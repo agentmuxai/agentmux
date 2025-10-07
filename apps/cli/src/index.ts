@@ -11,6 +11,7 @@ import chalk from 'chalk';
 import { MessageBus, AgentIdentity, MessageType, AgentMessage } from '@agentmux/core';
 import * as os from 'os';
 import * as path from 'path';
+import { findCommandHandler } from './commands';
 
 const program = new Command();
 
@@ -91,7 +92,7 @@ program
     console.log(chalk.gray(`  Press Ctrl+C to stop\n`));
 
     // Handle all messages
-    bus.on('*', (message: AgentMessage) => {
+    bus.on('*', async (message: AgentMessage) => {
       if (options.type && message.type !== options.type) {
         return; // Skip if filtering and type doesn't match
       }
@@ -104,6 +105,19 @@ program
       if (message.type === MessageType.MESSAGE) {
         const payload = message.payload as { text: string };
         console.log(chalk.white(`\n  ${payload.text}\n`));
+      } else if (message.type === MessageType.COMMAND) {
+        const payload = message.payload as { text: string };
+        console.log(chalk.cyan(`\n  Command: ${payload.text}`));
+
+        // Check for built-in commands
+        const handler = findCommandHandler(payload.text);
+        if (handler) {
+          console.log(chalk.gray(`  Auto-responding...`));
+          await handler.handler(message, bus);
+          console.log(chalk.green(`  ✓ Response sent\n`));
+        } else {
+          console.log(chalk.gray(`  (No handler for this command)\n`));
+        }
       } else {
         console.log(chalk.gray(`  Payload: ${JSON.stringify(message.payload, null, 2)}\n`));
       }
