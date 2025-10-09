@@ -15,7 +15,8 @@ mod tests {
         let stats = manager.get_stats().await;
 
         assert_eq!(stats.agents_connected, 0);
-        assert_eq!(stats.running, true);
+        assert_eq!(stats.running, false);
+        assert_eq!(stats.uptime_seconds, 0);
     }
 
     #[tokio::test]
@@ -65,10 +66,11 @@ mod tests {
         let manager = BusManager::new(config);
         let stats = manager.get_stats().await;
 
-        assert_eq!(stats.running, true);
+        assert_eq!(stats.running, false);
         assert_eq!(stats.agents_connected, 0);
         assert_eq!(stats.total_messages, 0);
         assert_eq!(stats.messages_per_second, 0);
+        assert_eq!(stats.uptime_seconds, 0);
     }
 
     #[tokio::test]
@@ -105,6 +107,7 @@ mod tests {
     async fn test_bus_stats_serialization() {
         let stats = BusStats {
             running: true,
+            uptime_seconds: 42,
             agents_connected: 5,
             total_messages: 100,
             messages_per_second: 10,
@@ -117,6 +120,7 @@ mod tests {
         let json_str = json.unwrap();
         assert!(json_str.contains("\"running\":true"));
         assert!(json_str.contains("\"agents_connected\":5"));
+        assert!(json_str.contains("\"uptime_seconds\":42"));
     }
 
     #[tokio::test]
@@ -141,5 +145,26 @@ mod tests {
 
         // Clean up
         let _ = manager.stop().await;
+    }
+
+    #[tokio::test]
+    async fn test_stats_after_start() {
+        let config = BusConfig {
+            host: "127.0.0.1".to_string(),
+            port: 9993,
+            max_agents: 10,
+        };
+
+        let mut manager = BusManager::new(config);
+
+        manager.start().await.unwrap();
+        sleep(Duration::from_millis(1100)).await;
+
+        let stats = manager.get_stats().await;
+        assert!(stats.running);
+        assert_eq!(stats.agents_connected, 0);
+        assert!(stats.uptime_seconds >= 1);
+
+        manager.stop().await.unwrap();
     }
 }

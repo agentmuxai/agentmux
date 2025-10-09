@@ -96,11 +96,12 @@ async fn get_bus_status(state: State<'_, AppState>) -> Result<serde_json::Value,
 
     if let Some(manager) = manager_guard.as_ref() {
         let stats = manager.get_stats().await;
+        let config = manager.get_config();
         Ok(serde_json::json!({
-            "running": true,
-            "host": "localhost",
-            "port": 8765,
-            "uptime": 0, // TODO: Track actual uptime
+            "running": stats.running,
+            "host": config.host,
+            "port": config.port,
+            "uptime": stats.uptime_seconds,
             "agents_connected": stats.agents_connected,
             "messages_per_second": stats.messages_per_second,
             "total_messages": stats.total_messages

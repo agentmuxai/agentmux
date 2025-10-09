@@ -9,10 +9,12 @@ use axum::{
     routing::get,
     Router,
 };
-use futures_util::{SinkExt, StreamExt};
+use futures_util::StreamExt;
 use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::time::Instant;
 use tokio::sync::{broadcast, RwLock};
 
 #[derive(Clone)]
@@ -27,6 +29,8 @@ pub struct BusState {
     pub message_tx: broadcast::Sender<BusMessage>,
     pub message_history: SharedMessageHistory,
     pub config: BusConfig,
+    pub start_time: RwLock<Option<Instant>>,
+    pub total_messages: AtomicUsize,
 }
 
 pub type SharedBusState = Arc<BusState>;
@@ -45,6 +49,8 @@ impl BusManager {
             message_tx,
             message_history: Arc::new(MessageHistory::new()),
             config,
+            start_time: RwLock::new(None),
+            total_messages: AtomicUsize::new(0),
         });
 
         Self {
@@ -56,6 +62,12 @@ impl BusManager {
     pub async fn start(&mut self) -> Result<(), String> {
         let (shutdown_tx, mut shutdown_rx) = broadcast::channel::<()>(1);
         self.shutdown_tx = Some(shutdown_tx);
+
+        {
+            let mut start_time = self.state.start_time.write().await;
+            *start_time = Some(Instant::now());
+        }
+        self.state.total_messages.store(0, Ordering::Relaxed);
 
         let app = Router::new()
             .route("/ws", get(websocket_handler))
@@ -90,6 +102,11 @@ impl BusManager {
         if let Some(tx) = &self.shutdown_tx {
             tx.send(()).ok();
             self.shutdown_tx = None;
+            {
+                let mut start_time = self.state.start_time.write().await;
+                *start_time = None;
+            }
+            self.state.total_messages.store(0, Ordering::Relaxed);
             Ok(())
         } else {
             Err("Bus is not running".to_string())
@@ -105,27 +122,51 @@ impl BusManager {
         let agents = self.state.agents.read().await;
         let agent_count = agents.len();
 
-        let total_messages: usize = agents
-            .values()
-            .map(|a| a.messages_sent + a.messages_received)
-            .sum();
+        let total_messages = self.state.total_messages.load(Ordering::Relaxed);
+
+        let (running, uptime_seconds, denom_seconds) = {
+            let start_time_guard = self.state.start_time.read().await;
+            if let Some(start_time) = *start_time_guard {
+                let elapsed = start_time.elapsed();
+                (
+                    self.shutdown_tx.is_some(),
+                    elapsed.as_secs(),
+                    elapsed.as_secs_f64().max(1.0),
+                )
+            } else {
+                (false, 0, 0.0)
+            }
+        };
+
+        let messages_per_second = if denom_seconds > 0.0 {
+            let rate = (total_messages as f64) / denom_seconds;
+            rate.round().max(0.0) as usize
+        } else {
+            0
+        };
 
         BusStats {
-            running: true,
+            running,
+            uptime_seconds,
             agents_connected: agent_count,
             total_messages,
-            messages_per_second: 0, // TODO: Calculate actual rate
+            messages_per_second,
         }
     }
 
     pub async fn get_recent_messages(&self, limit: usize) -> Vec<BusMessage> {
         self.state.message_history.get_recent_messages(limit).await
     }
+
+    pub fn get_config(&self) -> BusConfig {
+        self.state.config.clone()
+    }
 }
 
 #[derive(Clone, Debug, serde::Serialize)]
 pub struct BusStats {
     pub running: bool,
+    pub uptime_seconds: u64,
     pub agents_connected: usize,
     pub total_messages: usize,
     pub messages_per_second: usize,
@@ -176,6 +217,7 @@ async fn handle_socket(socket: WebSocket, state: SharedBusState) {
 
                             // Store message in history
                             state_clone.message_history.add_message(bus_msg.clone()).await;
+                            state_clone.total_messages.fetch_add(1, Ordering::Relaxed);
 
                             // Broadcast message
                             state_clone.message_tx.send(bus_msg).ok();

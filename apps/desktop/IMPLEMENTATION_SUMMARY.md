@@ -33,6 +33,7 @@ Real-time bus control and monitoring
 - ✅ Start/Stop bus with single click
 - ✅ Live status indicators (Running/Stopped)
 - ✅ Connected agents counter
+- ✅ Uptime tracking derived from server start time
 - ✅ Messages per second metrics
 - ✅ Total message counter
 - ✅ Error handling and display
