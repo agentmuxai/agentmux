@@ -82,10 +82,8 @@ mod tests {
 
         let agent = ConnectedAgent::new(identity);
 
-        // Uptime should be >= 0 (current time - connected_at)
-        // Can be 0 for just-connected agents in fast tests
         let uptime = agent.uptime();
-        assert!(uptime >= 0);
+        assert_eq!(uptime, 0);
     }
 
     #[test]

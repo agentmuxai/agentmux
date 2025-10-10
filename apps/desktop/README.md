@@ -43,6 +43,7 @@ The compiled application will be in `src-tauri/target/release/`.
 - **Bus Control:** Start/stop with single click
 - **Live Metrics:** Connected agents, messages/sec, total messages
 - **Status Indicators:** Real-time running/stopped status
+- **Uptime Tracking:** Live runtime counter derived from bus start time
 - **Auto-refresh:** Updates every 2 seconds
 - **Error Handling:** Graceful error display and recovery
 
