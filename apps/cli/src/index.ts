@@ -147,10 +147,11 @@ program
   .command('status')
   .description('Show status of message bus')
   .action(() => {
-    const busPath = path.join(process.cwd(), '_temp', 'agentmux-bus');
+    const busPath = path.join(os.homedir(), '.agentmux', 'shared');
     console.log(chalk.blue('📊 Message Bus Status:'));
     console.log(chalk.gray(`  Bus path: ${busPath}`));
     console.log(chalk.gray(`  Transport: file`));
+    console.log(chalk.gray(`  Poll interval: 500ms`));
   });
 
 program.parse();
