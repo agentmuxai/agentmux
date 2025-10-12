@@ -24,7 +24,19 @@ export class MessageWatcher {
 
   constructor(options: WatcherOptions) {
     this.agentId = options.agentId;
-    this.messagesDir = options.messagesDir || path.join(os.homedir(), '.agentmux/shared/messages');
+
+    // Default messages directory
+    let defaultMessagesDir = path.join(os.homedir(), '.agentmux/shared/messages');
+
+    // WSL detection: Check if we're in WSL and need to use Windows home
+    // WSL sets WSL_DISTRO_NAME and os.homedir() returns /home/user
+    if (process.env.WSL_DISTRO_NAME && os.homedir().startsWith('/home/')) {
+      // Get Windows username from WSL environment or fall back to current user
+      const windowsUser = process.env.USER || process.env.USERNAME || 'asafe';
+      defaultMessagesDir = `/mnt/c/Users/${windowsUser}/.agentmux/shared/messages`;
+    }
+
+    this.messagesDir = options.messagesDir || defaultMessagesDir;
     this.onMessage = options.onMessage;
     this.debug = options.debug || false;
 
