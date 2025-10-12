@@ -2,12 +2,13 @@
  * AgentMux Message Bus
  *
  * File-based message bus for inter-agent communication
- * Simple MVP using filesystem as transport
+ * Uses shared $HOME/.agentmux/shared/ directory for cross-workspace communication
  */
 
 import { nanoid } from 'nanoid';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as os from 'os';
 import { AgentMessage, AgentIdentity, MessageBusConfig, MessageHandler, MessageType } from './types';
 
 export class MessageBus {
@@ -17,15 +18,19 @@ export class MessageBus {
   private pollTimer?: NodeJS.Timeout;
   private lastReadTime: number = Date.now();
   private busPath: string;
-  private inboxPath: string;
-  private outboxPath: string;
+  private messagesPath: string;
+  private agentsPath: string;
 
   constructor(identity: AgentIdentity, config?: Partial<MessageBusConfig>) {
     this.identity = identity;
+
+    // Use shared location: $HOME/.agentmux/shared/
+    const sharedDir = path.join(os.homedir(), '.agentmux', 'shared');
+
     this.config = {
       transport: 'file',
-      busPath: path.join(process.cwd(), '_temp', 'agentmux-bus'),
-      pollInterval: 1000,
+      busPath: sharedDir,
+      pollInterval: 500, // Faster polling for better responsiveness
       ...config,
     };
 
@@ -34,14 +39,14 @@ export class MessageBus {
     }
 
     this.busPath = this.config.busPath!;
-    this.inboxPath = path.join(this.busPath, 'inbox');
-    this.outboxPath = path.join(this.busPath, 'outbox');
+    this.messagesPath = path.join(this.busPath, 'messages');
+    this.agentsPath = path.join(this.busPath, 'agents');
 
     this.ensureBusDirectories();
   }
 
   private ensureBusDirectories(): void {
-    [this.busPath, this.inboxPath, this.outboxPath].forEach((dir) => {
+    [this.busPath, this.messagesPath, this.agentsPath].forEach((dir) => {
       if (!fs.existsSync(dir)) {
         fs.mkdirSync(dir, { recursive: true });
       }
@@ -85,7 +90,7 @@ export class MessageBus {
     };
 
     const filename = `${message.timestamp}-${message.id}.json`;
-    const filepath = path.join(this.outboxPath, filename);
+    const filepath = path.join(this.messagesPath, filename);
 
     fs.writeFileSync(filepath, JSON.stringify(message, null, 2));
 
@@ -137,12 +142,12 @@ export class MessageBus {
 
   private pollMessages(): void {
     try {
-      const files = fs.readdirSync(this.inboxPath);
+      const files = fs.readdirSync(this.messagesPath);
 
       for (const file of files) {
         if (!file.endsWith('.json')) continue;
 
-        const filepath = path.join(this.inboxPath, file);
+        const filepath = path.join(this.messagesPath, file);
         const stat = fs.statSync(filepath);
 
         // Only process messages newer than last read
@@ -156,11 +161,7 @@ export class MessageBus {
           if (message.from.id === this.identity.id) continue;
 
           // Check if message is for us
-          if (message.to !== '*' && message.to !== this.identity.id) {
-            if (Array.isArray(message.to) && !message.to.includes(this.identity.id)) {
-              continue;
-            }
-          }
+          if (!this.isMessageForMe(message)) continue;
 
           this.handleMessage(message);
 
@@ -173,6 +174,27 @@ export class MessageBus {
     } catch (err) {
       console.error('Error polling messages:', err);
     }
+  }
+
+  private isMessageForMe(message: AgentMessage): boolean {
+    // Broadcast
+    if (message.to === '*') return true;
+
+    // Direct ID match
+    if (message.to === this.identity.id) return true;
+
+    // Wildcard match (e.g., "Agent1-*")
+    if (typeof message.to === 'string' && message.to.includes('*')) {
+      const pattern = message.to.replace(/\*/g, '.*');
+      return new RegExp(`^${pattern}$`).test(this.identity.id);
+    }
+
+    // Array of recipients
+    if (Array.isArray(message.to)) {
+      return message.to.includes(this.identity.id);
+    }
+
+    return false;
   }
 
   private handleMessage(message: AgentMessage): void {
