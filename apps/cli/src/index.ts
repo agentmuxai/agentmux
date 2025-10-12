@@ -153,4 +153,55 @@ program
     console.log(chalk.gray(`  Transport: file`));
   });
 
+// Wrap command - NEW: Reactive wrapper for AI CLIs
+program
+  .command('wrap')
+  .description('Wrap AI CLI with reactive message notifications')
+  .argument('<cli>', 'CLI to wrap (claude, gemini, gpt, etc.)')
+  .option('-a, --agent-id <id>', 'Agent ID (defaults to AGENT_ID env var)')
+  .option('-m, --messages-dir <dir>', 'Custom messages directory')
+  .option('--debug', 'Enable debug logging')
+  .action(async (cli: string, options: any) => {
+    console.log(chalk.blue(`🔄 Starting wrapper for ${cli}...`));
+    console.log(chalk.gray(`  Agent ID: ${options.agentId || process.env.AGENT_ID || 'AgentX'}`));
+
+    try {
+      // Dynamically import wrapper module
+      const { ClaudeWrapper } = await import('@agentmux/wrapper');
+
+      let wrapper;
+
+      switch (cli.toLowerCase()) {
+        case 'claude':
+          wrapper = new ClaudeWrapper({
+            agentId: options.agentId,
+            messagesDir: options.messagesDir,
+            debug: options.debug
+          });
+          break;
+
+        default:
+          console.error(chalk.red(`✗ Unsupported CLI: ${cli}`));
+          console.error(chalk.gray('  Supported: claude'));
+          console.error(chalk.gray('  Coming soon: gemini, gpt, cursor'));
+          process.exit(1);
+      }
+
+      await wrapper.start();
+
+      // Setup cleanup
+      const cleanup = () => {
+        wrapper.stop();
+        process.exit(0);
+      };
+
+      process.on('SIGINT', cleanup);
+      process.on('SIGTERM', cleanup);
+
+    } catch (error) {
+      console.error(chalk.red('✗ Failed to start wrapper:'), error);
+      process.exit(1);
+    }
+  });
+
 program.parse();
