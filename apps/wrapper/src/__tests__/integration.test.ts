@@ -36,21 +36,16 @@ describe('Integration: Message Flow', () => {
     testMessagesDir = path.join(os.tmpdir(), `agentmux-integration-${Date.now()}`);
     fs.mkdirSync(testMessagesDir, { recursive: true });
 
-    // Mock stdin/stdout
-    process.stdin = {
-      setRawMode: jest.fn(),
-      on: jest.fn()
-    } as any;
-
-    process.stdout = {
-      write: jest.fn(),
-      on: jest.fn(),
-      columns: 80,
-      rows: 30
-    } as any;
+    // Mock stdin/stdout methods
+    jest.spyOn(process.stdin, 'setRawMode').mockImplementation(() => process.stdin as any);
+    jest.spyOn(process.stdin, 'on').mockImplementation(() => process.stdin);
+    jest.spyOn(process.stdout, 'write').mockImplementation(() => true as any);
+    jest.spyOn(process.stdout, 'on').mockImplementation(() => process.stdout);
   });
 
   afterEach(() => {
+    jest.restoreAllMocks();
+
     if (fs.existsSync(testMessagesDir)) {
       fs.rmSync(testMessagesDir, { recursive: true, force: true });
     }
@@ -81,13 +76,14 @@ describe('Integration: Message Flow', () => {
       );
 
       // Wait for file watcher to trigger
-      await new Promise(resolve => setTimeout(resolve, 300));
+      await new Promise(resolve => setTimeout(resolve, 600));
 
       // Verify command was injected
       const injectedCommands = wrapper.getInjectedCommands();
       expect(injectedCommands).toContain('check messages');
 
       wrapper.stop();
+      await new Promise(resolve => setTimeout(resolve, 100));
     }, 10000);
 
     it('should handle multiple messages in sequence', async () => {
@@ -129,11 +125,11 @@ describe('Integration: Message Flow', () => {
           path.join(testMessagesDir, `${message.id}.json`),
           JSON.stringify(message)
         );
-        await new Promise(resolve => setTimeout(resolve, 150));
+        await new Promise(resolve => setTimeout(resolve, 300));
       }
 
       // Wait for all to process
-      await new Promise(resolve => setTimeout(resolve, 500));
+      await new Promise(resolve => setTimeout(resolve, 1000));
 
       // Verify all were processed
       const injectedCommands = wrapper.getInjectedCommands();
@@ -141,6 +137,7 @@ describe('Integration: Message Flow', () => {
       expect(checkMessageCommands.length).toBe(3);
 
       wrapper.stop();
+      await new Promise(resolve => setTimeout(resolve, 100));
     }, 15000);
 
     it('should filter messages not addressed to this agent', async () => {
@@ -174,13 +171,13 @@ describe('Integration: Message Flow', () => {
         path.join(testMessagesDir, `${wrongMessage.id}.json`),
         JSON.stringify(wrongMessage)
       );
-      await new Promise(resolve => setTimeout(resolve, 200));
+      await new Promise(resolve => setTimeout(resolve, 600));
 
       fs.writeFileSync(
         path.join(testMessagesDir, `${rightMessage.id}.json`),
         JSON.stringify(rightMessage)
       );
-      await new Promise(resolve => setTimeout(resolve, 200));
+      await new Promise(resolve => setTimeout(resolve, 600));
 
       // Should only inject command once (for right message)
       const injectedCommands = wrapper.getInjectedCommands();
@@ -188,6 +185,7 @@ describe('Integration: Message Flow', () => {
       expect(checkMessageCommands.length).toBe(1);
 
       wrapper.stop();
+      await new Promise(resolve => setTimeout(resolve, 100));
     }, 10000);
   });
 
@@ -220,6 +218,7 @@ describe('Integration: Message Flow', () => {
       expect(injectedCommands).toContain('check messages');
 
       wrapper.stop();
+      await new Promise(resolve => setTimeout(resolve, 100));
     }, 10000);
 
     it('should handle broadcast messages', async () => {
@@ -250,6 +249,7 @@ describe('Integration: Message Flow', () => {
       expect(injectedCommands).toContain('check messages');
 
       wrapper.stop();
+      await new Promise(resolve => setTimeout(resolve, 100));
     }, 10000);
   });
 
@@ -313,6 +313,7 @@ describe('Integration: Message Flow', () => {
       );
 
       wrapper.stop();
+      await new Promise(resolve => setTimeout(resolve, 100));
     }, 10000);
   });
 });

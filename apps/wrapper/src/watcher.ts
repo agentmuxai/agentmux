@@ -118,6 +118,17 @@ export class MessageWatcher {
     this.processedMessages.clear();
   }
 
+  async stopAsync(): Promise<void> {
+    this.log('Stopping watcher (async)');
+
+    if (this.watcher) {
+      await this.watcher.close();
+      this.watcher = null;
+    }
+
+    this.processedMessages.clear();
+  }
+
   private log(message: string, data?: any): void {
     if (!this.debug) return;
 

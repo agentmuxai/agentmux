@@ -28,31 +28,17 @@ class TestWrapper extends BaseWrapper {
 }
 
 describe('BaseWrapper', () => {
-  let originalStdin: any;
-  let originalStdout: any;
-
   beforeEach(() => {
-    // Mock stdin/stdout
-    originalStdin = process.stdin;
-    originalStdout = process.stdout;
-
-    process.stdin = {
-      setRawMode: jest.fn(),
-      on: jest.fn()
-    } as any;
-
-    process.stdout = {
-      write: jest.fn(),
-      on: jest.fn(),
-      columns: 80,
-      rows: 30
-    } as any;
+    // Mock stdin/stdout methods
+    jest.spyOn(process.stdin, 'setRawMode').mockImplementation(() => process.stdin as any);
+    jest.spyOn(process.stdin, 'on').mockImplementation(() => process.stdin);
+    jest.spyOn(process.stdout, 'write').mockImplementation(() => true as any);
+    jest.spyOn(process.stdout, 'on').mockImplementation(() => process.stdout);
   });
 
   afterEach(() => {
-    // Restore stdin/stdout
-    process.stdin = originalStdin;
-    process.stdout = originalStdout;
+    // Restore mocks
+    jest.restoreAllMocks();
   });
 
   describe('initialization', () => {
