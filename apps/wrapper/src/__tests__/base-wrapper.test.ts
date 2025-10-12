@@ -29,6 +29,11 @@ class TestWrapper extends BaseWrapper {
 
 describe('BaseWrapper', () => {
   beforeEach(() => {
+    // Add setRawMode to process.stdin if it doesn't exist (for test environment)
+    if (!process.stdin.setRawMode) {
+      (process.stdin as any).setRawMode = jest.fn();
+    }
+
     // Mock stdin/stdout methods
     jest.spyOn(process.stdin, 'setRawMode').mockImplementation(() => process.stdin as any);
     jest.spyOn(process.stdin, 'on').mockImplementation(() => process.stdin);
