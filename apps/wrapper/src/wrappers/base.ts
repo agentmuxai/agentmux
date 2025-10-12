@@ -17,12 +17,14 @@ export abstract class BaseWrapper implements AIWrapper {
   protected agentId: string;
   protected watcher: MessageWatcher;
   protected debug: boolean;
+  protected cliCommand?: string;  // Override command (e.g., 'claude.exe' for WSL)
 
   abstract get command(): string;
 
   constructor(options: WrapperOptions = {}) {
     this.agentId = options.agentId || process.env.AGENT_ID || 'AgentX';
     this.debug = options.debug || false;
+    this.cliCommand = options.cliCommand;  // Store override command
 
     // Initialize message watcher
     this.watcher = new MessageWatcher({
@@ -32,7 +34,7 @@ export abstract class BaseWrapper implements AIWrapper {
       debug: this.debug
     });
 
-    this.log('Initialized BaseWrapper', { agentId: this.agentId });
+    this.log('Initialized BaseWrapper', { agentId: this.agentId, cliCommand: this.cliCommand });
   }
 
   async start(): Promise<void> {
@@ -55,7 +57,11 @@ export abstract class BaseWrapper implements AIWrapper {
     }
 
     // Spawn CLI in PTY
-    this.ptyProcess = pty.spawn(this.command, [], {
+    // Use override command if provided (for WSL .exe suffix), otherwise use default
+    const commandToSpawn = this.cliCommand || this.command;
+    this.log('Spawning CLI', { command: commandToSpawn });
+
+    this.ptyProcess = pty.spawn(commandToSpawn, [], {
       name: 'xterm-color',
       cols: process.stdout.columns || 80,
       rows: process.stdout.rows || 30,

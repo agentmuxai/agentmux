@@ -28,6 +28,7 @@ export interface WrapperOptions {
   agentId?: string;
   messagesDir?: string;
   debug?: boolean;
+  cliCommand?: string;  // Override the default command (for WSL .exe suffix)
 }
 
 export interface AIWrapper {
