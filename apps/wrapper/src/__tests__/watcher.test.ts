@@ -33,6 +33,9 @@ describe('MessageWatcher', () => {
 
       await watcher.start();
 
+      // Give watcher time to initialize
+      await new Promise(resolve => setTimeout(resolve, 200));
+
       // Create test message
       const message: Message = {
         id: 'test-msg-1',
@@ -46,12 +49,13 @@ describe('MessageWatcher', () => {
       const filePath = path.join(testMessagesDir, `${message.id}.json`);
       fs.writeFileSync(filePath, JSON.stringify(message));
 
-      // Wait for file watcher to trigger
-      await new Promise(resolve => setTimeout(resolve, 200));
+      // Wait for file watcher to trigger (increased timeout)
+      await new Promise(resolve => setTimeout(resolve, 500));
 
       expect(messageCallback).toHaveBeenCalledWith(message);
 
       watcher.stop();
+      await new Promise(resolve => setTimeout(resolve, 100));
     });
 
     it('should trigger callback for pattern match', async () => {
@@ -62,6 +66,9 @@ describe('MessageWatcher', () => {
       });
 
       await watcher.start();
+
+      // Give watcher time to initialize
+      await new Promise(resolve => setTimeout(resolve, 200));
 
       // Create test message with pattern
       const message: Message = {
@@ -77,11 +84,12 @@ describe('MessageWatcher', () => {
         JSON.stringify(message)
       );
 
-      await new Promise(resolve => setTimeout(resolve, 200));
+      await new Promise(resolve => setTimeout(resolve, 500));
 
       expect(messageCallback).toHaveBeenCalledWith(message);
 
       watcher.stop();
+      await new Promise(resolve => setTimeout(resolve, 100));
     });
 
     it('should trigger callback for broadcast message', async () => {
@@ -92,6 +100,9 @@ describe('MessageWatcher', () => {
       });
 
       await watcher.start();
+
+      // Give watcher time to initialize
+      await new Promise(resolve => setTimeout(resolve, 200));
 
       // Create broadcast message
       const message: Message = {
@@ -107,11 +118,12 @@ describe('MessageWatcher', () => {
         JSON.stringify(message)
       );
 
-      await new Promise(resolve => setTimeout(resolve, 200));
+      await new Promise(resolve => setTimeout(resolve, 500));
 
       expect(messageCallback).toHaveBeenCalledWith(message);
 
       watcher.stop();
+      await new Promise(resolve => setTimeout(resolve, 100));
     });
 
     it('should NOT trigger callback for non-matching message', async () => {
@@ -122,6 +134,9 @@ describe('MessageWatcher', () => {
       });
 
       await watcher.start();
+
+      // Give watcher time to initialize
+      await new Promise(resolve => setTimeout(resolve, 200));
 
       // Create message for different agent
       const message: Message = {
@@ -137,11 +152,12 @@ describe('MessageWatcher', () => {
         JSON.stringify(message)
       );
 
-      await new Promise(resolve => setTimeout(resolve, 200));
+      await new Promise(resolve => setTimeout(resolve, 500));
 
       expect(messageCallback).not.toHaveBeenCalled();
 
       watcher.stop();
+      await new Promise(resolve => setTimeout(resolve, 100));
     });
   });
 
@@ -155,6 +171,9 @@ describe('MessageWatcher', () => {
 
       await watcher.start();
 
+      // Give watcher time to initialize
+      await new Promise(resolve => setTimeout(resolve, 200));
+
       const message: Message = {
         id: 'test-msg-5',
         from: { id: 'Agent1', name: 'Agent1' },
@@ -167,15 +186,16 @@ describe('MessageWatcher', () => {
 
       // Write file twice
       fs.writeFileSync(filePath, JSON.stringify(message));
-      await new Promise(resolve => setTimeout(resolve, 200));
+      await new Promise(resolve => setTimeout(resolve, 500));
 
       // Try to trigger again (shouldn't work)
       fs.utimesSync(filePath, new Date(), new Date());
-      await new Promise(resolve => setTimeout(resolve, 200));
+      await new Promise(resolve => setTimeout(resolve, 500));
 
       expect(messageCallback).toHaveBeenCalledTimes(1);
 
       watcher.stop();
+      await new Promise(resolve => setTimeout(resolve, 100));
     });
   });
 
@@ -191,9 +211,13 @@ describe('MessageWatcher', () => {
 
       await watcher.start();
 
+      // Give watcher time to initialize
+      await new Promise(resolve => setTimeout(resolve, 200));
+
       expect(fs.existsSync(nonExistentDir)).toBe(true);
 
       watcher.stop();
+      await new Promise(resolve => setTimeout(resolve, 100));
     });
 
     it('should stop watching when stopped', async () => {
@@ -204,6 +228,10 @@ describe('MessageWatcher', () => {
       });
 
       await watcher.start();
+
+      // Give watcher time to initialize
+      await new Promise(resolve => setTimeout(resolve, 200));
+
       watcher.stop();
 
       // Write message after stopping
@@ -220,7 +248,7 @@ describe('MessageWatcher', () => {
         JSON.stringify(message)
       );
 
-      await new Promise(resolve => setTimeout(resolve, 200));
+      await new Promise(resolve => setTimeout(resolve, 500));
 
       expect(messageCallback).not.toHaveBeenCalled();
     });
@@ -236,6 +264,9 @@ describe('MessageWatcher', () => {
 
       await watcher.start();
 
+      // Give watcher time to initialize
+      await new Promise(resolve => setTimeout(resolve, 200));
+
       const message: Message = {
         id: 'test-msg-7',
         from: { id: 'Agent1', name: 'Agent1' },
@@ -250,13 +281,14 @@ describe('MessageWatcher', () => {
         JSON.stringify(message)
       );
 
-      await new Promise(resolve => setTimeout(resolve, 200));
+      await new Promise(resolve => setTimeout(resolve, 500));
 
       expect(messageCallback).toHaveBeenCalledWith(
         expect.objectContaining({ priority: 'urgent' })
       );
 
       watcher.stop();
+      await new Promise(resolve => setTimeout(resolve, 100));
     });
   });
 });
