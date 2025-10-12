@@ -64,7 +64,10 @@ program
     }
   });
 
-program.parse();
+// Only parse if run directly as binary, not when imported as module
+if (require.main === module) {
+  program.parse();
+}
 
 export { ClaudeWrapper } from './wrappers/claude';
 export { BaseWrapper } from './wrappers/base';
