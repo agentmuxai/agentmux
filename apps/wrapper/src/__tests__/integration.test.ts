@@ -36,6 +36,11 @@ describe('Integration: Message Flow', () => {
     testMessagesDir = path.join(os.tmpdir(), `agentmux-integration-${Date.now()}`);
     fs.mkdirSync(testMessagesDir, { recursive: true });
 
+    // Add setRawMode to process.stdin if it doesn't exist (for test environment)
+    if (!process.stdin.setRawMode) {
+      (process.stdin as any).setRawMode = jest.fn();
+    }
+
     // Mock stdin/stdout methods
     jest.spyOn(process.stdin, 'setRawMode').mockImplementation(() => process.stdin as any);
     jest.spyOn(process.stdin, 'on').mockImplementation(() => process.stdin);
@@ -60,6 +65,9 @@ describe('Integration: Message Flow', () => {
       });
 
       await wrapper.start();
+
+      // Give watcher time to initialize
+      await new Promise(resolve => setTimeout(resolve, 200));
 
       // Simulate Agent1 sending message
       const message: Message = {
@@ -94,6 +102,9 @@ describe('Integration: Message Flow', () => {
       });
 
       await wrapper.start();
+
+      // Give watcher time to initialize
+      await new Promise(resolve => setTimeout(resolve, 200));
 
       // Send multiple messages
       const messages: Message[] = [
@@ -149,6 +160,9 @@ describe('Integration: Message Flow', () => {
 
       await wrapper.start();
 
+      // Give watcher time to initialize
+      await new Promise(resolve => setTimeout(resolve, 200));
+
       // Message for different agent
       const wrongMessage: Message = {
         id: `msg-wrong-${Date.now()}`,
@@ -199,6 +213,9 @@ describe('Integration: Message Flow', () => {
 
       await wrapper.start();
 
+      // Give watcher time to initialize
+      await new Promise(resolve => setTimeout(resolve, 200));
+
       const message: Message = {
         id: `msg-pattern-${Date.now()}`,
         from: { id: 'Agent1', name: 'Agent1' },
@@ -229,6 +246,9 @@ describe('Integration: Message Flow', () => {
       });
 
       await wrapper.start();
+
+      // Give watcher time to initialize
+      await new Promise(resolve => setTimeout(resolve, 200));
 
       const message: Message = {
         id: `msg-broadcast-${Date.now()}`,
@@ -262,6 +282,9 @@ describe('Integration: Message Flow', () => {
       });
 
       await wrapper.start();
+
+      // Give watcher time to initialize
+      await new Promise(resolve => setTimeout(resolve, 200));
 
       const mockPty = (wrapper as any).ptyProcess;
       mockPty.write = jest.fn();
