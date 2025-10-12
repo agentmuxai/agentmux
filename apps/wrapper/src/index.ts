@@ -28,7 +28,8 @@ program
         wrapper = new ClaudeWrapper({
           agentId: options.agentId,
           messagesDir: options.messagesDir,
-          debug: options.debug
+          debug: options.debug,
+          cliCommand: cli  // Pass original CLI name (may include .exe for WSL)
         });
         break;
 
