@@ -19,8 +19,11 @@ program
   .action(async (cli: string, options: any) => {
     let wrapper: AIWrapper;
 
+    // Normalize CLI name: strip .exe suffix (Windows/WSL compatibility)
+    const normalizedCli = cli.toLowerCase().replace(/\.exe$/, '');
+
     // Select wrapper based on CLI
-    switch (cli.toLowerCase()) {
+    switch (normalizedCli) {
       case 'claude':
         wrapper = new ClaudeWrapper({
           agentId: options.agentId,
@@ -38,7 +41,7 @@ program
       //   break;
 
       default:
-        console.error(`Unsupported CLI: ${cli}`);
+        console.error(`Unsupported CLI: ${normalizedCli} (original: ${cli})`);
         console.error('Supported CLIs: claude');
         console.error('Coming soon: gemini, gpt, cursor');
         process.exit(1);
