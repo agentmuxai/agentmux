@@ -39,11 +39,19 @@ export abstract class BaseWrapper implements AIWrapper {
     this.log('Starting CLI wrapper');
 
     if (!pty) {
-      throw new Error(
-        'node-pty is required but not installed. ' +
-        'Please install it with: npm install node-pty\n' +
-        'Note: On Windows, you may need Visual Studio build tools.'
-      );
+      // Fallback mode: No PTY, only message watching
+      console.log('\x1b[33m⚠️  Running in fallback mode (node-pty not available)\x1b[0m');
+      console.log('\x1b[90m    Message notifications will appear in console only\x1b[0m');
+      console.log('\x1b[90m    No automatic command injection\x1b[0m');
+      console.log('\x1b[90m    Use MCP tools to check messages manually\x1b[0m\n');
+
+      // Start watcher only (no PTY)
+      await this.watcher.start();
+      this.log('Message watcher started (fallback mode)');
+
+      console.log('\x1b[32m✓ Wrapper ready - monitoring messages\x1b[0m');
+      console.log('\x1b[90m  Press Ctrl+C to stop\x1b[0m\n');
+      return;
     }
 
     // Spawn CLI in PTY
@@ -106,8 +114,6 @@ export abstract class BaseWrapper implements AIWrapper {
   }
 
   protected showNotification(message: Message): void {
-    if (!this.ptyProcess) return;
-
     // ANSI color codes
     const BG_BLUE = '\x1b[44m';
     const BG_RED = '\x1b[41m';
@@ -118,16 +124,25 @@ export abstract class BaseWrapper implements AIWrapper {
     const bgColor = message.priority === 'urgent' ? BG_RED : BG_BLUE;
     const icon = message.priority === 'urgent' ? '⚠️' : '📨';
 
-    // Write highlighted notification
-    this.ptyProcess.write('\n');
-    this.ptyProcess.write(
-      `${bgColor}${BOLD} ${icon}  Remote message from ${message.from.name} ${RESET}\n`
-    );
+    const notification = `${bgColor}${BOLD} ${icon}  Remote message from ${message.from.name} ${RESET}`;
+
+    if (this.ptyProcess) {
+      // PTY mode: Inject into terminal
+      this.ptyProcess.write('\n');
+      this.ptyProcess.write(notification + '\n');
+    } else {
+      // Fallback mode: Print to console
+      console.log('\n' + notification);
+      console.log(`\x1b[90m    From: ${message.from.name}\x1b[0m`);
+      console.log(`\x1b[90m    Use MCP tools to read: agentmux_list_messages\x1b[0m\n`);
+    }
   }
 
   inject(command: string): void {
     if (!this.ptyProcess) {
-      throw new Error('PTY process not initialized');
+      // Fallback mode: Can't inject commands, just log
+      this.log('Skipping command injection (fallback mode)', { command });
+      return;
     }
 
     this.log('Injecting command', { command });
