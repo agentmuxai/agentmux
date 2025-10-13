@@ -1,7 +1,16 @@
 import { Component, createSignal, onMount, onCleanup, For, Show } from 'solid-js';
 import { invoke } from '@tauri-apps/api/core';
+import SimpleTerminal from './SimpleTerminal';
 
 interface Agent {
+  instanceName: string;
+  pid: number;
+  wsPort: number;
+  status: string;
+  startedAt?: number;
+}
+
+interface LegacyAgent {
   agentId: string;
   status: string;
   pid?: number;
@@ -44,11 +53,10 @@ const AgentsManager: Component = () => {
   };
 
   const spawnAgent = async () => {
-    const agentId = newAgentId().trim();
-    const cliCommand = newAgentCommand().trim() || 'claude';
+    const instanceName = newAgentId().trim();
 
-    if (!agentId) {
-      setError('Agent ID is required');
+    if (!instanceName) {
+      setError('Instance name is required');
       return;
     }
 
@@ -56,22 +64,24 @@ const AgentsManager: Component = () => {
     setError(null);
 
     try {
-      const result = await invoke('spawn_agent', {
-        agentId,
-        cliCommand
+      const result: Agent = await invoke('spawn_embedded_claude', {
+        instanceName
       });
 
-      console.log('Agent spawned:', result);
+      console.log('Embedded Claude spawned:', result);
+
+      // Add to agents list
+      setAgents([...agents(), result]);
+
+      // Select the new agent
+      setSelectedAgent(instanceName);
 
       // Clear inputs
       setNewAgentId('');
       setNewAgentCommand('claude');
-
-      // Refresh list
-      setTimeout(() => loadAgents(), 500);
     } catch (err: any) {
       setError(err.toString());
-      console.error('Failed to spawn agent:', err);
+      console.error('Failed to spawn instance:', err);
     } finally {
       setIsSpawning(false);
     }
@@ -80,6 +90,26 @@ const AgentsManager: Component = () => {
   const selectAgent = (agentId: string) => {
     setSelectedAgent(agentId);
     loadAgentOutput();
+  };
+
+  const sendMessageToAgent = async (agentId: string, message?: string) => {
+    const messageText = message || 'Hello! This is a test message from the Desktop app. Please acknowledge receipt.';
+
+    try {
+      await invoke('send_message', {
+        to: agentId,
+        message: messageText,
+        priority: 'normal'
+      });
+
+      console.log(`Message sent to ${agentId}: ${messageText}`);
+
+      // Show confirmation
+      setError(null);
+    } catch (err: any) {
+      setError(`Failed to send message: ${err.toString()}`);
+      console.error('Failed to send message:', err);
+    }
   };
 
   const formatUptime = (startedAt?: number) => {
@@ -169,15 +199,15 @@ const AgentsManager: Component = () => {
             <For each={agents()}>
               {(agent) => (
                 <div
-                  class={`agent-card ${selectedAgent() === agent.agentId ? 'selected' : ''}`}
-                  onClick={() => selectAgent(agent.agentId)}
+                  class={`agent-card ${selectedAgent() === agent.instanceName ? 'selected' : ''}`}
+                  onClick={() => selectAgent(agent.instanceName)}
                 >
                   <div class="agent-header">
                     <span class="agent-id">
                       <span
                         class={`status-dot ${agent.status === 'running' ? 'online' : 'offline'}`}
                       ></span>
-                      {agent.agentId}
+                      {agent.instanceName}
                     </span>
                     <span class="agent-pid">
                       PID: {agent.pid || 'N/A'}
@@ -190,16 +220,12 @@ const AgentsManager: Component = () => {
                       <span class="value">{agent.status}</span>
                     </div>
                     <div class="stat">
+                      <span class="label">WebSocket:</span>
+                      <span class="value">:{agent.wsPort}</span>
+                    </div>
+                    <div class="stat">
                       <span class="label">Uptime:</span>
                       <span class="value">{formatUptime(agent.startedAt)}</span>
-                    </div>
-                    <div class="stat">
-                      <span class="label">Messages:</span>
-                      <span class="value">{agent.messagesReceived || 0}</span>
-                    </div>
-                    <div class="stat">
-                      <span class="label">Output:</span>
-                      <span class="value">{agent.outputLength || 0} bytes</span>
                     </div>
                   </div>
                 </div>
@@ -209,24 +235,20 @@ const AgentsManager: Component = () => {
         </Show>
       </div>
 
-      {/* Agent Output Viewer */}
+      {/* Embedded Terminal */}
       <Show when={selectedAgent()}>
-        <div class="card">
-          <h2>📺 Live Output: {selectedAgent()}</h2>
-
-          <div class="output-viewer">
-            <pre class="output-content">{agentOutput() || 'Waiting for output...'}</pre>
-          </div>
-
-          <div class="output-controls">
-            <button onClick={() => setAgentOutput('')}>
-              🗑️ Clear Display
-            </button>
-            <button onClick={loadAgentOutput}>
-              🔄 Refresh
-            </button>
-          </div>
-        </div>
+        {() => {
+          const agent = agents().find(a => a.instanceName === selectedAgent());
+          return agent ? (
+            <div class="card">
+              <h2>💻 Interactive Terminal: {agent.instanceName}</h2>
+              <SimpleTerminal
+                instanceName={agent.instanceName}
+                wsPort={agent.wsPort}
+              />
+            </div>
+          ) : null;
+        }}
       </Show>
     </div>
   );

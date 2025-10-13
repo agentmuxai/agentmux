@@ -1,5 +1,6 @@
 import { Component, createSignal, onMount, onCleanup } from 'solid-js';
 import { invoke } from '@tauri-apps/api/core';
+import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 
 const Dashboard: Component = () => {
   const [busRunning, setBusRunning] = createSignal(false);
@@ -10,6 +11,7 @@ const Dashboard: Component = () => {
 
   // Poll bus status every 2 seconds
   let intervalId: number;
+  let unlistenCommand: UnlistenFn | undefined;
 
   const updateStatus = async () => {
     try {
@@ -29,7 +31,7 @@ const Dashboard: Component = () => {
       setError(null);
       const result = await invoke<string>('start_bus', {
         config: {
-          host: 'localhost',
+          host: '127.0.0.1',
           port: 8765,
           max_agents: 50
         }
@@ -54,14 +56,60 @@ const Dashboard: Component = () => {
     }
   };
 
-  onMount(() => {
+  const handleSpawnClaude = async () => {
+    try {
+      const instanceName = prompt('Enter instance name (e.g., Alice, Bob):');
+      if (!instanceName) return;
+
+      setError(null);
+      await invoke('spawn_claude_instance', { instanceName });
+      console.log(`Spawned Claude instance: ${instanceName}`);
+    } catch (err: any) {
+      setError(err.toString());
+      console.error('Failed to spawn Claude instance:', err);
+    }
+  };
+
+  onMount(async () => {
     updateStatus();
     intervalId = window.setInterval(updateStatus, 2000);
+
+    // Start command watcher for CLI integration
+    try {
+      await invoke('start_command_watcher');
+      console.log('Command watcher started');
+    } catch (err) {
+      console.error('Failed to start command watcher:', err);
+    }
+
+    // Listen for CLI commands
+    unlistenCommand = await listen('cli_command', async (event: any) => {
+      const command = event.payload;
+      console.log('CLI command received:', command);
+
+      try {
+        switch (command.command) {
+          case 'start_bus':
+            await handleStartBus();
+            break;
+          case 'stop_bus':
+            await handleStopBus();
+            break;
+          default:
+            console.warn('Unknown CLI command:', command.command);
+        }
+      } catch (err) {
+        console.error('Error executing CLI command:', err);
+      }
+    });
   });
 
   onCleanup(() => {
     if (intervalId) {
       clearInterval(intervalId);
+    }
+    if (unlistenCommand) {
+      unlistenCommand();
     }
   });
 
@@ -113,6 +161,22 @@ const Dashboard: Component = () => {
             ? 'Bus is running. Agents can connect at ws://localhost:8765/ws'
             : 'Start the bus to begin monitoring agents.'}
         </p>
+      </div>
+
+      <div class="card">
+        <h2>🧪 Reactive Claude Demo</h2>
+        <p style={{ color: '#999', 'margin-bottom': '1rem' }}>
+          Launch wrapped Claude instances that can message each other reactively.
+        </p>
+        <div style={{ display: 'flex', gap: '1rem', 'flex-wrap': 'wrap' }}>
+          <button class="primary" onClick={handleSpawnClaude}>
+            🚀 Spawn Claude Instance
+          </button>
+        </div>
+        <div style={{ 'margin-top': '1rem', color: '#666', 'font-size': '0.85rem' }}>
+          <div>Each instance can send messages to other instances using MCP tools.</div>
+          <div>Messages are delivered reactively without human intervention.</div>
+        </div>
       </div>
     </div>
   );
