@@ -448,3 +448,98 @@ button.danger:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
+
+/* Debug Console */
+.debug-console {
+  border-top: 2px solid #3a3a3a;
+  background: #0a0a0a;
+}
+
+.debug-console-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem;
+  background: #1a1a1a;
+  border-bottom: 1px solid #2a2a2a;
+}
+
+.debug-console-toggle {
+  background: none;
+  border: none;
+  color: #e0e0e0;
+  font-family: monospace;
+  font-size: 0.875rem;
+  cursor: pointer;
+  padding: 0.25rem 0.5rem;
+}
+
+.debug-console-toggle:hover {
+  background: #2a2a2a;
+}
+
+.debug-console-btn {
+  background: #2a2a2a;
+  border: 1px solid #3a3a3a;
+  color: #e0e0e0;
+  padding: 0.25rem 0.75rem;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 0.75rem;
+}
+
+.debug-console-btn:hover {
+  background: #3a3a3a;
+}
+
+.debug-console-content {
+  height: 150px;
+  overflow-y: auto;
+  padding: 0.5rem;
+  font-family: 'Courier New', monospace;
+  font-size: 0.75rem;
+  line-height: 1.4;
+}
+
+.debug-log-entry {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.125rem 0;
+  color: #e0e0e0;
+}
+
+.debug-time {
+  color: #666;
+  min-width: 95px;
+}
+
+.debug-prefix {
+  color: #4a9eff;
+  font-weight: bold;
+  min-width: 50px;
+}
+
+.debug-prefix-error {
+  color: #ef5350;
+}
+
+.debug-prefix-warn {
+  color: #ff9800;
+}
+
+.debug-prefix-rust {
+  color: #9c27b0;
+}
+
+.debug-message {
+  flex: 1;
+  word-break: break-word;
+}
+
+.debug-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: #666;
+}

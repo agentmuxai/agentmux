@@ -4,6 +4,7 @@ import BusControl from './components/BusControl';
 import AgentList from './components/AgentList';
 import MessageStream from './components/MessageStream';
 import AgentsManager from './components/AgentsManager';
+import { DebugConsole } from './components/DebugConsole';
 
 const App: Component = () => {
   const [activeTab, setActiveTab] = createSignal<'dashboard' | 'bus' | 'agents' | 'messages' | 'agents-manager'>('dashboard');
@@ -55,10 +56,12 @@ const App: Component = () => {
       </main>
 
       <footer class="app-footer">
-        <span>AgentMux v0.1.0</span>
+        <span>AgentMux v0.2.0</span>
         <span>|</span>
         <span>Status: Ready</span>
       </footer>
+
+      <DebugConsole />
     </div>
   );
 };
