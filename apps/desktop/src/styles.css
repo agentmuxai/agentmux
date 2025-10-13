@@ -232,3 +232,149 @@ button.danger:disabled {
   border-radius: 4px;
   font-size: 0.95rem;
 }
+
+/* Agents Manager Styles */
+.agents-manager {
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.form-grid label {
+  display: block;
+  color: #999;
+  font-size: 0.9rem;
+  margin-bottom: 0.5rem;
+}
+
+.form-grid input {
+  width: 100%;
+  background: #1a1a1a;
+  border: 1px solid #3a3a3a;
+  color: #e0e0e0;
+  padding: 0.75rem;
+  border-radius: 6px;
+  font-size: 0.95rem;
+}
+
+.form-grid input:focus {
+  outline: none;
+  border-color: #4a9eff;
+}
+
+.form-grid input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.agents-list {
+  display: grid;
+  gap: 1rem;
+}
+
+.agent-card {
+  background: #333;
+  padding: 1.25rem;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s;
+  border: 2px solid transparent;
+}
+
+.agent-card:hover {
+  background: #3a3a3a;
+  border-color: #4a9eff;
+}
+
+.agent-card.selected {
+  background: #3a3a3a;
+  border-color: #4a9eff;
+}
+
+.agent-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.75rem;
+}
+
+.agent-id {
+  font-size: 1.1rem;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+}
+
+.agent-pid {
+  font-size: 0.85rem;
+  color: #999;
+}
+
+.agent-stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+}
+
+.stat {
+  display: flex;
+  flex-direction: column;
+}
+
+.stat .label {
+  font-size: 0.8rem;
+  color: #999;
+  margin-bottom: 0.25rem;
+}
+
+.stat .value {
+  font-size: 0.95rem;
+  color: #e0e0e0;
+  font-weight: 500;
+}
+
+.output-viewer {
+  background: #1a1a1a;
+  border: 1px solid #3a3a3a;
+  border-radius: 6px;
+  padding: 1rem;
+  margin-bottom: 1rem;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.output-content {
+  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+  font-size: 0.9rem;
+  color: #e0e0e0;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  line-height: 1.5;
+}
+
+.output-controls {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.output-controls button {
+  background: #333;
+  color: #e0e0e0;
+  border: none;
+  padding: 0.5rem 1rem;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  transition: background 0.2s;
+}
+
+.output-controls button:hover {
+  background: #3a3a3a;
+}

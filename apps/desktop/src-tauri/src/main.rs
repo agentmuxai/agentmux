@@ -4,17 +4,21 @@
 mod bus;
 mod watcher;
 
+#[cfg(test)]
+mod tests;
+
 use bus::{manager::BusConfig as BusManagerConfig, BusManager, ConnectedAgent};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tauri::{AppHandle, State};
 use tokio::sync::Mutex;
-use watcher::{AgentMessage, FileWatcher};
+use watcher::{AgentMessage, CommandWatcher, FileWatcher};
 
 // State management
 struct AppState {
     bus_manager: Arc<Mutex<Option<BusManager>>>,
     file_watcher: Arc<Mutex<Option<FileWatcher>>>,
+    command_watcher: Arc<Mutex<Option<CommandWatcher>>>,
 }
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
@@ -262,11 +266,199 @@ async fn send_message(
     ))
 }
 
+// ============================================================================
+// Agent Management Commands
+// ============================================================================
+
+use std::process::{Child, Command as StdCommand};
+use std::collections::HashMap;
+
+// Store spawned agent processes
+type AgentProcesses = Arc<Mutex<HashMap<String, Child>>>;
+
+#[tauri::command]
+async fn spawn_agent(
+    agent_id: String,
+    cli_command: Option<String>,
+) -> Result<serde_json::Value, String> {
+    // Get the executable's directory
+    let exe_path = std::env::current_exe()
+        .map_err(|e| format!("Failed to get executable path: {}", e))?;
+    let exe_dir = exe_path.parent()
+        .ok_or_else(|| "Failed to get executable directory".to_string())?;
+
+    let wrapper_path = exe_dir
+        .join("wrappers")
+        .join("reactive-claude-agent.js");
+
+    if !wrapper_path.exists() {
+        return Err(format!("Wrapper script not found: {}", wrapper_path.display()));
+    }
+
+    let cli_cmd = cli_command.unwrap_or_else(|| "claude".to_string());
+
+    println!("🚀 Spawning agent: {} with command: {}", agent_id, cli_cmd);
+
+    let child = StdCommand::new("node")
+        .arg(wrapper_path)
+        .arg(&agent_id)
+        .arg(&cli_cmd)
+        .spawn()
+        .map_err(|e| format!("Failed to spawn agent: {}", e))?;
+
+    let pid = child.id();
+
+    println!("✅ Agent {} spawned (PID: {})", agent_id, pid);
+
+    Ok(serde_json::json!({
+        "agent_id": agent_id,
+        "pid": pid,
+        "cli_command": cli_cmd,
+        "status": "running"
+    }))
+}
+
+#[tauri::command]
+async fn get_agent_status(agent_id: String) -> Result<serde_json::Value, String> {
+    let home = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .map_err(|_| "Could not determine home directory".to_string())?;
+
+    let status_file = PathBuf::from(home)
+        .join(".agentmux/desktop/agents")
+        .join(&agent_id)
+        .join("status.json");
+
+    if !status_file.exists() {
+        return Ok(serde_json::json!({
+            "agent_id": agent_id,
+            "status": "stopped",
+            "error": "Status file not found"
+        }));
+    }
+
+    let content = std::fs::read_to_string(&status_file)
+        .map_err(|e| format!("Failed to read status: {}", e))?;
+
+    let status: serde_json::Value = serde_json::from_str(&content)
+        .map_err(|e| format!("Failed to parse status: {}", e))?;
+
+    Ok(status)
+}
+
+#[tauri::command]
+async fn get_agent_output(agent_id: String) -> Result<String, String> {
+    let home = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .map_err(|_| "Could not determine home directory".to_string())?;
+
+    let output_file = PathBuf::from(home)
+        .join(".agentmux/desktop/agents")
+        .join(&agent_id)
+        .join("live-output.txt");
+
+    if !output_file.exists() {
+        return Ok(String::new());
+    }
+
+    std::fs::read_to_string(&output_file)
+        .map_err(|e| format!("Failed to read output: {}", e))
+}
+
+#[tauri::command]
+async fn list_agents() -> Result<Vec<serde_json::Value>, String> {
+    let home = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .map_err(|_| "Could not determine home directory".to_string())?;
+
+    let agents_dir = PathBuf::from(home).join(".agentmux/desktop/agents");
+
+    if !agents_dir.exists() {
+        return Ok(vec![]);
+    }
+
+    let mut agents = vec![];
+
+    let entries = std::fs::read_dir(&agents_dir)
+        .map_err(|e| format!("Failed to read agents dir: {}", e))?;
+
+    for entry in entries {
+        let entry = entry.map_err(|e| format!("Failed to read entry: {}", e))?;
+        let path = entry.path();
+
+        if path.is_dir() {
+            let agent_id = path.file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("")
+                .to_string();
+
+            let status_file = path.join("status.json");
+            if status_file.exists() {
+                if let Ok(content) = std::fs::read_to_string(&status_file) {
+                    if let Ok(status) = serde_json::from_str(&content) {
+                        agents.push(status);
+                    }
+                }
+            } else {
+                // Agent directory exists but no status
+                agents.push(serde_json::json!({
+                    "agentId": agent_id,
+                    "status": "unknown"
+                }));
+            }
+        }
+    }
+
+    Ok(agents)
+}
+
+// ============================================================================
+// Command Watcher Commands (CLI Integration)
+// ============================================================================
+
+#[tauri::command]
+async fn start_command_watcher(
+    state: State<'_, AppState>,
+    app_handle: AppHandle,
+) -> Result<String, String> {
+    let mut watcher_guard = state.command_watcher.lock().await;
+
+    if watcher_guard.is_some() {
+        return Err("Command watcher is already running".to_string());
+    }
+
+    // Default to ~/.agentmux/desktop/commands
+    let home = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .map_err(|_| "Could not determine home directory".to_string())?;
+    let commands_dir = PathBuf::from(home).join(".agentmux/desktop/commands");
+
+    let mut watcher = CommandWatcher::new(commands_dir.clone(), app_handle);
+    watcher.start()?;
+
+    *watcher_guard = Some(watcher);
+
+    Ok(format!("Command watcher started: {}", commands_dir.display()))
+}
+
+#[tauri::command]
+async fn stop_command_watcher(state: State<'_, AppState>) -> Result<String, String> {
+    let mut watcher_guard = state.command_watcher.lock().await;
+
+    if let Some(mut watcher) = watcher_guard.take() {
+        watcher.stop();
+        Ok("Command watcher stopped".to_string())
+    } else {
+        Err("Command watcher is not running".to_string())
+    }
+}
+
 #[tokio::main]
 async fn main() {
     let app_state = AppState {
         bus_manager: Arc::new(Mutex::new(None)),
         file_watcher: Arc::new(Mutex::new(None)),
+        command_watcher: Arc::new(Mutex::new(None)),
     };
 
     tauri::Builder::default()
@@ -281,6 +473,12 @@ async fn main() {
             start_file_watcher,
             stop_file_watcher,
             send_message,
+            start_command_watcher,
+            stop_command_watcher,
+            spawn_agent,
+            get_agent_status,
+            get_agent_output,
+            list_agents,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
