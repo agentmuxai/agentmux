@@ -86,9 +86,10 @@ mod tests {
             priority: "normal".to_string(),
         };
 
-        assert!(msg.is_for_agent("AgentX"));
-        assert!(msg.is_for_agent("AgentX-123"));
-        assert!(!msg.is_for_agent("Agent1"));
+        // "AgentX-*" matches "AgentX-123" but NOT "AgentX" (needs the dash and more)
+        assert!(!msg.is_for_agent("AgentX")); // Does not match exact "AgentX"
+        assert!(msg.is_for_agent("AgentX-123")); // Matches with prefix
+        assert!(!msg.is_for_agent("Agent1")); // Does not match different agent
     }
 
     #[test]

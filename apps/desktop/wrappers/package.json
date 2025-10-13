@@ -1,0 +1,20 @@
+{
+  "name": "agentmux-wrappers",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Reactive CLI wrappers for AgentMux Desktop",
+  "main": "reactive-claude-agent.js",
+  "scripts": {
+    "test": "cross-env NODE_OPTIONS=--experimental-vm-modules jest",
+    "test:watch": "cross-env NODE_OPTIONS=--experimental-vm-modules jest --watch",
+    "test:coverage": "cross-env NODE_OPTIONS=--experimental-vm-modules jest --coverage"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@types/node": "^24.7.2",
+    "cross-env": "^10.1.0",
+    "jest": "^30.2.0"
+  }
+}
