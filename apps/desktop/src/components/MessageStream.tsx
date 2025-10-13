@@ -1,43 +1,56 @@
-import { Component, createSignal, onMount, onCleanup, For } from 'solid-js';
+import { Component, createSignal, onMount, onCleanup, For, Show } from 'solid-js';
 import { invoke } from '@tauri-apps/api/core';
+import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 
-interface BusMessage {
+interface AgentMessage {
   id: string;
   from: {
     id: string;
     name: string;
   };
   to: string;
-  msg_type: string;
-  payload: any;
-  timestamp: number;
+  payload: {
+    text: string;
+  };
+  timestamp: string;
+  priority: string;
 }
 
 const MessageStream: Component = () => {
-  const [messages, setMessages] = createSignal<BusMessage[]>([]);
+  const [messages, setMessages] = createSignal<AgentMessage[]>([]);
   const [paused, setPaused] = createSignal(false);
   const [filter, setFilter] = createSignal('');
   const [maxMessages, setMaxMessages] = createSignal(100);
+  const [watcherStatus, setWatcherStatus] = createSignal<'stopped' | 'running' | 'error'>('stopped');
+  const [replyTo, setReplyTo] = createSignal<AgentMessage | null>(null);
+  const [replyText, setReplyText] = createSignal('');
 
-  const formatTimestamp = (timestamp: number): string => {
-    const date = new Date(timestamp * 1000);
-    return date.toLocaleTimeString('en-US', {
-      hour12: false,
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit'
-    });
-  };
-
-  const formatPayload = (payload: any): string => {
+  const formatTimestamp = (timestamp: string): string => {
     try {
-      return JSON.stringify(payload, null, 2);
+      // Try parsing as ISO string first
+      const date = new Date(timestamp);
+      if (!isNaN(date.getTime())) {
+        return date.toLocaleTimeString('en-US', {
+          hour12: false,
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit'
+        });
+      }
+      // Fallback: treat as Unix timestamp
+      const unixDate = new Date(parseInt(timestamp) * 1000);
+      return unixDate.toLocaleTimeString('en-US', {
+        hour12: false,
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit'
+      });
     } catch {
-      return String(payload);
+      return timestamp;
     }
   };
 
-  const addMessage = (message: BusMessage) => {
+  const addMessage = (message: AgentMessage) => {
     if (!paused()) {
       setMessages(prev => {
         const updated = [message, ...prev];
@@ -58,33 +71,73 @@ const MessageStream: Component = () => {
       msg.from.id.toLowerCase().includes(filterText) ||
       msg.from.name.toLowerCase().includes(filterText) ||
       msg.to.toLowerCase().includes(filterText) ||
-      msg.msg_type.toLowerCase().includes(filterText) ||
-      JSON.stringify(msg.payload).toLowerCase().includes(filterText)
+      msg.priority.toLowerCase().includes(filterText) ||
+      msg.payload.text.toLowerCase().includes(filterText)
     );
   };
 
-  const fetchMessages = async () => {
+  const handleReply = (message: AgentMessage) => {
+    setReplyTo(message);
+    setReplyText('');
+  };
+
+  const sendReply = async () => {
+    const msg = replyTo();
+    if (!msg || !replyText().trim()) return;
+
     try {
-      const msgs = await invoke<BusMessage[]>('get_recent_messages', {
-        limit: maxMessages()
+      await invoke('send_message', {
+        to: msg.from.id,
+        message: replyText(),
+        priority: 'normal',
       });
-      setMessages(msgs);
+
+      setReplyTo(null);
+      setReplyText('');
     } catch (err) {
-      console.error('Failed to fetch messages:', err);
+      console.error('Failed to send reply:', err);
+      alert(`Failed to send reply: ${err}`);
     }
   };
 
-  // Poll for messages every 2 seconds
-  let intervalId: number;
+  const cancelReply = () => {
+    setReplyTo(null);
+    setReplyText('');
+  };
 
-  onMount(() => {
-    fetchMessages(); // Initial fetch
-    intervalId = window.setInterval(fetchMessages, 2000);
+  // File watcher setup
+  let unlistenFn: UnlistenFn | null = null;
+
+  onMount(async () => {
+    try {
+      // Start file watcher
+      const result = await invoke<string>('start_file_watcher', {
+        messagesDir: null,  // Use default ~/.agentmux/shared/messages
+        agentId: 'AgentX',  // TODO: Make configurable
+      });
+      console.log('File watcher started:', result);
+      setWatcherStatus('running');
+
+      // Listen for new messages
+      unlistenFn = await listen<AgentMessage>('message_received', (event) => {
+        console.log('New message received:', event.payload);
+        addMessage(event.payload);
+      });
+    } catch (err) {
+      console.error('Failed to start file watcher:', err);
+      setWatcherStatus('error');
+    }
   });
 
-  onCleanup(() => {
-    if (intervalId) {
-      clearInterval(intervalId);
+  onCleanup(async () => {
+    try {
+      if (unlistenFn) {
+        unlistenFn();
+      }
+      await invoke('stop_file_watcher');
+      setWatcherStatus('stopped');
+    } catch (err) {
+      console.error('Failed to stop file watcher:', err);
     }
   });
 
@@ -92,7 +145,16 @@ const MessageStream: Component = () => {
     <div>
       <div class="card">
         <div style={{ display: 'flex', 'justify-content': 'space-between', 'align-items': 'center', 'margin-bottom': '1rem' }}>
-          <h2>Message Stream</h2>
+          <div>
+            <h2>Message Stream</h2>
+            <div style={{
+              color: watcherStatus() === 'running' ? '#66bb6a' : watcherStatus() === 'error' ? '#ef5350' : '#999',
+              'font-size': '0.85rem',
+              'margin-top': '0.25rem'
+            }}>
+              Watcher: {watcherStatus()}
+            </div>
+          </div>
           <div style={{ display: 'flex', gap: '0.5rem', 'align-items': 'center' }}>
             <span style={{ color: '#999', 'font-size': '0.9rem' }}>
               {filteredMessages().length} / {messages().length} messages
@@ -189,15 +251,15 @@ const MessageStream: Component = () => {
                       <span
                         class="message-type-badge"
                         style={{
-                          background: '#2a2a4a',
-                          color: '#9c9cff',
+                          background: message.priority === 'urgent' ? '#4a2a2a' : '#2a2a4a',
+                          color: message.priority === 'urgent' ? '#ff9c9c' : '#9c9cff',
                           padding: '0.25rem 0.5rem',
                           'border-radius': '4px',
                           'font-size': '0.75rem',
                           'font-weight': 'bold'
                         }}
                       >
-                        {message.msg_type}
+                        {message.priority}
                       </span>
                     </div>
                     <span style={{ color: '#999', 'font-size': '0.8rem' }}>
@@ -213,20 +275,41 @@ const MessageStream: Component = () => {
                     'white-space': 'pre-wrap',
                     'word-break': 'break-word',
                     'max-height': '300px',
-                    'overflow-y': 'auto'
+                    'overflow-y': 'auto',
+                    'margin-bottom': '0.5rem'
                   }}>
-                    {formatPayload(message.payload)}
+                    {message.payload.text}
                   </div>
 
                   <div style={{
-                    'margin-top': '0.5rem',
-                    color: '#666',
-                    'font-size': '0.75rem',
                     display: 'flex',
-                    gap: '1rem'
+                    'justify-content': 'space-between',
+                    'align-items': 'center'
                   }}>
-                    <span>ID: {message.id.substring(0, 8)}...</span>
-                    <span>From: {message.from.id}</span>
+                    <div style={{
+                      color: '#666',
+                      'font-size': '0.75rem',
+                      display: 'flex',
+                      gap: '1rem'
+                    }}>
+                      <span>ID: {message.id.substring(0, 8)}...</span>
+                      <span>From: {message.from.id}</span>
+                    </div>
+                    <button
+                      onClick={() => handleReply(message)}
+                      style={{
+                        background: '#2a4a2a',
+                        color: '#9cff9c',
+                        border: 'none',
+                        padding: '0.35rem 0.75rem',
+                        'border-radius': '4px',
+                        cursor: 'pointer',
+                        'font-size': '0.75rem',
+                        'font-weight': 'bold'
+                      }}
+                    >
+                      💬 Reply
+                    </button>
                   </div>
                 </div>
               )}
@@ -234,6 +317,98 @@ const MessageStream: Component = () => {
           )}
         </div>
       </div>
+
+      {/* Reply Modal */}
+      <Show when={replyTo()}>
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(0, 0, 0, 0.8)',
+          display: 'flex',
+          'align-items': 'center',
+          'justify-content': 'center',
+          'z-index': 1000
+        }}>
+          <div class="card" style={{
+            'max-width': '600px',
+            width: '90%',
+            'max-height': '80vh',
+            'overflow-y': 'auto'
+          }}>
+            <h2>Reply to {replyTo()?.from.name}</h2>
+
+            <div style={{
+              background: '#1a1a1a',
+              padding: '1rem',
+              'border-radius': '6px',
+              'margin-bottom': '1rem',
+              border: '1px solid #2a2a2a'
+            }}>
+              <div style={{
+                color: '#999',
+                'font-size': '0.85rem',
+                'margin-bottom': '0.5rem'
+              }}>
+                Original message:
+              </div>
+              <div style={{ color: '#e0e0e0' }}>
+                {replyTo()?.payload.text}
+              </div>
+            </div>
+
+            <textarea
+              value={replyText()}
+              onInput={(e) => setReplyText(e.currentTarget.value)}
+              placeholder="Type your reply..."
+              style={{
+                width: '100%',
+                'min-height': '150px',
+                background: '#1a1a1a',
+                border: '1px solid #3a3a3a',
+                color: '#e0e0e0',
+                padding: '1rem',
+                'border-radius': '6px',
+                'font-family': 'inherit',
+                'font-size': '0.95rem',
+                'margin-bottom': '1rem',
+                resize: 'vertical'
+              }}
+            />
+
+            <div style={{
+              display: 'flex',
+              gap: '0.5rem',
+              'justify-content': 'flex-end'
+            }}>
+              <button
+                class="secondary"
+                onClick={cancelReply}
+                style={{ padding: '0.75rem 1.5rem' }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={sendReply}
+                disabled={!replyText().trim()}
+                style={{
+                  padding: '0.75rem 1.5rem',
+                  background: replyText().trim() ? '#2a4a2a' : '#1a1a1a',
+                  color: replyText().trim() ? '#9cff9c' : '#666',
+                  border: 'none',
+                  'border-radius': '6px',
+                  cursor: replyText().trim() ? 'pointer' : 'not-allowed',
+                  'font-weight': 'bold'
+                }}
+              >
+                Send Reply
+              </button>
+            </div>
+          </div>
+        </div>
+      </Show>
 
       <div class="card">
         <h2>Message Statistics</h2>

@@ -2,15 +2,19 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod bus;
+mod watcher;
 
 use bus::{manager::BusConfig as BusManagerConfig, BusManager, ConnectedAgent};
+use std::path::PathBuf;
 use std::sync::Arc;
-use tauri::State;
+use tauri::{AppHandle, State};
 use tokio::sync::Mutex;
+use watcher::{AgentMessage, FileWatcher};
 
 // State management
 struct AppState {
     bus_manager: Arc<Mutex<Option<BusManager>>>,
+    file_watcher: Arc<Mutex<Option<FileWatcher>>>,
 }
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
@@ -147,10 +151,122 @@ impl From<ConnectedAgent> for AgentInfo {
     }
 }
 
+// ============================================================================
+// File Watcher Commands (New)
+// ============================================================================
+
+#[tauri::command]
+async fn start_file_watcher(
+    state: State<'_, AppState>,
+    app_handle: AppHandle,
+    messages_dir: Option<String>,
+    agent_id: Option<String>,
+) -> Result<String, String> {
+    let mut watcher_guard = state.file_watcher.lock().await;
+
+    if watcher_guard.is_some() {
+        return Err("File watcher is already running".to_string());
+    }
+
+    // Default to ~/.agentmux/shared/messages
+    let dir = if let Some(dir) = messages_dir {
+        PathBuf::from(dir)
+    } else {
+        let home = std::env::var("HOME")
+            .or_else(|_| std::env::var("USERPROFILE"))
+            .map_err(|_| "Could not determine home directory".to_string())?;
+        PathBuf::from(home).join(".agentmux/shared/messages")
+    };
+
+    let mut watcher = FileWatcher::new(dir.clone(), app_handle);
+
+    if let Some(id) = agent_id {
+        watcher.set_agent_id(id);
+    }
+
+    watcher.start()?;
+
+    *watcher_guard = Some(watcher);
+
+    Ok(format!("File watcher started: {}", dir.display()))
+}
+
+#[tauri::command]
+async fn stop_file_watcher(state: State<'_, AppState>) -> Result<String, String> {
+    let mut watcher_guard = state.file_watcher.lock().await;
+
+    if let Some(mut watcher) = watcher_guard.take() {
+        watcher.stop();
+        Ok("File watcher stopped".to_string())
+    } else {
+        Err("File watcher is not running".to_string())
+    }
+}
+
+#[tauri::command]
+async fn send_message(
+    to: String,
+    message: String,
+    priority: Option<String>,
+) -> Result<String, String> {
+    // Get home directory
+    let home = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .map_err(|_| "Could not determine home directory".to_string())?;
+
+    let messages_dir = PathBuf::from(home).join(".agentmux/shared/messages");
+
+    // Create messages directory if it doesn't exist
+    std::fs::create_dir_all(&messages_dir)
+        .map_err(|e| format!("Failed to create messages directory: {}", e))?;
+
+    // Generate message ID
+    let msg_id = format!("msg-{}", uuid::Uuid::new_v4());
+
+    // Get current timestamp
+    let timestamp = {
+        use std::time::SystemTime;
+        let duration = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap();
+        format!("{}", duration.as_secs())
+    };
+
+    // Determine agent ID (from environment or default)
+    let agent_id = std::env::var("AGENT_ID").unwrap_or_else(|_| "Desktop".to_string());
+
+    // Create message
+    let msg = AgentMessage {
+        id: msg_id.clone(),
+        from: watcher::AgentIdentity {
+            id: agent_id.clone(),
+            name: agent_id.clone(),
+        },
+        to: to.clone(),
+        payload: watcher::MessagePayload { text: message },
+        timestamp,
+        priority: priority.unwrap_or_else(|| "normal".to_string()),
+    };
+
+    // Write message to file
+    let file_path = messages_dir.join(format!("{}.json", msg_id));
+    let json = serde_json::to_string_pretty(&msg)
+        .map_err(|e| format!("Failed to serialize message: {}", e))?;
+
+    std::fs::write(&file_path, json)
+        .map_err(|e| format!("Failed to write message file: {}", e))?;
+
+    Ok(format!(
+        "Message sent: {} -> {} ({})",
+        agent_id, to, msg_id
+    ))
+}
+
 #[tokio::main]
 async fn main() {
     let app_state = AppState {
         bus_manager: Arc::new(Mutex::new(None)),
+        file_watcher: Arc::new(Mutex::new(None)),
     };
 
     tauri::Builder::default()
@@ -161,7 +277,10 @@ async fn main() {
             stop_bus,
             get_connected_agents,
             get_bus_status,
-            get_recent_messages
+            get_recent_messages,
+            start_file_watcher,
+            stop_file_watcher,
+            send_message,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
