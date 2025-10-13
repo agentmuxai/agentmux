@@ -3,6 +3,8 @@
 
 mod bus;
 mod watcher;
+mod commands;
+mod embedded_claude;
 
 #[cfg(test)]
 mod tests;
@@ -19,6 +21,7 @@ struct AppState {
     bus_manager: Arc<Mutex<Option<BusManager>>>,
     file_watcher: Arc<Mutex<Option<FileWatcher>>>,
     command_watcher: Arc<Mutex<Option<CommandWatcher>>>,
+    claude_instances: Arc<Mutex<std::collections::HashMap<String, embedded_claude::ClaudeInstance>>>,
 }
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
@@ -453,12 +456,72 @@ async fn stop_command_watcher(state: State<'_, AppState>) -> Result<String, Stri
     }
 }
 
+// ============================================================================
+// Embedded Claude Commands
+// ============================================================================
+
+#[tauri::command]
+async fn spawn_embedded_claude(
+    instance_name: String,
+    state: State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    // Find available WebSocket port
+    let ws_port = embedded_claude::find_available_port(9000, 9999)?;
+
+    // Spawn Claude instance
+    let instance = embedded_claude::ClaudeInstance::spawn(instance_name.clone(), ws_port).await?;
+
+    let result = serde_json::json!({
+        "instanceName": instance.instance_name,
+        "pid": instance.pid,
+        "wsPort": instance.ws_port,
+        "status": "running"
+    });
+
+    // Store instance in state
+    state.claude_instances.lock().await.insert(instance_name, instance);
+
+    Ok(result)
+}
+
+#[tauri::command]
+async fn send_claude_input(
+    instance_name: String,
+    input: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let instances = state.claude_instances.lock().await;
+    let instance = instances.get(&instance_name)
+        .ok_or(format!("Instance '{}' not found", instance_name))?;
+
+    instance.send_input(input).await
+}
+
+#[tauri::command]
+async fn list_claude_instances(
+    state: State<'_, AppState>,
+) -> Result<Vec<serde_json::Value>, String> {
+    let instances = state.claude_instances.lock().await;
+
+    let list = instances.iter().map(|(name, instance)| {
+        serde_json::json!({
+            "instanceName": name,
+            "pid": instance.pid,
+            "wsPort": instance.ws_port,
+            "status": "running"
+        })
+    }).collect();
+
+    Ok(list)
+}
+
 #[tokio::main]
 async fn main() {
     let app_state = AppState {
         bus_manager: Arc::new(Mutex::new(None)),
         file_watcher: Arc::new(Mutex::new(None)),
         command_watcher: Arc::new(Mutex::new(None)),
+        claude_instances: Arc::new(Mutex::new(std::collections::HashMap::new())),
     };
 
     tauri::Builder::default()
@@ -479,6 +542,9 @@ async fn main() {
             get_agent_status,
             get_agent_output,
             list_agents,
+            spawn_embedded_claude,
+            send_claude_input,
+            list_claude_instances,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

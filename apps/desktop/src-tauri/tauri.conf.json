@@ -23,7 +23,17 @@
     }
   },
   "bundle": {
-    "active": false,
-    "targets": "all"
+    "active": true,
+    "targets": ["msi"],
+    "icon": [
+      "icons/icon.ico"
+    ],
+    "windows": {
+      "allowDowngrades": true,
+      "webviewInstallMode": {
+        "silent": true,
+        "type": "downloadBootstrapper"
+      }
+    }
   }
 }

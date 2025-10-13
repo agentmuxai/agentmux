@@ -378,3 +378,73 @@ button.danger:disabled {
 .output-controls button:hover {
   background: #3a3a3a;
 }
+
+/* Simple Terminal Styles */
+.simple-terminal {
+  display: flex;
+  flex-direction: column;
+  height: 600px;
+  background: #0a0a0a;
+  border: 1px solid #3a3a3a;
+  border-radius: 8px;
+  overflow: hidden;
+  font-family: 'Courier New', 'Consolas', monospace;
+}
+
+.terminal-output {
+  flex: 1;
+  padding: 1rem;
+  overflow-y: auto;
+  background: #0a0a0a;
+  color: #e0e0e0;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.terminal-input-area {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  background: #1a1a1a;
+  border-top: 1px solid #3a3a3a;
+}
+
+.terminal-input {
+  flex: 1;
+  background: #2a2a2a;
+  border: 1px solid #3a3a3a;
+  color: #e0e0e0;
+  padding: 0.5rem;
+  border-radius: 4px;
+  font-family: 'Courier New', 'Consolas', monospace;
+  font-size: 14px;
+}
+
+.terminal-input:focus {
+  outline: none;
+  border-color: #4a9eff;
+}
+
+.terminal-input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.terminal-send {
+  background: #4a9eff;
+  border: none;
+  color: white;
+  padding: 0.5rem 1rem;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.terminal-send:hover:not(:disabled) {
+  background: #3a8eef;
+}
+
+.terminal-send:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
