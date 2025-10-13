@@ -10,6 +10,14 @@ export class ClaudeWrapper extends BaseWrapper {
   }
 
   /**
+   * Get command-line arguments for Claude CLI
+   */
+  protected getArgs(): string[] {
+    // Claude requires --dangerously-skip-permissions in WSL/wrapper contexts
+    return ['--dangerously-skip-permissions'];
+  }
+
+  /**
    * Claude-specific customizations can be added here
    */
   protected customizePrompt(): void {

@@ -21,6 +21,13 @@ export abstract class BaseWrapper implements AIWrapper {
 
   abstract get command(): string;
 
+  /**
+   * Get command-line arguments (override in subclasses)
+   */
+  protected getArgs(): string[] {
+    return [];
+  }
+
   constructor(options: WrapperOptions = {}) {
     this.agentId = options.agentId || process.env.AGENT_ID || 'AgentX';
     this.debug = options.debug || false;
@@ -59,9 +66,10 @@ export abstract class BaseWrapper implements AIWrapper {
     // Spawn CLI in PTY
     // Use override command if provided (for WSL .exe suffix), otherwise use default
     const commandToSpawn = this.cliCommand || this.command;
-    this.log('Spawning CLI', { command: commandToSpawn });
+    const args = this.getArgs();
+    this.log('Spawning CLI', { command: commandToSpawn, args });
 
-    this.ptyProcess = pty.spawn(commandToSpawn, [], {
+    this.ptyProcess = pty.spawn(commandToSpawn, args, {
       name: 'xterm-color',
       cols: process.stdout.columns || 80,
       rows: process.stdout.rows || 30,
@@ -158,21 +166,38 @@ export abstract class BaseWrapper implements AIWrapper {
   stop(): void {
     this.log('Stopping wrapper');
 
-    if (this.watcher) {
-      this.watcher.stop();
+    // Restore terminal FIRST to prevent freeze
+    if (process.stdin.setRawMode) {
+      try {
+        process.stdin.setRawMode(false);
+        this.log('Terminal raw mode disabled');
+      } catch (error) {
+        this.log('Error disabling raw mode', { error });
+      }
     }
 
+    // Remove all stdin listeners to prevent hanging
+    process.stdin.removeAllListeners('data');
+    process.stdin.pause();
+
+    // Stop message watcher
+    if (this.watcher) {
+      this.watcher.stop();
+      this.log('Watcher stopped');
+    }
+
+    // Kill PTY process
     if (this.ptyProcess) {
-      this.ptyProcess.kill();
+      try {
+        this.ptyProcess.kill('SIGTERM');
+        this.log('PTY process terminated');
+      } catch (error) {
+        this.log('Error killing PTY', { error });
+      }
       this.ptyProcess = null;
     }
 
-    // Restore terminal
-    if (process.stdin.setRawMode) {
-      process.stdin.setRawMode(false);
-    }
-
-    this.log('Wrapper stopped');
+    this.log('Wrapper stopped - terminal restored');
   }
 
   protected log(message: string, data?: any): void {
