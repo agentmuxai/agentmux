@@ -25,6 +25,10 @@ class ReactiveCLIAgent {
     this.processedMessages = new Set();
     this.messageQueue = [];
     this.isProcessing = false;
+    this.lastStatusWrite = 0;
+
+    // Output buffer size limit (1MB max)
+    this.MAX_OUTPUT_SIZE = 1024 * 1024;
   }
 
   async start() {
@@ -92,8 +96,15 @@ class ReactiveCLIAgent {
   handleOutput(data) {
     const text = data.toString();
 
-    // Store full output history
+    // Store full output history with size limit
     this.fullOutput += text;
+
+    // Trim buffer if it exceeds max size (keep last 50%)
+    if (this.fullOutput.length > this.MAX_OUTPUT_SIZE) {
+      const keepSize = Math.floor(this.MAX_OUTPUT_SIZE / 2);
+      this.fullOutput = '... [earlier output truncated]\n' + this.fullOutput.slice(-keepSize);
+      console.log(`⚠️  [${this.agentId}] Output buffer trimmed (exceeded ${this.MAX_OUTPUT_SIZE} bytes)`);
+    }
 
     // Log to console
     console.log(`[${this.agentId}]`, text);
@@ -151,13 +162,23 @@ class ReactiveCLIAgent {
   }
 
   updateStatus(status, pid = null) {
+    // Throttle status writes to max 1 per second (except for explicit status changes)
+    const now = Date.now();
+    const isExplicitStatusChange = status !== 'running';
+
+    if (!isExplicitStatusChange && (now - this.lastStatusWrite < 1000)) {
+      return; // Skip write if less than 1 second since last write
+    }
+
+    this.lastStatusWrite = now;
+
     const statusFile = path.join(this.agentDir, 'status.json');
     const statusData = {
       agentId: this.agentId,
       status: status,
       pid: pid || this.process?.pid,
       startedAt: Date.now(),
-      lastUpdate: Date.now(),
+      lastUpdate: now,
       messagesReceived: this.processedMessages.size,
       outputLength: this.fullOutput.length
     };
