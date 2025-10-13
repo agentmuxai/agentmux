@@ -1,10 +1,10 @@
 use super::types::AgentMessage;
-use notify::{Config, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
+use notify::{RecommendedWatcher, RecursiveMode};
 use notify_debouncer_mini::{new_debouncer, DebouncedEventKind};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::channel;
 use std::time::Duration;
-use tauri::AppHandle;
+use tauri::{AppHandle, Emitter};
 
 pub struct FileWatcher {
     messages_dir: PathBuf,
@@ -66,13 +66,12 @@ impl FileWatcher {
                     Ok(events) => {
                         for event in events {
                             if let DebouncedEventKind::Any = event.kind {
-                                for path in &event.paths {
-                                    if path.extension().and_then(|s| s.to_str()) == Some("json") {
-                                        if let Err(e) =
-                                            Self::handle_new_message(&path, &app_handle, &agent_id)
-                                        {
-                                            eprintln!("Error handling message: {}", e);
-                                        }
+                                let path = &event.path;
+                                if path.extension().and_then(|s| s.to_str()) == Some("json") {
+                                    if let Err(e) =
+                                        Self::handle_new_message(&path, &app_handle, &agent_id)
+                                    {
+                                        eprintln!("Error handling message: {}", e);
                                     }
                                 }
                             }
