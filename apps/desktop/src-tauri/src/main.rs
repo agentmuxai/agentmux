@@ -616,7 +616,7 @@ async fn execute_cli_command(
         .collect();
 
     // Prepend program name for clap parsing
-    let mut full_args = vec!["agentmux-desktop".to_string()];
+    let mut full_args = vec!["agentmux".to_string()];
     full_args.extend(args);
 
     // Parse with clap

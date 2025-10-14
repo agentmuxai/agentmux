@@ -115,16 +115,16 @@
 **Example Usage:**
 ```bash
 # List agents and exit
-agentmux-desktop --headless agents list
+agentmux --headless agents list
 
 # Spawn agent with JSON output
-agentmux-desktop --json --headless agents spawn Agent1
+agentmux --json --headless agents spawn Agent1
 
 # Enable verbose logging and launch GUI
-agentmux-desktop --verbose
+agentmux --verbose
 
 # Show help
-agentmux-desktop --help
+agentmux --help
 ```
 
 **Commit:** Pending (Phase 3 complete)
