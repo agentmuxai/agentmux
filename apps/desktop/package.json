@@ -15,7 +15,11 @@
     "test:cli": "bats tests/cli/*.bats",
     "test:cli:single": "bats tests/cli/single_instance.bats",
     "test:cli:ipc": "bats tests/cli/ipc_forwarding.bats",
-    "test:all": "npm run test && npm run test:cli"
+    "test:all": "npm run test && npm run test:cli && npm run test:playwright",
+    "test:playwright": "playwright test",
+    "test:playwright:ui": "playwright test --ui",
+    "test:playwright:debug": "playwright test --debug",
+    "test:playwright:report": "playwright show-report"
   },
   "dependencies": {
     "@agentmux/core": "*",
@@ -23,12 +27,15 @@
     "solid-js": "^1.9.3"
   },
   "devDependencies": {
+    "@playwright/test": "^1.56.0",
     "@solidjs/testing-library": "^0.8.5",
     "@tauri-apps/cli": "^2.2.0",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/user-event": "^14.5.1",
     "@vitest/ui": "^1.0.0",
+    "cross-env": "^10.1.0",
     "jsdom": "^23.0.0",
+    "playwright": "^1.56.0",
     "typescript": "^5.3.3",
     "vite": "^5.0.0",
     "vite-plugin-solid": "^2.8.2",
