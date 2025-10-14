@@ -64,7 +64,7 @@ const Dashboard: Component = () => {
 
     // Listen for bus_started events
     unlisteners.push(await listen('bus_started', async (event) => {
-      console.log('[Dashboard] Received bus_started event:', event.payload);
+      console.log('[Dashboard] Received bus_started event:', JSON.stringify(event.payload, null, 2));
       const payload = event.payload as {
         host: string;
         port: number;
