@@ -53,11 +53,19 @@ pub struct ClaudeInstance {
 
 impl ClaudeInstance {
     pub async fn spawn(instance_name: String, ws_port: u16) -> Result<Self, String> {
-        // Spawn Claude CLI with piped stdio
+        // Spawn Claude CLI with piped stdio (no window on Windows)
         let mut cmd = Command::new("claude");
         cmd.stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .stdin(Stdio::piped());
+
+        // Hide console window on Windows
+        #[cfg(target_os = "windows")]
+        {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x08000000;
+            cmd.creation_flags(CREATE_NO_WINDOW);
+        }
 
         let mut child = cmd.spawn()
             .map_err(|e| format!("Failed to spawn Claude: {}", e))?;

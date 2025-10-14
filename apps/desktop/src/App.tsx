@@ -1,13 +1,12 @@
 import { Component, createSignal } from 'solid-js';
 import Dashboard from './components/Dashboard';
 import BusControl from './components/BusControl';
-import AgentList from './components/AgentList';
-import MessageStream from './components/MessageStream';
 import AgentsManager from './components/AgentsManager';
+import MessageStream from './components/MessageStream';
 import { DebugConsole } from './components/DebugConsole';
 
 const App: Component = () => {
-  const [activeTab, setActiveTab] = createSignal<'dashboard' | 'bus' | 'agents' | 'messages' | 'agents-manager'>('dashboard');
+  const [activeTab, setActiveTab] = createSignal<'dashboard' | 'bus' | 'agents' | 'messages'>('dashboard');
 
   return (
     <div class="app">
@@ -38,27 +37,20 @@ const App: Component = () => {
           >
             💬 Messages
           </button>
-          <button
-            class={activeTab() === 'agents-manager' ? 'tab active' : 'tab'}
-            onClick={() => setActiveTab('agents-manager')}
-          >
-            🧠 CLI Agents
-          </button>
         </div>
       </header>
 
       <main class="app-content">
         {activeTab() === 'dashboard' && <Dashboard />}
         {activeTab() === 'bus' && <BusControl />}
-        {activeTab() === 'agents' && <AgentList />}
+        {activeTab() === 'agents' && <AgentsManager />}
         {activeTab() === 'messages' && <MessageStream />}
-        {activeTab() === 'agents-manager' && <AgentsManager />}
       </main>
 
       <footer class="app-footer">
-        <span>AgentMux v0.2.3</span>
+        <span>AgentMux v0.2.5</span>
         <span>|</span>
-        <span>Built: 2025-10-13 5:47 PM PT</span>
+        <span>Built: 2025-10-13 1:00 AM PT</span>
         <span>|</span>
         <span>Status: Ready</span>
       </footer>
