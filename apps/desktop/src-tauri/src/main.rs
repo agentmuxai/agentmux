@@ -517,6 +517,35 @@ async fn list_claude_instances(
 }
 
 // ============================================================================
+// Logs Export (Direct UI Access)
+// ============================================================================
+
+#[tauri::command]
+async fn export_logs(output_path: Option<String>, format: String) -> Result<String, String> {
+    use agentmux_desktop::services::logs::{export_logs as export_logs_service, LogExportRequest, LogFormat};
+    use std::path::PathBuf;
+
+    let request = LogExportRequest {
+        output_path: output_path.map(PathBuf::from),
+        format: LogFormat::from(format.as_str()),
+    };
+
+    let result = export_logs_service(request);
+
+    if result.success {
+        Ok(serde_json::json!({
+            "output_path": result.output_path,
+            "entries_count": result.entries_count,
+        })
+        .to_string())
+    } else {
+        Err(result
+            .error_message
+            .unwrap_or_else(|| "Unknown error".to_string()))
+    }
+}
+
+// ============================================================================
 // CLI Command Execution (In-App)
 // ============================================================================
 
@@ -599,6 +628,7 @@ async fn main() {
             send_claude_input,
             list_claude_instances,
             execute_cli_command,
+            export_logs,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
