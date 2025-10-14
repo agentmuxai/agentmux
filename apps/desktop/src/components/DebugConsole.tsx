@@ -12,9 +12,15 @@ export function DebugConsole() {
   const [collapsed, setCollapsed] = createSignal(false);
 
   onMount(() => {
-    // Intercept ERRORS ONLY (not regular console.log)
+    // Intercept ALL console methods for debugging
+    const originalLog = console.log;
     const originalError = console.error;
     const originalWarn = console.warn;
+
+    console.log = (...args: any[]) => {
+      originalLog.apply(console, args);
+      addLog('[LOG]', args.join(' '));
+    };
 
     console.error = (...args: any[]) => {
       originalError.apply(console, args);
