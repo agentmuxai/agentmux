@@ -1,7 +1,7 @@
 // IPC client for sending commands from CLI to running GUI instance
 
 use super::protocol::{IpcCommand, IpcResponse};
-use super::lock::{LockFile, read_lock_file, is_lock_stale, remove_lock_file};
+use super::lock::{read_lock_file, is_lock_stale, remove_lock_file};
 use reqwest::blocking::Client;
 use std::time::Duration;
 

@@ -2,8 +2,7 @@
 
 use super::protocol::{IpcCommand, IpcResponse};
 use super::lock::{LockFile, write_lock_file};
-use tauri::{AppHandle, Manager, Emitter};
-use std::io::Read;
+use tauri::{AppHandle, Manager};
 use chrono::Utc;
 
 /// Start the IPC HTTP server
@@ -12,7 +11,11 @@ pub fn start_ipc_server(app_handle: AppHandle) -> Result<(), String> {
     let server = tiny_http::Server::http("127.0.0.1:0")
         .map_err(|e| format!("Failed to start IPC server: {}", e))?;
 
-    let port = server.server_addr().port();
+    // Extract port from server address
+    let port = match server.server_addr() {
+        tiny_http::ListenAddr::IP(addr) => addr.port(),
+        _ => return Err("Failed to get server port".to_string()),
+    };
     println!("[IPC] Server started on port {}", port);
 
     // Write lock file
@@ -244,14 +247,14 @@ async fn execute_ipc_command(command: IpcCommand, app_handle: AppHandle) -> IpcR
         }
     };
 
-    // Execute command
-    let result = handle_command(cli_command, OutputFormat::Text, Some(app_handle)).await;
+    // Execute command (pass None for state as it's not available in IPC context)
+    let result = handle_command(cli_command, OutputFormat::Text, None).await;
 
     // Convert result to IPC response
     if result.success {
         IpcResponse::success(
             result.output,
-            result.json_output,
+            result.data,
             start.elapsed().as_millis() as u64,
         )
     } else {

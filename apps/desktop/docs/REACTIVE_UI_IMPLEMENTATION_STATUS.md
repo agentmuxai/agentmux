@@ -188,12 +188,14 @@ agentmux agents spawn Agent2
 - [x] External CLI launch initializes UI correctly
 - [x] Debug output shows in terminal (--verbose flag)
 
-### Phase 4 ⏳
-- [ ] Single instance detection works
-- [ ] IPC command forwarding works
-- [ ] Window focuses on IPC command
-- [ ] Stale lock detection works
-- [ ] Timeout handling works
+### Phase 4 ✅
+- [x] Single instance detection works
+- [x] IPC command forwarding works
+- [x] Window focuses on IPC command (code implemented, not visually tested)
+- [x] Stale lock detection works
+- [x] Timeout handling works
+
+**Detailed Test Results:** See `PHASE_4_IPC_TEST_RESULTS.md`
 
 ---
 
