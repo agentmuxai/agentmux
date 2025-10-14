@@ -3,8 +3,8 @@
 use clap::{Parser, Subcommand};
 
 #[derive(Parser, Debug)]
-#[command(name = "agentmux-desktop")]
-#[command(about = "AgentMux Desktop - Agent monitoring and orchestration", long_about = None)]
+#[command(name = "agentmux")]
+#[command(about = "AgentMux - Multi-agent monitoring and orchestration", long_about = None)]
 #[command(version)]
 pub struct Cli {
     /// Enable headless mode (no GUI)

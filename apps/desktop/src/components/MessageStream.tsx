@@ -105,40 +105,68 @@ const MessageStream: Component = () => {
     setReplyText('');
   };
 
-  // File watcher setup
-  let unlistenFn: UnlistenFn | null = null;
-
+  // Event listeners setup
   onMount(async () => {
+    const unlisteners: UnlistenFn[] = [];
+
     try {
       // Start file watcher
       const result = await invoke<string>('start_file_watcher', {
         messagesDir: null,  // Use default ~/.agentmux/shared/messages
         agentId: 'AgentX',  // TODO: Make configurable
       });
-      console.log('File watcher started:', result);
+      console.log('[MessageStream] File watcher started:', result);
       setWatcherStatus('running');
 
-      // Listen for new messages
-      unlistenFn = await listen<AgentMessage>('message_received', (event) => {
-        console.log('New message received:', event.payload);
+      // Listen for received messages (from file watcher)
+      unlisteners.push(await listen<AgentMessage>('message_received', (event) => {
+        console.log('[MessageStream] Message received:', event.payload);
         addMessage(event.payload);
-      });
+      }));
+
+      // Listen for sent messages (from send_message command)
+      unlisteners.push(await listen('message_sent', (event) => {
+        console.log('[MessageStream] Message sent event:', event.payload);
+        const payload = event.payload as {
+          from_agent: string;
+          to_agent: string;
+          message_text: string;
+          timestamp: string;
+        };
+
+        // Create a message object to display in stream
+        const sentMessage: AgentMessage = {
+          id: `sent-${Date.now()}`,
+          from: {
+            id: payload.from_agent,
+            name: payload.from_agent
+          },
+          to: payload.to_agent,
+          payload: {
+            text: payload.message_text
+          },
+          timestamp: payload.timestamp,
+          priority: 'normal'
+        };
+
+        addMessage(sentMessage);
+      }));
+
     } catch (err) {
-      console.error('Failed to start file watcher:', err);
+      console.error('[MessageStream] Failed to start file watcher:', err);
       setWatcherStatus('error');
     }
-  });
 
-  onCleanup(async () => {
-    try {
-      if (unlistenFn) {
-        unlistenFn();
+    // Cleanup all event listeners
+    onCleanup(async () => {
+      try {
+        unlisteners.forEach(fn => fn());
+        await invoke('stop_file_watcher');
+        setWatcherStatus('stopped');
+      } catch (err) {
+        console.error('[MessageStream] Failed to stop file watcher:', err);
       }
-      await invoke('stop_file_watcher');
-      setWatcherStatus('stopped');
-    } catch (err) {
-      console.error('Failed to stop file watcher:', err);
-    }
+    });
   });
 
   return (
