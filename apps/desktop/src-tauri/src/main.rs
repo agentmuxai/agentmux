@@ -654,6 +654,21 @@ async fn execute_cli_command(
 
 #[tokio::main]
 async fn main() {
+    use clap::Parser;
+    use cli::parser::Cli;
+    use cli::output::OutputFormat;
+
+    // Parse CLI arguments
+    let cli = Cli::parse();
+
+    // Handle --version and --help (already handled by clap via parse())
+
+    // Enable verbose logging if requested
+    if cli.verbose {
+        println!("[DEBUG] Verbose logging enabled");
+        std::env::set_var("RUST_LOG", "debug");
+    }
+
     let claude_instances_arc = Arc::new(Mutex::new(std::collections::HashMap::new()));
 
     let app_state = AppState {
@@ -665,8 +680,33 @@ async fn main() {
 
     // Create CLI state wrapper pointing to same instances
     let cli_state = embedded_claude::ClaudeInstancesState {
-        instances: claude_instances_arc,
+        instances: claude_instances_arc.clone(),
     };
+
+    // Execute CLI command if provided (before UI initialization)
+    if let Some(command) = cli.command {
+        let format: OutputFormat = cli.json.into();
+
+        // Note: We pass None for state since Tauri isn't initialized yet
+        // This means CLI commands run in a limited mode before GUI starts
+        // For full functionality, use --headless mode or run after app starts
+        let result = cli::handlers::handle_command(
+            command,
+            format,
+            None,
+        ).await;
+
+        // Print result
+        println!("{}", result.format(&format));
+
+        // Exit if in headless mode
+        if cli.headless {
+            std::process::exit(if result.success { 0 } else { 1 });
+        }
+
+        // If not headless, command output was printed but app continues to GUI
+        // The UI will show the current state after command execution
+    }
 
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())

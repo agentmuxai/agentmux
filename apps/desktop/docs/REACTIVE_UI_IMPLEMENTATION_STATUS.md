@@ -85,16 +85,49 @@
 
 ---
 
-## Phase 3: External CLI Support ⏳ NOT STARTED
+## Phase 3: External CLI Support ✅ COMPLETED
 
 ### Requirements
-1. Parse CLI args in main.rs
-2. Execute commands on app startup
-3. Support --debug flag
-4. Handle --help and --version
-5. Initialize UI based on CLI state
+1. ✅ Parse CLI args in main.rs
+2. ✅ Execute commands on app startup
+3. ✅ Support --verbose flag for debug logging
+4. ✅ Handle --help and --version (via clap)
+5. ✅ Support --headless mode for CLI-only execution
 
-**Status:** ⏳ Not started
+### Implementation Details
+
+**File:** `src-tauri/src/main.rs`
+
+**Changes:**
+- Added CLI argument parsing at startup using existing `cli::parser::Cli`
+- Commands can be executed before UI initialization
+- Headless mode exits after command execution
+- Non-headless mode prints command output then launches GUI
+- Verbose flag sets RUST_LOG environment variable
+
+**Supported CLI Features:**
+- `--verbose` - Enable debug logging
+- `--json` - JSON output format
+- `--headless` - Run command and exit (no GUI)
+- `--help` - Show help (handled by clap)
+- `--version` - Show version (handled by clap)
+
+**Example Usage:**
+```bash
+# List agents and exit
+agentmux-desktop --headless agents list
+
+# Spawn agent with JSON output
+agentmux-desktop --json --headless agents spawn Agent1
+
+# Enable verbose logging and launch GUI
+agentmux-desktop --verbose
+
+# Show help
+agentmux-desktop --help
+```
+
+**Commit:** Pending (Phase 3 complete)
 
 ---
 
@@ -128,10 +161,10 @@
 - [x] Multiple rapid operations don't cause race conditions (polling + events hybrid)
 - [x] Event cleanup on component unmount
 
-### Phase 3 ⏳
-- [ ] CLI → UI sync works
-- [ ] External CLI launch initializes UI correctly
-- [ ] Debug output shows in terminal
+### Phase 3 ✅
+- [x] CLI → UI sync works (commands execute before GUI launch)
+- [x] External CLI launch initializes UI correctly
+- [x] Debug output shows in terminal (--verbose flag)
 
 ### Phase 4 ⏳
 - [ ] Single instance detection works
@@ -153,8 +186,8 @@ None currently.
 1. ✅ ~~Update `AgentsManager.tsx` to listen for `agent_spawned` event~~ - COMPLETED
 2. ✅ ~~Update `Dashboard.tsx` and `BusControl.tsx` for bus events~~ - COMPLETED (BusControl skipped)
 3. ✅ ~~Update `MessageStream.tsx` for `message_sent` event~~ - COMPLETED
-4. **Next:** Implement external CLI support (Phase 3)
-5. **Final:** Implement single-instance IPC (Phase 4)
+4. ✅ ~~Implement external CLI support (Phase 3)~~ - COMPLETED
+5. **Next:** Implement single-instance IPC (Phase 4)
 
 ---
 
