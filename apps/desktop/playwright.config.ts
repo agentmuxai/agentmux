@@ -55,7 +55,7 @@ export default defineConfig({
 
   // Start Tauri dev server with CDP enabled before running tests
   webServer: {
-    command: 'WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS="--remote-debugging-port=9222" npm run tauri:dev',
+    command: 'cross-env WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS="--remote-debugging-port=9222" npm run tauri:dev',
     url: 'http://localhost:9222',
     timeout: 120 * 1000,
     reuseExistingServer: !process.env.CI,
