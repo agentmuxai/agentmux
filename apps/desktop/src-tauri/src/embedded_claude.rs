@@ -214,57 +214,81 @@ async fn start_websocket_server(port: u16, peer_map: PeerMap) -> Result<(), Stri
 }
 
 async fn handle_websocket_connection(peer_map: PeerMap, raw_stream: TcpStream, addr: SocketAddr) {
+    println!("[WS:{}] Accepting WebSocket handshake...", addr);
+
     // Accept WebSocket connection
     let ws_stream = match accept_async(raw_stream).await {
-        Ok(ws) => ws,
+        Ok(ws) => {
+            println!("[WS:{}] ✓ Handshake successful", addr);
+            ws
+        },
         Err(e) => {
-            eprintln!("WebSocket handshake error for {}: {}", addr, e);
+            eprintln!("[WS:{}] ✗ Handshake error: {}", addr, e);
             return;
         }
     };
 
-    println!("New WebSocket connection: {}", addr);
+    println!("[WS:{}] ✓ New WebSocket connection established", addr);
 
     // Create channel for this peer
     let (tx, mut rx): (Tx, UnboundedReceiver<Message>) = mpsc::unbounded_channel();
     peer_map.lock().await.insert(addr, tx);
+    println!("[WS:{}] Peer registered in peer_map", addr);
 
     // Split stream into sender/receiver
     let (mut outgoing, mut incoming) = ws_stream.split();
+    println!("[WS:{}] Stream split into sender/receiver", addr);
 
     // Forward messages from channel to this connection
     let peer_map_clone = Arc::clone(&peer_map);
     let forward_task = tokio::spawn(async move {
+        println!("[WS:{}] Forward task started - waiting for messages to broadcast...", addr);
+        let mut msg_count = 0;
         while let Some(msg) = rx.recv().await {
+            msg_count += 1;
+            println!("[WS:{}] Forward task broadcasting message #{}", addr, msg_count);
             if outgoing.send(msg).await.is_err() {
+                eprintln!("[WS:{}] ✗ Failed to send message, connection broken", addr);
                 break;
             }
         }
         // Connection closed, clean up
         peer_map_clone.lock().await.remove(&addr);
-        println!("WebSocket connection closed: {}", addr);
+        println!("[WS:{}] Forward task ended after {} messages, peer removed from map", addr, msg_count);
     });
 
     // Handle incoming messages (input from UI)
+    println!("[WS:{}] Starting incoming message loop...", addr);
+    let mut incoming_count = 0;
     while let Some(msg) = incoming.next().await {
         match msg {
             Ok(Message::Text(text)) => {
-                // This is user input from UI - we'll handle it in the Tauri command
-                println!("[{}] Received input: {}", addr, text);
+                incoming_count += 1;
+                println!("[WS:{}] ← Received text message #{}: {}", addr, incoming_count, text);
             }
-            Ok(Message::Close(_)) => {
-                println!("Client {} requested close", addr);
+            Ok(Message::Close(close_frame)) => {
+                println!("[WS:{}] Client requested close: {:?}", addr, close_frame);
                 break;
+            }
+            Ok(Message::Ping(data)) => {
+                println!("[WS:{}] ← Received ping ({} bytes)", addr, data.len());
+            }
+            Ok(Message::Pong(data)) => {
+                println!("[WS:{}] ← Received pong ({} bytes)", addr, data.len());
             }
             Err(e) => {
-                eprintln!("WebSocket error for {}: {}", addr, e);
+                eprintln!("[WS:{}] ✗ Error in incoming message loop: {}", addr, e);
                 break;
             }
-            _ => {}
+            _ => {
+                println!("[WS:{}] ← Received other message type", addr);
+            }
         }
     }
 
+    println!("[WS:{}] Incoming message loop ended, aborting forward task...", addr);
     forward_task.abort();
+    println!("[WS:{}] ✗ Connection handler finished", addr);
 }
 
 async fn stream_output_to_websocket(
@@ -273,22 +297,48 @@ async fn stream_output_to_websocket(
     instance_name: String,
     stream_type: &str,
 ) {
+    println!("[{}:{}] Stream monitoring task started", instance_name, stream_type);
     let mut reader = BufReader::new(output).lines();
+    let mut line_count = 0;
 
-    while let Ok(Some(line)) = reader.next_line().await {
-        let message = format!("{}\n", line);
+    loop {
+        match reader.next_line().await {
+            Ok(Some(line)) => {
+                line_count += 1;
+                let message = format!("{}\n", line);
 
-        // Broadcast to all connected WebSocket clients
-        let peers = peer_map.lock().await;
-        for (_, tx) in peers.iter() {
-            let _ = tx.send(Message::Text(message.clone().into()));
+                // Broadcast to all connected WebSocket clients
+                let peers = peer_map.lock().await;
+                let peer_count = peers.len();
+
+                if peer_count == 0 {
+                    println!("[{}:{}] Line #{} - No peers connected, data not broadcast",
+                             instance_name, stream_type, line_count);
+                } else {
+                    println!("[{}:{}] Line #{} - Broadcasting to {} peer(s)",
+                             instance_name, stream_type, line_count, peer_count);
+                    for (_, tx) in peers.iter() {
+                        let _ = tx.send(Message::Text(message.clone().into()));
+                    }
+                }
+
+                // Also print to console for debugging
+                println!("[{}:{}] {}", instance_name, stream_type, line);
+            }
+            Ok(None) => {
+                println!("[{}:{}] Stream reached EOF after {} lines",
+                         instance_name, stream_type, line_count);
+                break;
+            }
+            Err(e) => {
+                eprintln!("[{}:{}] ✗ Error reading stream: {}", instance_name, stream_type, e);
+                break;
+            }
         }
-
-        // Also print to console for debugging
-        println!("[{}:{}] {}", instance_name, stream_type, line);
     }
 
-    println!("[{}] {} stream closed", instance_name, stream_type);
+    println!("[{}:{}] ✗ Stream monitoring task ended (total lines: {})",
+             instance_name, stream_type, line_count);
 }
 
 async fn handle_stdin(
@@ -296,27 +346,45 @@ async fn handle_stdin(
     mut stdin_rx: UnboundedReceiver<String>,
     instance_name: String,
 ) {
+    println!("[{}:stdin] Stdin handler task started", instance_name);
+    let mut input_count = 0;
+
     while let Some(input) = stdin_rx.recv().await {
+        input_count += 1;
+        println!("[{}:stdin] → Sending input #{} ({} bytes)", instance_name, input_count, input.len());
+
         if let Err(e) = stdin.write_all(input.as_bytes()).await {
-            eprintln!("[{}] Failed to write to stdin: {}", instance_name, e);
+            eprintln!("[{}:stdin] ✗ Failed to write input #{}: {}", instance_name, input_count, e);
             break;
         }
         if let Err(e) = stdin.flush().await {
-            eprintln!("[{}] Failed to flush stdin: {}", instance_name, e);
+            eprintln!("[{}:stdin] ✗ Failed to flush input #{}: {}", instance_name, input_count, e);
             break;
         }
+
+        println!("[{}:stdin] ✓ Input #{} sent successfully", instance_name, input_count);
     }
+
+    println!("[{}:stdin] ✗ Stdin handler task ended (total inputs: {})", instance_name, input_count);
 }
 
 async fn wait_for_process(mut child: Child, instance_name: String) {
+    println!("[{}:process] Process monitor task started, waiting for exit...", instance_name);
+
     match child.wait().await {
         Ok(status) => {
-            println!("[{}] Process exited with status: {}", instance_name, status);
+            if status.success() {
+                println!("[{}:process] ✓ Process exited successfully with status: {}", instance_name, status);
+            } else {
+                eprintln!("[{}:process] ✗ Process exited with error status: {}", instance_name, status);
+            }
         }
         Err(e) => {
-            eprintln!("[{}] Error waiting for process: {}", instance_name, e);
+            eprintln!("[{}:process] ✗ Error waiting for process: {}", instance_name, e);
         }
     }
+
+    println!("[{}:process] ✗ Process monitor task ended", instance_name);
 }
 
 async fn watch_messages(
@@ -411,4 +479,9 @@ pub fn find_available_port(start: u16, end: u16) -> Result<u16, String> {
     }
 
     Err(format!("No available ports in range {}-{}", start, end))
+}
+
+// State wrapper for CLI access
+pub struct ClaudeInstancesState {
+    pub instances: Arc<Mutex<HashMap<String, ClaudeInstance>>>,
 }

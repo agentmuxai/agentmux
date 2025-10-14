@@ -20,12 +20,14 @@ const SimpleTerminal: Component<SimpleTerminalProps> = (props) => {
 
   const connectWebSocket = () => {
     const wsUrl = `ws://localhost:${props.wsPort}`;
+    console.log(`[${props.instanceName}] [WS] Attempting to connect to ${wsUrl}...`);
 
     try {
       ws = new WebSocket(wsUrl);
+      console.log(`[${props.instanceName}] [WS] WebSocket object created, readyState: ${ws.readyState} (CONNECTING)`);
 
       ws.onopen = () => {
-        console.log(`[${props.instanceName}] Connected to PTY wrapper`);
+        console.log(`[${props.instanceName}] [WS] ✓ Connection opened successfully, readyState: ${ws?.readyState} (OPEN)`);
         setIsConnected(true);
         setError(null);
         setOutput(prev => prev + `\x1b[1;32m[Connected to ${props.instanceName}]\x1b[0m\n`);
@@ -33,6 +35,7 @@ const SimpleTerminal: Component<SimpleTerminalProps> = (props) => {
 
       ws.onmessage = (event) => {
         const text = event.data;
+        console.log(`[${props.instanceName}] [WS] ← Received message (${text.length} bytes)`);
         setOutput(prev => prev + text);
 
         // Auto-scroll to bottom
@@ -42,22 +45,31 @@ const SimpleTerminal: Component<SimpleTerminalProps> = (props) => {
       };
 
       ws.onerror = (err) => {
-        console.error(`[${props.instanceName}] WebSocket error:`, err);
+        console.error(`[${props.instanceName}] [WS] ✗ Error occurred, readyState: ${ws?.readyState}`, err);
+        console.error(`[${props.instanceName}] [WS] Error details:`, JSON.stringify(err, null, 2));
         setError('Connection error');
         setIsConnected(false);
       };
 
-      ws.onclose = () => {
-        console.log(`[${props.instanceName}] WebSocket closed`);
+      ws.onclose = (event) => {
+        console.log(`[${props.instanceName}] [WS] ✗ Connection closed`);
+        console.log(`[${props.instanceName}] [WS] Close code: ${event.code}`);
+        console.log(`[${props.instanceName}] [WS] Close reason: "${event.reason}"`);
+        console.log(`[${props.instanceName}] [WS] Was clean: ${event.wasClean}`);
+        console.log(`[${props.instanceName}] [WS] readyState: ${ws?.readyState} (CLOSED)`);
+
         setIsConnected(false);
 
         // Attempt reconnect after 2 seconds
+        console.log(`[${props.instanceName}] [WS] Scheduling reconnect in 2 seconds...`);
         setTimeout(() => {
+          console.log(`[${props.instanceName}] [WS] Reconnect timer fired, attempting reconnect...`);
           connectWebSocket();
         }, 2000);
       };
     } catch (err: any) {
-      console.error(`[${props.instanceName}] Failed to create WebSocket:`, err);
+      console.error(`[${props.instanceName}] [WS] ✗ Failed to create WebSocket:`, err);
+      console.error(`[${props.instanceName}] [WS] Exception details:`, err.message, err.stack);
       setError(err.message);
     }
   };
