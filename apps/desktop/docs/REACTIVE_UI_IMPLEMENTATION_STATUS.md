@@ -205,13 +205,46 @@ None currently.
 
 ---
 
+## Phase 5: Debug Console Improvements ✅ COMPLETED
+
+### Requirements
+1. ✅ Fix object logging - Objects should display full JSON structure, not "[object Object]"
+2. ✅ Add resize functionality - Console should be resizable via top border drag
+
+### Implementation Details
+
+**Files Modified:**
+1. `apps/desktop/src/components/DebugConsole.tsx`
+   - Added `serializeArgs` helper function with JSON.stringify for objects
+   - Added height state management with createSignal (default 250px)
+   - Implemented mouse event handlers for drag-to-resize
+   - Changed message display from span to pre tag for formatting
+   - Added resize handle with visual indicator (⋮)
+   - Implemented constraints (min 100px, max 600px)
+
+2. `apps/desktop/src/components/Dashboard.tsx`
+   - Updated bus_started event listener to explicitly stringify payloads
+
+3. `apps/desktop/src/styles.css`
+   - Added resize handle styles with hover effects
+   - Updated debug-console to use flexbox layout
+   - Updated debug-message for pre tag support
+
+**Commit:** `601b311` - feat: Add resizable debug console and JSON object logging
+
+**Build Status:** ✅ Compiled successfully (v0.2.9)
+
+---
+
 ## Next Steps
 
 1. ✅ ~~Update `AgentsManager.tsx` to listen for `agent_spawned` event~~ - COMPLETED
 2. ✅ ~~Update `Dashboard.tsx` and `BusControl.tsx` for bus events~~ - COMPLETED (BusControl skipped)
 3. ✅ ~~Update `MessageStream.tsx` for `message_sent` event~~ - COMPLETED
 4. ✅ ~~Implement external CLI support (Phase 3)~~ - COMPLETED
-5. **Next:** Implement single-instance IPC (Phase 4)
+5. ✅ ~~Implement single-instance IPC (Phase 4)~~ - COMPLETED
+6. ✅ ~~Debug console improvements (Phase 5)~~ - COMPLETED
+7. **Next:** Testing and documentation updates
 
 ---
 
