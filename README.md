@@ -252,3 +252,37 @@ MIT
 
 - **Issues:** https://github.com/a5af/agentmux/issues
 - **Docs:** This repository's `docs/` folder
+
+### Version Management
+
+**⚠️ IMPORTANT: Every build MUST increment the version number**
+
+Before running `npm run tauri:build`, update both version files to avoid duplicate releases:
+
+1. Update `apps/desktop/package.json`:
+   ```bash
+   cd apps/desktop
+   npm version patch  # or minor, major
+   ```
+
+2. Update `apps/desktop/src-tauri/Cargo.toml` to match:
+   ```toml
+   version = "0.3.0"  # Must match package.json
+   ```
+
+3. Update `apps/desktop/src-tauri/tauri.conf.json` to match:
+   ```json
+   "version": "0.3.0"  // Must match package.json - CRITICAL for MSI filename
+   ```
+
+4. Then build:
+   ```bash
+   npm run tauri:build
+   ```
+
+**Why this matters:**
+- Multiple builds with the same version (e.g., 0.2.9) create duplicate MSI files
+- Version mismatches between package.json and Cargo.toml cause confusion
+- MSI installers are named by version: `AgentMux Desktop_{version}_x64_en-US.msi`
+
+**Current version:** Check `apps/desktop/package.json` for the latest version number.
