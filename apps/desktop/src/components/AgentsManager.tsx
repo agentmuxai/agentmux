@@ -1,4 +1,4 @@
-import { Component, createSignal, onMount, onCleanup, For, Show } from 'solid-js';
+import { Component, createSignal, createMemo, onMount, onCleanup, For, Show } from 'solid-js';
 import { invoke } from '@tauri-apps/api/core';
 import SimpleTerminal from './SimpleTerminal';
 
@@ -27,6 +27,13 @@ const AgentsManager: Component = () => {
   const [newAgentCommand, setNewAgentCommand] = createSignal('claude');
   const [error, setError] = createSignal<string | null>(null);
   const [isSpawning, setIsSpawning] = createSignal(false);
+
+  // Memoize selected agent to prevent SimpleTerminal recreation
+  const selectedAgentData = createMemo(() => {
+    const name = selectedAgent();
+    if (!name) return null;
+    return agents().find(a => a.instanceName === name) || null;
+  });
 
   let refreshInterval: number;
   let outputInterval: number;
@@ -246,19 +253,16 @@ const AgentsManager: Component = () => {
       </div>
 
       {/* Embedded Terminal */}
-      <Show when={selectedAgent()}>
-        {() => {
-          const agent = agents().find(a => a.instanceName === selectedAgent());
-          return agent ? (
-            <div class="card">
-              <h2>💻 Interactive Terminal: {agent.instanceName}</h2>
-              <SimpleTerminal
-                instanceName={agent.instanceName}
-                wsPort={agent.wsPort}
-              />
-            </div>
-          ) : null;
-        }}
+      <Show when={selectedAgentData()}>
+        {(agent) => (
+          <div class="card">
+            <h2>💻 Interactive Terminal: {agent().instanceName}</h2>
+            <SimpleTerminal
+              instanceName={agent().instanceName}
+              wsPort={agent().wsPort}
+            />
+          </div>
+        )}
       </Show>
     </div>
   );
