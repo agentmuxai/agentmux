@@ -38,4 +38,3 @@ coverage/
 .nyc_output/
 
 # Release artifacts
-releases/

@@ -1,6 +1,6 @@
 {
   "name": "@agentmux/desktop",
-  "version": "0.2.9",
+  "version": "0.3.0",
   "description": "AgentMux Desktop - Native desktop app for agent monitoring and orchestration",
   "type": "module",
   "scripts": {
@@ -15,6 +15,7 @@
     "test:cli": "bats tests/cli/*.bats",
     "test:cli:single": "bats tests/cli/single_instance.bats",
     "test:cli:ipc": "bats tests/cli/ipc_forwarding.bats",
+    "test:cli:claude": "bats tests/cli/claude_integration.bats",
     "test:all": "npm run test && npm run test:cli && npm run test:playwright",
     "test:playwright": "playwright test",
     "test:playwright:ui": "playwright test --ui",
@@ -24,6 +25,7 @@
   "dependencies": {
     "@agentmux/core": "*",
     "@tauri-apps/api": "^2.2.0",
+    "@tauri-apps/plugin-dialog": "^2.4.0",
     "solid-js": "^1.9.3"
   },
   "devDependencies": {
