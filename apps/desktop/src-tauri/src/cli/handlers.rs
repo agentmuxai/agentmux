@@ -1,5 +1,5 @@
 // CLI command handlers
-//  Due to time constraints in initial v0.3.0 release, implementing core functionality
+// Due to time constraints in initial v0.3.0 release, implementing core functionality
 // Full implementation will be completed in subsequent releases
 
 use super::output::{CliResponse, OutputFormat};
@@ -61,22 +61,101 @@ async fn handle_agent_action(
             }
         }
         AgentAction::Spawn { name, command: _cmd, port } => {
-            CliResponse::error(format!(
-                "Spawn command not yet implemented in CLI. Use GUI to spawn agent '{}' on port {:?}",
-                name, port
-            ))
+            if let Some(state) = state {
+                // Find available port if not specified
+                let ws_port = if let Some(p) = port {
+                    p
+                } else {
+                    match crate::embedded_claude::find_available_port(9000, 9999) {
+                        Ok(p) => p,
+                        Err(e) => return CliResponse::error(e),
+                    }
+                };
+
+                // Spawn the instance
+                match crate::embedded_claude::ClaudeInstance::spawn(name.clone(), ws_port).await {
+                    Ok(instance) => {
+                        let result = json!({
+                            "instanceName": instance.instance_name,
+                            "pid": instance.pid,
+                            "wsPort": instance.ws_port,
+                            "status": "running"
+                        });
+
+                        // Store in state
+                        state.instances.lock().await.insert(name.clone(), instance);
+
+                        let output = format!(
+                            "✓ Spawned agent '{}' (PID: {}, Port: {})",
+                            result["instanceName"], result["pid"], result["wsPort"]
+                        );
+
+                        CliResponse::success(output, Some(result))
+                    }
+                    Err(e) => CliResponse::error(format!("Failed to spawn agent: {}", e)),
+                }
+            } else {
+                CliResponse::error("State not available (headless mode not yet implemented)".to_string())
+            }
         }
         AgentAction::Stop { name } => {
-            CliResponse::error(format!("Stop command not yet implemented. Agent: {}", name))
+            if let Some(state) = state {
+                let mut instances = state.instances.lock().await;
+                if instances.remove(&name).is_some() {
+                    let output = format!("✓ Stopped agent '{}'", name);
+                    CliResponse::success(output, Some(json!({
+                        "instanceName": name,
+                        "status": "stopped"
+                    })))
+                } else {
+                    CliResponse::error(format!("Agent '{}' not found", name))
+                }
+            } else {
+                CliResponse::error("State not available (headless mode not yet implemented)".to_string())
+            }
         }
         AgentAction::Input { name, text } => {
-            CliResponse::error(format!(
-                "Input command not yet implemented. Agent: {}, Text: {}",
-                name, text
-            ))
+            if let Some(state) = state {
+                let instances = state.instances.lock().await;
+                if let Some(instance) = instances.get(&name) {
+                    match instance.send_input(text.clone()).await {
+                        Ok(_) => {
+                            let output = format!("✓ Sent input to agent '{}'", name);
+                            CliResponse::success(output, Some(json!({
+                                "instanceName": name,
+                                "input": text,
+                                "status": "sent"
+                            })))
+                        }
+                        Err(e) => CliResponse::error(format!("Failed to send input: {}", e)),
+                    }
+                } else {
+                    CliResponse::error(format!("Agent '{}' not found", name))
+                }
+            } else {
+                CliResponse::error("State not available (headless mode not yet implemented)".to_string())
+            }
         }
         AgentAction::Status { name } => {
-            CliResponse::error(format!("Status command not yet implemented. Agent: {}", name))
+            if let Some(state) = state {
+                let instances = state.instances.lock().await;
+                if let Some(instance) = instances.get(&name) {
+                    let output = format!(
+                        "Agent '{}': PID={}, Port={}, Status=running",
+                        name, instance.pid, instance.ws_port
+                    );
+                    CliResponse::success(output, Some(json!({
+                        "instanceName": instance.instance_name,
+                        "pid": instance.pid,
+                        "wsPort": instance.ws_port,
+                        "status": "running"
+                    })))
+                } else {
+                    CliResponse::error(format!("Agent '{}' not found", name))
+                }
+            } else {
+                CliResponse::error("State not available (headless mode not yet implemented)".to_string())
+            }
         }
     }
 }
@@ -88,24 +167,24 @@ async fn handle_message_action(
     match action {
         MessageAction::Send { to, message, priority } => {
             CliResponse::error(format!(
-                "Message send not yet implemented. To: {}, Message: {}, Priority: {}",
+                "Message send not yet implemented (requires bus integration). To: {}, Message: {}, Priority: {}",
                 to, message, priority
             ))
         }
         MessageAction::List { limit, r#type } => {
             CliResponse::error(format!(
-                "Message list not yet implemented. Limit: {}, Type: {:?}",
+                "Message list not yet implemented (requires bus integration). Limit: {}, Type: {:?}",
                 limit, r#type
             ))
         }
         MessageAction::Reply { id, reply } => {
             CliResponse::error(format!(
-                "Message reply not yet implemented. ID: {}, Reply: {}",
+                "Message reply not yet implemented (requires bus integration). ID: {}, Reply: {}",
                 id, reply
             ))
         }
         MessageAction::Agents => {
-            CliResponse::error("Message agents command not yet implemented".to_string())
+            CliResponse::error("Message agents command not yet implemented (requires bus integration)".to_string())
         }
     }
 }
@@ -113,10 +192,10 @@ async fn handle_message_action(
 async fn handle_status_action(action: StatusAction, _format: OutputFormat) -> CliResponse {
     match action {
         StatusAction::Bus => {
-            CliResponse::error("Bus status command not yet implemented".to_string())
+            CliResponse::error("Bus status command not yet implemented (requires bus integration)".to_string())
         }
         StatusAction::Agents => {
-            CliResponse::error("Agents status command not yet implemented".to_string())
+            CliResponse::error("Agents status command not yet implemented (requires bus integration)".to_string())
         }
     }
 }

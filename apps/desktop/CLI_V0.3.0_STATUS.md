@@ -1,7 +1,7 @@
-# AgentMux Desktop v0.3.0 - CLI Implementation Status
+# AgentMux Desktop v0.3.1 - CLI Implementation Status
 
 **Date:** 2025-10-13
-**Status:** Phase 1 Foundation Complete (Partial MVP)
+**Status:** Phase 1 Agent Management Complete
 
 ---
 
@@ -56,23 +56,27 @@ agentmux-desktop.exe agents list --json
 
 ## Not Yet Implemented ❌
 
-### Phase 1 Remaining Work
+### Phase 1 - Agent Management (v0.3.1) ✅ COMPLETE
 
 #### Agent Commands
-- ❌ `agents spawn` - Spawn Claude instance from CLI
-- ❌ `agents stop` - Stop instance
-- ❌ `agents input` - Send input to instance stdin
-- ❌ `agents status` - Get detailed instance status
+- ✅ `agents spawn` - Spawn Claude instance from CLI
+- ✅ `agents stop` - Stop instance
+- ✅ `agents input` - Send input to instance stdin
+- ✅ `agents status` - Get detailed instance status
 
-#### Message Bus Commands
-- ❌ `messages send` - Send message to agent
-- ❌ `messages list` - List recent messages
-- ❌ `messages reply` - Reply to message
-- ❌ `messages agents` - Get active agents on bus
+### Phase 2 - Message Bus Integration (v0.3.2) ⚠️ STUBBED
 
-#### Status Commands
-- ❌ `status bus` - Get message bus status
-- ❌ `status agents` - Get all agent statistics
+**Note:** Message bus commands are parsed but return "not yet implemented" errors. Full implementation requires architecture changes to avoid duplicate crate compilation issues.
+
+#### Message Bus Commands (Stubbed)
+- ⚠️ `messages send` - Parsed, returns error (requires bus integration)
+- ⚠️ `messages list` - Parsed, returns error (requires bus integration)
+- ⚠️ `messages reply` - Parsed, returns error (requires bus integration)
+- ⚠️ `messages agents` - Parsed, returns error (requires bus integration)
+
+#### Status Commands (Stubbed)
+- ⚠️ `status bus` - Parsed, returns error (requires bus integration)
+- ⚠️ `status agents` - Parsed, returns error (requires bus integration)
 
 #### Log Commands
 - ❌ `logs export` - Export debug logs to file
