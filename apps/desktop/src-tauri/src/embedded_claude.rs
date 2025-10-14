@@ -52,14 +52,24 @@ pub struct ClaudeInstance {
 }
 
 impl ClaudeInstance {
-    pub async fn spawn(instance_name: String, ws_port: u16) -> Result<Self, String> {
+    pub async fn spawn(instance_name: String, ws_port: u16, workspace_path: Option<String>) -> Result<Self, String> {
         println!("[embedded_claude] Spawning instance: {} on port {}", instance_name, ws_port);
+
+        if let Some(ref path) = workspace_path {
+            println!("[embedded_claude] {} - Workspace path: {}", instance_name, path);
+        }
 
         // Spawn Claude CLI with piped stdio (no window on Windows)
         let mut cmd = Command::new("claude");
         cmd.stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .stdin(Stdio::piped());
+
+        // Set working directory if workspace path provided
+        if let Some(path) = workspace_path {
+            cmd.current_dir(&path);
+            println!("[embedded_claude] {} - Set working directory to: {}", instance_name, path);
+        }
 
         // Hide console window on Windows
         #[cfg(target_os = "windows")]
@@ -113,14 +123,15 @@ impl ClaudeInstance {
         let (stdin_tx, stdin_rx) = mpsc::unbounded_channel::<String>();
         println!("[embedded_claude] {} - Created stdin channel", instance_name);
 
-        // Spawn WebSocket server
+        // Spawn WebSocket server with stdin channel
         let peer_map = Arc::new(Mutex::new(HashMap::new()));
         let peer_map_clone = Arc::clone(&peer_map);
         let ws_instance_name = instance_name.clone();
+        let stdin_tx_ws = stdin_tx.clone();
 
         println!("[embedded_claude] {} - Starting WebSocket server on port {}...", instance_name, ws_port);
         tokio::spawn(async move {
-            if let Err(e) = start_websocket_server(ws_port, peer_map_clone).await {
+            if let Err(e) = start_websocket_server(ws_port, peer_map_clone, stdin_tx_ws).await {
                 eprintln!("[{}] WebSocket server error: {}", ws_instance_name, e);
             } else {
                 println!("[{}] WebSocket server started successfully", ws_instance_name);
@@ -198,7 +209,7 @@ impl ClaudeInstance {
     }
 }
 
-async fn start_websocket_server(port: u16, peer_map: PeerMap) -> Result<(), String> {
+async fn start_websocket_server(port: u16, peer_map: PeerMap, stdin_tx: UnboundedSender<String>) -> Result<(), String> {
     let addr = format!("127.0.0.1:{}", port);
     let listener = TcpListener::bind(&addr).await
         .map_err(|e| format!("Failed to bind to {}: {}", addr, e))?;
@@ -207,13 +218,14 @@ async fn start_websocket_server(port: u16, peer_map: PeerMap) -> Result<(), Stri
 
     while let Ok((stream, addr)) = listener.accept().await {
         let peer_map_clone = Arc::clone(&peer_map);
-        tokio::spawn(handle_websocket_connection(peer_map_clone, stream, addr));
+        let stdin_tx_clone = stdin_tx.clone();
+        tokio::spawn(handle_websocket_connection(peer_map_clone, stream, addr, stdin_tx_clone));
     }
 
     Ok(())
 }
 
-async fn handle_websocket_connection(peer_map: PeerMap, raw_stream: TcpStream, addr: SocketAddr) {
+async fn handle_websocket_connection(peer_map: PeerMap, raw_stream: TcpStream, addr: SocketAddr, stdin_tx: UnboundedSender<String>) {
     println!("[WS:{}] Accepting WebSocket handshake...", addr);
 
     // Accept WebSocket connection
@@ -265,6 +277,10 @@ async fn handle_websocket_connection(peer_map: PeerMap, raw_stream: TcpStream, a
             Ok(Message::Text(text)) => {
                 incoming_count += 1;
                 println!("[WS:{}] ← Received text message #{}: {}", addr, incoming_count, text);
+                // Forward to Claude stdin
+                if let Err(e) = stdin_tx.send(text.to_string()) {
+                    eprintln!("[WS:{}] ✗ Failed to forward to stdin: {}", addr, e);
+                }
             }
             Ok(Message::Close(close_frame)) => {
                 println!("[WS:{}] Client requested close: {:?}", addr, close_frame);

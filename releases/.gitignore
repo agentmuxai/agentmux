@@ -1,0 +1,7 @@
+# Ignore all files in releases folder
+*
+
+# Except README files
+!README.md
+!*/
+!*/README.md
