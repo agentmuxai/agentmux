@@ -36,5 +36,11 @@ _temp/agentmux-bus/
 # Test outputs
 coverage/
 .nyc_output/
+test-results/
+playwright-report/
+
+# Backup files
+*.backup
+*.backup2
 
 # Release artifacts
