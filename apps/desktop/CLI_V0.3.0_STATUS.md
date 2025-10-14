@@ -64,15 +64,19 @@ agentmux-desktop.exe agents list --json
 - ✅ `agents input` - Send input to instance stdin
 - ✅ `agents status` - Get detailed instance status
 
-#### Message Bus Commands
-- ❌ `messages send` - Send message to agent
-- ❌ `messages list` - List recent messages
-- ❌ `messages reply` - Reply to message
-- ❌ `messages agents` - Get active agents on bus
+### Phase 2 - Message Bus Integration (v0.3.2) ⚠️ STUBBED
 
-#### Status Commands
-- ❌ `status bus` - Get message bus status
-- ❌ `status agents` - Get all agent statistics
+**Note:** Message bus commands are parsed but return "not yet implemented" errors. Full implementation requires architecture changes to avoid duplicate crate compilation issues.
+
+#### Message Bus Commands (Stubbed)
+- ⚠️ `messages send` - Parsed, returns error (requires bus integration)
+- ⚠️ `messages list` - Parsed, returns error (requires bus integration)
+- ⚠️ `messages reply` - Parsed, returns error (requires bus integration)
+- ⚠️ `messages agents` - Parsed, returns error (requires bus integration)
+
+#### Status Commands (Stubbed)
+- ⚠️ `status bus` - Parsed, returns error (requires bus integration)
+- ⚠️ `status agents` - Parsed, returns error (requires bus integration)
 
 #### Log Commands
 - ❌ `logs export` - Export debug logs to file

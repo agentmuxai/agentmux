@@ -1,5 +1,5 @@
 // CLI command handlers
-//  Due to time constraints in initial v0.3.0 release, implementing core functionality
+// Due to time constraints in initial v0.3.0 release, implementing core functionality
 // Full implementation will be completed in subsequent releases
 
 use super::output::{CliResponse, OutputFormat};
@@ -167,24 +167,24 @@ async fn handle_message_action(
     match action {
         MessageAction::Send { to, message, priority } => {
             CliResponse::error(format!(
-                "Message send not yet implemented. To: {}, Message: {}, Priority: {}",
+                "Message send not yet implemented (requires bus integration). To: {}, Message: {}, Priority: {}",
                 to, message, priority
             ))
         }
         MessageAction::List { limit, r#type } => {
             CliResponse::error(format!(
-                "Message list not yet implemented. Limit: {}, Type: {:?}",
+                "Message list not yet implemented (requires bus integration). Limit: {}, Type: {:?}",
                 limit, r#type
             ))
         }
         MessageAction::Reply { id, reply } => {
             CliResponse::error(format!(
-                "Message reply not yet implemented. ID: {}, Reply: {}",
+                "Message reply not yet implemented (requires bus integration). ID: {}, Reply: {}",
                 id, reply
             ))
         }
         MessageAction::Agents => {
-            CliResponse::error("Message agents command not yet implemented".to_string())
+            CliResponse::error("Message agents command not yet implemented (requires bus integration)".to_string())
         }
     }
 }
@@ -192,10 +192,10 @@ async fn handle_message_action(
 async fn handle_status_action(action: StatusAction, _format: OutputFormat) -> CliResponse {
     match action {
         StatusAction::Bus => {
-            CliResponse::error("Bus status command not yet implemented".to_string())
+            CliResponse::error("Bus status command not yet implemented (requires bus integration)".to_string())
         }
         StatusAction::Agents => {
-            CliResponse::error("Agents status command not yet implemented".to_string())
+            CliResponse::error("Agents status command not yet implemented (requires bus integration)".to_string())
         }
     }
 }
