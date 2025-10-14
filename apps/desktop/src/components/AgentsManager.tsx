@@ -33,10 +33,12 @@ const AgentsManager: Component = () => {
 
   const loadAgents = async () => {
     try {
-      const agentsList: Agent[] = await invoke('list_agents');
+      console.log('[AgentsManager] Loading Claude instances...');
+      const agentsList: Agent[] = await invoke('list_claude_instances');
+      console.log('[AgentsManager] Loaded agents:', agentsList);
       setAgents(agentsList);
     } catch (err: any) {
-      console.error('Failed to load agents:', err);
+      console.error('[AgentsManager] Failed to load agents:', err);
     }
   };
 
@@ -55,7 +57,10 @@ const AgentsManager: Component = () => {
   const spawnAgent = async () => {
     const instanceName = newAgentId().trim();
 
+    console.log('[AgentsManager] spawnAgent called with name:', instanceName);
+
     if (!instanceName) {
+      console.warn('[AgentsManager] Instance name is empty');
       setError('Instance name is required');
       return;
     }
@@ -64,26 +69,31 @@ const AgentsManager: Component = () => {
     setError(null);
 
     try {
+      console.log('[AgentsManager] Invoking spawn_embedded_claude...');
       const result: Agent = await invoke('spawn_embedded_claude', {
         instanceName
       });
 
-      console.log('Embedded Claude spawned:', result);
+      console.log('[AgentsManager] Embedded Claude spawned successfully:', result);
 
       // Add to agents list
       setAgents([...agents(), result]);
+      console.log('[AgentsManager] Updated agents list, new count:', agents().length + 1);
 
       // Select the new agent
       setSelectedAgent(instanceName);
+      console.log('[AgentsManager] Selected new agent:', instanceName);
 
       // Clear inputs
       setNewAgentId('');
       setNewAgentCommand('claude');
+      console.log('[AgentsManager] Cleared spawn form');
     } catch (err: any) {
+      console.error('[AgentsManager] Failed to spawn instance:', err);
       setError(err.toString());
-      console.error('Failed to spawn instance:', err);
     } finally {
       setIsSpawning(false);
+      console.log('[AgentsManager] Spawn process completed');
     }
   };
 
