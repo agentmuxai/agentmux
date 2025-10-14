@@ -57,8 +57,51 @@ const Dashboard: Component = () => {
   };
 
   onMount(async () => {
-    updateStatus();
-    intervalId = window.setInterval(updateStatus, 2000);
+    await updateStatus();
+
+    // Set up event listeners for reactive updates
+    const unlisteners: UnlistenFn[] = [];
+
+    // Listen for bus_started events
+    unlisteners.push(await listen('bus_started', async (event) => {
+      console.log('[Dashboard] Received bus_started event:', event.payload);
+      const payload = event.payload as {
+        host: string;
+        port: number;
+        max_agents: number;
+      };
+
+      // Update status immediately
+      setBusRunning(true);
+      setError(null);
+      console.log('[Dashboard] Bus started on', `${payload.host}:${payload.port}`);
+    }));
+
+    // Listen for bus_stopped events
+    unlisteners.push(await listen('bus_stopped', async (event) => {
+      console.log('[Dashboard] Received bus_stopped event:', event.payload);
+
+      // Update status immediately
+      setBusRunning(false);
+      setConnectedAgents(0);
+      setMessagesPerSec(0);
+      console.log('[Dashboard] Bus stopped');
+    }));
+
+    // Listen for CLI command execution events
+    unlisteners.push(await listen('cli_command_executed', (event) => {
+      const payload = event.payload as {
+        command_text: string;
+        output_text: string;
+        success: boolean;
+        duration_ms: number;
+      };
+      console.log('[Dashboard] CLI command executed:', payload.command_text,
+                  payload.success ? '✓' : '✗', `(${payload.duration_ms}ms)`);
+    }));
+
+    // Polling fallback for reconciliation (increased from 2s to 5s)
+    intervalId = window.setInterval(updateStatus, 5000);
 
     // Start command watcher for CLI integration (only if not already running)
     try {
@@ -71,8 +114,8 @@ const Dashboard: Component = () => {
       }
     }
 
-    // Listen for CLI commands
-    unlistenCommand = await listen('cli_command', async (event: any) => {
+    // Listen for CLI commands (legacy support)
+    unlisteners.push(await listen('cli_command', async (event: any) => {
       const command = event.payload;
       console.log('CLI command received:', command);
 
@@ -90,16 +133,13 @@ const Dashboard: Component = () => {
       } catch (err) {
         console.error('Error executing CLI command:', err);
       }
-    });
-  });
+    }));
 
-  onCleanup(() => {
-    if (intervalId) {
-      clearInterval(intervalId);
-    }
-    if (unlistenCommand) {
-      unlistenCommand();
-    }
+    // Cleanup all event listeners
+    onCleanup(() => {
+      unlisteners.forEach(fn => fn());
+      if (intervalId) clearInterval(intervalId);
+    });
   });
 
   return (
