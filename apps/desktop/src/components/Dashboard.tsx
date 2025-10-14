@@ -62,7 +62,7 @@ const Dashboard: Component = () => {
       if (!instanceName) return;
 
       setError(null);
-      await invoke('spawn_claude_instance', { instanceName });
+      await invoke('spawn_embedded_claude', { instanceName });
       console.log(`Spawned Claude instance: ${instanceName}`);
     } catch (err: any) {
       setError(err.toString());
@@ -74,12 +74,15 @@ const Dashboard: Component = () => {
     updateStatus();
     intervalId = window.setInterval(updateStatus, 2000);
 
-    // Start command watcher for CLI integration
+    // Start command watcher for CLI integration (only if not already running)
     try {
       await invoke('start_command_watcher');
       console.log('Command watcher started');
-    } catch (err) {
-      console.error('Failed to start command watcher:', err);
+    } catch (err: any) {
+      // Ignore "already running" errors
+      if (!err.toString().includes('already running')) {
+        console.error('Failed to start command watcher:', err);
+      }
     }
 
     // Listen for CLI commands
