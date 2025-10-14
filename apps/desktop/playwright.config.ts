@@ -40,8 +40,10 @@ export default defineConfig({
     video: 'retain-on-failure',
 
     // Connect to Tauri app via CDP
+    // Use browserURL instead of wsEndpoint for Chrome DevTools Protocol
+    // Chrome's --remote-debugging-port exposes browser info at /json/version
     connectOptions: {
-      wsEndpoint: 'ws://localhost:9222',
+      browserURL: 'http://localhost:9222',
     },
   },
 
