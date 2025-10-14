@@ -13,7 +13,7 @@ use agentmux_desktop::{cli, embedded_claude};
 use bus::{manager::BusConfig as BusManagerConfig, BusManager, ConnectedAgent};
 use std::path::PathBuf;
 use std::sync::Arc;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Emitter, State};
 use tokio::sync::Mutex;
 use watcher::{AgentMessage, CommandWatcher, FileWatcher};
 
@@ -47,6 +47,7 @@ impl From<BusConfig> for BusManagerConfig {
 async fn start_bus(
     state: State<'_, AppState>,
     config: BusConfig,
+    app_handle: AppHandle,
 ) -> Result<String, String> {
     let mut manager_guard = state.bus_manager.lock().await;
 
@@ -59,16 +60,32 @@ async fn start_bus(
 
     *manager_guard = Some(manager);
 
+    // Emit event for UI reactivity
+    let _ = app_handle.emit("bus_started", serde_json::json!({
+        "host": config.host,
+        "port": config.port,
+        "max_agents": config.max_agents
+    }));
+
     Ok(format!("Bus started on {}:{}", config.host, config.port))
 }
 
 #[tauri::command]
-async fn stop_bus(state: State<'_, AppState>) -> Result<String, String> {
+async fn stop_bus(
+    state: State<'_, AppState>,
+    app_handle: AppHandle,
+) -> Result<String, String> {
     let mut manager_guard = state.bus_manager.lock().await;
 
     if let Some(manager) = manager_guard.as_mut() {
         manager.stop().await?;
         *manager_guard = None;
+
+        // Emit event for UI reactivity
+        let _ = app_handle.emit("bus_stopped", serde_json::json!({
+            "reason": "user_request"
+        }));
+
         Ok("Bus stopped".to_string())
     } else {
         Err("Bus is not running".to_string())
@@ -216,6 +233,7 @@ async fn send_message(
     to: String,
     message: String,
     priority: Option<String>,
+    app_handle: AppHandle,
 ) -> Result<String, String> {
     // Get home directory
     let home = std::env::var("HOME")
@@ -251,9 +269,9 @@ async fn send_message(
             name: agent_id.clone(),
         },
         to: to.clone(),
-        payload: watcher::MessagePayload { text: message },
-        timestamp,
-        priority: priority.unwrap_or_else(|| "normal".to_string()),
+        payload: watcher::MessagePayload { text: message.clone() },
+        timestamp: timestamp.clone(),
+        priority: priority.clone().unwrap_or_else(|| "normal".to_string()),
     };
 
     // Write message to file
@@ -263,6 +281,14 @@ async fn send_message(
 
     std::fs::write(&file_path, json)
         .map_err(|e| format!("Failed to write message file: {}", e))?;
+
+    // Emit event for UI reactivity
+    let _ = app_handle.emit("message_sent", serde_json::json!({
+        "from_agent": agent_id.clone(),
+        "to_agent": to.clone(),
+        "message_text": message,
+        "timestamp": timestamp
+    }));
 
     Ok(format!(
         "Message sent: {} -> {} ({})",
@@ -465,6 +491,7 @@ async fn stop_command_watcher(state: State<'_, AppState>) -> Result<String, Stri
 async fn spawn_embedded_claude(
     instance_name: String,
     state: State<'_, AppState>,
+    app_handle: AppHandle,
 ) -> Result<serde_json::Value, String> {
     // Find available WebSocket port
     let ws_port = embedded_claude::find_available_port(9000, 9999)?;
@@ -480,7 +507,15 @@ async fn spawn_embedded_claude(
     });
 
     // Store instance in state
-    state.claude_instances.lock().await.insert(instance_name, instance);
+    state.claude_instances.lock().await.insert(instance_name.clone(), instance);
+
+    // Emit event for UI reactivity
+    let _ = app_handle.emit("agent_spawned", serde_json::json!({
+        "instance_name": instance_name,
+        "pid": result["pid"],
+        "ws_port": ws_port,
+        "status": "running"
+    }));
 
     Ok(result)
 }
@@ -521,7 +556,11 @@ async fn list_claude_instances(
 // ============================================================================
 
 #[tauri::command]
-async fn export_logs(output_path: Option<String>, format: String) -> Result<String, String> {
+async fn export_logs(
+    output_path: Option<String>,
+    format: String,
+    app_handle: AppHandle,
+) -> Result<String, String> {
     use agentmux_desktop::services::logs::{export_logs as export_logs_service, LogExportRequest, LogFormat};
     use std::path::PathBuf;
 
@@ -533,6 +572,14 @@ async fn export_logs(output_path: Option<String>, format: String) -> Result<Stri
     let result = export_logs_service(request);
 
     if result.success {
+        // Emit event for UI reactivity
+        let _ = app_handle.emit("logs_exported", serde_json::json!({
+            "output_path": result.output_path.clone(),
+            "format": format,
+            "entries_count": result.entries_count,
+            "success": true
+        }));
+
         Ok(serde_json::json!({
             "output_path": result.output_path,
             "entries_count": result.entries_count,
@@ -554,10 +601,14 @@ async fn execute_cli_command(
     command_str: String,
     json_output: bool,
     state: State<'_, embedded_claude::ClaudeInstancesState>,
+    app_handle: AppHandle,
 ) -> Result<String, String> {
     use clap::Parser;
     use cli::parser::{Cli, Command};
     use cli::output::OutputFormat;
+    use std::time::Instant;
+
+    let start = Instant::now();
 
     // Parse command string into CLI args
     let args: Vec<String> = command_str.split_whitespace()
@@ -586,7 +637,19 @@ async fn execute_cli_command(
         Some(state),
     ).await;
 
-    Ok(result.format(&format))
+    let duration_ms = start.elapsed().as_millis() as u64;
+    let output_text = result.format(&format);
+    let success = result.success;
+
+    // Emit event for UI reactivity
+    let _ = app_handle.emit("cli_command_executed", serde_json::json!({
+        "command_text": command_str,
+        "output_text": output_text.clone(),
+        "success": success,
+        "duration_ms": duration_ms
+    }));
+
+    Ok(output_text)
 }
 
 #[tokio::main]
