@@ -48,9 +48,9 @@ const App: Component = () => {
       </main>
 
       <footer class="app-footer">
-        <span>AgentMux v0.2.5</span>
+        <span>AgentMux v0.2.6</span>
         <span>|</span>
-        <span>Built: 2025-10-13 1:00 AM PT</span>
+        <span>Built: 2025-10-13 4:51 AM PT</span>
         <span>|</span>
         <span>Status: Ready</span>
       </footer>

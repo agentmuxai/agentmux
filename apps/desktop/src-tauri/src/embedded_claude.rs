@@ -53,6 +53,8 @@ pub struct ClaudeInstance {
 
 impl ClaudeInstance {
     pub async fn spawn(instance_name: String, ws_port: u16) -> Result<Self, String> {
+        println!("[embedded_claude] Spawning instance: {} on port {}", instance_name, ws_port);
+
         // Spawn Claude CLI with piped stdio (no window on Windows)
         let mut cmd = Command::new("claude");
         cmd.stdout(Stdio::piped())
@@ -65,12 +67,24 @@ impl ClaudeInstance {
             use std::os::windows::process::CommandExt;
             const CREATE_NO_WINDOW: u32 = 0x08000000;
             cmd.creation_flags(CREATE_NO_WINDOW);
+            println!("[embedded_claude] {} - Applied CREATE_NO_WINDOW flag", instance_name);
         }
 
+        println!("[embedded_claude] {} - Executing claude command...", instance_name);
         let mut child = cmd.spawn()
-            .map_err(|e| format!("Failed to spawn Claude: {}", e))?;
+            .map_err(|e| {
+                let err_msg = format!("Failed to spawn Claude: {}", e);
+                eprintln!("[embedded_claude] {} - ERROR: {}", instance_name, err_msg);
+                err_msg
+            })?;
 
-        let pid = child.id().ok_or("Failed to get PID")?;
+        let pid = child.id().ok_or_else(|| {
+            let err_msg = "Failed to get PID";
+            eprintln!("[embedded_claude] {} - ERROR: {}", instance_name, err_msg);
+            err_msg.to_string()
+        })?;
+
+        println!("[embedded_claude] {} - Process spawned with PID: {}", instance_name, pid);
 
         // Take ownership of stdio streams
         let stdout = child.stdout.take().ok_or("stdout not piped")?;
