@@ -1,7 +1,7 @@
-# AgentMux Desktop v0.3.0 - CLI Implementation Status
+# AgentMux Desktop v0.3.1 - CLI Implementation Status
 
 **Date:** 2025-10-13
-**Status:** Phase 1 Foundation Complete (Partial MVP)
+**Status:** Phase 1 Agent Management Complete
 
 ---
 
@@ -56,13 +56,13 @@ agentmux-desktop.exe agents list --json
 
 ## Not Yet Implemented ❌
 
-### Phase 1 Remaining Work
+### Phase 1 - Agent Management (v0.3.1) ✅ COMPLETE
 
 #### Agent Commands
-- ❌ `agents spawn` - Spawn Claude instance from CLI
-- ❌ `agents stop` - Stop instance
-- ❌ `agents input` - Send input to instance stdin
-- ❌ `agents status` - Get detailed instance status
+- ✅ `agents spawn` - Spawn Claude instance from CLI
+- ✅ `agents stop` - Stop instance
+- ✅ `agents input` - Send input to instance stdin
+- ✅ `agents status` - Get detailed instance status
 
 #### Message Bus Commands
 - ❌ `messages send` - Send message to agent
