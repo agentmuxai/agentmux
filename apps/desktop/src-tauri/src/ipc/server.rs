@@ -239,6 +239,28 @@ async fn execute_ipc_command(command: IpcCommand, app_handle: AppHandle) -> IpcR
             };
             Command::Logs { action }
         }
+        "internal" => {
+            // Handle internal commands (focus, etc.)
+            match command.action.as_str() {
+                "focus" => {
+                    // Window focusing is already handled in handle_ipc_request (lines 84-88)
+                    // Just return success
+                    return IpcResponse {
+                        success: true,
+                        output: "Window focused successfully".to_string(),
+                        data: None,
+                        error: None,
+                        duration_ms: start.elapsed().as_millis() as u64,
+                    };
+                }
+                _ => {
+                    return IpcResponse::error(
+                        format!("Unknown internal action: {}", command.action),
+                        start.elapsed().as_millis() as u64,
+                    );
+                }
+            }
+        }
         _ => {
             return IpcResponse::error(
                 format!("Unknown command type: {}", command.command_type),
