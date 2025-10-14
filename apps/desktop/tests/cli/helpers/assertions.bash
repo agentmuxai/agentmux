@@ -1,5 +1,31 @@
 # Custom assertions for BATS
 
+# Standard BATS assertions (bats-assert compatible)
+assert_success() {
+    if [ "$status" -ne 0 ]; then
+        echo "Expected success (exit code 0), got: $status" >&2
+        echo "Output: $output" >&2
+        return 1
+    fi
+}
+
+assert_failure() {
+    if [ "$status" -eq 0 ]; then
+        echo "Expected failure (non-zero exit code), got: $status" >&2
+        echo "Output: $output" >&2
+        return 1
+    fi
+}
+
+assert_output() {
+    local expected="$1"
+    if [ "$output" != "$expected" ]; then
+        echo "Expected output: $expected" >&2
+        echo "Actual output: $output" >&2
+        return 1
+    fi
+}
+
 assert_file_exists() {
     if [ ! -f "$1" ]; then
         echo "Expected file to exist: $1" >&2
