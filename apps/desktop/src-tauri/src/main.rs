@@ -8,7 +8,7 @@ mod commands;
 #[cfg(test)]
 mod tests;
 
-use agentmux_desktop::{cli, embedded_claude};
+use agentmux_desktop::{cli, embedded_claude, ipc};
 
 use bus::{manager::BusConfig as BusManagerConfig, BusManager, ConnectedAgent};
 use std::path::PathBuf;
@@ -652,6 +652,100 @@ async fn execute_cli_command(
     Ok(output_text)
 }
 
+/// Convert CLI command to IPC command
+fn cli_command_to_ipc(command: &cli::parser::Command) -> ipc::IpcCommand {
+    use cli::parser::{Command, AgentAction, MessageAction, StatusAction, LogAction};
+    use std::collections::HashMap;
+
+    let (command_type, action, args) = match command {
+        Command::Agents { action } => {
+            let (act, map) = match action {
+                AgentAction::List => ("list".to_string(), HashMap::new()),
+                AgentAction::Spawn { name, command, port } => {
+                    let mut map = HashMap::new();
+                    map.insert("name".to_string(), serde_json::Value::String(name.clone()));
+                    map.insert("command".to_string(), serde_json::Value::String(command.clone()));
+                    if let Some(p) = port {
+                        map.insert("port".to_string(), serde_json::Value::Number((*p).into()));
+                    }
+                    ("spawn".to_string(), map)
+                }
+                AgentAction::Stop { name } => {
+                    let mut map = HashMap::new();
+                    map.insert("name".to_string(), serde_json::Value::String(name.clone()));
+                    ("stop".to_string(), map)
+                }
+                AgentAction::Input { name, text } => {
+                    let mut map = HashMap::new();
+                    map.insert("name".to_string(), serde_json::Value::String(name.clone()));
+                    map.insert("text".to_string(), serde_json::Value::String(text.clone()));
+                    ("input".to_string(), map)
+                }
+                AgentAction::Status { name } => {
+                    let mut map = HashMap::new();
+                    map.insert("name".to_string(), serde_json::Value::String(name.clone()));
+                    ("status".to_string(), map)
+                }
+            };
+            ("agents".to_string(), act, map)
+        }
+        Command::Messages { action } => {
+            let (act, map) = match action {
+                MessageAction::Send { to, message, priority } => {
+                    let mut map = HashMap::new();
+                    map.insert("to".to_string(), serde_json::Value::String(to.clone()));
+                    map.insert("message".to_string(), serde_json::Value::String(message.clone()));
+                    map.insert("priority".to_string(), serde_json::Value::String(priority.clone()));
+                    ("send".to_string(), map)
+                }
+                MessageAction::List { limit, r#type } => {
+                    let mut map = HashMap::new();
+                    map.insert("limit".to_string(), serde_json::Value::Number((*limit as u64).into()));
+                    if let Some(t) = r#type {
+                        map.insert("type".to_string(), serde_json::Value::String(t.clone()));
+                    }
+                    ("list".to_string(), map)
+                }
+                MessageAction::Reply { id, reply } => {
+                    let mut map = HashMap::new();
+                    map.insert("id".to_string(), serde_json::Value::String(id.clone()));
+                    map.insert("reply".to_string(), serde_json::Value::String(reply.clone()));
+                    ("reply".to_string(), map)
+                }
+                MessageAction::Agents => ("agents".to_string(), HashMap::new()),
+            };
+            ("messages".to_string(), act, map)
+        }
+        Command::Status { action } => {
+            let (act, map) = match action {
+                StatusAction::Bus => ("bus".to_string(), HashMap::new()),
+                StatusAction::Agents => ("agents".to_string(), HashMap::new()),
+            };
+            ("status".to_string(), act, map)
+        }
+        Command::Logs { action } => {
+            let (act, map) = match action {
+                LogAction::Export { output, format } => {
+                    let mut map = HashMap::new();
+                    if let Some(o) = output {
+                        map.insert("output".to_string(), serde_json::Value::String(o.clone()));
+                    }
+                    map.insert("format".to_string(), serde_json::Value::String(format.clone()));
+                    ("export".to_string(), map)
+                }
+            };
+            ("logs".to_string(), act, map)
+        }
+    };
+
+    ipc::IpcCommand {
+        command_type,
+        action,
+        args,
+        caller_pid: Some(std::process::id()),
+    }
+}
+
 #[tokio::main]
 async fn main() {
     use clap::Parser;
@@ -667,6 +761,37 @@ async fn main() {
     if cli.verbose {
         println!("[DEBUG] Verbose logging enabled");
         std::env::set_var("RUST_LOG", "debug");
+    }
+
+    // Check for existing instance when CLI command is provided
+    if let Some(ref command) = cli.command {
+        // Try to read lock file
+        if let Ok(lock) = ipc::read_lock_file() {
+            // Check if lock is stale
+            if !ipc::is_lock_stale(&lock) {
+                println!("[IPC] Found running instance (PID: {}, port: {})", lock.pid, lock.ipc_port);
+
+                // Convert CLI command to IPC command
+                let ipc_command = cli_command_to_ipc(command);
+
+                // Send command to existing instance
+                match ipc::send_ipc_command(ipc_command) {
+                    Ok(response) => {
+                        println!("{}", response.output);
+                        std::process::exit(if response.success { 0 } else { 1 });
+                    }
+                    Err(e) => {
+                        eprintln!("Failed to communicate with running instance: {}", e);
+                        std::process::exit(1);
+                    }
+                }
+            } else {
+                // Stale lock, remove it
+                println!("[IPC] Found stale lock file, removing...");
+                let _ = ipc::remove_lock_file();
+            }
+        }
+        // No lock file or stale lock - continue to start new instance
     }
 
     let claude_instances_arc = Arc::new(Mutex::new(std::collections::HashMap::new()));
@@ -710,6 +835,17 @@ async fn main() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
+        .setup(|app| {
+            // Start IPC server for single-instance communication
+            if let Err(e) = ipc::start_ipc_server(app.handle().clone()) {
+                eprintln!("[IPC] Failed to start IPC server: {}", e);
+            }
+
+            // Note: Lock file cleanup will happen on process exit via Drop trait
+            // or can be handled by signal handlers in production
+
+            Ok(())
+        })
         .manage(app_state)
         .manage(cli_state)
         .invoke_handler(tauri::generate_handler![

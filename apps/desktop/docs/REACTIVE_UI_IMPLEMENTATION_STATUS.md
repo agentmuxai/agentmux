@@ -131,19 +131,41 @@ agentmux --help
 
 ---
 
-## Phase 4: Single-Instance IPC ⏳ NOT STARTED
+## Phase 4: Single-Instance IPC ✅ COMPLETED
 
 ### Requirements (from SINGLE_INSTANCE_IPC.md)
-1. Add `tiny_http` dependency
-2. Implement lock file management (`~/.agentmux/desktop.lock`)
-3. Implement stale lock detection
-4. Add IPC HTTP server in main.rs setup()
-5. Implement instance detection on CLI startup
-6. Implement command forwarding via HTTP POST
-7. Add window focus/show on IPC request
-8. Handle timeouts and errors
+1. ✅ Add `tiny_http` dependency
+2. ✅ Implement lock file management (`~/.agentmux/desktop.lock`)
+3. ✅ Implement stale lock detection
+4. ✅ Add IPC HTTP server in main.rs setup()
+5. ✅ Implement instance detection on CLI startup
+6. ✅ Implement command forwarding via HTTP POST
+7. ✅ Add window focus/show on IPC request
+8. ✅ Handle timeouts and errors
 
-**Status:** ⏳ Not started
+**Implementation Details:**
+- Created `ipc` module with submodules: `lock`, `server`, `client`, `protocol`
+- Lock file stored at `~/.agentmux/desktop.lock` (Unix) or `%LOCALAPPDATA%\agentmux\desktop.lock` (Windows)
+- Lock file contains: PID, IPC port, started timestamp, version
+- IPC server runs on random port (auto-assigned)
+- CLI checks for existing instance on startup
+- Commands forwarded via HTTP POST to `http://127.0.0.1:<port>/command`
+- Window focused and brought to front on IPC request
+- 30-second timeout for IPC requests
+- Stale lock detection via process check (platform-specific)
+
+**Example Usage:**
+```bash
+# Start GUI instance (creates lock file, starts IPC server)
+agentmux
+
+# From another terminal, send command to running instance
+agentmux agents spawn Agent2
+# Output: ✓ Agent spawned: Agent2 (PID: 5678)
+# GUI window focuses and updates instantly
+```
+
+**Status:** ✅ Completed
 
 ---
 
