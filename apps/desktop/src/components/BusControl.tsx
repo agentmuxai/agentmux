@@ -1,7 +1,7 @@
 import { Component, createSignal } from 'solid-js';
 
 const BusControl: Component = () => {
-  const [host, setHost] = createSignal('localhost');
+  const [host, setHost] = createSignal('127.0.0.1');
   const [port, setPort] = createSignal('8765');
   const [maxAgents, setMaxAgents] = createSignal('50');
 

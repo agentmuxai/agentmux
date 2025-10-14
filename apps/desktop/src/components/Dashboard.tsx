@@ -1,5 +1,6 @@
 import { Component, createSignal, onMount, onCleanup } from 'solid-js';
 import { invoke } from '@tauri-apps/api/core';
+import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 
 const Dashboard: Component = () => {
   const [busRunning, setBusRunning] = createSignal(false);
@@ -10,6 +11,7 @@ const Dashboard: Component = () => {
 
   // Poll bus status every 2 seconds
   let intervalId: number;
+  let unlistenCommand: UnlistenFn | undefined;
 
   const updateStatus = async () => {
     try {
@@ -29,7 +31,7 @@ const Dashboard: Component = () => {
       setError(null);
       const result = await invoke<string>('start_bus', {
         config: {
-          host: 'localhost',
+          host: '127.0.0.1',
           port: 8765,
           max_agents: 50
         }
@@ -54,14 +56,49 @@ const Dashboard: Component = () => {
     }
   };
 
-  onMount(() => {
+  onMount(async () => {
     updateStatus();
     intervalId = window.setInterval(updateStatus, 2000);
+
+    // Start command watcher for CLI integration (only if not already running)
+    try {
+      await invoke('start_command_watcher');
+      console.log('Command watcher started');
+    } catch (err: any) {
+      // Ignore "already running" errors
+      if (!err.toString().includes('already running')) {
+        console.error('Failed to start command watcher:', err);
+      }
+    }
+
+    // Listen for CLI commands
+    unlistenCommand = await listen('cli_command', async (event: any) => {
+      const command = event.payload;
+      console.log('CLI command received:', command);
+
+      try {
+        switch (command.command) {
+          case 'start_bus':
+            await handleStartBus();
+            break;
+          case 'stop_bus':
+            await handleStopBus();
+            break;
+          default:
+            console.warn('Unknown CLI command:', command.command);
+        }
+      } catch (err) {
+        console.error('Error executing CLI command:', err);
+      }
+    });
   });
 
   onCleanup(() => {
     if (intervalId) {
       clearInterval(intervalId);
+    }
+    if (unlistenCommand) {
+      unlistenCommand();
     }
   });
 
@@ -112,6 +149,9 @@ const Dashboard: Component = () => {
           {busRunning()
             ? 'Bus is running. Agents can connect at ws://localhost:8765/ws'
             : 'Start the bus to begin monitoring agents.'}
+        </p>
+        <p style={{ color: '#666', 'font-size': '0.9rem', 'margin-top': '1rem' }}>
+          💡 Tip: Go to the Agents tab to spawn reactive Claude instances
         </p>
       </div>
     </div>

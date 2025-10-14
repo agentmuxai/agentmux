@@ -36,3 +36,6 @@ _temp/agentmux-bus/
 # Test outputs
 coverage/
 .nyc_output/
+
+# Release artifacts
+releases/
