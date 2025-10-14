@@ -73,7 +73,7 @@ async fn handle_agent_action(
                 };
 
                 // Spawn the instance
-                match crate::embedded_claude::ClaudeInstance::spawn(name.clone(), ws_port).await {
+                match crate::embedded_claude::ClaudeInstance::spawn(name.clone(), ws_port, None).await {
                     Ok(instance) => {
                         let result = json!({
                             "instanceName": instance.instance_name,
