@@ -54,7 +54,21 @@ pub fn write_lock_file(lock: LockFile) -> Result<(), String> {
         .map_err(|e| format!("Failed to serialize lock file: {}", e))?;
 
     fs::write(&path, contents)
-        .map_err(|e| format!("Failed to write lock file: {}", e))
+        .map_err(|e| format!("Failed to write lock file: {}", e))?;
+
+    // Set file permissions to owner-only on Unix systems
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = fs::metadata(&path)
+            .map_err(|e| format!("Failed to read lock file metadata: {}", e))?
+            .permissions();
+        perms.set_mode(0o600); // Owner read/write only
+        fs::set_permissions(&path, perms)
+            .map_err(|e| format!("Failed to set lock file permissions: {}", e))?;
+    }
+
+    Ok(())
 }
 
 /// Remove the lock file
