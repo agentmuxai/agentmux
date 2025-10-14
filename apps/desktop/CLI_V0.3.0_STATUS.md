@@ -79,7 +79,7 @@ agentmux-desktop.exe agents list --json
 - ⚠️ `status agents` - Parsed, returns error (requires bus integration)
 
 #### Log Commands
-- ❌ `logs export` - Export debug logs to file
+- ✅ `logs export` - Export debug logs to file (text and JSON formats, auto-detects log locations)
 
 #### Infrastructure
 - ❌ Headless mode execution (requires refactoring Tauri app lifecycle)
@@ -196,11 +196,11 @@ fi
 - Implement all `messages` commands
 - Real-time message monitoring in CLI
 
-### v0.3.3 - Advanced Features
-- `status` commands with detailed metrics
-- `logs export` with filtering
-- Tab completion support
-- Command history
+### v0.3.3 - Advanced Features ⚠️ IN PROGRESS
+- ✅ `logs export` - Export logs to text/JSON files with automatic log detection
+- ❌ `status` commands with detailed metrics (deferred to v0.3.4)
+- ❌ Tab completion support (deferred to v0.3.4)
+- ❌ Command history (deferred to v0.3.4)
 
 ### v0.3.4 - In-App Console
 - CommandConsole SolidJS component
