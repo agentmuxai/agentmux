@@ -763,18 +763,16 @@ async fn main() {
         std::env::set_var("RUST_LOG", "debug");
     }
 
-    // Check for existing instance when CLI command is provided
-    if let Some(ref command) = cli.command {
-        // Try to read lock file
-        if let Ok(lock) = ipc::read_lock_file() {
-            // Check if lock is stale
-            if !ipc::is_lock_stale(&lock) {
-                println!("[IPC] Found running instance (PID: {}, port: {})", lock.pid, lock.ipc_port);
+    // Check for existing instance BEFORE processing CLI command or launching GUI
+    if let Ok(lock) = ipc::read_lock_file() {
+        if !ipc::is_lock_stale(&lock) {
+            // Valid lock file exists - another instance is running
+            println!("[IPC] Found running instance (PID: {}, port: {})", lock.pid, lock.ipc_port);
 
-                // Convert CLI command to IPC command
+            if let Some(ref command) = cli.command {
+                // CLI command provided - forward to existing instance
                 let ipc_command = cli_command_to_ipc(command);
 
-                // Send command to existing instance
                 match ipc::send_ipc_command(ipc_command) {
                     Ok(response) => {
                         println!("{}", response.output);
@@ -786,13 +784,35 @@ async fn main() {
                     }
                 }
             } else {
-                // Stale lock, remove it
-                println!("[IPC] Found stale lock file, removing...");
-                let _ = ipc::remove_lock_file();
+                // No CLI command - GUI launch attempt, focus existing window and exit
+                println!("[IPC] GUI instance already running. Focusing existing window...");
+
+                // Send a focus command via IPC
+                let focus_command = ipc::IpcCommand {
+                    command_type: "internal".to_string(),
+                    action: "focus".to_string(),
+                    args: std::collections::HashMap::new(),
+                    caller_pid: Some(std::process::id()),
+                };
+
+                match ipc::send_ipc_command(focus_command) {
+                    Ok(_) => {
+                        println!("[IPC] Successfully focused existing window");
+                        std::process::exit(0);
+                    }
+                    Err(e) => {
+                        eprintln!("[IPC] Failed to focus existing window: {}", e);
+                        std::process::exit(1);
+                    }
+                }
             }
+        } else {
+            // Stale lock, remove it
+            println!("[IPC] Found stale lock file, removing...");
+            let _ = ipc::remove_lock_file();
         }
-        // No lock file or stale lock - continue to start new instance
     }
+    // No lock file or stale lock - continue to start new instance
 
     let claude_instances_arc = Arc::new(Mutex::new(std::collections::HashMap::new()));
 
