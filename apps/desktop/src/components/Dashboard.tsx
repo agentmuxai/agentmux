@@ -56,20 +56,6 @@ const Dashboard: Component = () => {
     }
   };
 
-  const handleSpawnClaude = async () => {
-    try {
-      const instanceName = prompt('Enter instance name (e.g., Alice, Bob):');
-      if (!instanceName) return;
-
-      setError(null);
-      await invoke('spawn_embedded_claude', { instanceName });
-      console.log(`Spawned Claude instance: ${instanceName}`);
-    } catch (err: any) {
-      setError(err.toString());
-      console.error('Failed to spawn Claude instance:', err);
-    }
-  };
-
   onMount(async () => {
     updateStatus();
     intervalId = window.setInterval(updateStatus, 2000);
@@ -164,22 +150,9 @@ const Dashboard: Component = () => {
             ? 'Bus is running. Agents can connect at ws://localhost:8765/ws'
             : 'Start the bus to begin monitoring agents.'}
         </p>
-      </div>
-
-      <div class="card">
-        <h2>🧪 Reactive Claude Demo</h2>
-        <p style={{ color: '#999', 'margin-bottom': '1rem' }}>
-          Launch wrapped Claude instances that can message each other reactively.
+        <p style={{ color: '#666', 'font-size': '0.9rem', 'margin-top': '1rem' }}>
+          💡 Tip: Go to the Agents tab to spawn reactive Claude instances
         </p>
-        <div style={{ display: 'flex', gap: '1rem', 'flex-wrap': 'wrap' }}>
-          <button class="primary" onClick={handleSpawnClaude}>
-            🚀 Spawn Claude Instance
-          </button>
-        </div>
-        <div style={{ 'margin-top': '1rem', color: '#666', 'font-size': '0.85rem' }}>
-          <div>Each instance can send messages to other instances using MCP tools.</div>
-          <div>Messages are delivered reactively without human intervention.</div>
-        </div>
       </div>
     </div>
   );
