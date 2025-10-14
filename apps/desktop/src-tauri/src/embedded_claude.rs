@@ -87,58 +87,92 @@ impl ClaudeInstance {
         println!("[embedded_claude] {} - Process spawned with PID: {}", instance_name, pid);
 
         // Take ownership of stdio streams
-        let stdout = child.stdout.take().ok_or("stdout not piped")?;
-        let stderr = child.stderr.take().ok_or("stderr not piped")?;
-        let stdin = child.stdin.take().ok_or("stdin not piped")?;
+        println!("[embedded_claude] {} - Taking ownership of stdio streams...", instance_name);
+        let stdout = child.stdout.take().ok_or_else(|| {
+            let err = "stdout not piped";
+            eprintln!("[embedded_claude] {} - ERROR: {}", instance_name, err);
+            err.to_string()
+        })?;
+        println!("[embedded_claude] {} - stdout captured", instance_name);
+
+        let stderr = child.stderr.take().ok_or_else(|| {
+            let err = "stderr not piped";
+            eprintln!("[embedded_claude] {} - ERROR: {}", instance_name, err);
+            err.to_string()
+        })?;
+        println!("[embedded_claude] {} - stderr captured", instance_name);
+
+        let stdin = child.stdin.take().ok_or_else(|| {
+            let err = "stdin not piped";
+            eprintln!("[embedded_claude] {} - ERROR: {}", instance_name, err);
+            err.to_string()
+        })?;
+        println!("[embedded_claude] {} - stdin captured", instance_name);
 
         // Create channel for stdin
         let (stdin_tx, stdin_rx) = mpsc::unbounded_channel::<String>();
+        println!("[embedded_claude] {} - Created stdin channel", instance_name);
 
         // Spawn WebSocket server
         let peer_map = Arc::new(Mutex::new(HashMap::new()));
         let peer_map_clone = Arc::clone(&peer_map);
         let ws_instance_name = instance_name.clone();
 
+        println!("[embedded_claude] {} - Starting WebSocket server on port {}...", instance_name, ws_port);
         tokio::spawn(async move {
             if let Err(e) = start_websocket_server(ws_port, peer_map_clone).await {
                 eprintln!("[{}] WebSocket server error: {}", ws_instance_name, e);
+            } else {
+                println!("[{}] WebSocket server started successfully", ws_instance_name);
             }
         });
 
         // Stream stdout to WebSocket
         let instance_name_clone = instance_name.clone();
         let peer_map_clone = Arc::clone(&peer_map);
+        println!("[embedded_claude] {} - Spawning stdout stream task...", instance_name);
         tokio::spawn(async move {
+            println!("[embedded_claude] {} - stdout stream task started", instance_name_clone);
             stream_output_to_websocket(
                 stdout,
                 peer_map_clone,
                 instance_name_clone.clone(),
                 "stdout"
             ).await;
+            println!("[embedded_claude] {} - stdout stream task ended", instance_name_clone);
         });
 
         // Stream stderr to WebSocket
         let instance_name_clone = instance_name.clone();
         let peer_map_clone = Arc::clone(&peer_map);
+        println!("[embedded_claude] {} - Spawning stderr stream task...", instance_name);
         tokio::spawn(async move {
+            println!("[embedded_claude] {} - stderr stream task started", instance_name_clone);
             stream_output_to_websocket(
                 stderr,
                 peer_map_clone,
-                instance_name_clone,
+                instance_name_clone.clone(),
                 "stderr"
             ).await;
+            println!("[embedded_claude] {} - stderr stream task ended", instance_name_clone);
         });
 
         // Handle stdin from channel
         let instance_name_clone = instance_name.clone();
+        println!("[embedded_claude] {} - Spawning stdin handler task...", instance_name);
         tokio::spawn(async move {
-            handle_stdin(stdin, stdin_rx, instance_name_clone).await;
+            println!("[embedded_claude] {} - stdin handler task started", instance_name_clone);
+            handle_stdin(stdin, stdin_rx, instance_name_clone.clone()).await;
+            println!("[embedded_claude] {} - stdin handler task ended", instance_name_clone);
         });
 
         // Wait for process to exit
         let instance_name_clone = instance_name.clone();
+        println!("[embedded_claude] {} - Spawning process monitor task...", instance_name);
         tokio::spawn(async move {
-            wait_for_process(child, instance_name_clone).await;
+            println!("[embedded_claude] {} - process monitor task started", instance_name_clone);
+            wait_for_process(child, instance_name_clone.clone()).await;
+            println!("[embedded_claude] {} - process monitor task ended", instance_name_clone);
         });
 
         // Watch for message files
