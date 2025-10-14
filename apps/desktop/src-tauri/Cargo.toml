@@ -9,6 +9,10 @@ edition = "2021"
 name = "agentmux_desktop"
 path = "src/lib.rs"
 
+[[bin]]
+name = "agentmux"
+path = "src/main.rs"
+
 [build-dependencies]
 tauri-build = { version = "2.0", features = [] }
 
