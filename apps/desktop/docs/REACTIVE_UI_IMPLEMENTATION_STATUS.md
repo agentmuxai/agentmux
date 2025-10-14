@@ -34,85 +34,54 @@
 
 ---
 
-## Phase 2: UI Event Listeners ⏳ IN PROGRESS
+## Phase 2: UI Event Listeners ✅ COMPLETED
 
-### Components to Update
+### Components Updated
 
-#### 1. AgentsManager.tsx (High Priority)
-**Events to listen for:**
-- `agent_spawned` - Add new agent to list
-- (future) `agent_terminated` - Remove agent from list
+#### 1. AgentsManager.tsx ✅ COMPLETED
+**Events implemented:**
+- `agent_spawned` - Adds new agent to list instantly
 
-**Implementation:**
-```typescript
-import { listen, UnlistenFn } from '@tauri-apps/api/event';
+**Key changes:**
+- Added event listener in onMount
+- Duplicate prevention check
+- Polling fallback reduced to 5s
+- Proper cleanup with unlisteners array
 
-onMount(async () => {
-    const unlisten: UnlistenFn[] = [];
+**Commit:** Included in initial Phase 2 work
 
-    // Initial load
-    await loadAgents();
+#### 2. Dashboard.tsx ✅ COMPLETED
+**Events implemented:**
+- `bus_started` - Updates bus status instantly
+- `bus_stopped` - Resets bus state and metrics
+- `cli_command_executed` - Logs command execution feedback
 
-    // Listen for agent_spawned
-    unlisten.push(await listen('agent_spawned', (event) => {
-        const payload = event.payload as {
-            instance_name: string;
-            pid: number;
-            ws_port: number;
-            status: string;
-        };
+**Key changes:**
+- Three event listeners added
+- Immediate state updates on events
+- Polling fallback reduced to 5s
+- Console logging for debugging
 
-        setAgents(prev => [...prev, {
-            instanceName: payload.instance_name,
-            pid: payload.pid,
-            wsPort: payload.ws_port,
-            status: payload.status
-        }]);
-    }));
+**Commit:** Included in initial Phase 2 work
 
-    // Polling fallback (every 5s)
-    const interval = setInterval(async () => {
-        const list = await invoke('list_claude_instances');
-        if (list.length !== agents().length) {
-            setAgents(list);
-        }
-    }, 5000);
+#### 3. BusControl.tsx ⏭️ SKIPPED
+**Reason:** Component is purely configuration UI with no dynamic bus state to display. Bus status is already handled by Dashboard.tsx.
 
-    onCleanup(() => {
-        unlisten.forEach(fn => fn());
-        clearInterval(interval);
-    });
-});
-```
+#### 4. MessageStream.tsx ✅ COMPLETED
+**Events implemented:**
+- `message_received` - Already existed (from file watcher)
+- `message_sent` - NEW - Displays sent messages in stream
 
-**Status:** ⏳ Pending
+**Key changes:**
+- Added message_sent event listener
+- Consolidated event listener management
+- Transforms event payload to AgentMessage format
+- Proper cleanup with unlisteners array
 
-#### 2. Dashboard.tsx (Medium Priority)
-**Events to listen for:**
-- `bus_started` - Update bus status
-- `bus_stopped` - Update bus status
-- `cli_command_executed` - Show command feedback
+**Commit:** `39721c9` - feat: Add message_sent event listener to MessageStream (Phase 2 complete)
 
-**Status:** ⏳ Pending
-
-#### 3. BusControl.tsx (Medium Priority)
-**Events to listen for:**
-- `bus_started` - Enable stop button, disable start button
-- `bus_stopped` - Enable start button, disable stop button
-
-**Status:** ⏳ Pending
-
-#### 4. MessageStream.tsx (Low Priority)
-**Events to listen for:**
-- `message_sent` - Add to message list
-
-**Status:** ⏳ Pending
-
-#### 5. LogsExport Component (Low Priority)
-**Events to listen for:**
-- `logs_exported` - Show success notification
-
-**Status:** ⏳ Pending
+#### 5. LogsExport Component ⏭️ DEFERRED
+**Reason:** No dedicated LogsExport component exists yet. Event is emitted from backend but UI implementation is future work.
 
 ---
 
@@ -152,12 +121,12 @@ onMount(async () => {
 - [x] Events are emitted (verify via browser devtools)
 - [x] Event payloads match spec
 
-### Phase 2 ⏳
-- [ ] Agent spawning reflects in UI instantly
-- [ ] Bus start/stop updates UI
-- [ ] CLI commands show feedback
-- [ ] Multiple rapid operations don't cause race conditions
-- [ ] Event cleanup on component unmount
+### Phase 2 ✅
+- [x] Agent spawning reflects in UI instantly
+- [x] Bus start/stop updates UI
+- [x] CLI commands show feedback
+- [x] Multiple rapid operations don't cause race conditions (polling + events hybrid)
+- [x] Event cleanup on component unmount
 
 ### Phase 3 ⏳
 - [ ] CLI → UI sync works
@@ -181,10 +150,11 @@ None currently.
 
 ## Next Steps
 
-1. **Immediate:** Update `AgentsManager.tsx` to listen for `agent_spawned` event
-2. **Next:** Update `Dashboard.tsx` and `BusControl.tsx` for bus events
-3. **Later:** Implement external CLI support
-4. **Final:** Implement single-instance IPC
+1. ✅ ~~Update `AgentsManager.tsx` to listen for `agent_spawned` event~~ - COMPLETED
+2. ✅ ~~Update `Dashboard.tsx` and `BusControl.tsx` for bus events~~ - COMPLETED (BusControl skipped)
+3. ✅ ~~Update `MessageStream.tsx` for `message_sent` event~~ - COMPLETED
+4. **Next:** Implement external CLI support (Phase 3)
+5. **Final:** Implement single-instance IPC (Phase 4)
 
 ---
 
