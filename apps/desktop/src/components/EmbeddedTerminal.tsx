@@ -1,0 +1,174 @@
+import { Component, onMount, onCleanup, createSignal } from 'solid-js';
+import { Terminal } from '@xterm/xterm';
+import { FitAddon } from '@xterm/addon-fit';
+import { WebLinksAddon } from '@xterm/addon-web-links';
+import '@xterm/xterm/css/xterm.css';
+
+interface EmbeddedTerminalProps {
+  instanceName: string;
+  wsPort: number;
+}
+
+const EmbeddedTerminal: Component<EmbeddedTerminalProps> = (props) => {
+  let terminalRef: HTMLDivElement | undefined;
+  let terminal: Terminal | null = null;
+  let fitAddon: FitAddon | null = null;
+  let ws: WebSocket | null = null;
+  const [isConnected, setIsConnected] = createSignal(false);
+  const [error, setError] = createSignal<string | null>(null);
+
+  onMount(() => {
+    if (!terminalRef) return;
+
+    // Create terminal
+    terminal = new Terminal({
+      cursorBlink: true,
+      fontSize: 14,
+      fontFamily: '"Cascadia Code", "Fira Code", "Courier New", monospace',
+      theme: {
+        background: '#1a1a1a',
+        foreground: '#e0e0e0',
+        cursor: '#4a9eff',
+        selectionBackground: '#3a3a3a',
+      },
+      rows: 30,
+      cols: 120,
+    });
+
+    // Add addons
+    fitAddon = new FitAddon();
+    terminal.loadAddon(fitAddon);
+    terminal.loadAddon(new WebLinksAddon());
+
+    // Open terminal in DOM
+    terminal.open(terminalRef);
+    fitAddon.fit();
+
+    // Handle user input
+    terminal.onData(async (data) => {
+      // Send input directly via Tauri command for better reliability
+      try {
+        await invoke('send_claude_input', {
+          instanceName: props.instanceName,
+          input: data,
+        });
+      } catch (err) {
+        console.error(`[${props.instanceName}] Failed to send input:`, err);
+      }
+    });
+
+    // Connect to WebSocket
+    connectWebSocket();
+
+    // Handle window resize
+    const handleResize = () => {
+      if (fitAddon) {
+        fitAddon.fit();
+      }
+    };
+
+    window.addEventListener('resize', handleResize);
+
+    onCleanup(() => {
+      window.removeEventListener('resize', handleResize);
+
+      if (ws) {
+        ws.close();
+      }
+
+      if (terminal) {
+        terminal.dispose();
+      }
+    });
+  });
+
+  const connectWebSocket = () => {
+    const wsUrl = `ws://localhost:${props.wsPort}`;
+
+    try {
+      ws = new WebSocket(wsUrl);
+
+      ws.onopen = () => {
+        console.log(`[${props.instanceName}] Connected to PTY wrapper`);
+        setIsConnected(true);
+        setError(null);
+
+        if (terminal) {
+          terminal.writeln(`\x1b[1;32m[Connected to ${props.instanceName}]\x1b[0m`);
+        }
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const message = JSON.parse(event.data);
+
+          switch (message.type) {
+            case 'output':
+              // Write output to terminal
+              if (terminal) {
+                terminal.write(message.data);
+              }
+              break;
+
+            case 'message':
+              // Incoming message notification
+              if (terminal) {
+                terminal.writeln(`\n\x1b[1;35m📨 Message from ${message.data.from}\x1b[0m`);
+                terminal.writeln(`\x1b[0;35m${message.data.text}\x1b[0m\n`);
+              }
+              break;
+
+            case 'status':
+              console.log(`[${props.instanceName}] Status:`, message.data);
+              if (message.data.status === 'exited' && terminal) {
+                terminal.writeln(`\n\x1b[1;31m[Process exited: code ${message.data.exitCode}]\x1b[0m`);
+                setIsConnected(false);
+              }
+              break;
+          }
+        } catch (err) {
+          console.error(`[${props.instanceName}] Error parsing WS message:`, err);
+        }
+      };
+
+      ws.onerror = (err) => {
+        console.error(`[${props.instanceName}] WebSocket error:`, err);
+        setError('Connection error');
+        setIsConnected(false);
+      };
+
+      ws.onclose = () => {
+        console.log(`[${props.instanceName}] WebSocket closed`);
+        setIsConnected(false);
+
+        // Attempt reconnect after 2 seconds
+        setTimeout(() => {
+          if (terminal) {
+            connectWebSocket();
+          }
+        }, 2000);
+      };
+    } catch (err: any) {
+      console.error(`[${props.instanceName}] Failed to create WebSocket:`, err);
+      setError(err.message);
+    }
+  };
+
+  return (
+    <div class="embedded-terminal">
+      <div class="terminal-header">
+        <span class="terminal-title">
+          <span class={`status-dot ${isConnected() ? 'online' : 'offline'}`}></span>
+          {props.instanceName}
+        </span>
+        {error() && (
+          <span class="terminal-error">{error()}</span>
+        )}
+        <span class="terminal-port">ws://localhost:{props.wsPort}</span>
+      </div>
+      <div ref={terminalRef} class="terminal-container"></div>
+    </div>
+  );
+};
+
+export default EmbeddedTerminal;
