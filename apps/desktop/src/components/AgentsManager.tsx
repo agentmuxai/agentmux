@@ -1,5 +1,6 @@
 import { Component, createSignal, createMemo, onMount, onCleanup, For, Show } from 'solid-js';
 import { invoke } from '@tauri-apps/api/core';
+import { listen, UnlistenFn } from '@tauri-apps/api/event';
 import SimpleTerminal from './SimpleTerminal';
 
 interface Agent {
@@ -140,15 +141,55 @@ const AgentsManager: Component = () => {
     return `${seconds}s`;
   };
 
-  onMount(() => {
-    loadAgents();
-    refreshInterval = window.setInterval(loadAgents, 2000);
-    outputInterval = window.setInterval(loadAgentOutput, 1000);
-  });
+  onMount(async () => {
+    // Initial load
+    await loadAgents();
 
-  onCleanup(() => {
-    if (refreshInterval) clearInterval(refreshInterval);
-    if (outputInterval) clearInterval(outputInterval);
+    // Set up event listeners for reactive updates
+    const unlisteners: UnlistenFn[] = [];
+
+    // Listen for agent_spawned events
+    unlisteners.push(await listen('agent_spawned', (event) => {
+      console.log('[AgentsManager] Received agent_spawned event:', event.payload);
+      const payload = event.payload as {
+        instance_name: string;
+        pid: number;
+        ws_port: number;
+        status: string;
+      };
+
+      // Check if agent already exists (avoid duplicates)
+      const exists = agents().some(a => a.instanceName === payload.instance_name);
+      if (!exists) {
+        const newAgent: Agent = {
+          instanceName: payload.instance_name,
+          pid: payload.pid,
+          wsPort: payload.ws_port,
+          status: payload.status
+        };
+        setAgents([...agents(), newAgent]);
+        console.log('[AgentsManager] Added new agent from event:', payload.instance_name);
+      }
+    }));
+
+    // Polling fallback for reconciliation (increased from 2s to 5s)
+    refreshInterval = window.setInterval(async () => {
+      const agentsList: Agent[] = await invoke('list_claude_instances');
+      // Only update if counts differ (prevents unnecessary re-renders)
+      if (agentsList.length !== agents().length) {
+        console.log('[AgentsManager] Polling detected agent count change, updating list');
+        setAgents(agentsList);
+      }
+    }, 5000);
+
+    outputInterval = window.setInterval(loadAgentOutput, 1000);
+
+    // Cleanup event listeners
+    onCleanup(() => {
+      unlisteners.forEach(fn => fn());
+      if (refreshInterval) clearInterval(refreshInterval);
+      if (outputInterval) clearInterval(outputInterval);
+    });
   });
 
   return (
