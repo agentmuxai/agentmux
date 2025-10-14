@@ -131,19 +131,41 @@ agentmux --help
 
 ---
 
-## Phase 4: Single-Instance IPC ⏳ NOT STARTED
+## Phase 4: Single-Instance IPC ✅ COMPLETED
 
 ### Requirements (from SINGLE_INSTANCE_IPC.md)
-1. Add `tiny_http` dependency
-2. Implement lock file management (`~/.agentmux/desktop.lock`)
-3. Implement stale lock detection
-4. Add IPC HTTP server in main.rs setup()
-5. Implement instance detection on CLI startup
-6. Implement command forwarding via HTTP POST
-7. Add window focus/show on IPC request
-8. Handle timeouts and errors
+1. ✅ Add `tiny_http` dependency
+2. ✅ Implement lock file management (`~/.agentmux/desktop.lock`)
+3. ✅ Implement stale lock detection
+4. ✅ Add IPC HTTP server in main.rs setup()
+5. ✅ Implement instance detection on CLI startup
+6. ✅ Implement command forwarding via HTTP POST
+7. ✅ Add window focus/show on IPC request
+8. ✅ Handle timeouts and errors
 
-**Status:** ⏳ Not started
+**Implementation Details:**
+- Created `ipc` module with submodules: `lock`, `server`, `client`, `protocol`
+- Lock file stored at `~/.agentmux/desktop.lock` (Unix) or `%LOCALAPPDATA%\agentmux\desktop.lock` (Windows)
+- Lock file contains: PID, IPC port, started timestamp, version
+- IPC server runs on random port (auto-assigned)
+- CLI checks for existing instance on startup
+- Commands forwarded via HTTP POST to `http://127.0.0.1:<port>/command`
+- Window focused and brought to front on IPC request
+- 30-second timeout for IPC requests
+- Stale lock detection via process check (platform-specific)
+
+**Example Usage:**
+```bash
+# Start GUI instance (creates lock file, starts IPC server)
+agentmux
+
+# From another terminal, send command to running instance
+agentmux agents spawn Agent2
+# Output: ✓ Agent spawned: Agent2 (PID: 5678)
+# GUI window focuses and updates instantly
+```
+
+**Status:** ✅ Completed
 
 ---
 
@@ -166,12 +188,14 @@ agentmux --help
 - [x] External CLI launch initializes UI correctly
 - [x] Debug output shows in terminal (--verbose flag)
 
-### Phase 4 ⏳
-- [ ] Single instance detection works
-- [ ] IPC command forwarding works
-- [ ] Window focuses on IPC command
-- [ ] Stale lock detection works
-- [ ] Timeout handling works
+### Phase 4 ✅
+- [x] Single instance detection works
+- [x] IPC command forwarding works
+- [x] Window focuses on IPC command (code implemented, not visually tested)
+- [x] Stale lock detection works
+- [x] Timeout handling works
+
+**Detailed Test Results:** See `PHASE_4_IPC_TEST_RESULTS.md`
 
 ---
 
@@ -181,13 +205,46 @@ None currently.
 
 ---
 
+## Phase 5: Debug Console Improvements ✅ COMPLETED
+
+### Requirements
+1. ✅ Fix object logging - Objects should display full JSON structure, not "[object Object]"
+2. ✅ Add resize functionality - Console should be resizable via top border drag
+
+### Implementation Details
+
+**Files Modified:**
+1. `apps/desktop/src/components/DebugConsole.tsx`
+   - Added `serializeArgs` helper function with JSON.stringify for objects
+   - Added height state management with createSignal (default 250px)
+   - Implemented mouse event handlers for drag-to-resize
+   - Changed message display from span to pre tag for formatting
+   - Added resize handle with visual indicator (⋮)
+   - Implemented constraints (min 100px, max 600px)
+
+2. `apps/desktop/src/components/Dashboard.tsx`
+   - Updated bus_started event listener to explicitly stringify payloads
+
+3. `apps/desktop/src/styles.css`
+   - Added resize handle styles with hover effects
+   - Updated debug-console to use flexbox layout
+   - Updated debug-message for pre tag support
+
+**Commit:** `601b311` - feat: Add resizable debug console and JSON object logging
+
+**Build Status:** ✅ Compiled successfully (v0.2.9)
+
+---
+
 ## Next Steps
 
 1. ✅ ~~Update `AgentsManager.tsx` to listen for `agent_spawned` event~~ - COMPLETED
 2. ✅ ~~Update `Dashboard.tsx` and `BusControl.tsx` for bus events~~ - COMPLETED (BusControl skipped)
 3. ✅ ~~Update `MessageStream.tsx` for `message_sent` event~~ - COMPLETED
 4. ✅ ~~Implement external CLI support (Phase 3)~~ - COMPLETED
-5. **Next:** Implement single-instance IPC (Phase 4)
+5. ✅ ~~Implement single-instance IPC (Phase 4)~~ - COMPLETED
+6. ✅ ~~Debug console improvements (Phase 5)~~ - COMPLETED
+7. **Next:** Testing and documentation updates
 
 ---
 
