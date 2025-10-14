@@ -11,7 +11,11 @@
     "tauri:build": "tauri build",
     "test": "vitest",
     "test:ui": "vitest --ui",
-    "test:coverage": "vitest --coverage"
+    "test:coverage": "vitest --coverage",
+    "test:cli": "bats tests/cli/*.bats",
+    "test:cli:single": "bats tests/cli/single_instance.bats",
+    "test:cli:ipc": "bats tests/cli/ipc_forwarding.bats",
+    "test:all": "npm run test && npm run test:cli"
   },
   "dependencies": {
     "@agentmux/core": "*",
