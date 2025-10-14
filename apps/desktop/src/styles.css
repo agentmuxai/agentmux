@@ -451,8 +451,37 @@ button.danger:disabled {
 
 /* Debug Console */
 .debug-console {
+  position: relative;
   border-top: 2px solid #3a3a3a;
   background: #0a0a0a;
+  display: flex;
+  flex-direction: column;
+}
+
+.debug-console-resize-handle {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 6px;
+  cursor: ns-resize;
+  background: transparent;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.2s;
+}
+
+.debug-console-resize-handle:hover {
+  background: rgba(74, 158, 255, 0.2);
+}
+
+.debug-console-resize-indicator {
+  font-size: 8px;
+  color: #666;
+  letter-spacing: 2px;
+  user-select: none;
 }
 
 .debug-console-header {
@@ -493,7 +522,7 @@ button.danger:disabled {
 }
 
 .debug-console-content {
-  height: 150px;
+  flex: 1;
   overflow-y: auto;
   padding: 0.5rem;
   font-family: 'Courier New', monospace;
@@ -506,6 +535,7 @@ button.danger:disabled {
   gap: 0.5rem;
   padding: 0.125rem 0;
   color: #e0e0e0;
+  align-items: flex-start;
 }
 
 .debug-time {
@@ -534,6 +564,12 @@ button.danger:disabled {
 .debug-message {
   flex: 1;
   word-break: break-word;
+  margin: 0;
+  font-family: inherit;
+  font-size: inherit;
+  line-height: inherit;
+  white-space: pre-wrap;
+  overflow-x: auto;
 }
 
 .debug-empty {

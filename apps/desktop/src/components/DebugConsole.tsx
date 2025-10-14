@@ -1,15 +1,18 @@
-import { createSignal, For, Show, onMount } from 'solid-js';
+import { createSignal, For, Show, onMount, onCleanup } from 'solid-js';
 import { listen } from '@tauri-apps/api/event';
 
 interface DebugLog {
   time: string;
   prefix: string;
   message: string;
+  expanded?: boolean;
 }
 
 export function DebugConsole() {
   const [logs, setLogs] = createSignal<DebugLog[]>([]);
   const [collapsed, setCollapsed] = createSignal(false);
+  const [height, setHeight] = createSignal(250); // Default height in pixels
+  let resizing = false;
 
   onMount(() => {
     // Intercept ALL console methods for debugging
@@ -17,19 +20,33 @@ export function DebugConsole() {
     const originalError = console.error;
     const originalWarn = console.warn;
 
+    // Helper to serialize arguments (handles objects, arrays, etc.)
+    const serializeArgs = (...args: any[]): string => {
+      return args.map(arg => {
+        if (typeof arg === 'object' && arg !== null) {
+          try {
+            return JSON.stringify(arg, null, 2);
+          } catch (e) {
+            return String(arg);
+          }
+        }
+        return String(arg);
+      }).join(' ');
+    };
+
     console.log = (...args: any[]) => {
       originalLog.apply(console, args);
-      addLog('[LOG]', args.join(' '));
+      addLog('[LOG]', serializeArgs(...args));
     };
 
     console.error = (...args: any[]) => {
       originalError.apply(console, args);
-      addLog('[ERR]', args.join(' '));
+      addLog('[ERR]', serializeArgs(...args));
     };
 
     console.warn = (...args: any[]) => {
       originalWarn.apply(console, args);
-      addLog('[WARN]', args.join(' '));
+      addLog('[WARN]', serializeArgs(...args));
     };
 
     // Catch uncaught errors
@@ -47,7 +64,38 @@ export function DebugConsole() {
       const message = event.payload as string;
       addLog('[RUST]', message);
     });
+
+    // Add resize functionality
+    const handleMouseMove = (e: MouseEvent) => {
+      if (resizing) {
+        const newHeight = window.innerHeight - e.clientY;
+        setHeight(Math.max(100, Math.min(600, newHeight))); // Min 100px, max 600px
+      }
+    };
+
+    const handleMouseUp = () => {
+      if (resizing) {
+        resizing = false;
+        document.body.style.cursor = 'default';
+        document.body.style.userSelect = '';
+      }
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+
+    onCleanup(() => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    });
   });
+
+  function handleResizeStart(e: MouseEvent) {
+    e.preventDefault();
+    resizing = true;
+    document.body.style.cursor = 'ns-resize';
+    document.body.style.userSelect = 'none';
+  }
 
   function addLog(prefix: string, message: string) {
     const time = new Date().toLocaleTimeString('en-US', {
@@ -74,7 +122,18 @@ export function DebugConsole() {
   }
 
   return (
-    <div class="debug-console">
+    <div class="debug-console" style={{ height: collapsed() ? 'auto' : `${height()}px` }}>
+      {/* Resize handle */}
+      <Show when={!collapsed()}>
+        <div
+          class="debug-console-resize-handle"
+          onMouseDown={handleResizeStart}
+          title="Drag to resize"
+        >
+          <div class="debug-console-resize-indicator">⋮</div>
+        </div>
+      </Show>
+
       <div class="debug-console-header">
         <button
           onClick={() => setCollapsed(!collapsed())}
@@ -103,7 +162,7 @@ export function DebugConsole() {
                   >
                     {log.prefix}
                   </span>
-                  <span class="debug-message">{log.message}</span>
+                  <pre class="debug-message">{log.message}</pre>
                 </div>
               )}
             </For>
