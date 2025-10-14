@@ -480,3 +480,8 @@ pub fn find_available_port(start: u16, end: u16) -> Result<u16, String> {
 
     Err(format!("No available ports in range {}-{}", start, end))
 }
+
+// State wrapper for CLI access
+pub struct ClaudeInstancesState {
+    pub instances: Arc<Mutex<HashMap<String, ClaudeInstance>>>,
+}

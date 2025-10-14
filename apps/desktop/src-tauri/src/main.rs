@@ -4,10 +4,11 @@
 mod bus;
 mod watcher;
 mod commands;
-mod embedded_claude;
 
 #[cfg(test)]
 mod tests;
+
+use agentmux_desktop::{cli, embedded_claude};
 
 use bus::{manager::BusConfig as BusManagerConfig, BusManager, ConnectedAgent};
 use std::path::PathBuf;
@@ -515,18 +516,70 @@ async fn list_claude_instances(
     Ok(list)
 }
 
+// ============================================================================
+// CLI Command Execution (In-App)
+// ============================================================================
+
+#[tauri::command]
+async fn execute_cli_command(
+    command_str: String,
+    json_output: bool,
+    state: State<'_, embedded_claude::ClaudeInstancesState>,
+) -> Result<String, String> {
+    use clap::Parser;
+    use cli::parser::{Cli, Command};
+    use cli::output::OutputFormat;
+
+    // Parse command string into CLI args
+    let args: Vec<String> = command_str.split_whitespace()
+        .map(String::from)
+        .collect();
+
+    // Prepend program name for clap parsing
+    let mut full_args = vec!["agentmux-desktop".to_string()];
+    full_args.extend(args);
+
+    // Parse with clap
+    let cli = match Cli::try_parse_from(full_args) {
+        Ok(cli) => cli,
+        Err(e) => return Err(format!("Failed to parse command: {}", e)),
+    };
+
+    // Execute command
+    let format: OutputFormat = json_output.into();
+    let result = cli::handlers::handle_command(
+        cli.command.unwrap_or_else(|| {
+            Command::Agents {
+                action: cli::parser::AgentAction::List
+            }
+        }),
+        format,
+        Some(state),
+    ).await;
+
+    Ok(result.format(&format))
+}
+
 #[tokio::main]
 async fn main() {
+    let claude_instances_arc = Arc::new(Mutex::new(std::collections::HashMap::new()));
+
     let app_state = AppState {
         bus_manager: Arc::new(Mutex::new(None)),
         file_watcher: Arc::new(Mutex::new(None)),
         command_watcher: Arc::new(Mutex::new(None)),
-        claude_instances: Arc::new(Mutex::new(std::collections::HashMap::new())),
+        claude_instances: claude_instances_arc.clone(),
+    };
+
+    // Create CLI state wrapper pointing to same instances
+    let cli_state = embedded_claude::ClaudeInstancesState {
+        instances: claude_instances_arc,
     };
 
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .manage(app_state)
+        .manage(cli_state)
         .invoke_handler(tauri::generate_handler![
             start_bus,
             stop_bus,
@@ -545,6 +598,7 @@ async fn main() {
             spawn_embedded_claude,
             send_claude_input,
             list_claude_instances,
+            execute_cli_command,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
