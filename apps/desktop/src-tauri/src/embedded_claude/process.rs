@@ -8,7 +8,61 @@ use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::sync::Mutex;
 use tokio_tungstenite::tungstenite::Message;
 use std::sync::Arc;
+use std::path::PathBuf;
+use std::fs;
 use portable_pty::{native_pty_system, Child as PtyChild, CommandBuilder, MasterPty, PtySize};
+
+/// Create Claude settings file to auto-trust workspace
+///
+/// Creates `.claude/settings.local.json` with execution permissions to bypass security prompt.
+fn create_claude_settings(workspace_path: &str, app_handle: &AppHandle, instance_name: &str) -> Result<(), String> {
+    let claude_dir = PathBuf::from(workspace_path).join(".claude");
+    let settings_file = claude_dir.join("settings.local.json");
+
+    // Create .claude directory if it doesn't exist
+    if !claude_dir.exists() {
+        fs::create_dir_all(&claude_dir).map_err(|e| {
+            let err_msg = format!("Failed to create .claude directory: {}", e);
+            logging::error(app_handle, LogCategory::Process, Some(instance_name), &err_msg);
+            err_msg
+        })?;
+        logging::debug(app_handle, LogCategory::Process, Some(instance_name), "Created .claude directory");
+    }
+
+    // Create settings file if it doesn't exist
+    if !settings_file.exists() {
+        let settings_content = r#"{
+  "allowedCommands": {
+    "bash": true,
+    "powershell": true,
+    "cmd": true
+  },
+  "allowExecution": true
+}"#;
+
+        fs::write(&settings_file, settings_content).map_err(|e| {
+            let err_msg = format!("Failed to write Claude settings: {}", e);
+            logging::error(app_handle, LogCategory::Process, Some(instance_name), &err_msg);
+            err_msg
+        })?;
+
+        logging::success(
+            app_handle,
+            LogCategory::Process,
+            Some(instance_name),
+            "Created Claude settings to bypass security prompt"
+        );
+    } else {
+        logging::debug(
+            app_handle,
+            LogCategory::Process,
+            Some(instance_name),
+            "Claude settings already exist"
+        );
+    }
+
+    Ok(())
+}
 
 /// Spawn a Claude CLI process in a PTY (pseudoterminal)
 ///
@@ -30,6 +84,7 @@ pub fn spawn_claude_process(
 ) -> Result<(Box<dyn PtyChild + Send + Sync>, Box<dyn MasterPty + Send>, u32), String> {
     logging::log_process_spawn(app_handle, instance_name, "claude");
 
+    // Create Claude settings to bypass security prompt
     if let Some(ref path) = workspace_path {
         logging::info(
             app_handle,
@@ -37,6 +92,9 @@ pub fn spawn_claude_process(
             Some(instance_name),
             format!("Workspace path: {}", path),
         );
+
+        // Auto-trust workspace to bypass security prompt
+        create_claude_settings(path, app_handle, instance_name)?;
     }
 
     // Create PTY system (uses ConPTY on Windows 10+, native PTY on Unix)
