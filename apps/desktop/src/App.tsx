@@ -52,9 +52,9 @@ const App: Component = () => {
       </main>
 
       <footer class="app-footer" data-testid="status-bar">
-        <span data-testid="app-version">AgentMux v0.2.9</span>
+        <span data-testid="app-version">AgentMux v{import.meta.env.VITE_APP_VERSION || '0.3.1'}</span>
         <span>|</span>
-        <span data-testid="build-timestamp">Built: 2025-10-13 6:45 AM PT</span>
+        <span data-testid="build-timestamp">Built: {import.meta.env.VITE_BUILD_TIME || new Date().toLocaleString('en-US', { timeZone: 'America/Los_Angeles', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: true }) + ' PT'}</span>
         <span>|</span>
         <span data-testid="app-status">Status: Ready</span>
       </footer>
