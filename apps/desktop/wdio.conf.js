@@ -82,6 +82,10 @@ export const config = {
     const buildResult = spawnSync('cargo', ['build'], {
       cwd: path.join(__dirname, 'src-tauri'),
       stdio: 'inherit',
+      env: {
+        ...process.env,
+        AGENTMUX_DISABLE_SINGLE_INSTANCE: '1',
+      },
     });
 
     if (buildResult.status !== 0) {
@@ -97,6 +101,10 @@ export const config = {
       path.join(__dirname, 'msedgedriver.exe')
     ], {
       stdio: 'inherit',
+      env: {
+        ...process.env,
+        AGENTMUX_DISABLE_SINGLE_INSTANCE: '1',
+      },
     });
 
     // Store process reference for cleanup
