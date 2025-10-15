@@ -72,7 +72,7 @@ const AgentList: Component = () => {
                 </div>
                 <button
                   class="danger"
-                  style={{ padding: '0.5rem 1rem', 'font-size': '0.85rem' }}
+                  style={{ padding: '0.25rem 0.5rem', 'font-size': '0.85rem' }}
                 >
                   Disconnect
                 </button>

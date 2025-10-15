@@ -12,7 +12,7 @@ const BusControl: Component = () => {
 
         <div class="config-grid">
           <label>Protocol:</label>
-          <select style="background: #1a1a1a; border: 1px solid #3a3a3a; color: #e0e0e0; padding: 0.5rem; border-radius: 4px;">
+          <select style="background: #1a1a1a; border: 1px solid #3a3a3a; color: #e0e0e0; padding: 0.25rem; border-radius: 4px;">
             <option>WebSocket</option>
           </select>
 

@@ -1,6 +1,7 @@
 import { Component, createSignal, createMemo, onMount, onCleanup, For, Show } from 'solid-js';
 import { invoke } from '@tauri-apps/api/core';
 import { listen, UnlistenFn } from '@tauri-apps/api/event';
+import { open } from '@tauri-apps/plugin-dialog';
 import SimpleTerminal from './SimpleTerminal';
 
 interface Agent {
@@ -24,11 +25,20 @@ const AgentsManager: Component = () => {
   const [agents, setAgents] = createSignal<Agent[]>([]);
   const [selectedAgent, setSelectedAgent] = createSignal<string | null>(null);
   const [agentOutput, setAgentOutput] = createSignal('');
-  const [newAgentId, setNewAgentId] = createSignal('');
+  const [workspacePath, setWorkspacePath] = createSignal('');
+  const [agentLabel, setAgentLabel] = createSignal('');
   const [newAgentCommand, setNewAgentCommand] = createSignal('claude');
-  const [workingDirectory, setWorkingDirectory] = createSignal('');
   const [error, setError] = createSignal<string | null>(null);
   const [isSpawning, setIsSpawning] = createSignal(false);
+
+  // Auto-suggest agent label from workspace path
+  const suggestedLabel = createMemo(() => {
+    const path = workspacePath();
+    if (!path) return '';
+    // Extract folder name from path as suggested label
+    const folderName = path.split(/[/\\]/).filter(Boolean).pop() || '';
+    return folderName;
+  });
 
   // Memoize selected agent to prevent SimpleTerminal recreation
   const selectedAgentData = createMemo(() => {
@@ -63,14 +73,43 @@ const AgentsManager: Component = () => {
     }
   };
 
+  const browseWorkspace = async () => {
+    try {
+      const selected = await open({
+        directory: true,
+        multiple: false,
+        title: 'Select Workspace Directory for Agent'
+      });
+
+      if (selected && typeof selected === 'string') {
+        setWorkspacePath(selected);
+        // Auto-fill label if empty
+        if (!agentLabel()) {
+          setAgentLabel(suggestedLabel());
+        }
+        setError(null);
+      }
+    } catch (err: any) {
+      console.error('[AgentsManager] Failed to open file browser:', err);
+      setError('Failed to open file browser: ' + err);
+    }
+  };
+
   const spawnAgent = async () => {
-    const instanceName = newAgentId().trim();
+    const label = agentLabel().trim() || suggestedLabel();
+    const workspace = workspacePath().trim();
 
-    console.log('[AgentsManager] spawnAgent called with name:', instanceName);
+    console.log('[AgentsManager] spawnAgent called with label:', label, 'workspace:', workspace);
 
-    if (!instanceName) {
-      console.warn('[AgentsManager] Instance name is empty');
-      setError('Instance name is required');
+    if (!workspace) {
+      console.warn('[AgentsManager] Workspace path is empty');
+      setError('Workspace path is required');
+      return;
+    }
+
+    if (!label) {
+      console.warn('[AgentsManager] Agent label is empty');
+      setError('Agent label is required (used for UI identification only)');
       return;
     }
 
@@ -79,10 +118,9 @@ const AgentsManager: Component = () => {
 
     try {
       console.log('[AgentsManager] Invoking spawn_embedded_claude...');
-      const workspacePath = workingDirectory().trim() || null;
       const result: Agent = await invoke('spawn_embedded_claude', {
-        instanceName,
-        workspacePath
+        instanceName: label, // Label is used for UI identification only
+        workspacePath: workspace
       });
 
       console.log('[AgentsManager] Embedded Claude spawned successfully:', result);
@@ -92,13 +130,13 @@ const AgentsManager: Component = () => {
       console.log('[AgentsManager] Updated agents list, new count:', agents().length + 1);
 
       // Select the new agent
-      setSelectedAgent(instanceName);
-      console.log('[AgentsManager] Selected new agent:', instanceName);
+      setSelectedAgent(label);
+      console.log('[AgentsManager] Selected new agent:', label);
 
       // Clear inputs
-      setNewAgentId('');
+      setWorkspacePath('');
+      setAgentLabel('');
       setNewAgentCommand('claude');
-      setWorkingDirectory('');
       console.log('[AgentsManager] Cleared spawn form');
     } catch (err: any) {
       console.error('[AgentsManager] Failed to spawn instance:', err);
@@ -203,56 +241,77 @@ const AgentsManager: Component = () => {
         <h2>🚀 Spawn New Agent</h2>
 
         {error() && (
-          <div style={{ color: '#ef5350', 'margin-bottom': '1rem', 'font-size': '0.9rem' }}>
+          <div style={{ color: '#ef5350', 'margin-bottom': '0.5rem', 'font-size': '0.9rem' }}>
             Error: {error()}
           </div>
         )}
 
         <div class="form-grid">
           <div>
-            <label>Agent ID:</label>
-            <input
-              type="text"
-              placeholder="Agent2"
-              value={newAgentId()}
-              onInput={(e) => setNewAgentId(e.currentTarget.value)}
-              disabled={isSpawning()}
-            />
+            <label>Workspace Path:</label>
+            <div style={{ display: 'flex', gap: '0.5rem' }}>
+              <input
+                type="text"
+                placeholder="Select workspace directory..."
+                value={workspacePath()}
+                onInput={(e) => setWorkspacePath(e.currentTarget.value)}
+                disabled={isSpawning()}
+                style={{ flex: 1 }}
+              />
+              <button
+                onClick={browseWorkspace}
+                disabled={isSpawning()}
+                style={{
+                  background: '#2a2a2a',
+                  color: '#e0e0e0',
+                  border: '1px solid #3a3a3a',
+                  padding: '0.375rem 0.75rem',
+                  'border-radius': '6px',
+                  cursor: isSpawning() ? 'not-allowed' : 'pointer',
+                  'font-weight': '500'
+                }}
+              >
+                📁 Browse
+              </button>
+            </div>
+            <div style={{
+              color: '#666',
+              'font-size': '0.8rem',
+              'margin-top': '0.25rem'
+            }}>
+              Agent will spawn in this directory (agent name inferred from path)
+            </div>
           </div>
 
           <div>
-            <label>CLI Command:</label>
+            <label>Agent Label (UI only):</label>
             <input
               type="text"
-              placeholder="claude"
-              value={newAgentCommand()}
-              onInput={(e) => setNewAgentCommand(e.currentTarget.value)}
+              placeholder={suggestedLabel() || "MyAgent"}
+              value={agentLabel()}
+              onInput={(e) => setAgentLabel(e.currentTarget.value)}
               disabled={isSpawning()}
             />
-          </div>
-
-          <div>
-            <label>Working Directory (optional):</label>
-            <input
-              type="text"
-              placeholder="D:\Code\WebProjects2"
-              value={workingDirectory()}
-              onInput={(e) => setWorkingDirectory(e.currentTarget.value)}
-              disabled={isSpawning()}
-            />
+            <div style={{
+              color: '#666',
+              'font-size': '0.8rem',
+              'margin-top': '0.25rem'
+            }}>
+              Optional shortcut identifier (not visible to agent)
+            </div>
           </div>
         </div>
 
         <button
           class="primary"
           onClick={spawnAgent}
-          disabled={isSpawning() || !newAgentId().trim()}
+          disabled={isSpawning() || !workspacePath().trim()}
         >
           {isSpawning() ? '⏳ Spawning...' : '▶️ Spawn Agent'}
         </button>
 
-        <p style={{ color: '#999', 'font-size': '0.85rem', 'margin-top': '0.5rem' }}>
-          Agent will run Claude CLI and respond to messages reactively
+        <p style={{ color: '#999', 'font-size': '0.85rem', 'margin-top': '0.25rem' }}>
+          💡 Agent spawns in selected workspace. Agent identity is determined by workspace path (e.g., WebProjects1 → Agent1).
         </p>
       </div>
 
