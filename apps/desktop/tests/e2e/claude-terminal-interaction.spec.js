@@ -18,6 +18,10 @@ import {
   clickTerminalInput,
   expectInputFocused,
   sendArrowKey,
+  sendMessageToAgent,
+  waitForAgentResponse,
+  getTerminalOutput,
+  verify2WayCommunication,
 } from './helpers/claude-helpers.js';
 
 describe('AgentMux - Claude Terminal Interaction', () => {
@@ -157,5 +161,96 @@ describe('AgentMux - Claude Terminal Interaction', () => {
     await takeDebugScreenshot('tc5-agent-list');
 
     console.log('[Test] ✅ TC5 PASSED: Agent list displays correctly');
+  });
+
+  it('TC6: Send message to agent via terminal', async () => {
+    console.log('[Test] TC6: Testing message sending to agent');
+
+    await takeDebugScreenshot('tc6-01-before-message');
+
+    // Get initial terminal output
+    const initialOutput = await getTerminalOutput();
+    console.log('[Test] Initial output length:', initialOutput.length);
+
+    // Send a simple command to the agent
+    const testMessage = 'echo "Hello from E2E test"';
+    await sendMessageToAgent(testMessage);
+
+    await browser.pause(2000); // Give agent time to process
+
+    await takeDebugScreenshot('tc6-02-after-message');
+
+    // Verify output changed (message was sent)
+    const updatedOutput = await getTerminalOutput();
+    expect(updatedOutput.length).toBeGreaterThan(initialOutput.length);
+
+    console.log('[Test] ✅ TC6 PASSED: Message sent to agent');
+  });
+
+  it('TC7: Receive response from agent', async () => {
+    console.log('[Test] TC7: Testing agent response reception');
+
+    await takeDebugScreenshot('tc7-01-before-command');
+
+    // Send a command that will generate output
+    await sendMessageToAgent('pwd');
+
+    await takeDebugScreenshot('tc7-02-after-command');
+
+    // Wait for agent to respond (look for common path patterns)
+    // This will timeout if agent doesn't respond
+    await waitForAgentResponse('Code', 15000); // Look for "Code" in path
+
+    await takeDebugScreenshot('tc7-03-response-received');
+
+    console.log('[Test] ✅ TC7 PASSED: Agent response received');
+  });
+
+  it('TC8: Verify full 2-way communication cycle', async () => {
+    console.log('[Test] TC8: Testing complete 2-way communication');
+
+    await takeDebugScreenshot('tc8-01-start');
+
+    // Send a command and verify specific response
+    const success = await verify2WayCommunication(
+      'echo "AgentMux E2E Test"',
+      'AgentMux E2E Test',
+      30000
+    );
+
+    expect(success).toBe(true);
+
+    await takeDebugScreenshot('tc8-02-communication-verified');
+
+    console.log('[Test] ✅ TC8 PASSED: 2-way communication verified');
+  });
+
+  it('TC9: Multiple message exchanges', async () => {
+    console.log('[Test] TC9: Testing multiple message exchanges');
+
+    await takeDebugScreenshot('tc9-01-start');
+
+    // First exchange
+    await sendMessageToAgent('echo "Test 1"');
+    await waitForAgentResponse('Test 1', 10000);
+    console.log('[Test] ✓ Exchange 1 complete');
+
+    await browser.pause(500);
+
+    // Second exchange
+    await sendMessageToAgent('echo "Test 2"');
+    await waitForAgentResponse('Test 2', 10000);
+    console.log('[Test] ✓ Exchange 2 complete');
+
+    await browser.pause(500);
+
+    // Third exchange
+    await sendMessageToAgent('echo "Test 3"');
+    await waitForAgentResponse('Test 3', 10000);
+    console.log('[Test] ✓ Exchange 3 complete');
+
+    await takeDebugScreenshot('tc9-02-all-exchanges-complete');
+
+    console.log('[Test] ✅ TC9 PASSED: Multiple exchanges successful');
   });
 });
