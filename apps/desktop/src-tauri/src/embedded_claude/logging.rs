@@ -177,9 +177,8 @@ pub fn log(
     // Print to terminal with colors
     println!("{}", entry.format_terminal());
 
-    // Emit to UI DebugConsole
-    let ui_message = entry.format_ui();
-    let _ = app_handle.emit("debug_log", ui_message);
+    // Emit structured data to UI DebugConsole (JSON with color information)
+    let _ = app_handle.emit("debug_log", &entry);
 }
 
 /// Convenience macros for each log level

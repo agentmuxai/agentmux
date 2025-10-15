@@ -5,8 +5,27 @@ interface DebugLog {
   time: string;
   prefix: string;
   message: string;
+  color?: string;
   expanded?: boolean;
 }
+
+// Structured log from Rust backend
+interface RustLogEntry {
+  level: 'debug' | 'info' | 'success' | 'warning' | 'error';
+  category: 'PROCESS' | 'STDIN' | 'STDOUT' | 'STDERR' | 'WEBSOCKET' | 'MESSAGE' | 'STATE' | 'ERROR';
+  instance: string | null;
+  message: string;
+  timestamp: string;
+}
+
+// Map Rust log levels to colors (matching logging.rs css_color())
+const LEVEL_COLORS: Record<string, string> = {
+  'debug': '#888888',
+  'info': '#4A90E2',
+  'success': '#7ED321',
+  'warning': '#F5A623',
+  'error': '#D0021B',
+};
 
 export function DebugConsole() {
   const [logs, setLogs] = createSignal<DebugLog[]>([]);
@@ -59,10 +78,24 @@ export function DebugConsole() {
       addLog('[ERR]', `Unhandled promise rejection: ${event.reason}`);
     });
 
-    // Listen for backend logs
+    // Listen for backend logs (structured JSON)
     listen('debug_log', (event) => {
-      const message = event.payload as string;
-      addLog('[RUST]', message);
+      try {
+        const entry = event.payload as RustLogEntry;
+
+        // Format prefix with category and instance
+        const instancePart = entry.instance ? `[${entry.instance}] ` : '';
+        const prefix = `[${entry.level.toUpperCase()}] [${entry.category}]`;
+
+        // Get color from level
+        const color = LEVEL_COLORS[entry.level] || '#e0e0e0';
+
+        addLog(prefix, `${instancePart}${entry.message}`, color);
+      } catch (e) {
+        // Fallback for plain string messages (backwards compatibility)
+        const message = event.payload as string;
+        addLog('[RUST]', message);
+      }
     });
 
     // Add resize functionality
@@ -97,7 +130,7 @@ export function DebugConsole() {
     document.body.style.userSelect = 'none';
   }
 
-  function addLog(prefix: string, message: string) {
+  function addLog(prefix: string, message: string, color?: string) {
     const time = new Date().toLocaleTimeString('en-US', {
       hour12: false,
       hour: '2-digit',
@@ -106,7 +139,7 @@ export function DebugConsole() {
       fractionalSecondDigits: 3,
     });
 
-    setLogs([{ time, prefix, message }, ...logs()].slice(0, 100));
+    setLogs([{ time, prefix, message, color }, ...logs()].slice(0, 100));
   }
 
   function handleClear() {
@@ -154,6 +187,7 @@ export function DebugConsole() {
                   <span class="debug-time">{log.time}</span>
                   <span
                     class="debug-prefix"
+                    style={log.color ? { color: log.color } : undefined}
                     classList={{
                       'debug-prefix-error': log.prefix === '[ERR]',
                       'debug-prefix-warn': log.prefix === '[WARN]',
@@ -162,7 +196,7 @@ export function DebugConsole() {
                   >
                     {log.prefix}
                   </span>
-                  <pre class="debug-message">{log.message}</pre>
+                  <pre class="debug-message" style={log.color ? { color: log.color } : undefined}>{log.message}</pre>
                 </div>
               )}
             </For>
