@@ -4,43 +4,21 @@
 mod bus;
 mod watcher;
 mod commands;
+mod tauri_commands;
 
 #[cfg(test)]
 mod tests;
 
 use agentmux_desktop::{cli, embedded_claude, ipc};
-
-use bus::{manager::BusConfig as BusManagerConfig, BusManager, ConnectedAgent};
+use tauri_commands::types::{AppState, BusConfig, AgentInfo};
+use bus::BusManager;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, State};
 use tokio::sync::Mutex;
 use watcher::{AgentMessage, CommandWatcher, FileWatcher};
 
-// State management
-struct AppState {
-    bus_manager: Arc<Mutex<Option<BusManager>>>,
-    file_watcher: Arc<Mutex<Option<FileWatcher>>>,
-    command_watcher: Arc<Mutex<Option<CommandWatcher>>>,
-    claude_instances: Arc<Mutex<std::collections::HashMap<String, embedded_claude::ClaudeInstance>>>,
-}
 
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
-struct BusConfig {
-    host: String,
-    port: u16,
-    max_agents: usize,
-}
-
-impl From<BusConfig> for BusManagerConfig {
-    fn from(config: BusConfig) -> Self {
-        BusManagerConfig {
-            host: config.host,
-            port: config.port,
-            max_agents: config.max_agents,
-        }
-    }
-}
 
 // Tauri commands
 #[tauri::command]
@@ -148,33 +126,6 @@ async fn get_bus_status(state: State<'_, AppState>) -> Result<serde_json::Value,
     }
 }
 
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
-struct AgentInfo {
-    id: String,
-    name: String,
-    workspace: String,
-    status: String,
-    connected_at: u64,
-    uptime: u64,
-    messages_sent: usize,
-    messages_received: usize,
-}
-
-impl From<ConnectedAgent> for AgentInfo {
-    fn from(agent: ConnectedAgent) -> Self {
-        let uptime = agent.uptime();
-        AgentInfo {
-            id: agent.identity.id,
-            name: agent.identity.name,
-            workspace: agent.identity.workspace,
-            status: format!("{:?}", agent.status).to_lowercase(),
-            connected_at: agent.connected_at,
-            uptime,
-            messages_sent: agent.messages_sent,
-            messages_received: agent.messages_received,
-        }
-    }
-}
 
 // ============================================================================
 // File Watcher Commands (New)
