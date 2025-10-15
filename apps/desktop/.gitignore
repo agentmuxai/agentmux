@@ -40,3 +40,4 @@ lerna-debug.log*
 # Tauri
 src-tauri/gen/
 src-tauri/Cargo.lock
+msedgedriver.exe

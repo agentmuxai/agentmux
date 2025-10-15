@@ -34,9 +34,10 @@ describe('AgentMux - Claude Terminal Interaction', () => {
 
     // Spawn Claude instance for all tests
     try {
+      // Use agentmux desktop directory - we know this exists and is valid!
       agentLabel = await spawnClaudeAgent({
-        workspacePath: 'D:\\Code\\PythonProjects',
-        label: 'TestAgent',
+        workspacePath: 'D:\\Code\\WebProjects\\agentmux\\apps\\desktop',
+        label: 'E2ETestAgent',
       });
       console.log(`[Test] ✓ Claude agent spawned: ${agentLabel}`);
 
@@ -197,9 +198,9 @@ describe('AgentMux - Claude Terminal Interaction', () => {
 
     await takeDebugScreenshot('tc7-02-after-command');
 
-    // Wait for agent to respond (look for common path patterns)
+    // Wait for agent to respond (look for "desktop" in the path)
     // This will timeout if agent doesn't respond
-    await waitForAgentResponse('Code', 15000); // Look for "Code" in path
+    await waitForAgentResponse('desktop', 15000); // Look for "desktop" in path
 
     await takeDebugScreenshot('tc7-03-response-received');
 
