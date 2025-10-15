@@ -17,6 +17,8 @@ export default defineConfig({
 
   fullyParallel: false, // Run tests sequentially (only one app instance)
 
+  workers: 1, // CRITICAL: Only one worker to avoid port conflicts
+
   forbidOnly: !!process.env.CI,
 
   retries: process.env.CI ? 2 : 0,

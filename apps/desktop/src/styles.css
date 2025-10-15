@@ -394,6 +394,7 @@ button.danger:disabled {
 .terminal-output {
   flex: 1;
   padding: 0.5rem;
+  padding-bottom: 0; /* No bottom padding - input continues seamlessly */
   overflow-y: auto;
   background: #0a0a0a;
   color: #e0e0e0;
@@ -403,26 +404,27 @@ button.danger:disabled {
 
 .terminal-input-area {
   display: flex;
-  gap: 0.5rem;
-  padding: 0.375rem;
-  background: #1a1a1a;
-  border-top: 1px solid #3a3a3a;
+  gap: 0;
+  padding: 0; /* Remove padding for seamless look */
+  background: #0a0a0a; /* Same background as output */
+  border-top: none; /* No visual separation */
 }
 
 .terminal-input {
   flex: 1;
-  background: #2a2a2a;
-  border: 1px solid #3a3a3a;
+  background: transparent; /* Transparent to blend with output */
+  border: none; /* No border for seamless appearance */
   color: #e0e0e0;
-  padding: 0.25rem;
-  border-radius: 4px;
+  padding: 0 0.5rem 0.5rem 0.5rem; /* Continue output padding */
+  border-radius: 0; /* No rounding - continuous with output */
   font-family: 'Courier New', 'Consolas', monospace;
   font-size: 14px;
+  line-height: 1.5; /* Match output line height */
 }
 
 .terminal-input:focus {
   outline: none;
-  border-color: #4a9eff;
+  background: rgba(74, 158, 255, 0.05); /* Subtle focus indication */
 }
 
 .terminal-input:disabled {
