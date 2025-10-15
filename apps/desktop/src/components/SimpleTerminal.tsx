@@ -100,6 +100,20 @@ const SimpleTerminal: Component<SimpleTerminalProps> = (props) => {
     } else if (e.key === 'Escape') {
       e.preventDefault();
       setInput('');  // Clear input on Escape
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      // Send up arrow control sequence
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send('\x1b[A');  // ANSI escape code for up arrow
+        console.log(`[${props.instanceName}] [WS] → Sent up arrow key`);
+      }
+    } else if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      // Send down arrow control sequence
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send('\x1b[B');  // ANSI escape code for down arrow
+        console.log(`[${props.instanceName}] [WS] → Sent down arrow key`);
+      }
     }
   };
 
@@ -132,7 +146,7 @@ const SimpleTerminal: Component<SimpleTerminalProps> = (props) => {
         <input
           type="text"
           class="terminal-input"
-          placeholder="Type your input and press Enter... (Esc to clear)"
+          placeholder="Enter to confirm, ↑↓ to navigate, Esc to clear"
           value={input()}
           onInput={(e) => setInput(e.currentTarget.value)}
           onKeyDown={handleKeyDown}
