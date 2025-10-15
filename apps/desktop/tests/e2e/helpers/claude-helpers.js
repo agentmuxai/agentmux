@@ -39,8 +39,11 @@ export async function spawnClaudeAgent(options = {}) {
 
   // Fill in agent label (optional)
   if (options.label) {
-    const labelInput = await getElement('input[placeholder*="MyAgent"]');
-    await labelInput.setValue(options.label);
+    // Find the label input by its position (second text input after workspace)
+    const textInputs = await $$('input[type="text"]');
+    if (textInputs.length >= 2) {
+      await textInputs[1].setValue(options.label);
+    }
   }
 
   // Click spawn button (primary button in the spawn card)
@@ -164,4 +167,77 @@ export async function sendArrowKey(direction) {
 
   await browser.keys([key]);
   console.log(`[Claude E2E] ✓ Arrow key sent: ${direction}`);
+}
+
+/**
+ * Send a message to the agent via terminal input
+ * @param {string} message - Message to send
+ */
+export async function sendMessageToAgent(message) {
+  console.log(`[Claude E2E] Sending message to agent: "${message}"`);
+
+  const input = await getElement('.terminal-input');
+  await input.click();
+  await input.setValue(message);
+  await browser.keys(['Enter']);
+
+  console.log('[Claude E2E] ✓ Message sent');
+}
+
+/**
+ * Wait for agent response in terminal output
+ * @param {string} expectedText - Text to look for in the response
+ * @param {number} timeout - Timeout in milliseconds
+ * @returns {Promise<string>} - Terminal output content
+ */
+export async function waitForAgentResponse(expectedText, timeout = 30000) {
+  console.log(`[Claude E2E] Waiting for agent response containing: "${expectedText}"`);
+
+  await browser.waitUntil(
+    async () => {
+      const output = await getElement('.terminal-output');
+      const text = await output.getText();
+      return text.includes(expectedText);
+    },
+    {
+      timeout,
+      timeoutMsg: `Agent response did not contain "${expectedText}" within ${timeout}ms`
+    }
+  );
+
+  const output = await getElement('.terminal-output');
+  const responseText = await output.getText();
+  console.log('[Claude E2E] ✓ Agent response received');
+  return responseText;
+}
+
+/**
+ * Get the current terminal output text
+ * @returns {Promise<string>} - Terminal output content
+ */
+export async function getTerminalOutput() {
+  const output = await getElement('.terminal-output');
+  return await output.getText();
+}
+
+/**
+ * Verify 2-way communication by sending a message and waiting for response
+ * @param {string} message - Message to send to agent
+ * @param {string} expectedResponse - Text expected in agent's response
+ * @param {number} timeout - Timeout in milliseconds
+ * @returns {Promise<boolean>} - True if communication successful
+ */
+export async function verify2WayCommunication(message, expectedResponse, timeout = 30000) {
+  console.log(`[Claude E2E] Verifying 2-way communication...`);
+  console.log(`[Claude E2E]   → Sending: "${message}"`);
+  console.log(`[Claude E2E]   → Expecting: "${expectedResponse}"`);
+
+  // Send message to agent
+  await sendMessageToAgent(message);
+
+  // Wait for agent response
+  const response = await waitForAgentResponse(expectedResponse, timeout);
+
+  console.log('[Claude E2E] ✓ 2-way communication verified');
+  return true;
 }
