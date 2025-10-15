@@ -1,7 +1,9 @@
 // Message watching and routing for embedded Claude instances
 
 use crate::embedded_claude::types::AgentMessage;
+use crate::embedded_claude::logging::{self, LogCategory};
 use notify::{Event, RecursiveMode, Watcher};
+use tauri::AppHandle;
 use tokio::sync::mpsc::{self, UnboundedSender};
 
 /// Watch for message files and inject them into the instance's stdin
@@ -9,58 +11,146 @@ use tokio::sync::mpsc::{self, UnboundedSender};
 /// Creates a filesystem watcher on ~/.agentmux/shared/messages and forwards
 /// messages to the appropriate instance based on routing rules.
 pub async fn watch_messages(
+    app_handle: AppHandle,
     instance_name: String,
     stdin_tx: UnboundedSender<String>,
 ) -> Result<(), String> {
-    println!("[MSG_WATCHER:{}] ========== START ==========", instance_name);
+    logging::info(
+        &app_handle,
+        LogCategory::Message,
+        Some(&instance_name),
+        "========== MESSAGE WATCHER START ==========",
+    );
 
-    println!("[MSG_WATCHER:{}] -> Retrieving home directory", instance_name);
+    logging::debug(
+        &app_handle,
+        LogCategory::Message,
+        Some(&instance_name),
+        "Retrieving home directory",
+    );
+
     let home_dir = dirs::home_dir()
         .ok_or("Could not determine home directory")?;
-    println!("[MSG_WATCHER:{}] V Home directory: {:?}", instance_name, home_dir);
+
+    logging::debug(
+        &app_handle,
+        LogCategory::Message,
+        Some(&instance_name),
+        format!("Home directory: {:?}", home_dir),
+    );
 
     let messages_dir = home_dir
         .join(".agentmux")
         .join("shared")
         .join("messages");
-    println!("[MSG_WATCHER:{}] V Messages directory: {:?}", instance_name, messages_dir);
+
+    logging::info(
+        &app_handle,
+        LogCategory::Message,
+        Some(&instance_name),
+        format!("Messages directory: {:?}", messages_dir),
+    );
 
     // Create directory if it doesn't exist
-    println!("[MSG_WATCHER:{}] -> Creating messages directory", instance_name);
+    logging::debug(
+        &app_handle,
+        LogCategory::Message,
+        Some(&instance_name),
+        "Creating messages directory",
+    );
+
     tokio::fs::create_dir_all(&messages_dir)
         .await
         .map_err(|e| {
-            eprintln!("[MSG_WATCHER:{}] X Failed to create messages directory: {}", instance_name, e);
-            format!("Failed to create messages directory: {}", e)
+            let err_msg = format!("Failed to create messages directory: {}", e);
+            logging::error(
+                &app_handle,
+                LogCategory::Message,
+                Some(&instance_name),
+                &err_msg,
+            );
+            err_msg
         })?;
-    println!("[MSG_WATCHER:{}] V Messages directory created/verified", instance_name);
 
-    println!("[MSG_WATCHER:{}] Watching messages in: {:?}", instance_name, messages_dir);
+    logging::success(
+        &app_handle,
+        LogCategory::Message,
+        Some(&instance_name),
+        "Messages directory created/verified",
+    );
+
+    logging::info(
+        &app_handle,
+        LogCategory::Message,
+        Some(&instance_name),
+        format!("Watching messages in: {:?}", messages_dir),
+    );
 
     let (tx, mut rx) = mpsc::channel(100);
 
-    println!("[MSG_WATCHER:{}] -> Creating filesystem watcher", instance_name);
+    logging::debug(
+        &app_handle,
+        LogCategory::Message,
+        Some(&instance_name),
+        "Creating filesystem watcher",
+    );
+
     let mut watcher = notify::recommended_watcher(move |res: Result<Event, _>| {
         if let Ok(event) = res {
             let _ = tx.blocking_send(event);
         }
     })
     .map_err(|e| {
-        eprintln!("[MSG_WATCHER:{}] X Failed to create watcher: {}", instance_name, e);
-        format!("Failed to create watcher: {}", e)
+        let err_msg = format!("Failed to create watcher: {}", e);
+        logging::error(
+            &app_handle,
+            LogCategory::Message,
+            Some(&instance_name),
+            &err_msg,
+        );
+        err_msg
     })?;
-    println!("[MSG_WATCHER:{}] V Watcher created", instance_name);
 
-    println!("[MSG_WATCHER:{}] -> Starting directory watch", instance_name);
+    logging::success(
+        &app_handle,
+        LogCategory::Message,
+        Some(&instance_name),
+        "Watcher created",
+    );
+
+    logging::debug(
+        &app_handle,
+        LogCategory::Message,
+        Some(&instance_name),
+        "Starting directory watch",
+    );
+
     watcher
         .watch(&messages_dir, RecursiveMode::NonRecursive)
         .map_err(|e| {
-            eprintln!("[MSG_WATCHER:{}] X Failed to watch directory: {}", instance_name, e);
-            format!("Failed to watch directory: {}", e)
+            let err_msg = format!("Failed to watch directory: {}", e);
+            logging::error(
+                &app_handle,
+                LogCategory::Message,
+                Some(&instance_name),
+                &err_msg,
+            );
+            err_msg
         })?;
-    println!("[MSG_WATCHER:{}] V Directory watch started", instance_name);
 
-    println!("[MSG_WATCHER:{}] ========== READY ==========", instance_name);
+    logging::success(
+        &app_handle,
+        LogCategory::Message,
+        Some(&instance_name),
+        "Directory watch started",
+    );
+
+    logging::success(
+        &app_handle,
+        LogCategory::Message,
+        Some(&instance_name),
+        "========== MESSAGE WATCHER READY ==========",
+    );
 
     let mut event_count = 0;
     let mut processed_count = 0;
@@ -68,30 +158,65 @@ pub async fn watch_messages(
     // Process file events
     while let Some(event) = rx.recv().await {
         event_count += 1;
-        println!("[MSG_WATCHER:{}] -> Event #{}: {:?}", instance_name, event_count, event.kind);
+
+        logging::debug(
+            &app_handle,
+            LogCategory::Message,
+            Some(&instance_name),
+            format!("Event #{}: {:?}", event_count, event.kind),
+        );
 
         if let notify::EventKind::Create(_) = event.kind {
             for path in event.paths {
                 if path.extension().and_then(|s| s.to_str()) == Some("json") {
-                    println!("[MSG_WATCHER:{}] -> Detected JSON file: {:?}", instance_name, path);
+                    logging::log_message_event(
+                        &app_handle,
+                        &instance_name,
+                        "Create",
+                        &path.display().to_string(),
+                    );
 
                     // Read and process message file
                     match tokio::fs::read_to_string(&path).await {
                         Ok(content) => {
                             let byte_count = content.len();
-                            println!("[MSG_WATCHER:{}] V Read file: {} bytes", instance_name, byte_count);
+
+                            logging::debug(
+                                &app_handle,
+                                LogCategory::Message,
+                                Some(&instance_name),
+                                format!("Read file: {} bytes", byte_count),
+                            );
 
                             match serde_json::from_str::<AgentMessage>(&content) {
                                 Ok(msg) => {
-                                    println!("[MSG_WATCHER:{}] V Deserialized message: id={}, from={}, to={}",
-                                        instance_name, msg.id, msg.from.name, msg.to);
+                                    logging::info(
+                                        &app_handle,
+                                        LogCategory::Message,
+                                        Some(&instance_name),
+                                        format!("Deserialized message: id={}, from={}, to={}", msg.id, msg.from.name, msg.to),
+                                    );
 
-                                    // Check if message is for this instance
-                                    println!("[MSG_WATCHER:{}] -> Routing check: target='{}', instance='{}'",
-                                        instance_name, msg.to, instance_name);
+                                    logging::debug(
+                                        &app_handle,
+                                        LogCategory::Message,
+                                        Some(&instance_name),
+                                        format!("Routing check: target='{}', instance='{}'", msg.to, instance_name),
+                                    );
 
                                     let matches = is_message_for_instance(&msg, &instance_name);
-                                    println!("[MSG_WATCHER:{}] V Routing result: matched={}", instance_name, matches);
+
+                                    let reason = if msg.to == instance_name {
+                                        "exact match"
+                                    } else if msg.to == "*" {
+                                        "broadcast"
+                                    } else if msg.to.ends_with('*') {
+                                        "wildcard match"
+                                    } else {
+                                        "no match"
+                                    };
+
+                                    logging::log_message_routing(&app_handle, &instance_name, matches, reason);
 
                                     if matches {
                                         let input = format!(
@@ -102,27 +227,48 @@ pub async fn watch_messages(
                                         match stdin_tx.send(input) {
                                             Ok(_) => {
                                                 processed_count += 1;
-                                                println!("[MSG_WATCHER:{}] V Sent to stdin (processed #{})",
-                                                    instance_name, processed_count);
+                                                logging::success(
+                                                    &app_handle,
+                                                    LogCategory::Message,
+                                                    Some(&instance_name),
+                                                    format!("Sent to stdin (processed #{})", processed_count),
+                                                );
                                             }
                                             Err(e) => {
-                                                eprintln!("[MSG_WATCHER:{}] X Failed to send to stdin: {}",
-                                                    instance_name, e);
+                                                logging::error(
+                                                    &app_handle,
+                                                    LogCategory::Message,
+                                                    Some(&instance_name),
+                                                    format!("Failed to send to stdin: {}", e),
+                                                );
                                             }
                                         }
 
-                                        println!("[MSG_WATCHER:{}] Processed message from {}", instance_name, msg.from.name);
-                                    } else {
-                                        println!("[MSG_WATCHER:{}] ! Message not for this instance (skipped)", instance_name);
+                                        logging::info(
+                                            &app_handle,
+                                            LogCategory::Message,
+                                            Some(&instance_name),
+                                            format!("Processed message from {}", msg.from.name),
+                                        );
                                     }
                                 }
                                 Err(e) => {
-                                    eprintln!("[MSG_WATCHER:{}] X Failed to deserialize message: {}", instance_name, e);
+                                    logging::error(
+                                        &app_handle,
+                                        LogCategory::Message,
+                                        Some(&instance_name),
+                                        format!("Failed to deserialize message: {}", e),
+                                    );
                                 }
                             }
                         }
                         Err(e) => {
-                            eprintln!("[MSG_WATCHER:{}] X Failed to read file: {}", instance_name, e);
+                            logging::error(
+                                &app_handle,
+                                LogCategory::Message,
+                                Some(&instance_name),
+                                format!("Failed to read file: {}", e),
+                            );
                         }
                     }
                 }
@@ -130,8 +276,12 @@ pub async fn watch_messages(
         }
     }
 
-    println!("[MSG_WATCHER:{}] ========== EXIT (events={}, processed={}) ==========",
-        instance_name, event_count, processed_count);
+    logging::info(
+        &app_handle,
+        LogCategory::Message,
+        Some(&instance_name),
+        format!("========== EXIT (events={}, processed={}) ==========", event_count, processed_count),
+    );
 
     Ok(())
 }

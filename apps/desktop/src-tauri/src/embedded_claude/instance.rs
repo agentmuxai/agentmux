@@ -1,9 +1,11 @@
 // Claude CLI instance coordination and management
 
-use crate::embedded_claude::{messages, process, websocket};
+use crate::embedded_claude::{logging, messages, process, websocket};
+use crate::embedded_claude::logging::LogCategory;
 use crate::embedded_claude::types::PeerMap;
 use std::collections::HashMap;
 use std::sync::Arc;
+use tauri::AppHandle;
 use tokio::sync::{mpsc, Mutex};
 
 /// Running Claude CLI instance with WebSocket streaming
@@ -25,100 +27,165 @@ impl ClaudeInstance {
     /// 5. Watching for message files
     /// 6. Monitoring process lifecycle
     pub async fn spawn(
+        app_handle: AppHandle,
         instance_name: String,
         ws_port: u16,
         workspace_path: Option<String>,
     ) -> Result<Self, String> {
+        logging::log_state_change(&app_handle, Some(&instance_name), "Spawning new instance");
+
         // Spawn Claude CLI process
         let (child, stdout, stderr, stdin) =
-            process::spawn_claude_process(&instance_name, workspace_path)?;
+            process::spawn_claude_process(&app_handle, &instance_name, workspace_path)?;
 
         let pid = child.id().ok_or_else(|| {
             let err_msg = "Failed to get PID";
-            eprintln!("[embedded_claude] {} - ERROR: {}", instance_name, err_msg);
+            logging::error(
+                &app_handle,
+                LogCategory::Process,
+                Some(&instance_name),
+                err_msg,
+            );
             err_msg.to_string()
         })?;
 
-        println!("[embedded_claude] {} - Process spawned with PID: {}", instance_name, pid);
+        logging::success(
+            &app_handle,
+            LogCategory::Process,
+            Some(&instance_name),
+            format!("Process spawned with PID: {}", pid),
+        );
 
         // Create channel for stdin
         let (stdin_tx, stdin_rx) = mpsc::unbounded_channel::<String>();
-        println!("[embedded_claude] {} - Created stdin channel", instance_name);
+        logging::debug(
+            &app_handle,
+            LogCategory::State,
+            Some(&instance_name),
+            "Created stdin channel",
+        );
 
         // Spawn WebSocket server with stdin channel
         let peer_map: PeerMap = Arc::new(Mutex::new(HashMap::new()));
         let peer_map_clone = peer_map.clone();
         let ws_instance_name = instance_name.clone();
         let stdin_tx_ws = stdin_tx.clone();
+        let app_handle_ws = app_handle.clone();
 
-        println!(
-            "[embedded_claude] {} - Starting WebSocket server on port {}...",
-            instance_name, ws_port
+        logging::info(
+            &app_handle,
+            LogCategory::WebSocket,
+            Some(&instance_name),
+            format!("Starting WebSocket server on port {}...", ws_port),
         );
+
         tokio::spawn(async move {
-            if let Err(e) = websocket::start_websocket_server(ws_port, peer_map_clone, stdin_tx_ws).await {
-                eprintln!("[{}] WebSocket server error: {}", ws_instance_name, e);
+            if let Err(e) = websocket::start_websocket_server(app_handle_ws.clone(), ws_port, peer_map_clone, stdin_tx_ws).await {
+                logging::error(
+                    &app_handle_ws,
+                    LogCategory::WebSocket,
+                    Some(&ws_instance_name),
+                    format!("WebSocket server error: {}", e),
+                );
             } else {
-                println!("[{}] WebSocket server started successfully", ws_instance_name);
+                logging::success(
+                    &app_handle_ws,
+                    LogCategory::WebSocket,
+                    Some(&ws_instance_name),
+                    "WebSocket server started successfully",
+                );
             }
         });
 
         // Stream stdout to WebSocket
         let instance_name_clone = instance_name.clone();
         let peer_map_clone = peer_map.clone();
-        println!("[embedded_claude] {} - Spawning stdout stream task...", instance_name);
+        let app_handle_stdout = app_handle.clone();
+
+        logging::debug(
+            &app_handle,
+            LogCategory::State,
+            Some(&instance_name),
+            "Spawning stdout stream task...",
+        );
+
         tokio::spawn(async move {
-            println!("[embedded_claude] {} - stdout stream task started", instance_name_clone);
             process::stream_output_to_websocket(
+                app_handle_stdout,
                 stdout,
                 peer_map_clone,
-                instance_name_clone.clone(),
+                instance_name_clone,
                 "stdout",
             )
             .await;
-            println!("[embedded_claude] {} - stdout stream task ended", instance_name_clone);
         });
 
         // Stream stderr to WebSocket
         let instance_name_clone = instance_name.clone();
         let peer_map_clone = peer_map.clone();
-        println!("[embedded_claude] {} - Spawning stderr stream task...", instance_name);
+        let app_handle_stderr = app_handle.clone();
+
+        logging::debug(
+            &app_handle,
+            LogCategory::State,
+            Some(&instance_name),
+            "Spawning stderr stream task...",
+        );
+
         tokio::spawn(async move {
-            println!("[embedded_claude] {} - stderr stream task started", instance_name_clone);
             process::stream_output_to_websocket(
+                app_handle_stderr,
                 stderr,
                 peer_map_clone,
-                instance_name_clone.clone(),
+                instance_name_clone,
                 "stderr",
             )
             .await;
-            println!("[embedded_claude] {} - stderr stream task ended", instance_name_clone);
         });
 
         // Handle stdin from channel
         let instance_name_clone = instance_name.clone();
-        println!("[embedded_claude] {} - Spawning stdin handler task...", instance_name);
+        let app_handle_stdin = app_handle.clone();
+
+        logging::debug(
+            &app_handle,
+            LogCategory::State,
+            Some(&instance_name),
+            "Spawning stdin handler task...",
+        );
+
         tokio::spawn(async move {
-            println!("[embedded_claude] {} - stdin handler task started", instance_name_clone);
-            process::handle_stdin(stdin, stdin_rx, instance_name_clone.clone()).await;
-            println!("[embedded_claude] {} - stdin handler task ended", instance_name_clone);
+            process::handle_stdin(app_handle_stdin, stdin, stdin_rx, instance_name_clone).await;
         });
 
         // Wait for process to exit
         let instance_name_clone = instance_name.clone();
-        println!("[embedded_claude] {} - Spawning process monitor task...", instance_name);
+        let app_handle_process = app_handle.clone();
+
+        logging::debug(
+            &app_handle,
+            LogCategory::State,
+            Some(&instance_name),
+            "Spawning process monitor task...",
+        );
+
         tokio::spawn(async move {
-            println!("[embedded_claude] {} - process monitor task started", instance_name_clone);
-            process::wait_for_process(child, instance_name_clone.clone()).await;
-            println!("[embedded_claude] {} - process monitor task ended", instance_name_clone);
+            process::wait_for_process(app_handle_process, child, instance_name_clone).await;
         });
 
         // Watch for message files
         let instance_name_clone = instance_name.clone();
         let stdin_tx_clone = stdin_tx.clone();
+        let app_handle_messages = app_handle.clone();
+
         tokio::spawn(async move {
-            if let Err(e) = messages::watch_messages(instance_name_clone.clone(), stdin_tx_clone).await {
-                eprintln!("[{}] Message watcher error: {}", instance_name_clone, e);
+            if let Err(e) = messages::watch_messages(app_handle_messages.clone(), instance_name_clone.clone(), stdin_tx_clone).await {
+                logging::error(
+                    &app_handle_messages,
+                    LogCategory::Message,
+                    Some(&instance_name_clone),
+                    format!("Message watcher error: {}", e),
+                );
             }
         });
 

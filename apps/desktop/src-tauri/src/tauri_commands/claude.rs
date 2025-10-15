@@ -6,6 +6,7 @@
 use tauri::{AppHandle, Emitter, State};
 use crate::tauri_commands::types::AppState;
 use agentmux_desktop::embedded_claude;
+use agentmux_desktop::embedded_claude::logging::{self, LogCategory};
 
 #[tauri::command]
 pub async fn spawn_embedded_claude(
@@ -14,21 +15,67 @@ pub async fn spawn_embedded_claude(
     state: State<'_, AppState>,
     app_handle: AppHandle,
 ) -> Result<serde_json::Value, String> {
-    println!("[SPAWN_CLAUDE] ========== START ==========");
-    println!("[SPAWN_CLAUDE] -> Instance name: '{}'", instance_name);
+    logging::info(
+        &app_handle,
+        LogCategory::State,
+        Some(&instance_name),
+        "========== SPAWN_EMBEDDED_CLAUDE START ==========",
+    );
+
+    logging::info(
+        &app_handle,
+        LogCategory::State,
+        Some(&instance_name),
+        format!("Instance name: '{}'", instance_name),
+    );
+
     if let Some(ref path) = workspace_path {
-        println!("[SPAWN_CLAUDE] -> Working directory: '{}'", path);
+        logging::info(
+            &app_handle,
+            LogCategory::State,
+            Some(&instance_name),
+            format!("Working directory: '{}'", path),
+        );
     }
 
     // Find available WebSocket port
-    println!("[SPAWN_CLAUDE] -> Finding available WebSocket port (9000-9999)");
+    logging::info(
+        &app_handle,
+        LogCategory::WebSocket,
+        Some(&instance_name),
+        "Finding available WebSocket port (9000-9999)",
+    );
+
     let ws_port = embedded_claude::find_available_port(9000, 9999)?;
-    println!("[SPAWN_CLAUDE] V Found port: {}", ws_port);
+
+    logging::success(
+        &app_handle,
+        LogCategory::WebSocket,
+        Some(&instance_name),
+        format!("Found port: {}", ws_port),
+    );
 
     // Spawn Claude instance
-    println!("[SPAWN_CLAUDE] -> Spawning Claude instance: name='{}', port={}", instance_name, ws_port);
-    let instance = embedded_claude::ClaudeInstance::spawn(instance_name.clone(), ws_port, workspace_path).await?;
-    println!("[SPAWN_CLAUDE] V Instance spawned: PID={}, port={}", instance.pid, instance.ws_port);
+    logging::info(
+        &app_handle,
+        LogCategory::State,
+        Some(&instance_name),
+        format!("Spawning Claude instance: name='{}', port={}", instance_name, ws_port),
+    );
+
+    let instance = embedded_claude::ClaudeInstance::spawn(
+        app_handle.clone(),
+        instance_name.clone(),
+        ws_port,
+        workspace_path
+    ).await?;
+
+    logging::success(
+        &app_handle,
+        LogCategory::State,
+        Some(&instance_name),
+        format!("Instance spawned: PID={}, port={}", instance.pid, instance.ws_port),
+    );
 
     let result = serde_json::json!({
         "instanceName": instance.instance_name,
@@ -38,22 +85,50 @@ pub async fn spawn_embedded_claude(
     });
 
     // Store instance in state
-    println!("[SPAWN_CLAUDE] -> Storing instance in state");
+    logging::info(
+        &app_handle,
+        LogCategory::State,
+        Some(&instance_name),
+        "Storing instance in state",
+    );
+
     state.claude_instances.lock().await.insert(instance_name.clone(), instance);
-    println!("[SPAWN_CLAUDE] V Instance stored in state");
+
+    logging::success(
+        &app_handle,
+        LogCategory::State,
+        Some(&instance_name),
+        "Instance stored in state",
+    );
 
     // Emit event for UI reactivity
-    println!("[SPAWN_CLAUDE] -> Emitting 'agent_spawned' event");
+    logging::info(
+        &app_handle,
+        LogCategory::State,
+        Some(&instance_name),
+        "Emitting 'agent_spawned' event",
+    );
+
     let _ = app_handle.emit("agent_spawned", serde_json::json!({
         "instance_name": instance_name,
         "pid": result["pid"],
         "ws_port": ws_port,
         "status": "running"
     }));
-    println!("[SPAWN_CLAUDE] V Event emitted");
 
-    println!("[SPAWN_CLAUDE] ========== SUCCESS (instance='{}', PID={}, port={}) ==========",
-        instance_name, result["pid"], ws_port);
+    logging::success(
+        &app_handle,
+        LogCategory::State,
+        Some(&instance_name),
+        "Event emitted",
+    );
+
+    logging::success(
+        &app_handle,
+        LogCategory::State,
+        Some(&instance_name),
+        format!("========== SUCCESS (instance='{}', PID={}, port={}) ==========", instance_name, result["pid"], ws_port),
+    );
 
     Ok(result)
 }
@@ -63,38 +138,109 @@ pub async fn send_claude_input(
     instance_name: String,
     input: String,
     state: State<'_, AppState>,
+    app_handle: AppHandle,
 ) -> Result<(), String> {
-    println!("[SEND_INPUT] ========== START ==========");
-    println!("[SEND_INPUT] -> Instance name: '{}'", instance_name);
-    println!("[SEND_INPUT] -> Input length: {} bytes", input.len());
+    logging::info(
+        &app_handle,
+        LogCategory::Stdin,
+        Some(&instance_name),
+        "========== SEND_CLAUDE_INPUT START ==========",
+    );
 
-    println!("[SEND_INPUT] -> Looking up instance in state");
+    logging::info(
+        &app_handle,
+        LogCategory::Stdin,
+        Some(&instance_name),
+        format!("Instance name: '{}'", instance_name),
+    );
+
+    logging::info(
+        &app_handle,
+        LogCategory::Stdin,
+        Some(&instance_name),
+        format!("Input length: {} bytes", input.len()),
+    );
+
+    logging::info(
+        &app_handle,
+        LogCategory::State,
+        Some(&instance_name),
+        "Looking up instance in state",
+    );
+
     let instances = state.claude_instances.lock().await;
     let instance_count = instances.len();
-    println!("[SEND_INPUT] -> State has {} instance(s)", instance_count);
+
+    logging::info(
+        &app_handle,
+        LogCategory::State,
+        Some(&instance_name),
+        format!("State has {} instance(s)", instance_count),
+    );
 
     let instance = instances.get(&instance_name)
         .ok_or_else(|| {
             let available: Vec<String> = instances.keys().cloned().collect();
-            eprintln!("[SEND_INPUT] X Instance '{}' not found", instance_name);
-            eprintln!("[SEND_INPUT] ! Available instances: {:?}", available);
+            logging::error(
+                &app_handle,
+                LogCategory::State,
+                Some(&instance_name),
+                format!("Instance '{}' not found", instance_name),
+            );
+            logging::warning(
+                &app_handle,
+                LogCategory::State,
+                Some(&instance_name),
+                format!("Available instances: {:?}", available),
+            );
             format!("Instance '{}' not found. Available: {:?}", instance_name, available)
         })?;
 
-    println!("[SEND_INPUT] V Instance found: PID={}, port={}", instance.pid, instance.ws_port);
+    logging::success(
+        &app_handle,
+        LogCategory::State,
+        Some(&instance_name),
+        format!("Instance found: PID={}, port={}", instance.pid, instance.ws_port),
+    );
 
-    println!("[SEND_INPUT] -> Calling send_input()");
+    logging::info(
+        &app_handle,
+        LogCategory::Stdin,
+        Some(&instance_name),
+        "Calling send_input()",
+    );
+
     let result = instance.send_input(input).await;
 
     match result {
         Ok(_) => {
-            println!("[SEND_INPUT] V Input sent successfully");
-            println!("[SEND_INPUT] ========== SUCCESS ==========");
+            logging::success(
+                &app_handle,
+                LogCategory::Stdin,
+                Some(&instance_name),
+                "Input sent successfully",
+            );
+            logging::success(
+                &app_handle,
+                LogCategory::Stdin,
+                Some(&instance_name),
+                "========== SUCCESS ==========",
+            );
             Ok(())
         }
         Err(ref e) => {
-            eprintln!("[SEND_INPUT] X Failed to send input: {}", e);
-            eprintln!("[SEND_INPUT] ========== FAILED ==========");
+            logging::error(
+                &app_handle,
+                LogCategory::Stdin,
+                Some(&instance_name),
+                format!("Failed to send input: {}", e),
+            );
+            logging::error(
+                &app_handle,
+                LogCategory::Stdin,
+                Some(&instance_name),
+                "========== FAILED ==========",
+            );
             result
         }
     }
@@ -103,11 +249,24 @@ pub async fn send_claude_input(
 #[tauri::command]
 pub async fn list_claude_instances(
     state: State<'_, AppState>,
+    app_handle: AppHandle,
 ) -> Result<Vec<serde_json::Value>, String> {
-    println!("[LIST_INSTANCES] -> Retrieving instances from state");
+    logging::info(
+        &app_handle,
+        LogCategory::State,
+        None,
+        "Retrieving instances from state",
+    );
+
     let instances = state.claude_instances.lock().await;
     let count = instances.len();
-    println!("[LIST_INSTANCES] V Found {} instance(s)", count);
+
+    logging::success(
+        &app_handle,
+        LogCategory::State,
+        None,
+        format!("Found {} instance(s)", count),
+    );
 
     let list = instances.iter().map(|(name, instance)| {
         serde_json::json!({
