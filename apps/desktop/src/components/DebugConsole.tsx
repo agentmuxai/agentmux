@@ -182,23 +182,27 @@ export function DebugConsole() {
         <div class="debug-console-content">
           <Show when={logs().length === 0} fallback={
             <For each={logs()}>
-              {(log) => (
-                <div class="debug-log-entry">
-                  <span class="debug-time">{log.time}</span>
-                  <span
-                    class="debug-prefix"
-                    style={log.color ? { color: log.color } : undefined}
-                    classList={{
-                      'debug-prefix-error': log.prefix === '[ERR]',
-                      'debug-prefix-warn': log.prefix === '[WARN]',
-                      'debug-prefix-rust': log.prefix === '[RUST]',
-                    }}
-                  >
-                    {log.prefix}
-                  </span>
-                  <pre class="debug-message" style={log.color ? { color: log.color } : undefined}>{log.message}</pre>
-                </div>
-              )}
+              {(log) => {
+                // Only apply inline color if no CSS class matches
+                const hasClassColor = log.prefix === '[ERR]' || log.prefix === '[WARN]' || log.prefix === '[RUST]';
+                return (
+                  <div class="debug-log-entry">
+                    <span class="debug-time">{log.time}</span>
+                    <span
+                      class="debug-prefix"
+                      style={!hasClassColor && log.color ? { color: log.color } : undefined}
+                      classList={{
+                        'debug-prefix-error': log.prefix === '[ERR]',
+                        'debug-prefix-warn': log.prefix === '[WARN]',
+                        'debug-prefix-rust': log.prefix === '[RUST]',
+                      }}
+                    >
+                      {log.prefix}
+                    </span>
+                    <pre class="debug-message" style={!hasClassColor && log.color ? { color: log.color } : undefined}>{log.message}</pre>
+                  </div>
+                );
+              }}
             </For>
           }>
             <div class="debug-empty">No logs</div>

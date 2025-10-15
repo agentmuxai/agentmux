@@ -26,6 +26,7 @@
     "@agentmux/core": "*",
     "@tauri-apps/api": "^2.2.0",
     "@tauri-apps/plugin-dialog": "^2.4.0",
+    "ansi-to-html": "^0.7.2",
     "solid-js": "^1.9.3"
   },
   "devDependencies": {

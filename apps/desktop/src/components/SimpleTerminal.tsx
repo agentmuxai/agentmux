@@ -1,4 +1,5 @@
 import { Component, onMount, onCleanup, createSignal } from 'solid-js';
+import AnsiToHtml from 'ansi-to-html';
 
 interface SimpleTerminalProps {
   instanceName: string;
@@ -146,18 +147,17 @@ const SimpleTerminal: Component<SimpleTerminalProps> = (props) => {
   );
 };
 
-// Simple ANSI color code parser
+// ANSI color code converter (using ansi-to-html library)
+const ansiConverter = new AnsiToHtml({
+  fg: '#e0e0e0',      // Default foreground color
+  bg: '#0a0a0a',      // Default background color
+  newline: true,      // Convert \n to <br/>
+  escapeXML: true,    // Escape HTML entities
+  stream: false,      // Don't maintain state between calls
+});
+
 function formatOutput(text: string): string {
-  // Convert ANSI codes to HTML
-  return text
-    .replace(/\x1b\[1;32m/g, '<span style="color: #4ade80; font-weight: bold;">')
-    .replace(/\x1b\[1;31m/g, '<span style="color: #ef4444; font-weight: bold;">')
-    .replace(/\x1b\[1;33m/g, '<span style="color: #fbbf24; font-weight: bold;">')
-    .replace(/\x1b\[1;34m/g, '<span style="color: #60a5fa; font-weight: bold;">')
-    .replace(/\x1b\[1;35m/g, '<span style="color: #c084fc; font-weight: bold;">')
-    .replace(/\x1b\[1;36m/g, '<span style="color: #22d3ee; font-weight: bold;">')
-    .replace(/\x1b\[0m/g, '</span>')
-    .replace(/\n/g, '<br/>');
+  return ansiConverter.toHtml(text);
 }
 
 export default SimpleTerminal;
