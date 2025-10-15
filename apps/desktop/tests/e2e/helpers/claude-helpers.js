@@ -59,7 +59,7 @@ export async function spawnClaudeAgent(options = {}) {
     }
   );
 
-  const label = options.label || options.workspacePath.split(/[/\]/).filter(Boolean).pop() || 'Agent';
+  const label = options.label || options.workspacePath.split(/[/\\]/).filter(Boolean).pop() || 'Agent';
   console.log(`[Claude E2E] ✓ Claude agent spawned: ${label}`);
   return label;
 }
