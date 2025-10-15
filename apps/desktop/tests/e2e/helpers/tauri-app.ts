@@ -5,12 +5,14 @@
 import { chromium, Browser, Page } from '@playwright/test';
 import { spawn, ChildProcess } from 'child_process';
 import * as path from 'path';
+import * as fs from 'fs/promises';
 
 export interface TauriAppInstance {
   browser: Browser;
   page: Page;
   process: ChildProcess;
   debugPort: number;
+  userDataDir: string;
 }
 
 /**
@@ -19,11 +21,16 @@ export interface TauriAppInstance {
  */
 export async function launchTauriApp(options?: {
   executablePath?: string;
-  debugPort?: number;
   timeout?: number;
 }): Promise<TauriAppInstance> {
-  const debugPort = options?.debugPort || 9222;
-  const timeout = options?.timeout || 30000;
+  // Generate UNIQUE port for this test instance (9000-9999 range)
+  const debugPort = 9000 + Math.floor(Math.random() * 1000);
+
+  // Create UNIQUE user data directory for this test instance
+  const timestamp = Date.now();
+  const userDataDir = path.join(process.cwd(), 'test-data', `webview2-${timestamp}`);
+
+  const timeout = options?.timeout || 60000; // Increased to 60s for reliability
 
   // Determine the executable path
   // Default: target/release/agentmux.exe or the provided path
@@ -31,15 +38,23 @@ export async function launchTauriApp(options?: {
     path.join(process.cwd(), 'src-tauri', 'target', 'release', 'agentmux.exe');
 
   console.log(`[Tauri E2E] Launching Tauri app from: ${executablePath}`);
-  console.log(`[Tauri E2E] WebView2 debugging port: ${debugPort}`);
+  console.log(`[Tauri E2E] WebView2 debugging port: ${debugPort} (dynamic)`);
+  console.log(`[Tauri E2E] User data directory: ${userDataDir}`);
+
+  // Ensure test-data directory exists
+  await fs.mkdir(path.dirname(userDataDir), { recursive: true });
 
   // Launch the Tauri app with remote debugging enabled
   const tauriProcess = spawn(executablePath, [], {
     env: {
       ...process.env,
-      // Enable WebView2 remote debugging
+      // Enable WebView2 remote debugging with DYNAMIC port
       WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${debugPort}`,
-      // Disable any security restrictions for testing
+      // Set UNIQUE user data folder to avoid lock conflicts
+      WEBVIEW2_USER_DATA_FOLDER: userDataDir,
+      // Disable single-instance check for testing
+      AGENTMUX_DISABLE_SINGLE_INSTANCE: '1',
+      // Debug logging
       RUST_LOG: 'debug',
     },
     stdio: ['pipe', 'pipe', 'pipe'],
@@ -119,6 +134,7 @@ export async function launchTauriApp(options?: {
     page,
     process: tauriProcess,
     debugPort,
+    userDataDir,
   };
 }
 
@@ -160,6 +176,15 @@ export async function closeTauriApp(instance: TauriAppInstance): Promise<void> {
     }
   } catch (error) {
     console.error(`[Tauri E2E] Error killing process:`, error);
+  }
+
+  // Cleanup user data directory
+  try {
+    console.log(`[Tauri E2E] Cleaning up user data directory: ${instance.userDataDir}`);
+    await fs.rm(instance.userDataDir, { recursive: true, force: true });
+    console.log(`[Tauri E2E] ✓ User data directory cleaned up`);
+  } catch (error) {
+    console.warn(`[Tauri E2E] Failed to cleanup user data directory:`, error);
   }
 }
 
