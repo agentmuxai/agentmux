@@ -38,9 +38,9 @@ export const config = {
   capabilities: [{
     maxInstances: 1,
     // Use tauri:options to tell tauri-driver which app to launch
-    // Using debug build which has more recent frontend
+    // Using release build so it serves from dist/ (debug tries to connect to dev server)
     'tauri:options': {
-      application: path.join(__dirname, 'src-tauri', 'target', 'debug', 'agentmux.exe'),
+      application: path.join(__dirname, 'src-tauri', 'target', 'release', 'agentmux.exe'),
     },
   }],
 
@@ -90,9 +90,9 @@ export const config = {
     }
     console.log('[wdio] ✓ Frontend built');
 
-    // Build the Tauri app (debug mode for faster builds)
-    console.log('[wdio] Building Tauri app (debug mode)...');
-    const buildResult = spawnSync('cargo', ['build'], {
+    // Build the Tauri app (release mode to serve from dist/)
+    console.log('[wdio] Building Tauri app (release mode)...');
+    const buildResult = spawnSync('cargo', ['build', '--release'], {
       cwd: path.join(__dirname, 'src-tauri'),
       stdio: 'inherit',
       env: {
