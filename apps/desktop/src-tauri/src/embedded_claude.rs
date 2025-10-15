@@ -276,10 +276,16 @@ async fn handle_websocket_connection(peer_map: PeerMap, raw_stream: TcpStream, a
         match msg {
             Ok(Message::Text(text)) => {
                 incoming_count += 1;
-                println!("[WS:{}] ← Received text message #{}: {}", addr, incoming_count, text);
-                // Forward to Claude stdin
-                if let Err(e) = stdin_tx.send(text.to_string()) {
-                    eprintln!("[WS:{}] ✗ Failed to forward to stdin: {}", addr, e);
+                println!("[WS:{}] ← Received text message #{}: '{}' ({} bytes)", addr, incoming_count, text, text.len());
+                println!("[WS:{}] → Forwarding to stdin channel...", addr);
+                match stdin_tx.send(text.to_string()) {
+                    Ok(_) => {
+                        println!("[WS:{}] ✓ Successfully sent to stdin channel", addr);
+                    }
+                    Err(e) => {
+                        eprintln!("[WS:{}] ✗ Failed to forward to stdin channel: {}", addr, e);
+                        eprintln!("[WS:{}] ✗ This usually means the stdin handler task has stopped", addr);
+                    }
                 }
             }
             Ok(Message::Close(close_frame)) => {
