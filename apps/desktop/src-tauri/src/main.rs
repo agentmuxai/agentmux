@@ -49,8 +49,16 @@ async fn main() {
         std::env::set_var("RUST_LOG", "debug");
     }
 
+    // Check if single-instance check should be disabled (for E2E testing)
+    let disable_single_instance = std::env::var("AGENTMUX_DISABLE_SINGLE_INSTANCE").is_ok();
+    if disable_single_instance {
+        println!("[DEBUG] Single-instance check disabled (E2E test mode)");
+    }
+
     // Check for existing instance BEFORE processing CLI command or launching GUI
-    if let Ok(lock) = ipc::read_lock_file() {
+    // Skip this check if AGENTMUX_DISABLE_SINGLE_INSTANCE is set
+    if !disable_single_instance {
+        if let Ok(lock) = ipc::read_lock_file() {
         if !ipc::is_lock_stale(&lock) {
             // Valid lock file exists - another instance is running
             println!("[IPC] Found running instance (PID: {}, port: {})", lock.pid, lock.ipc_port);
@@ -98,6 +106,7 @@ async fn main() {
             let _ = ipc::remove_lock_file();
         }
     }
+    } // End of single-instance check
     // No lock file or stale lock - continue to start new instance
 
     let claude_instances_arc = Arc::new(Mutex::new(std::collections::HashMap::new()));
