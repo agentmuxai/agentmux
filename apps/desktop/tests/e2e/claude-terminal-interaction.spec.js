@@ -31,7 +31,7 @@ describe('AgentMux - Claude Terminal Interaction', () => {
     // Spawn Claude instance for all tests
     try {
       agentLabel = await spawnClaudeAgent({
-        workspacePath: 'D:\Code\PythonProjects',
+        workspacePath: 'D:\\Code\\PythonProjects',
         label: 'TestAgent',
       });
       console.log(`[Test] ✓ Claude agent spawned: ${agentLabel}`);
