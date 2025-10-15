@@ -61,24 +61,53 @@ export async function launchTauriApp(options?: {
 
   // Wait for the app to start and debugging port to be ready
   console.log(`[Tauri E2E] Waiting for debugging port to be ready...`);
-  await waitForPort(debugPort, timeout);
-  console.log(`[Tauri E2E] ✓ Debugging port ready`);
+  try {
+    await waitForPort(debugPort, timeout);
+    console.log(`[Tauri E2E] ✓ Debugging port ready`);
+  } catch (error) {
+    console.error(`[Tauri E2E] Failed to connect to debugging port:`, error);
+    // Kill the process before re-throwing
+    if (!tauriProcess.killed) {
+      tauriProcess.kill('SIGKILL');
+    }
+    throw error;
+  }
 
   // Connect Playwright to the WebView2 debugging port
   console.log(`[Tauri E2E] Connecting Playwright to debugging port...`);
-  const browser = await chromium.connectOverCDP(`http://localhost:${debugPort}`, {
-    timeout,
-  });
-  console.log(`[Tauri E2E] ✓ Playwright connected`);
+  let browser: Browser;
+  try {
+    browser = await chromium.connectOverCDP(`http://localhost:${debugPort}`, {
+      timeout,
+    });
+    console.log(`[Tauri E2E] ✓ Playwright connected`);
+  } catch (error) {
+    console.error(`[Tauri E2E] Failed to connect Playwright to CDP:`, error);
+    // Kill the process before re-throwing
+    if (!tauriProcess.killed) {
+      tauriProcess.kill('SIGKILL');
+    }
+    throw error;
+  }
 
   // Get the default context and page
   const contexts = browser.contexts();
   if (contexts.length === 0) {
+    // Kill the process before throwing
+    if (!tauriProcess.killed) {
+      tauriProcess.kill('SIGKILL');
+    }
+    await browser.close().catch(() => {});
     throw new Error('No browser contexts found');
   }
 
   const pages = contexts[0].pages();
   if (pages.length === 0) {
+    // Kill the process before throwing
+    if (!tauriProcess.killed) {
+      tauriProcess.kill('SIGKILL');
+    }
+    await browser.close().catch(() => {});
     throw new Error('No pages found in default context');
   }
 
