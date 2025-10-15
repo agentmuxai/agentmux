@@ -497,7 +497,7 @@ async fn spawn_embedded_claude(
     let ws_port = embedded_claude::find_available_port(9000, 9999)?;
 
     // Spawn Claude instance
-    let instance = embedded_claude::ClaudeInstance::spawn(instance_name.clone(), ws_port).await?;
+    let instance = embedded_claude::ClaudeInstance::spawn(instance_name.clone(), ws_port, None).await?;
 
     let result = serde_json::json!({
         "instanceName": instance.instance_name,

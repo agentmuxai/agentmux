@@ -1,8 +1,9 @@
 import { defineConfig } from 'vite';
 import solidPlugin from 'vite-plugin-solid';
+import buildInfoPlugin from './vite-build-info-plugin.js';
 
 export default defineConfig({
-  plugins: [solidPlugin()],
+  plugins: [solidPlugin(), buildInfoPlugin()],
 
   // Tauri expects a fixed port for the dev server
   server: {
