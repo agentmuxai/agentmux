@@ -96,12 +96,24 @@ const SimpleTerminal: Component<SimpleTerminalProps> = (props) => {
   const handleKeyDown = (e: KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      handleSendInput();
+      e.stopPropagation();
+
+      // If input is empty, send bare Enter (CR) for menu confirmation
+      if (!input() || input().trim() === '') {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send('\r');  // Carriage return for menu selection
+          console.log(`[${props.instanceName}] [WS] → Sent Enter key (CR)`);
+        }
+      } else {
+        handleSendInput();
+      }
     } else if (e.key === 'Escape') {
       e.preventDefault();
+      e.stopPropagation();
       setInput('');  // Clear input on Escape
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
+      e.stopPropagation();
       // Send up arrow control sequence
       if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send('\x1b[A');  // ANSI escape code for up arrow
@@ -109,6 +121,7 @@ const SimpleTerminal: Component<SimpleTerminalProps> = (props) => {
       }
     } else if (e.key === 'ArrowDown') {
       e.preventDefault();
+      e.stopPropagation();
       // Send down arrow control sequence
       if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send('\x1b[B');  // ANSI escape code for down arrow
