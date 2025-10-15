@@ -10,11 +10,15 @@ use agentmux_desktop::embedded_claude;
 #[tauri::command]
 pub async fn spawn_embedded_claude(
     instance_name: String,
+    workspace_path: Option<String>,
     state: State<'_, AppState>,
     app_handle: AppHandle,
 ) -> Result<serde_json::Value, String> {
     println!("[SPAWN_CLAUDE] ========== START ==========");
     println!("[SPAWN_CLAUDE] -> Instance name: '{}'", instance_name);
+    if let Some(ref path) = workspace_path {
+        println!("[SPAWN_CLAUDE] -> Working directory: '{}'", path);
+    }
 
     // Find available WebSocket port
     println!("[SPAWN_CLAUDE] -> Finding available WebSocket port (9000-9999)");
@@ -23,7 +27,7 @@ pub async fn spawn_embedded_claude(
 
     // Spawn Claude instance
     println!("[SPAWN_CLAUDE] -> Spawning Claude instance: name='{}', port={}", instance_name, ws_port);
-    let instance = embedded_claude::ClaudeInstance::spawn(instance_name.clone(), ws_port, None).await?;
+    let instance = embedded_claude::ClaudeInstance::spawn(instance_name.clone(), ws_port, workspace_path).await?;
     println!("[SPAWN_CLAUDE] V Instance spawned: PID={}, port={}", instance.pid, instance.ws_port);
 
     let result = serde_json::json!({

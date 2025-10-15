@@ -26,6 +26,7 @@ const AgentsManager: Component = () => {
   const [agentOutput, setAgentOutput] = createSignal('');
   const [newAgentId, setNewAgentId] = createSignal('');
   const [newAgentCommand, setNewAgentCommand] = createSignal('claude');
+  const [workingDirectory, setWorkingDirectory] = createSignal('');
   const [error, setError] = createSignal<string | null>(null);
   const [isSpawning, setIsSpawning] = createSignal(false);
 
@@ -78,8 +79,10 @@ const AgentsManager: Component = () => {
 
     try {
       console.log('[AgentsManager] Invoking spawn_embedded_claude...');
+      const workspacePath = workingDirectory().trim() || null;
       const result: Agent = await invoke('spawn_embedded_claude', {
-        instanceName
+        instanceName,
+        workspacePath
       });
 
       console.log('[AgentsManager] Embedded Claude spawned successfully:', result);
@@ -95,6 +98,7 @@ const AgentsManager: Component = () => {
       // Clear inputs
       setNewAgentId('');
       setNewAgentCommand('claude');
+      setWorkingDirectory('');
       console.log('[AgentsManager] Cleared spawn form');
     } catch (err: any) {
       console.error('[AgentsManager] Failed to spawn instance:', err);
@@ -223,6 +227,17 @@ const AgentsManager: Component = () => {
               placeholder="claude"
               value={newAgentCommand()}
               onInput={(e) => setNewAgentCommand(e.currentTarget.value)}
+              disabled={isSpawning()}
+            />
+          </div>
+
+          <div>
+            <label>Working Directory (optional):</label>
+            <input
+              type="text"
+              placeholder="D:\Code\WebProjects2"
+              value={workingDirectory()}
+              onInput={(e) => setWorkingDirectory(e.currentTarget.value)}
               disabled={isSpawning()}
             />
           </div>
