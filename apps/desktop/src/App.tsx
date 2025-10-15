@@ -5,6 +5,9 @@ import AgentsManager from './components/AgentsManager';
 import MessageStream from './components/MessageStream';
 import { DebugConsole } from './components/DebugConsole';
 
+const BUILD_TIME = '__BUILD_TIME__'; // Replaced at build time
+const VERSION = '__VERSION__'; // Replaced at build time
+
 const App: Component = () => {
   const [activeTab, setActiveTab] = createSignal<'dashboard' | 'bus' | 'agents' | 'messages'>('dashboard');
 
@@ -52,9 +55,9 @@ const App: Component = () => {
       </main>
 
       <footer class="app-footer" data-testid="status-bar">
-        <span data-testid="app-version">AgentMux v{import.meta.env.VITE_APP_VERSION || '0.3.1'}</span>
+        <span data-testid="app-version">AgentMux v{VERSION}</span>
         <span>|</span>
-        <span data-testid="build-timestamp">Built: {import.meta.env.VITE_BUILD_TIME || new Date().toLocaleString('en-US', { timeZone: 'America/Los_Angeles', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: true }) + ' PT'}</span>
+        <span data-testid="build-timestamp">Built: {BUILD_TIME}</span>
         <span>|</span>
         <span data-testid="app-status">Status: Ready</span>
       </footer>
