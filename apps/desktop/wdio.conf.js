@@ -77,6 +77,19 @@ export const config = {
   onPrepare: async function () {
     const { spawn, spawnSync } = await import('child_process');
 
+    // Build the frontend first
+    console.log('[wdio] Building frontend...');
+    const frontendBuild = spawnSync('npm', ['run', 'build'], {
+      cwd: __dirname,
+      stdio: 'inherit',
+      shell: true,
+    });
+
+    if (frontendBuild.status !== 0) {
+      throw new Error('Frontend build failed');
+    }
+    console.log('[wdio] ✓ Frontend built');
+
     // Build the Tauri app (debug mode for faster builds)
     console.log('[wdio] Building Tauri app (debug mode)...');
     const buildResult = spawnSync('cargo', ['build'], {
