@@ -6,15 +6,16 @@ use super::output::{CliResponse, OutputFormat};
 use super::parser::{AgentAction, Command, LogAction, MessageAction, StatusAction};
 use crate::embedded_claude::ClaudeInstancesState;
 use serde_json::json;
-use tauri::State;
+use tauri::{AppHandle, State};
 
 pub async fn handle_command(
     command: Command,
     format: OutputFormat,
     _state: Option<State<'_, ClaudeInstancesState>>,
+    app_handle: Option<AppHandle>,
 ) -> CliResponse {
     match command {
-        Command::Agents { action } => handle_agent_action(action, format, _state).await,
+        Command::Agents { action } => handle_agent_action(action, format, _state, app_handle).await,
         Command::Messages { action } => handle_message_action(action, format).await,
         Command::Status { action } => handle_status_action(action, format).await,
         Command::Logs { action } => handle_log_action(action, format).await,
@@ -25,6 +26,7 @@ async fn handle_agent_action(
     action: AgentAction,
     _format: OutputFormat,
     state: Option<State<'_, ClaudeInstancesState>>,
+    app_handle: Option<AppHandle>,
 ) -> CliResponse {
     match action {
         AgentAction::List => {
@@ -73,7 +75,13 @@ async fn handle_agent_action(
                 };
 
                 // Spawn the instance
-                match crate::embedded_claude::ClaudeInstance::spawn(name.clone(), ws_port, None).await {
+                // Note: Requires AppHandle for logging, return error if not available
+                let app_handle = match app_handle {
+                    Some(h) => h,
+                    None => return CliResponse::error("AppHandle not available in headless mode. Use GUI mode to spawn agents.".to_string()),
+                };
+
+                match crate::embedded_claude::ClaudeInstance::spawn(app_handle, name.clone(), ws_port, None).await {
                     Ok(instance) => {
                         let result = json!({
                             "instanceName": instance.instance_name,

@@ -5,6 +5,7 @@
 
 pub mod types;
 pub mod utils;
+pub mod logging;
 pub mod instance;
 pub mod process;
 pub mod websocket;
