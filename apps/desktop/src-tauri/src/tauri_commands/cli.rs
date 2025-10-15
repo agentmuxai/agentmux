@@ -44,6 +44,7 @@ pub async fn execute_cli_command(
         }),
         format,
         Some(state),
+        Some(app_handle.clone()),
     ).await;
 
     let duration_ms = start.elapsed().as_millis() as u64;

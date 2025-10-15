@@ -118,12 +118,13 @@ async fn main() {
     if let Some(command) = cli.command {
         let format: OutputFormat = cli.json.into();
 
-        // Note: We pass None for state since Tauri isn't initialized yet
+        // Note: We pass None for state and app_handle since Tauri isn't initialized yet
         // This means CLI commands run in a limited mode before GUI starts
         // For full functionality, use --headless mode or run after app starts
         let result = cli::handlers::handle_command(
             command,
             format,
+            None,
             None,
         ).await;
 

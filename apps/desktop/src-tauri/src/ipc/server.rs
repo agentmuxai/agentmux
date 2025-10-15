@@ -269,8 +269,8 @@ async fn execute_ipc_command(command: IpcCommand, app_handle: AppHandle) -> IpcR
         }
     };
 
-    // Execute command (pass None for state as it's not available in IPC context)
-    let result = handle_command(cli_command, OutputFormat::Text, None).await;
+    // Execute command (pass None for state and app_handle as they're not available in IPC context)
+    let result = handle_command(cli_command, OutputFormat::Text, None, None).await;
 
     // Convert result to IPC response
     if result.success {
