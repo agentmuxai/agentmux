@@ -34,5 +34,6 @@ clap = { version = "4.5", features = ["derive"] }
 chrono = { version = "0.4", features = ["serde"] }
 tiny_http = "0.12"
 reqwest = { version = "0.12", features = ["blocking", "json"] }
+portable-pty = "0.8"
 
 [dev-dependencies]
