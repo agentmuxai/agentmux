@@ -130,6 +130,13 @@ const SimpleTerminal: Component<SimpleTerminalProps> = (props) => {
     }
   };
 
+  // Focus handler - clicking anywhere in terminal focuses the input
+  let inputRef: HTMLInputElement | undefined;
+
+  const focusInput = () => {
+    inputRef?.focus();
+  };
+
   onCleanup(() => {
     if (ws) {
       ws.close();
@@ -137,7 +144,11 @@ const SimpleTerminal: Component<SimpleTerminalProps> = (props) => {
   });
 
   return (
-    <div class="simple-terminal">
+    <div
+      class="simple-terminal"
+      onClick={focusInput}
+      tabIndex={-1}
+    >
       <div class="terminal-header">
         <span class="terminal-title">
           <span class={`status-dot ${isConnected() ? 'online' : 'offline'}`}></span>
@@ -157,6 +168,7 @@ const SimpleTerminal: Component<SimpleTerminalProps> = (props) => {
 
       <div class="terminal-input-area">
         <input
+          ref={inputRef}
           type="text"
           class="terminal-input"
           placeholder="Enter to confirm, ↑↓ to navigate, Esc to clear"
@@ -164,6 +176,7 @@ const SimpleTerminal: Component<SimpleTerminalProps> = (props) => {
           onInput={(e) => setInput(e.currentTarget.value)}
           onKeyDown={handleKeyDown}
           disabled={!isConnected()}
+          autofocus
         />
       </div>
     </div>
