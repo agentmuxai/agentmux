@@ -141,6 +141,7 @@ async fn main() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             // Start IPC server for single-instance communication
             if let Err(e) = ipc::start_ipc_server(app.handle().clone()) {

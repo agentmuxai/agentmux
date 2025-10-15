@@ -28,11 +28,11 @@ export default function buildInfoPlugin() {
           hour12: true
         }).format(now);
 
-        // Replace placeholders (both quoted and unquoted)
+        // Replace placeholders (remove quotes from placeholder, add around value)
         code = code.replace(/'__VERSION__'/g, `'${version}'`);
-        code = code.replace(/__VERSION__/g, `'${version}'`);
+        code = code.replace(/__VERSION__/g, version);
         code = code.replace(/'__BUILD_TIME__'/g, `'${pstTime}'`);
-        code = code.replace(/__BUILD_TIME__/g, `'${pstTime}'`);
+        code = code.replace(/__BUILD_TIME__/g, pstTime);
 
         return { code };
       }
