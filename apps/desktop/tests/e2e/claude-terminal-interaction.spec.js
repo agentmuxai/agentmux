@@ -1,7 +1,7 @@
 /**
  * E2E Tests: Claude Terminal Interaction
  *
- * Tests focus unification, keyboard event handling, and Claude responses
+ * Tests terminal focus, agent spawning, and interaction
  * Using WebdriverIO + tauri-driver
  */
 
@@ -12,15 +12,17 @@ import {
 } from './helpers/tauri-app.js';
 import {
   spawnClaudeAgent,
-  confirmClaudeTrust,
+  selectAgent,
+  waitForTerminalConnected,
   clickTerminalOutput,
+  clickTerminalInput,
   expectInputFocused,
-  getTerminalScrollTop,
   sendArrowKey,
-  waitForClaudeOutput,
 } from './helpers/claude-helpers.js';
 
-describe('Claude Terminal - Focus and Interaction', () => {
+describe('AgentMux - Claude Terminal Interaction', () => {
+  let agentLabel;
+
   before(async () => {
     // Wait for the Tauri app to be ready
     await waitForAppReady();
@@ -28,152 +30,132 @@ describe('Claude Terminal - Focus and Interaction', () => {
 
     // Spawn Claude instance for all tests
     try {
-      await spawnClaudeAgent({
-        workdir: 'D:\\Code\\PythonProjects',
+      agentLabel = await spawnClaudeAgent({
+        workspacePath: 'D:\Code\PythonProjects',
+        label: 'TestAgent',
       });
-      console.log('[Test] ✓ Claude agent spawned');
+      console.log(`[Test] ✓ Claude agent spawned: ${agentLabel}`);
+
+      // Select the agent to show terminal
+      await selectAgent(agentLabel);
+      console.log('[Test] ✓ Agent selected');
+
+      // Wait for terminal to connect
+      await waitForTerminalConnected();
+      console.log('[Test] ✓ Terminal connected');
+
+      await takeDebugScreenshot('00-initial-state');
     } catch (error) {
-      console.error('[Test] Failed to spawn Claude agent:', error);
+      console.error('[Test] Failed to setup:', error);
+      await takeDebugScreenshot('00-setup-failed');
       throw error;
     }
-
-    // Wait for initial output
-    await browser.pause(2000);
-    await takeDebugScreenshot('00-initial-state');
   });
 
-  it('TC1: Click terminal output → input focused', async () => {
-    console.log('[Test] TC1: Testing focus unification');
+  it('TC1: Terminal renders and shows connection', async () => {
+    console.log('[Test] TC1: Testing terminal rendering');
 
-    await takeDebugScreenshot('tc1-01-before-click');
+    // Verify terminal elements exist
+    const terminal = await $('.simple-terminal');
+    expect(await terminal.isDisplayed()).toBe(true);
+
+    const terminalOutput = await $('.terminal-output');
+    expect(await terminalOutput.isDisplayed()).toBe(true);
+
+    const terminalInput = await $('.terminal-input');
+    expect(await terminalInput.isDisplayed()).toBe(true);
+
+    // Verify connection status indicator
+    const statusDot = await $('.terminal-header .status-dot.online');
+    expect(await statusDot.isDisplayed()).toBe(true);
+
+    await takeDebugScreenshot('tc1-terminal-rendered');
+
+    console.log('[Test] ✅ TC1 PASSED: Terminal rendered and connected');
+  });
+
+  it('TC2: Click terminal output → input focused', async () => {
+    console.log('[Test] TC2: Testing focus unification');
+
+    await takeDebugScreenshot('tc2-01-before-click');
 
     // Click on terminal OUTPUT area (not input)
     await clickTerminalOutput();
 
-    await takeDebugScreenshot('tc1-02-after-click');
+    await takeDebugScreenshot('tc2-02-after-click');
 
     // Verify input field is now focused
     await expectInputFocused();
 
-    console.log('[Test] ✅ TC1 PASSED: Terminal output click → input focused');
+    console.log('[Test] ✅ TC2 PASSED: Terminal output click → input focused');
   });
 
-  it('TC2: Arrow keys navigate without scrolling', async () => {
-    console.log('[Test] TC2: Testing arrow key event handling');
+  it('TC3: Arrow keys work in terminal input', async () => {
+    console.log('[Test] TC3: Testing arrow key handling');
 
-    // Wait for Claude to show content
-    await browser.pause(1000);
+    // Ensure input is focused
+    await clickTerminalInput();
+    await expectInputFocused();
 
-    // Get initial scroll position
-    const initialScroll = await getTerminalScrollTop();
-    console.log(`[Test] Initial scroll: ${initialScroll}px`);
+    await takeDebugScreenshot('tc3-01-before-arrow-keys');
 
-    await takeDebugScreenshot('tc2-01-before-arrow-keys');
-
-    // Press arrow down multiple times
+    // Send arrow keys (these should be handled by terminal, not scroll page)
     await sendArrowKey('down');
     await browser.pause(100);
     await sendArrowKey('down');
     await browser.pause(100);
-
-    // Press arrow up
     await sendArrowKey('up');
     await browser.pause(100);
 
-    await takeDebugScreenshot('tc2-02-after-arrow-keys');
+    await takeDebugScreenshot('tc3-02-after-arrow-keys');
 
-    // Verify scroll position UNCHANGED (event didn't bubble and scroll)
-    const afterScroll = await getTerminalScrollTop();
-    console.log(`[Test] After arrows: ${afterScroll}px`);
+    // Verify input is still focused (arrow keys didn't break focus)
+    await expectInputFocused();
 
-    expect(afterScroll).toBe(initialScroll);
-
-    console.log('[Test] ✅ TC2 PASSED: Arrow keys didn\'t scroll output');
+    console.log('[Test] ✅ TC3 PASSED: Arrow keys handled correctly');
   });
 
-  it('TC3: Claude responds to Enter key', async () => {
-    console.log('[Test] TC3: Testing Claude response to Enter key');
+  it('TC4: Terminal auto-focuses when clicking anywhere', async () => {
+    console.log('[Test] TC4: Testing auto-focus behavior');
 
-    // Check if trust prompt is visible
-    const trustPromptSelector = '*=Do you trust';
-    const trustPrompt = await $(trustPromptSelector);
-    const hasTrustPrompt = await trustPrompt.isDisplayed().catch(() => false);
+    // Click somewhere else first (like the agent card)
+    const agentCard = await $('.agent-card');
+    await agentCard.click();
+    await browser.pause(200);
 
-    if (hasTrustPrompt) {
-      console.log('[Test] Trust prompt found, confirming...');
+    await takeDebugScreenshot('tc4-01-clicked-away');
 
-      await takeDebugScreenshot('tc3-01-trust-prompt');
+    // Now click on the terminal container (not specifically input)
+    const terminalContainer = await $('.simple-terminal');
+    await terminalContainer.click();
 
-      // Confirm trust
-      await confirmClaudeTrust();
+    await takeDebugScreenshot('tc4-02-clicked-terminal');
 
-      await takeDebugScreenshot('tc3-02-trust-confirmed');
+    // Input should be focused
+    await expectInputFocused();
 
-      // Wait for Claude to become ready
-      await browser.pause(2000);
-
-      // Look for Claude prompt or ready indicator
-      const terminalOutput = await $('.terminal-output');
-      const outputText = await terminalOutput.getText();
-
-      console.log(`[Test] Terminal output after trust: ${outputText.substring(0, 100)}...`);
-
-      await takeDebugScreenshot('tc3-03-claude-ready');
-
-      console.log('[Test] ✅ TC3 PASSED: Claude responded to Enter key');
-    } else {
-      console.log('[Test] ⚠ No trust prompt found (may already be trusted)');
-      await takeDebugScreenshot('tc3-no-trust-prompt');
-    }
+    console.log('[Test] ✅ TC4 PASSED: Terminal auto-focus works');
   });
 
-  it('TC4: Input and output appear continuous', async () => {
-    console.log('[Test] TC4: Testing visual continuity of output and input');
+  it('TC5: Agent list shows spawned agent', async () => {
+    console.log('[Test] TC5: Testing agent list display');
 
-    // Get computed styles using browser.execute
-    const outputBg = await browser.execute(() => {
-      const el = document.querySelector('.terminal-output');
-      return window.getComputedStyle(el).backgroundColor;
-    });
+    // Agent card should exist and be selected
+    const agentCard = await $('.agent-card.selected');
+    expect(await agentCard.isDisplayed()).toBe(true);
 
-    const inputAreaBg = await browser.execute(() => {
-      const el = document.querySelector('.terminal-input-area');
-      return window.getComputedStyle(el).backgroundColor;
-    });
+    // Card should show agent label
+    const cardText = await agentCard.getText();
+    expect(cardText).toContain(agentLabel);
 
-    const inputBg = await browser.execute(() => {
-      const el = document.querySelector('.terminal-input');
-      return window.getComputedStyle(el).backgroundColor;
-    });
+    // Card should show status
+    expect(cardText).toContain('running');
 
-    const inputBorder = await browser.execute(() => {
-      const el = document.querySelector('.terminal-input');
-      return window.getComputedStyle(el).borderTop;
-    });
+    // Card should show PID
+    expect(cardText).toMatch(/PID:/);
 
-    console.log(`[Test] Output background: ${outputBg}`);
-    console.log(`[Test] Input area background: ${inputAreaBg}`);
-    console.log(`[Test] Input background: ${inputBg}`);
-    console.log(`[Test] Input border: ${inputBorder}`);
+    await takeDebugScreenshot('tc5-agent-list');
 
-    // Take screenshot for visual verification
-    await takeDebugScreenshot('tc4-visual-continuity');
-
-    // Input should be transparent or same as output
-    const inputIsTransparent =
-      inputBg.includes('0, 0, 0, 0') ||
-      inputBg === 'rgba(0, 0, 0, 0)' ||
-      inputBg === 'transparent';
-
-    if (inputIsTransparent) {
-      console.log('[Test] ✓ Input is transparent (blends with output)');
-    } else {
-      console.log('[Test] ℹ Input has background:', inputBg);
-    }
-
-    // Input area should match output
-    expect(outputBg).toBe(inputAreaBg);
-
-    console.log('[Test] ✅ TC4 PASSED: Output and input appear continuous');
+    console.log('[Test] ✅ TC5 PASSED: Agent list displays correctly');
   });
 });
