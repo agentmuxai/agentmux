@@ -172,13 +172,13 @@ const MessageStream: Component = () => {
   return (
     <div>
       <div class="card">
-        <div style={{ display: 'flex', 'justify-content': 'space-between', 'align-items': 'center', 'margin-bottom': '1rem' }}>
+        <div style={{ display: 'flex', 'justify-content': 'space-between', 'align-items': 'center', 'margin-bottom': '0.125rem' }}>
           <div>
             <h2>Message Stream</h2>
             <div style={{
               color: watcherStatus() === 'running' ? '#66bb6a' : watcherStatus() === 'error' ? '#ef5350' : '#999',
               'font-size': '0.85rem',
-              'margin-top': '0.25rem'
+              'margin-top': '0.125rem'
             }}>
               Watcher: {watcherStatus()}
             </div>
@@ -190,21 +190,21 @@ const MessageStream: Component = () => {
             <button
               class="secondary"
               onClick={() => setPaused(!paused())}
-              style={{ padding: '0.5rem 1rem', 'font-size': '0.85rem' }}
+              style={{ padding: '0.125rem 0.25rem', 'font-size': '0.85rem' }}
             >
               {paused() ? '▶️ Resume' : '⏸️ Pause'}
             </button>
             <button
               class="danger"
               onClick={clearMessages}
-              style={{ padding: '0.5rem 1rem', 'font-size': '0.85rem' }}
+              style={{ padding: '0.125rem 0.25rem', 'font-size': '0.85rem' }}
             >
               🗑️ Clear
             </button>
           </div>
         </div>
 
-        <div style={{ 'margin-bottom': '1rem', display: 'flex', gap: '1rem', 'align-items': 'center' }}>
+        <div style={{ 'margin-bottom': '0.125rem', display: 'flex', gap: '1rem', 'align-items': 'center' }}>
           <input
             type="text"
             placeholder="Filter messages (sender, type, payload...)"
@@ -215,7 +215,7 @@ const MessageStream: Component = () => {
           <select
             value={maxMessages()}
             onChange={(e) => setMaxMessages(parseInt(e.currentTarget.value))}
-            style={{ background: '#1a1a1a', border: '1px solid #3a3a3a', color: '#e0e0e0', padding: '0.5rem', 'border-radius': '4px' }}
+            style={{ background: '#1a1a1a', border: '1px solid #3a3a3a', color: '#e0e0e0', padding: '0.25rem', 'border-radius': '4px' }}
           >
             <option value="50">Last 50</option>
             <option value="100">Last 100</option>
@@ -232,14 +232,14 @@ const MessageStream: Component = () => {
             background: '#0a0a0a',
             border: '1px solid #2a2a2a',
             'border-radius': '8px',
-            padding: '1rem'
+            padding: '0.5rem'
           }}
         >
           {filteredMessages().length === 0 ? (
             <div style={{
               color: '#666',
               'text-align': 'center',
-              padding: '3rem',
+              padding: '1.5rem',
               'font-size': '0.95rem'
             }}>
               {messages().length === 0
@@ -255,8 +255,8 @@ const MessageStream: Component = () => {
                     background: '#1a1a1a',
                     border: '1px solid #2a2a2a',
                     'border-radius': '6px',
-                    padding: '1rem',
-                    'margin-bottom': '0.75rem',
+                    padding: '0.5rem',
+                    'margin-bottom': '0.375rem',
                     'font-family': 'monospace',
                     'font-size': '0.85rem'
                   }}
@@ -264,9 +264,9 @@ const MessageStream: Component = () => {
                   <div style={{
                     display: 'flex',
                     'justify-content': 'space-between',
-                    'margin-bottom': '0.5rem',
+                    'margin-bottom': '0.125rem',
                     'border-bottom': '1px solid #2a2a2a',
-                    'padding-bottom': '0.5rem'
+                    'padding-bottom': '0.25rem'
                   }}>
                     <div style={{ display: 'flex', gap: '1rem', 'align-items': 'center' }}>
                       <span style={{ color: '#4a9eff', 'font-weight': 'bold' }}>
@@ -281,7 +281,7 @@ const MessageStream: Component = () => {
                         style={{
                           background: message.priority === 'urgent' ? '#4a2a2a' : '#2a2a4a',
                           color: message.priority === 'urgent' ? '#ff9c9c' : '#9c9cff',
-                          padding: '0.25rem 0.5rem',
+                          padding: '0.125rem 0.25rem',
                           'border-radius': '4px',
                           'font-size': '0.75rem',
                           'font-weight': 'bold'
@@ -298,13 +298,13 @@ const MessageStream: Component = () => {
                   <div style={{
                     color: '#e0e0e0',
                     background: '#0a0a0a',
-                    padding: '0.75rem',
+                    padding: '0.375rem',
                     'border-radius': '4px',
                     'white-space': 'pre-wrap',
                     'word-break': 'break-word',
                     'max-height': '300px',
                     'overflow-y': 'auto',
-                    'margin-bottom': '0.5rem'
+                    'margin-bottom': '0.125rem'
                   }}>
                     {message.payload.text}
                   </div>
@@ -329,7 +329,7 @@ const MessageStream: Component = () => {
                         background: '#2a4a2a',
                         color: '#9cff9c',
                         border: 'none',
-                        padding: '0.35rem 0.75rem',
+                        padding: '0.175rem 0.375rem',
                         'border-radius': '4px',
                         cursor: 'pointer',
                         'font-size': '0.75rem',
@@ -370,15 +370,15 @@ const MessageStream: Component = () => {
 
             <div style={{
               background: '#1a1a1a',
-              padding: '1rem',
+              padding: '0.5rem',
               'border-radius': '6px',
-              'margin-bottom': '1rem',
+              'margin-bottom': '0.125rem',
               border: '1px solid #2a2a2a'
             }}>
               <div style={{
                 color: '#999',
                 'font-size': '0.85rem',
-                'margin-bottom': '0.5rem'
+                'margin-bottom': '0.125rem'
               }}>
                 Original message:
               </div>
@@ -397,11 +397,11 @@ const MessageStream: Component = () => {
                 background: '#1a1a1a',
                 border: '1px solid #3a3a3a',
                 color: '#e0e0e0',
-                padding: '1rem',
+                padding: '0.5rem',
                 'border-radius': '6px',
                 'font-family': 'inherit',
                 'font-size': '0.95rem',
-                'margin-bottom': '1rem',
+                'margin-bottom': '0.125rem',
                 resize: 'vertical'
               }}
             />
@@ -414,7 +414,7 @@ const MessageStream: Component = () => {
               <button
                 class="secondary"
                 onClick={cancelReply}
-                style={{ padding: '0.75rem 1.5rem' }}
+                style={{ padding: '0.375rem 0.75rem' }}
               >
                 Cancel
               </button>
@@ -422,7 +422,7 @@ const MessageStream: Component = () => {
                 onClick={sendReply}
                 disabled={!replyText().trim()}
                 style={{
-                  padding: '0.75rem 1.5rem',
+                  padding: '0.375rem 0.75rem',
                   background: replyText().trim() ? '#2a4a2a' : '#1a1a1a',
                   color: replyText().trim() ? '#9cff9c' : '#666',
                   border: 'none',
@@ -441,8 +441,8 @@ const MessageStream: Component = () => {
       <div class="card">
         <h2>Message Statistics</h2>
         <div style={{ display: 'grid', 'grid-template-columns': 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem' }}>
-          <div style={{ background: '#1a1a1a', padding: '1rem', 'border-radius': '6px' }}>
-            <div style={{ color: '#999', 'font-size': '0.85rem', 'margin-bottom': '0.25rem' }}>
+          <div style={{ background: '#1a1a1a', padding: '0.5rem', 'border-radius': '6px' }}>
+            <div style={{ color: '#999', 'font-size': '0.85rem', 'margin-bottom': '0.125rem' }}>
               Total Messages
             </div>
             <div style={{ color: '#4a9eff', 'font-size': '1.5rem', 'font-weight': 'bold' }}>
@@ -450,8 +450,8 @@ const MessageStream: Component = () => {
             </div>
           </div>
 
-          <div style={{ background: '#1a1a1a', padding: '1rem', 'border-radius': '6px' }}>
-            <div style={{ color: '#999', 'font-size': '0.85rem', 'margin-bottom': '0.25rem' }}>
+          <div style={{ background: '#1a1a1a', padding: '0.5rem', 'border-radius': '6px' }}>
+            <div style={{ color: '#999', 'font-size': '0.85rem', 'margin-bottom': '0.125rem' }}>
               Broadcasts
             </div>
             <div style={{ color: '#ff9800', 'font-size': '1.5rem', 'font-weight': 'bold' }}>
@@ -459,8 +459,8 @@ const MessageStream: Component = () => {
             </div>
           </div>
 
-          <div style={{ background: '#1a1a1a', padding: '1rem', 'border-radius': '6px' }}>
-            <div style={{ color: '#999', 'font-size': '0.85rem', 'margin-bottom': '0.25rem' }}>
+          <div style={{ background: '#1a1a1a', padding: '0.5rem', 'border-radius': '6px' }}>
+            <div style={{ color: '#999', 'font-size': '0.85rem', 'margin-bottom': '0.125rem' }}>
               Direct Messages
             </div>
             <div style={{ color: '#66bb6a', 'font-size': '1.5rem', 'font-weight': 'bold' }}>
@@ -468,8 +468,8 @@ const MessageStream: Component = () => {
             </div>
           </div>
 
-          <div style={{ background: '#1a1a1a', padding: '1rem', 'border-radius': '6px' }}>
-            <div style={{ color: '#999', 'font-size': '0.85rem', 'margin-bottom': '0.25rem' }}>
+          <div style={{ background: '#1a1a1a', padding: '0.5rem', 'border-radius': '6px' }}>
+            <div style={{ color: '#999', 'font-size': '0.85rem', 'margin-bottom': '0.125rem' }}>
               Stream Status
             </div>
             <div style={{

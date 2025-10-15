@@ -151,7 +151,7 @@ const Dashboard: Component = () => {
           <span>Status: {busRunning() ? 'Running' : 'Stopped'}</span>
         </div>
         {error() && (
-          <div style={{ color: '#ef5350', 'margin-bottom': '1rem', 'font-size': '0.9rem' }}>
+          <div style={{ color: '#ef5350', 'margin-bottom': '0.5rem', 'font-size': '0.9rem' }}>
             Error: {error()}
           </div>
         )}
@@ -190,7 +190,7 @@ const Dashboard: Component = () => {
             ? 'Bus is running. Agents can connect at ws://localhost:8765/ws'
             : 'Start the bus to begin monitoring agents.'}
         </p>
-        <p style={{ color: '#666', 'font-size': '0.9rem', 'margin-top': '1rem' }}>
+        <p style={{ color: '#666', 'font-size': '0.9rem', 'margin-top': '0.5rem' }}>
           💡 Tip: Go to the Agents tab to spawn reactive Claude instances
         </p>
       </div>
