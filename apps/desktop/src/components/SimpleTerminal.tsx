@@ -93,10 +93,13 @@ const SimpleTerminal: Component<SimpleTerminalProps> = (props) => {
     }
   };
 
-  const handleKeyPress = (e: KeyboardEvent) => {
+  const handleKeyDown = (e: KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSendInput();
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      setInput('');  // Clear input on Escape
     }
   };
 
@@ -129,19 +132,12 @@ const SimpleTerminal: Component<SimpleTerminalProps> = (props) => {
         <input
           type="text"
           class="terminal-input"
-          placeholder="Type your input and press Enter..."
+          placeholder="Type your input and press Enter... (Esc to clear)"
           value={input()}
           onInput={(e) => setInput(e.currentTarget.value)}
-          onKeyPress={handleKeyPress}
+          onKeyDown={handleKeyDown}
           disabled={!isConnected()}
         />
-        <button
-          class="terminal-send"
-          onClick={handleSendInput}
-          disabled={!isConnected() || !input()}
-        >
-          Send
-        </button>
       </div>
     </div>
   );

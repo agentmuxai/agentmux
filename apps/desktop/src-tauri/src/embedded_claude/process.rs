@@ -26,7 +26,7 @@ fn create_claude_settings(workspace_path: &str, app_handle: &AppHandle, instance
             logging::error(app_handle, LogCategory::Process, Some(instance_name), &err_msg);
             err_msg
         })?;
-        logging::debug(app_handle, LogCategory::Process, Some(instance_name), "Created .claude directory");
+        logging::info(app_handle, LogCategory::Process, Some(instance_name), format!("Created directory: {}", claude_dir.display()));
     }
 
     // Create settings file if it doesn't exist
@@ -134,6 +134,10 @@ pub fn spawn_claude_process(
 
     // Build Claude command with PTY
     let mut cmd = CommandBuilder::new("claude");
+
+    // Set terminal environment variables for proper TUI rendering
+    cmd.env("TERM", "xterm-256color");
+    cmd.env("COLORTERM", "truecolor");
 
     // Set working directory if provided
     if let Some(path) = workspace_path {
@@ -417,11 +421,12 @@ pub async fn handle_pty_stdin(
         input_count += 1;
         logging::log_stdin_write(&app_handle, &instance_name, input_count, input.len());
 
-        // Write to PTY master
+        // Write to PTY master - take_writer() should be callable multiple times
         let write_result = {
-            let pty = pty_master.lock().await;
+            let mut pty = pty_master.lock().await;
             match pty.take_writer() {
                 Ok(mut writer) => {
+                    // Write in blocking context to avoid blocking async runtime
                     tokio::task::spawn_blocking(move || {
                         use std::io::Write;
                         writer.write_all(input.as_bytes())?;
