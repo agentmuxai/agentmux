@@ -34,27 +34,19 @@ impl ClaudeInstance {
     ) -> Result<Self, String> {
         logging::log_state_change(&app_handle, Some(&instance_name), "Spawning new instance");
 
-        // Spawn Claude CLI process
-        let (child, stdout, stderr, stdin) =
+        // Spawn Claude CLI process in PTY
+        let (child, pty_master, pid) =
             process::spawn_claude_process(&app_handle, &instance_name, workspace_path)?;
-
-        let pid = child.id().ok_or_else(|| {
-            let err_msg = "Failed to get PID";
-            logging::error(
-                &app_handle,
-                LogCategory::Process,
-                Some(&instance_name),
-                err_msg,
-            );
-            err_msg.to_string()
-        })?;
 
         logging::success(
             &app_handle,
             LogCategory::Process,
             Some(&instance_name),
-            format!("Process spawned with PID: {}", pid),
+            format!("Claude CLI spawned in PTY with PID: {}", pid),
         );
+
+        // Wrap PTY master in Arc<Mutex> for shared access
+        let pty_master = Arc::new(Mutex::new(pty_master));
 
         // Create channel for stdin
         let (stdin_tx, stdin_rx) = mpsc::unbounded_channel::<String>();
@@ -97,68 +89,46 @@ impl ClaudeInstance {
             }
         });
 
-        // Stream stdout to WebSocket
+        // Stream PTY output to WebSocket (combined stdout/stderr)
         let instance_name_clone = instance_name.clone();
         let peer_map_clone = peer_map.clone();
-        let app_handle_stdout = app_handle.clone();
+        let app_handle_pty = app_handle.clone();
+        let pty_master_output = pty_master.clone();
 
         logging::debug(
             &app_handle,
             LogCategory::State,
             Some(&instance_name),
-            "Spawning stdout stream task...",
+            "Spawning PTY output stream task...",
         );
 
         tokio::spawn(async move {
-            process::stream_output_to_websocket(
-                app_handle_stdout,
-                stdout,
+            process::stream_pty_to_websocket(
+                app_handle_pty,
+                pty_master_output,
                 peer_map_clone,
                 instance_name_clone,
-                "stdout",
             )
             .await;
         });
 
-        // Stream stderr to WebSocket
-        let instance_name_clone = instance_name.clone();
-        let peer_map_clone = peer_map.clone();
-        let app_handle_stderr = app_handle.clone();
-
-        logging::debug(
-            &app_handle,
-            LogCategory::State,
-            Some(&instance_name),
-            "Spawning stderr stream task...",
-        );
-
-        tokio::spawn(async move {
-            process::stream_output_to_websocket(
-                app_handle_stderr,
-                stderr,
-                peer_map_clone,
-                instance_name_clone,
-                "stderr",
-            )
-            .await;
-        });
-
-        // Handle stdin from channel
+        // Handle PTY stdin from channel
         let instance_name_clone = instance_name.clone();
         let app_handle_stdin = app_handle.clone();
+        let pty_master_stdin = pty_master.clone();
 
         logging::debug(
             &app_handle,
             LogCategory::State,
             Some(&instance_name),
-            "Spawning stdin handler task...",
+            "Spawning PTY stdin handler task...",
         );
 
         tokio::spawn(async move {
-            process::handle_stdin(app_handle_stdin, stdin, stdin_rx, instance_name_clone).await;
+            process::handle_pty_stdin(app_handle_stdin, pty_master_stdin, stdin_rx, instance_name_clone).await;
         });
 
-        // Wait for process to exit
+        // Wait for PTY process to exit
         let instance_name_clone = instance_name.clone();
         let app_handle_process = app_handle.clone();
 
@@ -166,11 +136,11 @@ impl ClaudeInstance {
             &app_handle,
             LogCategory::State,
             Some(&instance_name),
-            "Spawning process monitor task...",
+            "Spawning PTY process monitor task...",
         );
 
         tokio::spawn(async move {
-            process::wait_for_process(app_handle_process, child, instance_name_clone).await;
+            process::wait_for_pty_process(app_handle_process, child, instance_name_clone).await;
         });
 
         // Watch for message files
