@@ -1,5 +1,4 @@
 import { Component, onMount, onCleanup, createSignal } from 'solid-js';
-import { invoke } from '@tauri-apps/api/core';
 
 interface SimpleTerminalProps {
   instanceName: string;
@@ -74,18 +73,21 @@ const SimpleTerminal: Component<SimpleTerminalProps> = (props) => {
     }
   };
 
-  const handleSendInput = async () => {
+  const handleSendInput = () => {
     const text = input();
-    if (!text) return;
+    if (!text || !ws || ws.readyState !== WebSocket.OPEN) {
+      console.warn(`[${props.instanceName}] Cannot send: ${!text ? 'empty input' : 'WebSocket not ready'}`);
+      return;
+    }
 
     try {
-      await invoke('send_claude_input', {
-        instanceName: props.instanceName,
-        input: text + '\n',
-      });
+      console.log(`[${props.instanceName}] [WS] → Sending input: "${text}" (${text.length} chars)`);
+      ws.send(text + '\n');
+      console.log(`[${props.instanceName}] [WS] ✓ Input sent successfully`);
       setInput('');
+      setError(null);
     } catch (err: any) {
-      console.error(`[${props.instanceName}] Failed to send input:`, err);
+      console.error(`[${props.instanceName}] [WS] ✗ Failed to send input:`, err);
       setError(err.toString());
     }
   };
