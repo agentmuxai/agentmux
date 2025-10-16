@@ -1,4 +1,4 @@
-import { Component, createSignal, For, Show } from 'solid-js';
+import { Component, createSignal, For, Show, onMount, createEffect } from 'solid-js';
 import { invoke } from '@tauri-apps/api/core';
 import EmbeddedTerminal from './EmbeddedTerminal';
 
@@ -21,12 +21,45 @@ interface PaneContainerProps {
   onPanesChange?: (count: number) => void;
 }
 
+interface PersistedLayout {
+  panes: Array<{ id: string; agentInstanceName: string | null }>;
+  orientation: SplitOrientation;
+  activePaneId: string;
+}
+
+// localStorage helpers
+const STORAGE_KEY = 'agentmux.layout';
+
+const saveLayout = (layout: PersistedLayout) => {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(layout));
+    console.log('[PaneContainer] Layout saved to localStorage');
+  } catch (err) {
+    console.error('[PaneContainer] Failed to save layout:', err);
+  }
+};
+
+const loadLayout = (): PersistedLayout | null => {
+  try {
+    const stored = localStorage.getItem(STORAGE_KEY);
+    if (stored) {
+      const layout = JSON.parse(stored);
+      console.log('[PaneContainer] Layout restored from localStorage:', layout);
+      return layout;
+    }
+  } catch (err) {
+    console.error('[PaneContainer] Failed to load layout:', err);
+  }
+  return null;
+};
+
 const PaneContainer: Component<PaneContainerProps> = (props) => {
   const [panes, setPanes] = createSignal<Pane[]>([
     { id: 'pane-1', agent: null, isLoading: true }
   ]);
   const [orientation, setOrientation] = createSignal<SplitOrientation>('vertical');
   const [activePaneId, setActivePaneId] = createSignal<string>('pane-1');
+  const [isRestoring, setIsRestoring] = createSignal(false);
 
   // Auto-spawn agent for first pane
   const spawnAgentForPane = async (paneId: string) => {
@@ -72,8 +105,68 @@ const PaneContainer: Component<PaneContainerProps> = (props) => {
     }
   };
 
-  // Initialize first pane
-  setTimeout(() => spawnAgentForPane('pane-1'), 100);
+  // Restore layout from localStorage on mount
+  onMount(async () => {
+    const savedLayout = loadLayout();
+
+    if (savedLayout && savedLayout.panes.length > 0) {
+      setIsRestoring(true);
+      console.log('[PaneContainer] Restoring layout...');
+
+      // Get existing agents
+      const existingAgents: Agent[] = await invoke('list_claude_instances').catch(() => []);
+
+      // Restore panes
+      const restoredPanes: Pane[] = savedLayout.panes.map(savedPane => {
+        const agent = savedPane.agentInstanceName
+          ? existingAgents.find(a => a.instanceName === savedPane.agentInstanceName) || null
+          : null;
+
+        return {
+          id: savedPane.id,
+          agent,
+          isLoading: !agent // Will spawn if no agent found
+        };
+      });
+
+      setPanes(restoredPanes);
+      setOrientation(savedLayout.orientation);
+      setActivePaneId(savedLayout.activePaneId);
+      props.onPanesChange?.(restoredPanes.length);
+
+      // Spawn agents for panes that need them
+      for (const pane of restoredPanes) {
+        if (!pane.agent) {
+          spawnAgentForPane(pane.id);
+        }
+      }
+
+      setIsRestoring(false);
+    } else {
+      // No saved layout, initialize first pane
+      setTimeout(() => spawnAgentForPane('pane-1'), 100);
+    }
+  });
+
+  // Save layout to localStorage whenever it changes
+  createEffect(() => {
+    if (isRestoring()) return; // Don't save during restoration
+
+    const currentPanes = panes();
+    const currentOrientation = orientation();
+    const currentActivePaneId = activePaneId();
+
+    const layout: PersistedLayout = {
+      panes: currentPanes.map(p => ({
+        id: p.id,
+        agentInstanceName: p.agent?.instanceName || null
+      })),
+      orientation: currentOrientation,
+      activePaneId: currentActivePaneId
+    };
+
+    saveLayout(layout);
+  });
 
   const splitVertical = () => {
     const newPaneId = `pane-${Date.now()}`;
