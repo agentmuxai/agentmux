@@ -110,7 +110,10 @@ See [apps/wrapper/docs/DEPLOYMENT.md](../apps/wrapper/docs/DEPLOYMENT.md) for se
 - **[PROJECT_REORGANIZATION_SPEC.md](PROJECT_REORGANIZATION_SPEC.md)** - Project roadmap
 
 ### Archive
-- **[archive/2025-10/](archive/2025-10/)** - Old test reports and notes
+- **[archive/2025-10/](archive/2025-10/)** - Historical documentation
+  - **[desktop/](archive/2025-10/desktop/)** - Desktop app temp docs (E2E testing, terminal fixes, analysis)
+  - **[root/](archive/2025-10/root/)** - Root workspace temp docs (PTY, debugging, releases)
+  - Includes: Test reports, retrospectives, implementation summaries, debug analyses
 
 ---
 

@@ -17,6 +17,7 @@ build/
 # OS
 .DS_Store
 Thumbs.db
+*.exe
 
 # Logs
 *.log
