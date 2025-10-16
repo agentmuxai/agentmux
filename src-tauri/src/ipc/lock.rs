@@ -105,10 +105,16 @@ fn is_process_running(pid: u32) -> bool {
 #[cfg(windows)]
 fn is_process_running(pid: u32) -> bool {
     use std::process::Command;
+    use std::os::windows::process::CommandExt;
 
     // Use tasklist to check if process exists
-    Command::new("tasklist")
+    // Apply CREATE_NO_WINDOW flag to prevent console window flash
+    let mut command = Command::new("tasklist");
+    command
         .args(["/FI", &format!("PID eq {}", pid), "/NH"])
+        .creation_flags(0x08000000); // CREATE_NO_WINDOW
+
+    command
         .output()
         .map(|output| {
             let stdout = String::from_utf8_lossy(&output.stdout);
