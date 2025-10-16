@@ -1,6 +1,6 @@
 {
   "name": "@agentmux/desktop",
-  "version": "0.3.27",
+  "version": "0.3.28",
   "description": "AgentMux Desktop - Native desktop app for agent monitoring and orchestration",
   "type": "module",
   "scripts": {
