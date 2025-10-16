@@ -951,3 +951,124 @@ button.danger:disabled {
   flex: 1;
   overflow: hidden;
 }
+
+/* ========================================
+   Phase 2: Split Pane Layout
+   ======================================== */
+
+/* Pane Container Layouts */
+.pane-container {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+  background: #1a1a1a;
+  gap: 4px;
+}
+
+.pane-container-single {
+  flex-direction: column;
+}
+
+.pane-container-vertical {
+  flex-direction: row;
+}
+
+.pane-container-horizontal {
+  flex-direction: column;
+}
+
+.pane-container-grid {
+  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+}
+
+/* Individual Pane */
+.pane {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  background: #1e1e1e;
+  border: 2px solid transparent;
+  transition: border-color 0.2s;
+  overflow: hidden;
+  min-width: 300px;
+  min-height: 200px;
+}
+
+.pane:hover {
+  border-color: #333;
+}
+
+.pane-active {
+  border-color: #4a9eff !important;
+}
+
+/* Pane Header */
+.pane-header {
+  background: #2a2a2a;
+  padding: 0.5rem 1rem;
+  border-bottom: 1px solid #3a3a3a;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.9rem;
+}
+
+.pane-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 500;
+  color: #e0e0e0;
+}
+
+.pane-close-btn {
+  background: transparent;
+  border: none;
+  color: #999;
+  font-size: 1.2rem;
+  cursor: pointer;
+  padding: 0.25rem 0.5rem;
+  line-height: 1;
+  transition: color 0.2s;
+  border-radius: 3px;
+}
+
+.pane-close-btn:hover {
+  color: #e0e0e0;
+  background: #3a3a3a;
+}
+
+/* Pane Content */
+.pane-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.pane-loading {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  color: #999;
+}
+
+.pane-loading p {
+  font-size: 0.9rem;
+}
+
+/* Menubar disabled state */
+.menubar-item:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.menubar-item:disabled:hover {
+  background: transparent;
+}

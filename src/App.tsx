@@ -1,6 +1,6 @@
 import { Component, createSignal } from 'solid-js';
 import Menubar from './components/Menubar';
-import TerminalWorkspace from './components/TerminalWorkspace';
+import PaneContainer from './components/PaneContainer';
 import Modal from './components/Modal';
 import Dashboard from './components/Dashboard';
 import BusControl from './components/BusControl';
@@ -15,6 +15,7 @@ type ModalView = 'dashboard' | 'bus' | 'agents' | 'messages' | null;
 
 const App: Component = () => {
   const [activeModal, setActiveModal] = createSignal<ModalView>(null);
+  const [paneCount, setPaneCount] = createSignal(1);
 
   const closeModal = () => setActiveModal(null);
 
@@ -26,15 +27,19 @@ const App: Component = () => {
           onShowBusInfo={() => setActiveModal('bus')}
           onShowAgentList={() => setActiveModal('agents')}
           onShowMessageStream={() => setActiveModal('messages')}
+          paneCount={paneCount()}
         />
         <h1 class="app-title-minimal" data-testid="app-title">AgentMux Desktop</h1>
         <div class="app-status-minimal">
           <span data-testid="app-version">v{VERSION}</span>
+          <span style={{ 'margin-left': '0.5rem', color: '#666' }}>
+            ({paneCount()} {paneCount() === 1 ? 'pane' : 'panes'})
+          </span>
         </div>
       </header>
 
       <main class="app-content-fullscreen" data-testid="app-content">
-        <TerminalWorkspace />
+        <PaneContainer onPanesChange={setPaneCount} />
       </main>
 
       {/* Modals for management views */}
