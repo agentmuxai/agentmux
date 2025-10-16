@@ -1,20 +1,20 @@
 # AgentMux
 
-**MCP monitoring and inter-agent communication platform**
+**Native desktop app for agent monitoring and inter-agent communication**
 
-Version: 0.3.3 (Desktop) | 0.1.0 (CLI/MCP)
+Version: 0.3.20
 Status: 🚧 Active Development
 
 ---
 
 ## Overview
 
-AgentMux enables Claude Code agents to communicate with each other across workspaces through multiple interfaces:
+AgentMux is a native desktop application that enables Claude Code agents to communicate with each other across workspaces:
 
-- **Desktop App** - Native GUI with embedded terminal, message bus, and agent monitoring
-- **CLI** - Command-line interface for messaging (embedded in desktop app)
-- **Wrapper** - Reactive PTY wrapper for supervised agent communication
-- **MCP Server** - Model Context Protocol integration (experimental)
+- **Embedded Terminal** - Full terminal with Claude Code integration
+- **Message Bus** - Real-time inter-agent messaging
+- **Agent Monitoring** - Visual dashboard for agent status
+- **Built-in CLI** - Agent and bus commands accessible from terminal
 
 ---
 
@@ -23,31 +23,24 @@ AgentMux enables Claude Code agents to communicate with each other across worksp
 ### Installation
 
 ```bash
-# From WebProjects root
+# Clone or navigate to agentmux
 cd agentmux
 
 # Install dependencies
 npm install
 
-# Build all packages
-npm run build
-
 # Build desktop app
-cd apps/desktop
 npm run tauri:build
 ```
 
-### Desktop App (Recommended)
-
-The desktop app provides the full AgentMux experience:
+### Running
 
 ```bash
-# Run in development mode
-cd apps/desktop
+# Development mode
 npm run tauri:dev
 
 # Or run built binary
-./src-tauri/target/release/agentmux-desktop
+./src-tauri/target/release/agentmux
 ```
 
 **Features:**
@@ -74,18 +67,7 @@ bus listen
 logs export --format json
 ```
 
-See [apps/desktop/docs/CLI_STATUS.md](../apps/desktop/docs/CLI_STATUS.md) for complete command reference.
-
-### Reactive Wrapper
-
-Wrap AI CLIs for supervised inter-agent communication:
-
-```bash
-# Wrap Claude CLI
-agentmux wrap claude --agent-id Agent3
-```
-
-See [apps/wrapper/docs/DEPLOYMENT.md](../apps/wrapper/docs/DEPLOYMENT.md) for setup guide.
+See [docs/CLI_STATUS.md](docs/CLI_STATUS.md) for complete command reference.
 
 ---
 
@@ -97,17 +79,13 @@ See [apps/wrapper/docs/DEPLOYMENT.md](../apps/wrapper/docs/DEPLOYMENT.md) for se
 - **[QUICKSTART.md](QUICKSTART.md)** - Getting started in 5 minutes
 
 ### Developer Docs
-- **[development/TESTING.md](development/TESTING.md)** - Testing guide
-- **[development/TESTING_EMBEDDED_CLAUDE.md](development/TESTING_EMBEDDED_CLAUDE.md)** - Embedded terminal testing
-- **[apps/desktop/docs/ARCHITECTURE.md](../apps/desktop/docs/ARCHITECTURE.md)** - Service layer architecture
-
-### Deployment
-- **[deployment/WRAPPER_DEPLOYMENT.md](deployment/WRAPPER_DEPLOYMENT.md)** - Wrapper deployment
+- **[docs/development/TESTING.md](docs/development/TESTING.md)** - Testing guide
+- **[docs/development/TESTING_EMBEDDED_CLAUDE.md](docs/development/TESTING_EMBEDDED_CLAUDE.md)** - Embedded terminal testing
+- **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** - Service layer architecture
 
 ### Specifications
-- **[apps/desktop/docs/CLI_SPECIFICATION.md](../apps/desktop/docs/CLI_SPECIFICATION.md)** - CLI commands
-- **[apps/desktop/docs/BUILD.md](../apps/desktop/docs/BUILD.md)** - Build instructions
-- **[PROJECT_REORGANIZATION_SPEC.md](PROJECT_REORGANIZATION_SPEC.md)** - Project roadmap
+- **[docs/CLI_SPECIFICATION.md](docs/CLI_SPECIFICATION.md)** - CLI commands
+- **[docs/BUILD.md](docs/BUILD.md)** - Build instructions
 
 ### Archive
 - **[archive/2025-10/](archive/2025-10/)** - Old test reports and notes
@@ -116,31 +94,22 @@ See [apps/wrapper/docs/DEPLOYMENT.md](../apps/wrapper/docs/DEPLOYMENT.md) for se
 
 ## Architecture
 
-### Unified Structure
+### Project Structure
 
 ```
 agentmux/
-├── docs/                       # All documentation
-│   ├── README.md              # This file
-│   ├── development/           # Developer docs
-│   ├── deployment/            # Deployment guides
-│   └── archive/               # Historical docs
-│
-├── apps/
-│   ├── desktop/               # Tauri desktop app (primary)
-│   │   ├── src/              # SolidJS frontend
-│   │   ├── src-tauri/        # Rust backend
-│   │   │   ├── services/     # Business logic layer
-│   │   │   ├── cli/          # CLI handlers
-│   │   │   └── bus/          # Message bus
-│   │   └── docs/             # Desktop-specific docs
-│   │
-│   ├── wrapper/               # PTY wrapper
-│   ├── mcp-server/            # MCP protocol server
-│   └── cli/                   # Standalone CLI (deprecated)
-│
-└── packages/
-    └── core/                  # Shared core library
+├── src/                       # SolidJS frontend
+├── src-tauri/                 # Rust backend
+│   ├── src/
+│   │   ├── services/         # Business logic layer
+│   │   ├── cli/              # CLI handlers
+│   │   └── bus/              # Message bus
+│   └── Cargo.toml
+├── tests/                     # Test suites
+├── docs/                      # Documentation
+│   ├── development/          # Developer guides
+│   └── archive/              # Historical docs
+└── package.json              # Desktop app configuration
 ```
 
 ### Service Layer Architecture
