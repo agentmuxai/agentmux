@@ -6,9 +6,6 @@ mod watcher;
 mod commands;
 mod tauri_commands;
 
-#[cfg(windows)]
-mod splash;
-
 #[cfg(test)]
 mod tests;
 
@@ -32,7 +29,20 @@ use tauri_commands::{
 };
 use tauri_commands::cli::cli_command_to_ipc;
 
+#[cfg(windows)]
+fn signal_launcher_ready() {
+    // Signal launcher by creating a temporary file
+    use std::fs::File;
+    use std::env;
 
+    let temp_dir = env::temp_dir();
+    let signal_file = temp_dir.join("agentmux_ready.signal");
+
+    // Create signal file
+    let _ = File::create(&signal_file);
+
+    // File will be deleted on app exit or manually by launcher
+}
 
 // ============================================================================
 #[tokio::main]
@@ -152,17 +162,13 @@ async fn main() {
         // The UI will show the current state after command execution
     }
 
-    // Show splash screen immediately on Windows (before Tauri initialization)
-    #[cfg(windows)]
-    let splash_close_signal = splash::show();
-
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
-            // Close splash screen now that app is ready
+            // Signal launcher that app is ready (via named mutex)
             #[cfg(windows)]
-            splash::close(splash_close_signal);
+            signal_launcher_ready();
 
             // Start IPC server for single-instance communication
             if let Err(e) = ipc::start_ipc_server(app.handle().clone()) {
