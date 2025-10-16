@@ -1,5 +1,6 @@
 import { Component, onMount, onCleanup, createSignal } from 'solid-js';
 import { invoke } from '@tauri-apps/api/core';
+import { open } from '@tauri-apps/plugin-dialog';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
@@ -8,6 +9,7 @@ import '@xterm/xterm/css/xterm.css';
 interface EmbeddedTerminalProps {
   instanceName: string;
   wsPort: number;
+  onChangeDirectory?: (instanceName: string, newPath: string) => void;
 }
 
 const EmbeddedTerminal: Component<EmbeddedTerminalProps> = (props) => {
@@ -150,6 +152,27 @@ const EmbeddedTerminal: Component<EmbeddedTerminalProps> = (props) => {
     }
   };
 
+  const handleContextMenu = async (e: MouseEvent) => {
+    e.preventDefault();
+
+    if (!props.onChangeDirectory) return;
+
+    try {
+      const selected = await open({
+        directory: true,
+        multiple: false,
+        title: 'Select Working Directory',
+      });
+
+      if (selected && typeof selected === 'string') {
+        console.log(`[${props.instanceName}] Changing directory to: ${selected}`);
+        props.onChangeDirectory(props.instanceName, selected);
+      }
+    } catch (err) {
+      console.error(`[${props.instanceName}] Failed to select directory:`, err);
+    }
+  };
+
   return (
     <div class="embedded-terminal">
       <div class="terminal-header">
@@ -162,7 +185,11 @@ const EmbeddedTerminal: Component<EmbeddedTerminalProps> = (props) => {
         )}
         <span class="terminal-port">ws://localhost:{props.wsPort}</span>
       </div>
-      <div ref={terminalRef} class="terminal-container"></div>
+      <div
+        ref={terminalRef}
+        class="terminal-container"
+        onContextMenu={handleContextMenu}
+      ></div>
     </div>
   );
 };

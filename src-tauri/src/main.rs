@@ -24,7 +24,7 @@ use tauri_commands::{
     start_bus, stop_bus, get_connected_agents, get_bus_status, get_recent_messages,
     start_file_watcher, stop_file_watcher, start_command_watcher, stop_command_watcher,
     spawn_agent, get_agent_status, get_agent_output, list_agents,
-    spawn_embedded_claude, send_claude_input, list_claude_instances,
+    spawn_embedded_claude, send_claude_input, list_claude_instances, kill_claude_instance,
     execute_cli_command,
 };
 use tauri_commands::cli::cli_command_to_ipc;
@@ -200,6 +200,7 @@ async fn main() {
             spawn_embedded_claude,
             send_claude_input,
             list_claude_instances,
+            kill_claude_instance,
             execute_cli_command,
             export_logs,
         ])
