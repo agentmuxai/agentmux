@@ -27,15 +27,12 @@ const TerminalWorkspace: Component = () => {
         console.log('[TerminalWorkspace] Found existing agent:', existingAgents[0].instanceName);
         setAgent(existingAgents[0]);
       } else {
-        // Auto-spawn a new Claude agent in the current directory
-        console.log('[TerminalWorkspace] No existing agents, spawning new one...');
-
-        // Use current directory or a default workspace
-        const workspacePath = await invoke<string>('get_current_directory').catch(() => '.');
+        // Auto-spawn a new Claude agent in user's home directory (default)
+        console.log('[TerminalWorkspace] No existing agents, spawning new one in home directory...');
 
         const newAgent: Agent = await invoke('spawn_embedded_claude', {
           instanceName: 'Claude-1',
-          workspacePath: workspacePath
+          workspacePath: '~'  // User's home directory (default)
         });
 
         console.log('[TerminalWorkspace] Claude agent spawned:', newAgent.instanceName);
