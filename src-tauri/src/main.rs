@@ -6,6 +6,9 @@ mod watcher;
 mod commands;
 mod tauri_commands;
 
+#[cfg(windows)]
+mod splash;
+
 #[cfg(test)]
 mod tests;
 
@@ -149,10 +152,18 @@ async fn main() {
         // The UI will show the current state after command execution
     }
 
+    // Show splash screen immediately on Windows (before Tauri initialization)
+    #[cfg(windows)]
+    let splash_close_signal = splash::show();
+
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
+            // Close splash screen now that app is ready
+            #[cfg(windows)]
+            splash::close(splash_close_signal);
+
             // Start IPC server for single-instance communication
             if let Err(e) = ipc::start_ipc_server(app.handle().clone()) {
                 eprintln!("[IPC] Failed to start IPC server: {}", e);
