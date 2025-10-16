@@ -177,8 +177,16 @@ pub fn log(
     // Print to terminal with colors
     println!("{}", entry.format_terminal());
 
-    // Emit structured data to UI DebugConsole (JSON with color information)
-    let _ = app_handle.emit("debug_log", &entry);
+    // Only emit important logs to UI (filter out Debug and Info to reduce noise)
+    match level {
+        LogLevel::Success | LogLevel::Warning | LogLevel::Error => {
+            let _ = app_handle.emit("debug_log", &entry);
+        }
+        LogLevel::Debug | LogLevel::Info => {
+            // Suppress debug/info logs from UI - too noisy
+            // They still appear in terminal for development
+        }
+    }
 }
 
 /// Convenience macros for each log level
