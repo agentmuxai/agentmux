@@ -1,6 +1,6 @@
 [package]
 name = "agentmux-desktop"
-version = "0.3.16"
+version = "0.3.20"
 description = "AgentMux Desktop - Native desktop app for agent monitoring"
 authors = ["AgentMux Team"]
 edition = "2021"
@@ -17,7 +17,7 @@ path = "src/main.rs"
 tauri-build = { version = "2.0", features = [] }
 
 [dependencies]
-tauri = { version = "2.2", features = [] }
+tauri = { version = "2.2", features = ["custom-protocol"] }
 tauri-plugin-shell = "2.0"
 tauri-plugin-dialog = "2.0"
 serde = { version = "1", features = ["derive"] }

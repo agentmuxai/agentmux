@@ -5,6 +5,8 @@ node_modules/
 
 # Testing
 coverage/
+test-data/
+test-results/
 
 # Production
 dist/
@@ -38,3 +40,4 @@ lerna-debug.log*
 # Tauri
 src-tauri/gen/
 src-tauri/Cargo.lock
+msedgedriver.exe
