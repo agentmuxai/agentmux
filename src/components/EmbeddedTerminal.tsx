@@ -18,6 +18,19 @@ const EmbeddedTerminal: Component<EmbeddedTerminalProps> = (props) => {
   const [isConnected, setIsConnected] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
 
+  // Safety check: Don't render if props are invalid
+  if (!props.instanceName || !props.wsPort) {
+    console.error('[EmbeddedTerminal] Invalid props:', { instanceName: props.instanceName, wsPort: props.wsPort });
+    return (
+      <div class="embedded-terminal">
+        <div class="pane-error">
+          <p>⚠️ Invalid terminal configuration</p>
+          <p class="error-detail">Missing instanceName or wsPort</p>
+        </div>
+      </div>
+    );
+  }
+
   onMount(() => {
     if (!terminalRef) return;
 
