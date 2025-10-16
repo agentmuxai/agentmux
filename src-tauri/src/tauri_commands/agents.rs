@@ -7,6 +7,10 @@
 use std::path::PathBuf;
 use std::process::{Command as StdCommand};
 
+// Windows-specific imports for CREATE_NO_WINDOW flag
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
+
 #[tauri::command]
 pub async fn spawn_agent(
     agent_id: String,
@@ -30,10 +34,17 @@ pub async fn spawn_agent(
 
     println!("🚀 Spawning agent: {} with command: {}", agent_id, cli_cmd);
 
-    let child = StdCommand::new("node")
+    let mut command = StdCommand::new("node");
+    command
         .arg(wrapper_path)
         .arg(&agent_id)
-        .arg(&cli_cmd)
+        .arg(&cli_cmd);
+
+    // On Windows, prevent console window flash by using CREATE_NO_WINDOW flag
+    #[cfg(target_os = "windows")]
+    command.creation_flags(0x08000000);
+
+    let child = command
         .spawn()
         .map_err(|e| format!("Failed to spawn agent: {}", e))?;
 
