@@ -29,7 +29,7 @@ jobs:
         run: npm install
 
       - name: Build desktop app
-        run: npm --prefix apps/desktop run tauri build
+        run: npm run tauri:build
 
       - name: Upload Windows bundles
         uses: actions/upload-artifact@v4
@@ -37,5 +37,5 @@ jobs:
           name: agentmux-desktop-windows
           if-no-files-found: warn
           path: |
-            apps/desktop/src-tauri/target/release/bundle/msi/*.msi
-            apps/desktop/src-tauri/target/release/bundle/nsis/*.exe
+            src-tauri/target/release/bundle/msi/*.msi
+            src-tauri/target/release/bundle/nsis/*.exe

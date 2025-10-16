@@ -46,3 +46,4 @@ playwright-report/
 *.backup2
 
 # Release artifacts
+releases/
