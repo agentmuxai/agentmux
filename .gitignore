@@ -8,6 +8,7 @@ build/
 .next/
 *.tsbuildinfo
 src-tauri/target/
+src-tauri/gen/
 
 # IDE
 .vscode/
@@ -46,3 +47,4 @@ playwright-report/
 *.backup2
 
 # Release artifacts
+releases/
