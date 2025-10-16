@@ -4,3 +4,6 @@ pub mod cli;
 pub mod embedded_claude;
 pub mod services;
 pub mod ipc;
+
+#[cfg(windows)]
+pub mod splash;
