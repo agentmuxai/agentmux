@@ -274,13 +274,20 @@ const PaneContainer: Component<PaneContainerProps> = (props) => {
                 </div>
               </Show>
 
-              <Show when={pane.agent && !pane.isLoading}>
+              <Show when={pane.agent && !pane.isLoading && pane.agent.wsPort}>
                 {(currentAgent) => (
                   <EmbeddedTerminal
                     instanceName={currentAgent().instanceName}
                     wsPort={currentAgent().wsPort}
                   />
                 )}
+              </Show>
+
+              <Show when={pane.agent && !pane.isLoading && !pane.agent.wsPort}>
+                <div class="pane-error">
+                  <p>⚠️ Agent running but WebSocket port unavailable</p>
+                  <p class="error-detail">Agent: {pane.agent?.instanceName}</p>
+                </div>
               </Show>
             </div>
           </div>

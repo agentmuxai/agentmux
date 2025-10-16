@@ -84,6 +84,13 @@ const EmbeddedTerminal: Component<EmbeddedTerminalProps> = (props) => {
   });
 
   const connectWebSocket = () => {
+    // Defensive check: don't connect if wsPort is invalid
+    if (!props.wsPort || props.wsPort <= 0) {
+      console.warn(`[${props.instanceName}] Invalid wsPort: ${props.wsPort} - skipping WebSocket connection`);
+      setError(`Invalid port: ${props.wsPort}`);
+      return;
+    }
+
     const wsUrl = `ws://localhost:${props.wsPort}`;
 
     try {
