@@ -379,52 +379,110 @@ button.danger:disabled {
   background: #3a3a3a;
 }
 
-/* Simple Terminal Styles */
+/* Simple Terminal Styles - Claude CLI Appearance */
 .simple-terminal {
   display: flex;
   flex-direction: column;
   height: 600px;
-  background: #0a0a0a;
+  background: #1e1e1e;
   border: 1px solid #3a3a3a;
   border-radius: 8px;
   overflow: hidden;
-  font-family: 'Courier New', 'Consolas', monospace;
+  font-family: 'Consolas', 'Menlo', 'Monaco', 'Courier New', monospace;
+  font-size: 14px;
+}
+
+.terminal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: #252526;
+  border-bottom: 1px solid #3a3a3a;
+  font-size: 13px;
+}
+
+.terminal-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #cccccc;
+  font-weight: 500;
+}
+
+.terminal-error {
+  color: #f14c4c;
+  font-size: 12px;
+}
+
+.terminal-port {
+  color: #6a6a6a;
+  font-size: 11px;
+  font-family: monospace;
 }
 
 .terminal-output {
   flex: 1;
-  padding: 0.5rem;
-  padding-bottom: 0; /* No bottom padding - input continues seamlessly */
+  padding: 12px;
+  padding-bottom: 0;
   overflow-y: auto;
-  background: #0a0a0a;
-  color: #e0e0e0;
+  overflow-x: hidden;
+  background: #1e1e1e;
+  color: #d4d4d4;
   font-size: 14px;
-  line-height: 1.5;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  font-feature-settings: "liga" 0, "calt" 0; /* Disable ligatures for terminal feel */
+  letter-spacing: 0;
+}
+
+/* Scrollbar styling to match VSCode */
+.terminal-output::-webkit-scrollbar {
+  width: 10px;
+}
+
+.terminal-output::-webkit-scrollbar-track {
+  background: #1e1e1e;
+}
+
+.terminal-output::-webkit-scrollbar-thumb {
+  background: #424242;
+  border-radius: 5px;
+}
+
+.terminal-output::-webkit-scrollbar-thumb:hover {
+  background: #4e4e4e;
 }
 
 .terminal-input-area {
   display: flex;
   gap: 0;
-  padding: 0; /* Remove padding for seamless look */
-  background: #0a0a0a; /* Same background as output */
-  border-top: none; /* No visual separation */
+  padding: 0;
+  background: #1e1e1e;
+  border-top: none;
 }
 
 .terminal-input {
   flex: 1;
-  background: transparent; /* Transparent to blend with output */
-  border: none; /* No border for seamless appearance */
-  color: #e0e0e0;
-  padding: 0 0.5rem 0.5rem 0.5rem; /* Continue output padding */
-  border-radius: 0; /* No rounding - continuous with output */
-  font-family: 'Courier New', 'Consolas', monospace;
+  background: transparent;
+  border: none;
+  color: #d4d4d4;
+  padding: 0 12px 12px 12px;
+  border-radius: 0;
+  font-family: 'Consolas', 'Menlo', 'Monaco', 'Courier New', monospace;
   font-size: 14px;
-  line-height: 1.5; /* Match output line height */
+  line-height: 1.6;
+  font-feature-settings: "liga" 0, "calt" 0;
+}
+
+.terminal-input::placeholder {
+  color: #6a6a6a;
 }
 
 .terminal-input:focus {
   outline: none;
-  background: rgba(74, 158, 255, 0.05); /* Subtle focus indication */
+  background: rgba(74, 158, 255, 0.03);
 }
 
 .terminal-input:disabled {
@@ -580,4 +638,29 @@ button.danger:disabled {
   justify-content: center;
   height: 100%;
   color: #666;
+}
+/* Embedded Terminal (xterm.js) */
+.embedded-terminal {
+  display: flex;
+  flex-direction: column;
+  height: 600px;
+  background: #1a1a1a;
+  border: 1px solid #3a3a3a;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.terminal-container {
+  flex: 1;
+  padding: 0.5rem;
+  overflow: hidden;
+}
+
+/* xterm.js overrides */
+.terminal-container .xterm {
+  height: 100% !important;
+}
+
+.terminal-container .xterm-viewport {
+  overflow-y: scroll;
 }

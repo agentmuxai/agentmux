@@ -1,6 +1,6 @@
 {
   "name": "@agentmux/desktop",
-  "version": "0.3.17",
+  "version": "0.3.20",
   "description": "AgentMux Desktop - Native desktop app for agent monitoring and orchestration",
   "type": "module",
   "scripts": {
@@ -24,6 +24,9 @@
     "@agentmux/core": "*",
     "@tauri-apps/api": "^2.2.0",
     "@tauri-apps/plugin-dialog": "^2.4.0",
+    "@xterm/addon-fit": "^0.10.0",
+    "@xterm/addon-web-links": "^0.11.0",
+    "@xterm/xterm": "^5.5.0",
     "ansi-to-html": "^0.7.2",
     "solid-js": "^1.9.3"
   },
