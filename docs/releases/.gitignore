@@ -1,0 +1,14 @@
+# Ignore all binary release artifacts
+*.exe
+*.msi
+*.dmg
+*.AppImage
+*.deb
+*.rpm
+*.zip
+*.tar.gz
+
+# But track documentation
+!README.md
+!**/README.md
+!.gitignore
