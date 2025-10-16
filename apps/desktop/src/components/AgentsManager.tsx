@@ -2,7 +2,7 @@ import { Component, createSignal, createMemo, onMount, onCleanup, For, Show } fr
 import { invoke } from '@tauri-apps/api/core';
 import { listen, UnlistenFn } from '@tauri-apps/api/event';
 import { open } from '@tauri-apps/plugin-dialog';
-import SimpleTerminal from './SimpleTerminal';
+import EmbeddedTerminal from './EmbeddedTerminal';
 
 interface Agent {
   instanceName: string;
@@ -40,7 +40,7 @@ const AgentsManager: Component = () => {
     return folderName;
   });
 
-  // Memoize selected agent to prevent SimpleTerminal recreation
+  // Memoize selected agent to prevent EmbeddedTerminal recreation
   const selectedAgentData = createMemo(() => {
     const name = selectedAgent();
     if (!name) return null;
@@ -372,7 +372,7 @@ const AgentsManager: Component = () => {
         {(agent) => (
           <div class="card">
             <h2>💻 Interactive Terminal: {agent().instanceName}</h2>
-            <SimpleTerminal
+            <EmbeddedTerminal
               instanceName={agent().instanceName}
               wsPort={agent().wsPort}
             />

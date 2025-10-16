@@ -1,6 +1,7 @@
 # Tauri E2E Testing Research Report
 **Date:** 2025-10-15
 **Focus:** Playwright + Tauri WebView2 on Windows
+**Status:** DEPRECATED - Switching to tauri-driver (see postscript)
 
 ## Executive Summary
 
@@ -336,3 +337,73 @@ Running 4 tests using 1 worker
 **Estimated Time to Working Tests:** 2-3 hours
 
 **Next Action:** Implement Phase 1 (update `tauri-app.ts`) and test immediately.
+
+---
+
+## POSTSCRIPT: Why We're Switching to tauri-driver
+
+**Date:** 2025-10-15 (later same day)
+
+### What Happened
+
+After implementing the dynamic ports + unique user data approach documented above, tests **still timed out** connecting to the CDP debugging port.
+
+User reported seeing 2 AgentMux windows with "couldn't connect to localhost" errors, which indicated:
+- Apps ARE launching (positive sign)
+- But WebView2 debugging port not opening despite `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS`
+- This suggests Tauri's WebView2 integration doesn't respect this environment variable the same way standalone WebView2 apps do
+
+### The Real Problem
+
+**Playwright's WebView2 guide is for standalone WebView2 apps, not Tauri apps.**
+
+Tauri has its own WebView2 integration that:
+- Doesn't necessarily respect `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS`
+- Has different behavior from Microsoft's standalone WebView2 examples
+- Is specifically designed to work with tauri-driver, not generic CDP approaches
+
+### The Decision
+
+Switching to **tauri-driver + WebdriverIO** because:
+
+1. **Official Support**: tauri-driver is specifically designed for Tauri's WebView2 integration
+2. **Proven Approach**: Used by Tauri team and documented in official guides
+3. **No Env Var Hacks**: Uses msedgedriver directly, not CDP environment variables
+4. **Full UI Testing**: Confirmed WebdriverIO has all needed APIs:
+   - `isFocused()` for focus checking
+   - `.click()` for clicking elements
+   - `.keys()` for keyboard input
+   - `.getCSSProperty()` for style verification
+
+### Why tauri-driver Wasn't Chosen Initially
+
+Looking back at the "Alternative Approaches Considered" section, tauri-driver was **Option 1** but rejected because:
+
+```
+Verdict: ❌ Rejected - Playwright is simpler and we already have infrastructure
+```
+
+The reasoning was:
+- Playwright seemed simpler
+- Had familiar API
+- Already had test infrastructure started
+- Playwright's WebView2 docs made it seem viable
+
+**This was a mistake.** We should have trusted Tauri's official documentation over a generic approach that worked for standalone WebView2 apps but not Tauri-specific integration.
+
+### Lesson Learned
+
+**When framework has official testing tools, use them first.**
+
+Don't assume generic solutions will work with framework-specific integrations, even if the underlying technology (WebView2) is the same.
+
+### Next Steps
+
+1. Remove Playwright dependencies
+2. Add tauri-driver + WebdriverIO dependencies
+3. Rewrite test helpers to use WebdriverIO API
+4. Update test cases to use WebDriver commands
+5. Configure tauri-driver in test setup
+
+This is the right path forward for reliable E2E testing of Tauri desktop apps.
+
