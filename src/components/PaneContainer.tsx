@@ -170,18 +170,24 @@ const PaneContainer: Component<PaneContainerProps> = (props) => {
 
   const splitVertical = () => {
     const newPaneId = `pane-${Date.now()}`;
-    setPanes(prev => [...prev, { id: newPaneId, agent: null, isLoading: true }]);
+    setPanes(prev => {
+      const newPanes = [...prev, { id: newPaneId, agent: null, isLoading: true }];
+      props.onPanesChange?.(newPanes.length);
+      return newPanes;
+    });
     setOrientation('vertical');
     spawnAgentForPane(newPaneId);
-    props.onPanesChange?.(panes().length + 1);
   };
 
   const splitHorizontal = () => {
     const newPaneId = `pane-${Date.now()}`;
-    setPanes(prev => [...prev, { id: newPaneId, agent: null, isLoading: true }]);
+    setPanes(prev => {
+      const newPanes = [...prev, { id: newPaneId, agent: null, isLoading: true }];
+      props.onPanesChange?.(newPanes.length);
+      return newPanes;
+    });
     setOrientation('horizontal');
     spawnAgentForPane(newPaneId);
-    props.onPanesChange?.(panes().length + 1);
   };
 
   const closePane = (paneId: string) => {
@@ -190,7 +196,11 @@ const PaneContainer: Component<PaneContainerProps> = (props) => {
       return;
     }
 
-    setPanes(prev => prev.filter(p => p.id !== paneId));
+    setPanes(prev => {
+      const newPanes = prev.filter(p => p.id !== paneId);
+      props.onPanesChange?.(newPanes.length);
+      return newPanes;
+    });
 
     // If we closed the active pane, activate the first remaining pane
     if (activePaneId() === paneId) {
@@ -199,8 +209,6 @@ const PaneContainer: Component<PaneContainerProps> = (props) => {
         setActivePaneId(remaining[0].id);
       }
     }
-
-    props.onPanesChange?.(panes().length - 1);
   };
 
   const resetToSingle = () => {
