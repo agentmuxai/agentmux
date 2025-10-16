@@ -415,39 +415,44 @@ pub async fn handle_pty_stdin(
         "PTY stdin handler task started",
     );
 
+    // Take writer ONCE at initialization (take_writer() can only be called once)
+    let mut writer = {
+        let mut pty = pty_master.lock().await;
+        match pty.take_writer() {
+            Ok(w) => w,
+            Err(e) => {
+                logging::error(
+                    &app_handle,
+                    LogCategory::Stdin,
+                    Some(&instance_name),
+                    format!("Failed to get PTY writer at initialization: {}", e),
+                );
+                return;
+            }
+        }
+    };
+
+    logging::success(
+        &app_handle,
+        LogCategory::Stdin,
+        Some(&instance_name),
+        "PTY writer acquired successfully",
+    );
+
     let mut input_count = 0;
 
     while let Some(input) = stdin_rx.recv().await {
         input_count += 1;
         logging::log_stdin_write(&app_handle, &instance_name, input_count, input.len());
 
-        // Write to PTY master - take_writer() should be callable multiple times
-        let write_result = {
-            let mut pty = pty_master.lock().await;
-            match pty.take_writer() {
-                Ok(mut writer) => {
-                    // Write in blocking context to avoid blocking async runtime
-                    tokio::task::spawn_blocking(move || {
-                        use std::io::Write;
-                        writer.write_all(input.as_bytes())?;
-                        writer.flush()
-                    })
-                    .await
-                }
-                Err(e) => {
-                    logging::error(
-                        &app_handle,
-                        LogCategory::Stdin,
-                        Some(&instance_name),
-                        format!("Failed to get PTY writer: {}", e),
-                    );
-                    break;
-                }
-            }
-        };
+        // Write to PTY using the writer we acquired at initialization
+        // Note: Direct write is acceptable here since we're in a dedicated stdin handler task
+        use std::io::Write;
+        let write_result = writer.write_all(input.as_bytes())
+            .and_then(|_| writer.flush());
 
         match write_result {
-            Ok(Ok(())) => {
+            Ok(()) => {
                 logging::success(
                     &app_handle,
                     LogCategory::Stdin,
@@ -455,17 +460,8 @@ pub async fn handle_pty_stdin(
                     format!("✓ Input #{} sent successfully to PTY", input_count),
                 );
             }
-            Ok(Err(e)) => {
-                logging::log_stdin_error(&app_handle, &instance_name, input_count, &e.to_string());
-                break;
-            }
             Err(e) => {
-                logging::error(
-                    &app_handle,
-                    LogCategory::Stdin,
-                    Some(&instance_name),
-                    format!("Task join error: {}", e),
-                );
+                logging::log_stdin_error(&app_handle, &instance_name, input_count, &e.to_string());
                 break;
             }
         }
