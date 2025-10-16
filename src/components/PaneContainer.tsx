@@ -74,6 +74,8 @@ const PaneContainer: Component<PaneContainerProps> = (props) => {
       const availableAgent = existingAgents.find(a => !usedAgents.includes(a.instanceName));
 
       if (availableAgent) {
+        console.log(`[PaneContainer] Found existing agent:`, availableAgent);
+        console.log(`[PaneContainer] wsPort type: ${typeof availableAgent.wsPort}, value:`, availableAgent.wsPort);
         setPanes(prev => prev.map(p =>
           p.id === paneId
             ? { ...p, agent: availableAgent, isLoading: false }
@@ -87,6 +89,9 @@ const PaneContainer: Component<PaneContainerProps> = (props) => {
           instanceName,
           workspacePath: '~'
         });
+
+        console.log(`[PaneContainer] Spawned new agent:`, newAgent);
+        console.log(`[PaneContainer] wsPort type: ${typeof newAgent.wsPort}, value:`, newAgent.wsPort);
 
         setPanes(prev => prev.map(p =>
           p.id === paneId
@@ -115,6 +120,7 @@ const PaneContainer: Component<PaneContainerProps> = (props) => {
 
       // Get existing agents
       const existingAgents: Agent[] = await invoke('list_claude_instances').catch(() => []);
+      console.log(`[PaneContainer] Existing agents from Rust:`, existingAgents);
 
       // Restore panes
       const restoredPanes: Pane[] = savedLayout.panes.map(savedPane => {
@@ -152,9 +158,13 @@ const PaneContainer: Component<PaneContainerProps> = (props) => {
   createEffect(() => {
     if (isRestoring()) return; // Don't save during restoration
 
+    // Use untrack to read values without creating dependencies that could cause loops
     const currentPanes = panes();
     const currentOrientation = orientation();
     const currentActivePaneId = activePaneId();
+
+    // Only save if we have meaningful data
+    if (currentPanes.length === 0) return;
 
     const layout: PersistedLayout = {
       panes: currentPanes.map(p => ({
@@ -165,7 +175,10 @@ const PaneContainer: Component<PaneContainerProps> = (props) => {
       activePaneId: currentActivePaneId
     };
 
-    saveLayout(layout);
+    // Use requestAnimationFrame to defer and deduplicate saves
+    requestAnimationFrame(() => {
+      saveLayout(layout);
+    });
   });
 
   const splitVertical = () => {
@@ -274,13 +287,20 @@ const PaneContainer: Component<PaneContainerProps> = (props) => {
                 </div>
               </Show>
 
-              <Show when={pane.agent && !pane.isLoading}>
+              <Show when={pane.agent && !pane.isLoading && pane.agent.wsPort}>
                 {(currentAgent) => (
                   <EmbeddedTerminal
                     instanceName={currentAgent().instanceName}
                     wsPort={currentAgent().wsPort}
                   />
                 )}
+              </Show>
+
+              <Show when={pane.agent && !pane.isLoading && !pane.agent.wsPort}>
+                <div class="pane-error">
+                  <p>⚠️ Agent running but WebSocket port unavailable</p>
+                  <p class="error-detail">Agent: {pane.agent?.instanceName}</p>
+                </div>
               </Show>
             </div>
           </div>
