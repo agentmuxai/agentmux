@@ -5,6 +5,7 @@ interface MenubarProps {
   onShowBusInfo: () => void;
   onShowAgentList: () => void;
   onShowMessageStream: () => void;
+  paneCount?: number;
 }
 
 const Menubar: Component<MenubarProps> = (props) => {
@@ -45,6 +46,50 @@ const Menubar: Component<MenubarProps> = (props) => {
               data-testid="menu-dashboard"
             >
               🚀 Dashboard
+            </button>
+          </div>
+
+          <div class="menubar-divider" />
+
+          <div class="menubar-section">
+            <div class="menubar-section-title">Layout</div>
+            <button
+              class="menubar-item"
+              onClick={() => handleAction(() => {
+                (window as any).paneActions?.splitVertical();
+              })}
+              data-testid="menu-split-vertical"
+            >
+              ⬌ Split Vertical
+            </button>
+            <button
+              class="menubar-item"
+              onClick={() => handleAction(() => {
+                (window as any).paneActions?.splitHorizontal();
+              })}
+              data-testid="menu-split-horizontal"
+            >
+              ⬍ Split Horizontal
+            </button>
+            <button
+              class="menubar-item"
+              onClick={() => handleAction(() => {
+                (window as any).paneActions?.closeCurrentPane();
+              })}
+              disabled={!props.paneCount || props.paneCount <= 1}
+              data-testid="menu-close-pane"
+            >
+              ✕ Close Current Pane
+            </button>
+            <button
+              class="menubar-item"
+              onClick={() => handleAction(() => {
+                (window as any).paneActions?.resetToSingle();
+              })}
+              disabled={!props.paneCount || props.paneCount <= 1}
+              data-testid="menu-reset-layout"
+            >
+              ▢ Reset to Single Pane
             </button>
           </div>
 
