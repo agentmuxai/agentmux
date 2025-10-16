@@ -1,8 +1,0 @@
-{
-  "allowedCommands": {
-    "bash": true,
-    "powershell": true,
-    "cmd": true
-  },
-  "allowExecution": true
-}
