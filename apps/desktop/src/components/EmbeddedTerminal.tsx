@@ -1,4 +1,5 @@
 import { Component, onMount, onCleanup, createSignal } from 'solid-js';
+import { invoke } from '@tauri-apps/api/core';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
@@ -99,35 +100,10 @@ const EmbeddedTerminal: Component<EmbeddedTerminalProps> = (props) => {
       };
 
       ws.onmessage = (event) => {
-        try {
-          const message = JSON.parse(event.data);
-
-          switch (message.type) {
-            case 'output':
-              // Write output to terminal
-              if (terminal) {
-                terminal.write(message.data);
-              }
-              break;
-
-            case 'message':
-              // Incoming message notification
-              if (terminal) {
-                terminal.writeln(`\n\x1b[1;35m📨 Message from ${message.data.from}\x1b[0m`);
-                terminal.writeln(`\x1b[0;35m${message.data.text}\x1b[0m\n`);
-              }
-              break;
-
-            case 'status':
-              console.log(`[${props.instanceName}] Status:`, message.data);
-              if (message.data.status === 'exited' && terminal) {
-                terminal.writeln(`\n\x1b[1;31m[Process exited: code ${message.data.exitCode}]\x1b[0m`);
-                setIsConnected(false);
-              }
-              break;
-          }
-        } catch (err) {
-          console.error(`[${props.instanceName}] Error parsing WS message:`, err);
+        // Backend sends raw PTY output as plain text (not JSON)
+        // xterm.js handles all ANSI sequences internally
+        if (terminal) {
+          terminal.write(event.data);
         }
       };
 

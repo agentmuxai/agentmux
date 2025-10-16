@@ -1,6 +1,6 @@
 [package]
 name = "agentmux-desktop"
-version = "0.3.17"
+version = "0.3.20"
 description = "AgentMux Desktop - Native desktop app for agent monitoring"
 authors = ["AgentMux Team"]
 edition = "2021"
