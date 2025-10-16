@@ -62,7 +62,7 @@ const PaneContainer: Component<PaneContainerProps> = (props) => {
   const [isRestoring, setIsRestoring] = createSignal(false);
 
   // Auto-spawn agent for first pane
-  const spawnAgentForPane = async (paneId: string) => {
+  const spawnAgentForPane = async (paneId: string, workspacePath: string = '~') => {
     try {
       // Check for existing agents first
       const existingAgents: Agent[] = await invoke('list_claude_instances');
@@ -87,7 +87,7 @@ const PaneContainer: Component<PaneContainerProps> = (props) => {
         const instanceName = `Claude-${paneIndex + 1}`;
         const newAgent: Agent = await invoke('spawn_embedded_claude', {
           instanceName,
-          workspacePath: '~'
+          workspacePath
         });
 
         console.log(`[PaneContainer] Spawned new agent:`, newAgent);
@@ -107,6 +107,36 @@ const PaneContainer: Component<PaneContainerProps> = (props) => {
           ? { ...p, isLoading: false }
           : p
       ));
+    }
+  };
+
+  // Change working directory for an agent
+  const changeWorkingDirectory = async (instanceName: string, newPath: string) => {
+    console.log(`[PaneContainer] Changing working directory for ${instanceName} to ${newPath}`);
+
+    try {
+      // Find the pane with this instance
+      const pane = panes().find(p => p.agent?.instanceName === instanceName);
+      if (!pane) {
+        console.error(`[PaneContainer] Pane not found for instance ${instanceName}`);
+        return;
+      }
+
+      // Kill the existing instance
+      await invoke('kill_claude_instance', { instanceName });
+      console.log(`[PaneContainer] Killed instance ${instanceName}`);
+
+      // Mark pane as loading
+      setPanes(prev => prev.map(p =>
+        p.id === pane.id
+          ? { ...p, agent: null, isLoading: true }
+          : p
+      ));
+
+      // Spawn new instance with new working directory
+      await spawnAgentForPane(pane.id, newPath);
+    } catch (err) {
+      console.error(`[PaneContainer] Failed to change working directory:`, err);
     }
   };
 
@@ -287,11 +317,12 @@ const PaneContainer: Component<PaneContainerProps> = (props) => {
                 </div>
               </Show>
 
-              <Show when={pane.agent && !pane.isLoading && pane.agent.wsPort}>
-                {(currentAgent) => (
+              <Show when={pane.agent && !pane.isLoading && pane.agent.wsPort ? pane.agent : null}>
+                {(agent) => (
                   <EmbeddedTerminal
-                    instanceName={currentAgent().instanceName}
-                    wsPort={currentAgent().wsPort}
+                    instanceName={agent().instanceName}
+                    wsPort={agent().wsPort}
+                    onChangeDirectory={changeWorkingDirectory}
                   />
                 )}
               </Show>

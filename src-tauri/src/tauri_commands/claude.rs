@@ -38,7 +38,7 @@ pub async fn spawn_embedded_claude(
         );
     }
 
-    // Find available WebSocket port
+    // Find available WebSocket port that's not already allocated
     logging::info(
         &app_handle,
         LogCategory::WebSocket,
@@ -46,14 +46,32 @@ pub async fn spawn_embedded_claude(
         "Finding available WebSocket port (9000-9999)",
     );
 
-    let ws_port = embedded_claude::find_available_port(9000, 9999)?;
+    let ws_port = loop {
+        let port = embedded_claude::find_available_port(9000, 9999)?;
 
-    logging::success(
-        &app_handle,
-        LogCategory::WebSocket,
-        Some(&instance_name),
-        format!("Found port: {}", ws_port),
-    );
+        // Check if this port is already allocated to another instance
+        let instances = state.claude_instances.lock().await;
+        let is_used = instances.values().any(|i| i.ws_port == port);
+        drop(instances);
+
+        if !is_used {
+            logging::success(
+                &app_handle,
+                LogCategory::WebSocket,
+                Some(&instance_name),
+                format!("Found available port: {}", port),
+            );
+            break port;
+        }
+
+        // Port was allocated since we checked, try again
+        logging::info(
+            &app_handle,
+            LogCategory::WebSocket,
+            Some(&instance_name),
+            format!("Port {} already allocated, retrying...", port),
+        );
+    };
 
     // Spawn Claude instance
     logging::info(
@@ -278,6 +296,57 @@ pub async fn list_claude_instances(
     }).collect();
 
     Ok(list)
+}
+
+#[tauri::command]
+pub async fn kill_claude_instance(
+    instance_name: String,
+    state: State<'_, AppState>,
+    app_handle: AppHandle,
+) -> Result<(), String> {
+    logging::info(
+        &app_handle,
+        LogCategory::State,
+        Some(&instance_name),
+        "========== KILL_CLAUDE_INSTANCE START ==========",
+    );
+
+    let mut instances = state.claude_instances.lock().await;
+
+    if instances.remove(&instance_name).is_some() {
+        logging::success(
+            &app_handle,
+            LogCategory::State,
+            Some(&instance_name),
+            format!("Instance '{}' removed from state", instance_name),
+        );
+
+        logging::success(
+            &app_handle,
+            LogCategory::State,
+            Some(&instance_name),
+            "========== SUCCESS ==========",
+        );
+
+        Ok(())
+    } else {
+        let err = format!("Instance '{}' not found", instance_name);
+        logging::error(
+            &app_handle,
+            LogCategory::State,
+            Some(&instance_name),
+            &err,
+        );
+
+        logging::error(
+            &app_handle,
+            LogCategory::State,
+            Some(&instance_name),
+            "========== FAILED ==========",
+        );
+
+        Err(err)
+    }
 }
 
 #[cfg(test)]
