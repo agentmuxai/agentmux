@@ -1,8 +1,21 @@
-# AgentMux MCP Server
+# AgentMux MCP Server (DEPRECATED)
+
+> ## ⚠️ DEPRECATED - DO NOT USE ⚠️
+>
+> **This file-based MCP server is deprecated as of 2025-12-31.**
+>
+> Use the new **HTTP-based AgentMux Server** instead:
+> - Location: `server/` directory in this repo
+> - Benefits: No shared volumes, cross-host support, better reliability
+> - Migration: See `server/README.md`
+>
+> This package (`@a5af/agentmux-mcp`) will be removed in a future release.
+
+---
 
 **Model Context Protocol server for inter-agent communication using file-based messaging**
 
-Version: 0.1.0
+Version: 0.1.0 (DEPRECATED)
 
 ---
 
