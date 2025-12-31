@@ -1,7 +1,12 @@
 #!/usr/bin/env node
 
 /**
- * AgentMux MCP Server
+ * ⚠️ DEPRECATED - Use server/ HTTP version instead ⚠️
+ * 
+ * AgentMux MCP Server (FILE-BASED - DEPRECATED)
+ *
+ * This file-based MCP server is deprecated as of 2025-12-31.
+ * Use the HTTP-based server in server/ directory instead.
  *
  * Provides Model Context Protocol tools for inter-agent communication using
  * file-based messaging. Agents can send messages, read their inbox, and
@@ -433,6 +438,11 @@ async function main() {
   await server.connect(transport);
 
   // Log to stderr (stdout is used for MCP protocol)
+  console.error('');
+  console.error('⚠️  WARNING: This file-based AgentMux MCP is DEPRECATED ⚠️');
+  console.error('   Use the HTTP server at http://agentmux:3100 instead');
+  console.error('   See: https://github.com/a5af/agentmux/tree/main/server');
+  console.error('');
   console.error(`[AgentMux MCP] Server started for agent: ${AGENT_ID}`);
   console.error(`[AgentMux MCP] Messages directory: ${MESSAGES_DIR}`);
   console.error(`[AgentMux MCP] Ready for tool calls`);
