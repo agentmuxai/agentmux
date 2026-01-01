@@ -4,11 +4,7 @@ package-lock.json
 
 # Build outputs
 dist/
-build/
-.next/
 *.tsbuildinfo
-src-tauri/target/
-src-tauri/gen/
 
 # IDE
 .vscode/
@@ -19,7 +15,6 @@ src-tauri/gen/
 # OS
 .DS_Store
 Thumbs.db
-*.exe
 
 # Logs
 *.log
@@ -30,21 +25,8 @@ npm-debug.log*
 .env.local
 .env.*.local
 
-# Turbo
-.turbo/
-
-# Message bus (runtime)
-_temp/agentmux-bus/
+# Database (runtime)
+*.db
 
 # Test outputs
 coverage/
-.nyc_output/
-test-results/
-playwright-report/
-
-# Backup files
-*.backup
-*.backup2
-
-# Release artifacts
-releases/
