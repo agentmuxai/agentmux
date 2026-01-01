@@ -1,4 +1,0 @@
-#include <windows.h>
-
-// Splash screen bitmap - 24-bit BMP (no alpha)
-1 BITMAP "splash.bmp"
