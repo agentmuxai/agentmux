@@ -11,8 +11,9 @@
  */
 
 const http = require("http");
-const { exec } = require("child_process");
+const { execFile } = require("child_process");
 const path = require("path");
+const fs = require("fs");
 
 const PORT = parseInt(process.env.VSCODE_BRIDGE_PORT || "3101");
 const HOST = process.env.VSCODE_BRIDGE_HOST || "0.0.0.0";
@@ -29,7 +30,17 @@ function getHostPath(agentId, containerPath) {
   if (containerPath.startsWith("/workspace")) {
     // Remove /workspace prefix and join with host base
     const relativePath = containerPath.slice("/workspace".length);
-    return path.join(hostBase, relativePath);
+    const fullPath = path.join(hostBase, relativePath);
+
+    // Prevent directory traversal - ensure resolved path is within workspace
+    const normalizedPath = path.normalize(fullPath);
+    const normalizedBase = path.normalize(hostBase);
+
+    if (!normalizedPath.startsWith(normalizedBase)) {
+      throw new Error("Invalid path: directory traversal detected");
+    }
+
+    return normalizedPath;
   }
 
   // If not a workspace path, return as-is (might be absolute host path)
@@ -37,18 +48,37 @@ function getHostPath(agentId, containerPath) {
 }
 
 function openInVSCode(hostPath, line, column, callback) {
-  let target = `"${hostPath}"`;
-
-  if (line) {
-    target = column
-      ? `--goto "${hostPath}:${line}:${column}"`
-      : `--goto "${hostPath}:${line}"`;
+  // Validate line and column are positive integers if provided
+  if (line !== undefined) {
+    const lineNum = parseInt(line, 10);
+    if (!Number.isInteger(lineNum) || lineNum < 1) {
+      return callback({ success: false, error: "Invalid line number" });
+    }
+    line = lineNum;
   }
 
-  const cmd = `code ${target}`;
-  console.log(`[vscode-bridge] Executing: ${cmd}`);
+  if (column !== undefined) {
+    const colNum = parseInt(column, 10);
+    if (!Number.isInteger(colNum) || colNum < 1) {
+      return callback({ success: false, error: "Invalid column number" });
+    }
+    column = colNum;
+  }
 
-  exec(cmd, (error, stdout, stderr) => {
+  // Build arguments array for execFile (no shell injection)
+  const args = [];
+
+  if (line) {
+    const gotoTarget = column ? `${hostPath}:${line}:${column}` : `${hostPath}:${line}`;
+    args.push("--goto", gotoTarget);
+  } else {
+    args.push(hostPath);
+  }
+
+  console.log(`[vscode-bridge] Executing: code ${args.join(" ")}`);
+
+  // Use execFile instead of exec - doesn't spawn a shell, safer
+  execFile("code", args, (error, stdout, stderr) => {
     if (error) {
       console.error(`[vscode-bridge] Error: ${error.message}`);
       callback({ success: false, error: error.message });
