@@ -1,0 +1,14 @@
+{
+  "name": "vscode-bridge",
+  "version": "1.0.0",
+  "description": "Host-side service for opening files in VS Code from container agents",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "install-service": "powershell -ExecutionPolicy Bypass -File ./install-service.ps1",
+    "uninstall-service": "powershell -ExecutionPolicy Bypass -File ./install-service.ps1 -Uninstall"
+  },
+  "keywords": ["vscode", "bridge", "agentmux", "claw"],
+  "author": "a5af",
+  "license": "MIT"
+}
