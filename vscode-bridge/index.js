@@ -36,7 +36,10 @@ function getHostPath(agentId, containerPath) {
     const normalizedPath = path.normalize(fullPath);
     const normalizedBase = path.normalize(hostBase);
 
-    if (!normalizedPath.startsWith(normalizedBase)) {
+    // Check path is within workspace - must be exact match OR start with base + separator
+    // This prevents prefix matching (e.g., "agent1" matching "agent10")
+    if (normalizedPath !== normalizedBase &&
+        !normalizedPath.startsWith(normalizedBase + path.sep)) {
       throw new Error("Invalid path: directory traversal detected");
     }
 
