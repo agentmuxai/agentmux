@@ -4,9 +4,8 @@ import { MessageStore } from "./store.js";
 
 const PORT = parseInt(process.env.PORT || "3100");
 const HOST = process.env.HOST || "0.0.0.0";
-const DB_PATH = process.env.DB_PATH || "/data/agentmux.db";
 
-const store = new MessageStore(DB_PATH);
+const store = new MessageStore();
 const app = Fastify({ logger: true });
 
 await app.register(cors, { origin: true });
