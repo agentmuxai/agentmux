@@ -1,0 +1,9 @@
+*.js
+*.d.ts
+node_modules
+cdk.out
+package-lock.json
+*.log
+
+# Keep package.json
+!package.json

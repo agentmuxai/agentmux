@@ -1,0 +1,68 @@
+import * as cdk from 'aws-cdk-lib';
+import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
+import { Construct } from 'constructs';
+
+export interface AgentMuxTablesProps {
+  /**
+   * Environment name (e.g., 'prod', 'dev')
+   */
+  environment?: string;
+}
+
+/**
+ * DynamoDB tables for AgentMux message persistence and agent registry.
+ */
+export class AgentMuxTables extends Construct {
+  public readonly messagesTable: dynamodb.Table;
+  public readonly agentsTable: dynamodb.Table;
+
+  constructor(scope: Construct, id: string, props?: AgentMuxTablesProps) {
+    super(scope, id);
+
+    const env = props?.environment || 'prod';
+
+    // Messages table: stores agent-to-agent messages
+    this.messagesTable = new dynamodb.Table(this, 'MessagesTable', {
+      tableName: `agentmux-messages-${env}`,
+      partitionKey: { name: 'recipientId', type: dynamodb.AttributeType.STRING },
+      sortKey: { name: 'timestamp', type: dynamodb.AttributeType.NUMBER },
+      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      timeToLiveAttribute: 'ttl',
+      pointInTimeRecoverySpecification: {
+        pointInTimeRecoveryEnabled: true,
+      },
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
+    });
+
+    // GSI: Query messages by sender
+    this.messagesTable.addGlobalSecondaryIndex({
+      indexName: 'senderId-timestamp-index',
+      partitionKey: { name: 'senderId', type: dynamodb.AttributeType.STRING },
+      sortKey: { name: 'timestamp', type: dynamodb.AttributeType.NUMBER },
+      projectionType: dynamodb.ProjectionType.ALL,
+    });
+
+    // Agents table: stores agent registry and presence
+    this.agentsTable = new dynamodb.Table(this, 'AgentsTable', {
+      tableName: `agentmux-agents-${env}`,
+      partitionKey: { name: 'agentId', type: dynamodb.AttributeType.STRING },
+      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      pointInTimeRecoverySpecification: {
+        pointInTimeRecoveryEnabled: true,
+      },
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
+    });
+
+    // GSI: Query agents by status
+    this.agentsTable.addGlobalSecondaryIndex({
+      indexName: 'status-lastSeen-index',
+      partitionKey: { name: 'status', type: dynamodb.AttributeType.STRING },
+      sortKey: { name: 'lastSeen', type: dynamodb.AttributeType.NUMBER },
+      projectionType: dynamodb.ProjectionType.ALL,
+    });
+
+    // Tags
+    cdk.Tags.of(this.messagesTable).add('Component', 'agentmux');
+    cdk.Tags.of(this.agentsTable).add('Component', 'agentmux');
+  }
+}
