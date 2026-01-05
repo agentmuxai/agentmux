@@ -63,6 +63,39 @@ export class MessageStore {
   }
 
   async readMessages(agentId: string, unreadOnly: boolean = true, limit: number = 10, markAsRead: boolean = true): Promise<Message[]> {
+    // Helper function to paginate queries until we get enough unread messages
+    const paginateQuery = async (baseParams: any, targetLimit: number): Promise<Message[]> => {
+      const collected: Message[] = [];
+      let lastEvaluatedKey: any = undefined;
+
+      // Keep querying until we have enough unread messages or exhaust the index
+      while (collected.length < targetLimit) {
+        const params = { ...baseParams };
+        if (lastEvaluatedKey) {
+          params.ExclusiveStartKey = lastEvaluatedKey;
+        }
+
+        const result = await this.client.send(new QueryCommand(params));
+        const items = (result.Items || []) as Message[];
+
+        collected.push(...items);
+
+        // If no more results, break
+        if (!result.LastEvaluatedKey) {
+          break;
+        }
+
+        lastEvaluatedKey = result.LastEvaluatedKey;
+
+        // If we have enough unread messages, break
+        if (collected.length >= targetLimit) {
+          break;
+        }
+      }
+
+      return collected;
+    };
+
     // Query messages for this agent using GSI
     const queryParams: any = {
       TableName: this.messagesTable,
@@ -71,7 +104,6 @@ export class MessageStore {
       ExpressionAttributeValues: {
         ':agent': agentId
       },
-      Limit: limit,
       ScanIndexForward: false // DESC order (newest first)
     };
 
@@ -82,8 +114,8 @@ export class MessageStore {
       queryParams.ExpressionAttributeValues[':false'] = false;
     }
 
-    const result = await this.client.send(new QueryCommand(queryParams));
-    const messages = (result.Items || []) as Message[];
+    // Paginate to get up to limit unread messages
+    const messages = await paginateQuery(queryParams, limit);
 
     // Also query for broadcast messages (to_agent = '*')
     const broadcastParams: any = {
@@ -93,7 +125,6 @@ export class MessageStore {
       ExpressionAttributeValues: {
         ':broadcast': '*'
       },
-      Limit: limit,
       ScanIndexForward: false
     };
 
@@ -103,8 +134,8 @@ export class MessageStore {
       broadcastParams.ExpressionAttributeValues[':false'] = false;
     }
 
-    const broadcastResult = await this.client.send(new QueryCommand(broadcastParams));
-    const broadcastMessages = (broadcastResult.Items || []) as Message[];
+    // Paginate broadcast messages too
+    const broadcastMessages = await paginateQuery(broadcastParams, limit);
 
     // Combine and sort by timestamp
     const allMessages = [...messages, ...broadcastMessages]
@@ -184,29 +215,50 @@ export class MessageStore {
   }
 
   async getStats() {
-    // Scan messages table for stats
-    const messagesResult = await this.client.send(new ScanCommand({
+    // Helper function to paginate scan and accumulate counts
+    const paginateScan = async (scanParams: any): Promise<number> => {
+      let totalCount = 0;
+      let lastEvaluatedKey: any = undefined;
+
+      do {
+        const params = { ...scanParams };
+        if (lastEvaluatedKey) {
+          params.ExclusiveStartKey = lastEvaluatedKey;
+        }
+
+        const result = await this.client.send(new ScanCommand(params));
+        totalCount += result.Count || 0;
+        lastEvaluatedKey = result.LastEvaluatedKey;
+      } while (lastEvaluatedKey);
+
+      return totalCount;
+    };
+
+    // Scan messages table for total count
+    const total_messages = await paginateScan({
       TableName: this.messagesTable,
       Select: 'COUNT'
-    }));
+    });
 
-    const unreadResult = await this.client.send(new ScanCommand({
+    // Scan for unread messages count
+    const unread_messages = await paginateScan({
       TableName: this.messagesTable,
       FilterExpression: '#read = :false',
       ExpressionAttributeNames: { '#read': 'read' },
       ExpressionAttributeValues: { ':false': false },
       Select: 'COUNT'
-    }));
+    });
 
-    const agentsResult = await this.client.send(new ScanCommand({
+    // Scan agents table for count
+    const unique_agents = await paginateScan({
       TableName: this.agentsTable,
       Select: 'COUNT'
-    }));
+    });
 
     return {
-      total_messages: messagesResult.Count || 0,
-      unread_messages: unreadResult.Count || 0,
-      unique_agents: agentsResult.Count || 0
+      total_messages,
+      unread_messages,
+      unique_agents
     };
   }
 
