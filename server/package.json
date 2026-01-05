@@ -1,6 +1,6 @@
 {
   "name": "@a5af/agentmux-server",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "AgentMux HTTP server for inter-agent messaging",
   "type": "module",
   "main": "dist/index.js",

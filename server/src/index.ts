@@ -83,6 +83,17 @@ const MCP_TOOLS = [
 
 interface MCPRequest { jsonrpc: "2.0"; id: number | string; method: string; params?: Record<string, unknown>; }
 
+// MCP endpoint info (for clients checking availability)
+app.get("/mcp", async (request, reply) => {
+  return {
+    name: "agentmux-server",
+    version: "1.0.0",
+    protocol: "JSON-RPC over HTTP",
+    transport: "POST only (SSE not implemented)",
+    usage: "Send JSON-RPC 2.0 requests via POST with X-Agent-ID header"
+  };
+});
+
 // MCP JSON-RPC endpoint
 app.post<{ Body: MCPRequest; Headers: { "x-agent-id"?: string } }>("/mcp", async (request, reply) => {
   const agentId = request.headers["x-agent-id"] || "unknown";
