@@ -4,7 +4,7 @@ import * as iam from 'aws-cdk-lib/aws-iam';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import { Construct } from 'constructs';
-import { NodejsFunction } from 'aws-cdk-lib/aws-lambda-nodejs';
+import { NodejsFunction, OutputFormat } from 'aws-cdk-lib/aws-lambda-nodejs';
 import { AgentMuxTables } from './constructs/agentmux-tables';
 import * as path from 'path';
 
@@ -73,9 +73,12 @@ export class AgentMuxStack extends cdk.Stack {
         NODE_ENV: 'production'
       },
       bundling: {
+        format: OutputFormat.ESM,
         minify: true,
         sourceMap: true,
-        externalModules: []
+        externalModules: [],
+        mainFields: ['module', 'main'],
+        banner: "import { createRequire } from 'module';const require = createRequire(import.meta.url);import * as url from 'url';const __filename = url.fileURLToPath(import.meta.url);const __dirname = url.fileURLToPath(new URL('.', import.meta.url));"
       },
       logRetention: logs.RetentionDays.ONE_WEEK
     });
