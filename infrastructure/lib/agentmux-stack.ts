@@ -75,10 +75,7 @@ export class AgentMuxStack extends cdk.Stack {
       bundling: {
         minify: true,
         sourceMap: true,
-        externalModules: [],
-        format: lambda.OutputFormat.ESM,
-        mainFields: ['module', 'main'],
-        banner: "import { createRequire } from 'module';const require = createRequire(import.meta.url);"
+        externalModules: []
       },
       logRetention: logs.RetentionDays.ONE_WEEK
     });
