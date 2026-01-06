@@ -11,7 +11,7 @@
  */
 
 const http = require("http");
-const { execFile } = require("child_process");
+const { spawn } = require("child_process");
 const path = require("path");
 const fs = require("fs");
 
@@ -22,6 +22,10 @@ const HOST = process.env.VSCODE_BRIDGE_HOST || "0.0.0.0";
 // Uses CLAW_WORKSPACES_DIR env var or defaults to standard location
 const WORKSPACES_BASE = process.env.CLAW_WORKSPACES_DIR ||
   path.join(process.env.USERPROFILE || process.env.HOME || "C:\\Users\\asafe", ".claw", "workspaces");
+
+// VS Code executable path - just use "code" from PATH
+// Windows installs VS Code with the "code" command available in PATH
+const VSCODE_PATH = process.env.VSCODE_PATH || "code";
 
 function getHostPath(agentId, containerPath) {
   // Container paths start with /workspace, map to host workspace
@@ -78,16 +82,38 @@ function openInVSCode(hostPath, line, column, callback) {
     args.push(hostPath);
   }
 
-  console.log(`[vscode-bridge] Executing: code ${args.join(" ")}`);
+  console.log(`[vscode-bridge] Executing: ${VSCODE_PATH} ${args.join(" ")}`);
 
-  // Use execFile instead of exec - doesn't spawn a shell, safer
-  execFile("code", args, (error, stdout, stderr) => {
-    if (error) {
-      console.error(`[vscode-bridge] Error: ${error.message}`);
-      callback({ success: false, error: error.message });
-    } else {
+  // Use spawn with shell: true to ensure PATH is available
+  const proc = spawn(VSCODE_PATH, args, { shell: true });
+
+  // Prevent callback from being invoked twice (error + exit events can both fire)
+  let callbackInvoked = false;
+  const invokeCallback = (result) => {
+    if (!callbackInvoked) {
+      callbackInvoked = true;
+      callback(result);
+    }
+  };
+
+  // Consume stdout/stderr to prevent child process from blocking on Windows
+  // when buffers fill (spawn doesn't buffer output by default)
+  if (proc.stdout) proc.stdout.on("data", () => {});
+  if (proc.stderr) proc.stderr.on("data", () => {});
+
+  proc.on("error", (error) => {
+    console.error(`[vscode-bridge] Error: ${error.message}`);
+    invokeCallback({ success: false, error: error.message });
+  });
+
+  proc.on("exit", (code) => {
+    if (code === 0) {
       console.log(`[vscode-bridge] Opened: ${hostPath}`);
-      callback({ success: true, path: hostPath, line, column });
+      invokeCallback({ success: true, path: hostPath, line, column });
+    } else if (code !== null) {
+      const error = `Process exited with code ${code}`;
+      console.error(`[vscode-bridge] ${error}`);
+      invokeCallback({ success: false, error });
     }
   });
 }
