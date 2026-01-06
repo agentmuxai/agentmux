@@ -87,19 +87,33 @@ function openInVSCode(hostPath, line, column, callback) {
   // Use spawn with shell: true to ensure PATH is available
   const proc = spawn(VSCODE_PATH, args, { shell: true });
 
+  // Prevent callback from being invoked twice (error + exit events can both fire)
+  let callbackInvoked = false;
+  const invokeCallback = (result) => {
+    if (!callbackInvoked) {
+      callbackInvoked = true;
+      callback(result);
+    }
+  };
+
+  // Consume stdout/stderr to prevent child process from blocking on Windows
+  // when buffers fill (spawn doesn't buffer output by default)
+  if (proc.stdout) proc.stdout.on("data", () => {});
+  if (proc.stderr) proc.stderr.on("data", () => {});
+
   proc.on("error", (error) => {
     console.error(`[vscode-bridge] Error: ${error.message}`);
-    callback({ success: false, error: error.message });
+    invokeCallback({ success: false, error: error.message });
   });
 
   proc.on("exit", (code) => {
     if (code === 0) {
       console.log(`[vscode-bridge] Opened: ${hostPath}`);
-      callback({ success: true, path: hostPath, line, column });
-    } else {
+      invokeCallback({ success: true, path: hostPath, line, column });
+    } else if (code !== null) {
       const error = `Process exited with code ${code}`;
       console.error(`[vscode-bridge] ${error}`);
-      callback({ success: false, error });
+      invokeCallback({ success: false, error });
     }
   });
 }
