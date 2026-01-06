@@ -4,9 +4,8 @@ import { MessageStore } from "./store.js";
 
 const PORT = parseInt(process.env.PORT || "3100");
 const HOST = process.env.HOST || "0.0.0.0";
-const DB_PATH = process.env.DB_PATH || "/data/agentmux.db";
 
-const store = new MessageStore(DB_PATH);
+const store = new MessageStore();
 const app = Fastify({ logger: true });
 
 await app.register(cors, { origin: true });
@@ -17,7 +16,7 @@ app.get("/api/health", async () => {
 });
 
 app.get("/api/stats", async () => {
-  return store.getStats();
+  return await store.getStats();
 });
 
 // REST: Send message
@@ -27,7 +26,7 @@ app.post<{ Body: { to: string; message: string; priority?: string }; Headers: { 
     const agentId = request.headers["x-agent-id"];
     if (!agentId) return reply.status(400).send({ error: "X-Agent-ID header required" });
     const { to, message, priority = "normal" } = request.body;
-    const msg = store.sendMessage(agentId, to, message, priority);
+    const msg = await store.sendMessage(agentId, to, message, priority);
     return { success: true, message_id: msg.id, from: agentId, to, delivered_at: msg.timestamp, priority };
   }
 );
@@ -41,7 +40,7 @@ app.get<{ Querystring: { unread_only?: string; limit?: string; mark_as_read?: st
     const unreadOnly = request.query.unread_only !== "false";
     const limit = parseInt(request.query.limit || "10");
     const markAsRead = request.query.mark_as_read !== "false";
-    const messages = store.readMessages(agentId, unreadOnly, limit, markAsRead);
+    const messages = await store.readMessages(agentId, unreadOnly, limit, markAsRead);
     return {
       agent_id: agentId,
       messages: messages.map(m => ({ id: m.id, from: m.from_agent, message: m.text, timestamp: m.timestamp, priority: m.priority, read: m.read })),
@@ -52,7 +51,7 @@ app.get<{ Querystring: { unread_only?: string; limit?: string; mark_as_read?: st
 
 // REST: List agents
 app.get("/api/agents", async () => {
-  const agents = store.listAgents();
+  const agents = await store.listAgents();
   return { agents, total_count: agents.length };
 });
 
@@ -63,7 +62,7 @@ app.delete<{ Body: { message_ids: string[] }; Headers: { "x-agent-id"?: string }
     const agentId = request.headers["x-agent-id"];
     if (!agentId) return reply.status(400).send({ error: "X-Agent-ID header required" });
     const { message_ids } = request.body;
-    const result = store.deleteMessages(agentId, message_ids);
+    const result = await store.deleteMessages(agentId, message_ids);
     return { ...result, deleted_count: result.deleted.length };
   }
 );
@@ -82,6 +81,17 @@ const MCP_TOOLS = [
 ];
 
 interface MCPRequest { jsonrpc: "2.0"; id: number | string; method: string; params?: Record<string, unknown>; }
+
+// MCP endpoint info (for clients checking availability)
+app.get("/mcp", async (request, reply) => {
+  return {
+    name: "agentmux-server",
+    version: "1.0.0",
+    protocol: "JSON-RPC over HTTP",
+    transport: "POST only (SSE not implemented)",
+    usage: "Send JSON-RPC 2.0 requests via POST with X-Agent-ID header"
+  };
+});
 
 // MCP JSON-RPC endpoint
 app.post<{ Body: MCPRequest; Headers: { "x-agent-id"?: string } }>("/mcp", async (request, reply) => {
@@ -103,27 +113,27 @@ app.post<{ Body: MCPRequest; Headers: { "x-agent-id"?: string } }>("/mcp", async
         const args = (params as any)?.arguments || {};
         switch (toolName) {
           case "send_message": {
-            const msg = store.sendMessage(agentId, args.to, args.message, args.priority || "normal");
+            const msg = await store.sendMessage(agentId, args.to, args.message, args.priority || "normal");
             result = { content: [{ type: "text", text: JSON.stringify({ success: true, message_id: msg.id, from: agentId, to: args.to, delivered_at: msg.timestamp, priority: args.priority || "normal" }, null, 2) }] };
             break;
           }
           case "read_messages": {
-            const messages = store.readMessages(agentId, args.unread_only ?? true, args.limit ?? 10, args.mark_as_read ?? true);
+            const messages = await store.readMessages(agentId, args.unread_only ?? true, args.limit ?? 10, args.mark_as_read ?? true);
             result = { content: [{ type: "text", text: JSON.stringify({ agent_id: agentId, messages: messages.map(m => ({ id: m.id, from: m.from_agent, message: m.text, timestamp: m.timestamp, priority: m.priority, read: m.read })), count: messages.length }, null, 2) }] };
             break;
           }
           case "list_agents": {
-            const agents = store.listAgents();
+            const agents = await store.listAgents();
             result = { content: [{ type: "text", text: JSON.stringify({ current_agent: agentId, agents, total_count: agents.length }, null, 2) }] };
             break;
           }
           case "broadcast_message": {
-            const msg = store.sendMessage(agentId, "*", args.message, args.priority || "normal");
+            const msg = await store.sendMessage(agentId, "*", args.message, args.priority || "normal");
             result = { content: [{ type: "text", text: JSON.stringify({ success: true, message_id: msg.id, from: agentId, to: "all agents", delivered_at: msg.timestamp, broadcast: true }, null, 2) }] };
             break;
           }
           case "delete_messages": {
-            const delResult = store.deleteMessages(agentId, args.message_ids);
+            const delResult = await store.deleteMessages(agentId, args.message_ids);
             result = { content: [{ type: "text", text: JSON.stringify({ ...delResult, deleted_count: delResult.deleted.length }, null, 2) }] };
             break;
           }
@@ -155,13 +165,18 @@ app.post<{ Body: MCPRequest; Headers: { "x-agent-id"?: string } }>("/mcp", async
   }
 });
 
-// Startup
-try {
-  await app.listen({ port: PORT, host: HOST });
-  console.log(`AgentMux Server v1.0.0 listening on http://${HOST}:${PORT}`);
-  console.log(`MCP endpoint: POST http://${HOST}:${PORT}/mcp`);
-  console.log(`REST API: http://${HOST}:${PORT}/api/*`);
-} catch (err) {
-  app.log.error(err);
-  process.exit(1);
+// Export app for Lambda handler
+export { app };
+
+// Startup (only if not running in Lambda)
+if (!process.env.AWS_LAMBDA_FUNCTION_NAME) {
+  try {
+    await app.listen({ port: PORT, host: HOST });
+    console.log(`AgentMux Server v1.0.0 listening on http://${HOST}:${PORT}`);
+    console.log(`MCP endpoint: POST http://${HOST}:${PORT}/mcp`);
+    console.log(`REST API: http://${HOST}:${PORT}/api/*`);
+  } catch (err) {
+    app.log.error(err);
+    process.exit(1);
+  }
 }

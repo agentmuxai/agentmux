@@ -24,41 +24,32 @@ export class AgentMuxTables extends Construct {
     // Messages table: stores agent-to-agent messages
     this.messagesTable = new dynamodb.Table(this, 'MessagesTable', {
       tableName: `agentmux-messages-${env}`,
-      partitionKey: { name: 'recipientId', type: dynamodb.AttributeType.STRING },
-      sortKey: { name: 'timestamp', type: dynamodb.AttributeType.NUMBER },
+      partitionKey: { name: 'id', type: dynamodb.AttributeType.STRING },
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
-      timeToLiveAttribute: 'ttl',
+      timeToLiveAttribute: 'ttl', // Optional: auto-cleanup old messages
       pointInTimeRecoverySpecification: {
         pointInTimeRecoveryEnabled: true,
       },
       removalPolicy: cdk.RemovalPolicy.RETAIN,
     });
 
-    // GSI: Query messages by sender
+    // GSI: Query messages by recipient (to_agent) and timestamp
     this.messagesTable.addGlobalSecondaryIndex({
-      indexName: 'senderId-timestamp-index',
-      partitionKey: { name: 'senderId', type: dynamodb.AttributeType.STRING },
-      sortKey: { name: 'timestamp', type: dynamodb.AttributeType.NUMBER },
+      indexName: 'to_agent-timestamp-index',
+      partitionKey: { name: 'to_agent', type: dynamodb.AttributeType.STRING },
+      sortKey: { name: 'timestamp', type: dynamodb.AttributeType.STRING },
       projectionType: dynamodb.ProjectionType.ALL,
     });
 
     // Agents table: stores agent registry and presence
     this.agentsTable = new dynamodb.Table(this, 'AgentsTable', {
       tableName: `agentmux-agents-${env}`,
-      partitionKey: { name: 'agentId', type: dynamodb.AttributeType.STRING },
+      partitionKey: { name: 'id', type: dynamodb.AttributeType.STRING },
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
       pointInTimeRecoverySpecification: {
         pointInTimeRecoveryEnabled: true,
       },
       removalPolicy: cdk.RemovalPolicy.RETAIN,
-    });
-
-    // GSI: Query agents by status
-    this.agentsTable.addGlobalSecondaryIndex({
-      indexName: 'status-lastSeen-index',
-      partitionKey: { name: 'status', type: dynamodb.AttributeType.STRING },
-      sortKey: { name: 'lastSeen', type: dynamodb.AttributeType.NUMBER },
-      projectionType: dynamodb.ProjectionType.ALL,
     });
 
     // Tags

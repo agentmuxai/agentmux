@@ -1,6 +1,6 @@
 {
   "name": "@a5af/agentmux-infrastructure",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "AgentMux cloud infrastructure (CDK)",
   "main": "index.js",
   "directories": {
