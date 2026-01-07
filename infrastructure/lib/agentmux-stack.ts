@@ -3,6 +3,11 @@ import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as logs from 'aws-cdk-lib/aws-logs';
+import * as cloudfront from 'aws-cdk-lib/aws-cloudfront';
+import * as origins from 'aws-cdk-lib/aws-cloudfront-origins';
+import * as acm from 'aws-cdk-lib/aws-certificatemanager';
+import * as route53 from 'aws-cdk-lib/aws-route53';
+import * as targets from 'aws-cdk-lib/aws-route53-targets';
 import { Construct } from 'constructs';
 import { NodejsFunction, OutputFormat } from 'aws-cdk-lib/aws-lambda-nodejs';
 import { AgentMuxTables } from './constructs/agentmux-tables';
@@ -98,6 +103,50 @@ export class AgentMuxStack extends cdk.Stack {
     });
 
     // ----------------------------------------
+    // Custom Domain: agentmux.asaf.cc
+    // ----------------------------------------
+    const domainName = 'agentmux.asaf.cc';
+    const hostedZoneId = 'Z0078677SB3OWE2X2KSJ';
+
+    // Import the hosted zone
+    const hostedZone = route53.HostedZone.fromHostedZoneAttributes(this, 'AsafCcZone', {
+      hostedZoneId,
+      zoneName: 'asaf.cc',
+    });
+
+    // ACM certificate (must be in us-east-1 for CloudFront)
+    const certificate = new acm.Certificate(this, 'AgentMuxCert', {
+      domainName,
+      validation: acm.CertificateValidation.fromDns(hostedZone),
+    });
+
+    // Extract Lambda Function URL domain (remove https:// and trailing /)
+    const lambdaUrlDomain = cdk.Fn.select(2, cdk.Fn.split('/', functionUrl.url));
+
+    // CloudFront distribution
+    const distribution = new cloudfront.Distribution(this, 'AgentMuxDistribution', {
+      defaultBehavior: {
+        origin: new origins.HttpOrigin(lambdaUrlDomain, {
+          protocolPolicy: cloudfront.OriginProtocolPolicy.HTTPS_ONLY,
+        }),
+        viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+        allowedMethods: cloudfront.AllowedMethods.ALLOW_ALL,
+        cachePolicy: cloudfront.CachePolicy.CACHING_DISABLED,
+        originRequestPolicy: cloudfront.OriginRequestPolicy.ALL_VIEWER_EXCEPT_HOST_HEADER,
+      },
+      domainNames: [domainName],
+      certificate,
+      comment: 'AgentMux Lambda custom domain',
+    });
+
+    // Route 53 alias record
+    new route53.ARecord(this, 'AgentMuxAliasRecord', {
+      zone: hostedZone,
+      recordName: 'agentmux',
+      target: route53.RecordTarget.fromAlias(new targets.CloudFrontTarget(distribution)),
+    });
+
+    // ----------------------------------------
     // Security Group: Allow WebSocket connections
     // ----------------------------------------
     bastionSG.addIngressRule(
@@ -129,8 +178,19 @@ export class AgentMuxStack extends cdk.Stack {
     // ----------------------------------------
     new cdk.CfnOutput(this, 'AgentMuxUrl', {
       value: functionUrl.url,
-      description: 'AgentMux Lambda Function URL',
+      description: 'AgentMux Lambda Function URL (direct)',
       exportName: `agentmux-url-${env}`,
+    });
+
+    new cdk.CfnOutput(this, 'AgentMuxCustomDomain', {
+      value: `https://${domainName}`,
+      description: 'AgentMux custom domain URL',
+      exportName: `agentmux-custom-url-${env}`,
+    });
+
+    new cdk.CfnOutput(this, 'CloudFrontDistributionId', {
+      value: distribution.distributionId,
+      description: 'CloudFront distribution ID',
     });
 
     new cdk.CfnOutput(this, 'AgentMuxFunctionName', {
