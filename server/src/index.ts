@@ -1,6 +1,7 @@
 import Fastify from "fastify";
 import cors from "@fastify/cors";
 import { MessageStore } from "./store.js";
+import { SecretsManagerClient, GetSecretValueCommand } from "@aws-sdk/client-secrets-manager";
 
 const PORT = parseInt(process.env.PORT || "3100");
 const HOST = process.env.HOST || "0.0.0.0";
@@ -9,6 +10,37 @@ const store = new MessageStore();
 const app = Fastify({ logger: true });
 
 await app.register(cors, { origin: true });
+
+// Authentication: Bearer token validation
+let cachedApiKey: string | null = null;
+
+async function getApiKey(): Promise<string> {
+  if (cachedApiKey) return cachedApiKey;
+
+  const client = new SecretsManagerClient({ region: process.env.AWS_REGION || "us-east-1" });
+  const response = await client.send(new GetSecretValueCommand({ SecretId: "services/infra" }));
+  const secrets = JSON.parse(response.SecretString || "{}");
+  cachedApiKey = secrets["agentmux-api-key"];
+
+  if (!cachedApiKey) {
+    throw new Error("agentmux-api-key not found in services/infra");
+  }
+
+  return cachedApiKey;
+}
+
+// Auth middleware: Validate bearer token
+app.addHook("onRequest", async (request, reply) => {
+  // Skip auth for health check
+  if (request.url === "/api/health") return;
+
+  const authHeader = request.headers.authorization || "";
+  const expectedKey = await getApiKey();
+
+  if (authHeader !== `Bearer ${expectedKey}`) {
+    reply.code(401).send({ error: "Unauthorized", message: "Invalid or missing bearer token" });
+  }
+});
 
 // Health & Stats
 app.get("/api/health", async () => {
