@@ -20,6 +20,8 @@ async function jsonRpcCall(method: string, params: any = {}): Promise<any> {
     'Content-Type': 'application/json',
     'X-Agent-ID': AGENT_ID,
   };
+
+  // Add auth header if token is available
   if (AGENTMUX_TOKEN) {
     headers['Authorization'] = `Bearer ${AGENTMUX_TOKEN}`;
   }
@@ -195,6 +197,10 @@ async function main() {
   console.error('[AgentMux MCP] Stdio wrapper started');
   console.error(`[AgentMux MCP] Agent ID: ${AGENT_ID}`);
   console.error(`[AgentMux MCP] Lambda URL: ${AGENTMUX_URL}`);
+  console.error(`[AgentMux MCP] Auth: ${AGENTMUX_TOKEN ? 'Bearer token configured' : 'NO TOKEN - will fail auth!'}`);
+  if (!AGENTMUX_TOKEN) {
+    console.error('[AgentMux MCP] WARNING: Set AGENTMUX_TOKEN env var for authentication');
+  }
 }
 
 main().catch((error) => {
