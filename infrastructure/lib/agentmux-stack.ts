@@ -92,6 +92,18 @@ export class AgentMuxStack extends cdk.Stack {
     this.tables.messagesTable.grantReadWriteData(agentmuxFunction);
     this.tables.agentsTable.grantReadWriteData(agentmuxFunction);
 
+    // Grant Secrets Manager access for bearer token
+    new iam.Policy(this, 'LambdaSecretsPolicy', {
+      roles: [agentmuxFunction.role!],
+      statements: [
+        new iam.PolicyStatement({
+          effect: iam.Effect.ALLOW,
+          actions: ['secretsmanager:GetSecretValue'],
+          resources: [`arn:aws:secretsmanager:${this.region}:${this.account}:secret:services/infra-*`],
+        }),
+      ],
+    });
+
     // Function URL (public endpoint)
     const functionUrl = agentmuxFunction.addFunctionUrl({
       authType: lambda.FunctionUrlAuthType.NONE,
