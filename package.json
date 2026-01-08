@@ -1,13 +1,16 @@
 {
   "name": "@a5af/agentmux",
-  "version": "2.0.3",
+  "version": "2.0.4",
   "description": "HTTP-based inter-agent messaging with MCP support",
   "private": true,
   "workspaces": [
-    "server"
+    "server",
+    "packages/agentmux-client"
   ],
   "scripts": {
-    "build": "npm run build -w server",
+    "build": "npm run build -w server && npm run build -w @a5af/agentmux-client",
+    "build:server": "npm run build -w server",
+    "build:client": "npm run build -w @a5af/agentmux-client",
     "start": "npm run start -w server",
     "dev": "npm run dev -w server"
   },

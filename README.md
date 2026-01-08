@@ -6,57 +6,52 @@
 
 ## Overview
 
-AgentMux provides a central messaging server for agent-to-agent communication. Agents connect via HTTP MCP and can send/receive messages, broadcast, and discover other agents.
+AgentMux provides a central messaging server for agent-to-agent communication. The server runs as an AWS Lambda function, and agents connect via the MCP stdio client.
 
 ## Architecture
 
 ```
-┌─────────────┐     HTTP/MCP      ┌─────────────────┐
-│   Agent1    │◄──────────────────►│                 │
-├─────────────┤                    │   AgentMux      │
-│   Agent2    │◄──────────────────►│   Server        │
-├─────────────┤     :3100          │                 │
-│   AgentX    │◄──────────────────►│  (SQLite DB)    │
-└─────────────┘                    └─────────────────┘
+┌─────────────┐                      ┌─────────────────────┐
+│   Agent1    │◄─── MCP stdio ───►   │  agentmux-client    │
+├─────────────┤                      │  (stdio wrapper)    │
+│   Agent2    │◄─── MCP stdio ───►   └──────────┬──────────┘
+├─────────────┤                                 │ HTTP
+│   AgentX    │◄─── MCP stdio ───►              ▼
+└─────────────┘                      ┌─────────────────────┐
+                                     │  AgentMux Lambda    │
+                                     │  agentmux.asaf.cc   │
+                                     │  (DynamoDB)         │
+                                     └─────────────────────┘
 ```
 
-## Quick Start
+## Components
 
-### Docker (Recommended)
-
-```bash
-cd server
-docker build -t a5af/agentmux-server:latest .
-docker run -d --name agentmux -p 3100:3100 -v agentmux-data:/data a5af/agentmux-server:latest
-```
-
-### Local Development
-
-```bash
-cd server
-npm install
-npm run dev
-```
+| Component | Location | Description |
+|-----------|----------|-------------|
+| **Lambda Server** | `server/` | HTTP server deployed as AWS Lambda |
+| **MCP Client** | `packages/agentmux-client/` | Stdio MCP wrapper for Claude Code |
+| **Infrastructure** | `infrastructure/` | CDK stack for Lambda + DynamoDB |
 
 ## MCP Configuration
 
-Add to agent `.mcp.json`:
+Add to `.mcp.json`:
 
 ```json
 {
   "mcpServers": {
     "agentmux": {
-      "type": "http",
-      "url": "http://localhost:3100/mcp",
-      "headers": {
-        "X-Agent-ID": "your-agent-id"
+      "type": "stdio",
+      "command": "node",
+      "args": ["path/to/agentmux-client/dist/index.js"],
+      "env": {
+        "AGENTMUX_URL": "https://agentmux.asaf.cc",
+        "AGENTMUX_AGENT_ID": "your-agent-id",
+        "AGENTMUX_TOKEN": "your-bearer-token"
       }
     }
   }
 }
 ```
-
-For containers, use `http://agentmux:3100/mcp`.
 
 ## MCP Tools
 
@@ -68,30 +63,28 @@ For containers, use `http://agentmux:3100/mcp`.
 | `broadcast_message` | Send to all agents |
 | `delete_messages` | Delete messages by ID |
 
-## REST API
+## Development
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/health` | GET | Health check |
-| `/api/messages` | POST | Send message |
-| `/api/messages` | GET | Read messages |
-| `/api/agents` | GET | List agents |
-| `/mcp` | POST | MCP JSON-RPC endpoint |
+### Build
 
-## Project Structure
-
+```bash
+npm run build          # Build server and client
+npm run build:server   # Build Lambda server only
+npm run build:client   # Build MCP client only
 ```
-agentmux/
-├── server/           # HTTP MCP server
-│   ├── src/          # TypeScript source
-│   ├── Dockerfile    # Container build
-│   └── package.json
-└── README.md
+
+### Deploy
+
+```bash
+cd infrastructure
+npm install
+npx cdk deploy
 ```
 
 ## Related
 
-- [claw](https://github.com/a5af/claw) - Agent workspace management (deploys agentmux)
+- [claw](https://github.com/a5af/claw) - Agent workspace management
+- [dev-tools](https://github.com/a5af/dev-tools) - VSCode bridge and other tools
 - [reagent](https://github.com/a5af/reagent) - Automated PR review worker
 
 ## License
