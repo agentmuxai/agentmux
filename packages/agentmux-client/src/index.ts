@@ -8,20 +8,25 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 
 // Configuration from environment
-const AGENTMUX_URL = process.env.AGENTMUX_URL ||
-  'https://xv7wycacd3vmglr7j24cfdkhb40buykg.lambda-url.us-east-1.on.aws';
+const AGENTMUX_URL = process.env.AGENTMUX_URL || 'https://agentmux.asaf.cc';
 const AGENT_ID = process.env.AGENTMUX_AGENT_ID || process.env.AGENT_NAME || 'unknown-agent';
+const AGENTMUX_TOKEN = process.env.AGENTMUX_TOKEN;
 
 /**
  * Make JSON-RPC call to AgentMux HTTP endpoint
  */
 async function jsonRpcCall(method: string, params: any = {}): Promise<any> {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    'X-Agent-ID': AGENT_ID,
+  };
+  if (AGENTMUX_TOKEN) {
+    headers['Authorization'] = `Bearer ${AGENTMUX_TOKEN}`;
+  }
+
   const response = await fetch(`${AGENTMUX_URL}/mcp`, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Agent-ID': AGENT_ID,
-    },
+    headers,
     body: JSON.stringify({
       jsonrpc: '2.0',
       id: Date.now(),
