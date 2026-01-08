@@ -1,6 +1,7 @@
 import Fastify from "fastify";
 import cors from "@fastify/cors";
 import { MessageStore } from "./store.js";
+import { SecretsManagerClient, GetSecretValueCommand } from "@aws-sdk/client-secrets-manager";
 
 const PORT = parseInt(process.env.PORT || "3100");
 const HOST = process.env.HOST || "0.0.0.0";
@@ -9,6 +10,37 @@ const store = new MessageStore();
 const app = Fastify({ logger: true });
 
 await app.register(cors, { origin: true });
+
+// Authentication: Bearer token validation
+let cachedApiKey: string | null = null;
+
+async function getApiKey(): Promise<string> {
+  if (cachedApiKey) return cachedApiKey;
+
+  const client = new SecretsManagerClient({ region: process.env.AWS_REGION || "us-east-1" });
+  const response = await client.send(new GetSecretValueCommand({ SecretId: "services/infra" }));
+  const secrets = JSON.parse(response.SecretString || "{}");
+  cachedApiKey = secrets["agentmux-api-key"];
+
+  if (!cachedApiKey) {
+    throw new Error("agentmux-api-key not found in services/infra");
+  }
+
+  return cachedApiKey;
+}
+
+// Auth middleware: Validate bearer token
+app.addHook("onRequest", async (request, reply) => {
+  // Skip auth for health check
+  if (request.url === "/api/health") return;
+
+  const authHeader = request.headers.authorization || "";
+  const expectedKey = await getApiKey();
+
+  if (authHeader !== `Bearer ${expectedKey}`) {
+    reply.code(401).send({ error: "Unauthorized", message: "Invalid or missing bearer token" });
+  }
+});
 
 // Health & Stats
 app.get("/api/health", async () => {
@@ -67,17 +99,13 @@ app.delete<{ Body: { message_ids: string[] }; Headers: { "x-agent-id"?: string }
   }
 );
 
-// VS Code Bridge configuration
-const VSCODE_BRIDGE_URL = process.env.VSCODE_BRIDGE_URL || "http://host.docker.internal:3101";
-
 // MCP Tools Definition
 const MCP_TOOLS = [
   { name: "send_message", description: "Send a message to another agent", inputSchema: { type: "object", properties: { to: { type: "string" }, message: { type: "string" }, priority: { type: "string", enum: ["low","normal","high","urgent"], default: "normal" } }, required: ["to","message"] } },
   { name: "read_messages", description: "Read messages sent to this agent", inputSchema: { type: "object", properties: { unread_only: { type: "boolean", default: true }, limit: { type: "number", default: 10 }, mark_as_read: { type: "boolean", default: true } } } },
   { name: "list_agents", description: "List all agents", inputSchema: { type: "object", properties: {} } },
   { name: "broadcast_message", description: "Send to all agents", inputSchema: { type: "object", properties: { message: { type: "string" }, priority: { type: "string", default: "normal" } }, required: ["message"] } },
-  { name: "delete_messages", description: "Delete messages by ID", inputSchema: { type: "object", properties: { message_ids: { type: "array", items: { type: "string" } } }, required: ["message_ids"] } },
-  { name: "open_vscode", description: "Open a file in VS Code on the host machine", inputSchema: { type: "object", properties: { path: { type: "string", description: "File path (container path like /workspace/src/file.ts)" }, line: { type: "number", description: "Line number to navigate to (optional)" }, column: { type: "number", description: "Column number to navigate to (optional)" } }, required: ["path"] } }
+  { name: "delete_messages", description: "Delete messages by ID", inputSchema: { type: "object", properties: { message_ids: { type: "array", items: { type: "string" } } }, required: ["message_ids"] } }
 ];
 
 interface MCPRequest { jsonrpc: "2.0"; id: number | string; method: string; params?: Record<string, unknown>; }
@@ -135,20 +163,6 @@ app.post<{ Body: MCPRequest; Headers: { "x-agent-id"?: string } }>("/mcp", async
           case "delete_messages": {
             const delResult = await store.deleteMessages(agentId, args.message_ids);
             result = { content: [{ type: "text", text: JSON.stringify({ ...delResult, deleted_count: delResult.deleted.length }, null, 2) }] };
-            break;
-          }
-          case "open_vscode": {
-            try {
-              const resp = await fetch(`${VSCODE_BRIDGE_URL}/open`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ agentId, path: args.path, line: args.line, column: args.column })
-              });
-              const data = await resp.json();
-              result = { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
-            } catch (err) {
-              result = { content: [{ type: "text", text: JSON.stringify({ success: false, error: `Failed to connect to VS Code bridge: ${(err as Error).message}` }, null, 2) }] };
-            }
             break;
           }
           default:
