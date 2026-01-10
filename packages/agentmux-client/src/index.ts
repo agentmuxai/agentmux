@@ -6,49 +6,10 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
+import { jsonRpcCall, getConfigFromEnv, TOOLS } from './client.js';
 
-// Configuration from environment
-const AGENTMUX_URL = process.env.AGENTMUX_URL || 'https://agentmux.asaf.cc';
-const AGENT_ID = process.env.AGENTMUX_AGENT_ID || process.env.AGENT_NAME || 'unknown-agent';
-const AGENTMUX_TOKEN = process.env.AGENTMUX_TOKEN;
-
-/**
- * Make JSON-RPC call to AgentMux HTTP endpoint
- */
-async function jsonRpcCall(method: string, params: any = {}): Promise<any> {
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    'X-Agent-ID': AGENT_ID,
-  };
-
-  // Add auth header if token is available
-  if (AGENTMUX_TOKEN) {
-    headers['Authorization'] = `Bearer ${AGENTMUX_TOKEN}`;
-  }
-
-  const response = await fetch(`${AGENTMUX_URL}/mcp`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({
-      jsonrpc: '2.0',
-      id: Date.now(),
-      method,
-      params,
-    }),
-  });
-
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-  }
-
-  const data = await response.json() as any;
-
-  if (data.error) {
-    throw new Error(`JSON-RPC Error: ${data.error.message}`);
-  }
-
-  return data.result;
-}
+// Get configuration
+const config = getConfigFromEnv();
 
 // Create MCP server
 const server = new Server(
@@ -65,96 +26,7 @@ const server = new Server(
 
 // List available tools
 server.setRequestHandler(ListToolsRequestSchema, async () => {
-  return {
-    tools: [
-      {
-        name: 'send_message',
-        description: 'Send a message to another agent',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            to: {
-              type: 'string',
-              description: 'Agent ID to send message to',
-            },
-            message: {
-              type: 'string',
-              description: 'Message content',
-            },
-            priority: {
-              type: 'string',
-              enum: ['low', 'normal', 'high', 'urgent'],
-              description: 'Message priority',
-              default: 'normal',
-            },
-          },
-          required: ['to', 'message'],
-        },
-      },
-      {
-        name: 'read_messages',
-        description: 'Read messages for this agent',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            unread_only: {
-              type: 'boolean',
-              description: 'Only return unread messages',
-              default: true,
-            },
-            limit: {
-              type: 'number',
-              description: 'Maximum number of messages to return',
-              default: 100,
-            },
-          },
-        },
-      },
-      {
-        name: 'list_agents',
-        description: 'List all known agents',
-        inputSchema: {
-          type: 'object',
-          properties: {},
-        },
-      },
-      {
-        name: 'broadcast_message',
-        description: 'Send a message to all agents',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            message: {
-              type: 'string',
-              description: 'Message content',
-            },
-            priority: {
-              type: 'string',
-              enum: ['low', 'normal', 'high', 'urgent'],
-              description: 'Message priority',
-              default: 'normal',
-            },
-          },
-          required: ['message'],
-        },
-      },
-      {
-        name: 'delete_messages',
-        description: 'Delete messages by ID',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            message_ids: {
-              type: 'array',
-              items: { type: 'string' },
-              description: 'Array of message IDs to delete',
-            },
-          },
-          required: ['message_ids'],
-        },
-      },
-    ],
-  };
+  return { tools: TOOLS };
 });
 
 // Handle tool calls
@@ -162,7 +34,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params;
 
   try {
-    const result = await jsonRpcCall('tools/call', {
+    const result = await jsonRpcCall(config, 'tools/call', {
       name,
       arguments: args || {},
     });
@@ -190,20 +62,25 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
 // Start server
 async function main() {
-  // Start MCP server
-  const transport = new StdioServerTransport();
-  await server.connect(transport);
+  console.error('[AgentMux MCP] Starting...');
+  console.error(`[AgentMux MCP] Agent ID: ${config.agentId}`);
+  console.error(`[AgentMux MCP] Server URL: ${config.url}`);
+  console.error(`[AgentMux MCP] Auth: ${config.token ? 'Bearer token configured' : 'NO TOKEN - requests will fail!'}`);
 
-  console.error('[AgentMux MCP] Stdio wrapper started');
-  console.error(`[AgentMux MCP] Agent ID: ${AGENT_ID}`);
-  console.error(`[AgentMux MCP] Lambda URL: ${AGENTMUX_URL}`);
-  console.error(`[AgentMux MCP] Auth: ${AGENTMUX_TOKEN ? 'Bearer token configured' : 'NO TOKEN - will fail auth!'}`);
-  if (!AGENTMUX_TOKEN) {
+  if (!config.token) {
     console.error('[AgentMux MCP] WARNING: Set AGENTMUX_TOKEN env var for authentication');
   }
+
+  console.error('[AgentMux MCP] Creating stdio transport...');
+  const transport = new StdioServerTransport();
+
+  console.error('[AgentMux MCP] Connecting to MCP protocol...');
+  await server.connect(transport);
+
+  console.error('[AgentMux MCP] Ready - listening for requests');
 }
 
 main().catch((error) => {
-  console.error('Fatal error:', error);
+  console.error('[AgentMux MCP] Fatal error:', error);
   process.exit(1);
 });

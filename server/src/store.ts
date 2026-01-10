@@ -25,7 +25,16 @@ export interface Agent {
   messages_sent: number;
 }
 
-export class MessageStore {
+/** Interface for store operations (for testing/mocking) */
+export interface IMessageStore {
+  sendMessage(from: string, to: string, text: string, priority?: string): Promise<Message>;
+  readMessages(agentId: string, unreadOnly?: boolean, limit?: number, markAsRead?: boolean): Promise<Message[]>;
+  listAgents(): Promise<Agent[]>;
+  deleteMessages(agentId: string, messageIds: string[]): Promise<{ deleted: string[]; errors: { id: string; error: string }[] }>;
+  getStats(): Promise<{ total_messages: number; unread_messages: number; unique_agents: number }>;
+}
+
+export class MessageStore implements IMessageStore {
   private client: DynamoDBDocumentClient;
   private messagesTable: string;
   private agentsTable: string;
