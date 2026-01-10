@@ -1,13 +1,15 @@
 {
   "name": "@a5af/agentmux-server",
-  "version": "1.0.6",
+  "version": "1.0.7",
   "description": "AgentMux HTTP server for inter-agent messaging",
   "type": "module",
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
-    "dev": "tsx watch src/index.ts"
+    "dev": "tsx watch src/index.ts",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@aws-sdk/client-dynamodb": "^3.700.0",
@@ -22,7 +24,8 @@
     "@types/aws-lambda": "^8.10.145",
     "@types/node": "^22.0.0",
     "tsx": "^4.0.0",
-    "typescript": "^5.0.0"
+    "typescript": "^5.0.0",
+    "vitest": "^3.0.4"
   },
   "engines": {
     "node": ">=20.0.0"
