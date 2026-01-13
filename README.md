@@ -32,6 +32,18 @@ AgentMux provides a central messaging server for agent-to-agent communication. T
 | **MCP Client** | `packages/agentmux-client/` | Stdio MCP wrapper for Claude Code |
 | **Infrastructure** | `infrastructure/` | CDK stack for Lambda + DynamoDB |
 
+## Authentication
+
+AgentMux uses a **shared API key** for authentication. All agents use the same key stored in AWS Secrets Manager:
+
+```bash
+secrets get services/infra --path agentmux-api-key --raw
+```
+
+The server validates requests by comparing the `Authorization: Bearer <token>` header against this key.
+
+> **Note:** There is no per-agent JWT authentication. All agents share the same API key. Agent identity is determined by the `X-Agent-ID` header (set via `AGENTMUX_AGENT_ID` env var).
+
 ## MCP Configuration
 
 Add to `.mcp.json`:
@@ -42,16 +54,22 @@ Add to `.mcp.json`:
     "agentmux": {
       "type": "stdio",
       "command": "node",
-      "args": ["path/to/agentmux-client/dist/index.js"],
+      "args": ["~/.claw/bin/node_modules/@a5af/agentmux-client/dist/index.js"],
       "env": {
         "AGENTMUX_URL": "https://agentmux.asaf.cc",
         "AGENTMUX_AGENT_ID": "your-agent-id",
-        "AGENTMUX_TOKEN": "your-bearer-token"
+        "AGENTMUX_TOKEN": "<agentmux-api-key from services/infra>"
       }
     }
   }
 }
 ```
+
+| Env Variable | Description |
+|--------------|-------------|
+| `AGENTMUX_URL` | Server URL (https://agentmux.asaf.cc) |
+| `AGENTMUX_AGENT_ID` | Your agent's unique identifier |
+| `AGENTMUX_TOKEN` | The shared API key from `services/infra` |
 
 ## MCP Tools
 
