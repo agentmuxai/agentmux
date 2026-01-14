@@ -68,7 +68,7 @@ export class AgentMuxStack extends cdk.Stack {
     const agentmuxFunction = new NodejsFunction(this, 'AgentMuxFunction', {
       runtime: lambda.Runtime.NODEJS_20_X,
       handler: 'handler',
-      entry: path.join(__dirname, '../../server/src/lambda.ts'),
+      entry: path.join(__dirname, '../../archive/server-docker-sidecar/src/lambda.ts'),
       functionName: 'agentmux-server',
       timeout: cdk.Duration.seconds(30),
       memorySize: 512,
