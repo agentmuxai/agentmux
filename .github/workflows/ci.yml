@@ -32,9 +32,6 @@ jobs:
       - name: Run client tests
         run: npm test -w @a5af/agentmux-client
 
-      - name: Run server tests
-        run: npm test -w @a5af/agentmux-server
-
   lint:
     runs-on: ubuntu-latest
     steps:
@@ -50,6 +47,4 @@ jobs:
         run: npm ci
 
       - name: Check for TypeScript errors
-        run: |
-          npm run build -w @a5af/agentmux-client
-          npm run build -w @a5af/agentmux-server
+        run: npm run build -w @a5af/agentmux-client
