@@ -159,4 +159,64 @@ export const TOOLS = [
       required: ['message_ids'],
     },
   },
+  {
+    name: 'inject_terminal',
+    description: 'Inject a message directly into another agent\'s terminal (reactive messaging). The message appears as user input and is processed immediately by the target agent.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        target_agent: {
+          type: 'string',
+          description: 'Agent ID to inject message into (e.g., "AgentX", "AgentA")',
+        },
+        message: {
+          type: 'string',
+          description: 'The message to inject as user input',
+        },
+        priority: {
+          type: 'string',
+          enum: ['normal', 'urgent'],
+          description: 'Message priority (urgent may interrupt current processing)',
+          default: 'normal',
+        },
+      },
+      required: ['target_agent', 'message'],
+    },
+  },
 ];
+
+/**
+ * Inject a message into a target agent's terminal via WaveMux reactive API
+ */
+export async function injectTerminal(
+  targetAgent: string,
+  message: string,
+  sourceAgent: string,
+  priority: string = 'normal'
+): Promise<any> {
+  const wavemuxUrl = process.env.WAVEMUX_URL || 'http://localhost:1729';
+
+  const response = await fetch(`${wavemuxUrl}/wave/reactive/inject`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      target_agent: targetAgent,
+      message: message,
+      source_agent: sourceAgent,
+      priority: priority,
+    }),
+  });
+
+  if (!response.ok) {
+    let errorMsg = `HTTP ${response.status}`;
+    try {
+      const data = await response.json() as { error?: string };
+      errorMsg = data.error || errorMsg;
+    } catch {
+      // Response not JSON
+    }
+    throw new Error(`WaveMux injection failed: ${errorMsg}`);
+  }
+
+  return await response.json();
+}
