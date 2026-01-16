@@ -6,6 +6,7 @@ import {
   BatchWriteCommand,
   ScanCommand,
   DeleteCommand,
+  GetCommand,
 } from "@aws-sdk/lib-dynamodb";
 import { randomUUID } from "crypto";
 
@@ -25,6 +26,18 @@ export interface Agent {
   messages_sent: number;
 }
 
+export interface Injection {
+  id: string;
+  target_agent: string;
+  source_agent: string;
+  message: string;
+  priority: "normal" | "urgent";
+  status: "pending" | "delivered" | "expired";
+  created_at: string;
+  delivered_at?: string;
+  ttl: number; // DynamoDB TTL (epoch seconds)
+}
+
 /** Interface for store operations (for testing/mocking) */
 export interface IMessageStore {
   sendMessage(from: string, to: string, text: string, priority?: string): Promise<Message>;
@@ -32,18 +45,24 @@ export interface IMessageStore {
   listAgents(): Promise<Agent[]>;
   deleteMessages(agentId: string, messageIds: string[]): Promise<{ deleted: string[]; errors: { id: string; error: string }[] }>;
   getStats(): Promise<{ total_messages: number; unread_messages: number; unique_agents: number }>;
+  // Reactive injection methods
+  createInjection(sourceAgent: string, targetAgent: string, message: string, priority?: "normal" | "urgent"): Promise<Injection>;
+  getPendingInjections(targetAgent: string): Promise<Injection[]>;
+  acknowledgeInjections(agentId: string, injectionIds: string[]): Promise<{ acknowledged: string[]; errors: { id: string; error: string }[] }>;
 }
 
 export class MessageStore implements IMessageStore {
   private client: DynamoDBDocumentClient;
   private messagesTable: string;
   private agentsTable: string;
+  private injectionsTable: string;
 
   constructor() {
     const dynamoClient = new DynamoDBClient({});
     this.client = DynamoDBDocumentClient.from(dynamoClient);
     this.messagesTable = process.env.MESSAGES_TABLE_NAME || 'agentmux-messages-prod';
     this.agentsTable = process.env.AGENTS_TABLE_NAME || 'agentmux-agents-prod';
+    this.injectionsTable = process.env.INJECTIONS_TABLE_NAME || 'agentmux-injections-prod';
   }
 
   async sendMessage(from: string, to: string, text: string, priority: string = "normal"): Promise<Message> {
@@ -320,5 +339,97 @@ export class MessageStore implements IMessageStore {
         messages_sent
       }
     }));
+  }
+
+  // =============================================
+  // Reactive Injection Methods
+  // =============================================
+
+  async createInjection(sourceAgent: string, targetAgent: string, message: string, priority: "normal" | "urgent" = "normal"): Promise<Injection> {
+    const id = `inj-${Date.now()}-${randomUUID().slice(0, 8)}`;
+    const created_at = new Date().toISOString();
+    // TTL: 1 hour from now (epoch seconds)
+    const ttl = Math.floor(Date.now() / 1000) + 3600;
+
+    const injection: Injection = {
+      id,
+      target_agent: targetAgent,
+      source_agent: sourceAgent,
+      message,
+      priority,
+      status: "pending",
+      created_at,
+      ttl
+    };
+
+    await this.client.send(new PutCommand({
+      TableName: this.injectionsTable,
+      Item: injection
+    }));
+
+    return injection;
+  }
+
+  async getPendingInjections(targetAgent: string): Promise<Injection[]> {
+    // Query using GSI: target_agent-created_at-index
+    const result = await this.client.send(new QueryCommand({
+      TableName: this.injectionsTable,
+      IndexName: 'target_agent-created_at-index',
+      KeyConditionExpression: 'target_agent = :agent',
+      FilterExpression: '#status = :pending',
+      ExpressionAttributeNames: { '#status': 'status' },
+      ExpressionAttributeValues: {
+        ':agent': targetAgent,
+        ':pending': 'pending'
+      },
+      ScanIndexForward: true // ASC order (oldest first for FIFO processing)
+    }));
+
+    return (result.Items || []) as Injection[];
+  }
+
+  async acknowledgeInjections(agentId: string, injectionIds: string[]): Promise<{ acknowledged: string[]; errors: { id: string; error: string }[] }> {
+    const acknowledged: string[] = [];
+    const errors: { id: string; error: string }[] = [];
+    const delivered_at = new Date().toISOString();
+
+    for (const id of injectionIds) {
+      try {
+        // Get injection first to verify it exists (use GetCommand for partition key lookup)
+        const getResult = await this.client.send(new GetCommand({
+          TableName: this.injectionsTable,
+          Key: { id }
+        }));
+
+        if (!getResult.Item) {
+          errors.push({ id, error: "Injection not found" });
+          continue;
+        }
+
+        const injection = getResult.Item as Injection;
+
+        // Security: Verify caller is the target agent
+        if (injection.target_agent !== agentId) {
+          errors.push({ id, error: "Not authorized - not target agent" });
+          continue;
+        }
+
+        // Update status to delivered
+        await this.client.send(new PutCommand({
+          TableName: this.injectionsTable,
+          Item: {
+            ...injection,
+            status: "delivered",
+            delivered_at
+          }
+        }));
+
+        acknowledged.push(id);
+      } catch (err) {
+        errors.push({ id, error: (err as Error).message });
+      }
+    }
+
+    return { acknowledged, errors };
   }
 }

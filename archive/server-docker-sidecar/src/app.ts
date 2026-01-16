@@ -3,7 +3,7 @@
  */
 import Fastify, { FastifyInstance } from "fastify";
 import cors from "@fastify/cors";
-import { IMessageStore, Message, Agent } from "./store.js";
+import { IMessageStore, Message, Agent, Injection } from "./store.js";
 
 // MCP Tools Definition
 export const MCP_TOOLS = [
@@ -95,6 +95,94 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
       const { message_ids } = request.body;
       const result = await store.deleteMessages(agentId, message_ids);
       return { ...result, deleted_count: result.deleted.length };
+    }
+  );
+
+  // =============================================
+  // Reactive Injection Endpoints
+  // =============================================
+
+  // POST /reactive/inject - Create a new injection for cross-host delivery
+  app.post<{ Body: { target_agent: string; message: string; priority?: "normal" | "urgent" }; Headers: { "x-agent-id"?: string } }>(
+    "/reactive/inject",
+    async (request, reply) => {
+      const sourceAgent = request.headers["x-agent-id"];
+      if (!sourceAgent) return reply.status(400).send({ error: "X-Agent-ID header required" });
+
+      const { target_agent, message, priority = "normal" } = request.body;
+      if (!target_agent || !message) {
+        return reply.status(400).send({ error: "target_agent and message are required" });
+      }
+
+      // Validate message length (max 10KB)
+      if (message.length > 10240) {
+        return reply.status(400).send({ error: "message exceeds maximum length of 10KB" });
+      }
+
+      const injection = await store.createInjection(sourceAgent, target_agent, message, priority);
+      return {
+        success: true,
+        injection_id: injection.id,
+        source_agent: sourceAgent,
+        target_agent,
+        priority,
+        created_at: injection.created_at,
+        ttl_seconds: 3600
+      };
+    }
+  );
+
+  // GET /reactive/pending/:agent_id - Get pending injections for an agent
+  app.get<{ Params: { agent_id: string }; Headers: { "x-agent-id"?: string } }>(
+    "/reactive/pending/:agent_id",
+    async (request, reply) => {
+      const callerAgent = request.headers["x-agent-id"];
+      if (!callerAgent) return reply.status(400).send({ error: "X-Agent-ID header required" });
+
+      const { agent_id } = request.params;
+      if (!agent_id) {
+        return reply.status(400).send({ error: "agent_id parameter required" });
+      }
+
+      // Security: Verify caller is requesting their own injections
+      if (callerAgent !== agent_id) {
+        return reply.status(403).send({ error: "Not authorized - can only fetch own pending injections" });
+      }
+
+      const injections = await store.getPendingInjections(agent_id);
+      return {
+        agent_id,
+        injections: injections.map(inj => ({
+          id: inj.id,
+          source_agent: inj.source_agent,
+          message: inj.message,
+          priority: inj.priority,
+          created_at: inj.created_at
+        })),
+        count: injections.length
+      };
+    }
+  );
+
+  // POST /reactive/ack - Acknowledge delivered injections
+  app.post<{ Body: { injection_ids: string[] }; Headers: { "x-agent-id"?: string } }>(
+    "/reactive/ack",
+    async (request, reply) => {
+      const agentId = request.headers["x-agent-id"];
+      if (!agentId) return reply.status(400).send({ error: "X-Agent-ID header required" });
+
+      const { injection_ids } = request.body;
+      if (!injection_ids || !Array.isArray(injection_ids)) {
+        return reply.status(400).send({ error: "injection_ids array required" });
+      }
+
+      // Pass agentId for authorization check (only target agent can acknowledge)
+      const result = await store.acknowledgeInjections(agentId, injection_ids);
+      return {
+        agent_id: agentId,
+        ...result,
+        acknowledged_count: result.acknowledged.length
+      };
     }
   );
 
