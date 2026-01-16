@@ -6,7 +6,7 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
-import { jsonRpcCall, getConfigFromEnv, TOOLS } from './client.js';
+import { jsonRpcCall, getConfigFromEnv, TOOLS, injectTerminal } from './client.js';
 
 // Get configuration
 const config = getConfigFromEnv();
@@ -34,10 +34,24 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params;
 
   try {
-    const result = await jsonRpcCall(config, 'tools/call', {
-      name,
-      arguments: args || {},
-    });
+    let result: any;
+
+    // Handle inject_terminal locally (calls WaveMux directly)
+    if (name === 'inject_terminal') {
+      const typedArgs = args as { target_agent: string; message: string; priority?: string };
+      result = await injectTerminal(
+        typedArgs.target_agent,
+        typedArgs.message,
+        config.agentId,
+        typedArgs.priority || 'normal'
+      );
+    } else {
+      // Proxy other tools to AgentMux server
+      result = await jsonRpcCall(config, 'tools/call', {
+        name,
+        arguments: args || {},
+      });
+    }
 
     return {
       content: result.content || [

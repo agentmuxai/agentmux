@@ -221,8 +221,16 @@ describe('client', () => {
       expect(tool?.inputSchema.required).toContain('message_ids');
     });
 
-    it('has 5 tools total', () => {
-      expect(TOOLS).toHaveLength(5);
+    it('defines inject_terminal tool', () => {
+      const tool = TOOLS.find(t => t.name === 'inject_terminal');
+      expect(tool).toBeDefined();
+      expect(tool?.inputSchema.required).toContain('target_agent');
+      expect(tool?.inputSchema.required).toContain('message');
+      expect(tool?.inputSchema.properties).toHaveProperty('priority');
+    });
+
+    it('has 6 tools total', () => {
+      expect(TOOLS).toHaveLength(6);
     });
   });
 });
