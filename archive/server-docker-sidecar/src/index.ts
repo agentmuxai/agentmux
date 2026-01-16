@@ -29,6 +29,14 @@ async function getApiKey(): Promise<string> {
   return cachedApiKey;
 }
 
+/**
+ * Normalize agent ID for case-insensitive matching.
+ * All agent IDs are stored and compared in lowercase.
+ */
+function normalizeAgentId(agentId: string): string {
+  return agentId.toLowerCase().trim();
+}
+
 // Auth middleware: Validate bearer token
 app.addHook("onRequest", async (request, reply) => {
   // Skip auth for health check
@@ -44,7 +52,7 @@ app.addHook("onRequest", async (request, reply) => {
 
 // Health & Stats
 app.get("/api/health", async () => {
-  return { status: "ok", version: "1.0.0", timestamp: new Date().toISOString() };
+  return { status: "ok", version: "1.1.0", timestamp: new Date().toISOString() };
 });
 
 app.get("/api/stats", async () => {
@@ -55,11 +63,13 @@ app.get("/api/stats", async () => {
 app.post<{ Body: { to: string; message: string; priority?: string }; Headers: { "x-agent-id"?: string } }>(
   "/api/messages",
   async (request, reply) => {
-    const agentId = request.headers["x-agent-id"];
-    if (!agentId) return reply.status(400).send({ error: "X-Agent-ID header required" });
+    const rawAgentId = request.headers["x-agent-id"];
+    if (!rawAgentId) return reply.status(400).send({ error: "X-Agent-ID header required" });
+    const agentId = normalizeAgentId(rawAgentId);
     const { to, message, priority = "normal" } = request.body;
-    const msg = await store.sendMessage(agentId, to, message, priority);
-    return { success: true, message_id: msg.id, from: agentId, to, delivered_at: msg.timestamp, priority };
+    const normalizedTo = normalizeAgentId(to);
+    const msg = await store.sendMessage(agentId, normalizedTo, message, priority);
+    return { success: true, message_id: msg.id, from: agentId, to: normalizedTo, delivered_at: msg.timestamp, priority };
   }
 );
 
@@ -67,8 +77,9 @@ app.post<{ Body: { to: string; message: string; priority?: string }; Headers: { 
 app.get<{ Querystring: { unread_only?: string; limit?: string; mark_as_read?: string }; Headers: { "x-agent-id"?: string } }>(
   "/api/messages",
   async (request, reply) => {
-    const agentId = request.headers["x-agent-id"];
-    if (!agentId) return reply.status(400).send({ error: "X-Agent-ID header required" });
+    const rawAgentId = request.headers["x-agent-id"];
+    if (!rawAgentId) return reply.status(400).send({ error: "X-Agent-ID header required" });
+    const agentId = normalizeAgentId(rawAgentId);
     const unreadOnly = request.query.unread_only !== "false";
     const limit = parseInt(request.query.limit || "10");
     const markAsRead = request.query.mark_as_read !== "false";
@@ -91,11 +102,105 @@ app.get("/api/agents", async () => {
 app.delete<{ Body: { message_ids: string[] }; Headers: { "x-agent-id"?: string } }>(
   "/api/messages",
   async (request, reply) => {
-    const agentId = request.headers["x-agent-id"];
-    if (!agentId) return reply.status(400).send({ error: "X-Agent-ID header required" });
+    const rawAgentId = request.headers["x-agent-id"];
+    if (!rawAgentId) return reply.status(400).send({ error: "X-Agent-ID header required" });
+    const agentId = normalizeAgentId(rawAgentId);
     const { message_ids } = request.body;
     const result = await store.deleteMessages(agentId, message_ids);
     return { ...result, deleted_count: result.deleted.length };
+  }
+);
+
+// =============================================
+// Reactive Injection Endpoints
+// =============================================
+
+// POST /reactive/inject - Create a new injection for cross-host delivery
+app.post<{ Body: { target_agent: string; message: string; priority?: "normal" | "urgent" }; Headers: { "x-agent-id"?: string } }>(
+  "/reactive/inject",
+  async (request, reply) => {
+    const rawSourceAgent = request.headers["x-agent-id"];
+    if (!rawSourceAgent) return reply.status(400).send({ error: "X-Agent-ID header required" });
+    const sourceAgent = normalizeAgentId(rawSourceAgent);
+
+    const { target_agent, message, priority = "normal" } = request.body;
+    if (!target_agent || !message) {
+      return reply.status(400).send({ error: "target_agent and message are required" });
+    }
+    const normalizedTarget = normalizeAgentId(target_agent);
+
+    // Validate message length (max 10KB)
+    if (message.length > 10240) {
+      return reply.status(400).send({ error: "message exceeds maximum length of 10KB" });
+    }
+
+    const injection = await store.createInjection(sourceAgent, normalizedTarget, message, priority);
+    return {
+      success: true,
+      injection_id: injection.id,
+      source_agent: sourceAgent,
+      target_agent: normalizedTarget,
+      priority,
+      created_at: injection.created_at,
+      ttl_seconds: 3600
+    };
+  }
+);
+
+// GET /reactive/pending/:agent_id - Get pending injections for an agent
+app.get<{ Params: { agent_id: string }; Headers: { "x-agent-id"?: string } }>(
+  "/reactive/pending/:agent_id",
+  async (request, reply) => {
+    const rawCallerAgent = request.headers["x-agent-id"];
+    if (!rawCallerAgent) return reply.status(400).send({ error: "X-Agent-ID header required" });
+    const callerAgent = normalizeAgentId(rawCallerAgent);
+
+    const { agent_id } = request.params;
+    if (!agent_id) {
+      return reply.status(400).send({ error: "agent_id parameter required" });
+    }
+    const normalizedAgentId = normalizeAgentId(agent_id);
+
+    // Security: Verify caller is requesting their own injections (case-insensitive)
+    if (callerAgent !== normalizedAgentId) {
+      return reply.status(403).send({ error: "Not authorized - can only fetch own pending injections" });
+    }
+
+    const injections = await store.getPendingInjections(normalizedAgentId);
+    return {
+      agent_id: normalizedAgentId,
+      injections: injections.map(inj => ({
+        id: inj.id,
+        source_agent: inj.source_agent,
+        message: inj.message,
+        priority: inj.priority,
+        created_at: inj.created_at
+      })),
+      count: injections.length
+    };
+  }
+);
+
+// POST /reactive/ack - Acknowledge delivered injections
+app.post<{ Body: { injection_ids: string[] }; Headers: { "x-agent-id"?: string } }>(
+  "/reactive/ack",
+  async (request, reply) => {
+    const rawAgentId = request.headers["x-agent-id"];
+    if (!rawAgentId) return reply.status(400).send({ error: "X-Agent-ID header required" });
+    const agentId = normalizeAgentId(rawAgentId);
+
+    const { injection_ids } = request.body;
+    if (!injection_ids || !Array.isArray(injection_ids)) {
+      return reply.status(400).send({ error: "injection_ids array required" });
+    }
+
+    // Pass agentId for authorization check (only target agent can acknowledge)
+    const result = await store.acknowledgeInjections(agentId, injection_ids);
+    return {
+      agent_id: agentId,
+      ...result,
+      acknowledged_count: result.acknowledged.length
+    };
   }
 );
 
@@ -114,7 +219,7 @@ interface MCPRequest { jsonrpc: "2.0"; id: number | string; method: string; para
 app.get("/mcp", async (request, reply) => {
   return {
     name: "agentmux-server",
-    version: "1.0.0",
+    version: "1.1.0",
     protocol: "JSON-RPC over HTTP",
     transport: "POST only (SSE not implemented)",
     usage: "Send JSON-RPC 2.0 requests via POST with X-Agent-ID header"
@@ -123,7 +228,11 @@ app.get("/mcp", async (request, reply) => {
 
 // MCP JSON-RPC endpoint
 app.post<{ Body: MCPRequest; Headers: { "x-agent-id"?: string } }>("/mcp", async (request, reply) => {
-  const agentId = request.headers["x-agent-id"] || "unknown";
+  const rawAgentId = request.headers["x-agent-id"];
+  if (!rawAgentId) {
+    return reply.status(400).send({ jsonrpc: "2.0", id: null, error: { code: -32600, message: "X-Agent-ID header required" } });
+  }
+  const agentId = normalizeAgentId(rawAgentId);
   const { jsonrpc, id, method, params } = request.body;
   if (jsonrpc !== "2.0") return reply.status(400).send({ jsonrpc: "2.0", id, error: { code: -32600, message: "Invalid JSON-RPC" } });
 
@@ -131,7 +240,7 @@ app.post<{ Body: MCPRequest; Headers: { "x-agent-id"?: string } }>("/mcp", async
     let result: unknown;
     switch (method) {
       case "initialize":
-        result = { protocolVersion: "2024-11-05", capabilities: { tools: {} }, serverInfo: { name: "agentmux-server", version: "1.0.0" } };
+        result = { protocolVersion: "2024-11-05", capabilities: { tools: {} }, serverInfo: { name: "agentmux-server", version: "1.1.0" } };
         break;
       case "tools/list":
         result = { tools: MCP_TOOLS };
@@ -141,8 +250,9 @@ app.post<{ Body: MCPRequest; Headers: { "x-agent-id"?: string } }>("/mcp", async
         const args = (params as any)?.arguments || {};
         switch (toolName) {
           case "send_message": {
-            const msg = await store.sendMessage(agentId, args.to, args.message, args.priority || "normal");
-            result = { content: [{ type: "text", text: JSON.stringify({ success: true, message_id: msg.id, from: agentId, to: args.to, delivered_at: msg.timestamp, priority: args.priority || "normal" }, null, 2) }] };
+            const normalizedTo = normalizeAgentId(args.to);
+            const msg = await store.sendMessage(agentId, normalizedTo, args.message, args.priority || "normal");
+            result = { content: [{ type: "text", text: JSON.stringify({ success: true, message_id: msg.id, from: agentId, to: normalizedTo, delivered_at: msg.timestamp, priority: args.priority || "normal" }, null, 2) }] };
             break;
           }
           case "read_messages": {
@@ -186,7 +296,7 @@ export { app };
 if (!process.env.AWS_LAMBDA_FUNCTION_NAME) {
   try {
     await app.listen({ port: PORT, host: HOST });
-    console.log(`AgentMux Server v1.0.0 listening on http://${HOST}:${PORT}`);
+    console.log(`AgentMux Server v1.1.0 listening on http://${HOST}:${PORT}`);
     console.log(`MCP endpoint: POST http://${HOST}:${PORT}/mcp`);
     console.log(`REST API: http://${HOST}:${PORT}/api/*`);
   } catch (err) {
