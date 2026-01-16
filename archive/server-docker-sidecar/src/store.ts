@@ -6,6 +6,7 @@ import {
   BatchWriteCommand,
   ScanCommand,
   DeleteCommand,
+  GetCommand,
 } from "@aws-sdk/lib-dynamodb";
 import { randomUUID } from "crypto";
 
@@ -47,7 +48,7 @@ export interface IMessageStore {
   // Reactive injection methods
   createInjection(sourceAgent: string, targetAgent: string, message: string, priority?: "normal" | "urgent"): Promise<Injection>;
   getPendingInjections(targetAgent: string): Promise<Injection[]>;
-  acknowledgeInjections(injectionIds: string[]): Promise<{ acknowledged: string[]; errors: { id: string; error: string }[] }>;
+  acknowledgeInjections(agentId: string, injectionIds: string[]): Promise<{ acknowledged: string[]; errors: { id: string; error: string }[] }>;
 }
 
 export class MessageStore implements IMessageStore {
@@ -387,26 +388,31 @@ export class MessageStore implements IMessageStore {
     return (result.Items || []) as Injection[];
   }
 
-  async acknowledgeInjections(injectionIds: string[]): Promise<{ acknowledged: string[]; errors: { id: string; error: string }[] }> {
+  async acknowledgeInjections(agentId: string, injectionIds: string[]): Promise<{ acknowledged: string[]; errors: { id: string; error: string }[] }> {
     const acknowledged: string[] = [];
     const errors: { id: string; error: string }[] = [];
     const delivered_at = new Date().toISOString();
 
     for (const id of injectionIds) {
       try {
-        // Get injection first to verify it exists
-        const getResult = await this.client.send(new QueryCommand({
+        // Get injection first to verify it exists (use GetCommand for partition key lookup)
+        const getResult = await this.client.send(new GetCommand({
           TableName: this.injectionsTable,
-          KeyConditionExpression: 'id = :id',
-          ExpressionAttributeValues: { ':id': id }
+          Key: { id }
         }));
 
-        if (!getResult.Items || getResult.Items.length === 0) {
+        if (!getResult.Item) {
           errors.push({ id, error: "Injection not found" });
           continue;
         }
 
-        const injection = getResult.Items[0] as Injection;
+        const injection = getResult.Item as Injection;
+
+        // Security: Verify caller is the target agent
+        if (injection.target_agent !== agentId) {
+          errors.push({ id, error: "Not authorized - not target agent" });
+          continue;
+        }
 
         // Update status to delivered
         await this.client.send(new PutCommand({

@@ -103,7 +103,7 @@ function createMockStore(): IMessageStore & { messages: Message[]; agents: Agent
       return injections.filter(inj => inj.target_agent === targetAgent && inj.status === "pending");
     },
 
-    async acknowledgeInjections(injectionIds: string[]): Promise<{ acknowledged: string[]; errors: { id: string; error: string }[] }> {
+    async acknowledgeInjections(agentId: string, injectionIds: string[]): Promise<{ acknowledged: string[]; errors: { id: string; error: string }[] }> {
       const acknowledged: string[] = [];
       const errors: { id: string; error: string }[] = [];
 
@@ -111,6 +111,8 @@ function createMockStore(): IMessageStore & { messages: Message[]; agents: Agent
         const inj = injections.find(i => i.id === id);
         if (!inj) {
           errors.push({ id, error: "Injection not found" });
+        } else if (inj.target_agent !== agentId) {
+          errors.push({ id, error: "Not authorized - not target agent" });
         } else {
           inj.status = "delivered";
           inj.delivered_at = new Date().toISOString();
