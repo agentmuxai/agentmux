@@ -1,15 +1,17 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { buildApp, MCP_TOOLS } from './app.js';
-import type { Message, Agent, IMessageStore } from './store.js';
+import type { Message, Agent, Injection, IMessageStore } from './store.js';
 
 // Mock store implementation for testing
-function createMockStore(): IMessageStore & { messages: Message[]; agents: Agent[] } {
+function createMockStore(): IMessageStore & { messages: Message[]; agents: Agent[]; injections: Injection[] } {
   const messages: Message[] = [];
   const agents: Agent[] = [];
+  const injections: Injection[] = [];
 
   return {
     messages,
     agents,
+    injections,
 
     async sendMessage(from: string, to: string, text: string, priority: string = 'normal'): Promise<Message> {
       const msg: Message = {
@@ -79,6 +81,44 @@ function createMockStore(): IMessageStore & { messages: Message[]; agents: Agent
         unread_messages: messages.filter(m => !m.read).length,
         unique_agents: agents.length,
       };
+    },
+
+    // Reactive injection methods
+    async createInjection(sourceAgent: string, targetAgent: string, message: string, priority: "normal" | "urgent" = "normal"): Promise<Injection> {
+      const inj: Injection = {
+        id: `inj-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+        target_agent: targetAgent,
+        source_agent: sourceAgent,
+        message,
+        priority,
+        status: "pending",
+        created_at: new Date().toISOString(),
+        ttl: Math.floor(Date.now() / 1000) + 3600,
+      };
+      injections.push(inj);
+      return inj;
+    },
+
+    async getPendingInjections(targetAgent: string): Promise<Injection[]> {
+      return injections.filter(inj => inj.target_agent === targetAgent && inj.status === "pending");
+    },
+
+    async acknowledgeInjections(injectionIds: string[]): Promise<{ acknowledged: string[]; errors: { id: string; error: string }[] }> {
+      const acknowledged: string[] = [];
+      const errors: { id: string; error: string }[] = [];
+
+      for (const id of injectionIds) {
+        const inj = injections.find(i => i.id === id);
+        if (!inj) {
+          errors.push({ id, error: "Injection not found" });
+        } else {
+          inj.status = "delivered";
+          inj.delivered_at = new Date().toISOString();
+          acknowledged.push(id);
+        }
+      }
+
+      return { acknowledged, errors };
     },
   };
 }
