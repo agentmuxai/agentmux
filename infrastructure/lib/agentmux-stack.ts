@@ -75,6 +75,7 @@ export class AgentMuxStack extends cdk.Stack {
       environment: {
         MESSAGES_TABLE_NAME: this.tables.messagesTable.tableName,
         AGENTS_TABLE_NAME: this.tables.agentsTable.tableName,
+        INJECTIONS_TABLE_NAME: this.tables.injectionsTable.tableName,
         NODE_ENV: 'production'
       },
       bundling: {
@@ -91,6 +92,7 @@ export class AgentMuxStack extends cdk.Stack {
     // Grant DynamoDB permissions
     this.tables.messagesTable.grantReadWriteData(agentmuxFunction);
     this.tables.agentsTable.grantReadWriteData(agentmuxFunction);
+    this.tables.injectionsTable.grantReadWriteData(agentmuxFunction);
 
     // Grant Secrets Manager access for bearer token
     new iam.Policy(this, 'LambdaSecretsPolicy', {
@@ -172,6 +174,7 @@ export class AgentMuxStack extends cdk.Stack {
     // ----------------------------------------
     this.tables.messagesTable.grantReadWriteData(bastionRole);
     this.tables.agentsTable.grantReadWriteData(bastionRole);
+    this.tables.injectionsTable.grantReadWriteData(bastionRole);
 
     // Grant Secrets Manager access for JWT secret
     new iam.Policy(this, 'BastionSecretsPolicy', {
@@ -220,6 +223,12 @@ export class AgentMuxStack extends cdk.Stack {
       value: this.tables.agentsTable.tableName,
       description: 'DynamoDB table for agent registry',
       exportName: `agentmux-agents-table-${env}`,
+    });
+
+    new cdk.CfnOutput(this, 'InjectionsTableName', {
+      value: this.tables.injectionsTable.tableName,
+      description: 'DynamoDB table for reactive terminal injections',
+      exportName: `agentmux-injections-table-${env}`,
     });
 
     new cdk.CfnOutput(this, 'BastionInstanceId', {

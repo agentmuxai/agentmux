@@ -15,6 +15,7 @@ export interface AgentMuxTablesProps {
 export class AgentMuxTables extends Construct {
   public readonly messagesTable: dynamodb.Table;
   public readonly agentsTable: dynamodb.Table;
+  public readonly injectionsTable: dynamodb.Table;
 
   constructor(scope: Construct, id: string, props?: AgentMuxTablesProps) {
     super(scope, id);
@@ -52,8 +53,29 @@ export class AgentMuxTables extends Construct {
       removalPolicy: cdk.RemovalPolicy.RETAIN,
     });
 
+    // Injections table: stores cross-host reactive terminal injections
+    this.injectionsTable = new dynamodb.Table(this, 'InjectionsTable', {
+      tableName: `agentmux-injections-${env}`,
+      partitionKey: { name: 'id', type: dynamodb.AttributeType.STRING },
+      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      timeToLiveAttribute: 'ttl', // Auto-cleanup after 1 hour
+      pointInTimeRecoverySpecification: {
+        pointInTimeRecoveryEnabled: true,
+      },
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
+    });
+
+    // GSI: Query injections by target agent and creation time
+    this.injectionsTable.addGlobalSecondaryIndex({
+      indexName: 'target_agent-created_at-index',
+      partitionKey: { name: 'target_agent', type: dynamodb.AttributeType.STRING },
+      sortKey: { name: 'created_at', type: dynamodb.AttributeType.STRING },
+      projectionType: dynamodb.ProjectionType.ALL,
+    });
+
     // Tags
     cdk.Tags.of(this.messagesTable).add('Component', 'agentmux');
     cdk.Tags.of(this.agentsTable).add('Component', 'agentmux');
+    cdk.Tags.of(this.injectionsTable).add('Component', 'agentmux');
   }
 }
