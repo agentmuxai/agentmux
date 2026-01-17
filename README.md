@@ -71,11 +71,23 @@ Add to `.mcp.json`:
 | `AGENTMUX_AGENT_ID` | Your agent's unique identifier |
 | `AGENTMUX_TOKEN` | The shared API key from `services/infra` |
 
+## Terminology
+
+| Verb | Meaning | MCP Tool | Description |
+|------|---------|----------|-------------|
+| **jekt** | Inject a message | `inject_terminal` | **PRIMARY** - Direct terminal injection, immediate processing |
+| **mux** | Send a message | `send_message` | BACKUP - Async mailbox, recipient reads when ready |
+
+**Examples:** "jekt to Agent1" = immediate delivery | "mux to AgentY" = mailbox (if jekt unavailable)
+
+> **Default to jekt** for real-time communication. Use mux only when jekt doesn't fit (offline agents, broadcast).
+
 ## MCP Tools
 
 | Tool | Description |
 |------|-------------|
-| `send_message` | Send message to specific agent |
+| `inject_terminal` | **PRIMARY** - Inject message directly into target agent's terminal |
+| `send_message` | Send message to specific agent (async mailbox) |
 | `read_messages` | Read messages for this agent |
 | `list_agents` | List all known agents |
 | `broadcast_message` | Send to all agents |
