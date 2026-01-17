@@ -22,8 +22,9 @@ Set environment variables:
 
 | Variable | Required | Description | Default |
 |----------|----------|-------------|---------|
-| `AGENTMUX_URL` | No | Lambda Function URL | `https://xv7wycacd3vmglr7j24cfdkhb40buykg.lambda-url.us-east-1.on.aws` |
+| `AGENTMUX_URL` | No | AgentMux server URL | `https://agentmux.asaf.cc` |
 | `AGENTMUX_AGENT_ID` | No | Unique agent identifier | Value from `AGENT_NAME` or `unknown-agent` |
+| `AGENTMUX_TOKEN` | For inject | Auth token for inject_terminal | - |
 | `AGENT_NAME` | No | Fallback for agent ID | - |
 
 ## Usage in Claude Code
@@ -37,15 +38,18 @@ Add to `.mcp.json`:
       "type": "stdio",
       "command": "agentmux",
       "env": {
-        "AGENTMUX_URL": "https://xv7wycacd3vmglr7j24cfdkhb40buykg.lambda-url.us-east-1.on.aws",
-        "AGENTMUX_AGENT_ID": "agent1"
+        "AGENTMUX_URL": "https://agentmux.asaf.cc",
+        "AGENTMUX_AGENT_ID": "agent1",
+        "AGENTMUX_TOKEN": "your-auth-token-here"
       }
     }
   }
 }
 ```
 
-**Note:** If `AGENTMUX_AGENT_ID` is not set, it falls back to `AGENT_NAME` environment variable.
+**Notes:**
+- `AGENTMUX_TOKEN` is required for `inject_terminal` tool. Without it, you can still use `send_message`, `read_messages`, etc.
+- If `AGENTMUX_AGENT_ID` is not set, it falls back to `AGENT_NAME` environment variable.
 
 ## MCP Tools
 
@@ -91,6 +95,39 @@ Delete messages by ID.
 
 **Parameters:**
 - `message_ids` (string[], required): Array of message IDs
+
+### inject_terminal
+Inject a message directly into another agent's terminal for reactive communication.
+
+**IMPORTANT: This tool routes through the AgentMux cloud, NOT directly to a local WaveMux instance.**
+
+The flow is:
+1. Your agent calls `inject_terminal` → AgentMux cloud queues the injection
+2. Target agent's WaveMux polls AgentMux for pending injections (every 5 seconds)
+3. Target WaveMux delivers the message to the agent's terminal as user input
+4. Target agent's Claude Code processes it as if typed by a user
+
+This enables cross-host agent-to-agent communication where agents are on different machines.
+
+**Parameters:**
+- `target_agent` (string, required): Agent ID to inject message into (e.g., "AgentX", "AgentA")
+- `message` (string, required): The message to inject as user input
+- `priority` (enum, optional): `normal` or `urgent` (default: `normal`)
+
+**Requires:** `AGENTMUX_TOKEN` must be set for authentication.
+
+**Example:**
+```typescript
+{
+  "target_agent": "AgentG",
+  "message": "Hello from AgentA! Can you help review PR #135?",
+  "priority": "normal"
+}
+```
+
+**Note:** This is fundamentally different from `send_message`:
+- `send_message`: Stores message in mailbox, target reads when convenient
+- `inject_terminal`: Injects directly into terminal, target processes immediately
 
 ## Testing Locally
 

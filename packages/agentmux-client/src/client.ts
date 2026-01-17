@@ -186,7 +186,10 @@ export const TOOLS = [
 ];
 
 /**
- * Inject a message into a target agent's terminal via WaveMux reactive API
+ * Inject a message into a target agent's terminal via AgentMux cloud.
+ *
+ * Always routes through AgentMux for reliable cross-host delivery.
+ * The target WaveMux instance polls for pending injections and delivers locally.
  */
 export async function injectTerminal(
   targetAgent: string,
@@ -194,11 +197,19 @@ export async function injectTerminal(
   sourceAgent: string,
   priority: string = 'normal'
 ): Promise<any> {
-  const wavemuxUrl = process.env.WAVEMUX_URL || 'http://localhost:1729';
+  const config = getConfigFromEnv();
 
-  const response = await fetch(`${wavemuxUrl}/wave/reactive/inject`, {
+  if (!config.token) {
+    throw new Error('inject_terminal requires AGENTMUX_TOKEN to be set');
+  }
+
+  const response = await fetch(`${config.url}/reactive/inject`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${config.token}`,
+      'X-Agent-ID': sourceAgent,
+    },
     body: JSON.stringify({
       target_agent: targetAgent,
       message: message,
@@ -215,7 +226,7 @@ export async function injectTerminal(
     } catch {
       // Response not JSON
     }
-    throw new Error(`WaveMux injection failed: ${errorMsg}`);
+    throw new Error(`Injection failed: ${errorMsg}`);
   }
 
   return await response.json();
