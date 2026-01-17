@@ -1,6 +1,6 @@
 {
   "name": "@a5af/agentmux-client",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "description": "MCP stdio wrapper for Lambda AgentMux (HTTP transport)",
   "main": "dist/index.js",
   "bin": {
