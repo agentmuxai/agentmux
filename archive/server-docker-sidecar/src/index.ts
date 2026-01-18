@@ -115,15 +115,45 @@ app.delete<{ Body: { message_ids: string[] }; Headers: { "x-agent-id"?: string }
 // Reactive Injection Endpoints
 // =============================================
 
+/**
+ * Wrap JEKT message with standard header/footer for clear identification.
+ * Applied server-side so ALL sources get consistent formatting.
+ */
+function wrapJektMessage(params: {
+  message: string;
+  sourceAgent: string;
+  targetAgent: string;
+  priority: "normal" | "urgent";
+  prNumber?: number;
+}): string {
+  const timestamp = new Date().toISOString().replace('T', ' ').substring(0, 19);
+  const priorityTag = params.priority === 'urgent' ? ' [URGENT]' : '';
+
+  // GitHub sources can't receive jekt - reply via PR comments
+  const isGitHubSource = params.sourceAgent.toLowerCase().startsWith('github');
+  const replyInstructions = isGitHubSource && params.prNumber
+    ? `Reply: mcp__github__add_issue_comment or gh pr comment ${params.prNumber}`
+    : `Reply: mcp__agentmux__inject_terminal to ${params.sourceAgent}`;
+
+  return `JEKT | From: ${params.sourceAgent} | To: ${params.targetAgent}${priorityTag} | ${timestamp}
+────────────────────────────────────────────────────────────
+${params.message}
+────────────────────────────────────────────────────────────
+${replyInstructions}`;
+}
+
 // POST /reactive/inject - Create a new injection for cross-host delivery
-app.post<{ Body: { target_agent: string; message: string; priority?: "normal" | "urgent" }; Headers: { "x-agent-id"?: string } }>(
+app.post<{ Body: { target_agent: string; message: string; priority?: "normal" | "urgent"; pr_number?: number }; Headers: { "x-agent-id"?: string } }>(
   "/reactive/inject",
   async (request, reply) => {
     const rawSourceAgent = request.headers["x-agent-id"];
     if (!rawSourceAgent) return reply.status(400).send({ error: "X-Agent-ID header required" });
-    const sourceAgent = normalizeAgentId(rawSourceAgent);
+    // Don't normalize GitHub sources - preserve "GitHub (@user)" format
+    const sourceAgent = rawSourceAgent.toLowerCase().startsWith('github')
+      ? rawSourceAgent
+      : normalizeAgentId(rawSourceAgent);
 
-    const { target_agent, message, priority = "normal" } = request.body;
+    const { target_agent, message, priority = "normal", pr_number } = request.body;
     if (!target_agent || !message) {
       return reply.status(400).send({ error: "target_agent and message are required" });
     }
@@ -134,7 +164,16 @@ app.post<{ Body: { target_agent: string; message: string; priority?: "normal" | 
       return reply.status(400).send({ error: "message exceeds maximum length of 10KB" });
     }
 
-    const injection = await store.createInjection(sourceAgent, normalizedTarget, message, priority);
+    // Wrap message with standard JEKT format
+    const wrappedMessage = wrapJektMessage({
+      message,
+      sourceAgent,
+      targetAgent: normalizedTarget,
+      priority: priority as "normal" | "urgent",
+      prNumber: pr_number
+    });
+
+    const injection = await store.createInjection(sourceAgent, normalizedTarget, wrappedMessage, priority);
     return {
       success: true,
       injection_id: injection.id,
