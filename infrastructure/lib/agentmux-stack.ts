@@ -189,8 +189,64 @@ export class AgentMuxStack extends cdk.Stack {
     });
 
     // ----------------------------------------
+    // GitHub Consumer Lambda
+    // ----------------------------------------
+    // Handles GitHub webhook events and notifies agents via AgentMux.
+    // Currently supports: PR merge notifications
+    const githubConsumerFunction = new NodejsFunction(this, 'GitHubConsumerFunction', {
+      runtime: lambda.Runtime.NODEJS_20_X,
+      handler: 'handler',
+      entry: path.join(__dirname, '../../consumers/github/handler.ts'),
+      functionName: 'agentmux-github-consumer',
+      timeout: cdk.Duration.seconds(30),
+      memorySize: 256,
+      environment: {
+        AGENTMUX_URL: `https://${domainName}`,
+        NODE_ENV: 'production',
+        // Secrets are fetched at runtime from Secrets Manager
+      },
+      bundling: {
+        format: OutputFormat.ESM,
+        minify: true,
+        sourceMap: true,
+        externalModules: [],
+        mainFields: ['module', 'main'],
+        banner: "import { createRequire } from 'module';const require = createRequire(import.meta.url);import * as url from 'url';const __filename = url.fileURLToPath(import.meta.url);const __dirname = url.fileURLToPath(new URL('.', import.meta.url));"
+      },
+      logRetention: logs.RetentionDays.ONE_WEEK
+    });
+
+    // Grant Secrets Manager access for webhook secret and API key
+    new iam.Policy(this, 'GitHubConsumerSecretsPolicy', {
+      roles: [githubConsumerFunction.role!],
+      statements: [
+        new iam.PolicyStatement({
+          effect: iam.Effect.ALLOW,
+          actions: ['secretsmanager:GetSecretValue'],
+          resources: [`arn:aws:secretsmanager:${this.region}:${this.account}:secret:services/infra-*`],
+        }),
+      ],
+    });
+
+    // Function URL for GitHub webhook endpoint
+    const githubConsumerUrl = githubConsumerFunction.addFunctionUrl({
+      authType: lambda.FunctionUrlAuthType.NONE, // GitHub webhooks don't support AWS auth
+      cors: {
+        allowedOrigins: ['*'],
+        allowedMethods: [lambda.HttpMethod.POST],
+        allowedHeaders: ['*']
+      }
+    });
+
+    // ----------------------------------------
     // Outputs
     // ----------------------------------------
+    new cdk.CfnOutput(this, 'GitHubConsumerUrl', {
+      value: githubConsumerUrl.url,
+      description: 'GitHub Consumer webhook URL',
+      exportName: `agentmux-github-consumer-url-${env}`,
+    });
+
     new cdk.CfnOutput(this, 'AgentMuxUrl', {
       value: functionUrl.url,
       description: 'AgentMux Lambda Function URL (direct)',
