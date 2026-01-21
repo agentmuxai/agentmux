@@ -8,6 +8,8 @@ import * as origins from 'aws-cdk-lib/aws-cloudfront-origins';
 import * as acm from 'aws-cdk-lib/aws-certificatemanager';
 import * as route53 from 'aws-cdk-lib/aws-route53';
 import * as targets from 'aws-cdk-lib/aws-route53-targets';
+import * as sns from 'aws-cdk-lib/aws-sns';
+import * as snsSubscriptions from 'aws-cdk-lib/aws-sns-subscriptions';
 import { Construct } from 'constructs';
 import { NodejsFunction, OutputFormat } from 'aws-cdk-lib/aws-lambda-nodejs';
 import { AgentMuxTables } from './constructs/agentmux-tables';
@@ -228,7 +230,7 @@ export class AgentMuxStack extends cdk.Stack {
       ],
     });
 
-    // Function URL for GitHub webhook endpoint
+    // Function URL for GitHub webhook endpoint (legacy direct access)
     const githubConsumerUrl = githubConsumerFunction.addFunctionUrl({
       authType: lambda.FunctionUrlAuthType.NONE, // GitHub webhooks don't support AWS auth
       cors: {
@@ -237,6 +239,29 @@ export class AgentMuxStack extends cdk.Stack {
         allowedHeaders: ['*']
       }
     });
+
+    // ----------------------------------------
+    // SNS Subscription: GitHub Webhook Fan-out
+    // ----------------------------------------
+    // Subscribe to github-router's SNS topic for webhook events
+    // This enables receiving pull_request_review and check_run events
+    const webhookTopicArn = cdk.Fn.importValue('github-webhooks-topic-arn');
+    const webhookTopic = sns.Topic.fromTopicArn(
+      this,
+      'GitHubWebhookTopic',
+      webhookTopicArn
+    );
+
+    // Subscribe with filter for relevant event types
+    webhookTopic.addSubscription(
+      new snsSubscriptions.LambdaSubscription(githubConsumerFunction, {
+        filterPolicy: {
+          event_type: sns.SubscriptionFilter.stringFilter({
+            allowlist: ['pull_request_review', 'check_run', 'pull_request'],
+          }),
+        },
+      })
+    );
 
     // ----------------------------------------
     // Outputs

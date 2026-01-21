@@ -1,20 +1,22 @@
 /**
  * AgentMux GitHub Consumer Lambda Handler
  *
- * Receives GitHub webhook events and notifies agents via AgentMux.
+ * Receives GitHub webhook events via:
+ * - SNS subscription (from github-router fan-out)
+ * - Direct API Gateway (legacy, for merge notifications)
+ *
  * Currently handles:
  * - pull_request.closed (merged) - Notify PR author when their PR is merged
- *
- * Future handlers:
- * - @agent mentions in PR comments
- * - Issue assignments to agents
- * - PR review requests
+ * - pull_request_review - Notify PR author/committer when PR is reviewed
+ * - check_run (failure) - Notify PR author when CI fails
  */
 
-import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from 'aws-lambda';
+import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2, SNSEvent } from 'aws-lambda';
 import { createHmac, timingSafeEqual } from 'crypto';
 import { SecretsManagerClient, GetSecretValueCommand } from '@aws-sdk/client-secrets-manager';
 import { processMergeEvent, PullRequestEvent } from './events/merge.js';
+import { processReviewEvent, PullRequestReviewEvent } from './events/review.js';
+import { processCIFailureEvent, CheckRunEvent, PullRequestDetails } from './events/ci-failure.js';
 
 // Environment variables
 const AGENTMUX_URL = process.env.AGENTMUX_URL || 'https://agentmux.asaf.cc';
@@ -25,6 +27,7 @@ const secretsClient = new SecretsManagerClient({});
 // Cached secrets (Lambda container reuse)
 let cachedWebhookSecret: string | null = null;
 let cachedApiKey: string | null = null;
+let cachedGithubToken: string | null = null;
 
 /**
  * Fetch secret from AWS Secrets Manager.
@@ -65,13 +68,31 @@ async function getApiKey(): Promise<string> {
 
   const secretJson = await getSecret('services/infra');
   const secrets = JSON.parse(secretJson);
-  cachedApiKey = secrets['agentmux-api-key'] || '';
+  // Try both key names for compatibility
+  cachedApiKey = secrets['agentmux-api-key'] || secrets.agentmux?.token || '';
 
   if (!cachedApiKey) {
     throw new Error('agentmux-api-key not found in services/infra');
   }
 
   return cachedApiKey;
+}
+
+/**
+ * Get GitHub token from Secrets Manager.
+ */
+async function getGithubToken(): Promise<string> {
+  if (cachedGithubToken) return cachedGithubToken;
+
+  const secretJson = await getSecret('services/infra');
+  const secrets = JSON.parse(secretJson);
+  cachedGithubToken = secrets.github?.token || '';
+
+  if (!cachedGithubToken) {
+    throw new Error('github.token not found in services/infra');
+  }
+
+  return cachedGithubToken;
 }
 
 /**
@@ -108,8 +129,19 @@ async function verifySignature(payload: string, signature: string | undefined): 
 /**
  * Send injection to AgentMux.
  */
-async function injectToAgent(targetAgent: string, message: string): Promise<void> {
+async function injectToAgent(targetAgent: string, message: string, prNumber?: number): Promise<void> {
   const apiKey = await getApiKey();
+
+  const body: Record<string, unknown> = {
+    target_agent: targetAgent,
+    message: message,
+    priority: 'urgent',
+    source_agent: 'github-consumer',
+  };
+
+  if (prNumber !== undefined) {
+    body.pr_number = prNumber;
+  }
 
   const response = await fetch(`${AGENTMUX_URL}/reactive/inject`, {
     method: 'POST',
@@ -118,11 +150,7 @@ async function injectToAgent(targetAgent: string, message: string): Promise<void
       'Authorization': `Bearer ${apiKey}`,
       'X-Agent-ID': 'github-consumer',
     },
-    body: JSON.stringify({
-      target_agent: targetAgent,
-      message: message,
-      priority: 'normal',
-    }),
+    body: JSON.stringify(body),
   });
 
   if (!response.ok) {
@@ -135,15 +163,210 @@ async function injectToAgent(targetAgent: string, message: string): Promise<void
 }
 
 /**
- * Main Lambda handler.
+ * Fetch commit author from GitHub API.
  */
-export async function handler(
-  event: APIGatewayProxyEventV2
-): Promise<APIGatewayProxyResultV2> {
-  console.log('GitHub webhook received:', {
-    headers: event.headers,
-    requestContext: event.requestContext,
-  });
+async function fetchCommitAuthor(repo: string, sha: string): Promise<string | undefined> {
+  try {
+    const token = await getGithubToken();
+    const response = await fetch(`https://api.github.com/repos/${repo}/commits/${sha}`, {
+      headers: {
+        'Authorization': `token ${token}`,
+        'Accept': 'application/vnd.github.v3+json',
+      },
+    });
+
+    if (!response.ok) {
+      console.warn(`Failed to fetch commit ${sha}: ${response.status}`);
+      return undefined;
+    }
+
+    const commit = await response.json() as { author?: { login?: string } };
+    return commit.author?.login;
+  } catch (error) {
+    console.warn(`Error fetching commit ${sha}:`, error);
+    return undefined;
+  }
+}
+
+/**
+ * Fetch PR details from GitHub API.
+ */
+async function fetchPRDetails(repo: string, prNumber: number): Promise<PullRequestDetails | undefined> {
+  try {
+    const token = await getGithubToken();
+    const response = await fetch(`https://api.github.com/repos/${repo}/pulls/${prNumber}`, {
+      headers: {
+        'Authorization': `token ${token}`,
+        'Accept': 'application/vnd.github.v3+json',
+      },
+    });
+
+    if (!response.ok) {
+      console.warn(`Failed to fetch PR ${repo}#${prNumber}: ${response.status}`);
+      return undefined;
+    }
+
+    return await response.json() as PullRequestDetails;
+  } catch (error) {
+    console.warn(`Error fetching PR ${repo}#${prNumber}:`, error);
+    return undefined;
+  }
+}
+
+/**
+ * Process a GitHub event (from either API Gateway or SNS).
+ */
+async function processGitHubEvent(eventType: string, payload: unknown): Promise<{ processed: boolean; notifications: number; reason?: string }> {
+  let notifications = 0;
+
+  switch (eventType) {
+    case 'pull_request': {
+      const prEvent = payload as PullRequestEvent;
+      console.log('Processing pull_request event:', {
+        action: prEvent.action,
+        number: prEvent.pull_request?.number,
+        merged: prEvent.pull_request?.merged,
+        author: prEvent.pull_request?.user?.login,
+      });
+
+      const result = processMergeEvent(prEvent);
+      console.log('Merge handler result:', result);
+
+      if (result.shouldNotify && result.targetAgentId && result.message) {
+        await injectToAgent(result.targetAgentId, result.message, prEvent.pull_request?.number);
+        console.log(`Notification sent to ${result.targetAgentId}`);
+        notifications++;
+      }
+
+      return { processed: true, notifications, reason: result.reason };
+    }
+
+    case 'pull_request_review': {
+      const reviewEvent = payload as PullRequestReviewEvent;
+      console.log('Processing pull_request_review event:', {
+        action: reviewEvent.action,
+        state: reviewEvent.review?.state,
+        prNumber: reviewEvent.pull_request?.number,
+        author: reviewEvent.pull_request?.user?.login,
+        reviewer: reviewEvent.review?.user?.login,
+      });
+
+      // Fetch head commit author for committer jekt feature
+      const repo = reviewEvent.repository?.full_name;
+      const headSha = reviewEvent.pull_request?.head?.sha;
+      let headCommitAuthor: string | undefined;
+
+      if (repo && headSha) {
+        headCommitAuthor = await fetchCommitAuthor(repo, headSha);
+        console.log(`Head commit author: ${headCommitAuthor || 'unknown'}`);
+      }
+
+      const result = processReviewEvent(reviewEvent, headCommitAuthor);
+      console.log('Review handler result:', result);
+
+      if (result.shouldNotify && result.message) {
+        for (const agentId of result.targetAgentIds) {
+          await injectToAgent(agentId, result.message, reviewEvent.pull_request?.number);
+          console.log(`Notification sent to ${agentId}`);
+          notifications++;
+        }
+      }
+
+      return { processed: true, notifications, reason: result.reason };
+    }
+
+    case 'check_run': {
+      const checkRunEvent = payload as CheckRunEvent;
+      console.log('Processing check_run event:', {
+        action: checkRunEvent.action,
+        conclusion: checkRunEvent.check_run?.conclusion,
+        name: checkRunEvent.check_run?.name,
+        prCount: checkRunEvent.check_run?.pull_requests?.length,
+      });
+
+      // Only process failures
+      if (checkRunEvent.action !== 'completed' || checkRunEvent.check_run?.conclusion !== 'failure') {
+        return { processed: true, notifications: 0, reason: 'Not a failure' };
+      }
+
+      // Fetch PR details to get author
+      const repo = checkRunEvent.repository?.full_name;
+      const prNumber = checkRunEvent.check_run?.pull_requests?.[0]?.number;
+      let prDetails: PullRequestDetails | undefined;
+
+      if (repo && prNumber) {
+        prDetails = await fetchPRDetails(repo, prNumber);
+      }
+
+      const result = processCIFailureEvent(checkRunEvent, prDetails);
+      console.log('CI failure handler result:', result);
+
+      if (result.shouldNotify && result.targetAgentId && result.message) {
+        await injectToAgent(result.targetAgentId, result.message, result.prNumber);
+        console.log(`Notification sent to ${result.targetAgentId}`);
+        notifications++;
+      }
+
+      return { processed: true, notifications, reason: result.reason };
+    }
+
+    case 'ping': {
+      console.log('Ping event received - webhook configured successfully');
+      return { processed: true, notifications: 0 };
+    }
+
+    default: {
+      console.log(`Unhandled event type: ${eventType}`);
+      return { processed: false, notifications: 0, reason: `Unhandled event type: ${eventType}` };
+    }
+  }
+}
+
+/**
+ * Handle SNS events (from github-router fan-out).
+ */
+async function handleSNSEvent(event: SNSEvent): Promise<{ statusCode: number; body: string }> {
+  let processed = 0;
+  let notifications = 0;
+
+  for (const record of event.Records) {
+    try {
+      // Parse SNS message (router format)
+      const snsMessage = JSON.parse(record.Sns.Message) as {
+        event_type: string;
+        delivery_id: string;
+        payload: unknown;
+      };
+
+      const eventType = snsMessage.event_type;
+      const deliveryId = snsMessage.delivery_id || 'unknown';
+      const payload = snsMessage.payload;
+
+      console.log(`Processing SNS message: ${eventType} (${deliveryId})`);
+
+      const result = await processGitHubEvent(eventType, payload);
+      if (result.processed) {
+        processed++;
+        notifications += result.notifications;
+      }
+    } catch (error) {
+      console.error('Error processing SNS record:', error);
+    }
+  }
+
+  console.log(`SNS processing complete: processed=${processed}, notifications=${notifications}`);
+
+  return {
+    statusCode: 200,
+    body: JSON.stringify({ processed, notifications }),
+  };
+}
+
+/**
+ * Handle API Gateway events (direct webhook).
+ */
+async function handleAPIGatewayEvent(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> {
+  console.log('API Gateway webhook received');
 
   // Verify webhook signature
   const signature = event.headers['x-hub-signature-256'];
@@ -170,67 +393,40 @@ export async function handler(
   }
 
   // Get event type from header
-  const eventType = event.headers['x-github-event'];
+  const eventType = event.headers['x-github-event'] || 'unknown';
   console.log('Event type:', eventType);
 
   try {
-    switch (eventType) {
-      case 'pull_request': {
-        const prEvent = payload as PullRequestEvent;
-        console.log('Processing pull_request event:', {
-          action: prEvent.action,
-          number: prEvent.pull_request?.number,
-          merged: prEvent.pull_request?.merged,
-          author: prEvent.pull_request?.user?.login,
-          merged_by: prEvent.pull_request?.merged_by?.login,
-        });
+    const result = await processGitHubEvent(eventType, payload);
 
-        const result = processMergeEvent(prEvent);
-        console.log('Merge handler result:', result);
-
-        if (result.shouldNotify && result.targetAgentId && result.message) {
-          await injectToAgent(result.targetAgentId, result.message);
-          console.log(`Notification sent to ${result.targetAgentId}`);
-        }
-
-        return {
-          statusCode: 200,
-          body: JSON.stringify({
-            processed: true,
-            eventType,
-            action: prEvent.action,
-            notification: result.shouldNotify ? {
-              targetAgent: result.targetAgentId,
-              sent: true,
-            } : {
-              sent: false,
-              reason: result.reason,
-            },
-          }),
-        };
-      }
-
-      case 'ping': {
-        console.log('Ping event received - webhook configured successfully');
-        return {
-          statusCode: 200,
-          body: JSON.stringify({ message: 'pong', processed: true }),
-        };
-      }
-
-      default: {
-        console.log(`Unhandled event type: ${eventType}`);
-        return {
-          statusCode: 200,
-          body: JSON.stringify({ processed: false, reason: `Unhandled event type: ${eventType}` }),
-        };
-      }
-    }
+    return {
+      statusCode: 200,
+      body: JSON.stringify({
+        processed: result.processed,
+        eventType,
+        notifications: result.notifications,
+        reason: result.reason,
+      }),
+    };
   } catch (error) {
     console.error('Error processing webhook:', error);
     return {
       statusCode: 500,
       body: JSON.stringify({ error: 'Internal server error', message: (error as Error).message }),
     };
+  }
+}
+
+/**
+ * Main Lambda handler - supports both SNS and API Gateway events.
+ */
+export async function handler(
+  event: SNSEvent | APIGatewayProxyEventV2
+): Promise<APIGatewayProxyResultV2 | { statusCode: number; body: string }> {
+  // Detect event type
+  if ('Records' in event && event.Records?.[0]?.EventSource === 'aws:sns') {
+    return handleSNSEvent(event as SNSEvent);
+  } else {
+    return handleAPIGatewayEvent(event as APIGatewayProxyEventV2);
   }
 }
