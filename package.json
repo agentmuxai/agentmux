@@ -1,6 +1,6 @@
 {
   "name": "@a5af/agentmux",
-  "version": "2.1.0",
+  "version": "2.1.1",
   "description": "HTTP-based inter-agent messaging with MCP support",
   "private": true,
   "workspaces": [
