@@ -120,7 +120,7 @@ function formatCIFailureNotification(
   branch: string,
   detailsUrl: string
 ): string {
-  return `❌ PR #${prNumber} FAILED CI
+  return `[FAIL] PR #${prNumber} FAILED CI
 
 Title: ${prTitle}
 Check: ${checkName}

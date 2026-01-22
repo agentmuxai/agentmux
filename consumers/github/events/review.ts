@@ -122,15 +122,15 @@ function formatReviewNotification(event: PullRequestReviewEvent): string {
   let action: string;
 
   if (reviewState === 'approved') {
-    emoji = '🎉';
+    emoji = '[OK]';
     status = 'APPROVED';
     action = 'Your PR has been approved! Ready to merge.';
   } else if (reviewState === 'changes_requested') {
-    emoji = '📝';
+    emoji = '[!!]';
     status = 'Changes requested';
     action = 'Review the feedback and update your PR.';
   } else {
-    emoji = '💬';
+    emoji = '[--]';
     status = 'Reviewed';
     action = 'Check the review comments.';
   }
