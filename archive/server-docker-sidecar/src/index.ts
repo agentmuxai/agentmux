@@ -243,6 +243,46 @@ app.post<{ Body: { injection_ids: string[] }; Headers: { "x-agent-id"?: string }
   }
 );
 
+// GET /reactive/status/:injection_id - Check injection delivery status
+app.get<{ Params: { injection_id: string }; Headers: { "x-agent-id"?: string } }>(
+  "/reactive/status/:injection_id",
+  async (request, reply) => {
+    const rawCallerAgent = request.headers["x-agent-id"];
+    if (!rawCallerAgent) return reply.status(400).send({ error: "X-Agent-ID header required" });
+    const callerAgent = normalizeAgentId(rawCallerAgent);
+
+    const { injection_id } = request.params;
+    if (!injection_id) {
+      return reply.status(400).send({ error: "injection_id parameter required" });
+    }
+
+    const injection = await store.getInjection(injection_id);
+    if (!injection) {
+      return reply.status(404).send({ error: "Injection not found or expired" });
+    }
+
+    // Security: Only source or target agent can check status
+    // Don't normalize GitHub sources - preserve "GitHub (@user)" format
+    const normalizedSource = injection.source_agent.toLowerCase().startsWith('github')
+      ? injection.source_agent.toLowerCase()
+      : normalizeAgentId(injection.source_agent);
+    const normalizedTarget = normalizeAgentId(injection.target_agent);
+
+    if (callerAgent !== normalizedSource && callerAgent !== normalizedTarget) {
+      return reply.status(403).send({ error: "Not authorized to check this injection status" });
+    }
+
+    return {
+      injection_id: injection.id,
+      status: injection.status,
+      target_agent: injection.target_agent,
+      source_agent: injection.source_agent,
+      created_at: injection.created_at,
+      delivered_at: injection.delivered_at || null
+    };
+  }
+);
+
 // MCP Tools Definition
 const MCP_TOOLS = [
   { name: "send_message", description: "Send a message to another agent", inputSchema: { type: "object", properties: { to: { type: "string" }, message: { type: "string" }, priority: { type: "string", enum: ["low","normal","high","urgent"], default: "normal" } }, required: ["to","message"] } },
