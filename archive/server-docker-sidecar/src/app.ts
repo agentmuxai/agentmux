@@ -222,6 +222,43 @@ ${replyInstructions}`;
     }
   );
 
+  // GET /reactive/status/:injection_id - Check injection delivery status
+  app.get<{ Params: { injection_id: string }; Headers: { "x-agent-id"?: string } }>(
+    "/reactive/status/:injection_id",
+    async (request, reply) => {
+      const callerAgent = request.headers["x-agent-id"];
+      if (!callerAgent) return reply.status(400).send({ error: "X-Agent-ID header required" });
+
+      const { injection_id } = request.params;
+      if (!injection_id) {
+        return reply.status(400).send({ error: "injection_id parameter required" });
+      }
+
+      const injection = await store.getInjection(injection_id);
+      if (!injection) {
+        return reply.status(404).send({ error: "Injection not found or expired" });
+      }
+
+      // Security: Only source or target agent can check status
+      const normalizedCaller = callerAgent.toLowerCase();
+      const normalizedSource = injection.source_agent.toLowerCase();
+      const normalizedTarget = injection.target_agent.toLowerCase();
+
+      if (normalizedCaller !== normalizedSource && normalizedCaller !== normalizedTarget) {
+        return reply.status(403).send({ error: "Not authorized to check this injection status" });
+      }
+
+      return {
+        injection_id: injection.id,
+        status: injection.status,
+        target_agent: injection.target_agent,
+        source_agent: injection.source_agent,
+        created_at: injection.created_at,
+        delivered_at: injection.delivered_at || null
+      };
+    }
+  );
+
   // MCP endpoint info (for clients checking availability)
   app.get("/mcp", async () => {
     return {
