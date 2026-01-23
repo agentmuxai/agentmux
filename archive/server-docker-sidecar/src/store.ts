@@ -48,6 +48,7 @@ export interface IMessageStore {
   // Reactive injection methods
   createInjection(sourceAgent: string, targetAgent: string, message: string, priority?: "normal" | "urgent"): Promise<Injection>;
   getPendingInjections(targetAgent: string): Promise<Injection[]>;
+  getInjection(injectionId: string): Promise<Injection | null>;
   acknowledgeInjections(agentId: string, injectionIds: string[]): Promise<{ acknowledged: string[]; errors: { id: string; error: string }[] }>;
 }
 
@@ -386,6 +387,14 @@ export class MessageStore implements IMessageStore {
     }));
 
     return (result.Items || []) as Injection[];
+  }
+
+  async getInjection(injectionId: string): Promise<Injection | null> {
+    const result = await this.client.send(new GetCommand({
+      TableName: this.injectionsTable,
+      Key: { id: injectionId }
+    }));
+    return (result.Item as Injection) || null;
   }
 
   async acknowledgeInjections(agentId: string, injectionIds: string[]): Promise<{ acknowledged: string[]; errors: { id: string; error: string }[] }> {

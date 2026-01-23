@@ -103,6 +103,10 @@ function createMockStore(): IMessageStore & { messages: Message[]; agents: Agent
       return injections.filter(inj => inj.target_agent === targetAgent && inj.status === "pending");
     },
 
+    async getInjection(injectionId: string): Promise<Injection | null> {
+      return injections.find(inj => inj.id === injectionId) || null;
+    },
+
     async acknowledgeInjections(agentId: string, injectionIds: string[]): Promise<{ acknowledged: string[]; errors: { id: string; error: string }[] }> {
       const acknowledged: string[] = [];
       const errors: { id: string; error: string }[] = [];

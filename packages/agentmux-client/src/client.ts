@@ -186,23 +186,78 @@ export const TOOLS = [
 ];
 
 /**
+ * Check injection delivery status from AgentMux.
+ */
+async function checkInjectionStatus(
+  injectionId: string,
+  sourceAgent: string,
+  config: AgentMuxConfig
+): Promise<{ status: string; delivered_at?: string }> {
+  const response = await fetch(`${config.url}/reactive/status/${injectionId}`, {
+    method: 'GET',
+    headers: {
+      'Authorization': `Bearer ${config.token}`,
+      'X-Agent-ID': sourceAgent,
+    },
+  });
+
+  if (!response.ok) {
+    if (response.status === 404) {
+      return { status: 'expired' };
+    }
+    throw new Error(`Status check failed: HTTP ${response.status}`);
+  }
+
+  return await response.json() as { status: string; delivered_at?: string };
+}
+
+/**
+ * Sleep helper for polling
+ */
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/** Result type for inject_terminal with delivery confirmation */
+export interface InjectTerminalResult {
+  success: boolean;
+  injection_id: string;
+  status: 'delivered' | 'pending' | 'timeout';
+  error?: string;
+  target_agent: string;
+  delivered_at?: string;
+}
+
+/**
  * Inject a message into a target agent's terminal via AgentMux cloud.
  *
  * Always routes through AgentMux for reliable cross-host delivery.
  * The target WaveMux instance polls for pending injections and delivers locally.
+ *
+ * Now includes delivery confirmation - waits for WaveMux to acknowledge delivery
+ * before returning success. This prevents false positives when target agent is
+ * offline or unregistered.
+ *
+ * @param targetAgent - Agent ID to inject message into
+ * @param message - Message content
+ * @param sourceAgent - Source agent ID (for logging/attribution)
+ * @param priority - Message priority (normal/urgent)
+ * @param timeoutMs - Max time to wait for delivery confirmation (default: 15000ms)
  */
 export async function injectTerminal(
   targetAgent: string,
   message: string,
   sourceAgent: string,
-  priority: string = 'normal'
-): Promise<any> {
+  priority: string = 'normal',
+  timeoutMs: number = 15000
+): Promise<InjectTerminalResult> {
   const config = getConfigFromEnv();
 
   if (!config.token) {
     throw new Error('inject_terminal requires AGENTMUX_TOKEN to be set');
   }
 
+  // Step 1: Create the injection
   const response = await fetch(`${config.url}/reactive/inject`, {
     method: 'POST',
     headers: {
@@ -226,8 +281,72 @@ export async function injectTerminal(
     } catch {
       // Response not JSON
     }
-    throw new Error(`Injection failed: ${errorMsg}`);
+    return {
+      success: false,
+      injection_id: '',
+      status: 'pending',
+      error: `Injection failed: ${errorMsg}`,
+      target_agent: targetAgent,
+    };
   }
 
-  return await response.json();
+  const injectResult = await response.json() as { injection_id: string; success: boolean };
+
+  if (!injectResult.success || !injectResult.injection_id) {
+    return {
+      success: false,
+      injection_id: injectResult.injection_id || '',
+      status: 'pending',
+      error: 'Failed to create injection',
+      target_agent: targetAgent,
+    };
+  }
+
+  // Step 2: Poll for delivery confirmation
+  const pollInterval = 1000; // 1 second
+  const startTime = Date.now();
+
+  while (Date.now() - startTime < timeoutMs) {
+    await sleep(pollInterval);
+
+    try {
+      const statusResult = await checkInjectionStatus(
+        injectResult.injection_id,
+        sourceAgent,
+        config
+      );
+
+      if (statusResult.status === 'delivered') {
+        return {
+          success: true,
+          injection_id: injectResult.injection_id,
+          status: 'delivered',
+          target_agent: targetAgent,
+          delivered_at: statusResult.delivered_at,
+        };
+      }
+
+      if (statusResult.status === 'expired') {
+        return {
+          success: false,
+          injection_id: injectResult.injection_id,
+          status: 'timeout',
+          error: 'Injection expired before delivery',
+          target_agent: targetAgent,
+        };
+      }
+    } catch (err) {
+      // Continue polling on transient errors
+      console.error(`[AgentMux] Status check error: ${err}`);
+    }
+  }
+
+  // Timeout - delivery not confirmed
+  return {
+    success: false,
+    injection_id: injectResult.injection_id,
+    status: 'timeout',
+    error: `Delivery not confirmed within ${timeoutMs / 1000}s. Target agent may be offline or unregistered.`,
+    target_agent: targetAgent,
+  };
 }
