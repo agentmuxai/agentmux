@@ -92,6 +92,9 @@ export class MessageStore implements IMessageStore {
   }
 
   async readMessages(agentId: string, unreadOnly: boolean = true, limit: number = 10, markAsRead: boolean = true): Promise<Message[]> {
+    // Update agent's last_seen timestamp (without incrementing messages_sent)
+    await this.updateAgentPresence(agentId);
+
     // Helper function to paginate queries until we get enough unread messages
     const paginateQuery = async (baseParams: any, targetLimit: number): Promise<Message[]> => {
       const collected: Message[] = [];
@@ -342,6 +345,30 @@ export class MessageStore implements IMessageStore {
     }));
   }
 
+  /**
+   * Update agent presence (last_seen) without incrementing message counter.
+   * Used for non-sending operations like reading messages, polling injections, etc.
+   */
+  private async updateAgentPresence(agentId: string) {
+    // Get current agent to preserve messages_sent
+    const getResult = await this.client.send(new QueryCommand({
+      TableName: this.agentsTable,
+      KeyConditionExpression: 'id = :id',
+      ExpressionAttributeValues: { ':id': agentId }
+    }));
+
+    const currentAgent = getResult.Items?.[0] as Agent | undefined;
+
+    await this.client.send(new PutCommand({
+      TableName: this.agentsTable,
+      Item: {
+        id: agentId,
+        last_seen: new Date().toISOString(),
+        messages_sent: currentAgent?.messages_sent || 0  // Preserve existing count
+      }
+    }));
+  }
+
   // =============================================
   // Reactive Injection Methods
   // =============================================
@@ -368,10 +395,16 @@ export class MessageStore implements IMessageStore {
       Item: injection
     }));
 
+    // Update source agent's last_seen timestamp
+    await this.updateAgent(sourceAgent);
+
     return injection;
   }
 
   async getPendingInjections(targetAgent: string): Promise<Injection[]> {
+    // Update target agent's last_seen timestamp (polled every 5s by WaveMux)
+    await this.updateAgentPresence(targetAgent);
+
     // Query using GSI: target_agent-created_at-index
     const result = await this.client.send(new QueryCommand({
       TableName: this.injectionsTable,
@@ -398,6 +431,9 @@ export class MessageStore implements IMessageStore {
   }
 
   async acknowledgeInjections(agentId: string, injectionIds: string[]): Promise<{ acknowledged: string[]; errors: { id: string; error: string }[] }> {
+    // Update agent's last_seen timestamp (ACKing delivery)
+    await this.updateAgentPresence(agentId);
+
     const acknowledged: string[] = [];
     const errors: { id: string; error: string }[] = [];
     const delivered_at = new Date().toISOString();
