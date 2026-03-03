@@ -1,0 +1,28 @@
+{
+  "id": "wsh",
+  "title": "wsh overview",
+  "description": "The wsh command provides Wave Terminal's core command line interface, allowing users to interact with both terminal and graphical elements from the command line. This guide covers the basics of using wsh and its key features.",
+  "source": "@site/docs/wsh.mdx",
+  "sourceDirName": ".",
+  "slug": "/wsh",
+  "permalink": "/docsite/wsh",
+  "draft": false,
+  "unlisted": false,
+  "tags": [],
+  "version": "current",
+  "sidebarPosition": 4,
+  "frontMatter": {
+    "sidebar_position": 4,
+    "id": "wsh",
+    "title": "wsh overview"
+  },
+  "sidebar": "defaultSidebar",
+  "previous": {
+    "title": "AI Presets",
+    "permalink": "/docsite/ai-presets"
+  },
+  "next": {
+    "title": "wsh reference",
+    "permalink": "/docsite/wsh-reference"
+  }
+}

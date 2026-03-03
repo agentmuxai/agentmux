@@ -1,0 +1,39 @@
+[package]
+name = "agentmux"
+version = "0.31.20"
+description = "AgentMux - AI-Native Terminal"
+authors = ["AgentMux Corp"]
+edition = "2021"
+rust-version = "1.77"
+
+[lib]
+name = "agentmux_lib"
+crate-type = ["lib", "cdylib", "staticlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "=2.10", features = ["tray-icon", "devtools", "custom-protocol"] }
+tauri-plugin-shell = "=2.3"
+tauri-plugin-dialog = "=2.6"
+tauri-plugin-notification = "=2.3"
+tauri-plugin-clipboard-manager = "=2.3"
+tauri-plugin-global-shortcut = "=2.3"
+tauri-plugin-fs = "=2.4"
+tauri-plugin-opener = "=2.5"
+tauri-plugin-process = "=2.3"
+tauri-plugin-store = "=2.4"
+tauri-plugin-window-state = "=2.4"
+tauri-plugin-websocket = "=2.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+uuid = { version = "1", features = ["v4"] }
+tokio = { version = "1", features = ["full"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-appender = "0.2"
+whoami = "1"
+chrono = "0.4"
+url = "2"

@@ -1,0 +1,65 @@
+// Copyright 2025, Command Line Inc.
+// SPDX-License-Identifier: Apache-2.0
+
+.window-controls {
+    display: flex;
+    gap: 4px;
+    align-items: center;
+    padding-left: 4px;
+    -webkit-app-region: no-drag;
+    user-select: none;
+
+    .version-label {
+        font-size: 10px;
+        color: var(--secondary-text-color);
+        opacity: 0.7;
+        padding: 2px 4px;
+        white-space: nowrap;
+    }
+
+    .window-control-btn {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 8px;
+        font-size: 11px;
+        color: var(--secondary-text-color);
+        background: transparent;
+        border: none;
+        cursor: pointer;
+        border-radius: 3px;
+        transition: all 0.15s ease;
+        -webkit-app-region: no-drag;
+
+        &:hover {
+            background: var(--hoverbg);
+            color: var(--main-text-color);
+        }
+
+        i {
+            font-size: 12px;
+        }
+    }
+
+    .new-window-btn {
+        color: #58a6ff;
+
+        &:hover {
+            color: #79c0ff;
+        }
+
+        .instance-num {
+            opacity: 0.55;
+            font-size: 0.9em;
+        }
+    }
+
+    .minimize-btn,
+    .maximize-btn {
+        padding: 4px 6px;
+
+        span {
+            display: none; // Icon only
+        }
+    }
+}

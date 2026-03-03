@@ -1,0 +1,28 @@
+{
+  "id": "ai-presets",
+  "title": "AI Presets",
+  "description": "The AI Widget and its presets are being replaced by Wave AI. Please refer to the Wave AI documentation for the latest AI features and configuration options.",
+  "source": "@site/docs/ai-presets.mdx",
+  "sourceDirName": ".",
+  "slug": "/ai-presets",
+  "permalink": "/docsite/ai-presets",
+  "draft": false,
+  "unlisted": false,
+  "tags": [],
+  "version": "current",
+  "sidebarPosition": 3.6,
+  "frontMatter": {
+    "sidebar_position": 3.6,
+    "id": "ai-presets",
+    "title": "AI Presets"
+  },
+  "sidebar": "defaultSidebar",
+  "previous": {
+    "title": "Presets",
+    "permalink": "/docsite/presets"
+  },
+  "next": {
+    "title": "wsh overview",
+    "permalink": "/docsite/wsh"
+  }
+}

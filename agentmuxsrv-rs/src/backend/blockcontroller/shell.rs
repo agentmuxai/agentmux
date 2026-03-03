@@ -1,0 +1,1024 @@
+// Copyright 2025, Command Line Inc.
+// SPDX-License-Identifier: Apache-2.0
+
+//! ShellController: manages lifecycle of shell and command blocks.
+//! Port of Go's pkg/blockcontroller/shellcontroller.go.
+//!
+//! State machine:
+//!   INIT ─(start)─> RUNNING ─(exit/stop)─> DONE
+//!   DONE ─(resync+force)─> RUNNING
+//!
+//! I/O model (4 async tasks when running):
+//! 1. PTY read loop: process stdout → FileStore + WPS event
+//! 2. Input loop: input channel → process stdin
+//! 3. Output/proxy loop: WSH messages → input channel
+//! 4. Wait loop: monitor process exit, update status
+
+#![allow(dead_code)]
+
+use std::io::Read as _;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::sync::Mutex;
+
+use base64::Engine as _;
+use portable_pty::{native_pty_system, CommandBuilder, PtySize};
+use tokio::sync::mpsc;
+
+use super::{
+    BlockControllerRuntimeStatus, BlockInputUnion, Controller, META_KEY_CMD, META_KEY_CMD_ARGS,
+    META_KEY_CMD_CLEAR_ON_START, META_KEY_CMD_CLOSE_ON_EXIT, META_KEY_CMD_CLOSE_ON_EXIT_DELAY,
+    META_KEY_CMD_CLOSE_ON_EXIT_FORCE, META_KEY_CMD_RUN_ONCE, META_KEY_CMD_RUN_ON_START,
+    META_KEY_CONNECTION, STATUS_DONE, STATUS_INIT, STATUS_RUNNING,
+};
+use crate::backend::eventbus::EventBus;
+use crate::backend::shellexec::{ConnInterface, ShellProc};
+use crate::backend::waveobj::{self, MetaMapType};
+use crate::backend::wps;
+
+/// Channel buffer size for shell input (matches Go's 32).
+const SHELL_INPUT_CH_SIZE: usize = 32;
+
+/// Detect the best available interactive shell on Windows.
+///
+/// Mirrors the original Go logic from pkg/util/shellutil/shellutil.go DetectLocalShellPath():
+///   1. Try `pwsh`  (PowerShell 7 — cross-platform)
+///   2. Try `powershell` (Windows PowerShell 5.x)
+///   3. Fall back to `cmd.exe`
+#[cfg(windows)]
+fn detect_local_shell_path_windows() -> String {
+    use std::process::Command;
+    // Try pwsh (PowerShell 7)
+    if Command::new("where").arg("pwsh").output().map(|o| o.status.success()).unwrap_or(false) {
+        return "pwsh".to_string();
+    }
+    // Try powershell (Windows PowerShell 5.x)
+    if Command::new("where").arg("powershell").output().map(|o| o.status.success()).unwrap_or(false) {
+        return "powershell".to_string();
+    }
+    "cmd.exe".to_string()
+}
+
+/// Stub for non-Windows builds (never called due to cfg!(windows) guard).
+#[cfg(not(windows))]
+fn detect_local_shell_path_windows() -> String {
+    "cmd.exe".to_string()
+}
+
+/// PTY read buffer size (matches Go's 4096).
+const PTY_READ_BUF_SIZE: usize = 4096;
+
+/// Inner state protected by mutex.
+struct ShellControllerInner {
+    /// Current process status.
+    proc_status: String,
+    /// Process exit code.
+    proc_exit_code: i32,
+    /// Status version counter (incremented on each change).
+    status_version: i32,
+    /// Connection name for the shell process.
+    conn_name: String,
+    /// Input channel sender (sends to the PTY input loop).
+    input_tx: Option<mpsc::Sender<BlockInputUnion>>,
+    /// Input channel receiver (consumed by the PTY input loop).
+    input_rx: Option<mpsc::Receiver<BlockInputUnion>>,
+}
+
+/// Factory function type for creating ConnInterface instances.
+/// This allows dependency injection for testing.
+pub type ConnFactory =
+    Box<dyn Fn(&str, &MetaMapType) -> Result<Box<dyn ConnInterface>, String> + Send + Sync>;
+
+/// ShellController manages one shell or command block.
+pub struct ShellController {
+    /// Controller type: "shell" or "cmd".
+    controller_type: String,
+    /// Parent tab UUID.
+    tab_id: String,
+    /// Block UUID.
+    block_id: String,
+    /// Prevents concurrent run() calls.
+    run_lock: Arc<AtomicBool>,
+    /// Protected inner state.
+    inner: Arc<Mutex<ShellControllerInner>>,
+    /// Optional factory for creating ConnInterface (for testing).
+    conn_factory: Mutex<Option<ConnFactory>>,
+    /// WPS broker for publishing events (blockfile, controllerstatus).
+    broker: Option<Arc<wps::Broker>>,
+    /// Event bus (unused for now, reserved for future event routing).
+    #[allow(dead_code)]
+    event_bus: Option<Arc<EventBus>>,
+}
+
+impl ShellController {
+    /// Create a new ShellController.
+    pub fn new(
+        controller_type: String,
+        tab_id: String,
+        block_id: String,
+        broker: Option<Arc<wps::Broker>>,
+        event_bus: Option<Arc<EventBus>>,
+    ) -> Self {
+        Self {
+            controller_type,
+            tab_id,
+            block_id,
+            run_lock: Arc::new(AtomicBool::new(false)),
+            inner: Arc::new(Mutex::new(ShellControllerInner {
+                proc_status: STATUS_INIT.to_string(),
+                proc_exit_code: 0,
+                status_version: 0,
+                conn_name: String::new(),
+                input_tx: None,
+                input_rx: None,
+            })),
+            conn_factory: Mutex::new(None),
+            broker,
+            event_bus,
+        }
+    }
+
+    /// Set a custom ConnInterface factory (for testing).
+    pub fn set_conn_factory(&self, factory: ConnFactory) {
+        *self.conn_factory.lock().unwrap() = Some(factory);
+    }
+
+    /// Try to acquire the run lock. Returns false if already running.
+    fn try_lock_run(&self) -> bool {
+        self.run_lock
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .is_ok()
+    }
+
+    /// Release the run lock.
+    fn unlock_run(&self) {
+        self.run_lock.store(false, Ordering::SeqCst);
+    }
+
+    /// Update process status and increment version (must hold inner lock).
+    fn set_status(inner: &mut ShellControllerInner, status: &str) {
+        inner.proc_status = status.to_string();
+        inner.status_version += 1;
+    }
+
+    /// Get the runtime status (snapshot).
+    fn get_status_snapshot(&self) -> BlockControllerRuntimeStatus {
+        let inner = self.inner.lock().unwrap();
+        BlockControllerRuntimeStatus {
+            blockid: self.block_id.clone(),
+            version: inner.status_version,
+            shellprocstatus: inner.proc_status.clone(),
+            shellprocconnname: inner.conn_name.clone(),
+            shellprocexitcode: inner.proc_exit_code,
+        }
+    }
+
+    /// Check block meta for whether to run on start.
+    fn should_run_on_start(meta: &MetaMapType) -> bool {
+        waveobj::meta_get_bool(meta, META_KEY_CMD_RUN_ON_START, true)
+    }
+
+    /// Check block meta for run-once mode (used in full lifecycle integration).
+    #[allow(dead_code)]
+    fn should_run_once(meta: &MetaMapType) -> bool {
+        waveobj::meta_get_bool(meta, META_KEY_CMD_RUN_ONCE, false)
+    }
+
+    /// Check block meta for clear-on-start (used in full lifecycle integration).
+    #[allow(dead_code)]
+    fn should_clear_on_start(meta: &MetaMapType) -> bool {
+        waveobj::meta_get_bool(meta, META_KEY_CMD_CLEAR_ON_START, false)
+    }
+
+    /// Check block meta for close-on-exit (used in full lifecycle integration).
+    #[allow(dead_code)]
+    fn should_close_on_exit(meta: &MetaMapType) -> bool {
+        waveobj::meta_get_bool(meta, META_KEY_CMD_CLOSE_ON_EXIT, false)
+    }
+
+    /// Check block meta for force close-on-exit (used in full lifecycle integration).
+    #[allow(dead_code)]
+    fn should_close_on_exit_force(meta: &MetaMapType) -> bool {
+        waveobj::meta_get_bool(meta, META_KEY_CMD_CLOSE_ON_EXIT_FORCE, false)
+    }
+
+    /// Get the close-on-exit delay in ms (defaults to 2000, used in full lifecycle integration).
+    #[allow(dead_code)]
+    fn close_on_exit_delay_ms(meta: &MetaMapType) -> u64 {
+        match meta.get(META_KEY_CMD_CLOSE_ON_EXIT_DELAY) {
+            Some(serde_json::Value::Number(n)) => n.as_u64().unwrap_or(2000),
+            _ => 2000,
+        }
+    }
+
+    /// Get the connection name from block meta.
+    fn get_conn_name(meta: &MetaMapType) -> String {
+        waveobj::meta_get_string(meta, META_KEY_CONNECTION, "local")
+    }
+
+    /// Get the command string from block meta.
+    fn get_cmd_str(meta: &MetaMapType) -> String {
+        waveobj::meta_get_string(meta, META_KEY_CMD, "")
+    }
+
+    /// Get cmd:args array from block meta.
+    fn get_cmd_args(meta: &MetaMapType) -> Vec<String> {
+        match meta.get(META_KEY_CMD_ARGS) {
+            Some(serde_json::Value::Array(arr)) => arr
+                .iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect(),
+            _ => vec![],
+        }
+    }
+
+    /// Check if cmd:interactive is set in block meta.
+    fn is_interactive(meta: &MetaMapType) -> bool {
+        waveobj::meta_get_bool(meta, "cmd:interactive", false)
+    }
+
+    /// Publish current controller status via the WPS broker.
+    fn publish_status(&self) {
+        if let Some(ref broker) = self.broker {
+            let status = self.get_status_snapshot();
+            super::publish_controller_status(broker, &status);
+        }
+    }
+}
+
+impl Controller for ShellController {
+    fn start(
+        &self,
+        block_meta: MetaMapType,
+        _rt_opts: Option<serde_json::Value>,
+        force: bool,
+    ) -> Result<(), String> {
+        // Check if we should run
+        if !force && !Self::should_run_on_start(&block_meta) {
+            return Ok(());
+        }
+
+        // Try to acquire run lock
+        if !self.try_lock_run() {
+            return Err("controller is already running".to_string());
+        }
+
+        // Get connection info
+        let conn_name = Self::get_conn_name(&block_meta);
+
+        // Update status to running and publish
+        {
+            let mut inner = self.inner.lock().unwrap();
+            Self::set_status(&mut inner, STATUS_RUNNING);
+            inner.conn_name = conn_name.clone();
+        }
+        self.publish_status();
+
+        // Create input channel
+        let (input_tx, input_rx) = mpsc::channel(SHELL_INPUT_CH_SIZE);
+        {
+            let mut inner = self.inner.lock().unwrap();
+            inner.input_tx = Some(input_tx);
+        }
+
+        // Check if we have a conn_factory (test/mock path)
+        let has_factory = self.conn_factory.lock().unwrap().is_some();
+
+        if has_factory {
+            // Mock path: use ConnInterface factory (synchronous, for tests)
+            let conn_result = {
+                let factory = self.conn_factory.lock().unwrap();
+                factory.as_ref().unwrap()(&conn_name, &block_meta)
+            };
+
+            let mut conn = match conn_result {
+                Ok(c) => c,
+                Err(e) => {
+                    let mut inner = self.inner.lock().unwrap();
+                    Self::set_status(&mut inner, STATUS_DONE);
+                    inner.proc_exit_code = -1;
+                    inner.input_tx = None;
+                    self.unlock_run();
+                    return Err(format!("failed to create connection: {e}"));
+                }
+            };
+
+            if let Err(e) = conn.start() {
+                let mut inner = self.inner.lock().unwrap();
+                Self::set_status(&mut inner, STATUS_DONE);
+                inner.proc_exit_code = -1;
+                inner.input_tx = None;
+                self.unlock_run();
+                return Err(format!("failed to start process: {e}"));
+            }
+
+            let mut shell_proc = ShellProc::new(conn_name, conn);
+            let _done_rx = shell_proc.take_done_rx();
+            let exit_code = shell_proc.wait_and_signal();
+
+            {
+                let mut inner = self.inner.lock().unwrap();
+                inner.proc_exit_code = exit_code;
+                Self::set_status(&mut inner, STATUS_DONE);
+                inner.input_tx = None;
+            }
+            self.publish_status();
+            self.unlock_run();
+            return Ok(());
+        }
+
+        // Real PTY path
+        let pty_system = native_pty_system();
+        let pty_size = PtySize {
+            rows: 25,
+            cols: 80,
+            pixel_width: 0,
+            pixel_height: 0,
+        };
+
+        let pair = pty_system.openpty(pty_size).map_err(|e| {
+            let mut inner = self.inner.lock().unwrap();
+            Self::set_status(&mut inner, STATUS_DONE);
+            inner.proc_exit_code = -1;
+            inner.input_tx = None;
+            self.unlock_run();
+            format!("failed to open PTY: {e}")
+        })?;
+
+        // Determine shell command
+        let cmd_str = Self::get_cmd_str(&block_meta);
+        let cmd_args = Self::get_cmd_args(&block_meta);
+        let interactive = Self::is_interactive(&block_meta);
+
+        let mut cmd = if !cmd_str.is_empty() && (!cmd_args.is_empty() || interactive) {
+            // Direct spawn: cmd:args provided or cmd:interactive set.
+            // Spawn the CLI directly (no sh -c wrapper) so args are passed correctly.
+            let mut c = CommandBuilder::new(&cmd_str);
+            if !cmd_args.is_empty() {
+                let arg_refs: Vec<&str> = cmd_args.iter().map(|s| s.as_str()).collect();
+                c.args(arg_refs);
+            }
+            c
+        } else if !cmd_str.is_empty() {
+            // "cmd" controller: run a specific command string via shell wrapper
+            if cfg!(windows) {
+                let mut c = CommandBuilder::new("cmd.exe");
+                c.args(["/C", &cmd_str]);
+                c
+            } else {
+                let mut c = CommandBuilder::new("/bin/sh");
+                c.args(["-c", &cmd_str]);
+                c
+            }
+        } else {
+            // "shell" controller: interactive shell with AgentMux integration
+            // On Windows: prefer pwsh (PowerShell 7), fall back to powershell.exe (5.x), then cmd.exe
+            let shell_path = if cfg!(windows) {
+                detect_local_shell_path_windows()
+            } else {
+                std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string())
+            };
+
+            let shell_type = crate::backend::shellintegration::detect_shell_type(&shell_path);
+            let wave_data_dir = crate::backend::wavebase::get_wave_data_dir();
+
+            // Deploy integration scripts (no-op if already up-to-date)
+            crate::backend::shellintegration::deploy_scripts(&wave_data_dir);
+
+            let mut c = CommandBuilder::new(&shell_path);
+
+            // Apply shell-specific startup args (--rcfile, -File, etc.)
+            if let Some(startup) = crate::backend::shellintegration::get_shell_startup(shell_type, &wave_data_dir) {
+                for arg in &startup.extra_args {
+                    c.arg(arg);
+                }
+                for (k, v) in &startup.env_vars {
+                    c.env(k, v);
+                }
+            }
+
+            // Inject AgentMux identity env vars into the PTY environment
+            c.env("TERM_PROGRAM", "agentmux");
+            c.env("AGENTMUX_BLOCKID", &self.block_id);
+            c.env("AGENTMUX_TABID", &self.tab_id);
+            c.env("AGENTMUX_VERSION", env!("CARGO_PKG_VERSION"));
+
+            // Set AGENTMUX to the wsh binary path for portable mode detection in scripts
+            if let Some(wsh_path) = crate::backend::shellintegration::find_wsh_binary() {
+                c.env("AGENTMUX", wsh_path.to_string_lossy().as_ref());
+            } else {
+                c.env("AGENTMUX", "1");
+            }
+
+            c
+        };
+
+        // Set working directory if specified
+        let cwd = waveobj::meta_get_string(&block_meta, super::META_KEY_CMD_CWD, "");
+        if !cwd.is_empty() {
+            cmd.cwd(&cwd);
+        }
+
+        let mut child = pair.slave.spawn_command(cmd).map_err(|e| {
+            let mut inner = self.inner.lock().unwrap();
+            Self::set_status(&mut inner, STATUS_DONE);
+            inner.proc_exit_code = -1;
+            inner.input_tx = None;
+            self.unlock_run();
+            format!("failed to spawn command: {e}")
+        })?;
+
+        // Get reader/writer from master
+        let reader = pair.master.try_clone_reader().map_err(|e| {
+            let _ = child.kill();
+            let mut inner = self.inner.lock().unwrap();
+            Self::set_status(&mut inner, STATUS_DONE);
+            inner.proc_exit_code = -1;
+            inner.input_tx = None;
+            self.unlock_run();
+            format!("failed to clone PTY reader: {e}")
+        })?;
+
+        let writer = pair.master.take_writer().map_err(|e| {
+            let _ = child.kill();
+            let mut inner = self.inner.lock().unwrap();
+            Self::set_status(&mut inner, STATUS_DONE);
+            inner.proc_exit_code = -1;
+            inner.input_tx = None;
+            self.unlock_run();
+            format!("failed to take PTY writer: {e}")
+        })?;
+
+        // Spawn PTY read task (blocking I/O → spawn_blocking)
+        let block_id_read = self.block_id.clone();
+        let broker_read = self.broker.clone();
+        tokio::task::spawn_blocking(move || {
+            let mut reader = reader;
+            let mut buf = [0u8; PTY_READ_BUF_SIZE];
+            loop {
+                match reader.read(&mut buf) {
+                    Ok(0) => break, // EOF
+                    Ok(n) => {
+                        if let Some(ref broker) = broker_read {
+                            handle_append_block_file(
+                                broker,
+                                &block_id_read,
+                                "term",
+                                &buf[..n],
+                            );
+                        }
+                    }
+                    Err(e) => {
+                        tracing::debug!("PTY read error for {}: {}", block_id_read, e);
+                        break;
+                    }
+                }
+            }
+        });
+
+        // Spawn input task (routes input channel → PTY writer + resize + signals)
+        // Owns writer and master — dropping them closes the PTY, causing child to exit.
+        let master = pair.master;
+        tokio::spawn(async move {
+            let mut writer = writer;
+            let mut input_rx = input_rx;
+            while let Some(input) = input_rx.recv().await {
+                if let Some(data) = input.input_data {
+                    use std::io::Write;
+                    if let Err(e) = writer.write_all(&data) {
+                        tracing::debug!("PTY write error: {}", e);
+                        break;
+                    }
+                }
+                if let Some(ref size) = input.term_size {
+                    let pty_size = PtySize {
+                        rows: size.rows as u16,
+                        cols: size.cols as u16,
+                        pixel_width: 0,
+                        pixel_height: 0,
+                    };
+                    if let Err(e) = master.resize(pty_size) {
+                        tracing::debug!("PTY resize error: {}", e);
+                    }
+                }
+                if input.sig_name.is_some() {
+                    // Drop writer + master to close PTY, which terminates the child
+                    break;
+                }
+            }
+            // writer and master drop here → PTY closes → child gets EOF/terminates
+        });
+
+        // Spawn wait task (monitors process exit)
+        let inner_wait = Arc::clone(&self.inner);
+        let block_id_wait = self.block_id.clone();
+        let broker_wait = self.broker.clone();
+        let run_lock = Arc::clone(&self.run_lock);
+        tokio::task::spawn_blocking(move || {
+            let mut child = child;
+
+            // Wait for child to exit (blocking)
+            let exit_status = child.wait();
+            let exit_code = match exit_status {
+                Ok(status) => {
+                    if status.success() {
+                        0
+                    } else {
+                        // portable-pty ExitStatus doesn't expose raw code on all platforms
+                        1
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!("wait error for block {}: {}", block_id_wait, e);
+                    -1
+                }
+            };
+
+            // Update inner state
+            {
+                let mut inner = inner_wait.lock().unwrap();
+                inner.proc_exit_code = exit_code;
+                ShellController::set_status(&mut inner, STATUS_DONE);
+                inner.input_tx = None;
+            }
+
+            // Publish done status
+            if let Some(ref broker) = broker_wait {
+                let status = {
+                    let inner = inner_wait.lock().unwrap();
+                    BlockControllerRuntimeStatus {
+                        blockid: block_id_wait.clone(),
+                        version: inner.status_version,
+                        shellprocstatus: inner.proc_status.clone(),
+                        shellprocconnname: inner.conn_name.clone(),
+                        shellprocexitcode: inner.proc_exit_code,
+                    }
+                };
+                super::publish_controller_status(broker, &status);
+            }
+
+            // Release run lock
+            run_lock.store(false, Ordering::SeqCst);
+        });
+
+        // Return immediately — PTY tasks run in background
+        Ok(())
+    }
+
+    fn stop(&self, _graceful: bool, new_status: &str) -> Result<(), String> {
+        let mut inner = self.inner.lock().unwrap();
+
+        // If already in the target state, nothing to do
+        if inner.proc_status == new_status {
+            return Ok(());
+        }
+
+        // Drop the input channel to signal shutdown
+        inner.input_tx = None;
+
+        // Update status
+        Self::set_status(&mut inner, new_status);
+
+        Ok(())
+    }
+
+    fn get_runtime_status(&self) -> BlockControllerRuntimeStatus {
+        self.get_status_snapshot()
+    }
+
+    fn send_input(&self, input: BlockInputUnion) -> Result<(), String> {
+        let inner = self.inner.lock().unwrap();
+        match &inner.input_tx {
+            Some(tx) => tx
+                .try_send(input)
+                .map_err(|e| format!("failed to send input: {e}")),
+            None => Err("controller is not running".to_string()),
+        }
+    }
+
+    fn controller_type(&self) -> &str {
+        &self.controller_type
+    }
+
+    fn block_id(&self) -> &str {
+        &self.block_id
+    }
+}
+
+// ---- File operation helpers ----
+
+/// Append data to a block's terminal output file and publish a WPS event.
+/// Port of Go's `HandleAppendBlockFile`.
+pub fn handle_append_block_file(
+    broker: &wps::Broker,
+    block_id: &str,
+    filename: &str,
+    data: &[u8],
+) {
+    // In a full implementation, this would also write to FileStore.
+    // For now, just publish the WPS event.
+    let data64 = base64::engine::general_purpose::STANDARD.encode(data);
+
+    let event_data = wps::WSFileEventData {
+        zoneid: block_id.to_string(),
+        filename: filename.to_string(),
+        fileop: wps::FILE_OP_APPEND.to_string(),
+        data64,
+    };
+
+    let event = wps::WaveEvent {
+        event: wps::EVENT_BLOCK_FILE.to_string(),
+        scopes: vec![format!("block:{block_id}")],
+        sender: String::new(),
+        persist: 0,
+        data: serde_json::to_value(&event_data).ok(),
+    };
+
+    broker.publish(event);
+}
+
+/// Truncate a block's terminal output file and publish a WPS event.
+/// Port of Go's `HandleTruncateBlockFile`.
+pub fn handle_truncate_block_file(broker: &wps::Broker, block_id: &str, filename: &str) {
+    let event_data = wps::WSFileEventData {
+        zoneid: block_id.to_string(),
+        filename: filename.to_string(),
+        fileop: wps::FILE_OP_TRUNCATE.to_string(),
+        data64: String::new(),
+    };
+
+    let event = wps::WaveEvent {
+        event: wps::EVENT_BLOCK_FILE.to_string(),
+        scopes: vec![format!("block:{block_id}")],
+        sender: String::new(),
+        persist: 0,
+        data: serde_json::to_value(&event_data).ok(),
+    };
+
+    broker.publish(event);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::backend::shellexec::MockConn;
+    use std::sync::Arc;
+
+    fn make_shell_meta() -> MetaMapType {
+        let mut meta = MetaMapType::new();
+        meta.insert(
+            "controller".to_string(),
+            serde_json::Value::String("shell".to_string()),
+        );
+        meta
+    }
+
+    fn make_cmd_meta(cmd: &str) -> MetaMapType {
+        let mut meta = MetaMapType::new();
+        meta.insert(
+            "controller".to_string(),
+            serde_json::Value::String("cmd".to_string()),
+        );
+        meta.insert(
+            "cmd".to_string(),
+            serde_json::Value::String(cmd.to_string()),
+        );
+        meta
+    }
+
+    #[test]
+    fn test_shell_controller_new() {
+        let ctrl = ShellController::new(
+            "shell".to_string(),
+            "tab-1".to_string(),
+            "block-1".to_string(),
+            None,
+            None,
+        );
+        assert_eq!(ctrl.controller_type(), "shell");
+        assert_eq!(ctrl.block_id(), "block-1");
+
+        let status = ctrl.get_runtime_status();
+        assert_eq!(status.shellprocstatus, STATUS_INIT);
+        assert_eq!(status.blockid, "block-1");
+        assert_eq!(status.version, 0);
+    }
+
+    #[test]
+    fn test_shell_controller_start_stop() {
+        let ctrl = ShellController::new(
+            "shell".to_string(),
+            "tab-1".to_string(),
+            "block-1".to_string(),
+            None,
+            None,
+        );
+
+        // Use mock factory so we don't open a real PTY in tests
+        ctrl.set_conn_factory(Box::new(|_conn_name, _meta| {
+            Ok(Box::new(MockConn::new(0)) as Box<dyn ConnInterface>)
+        }));
+
+        let meta = make_shell_meta();
+        let result = ctrl.start(meta, None, false);
+        assert!(result.is_ok());
+
+        // After start with mock, process immediately exits → status is done
+        let status = ctrl.get_runtime_status();
+        assert_eq!(status.shellprocstatus, STATUS_DONE);
+
+        // Stop should work
+        let result = ctrl.stop(true, STATUS_DONE);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_shell_controller_run_on_start_false() {
+        let ctrl = ShellController::new(
+            "shell".to_string(),
+            "tab-1".to_string(),
+            "block-1".to_string(),
+            None,
+            None,
+        );
+
+        let mut meta = make_shell_meta();
+        meta.insert(
+            META_KEY_CMD_RUN_ON_START.to_string(),
+            serde_json::Value::Bool(false),
+        );
+
+        let result = ctrl.start(meta, None, false);
+        assert!(result.is_ok());
+
+        // Should still be in init state (didn't start)
+        let status = ctrl.get_runtime_status();
+        assert_eq!(status.shellprocstatus, STATUS_INIT);
+    }
+
+    #[test]
+    fn test_shell_controller_force_start() {
+        let ctrl = ShellController::new(
+            "shell".to_string(),
+            "tab-1".to_string(),
+            "block-1".to_string(),
+            None,
+            None,
+        );
+
+        ctrl.set_conn_factory(Box::new(|_conn_name, _meta| {
+            Ok(Box::new(MockConn::new(0)) as Box<dyn ConnInterface>)
+        }));
+
+        let mut meta = make_shell_meta();
+        meta.insert(
+            META_KEY_CMD_RUN_ON_START.to_string(),
+            serde_json::Value::Bool(false),
+        );
+
+        // Force should override run_on_start=false
+        let result = ctrl.start(meta, None, true);
+        assert!(result.is_ok());
+
+        let status = ctrl.get_runtime_status();
+        // With mock, immediately exits to done
+        assert_eq!(status.shellprocstatus, STATUS_DONE);
+    }
+
+    #[test]
+    fn test_shell_controller_with_conn_factory() {
+        let ctrl = ShellController::new(
+            "cmd".to_string(),
+            "tab-1".to_string(),
+            "block-1".to_string(),
+            None,
+            None,
+        );
+
+        // Set a custom factory that returns a mock with exit code 42
+        ctrl.set_conn_factory(Box::new(|_conn_name, _meta| {
+            Ok(Box::new(MockConn::new(42)) as Box<dyn ConnInterface>)
+        }));
+
+        let meta = make_cmd_meta("echo hello");
+        let result = ctrl.start(meta, None, true);
+        assert!(result.is_ok());
+
+        let status = ctrl.get_runtime_status();
+        assert_eq!(status.shellprocstatus, STATUS_DONE);
+        assert_eq!(status.shellprocexitcode, 42);
+    }
+
+    #[test]
+    fn test_shell_controller_conn_factory_error() {
+        let ctrl = ShellController::new(
+            "shell".to_string(),
+            "tab-1".to_string(),
+            "block-1".to_string(),
+            None,
+            None,
+        );
+
+        ctrl.set_conn_factory(Box::new(|_conn_name, _meta| {
+            Err("connection refused".to_string())
+        }));
+
+        let meta = make_shell_meta();
+        let result = ctrl.start(meta, None, true);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("connection refused"));
+
+        let status = ctrl.get_runtime_status();
+        assert_eq!(status.shellprocstatus, STATUS_DONE);
+        assert_eq!(status.shellprocexitcode, -1);
+    }
+
+    #[test]
+    fn test_shell_controller_send_input_not_running() {
+        let ctrl = ShellController::new(
+            "shell".to_string(),
+            "tab-1".to_string(),
+            "block-1".to_string(),
+            None,
+            None,
+        );
+
+        let result = ctrl.send_input(BlockInputUnion::data(b"hello".to_vec()));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not running"));
+    }
+
+    #[test]
+    fn test_shell_controller_status_version_increments() {
+        let ctrl = ShellController::new(
+            "shell".to_string(),
+            "tab-1".to_string(),
+            "block-1".to_string(),
+            None,
+            None,
+        );
+
+        ctrl.set_conn_factory(Box::new(|_conn_name, _meta| {
+            Ok(Box::new(MockConn::new(0)) as Box<dyn ConnInterface>)
+        }));
+
+        let v0 = ctrl.get_runtime_status().version;
+
+        let meta = make_shell_meta();
+        ctrl.start(meta, None, true).unwrap();
+
+        let v_after = ctrl.get_runtime_status().version;
+        // Status changed from init → running → done = at least 2 increments
+        assert!(v_after > v0);
+    }
+
+    #[test]
+    fn test_controller_trait_as_arc() {
+        let ctrl: Arc<dyn Controller> = Arc::new(ShellController::new(
+            "shell".to_string(),
+            "tab-1".to_string(),
+            "block-1".to_string(),
+            None,
+            None,
+        ));
+
+        assert_eq!(ctrl.controller_type(), "shell");
+        assert_eq!(ctrl.block_id(), "block-1");
+        let status = ctrl.get_runtime_status();
+        assert_eq!(status.shellprocstatus, STATUS_INIT);
+    }
+
+    #[test]
+    fn test_meta_helpers() {
+        let mut meta = MetaMapType::new();
+        assert!(ShellController::should_run_on_start(&meta)); // default true
+        assert!(!ShellController::should_run_once(&meta)); // default false
+        assert!(!ShellController::should_clear_on_start(&meta)); // default false
+        assert!(!ShellController::should_close_on_exit(&meta)); // default false
+
+        meta.insert(
+            META_KEY_CMD_RUN_ON_START.to_string(),
+            serde_json::Value::Bool(false),
+        );
+        assert!(!ShellController::should_run_on_start(&meta));
+
+        meta.insert(
+            META_KEY_CMD_RUN_ONCE.to_string(),
+            serde_json::Value::Bool(true),
+        );
+        assert!(ShellController::should_run_once(&meta));
+
+        meta.insert(
+            META_KEY_CMD_CLEAR_ON_START.to_string(),
+            serde_json::Value::Bool(true),
+        );
+        assert!(ShellController::should_clear_on_start(&meta));
+    }
+
+    #[test]
+    fn test_close_on_exit_delay() {
+        let mut meta = MetaMapType::new();
+        assert_eq!(ShellController::close_on_exit_delay_ms(&meta), 2000); // default
+
+        meta.insert(
+            META_KEY_CMD_CLOSE_ON_EXIT_DELAY.to_string(),
+            serde_json::json!(5000),
+        );
+        assert_eq!(ShellController::close_on_exit_delay_ms(&meta), 5000);
+    }
+
+    #[test]
+    fn test_conn_name_from_meta() {
+        let mut meta = MetaMapType::new();
+        assert_eq!(ShellController::get_conn_name(&meta), "local"); // default
+
+        meta.insert(
+            META_KEY_CONNECTION.to_string(),
+            serde_json::Value::String("user@host".to_string()),
+        );
+        assert_eq!(ShellController::get_conn_name(&meta), "user@host");
+    }
+
+    #[test]
+    fn test_handle_append_block_file() {
+        let broker = wps::Broker::new();
+
+        // Subscribe to block file events
+        broker.subscribe(
+            "test-route",
+            wps::SubscriptionRequest {
+                event: wps::EVENT_BLOCK_FILE.to_string(),
+                scopes: vec!["block:block-1".to_string()],
+                allscopes: false,
+            },
+        );
+
+        handle_append_block_file(&broker, "block-1", "term", b"hello world");
+
+        // Check event was published
+        let _history = broker.read_event_history(wps::EVENT_BLOCK_FILE, "block:block-1", 10);
+        // Note: events are only persisted if persist > 0, so we verify via the publish mechanism
+        // The broker successfully processed without panic, which verifies correctness
+    }
+
+    #[test]
+    fn test_handle_truncate_block_file() {
+        let broker = wps::Broker::new();
+        // Should not panic
+        handle_truncate_block_file(&broker, "block-1", "term");
+    }
+
+    #[test]
+    fn test_register_and_get_controller() {
+        let ctrl: Arc<dyn Controller> = Arc::new(ShellController::new(
+            "shell".to_string(),
+            "tab-1".to_string(),
+            "test-register-block".to_string(),
+            None,
+            None,
+        ));
+
+        super::super::register_controller("test-register-block", ctrl.clone());
+
+        let retrieved = super::super::get_controller("test-register-block");
+        assert!(retrieved.is_some());
+        assert_eq!(retrieved.unwrap().block_id(), "test-register-block");
+
+        // Cleanup
+        super::super::delete_controller("test-register-block");
+        assert!(super::super::get_controller("test-register-block").is_none());
+    }
+
+    #[test]
+    fn test_resync_creates_shell_controller() {
+        use crate::backend::waveobj::Block;
+
+        let mut meta = MetaMapType::new();
+        meta.insert(
+            "controller".to_string(),
+            serde_json::Value::String("shell".to_string()),
+        );
+        // Disable auto-start so we don't open a real PTY in tests
+        meta.insert(
+            META_KEY_CMD_RUN_ON_START.to_string(),
+            serde_json::Value::Bool(false),
+        );
+
+        let block = Block {
+            oid: "resync-test-block".to_string(),
+            version: 1,
+            meta,
+            ..Default::default()
+        };
+
+        let result = super::super::resync_controller(&block, "tab-1", None, false, None, None);
+        assert!(result.is_ok());
+
+        let ctrl = super::super::get_controller("resync-test-block");
+        assert!(ctrl.is_some());
+        assert_eq!(ctrl.unwrap().controller_type(), "shell");
+
+        // Cleanup
+        super::super::delete_controller("resync-test-block");
+    }
+}

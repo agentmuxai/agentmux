@@ -1,0 +1,31 @@
+{
+    "include": ["frontend/**/*", "emain/**/*"],
+    "compilerOptions": {
+        "target": "es6",
+        "module": "es2020",
+        "jsx": "preserve",
+        "esModuleInterop": true,
+        "skipLibCheck": true,
+        "forceConsistentCasingInFileNames": true,
+        "moduleResolution": "bundler",
+        "allowSyntheticDefaultImports": true,
+        "resolveJsonModule": true,
+        "isolatedModules": true,
+        "experimentalDecorators": true,
+        "downlevelIteration": true,
+        "baseUrl": "./",
+        "paths": {
+            "@/app/*": ["frontend/app/*"],
+            "@/util/*": ["frontend/util/*"],
+            "@/layout/*": ["frontend/layout/*"],
+            "@/store/*": ["frontend/app/store/*"],
+            "@/view/*": ["frontend/app/view/*"],
+            "@/element/*": ["frontend/app/element/*"],
+            "@/shadcn/*": ["frontend/app/shadcn/*"]
+        },
+        "lib": ["dom", "dom.iterable", "es6"],
+        "allowJs": true,
+        "strict": false,
+        "noEmit": true
+    }
+}

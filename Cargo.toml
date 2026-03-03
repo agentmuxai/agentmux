@@ -1,0 +1,17 @@
+[workspace]
+resolver = "2"
+members = ["src-tauri", "agentmuxsrv-rs", "wsh-rs"]
+
+[profile.release]
+strip = true
+lto = true
+codegen-units = 1
+opt-level = "s"
+
+# Fast release profile for testing (much faster compile, slightly larger binary)
+[profile.fast-release]
+inherits = "release"
+lto = "thin"        # Thin LTO - parallel and much faster than full LTO
+codegen-units = 16  # Parallel codegen - uses multiple CPU cores
+strip = true
+opt-level = 2       # Still optimized, but not as aggressive as "s"

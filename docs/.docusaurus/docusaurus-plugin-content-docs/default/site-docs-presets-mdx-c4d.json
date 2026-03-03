@@ -1,0 +1,28 @@
+{
+  "id": "presets",
+  "title": "Presets",
+  "description": "Wave's preset system allows you to save and apply multiple configuration settings at once. Presets are used for:",
+  "source": "@site/docs/presets.mdx",
+  "sourceDirName": ".",
+  "slug": "/presets",
+  "permalink": "/docsite/presets",
+  "draft": false,
+  "unlisted": false,
+  "tags": [],
+  "version": "current",
+  "sidebarPosition": 3.5,
+  "frontMatter": {
+    "sidebar_position": 3.5,
+    "id": "presets",
+    "title": "Presets"
+  },
+  "sidebar": "defaultSidebar",
+  "previous": {
+    "title": "Configuration",
+    "permalink": "/docsite/config"
+  },
+  "next": {
+    "title": "AI Presets",
+    "permalink": "/docsite/ai-presets"
+  }
+}

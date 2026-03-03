@@ -1,0 +1,7 @@
+{
+  "instance": "dev",
+  "dataDir": "~/.agentmux-dev",
+  "description": "Isolated AgentMux development instance",
+  "purpose": "Development and testing without affecting production AgentMux",
+  "_usage": "agentmux --instance=dev"
+}

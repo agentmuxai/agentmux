@@ -1,0 +1,26 @@
+{
+  "id": "layout",
+  "title": "layout",
+  "description": "",
+  "source": "@site/docs/layout.mdx",
+  "sourceDirName": ".",
+  "slug": "/layout",
+  "permalink": "/docsite/layout",
+  "draft": false,
+  "unlisted": false,
+  "tags": [],
+  "version": "current",
+  "frontMatter": {
+    "sidebar_class_name": "hidden",
+    "id": "layout"
+  },
+  "sidebar": "defaultSidebar",
+  "previous": {
+    "title": "Release Notes",
+    "permalink": "/docsite/releasenotes"
+  },
+  "next": {
+    "title": "Legacy Telemetry",
+    "permalink": "/docsite/telemetry-old"
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "host_virtual_monitor": 1,
+  "host_virtual_monitor_fallback": 1,
+  "host_privacy": 0,
+  "host_virtual_monitor_preset": "1920x1080@60",
+  "host_name": "AgentMux-Sandbox",
+  "_comment": "Parsec configuration for headless sandbox operation"
+}

@@ -1,0 +1,28 @@
+{
+  "id": "tabs",
+  "title": "Tabs",
+  "description": "Tabs are collections of Widgets that can be arranged into tiled dashboards. You can create as many tabs as you want within a given workspace to help organize your workflows.",
+  "source": "@site/docs/tabs.mdx",
+  "sourceDirName": ".",
+  "slug": "/tabs",
+  "permalink": "/docsite/tabs",
+  "draft": false,
+  "unlisted": false,
+  "tags": [],
+  "version": "current",
+  "sidebarPosition": 3.25,
+  "frontMatter": {
+    "sidebar_position": 3.25,
+    "id": "tabs",
+    "title": "Tabs"
+  },
+  "sidebar": "defaultSidebar",
+  "previous": {
+    "title": "Customization",
+    "permalink": "/docsite/customization"
+  },
+  "next": {
+    "title": "Widgets",
+    "permalink": "/docsite/widgets"
+  }
+}
