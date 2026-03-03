@@ -1,0 +1,28 @@
+{
+  "id": "waveai",
+  "title": "Wave AI",
+  "description": "Context-aware terminal assistant with access to terminal output, widgets, and filesystem.",
+  "source": "@site/docs/waveai.mdx",
+  "sourceDirName": ".",
+  "slug": "/waveai",
+  "permalink": "/docsite/waveai",
+  "draft": false,
+  "unlisted": false,
+  "tags": [],
+  "version": "current",
+  "sidebarPosition": 1.5,
+  "frontMatter": {
+    "sidebar_position": 1.5,
+    "id": "waveai",
+    "title": "Wave AI"
+  },
+  "sidebar": "defaultSidebar",
+  "previous": {
+    "title": "Getting Started",
+    "permalink": "/docsite/gettingstarted"
+  },
+  "next": {
+    "title": "Key Bindings",
+    "permalink": "/docsite/keybindings"
+  }
+}

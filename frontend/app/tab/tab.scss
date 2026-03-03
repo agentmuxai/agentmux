@@ -1,0 +1,194 @@
+// Copyright 2024, Command Line Inc.
+// SPDX-License-Identifier: Apache-2.0
+
+.tab {
+    position: absolute;
+    width: 130px;
+    height: calc(100% - 1px);
+    padding: 0 0 0 0;
+    box-sizing: border-box;
+    font-weight: bold;
+    color: var(--secondary-text-color);
+    opacity: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    &::after {
+        content: "";
+        position: absolute;
+        left: 0;
+        width: 1px;
+        height: 14px;
+        border-right: 1px solid rgb(from var(--main-text-color) r g b / 0.2);
+    }
+
+    .tab-inner {
+        position: relative;
+        width: calc(100% - 6px);
+        height: 100%;
+        white-space: nowrap;
+        border-radius: 6px;
+    }
+
+    &.animate {
+        transition:
+            transform 0.3s ease,
+            background-color 0.3s ease-in-out;
+    }
+
+    &.active {
+        .tab-inner {
+            border-color: transparent;
+            border-radius: 6px;
+            background: rgb(from var(--main-text-color) r g b / 0.1);
+        }
+
+        .name {
+            color: var(--main-text-color);
+        }
+
+        & + .tab::after,
+        &::after {
+            content: none;
+        }
+    }
+
+    &:first-child::after {
+        content: none;
+    }
+
+    .name {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate3d(-50%, -50%, 0);
+        user-select: none;
+        z-index: var(--zindex-tab-name);
+        font-size: 11px;
+        font-weight: 500;
+        text-shadow: 0px 0px 4px rgb(from var(--main-bg-color) r g b / 0.25);
+        overflow: hidden;
+        width: calc(100% - 10px);
+        text-overflow: ellipsis;
+        text-align: center;
+
+        &.focused {
+            outline: none;
+            border: 1px solid rgb(from var(--main-text-color) r g b / 0.179);
+            padding: 2px 6px;
+            border-radius: 2px;
+        }
+    }
+
+    .wave-button {
+        position: absolute;
+        top: 50%;
+        right: 4px;
+        transform: translate3d(0, -50%, 0);
+        width: 20px;
+        height: 20px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        z-index: var(--zindex-tab-name);
+        padding: 1px 2px;
+        transition: none !important;
+    }
+
+    .close {
+        visibility: hidden;
+    }
+}
+
+// Only apply hover effects when not in nohover mode. This prevents the previously-hovered tab from remaining hovered while a tab view is not mounted.
+body:not(.nohover) .tab:hover,
+body:not(.nohover) .tab.dragging {
+    & + .tab::after,
+    &::after {
+        content: none;
+    }
+
+    .tab-inner {
+        border-color: transparent;
+        background: rgb(from var(--main-text-color) r g b / 0.1);
+    }
+    .close {
+        visibility: visible;
+        &:hover {
+            color: var(--main-text-color);
+        }
+    }
+}
+
+// When in nohover mode, always show the close button on the active tab. This prevents the close button of the active tab from flickering when nohover is toggled.
+body.nohover .tab.active .close {
+    visibility: visible;
+}
+
+@keyframes expandWidthAndFadeIn {
+    from {
+        width: var(--initial-tab-width);
+        opacity: 0;
+    }
+    to {
+        width: var(--final-tab-width);
+        opacity: 1;
+    }
+}
+
+.tab.new-tab {
+    animation: expandWidthAndFadeIn 0.1s forwards;
+}
+
+@keyframes jigglePinIcon {
+    0% {
+        transform: rotate(0deg);
+        color: inherit;
+    }
+    10% {
+        transform: rotate(-30deg);
+        color: rgb(255, 193, 7);
+    }
+    20% {
+        transform: rotate(30deg);
+        color: rgb(255, 193, 7);
+    }
+    30% {
+        transform: rotate(-30deg);
+        color: rgb(255, 193, 7);
+    }
+    40% {
+        transform: rotate(30deg);
+        color: rgb(255, 193, 7);
+    }
+    50% {
+        transform: rotate(-15deg);
+        color: rgb(255, 193, 7);
+    }
+    60% {
+        transform: rotate(15deg);
+        color: rgb(255, 193, 7);
+    }
+    70% {
+        transform: rotate(-15deg);
+        color: rgb(255, 193, 7);
+    }
+    80% {
+        transform: rotate(15deg);
+        color: rgb(255, 193, 7);
+    }
+    90% {
+        transform: rotate(0deg);
+        color: rgb(255, 193, 7);
+    }
+    100% {
+        transform: rotate(0deg);
+        color: inherit;
+    }
+}
+
+.pin.jiggling i {
+    animation: jigglePinIcon 0.5s ease-in-out;
+}

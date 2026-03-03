@@ -1,0 +1,159 @@
+name: Build Tauri
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-tauri:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            platform: linux
+            arch: x64
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            platform: darwin
+            arch: arm64
+          - os: macos-13
+            target: x86_64-apple-darwin
+            platform: darwin
+            arch: x64
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            platform: windows
+            arch: x64
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+          cache: true
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install Linux dependencies
+        if: matrix.platform == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libssl-dev \
+            libgtk-3-dev
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build Go backend binaries
+        shell: bash
+        run: |
+          # Get version from package.json
+          VERSION=$(node -p "require('./package.json').version")
+          BUILD_TIME=$(date +%Y%m%d%H%M)
+
+          # Set Go environment for cross-compilation
+          export CGO_ENABLED=0
+          export GOOS=${{ matrix.platform }}
+
+          # Convert arch names: x64→amd64, arm64→arm64 (no change)
+          if [ "${{ matrix.arch }}" = "x64" ]; then
+            export GOARCH=amd64
+          else
+            export GOARCH=${{ matrix.arch }}
+          fi
+
+          # Build agentmuxsrv with version injection
+          echo "Building agentmuxsrv v$VERSION for $GOOS/$GOARCH"
+          go build -o dist/bin/agentmuxsrv-${{ matrix.target }}${{ matrix.platform == 'windows' && '.exe' || '' }} \
+            -ldflags "-s -w -X main.WaveVersion=$VERSION -X main.BuildTime=$BUILD_TIME" \
+            ./cmd/server/main-server.go
+
+          # Build wsh with version injection
+          echo "Building wsh v$VERSION for $GOOS/$GOARCH"
+          go build -o dist/bin/wsh-${{ matrix.target }}${{ matrix.platform == 'windows' && '.exe' || '' }} \
+            -ldflags "-s -w -X main.WaveVersion=$VERSION -X main.BuildTime=$BUILD_TIME" \
+            ./cmd/wsh/main-wsh.go
+
+          # List built binaries
+          ls -lh dist/bin/
+
+      - name: Verify version consistency
+        shell: bash
+        run: |
+          # Run version verification in strict mode
+          # This ensures all binaries match package.json version
+          bash scripts/verify-version.sh --strict
+
+      - name: Copy sidecar binaries to Tauri
+        shell: bash
+        run: |
+          mkdir -p src-tauri/binaries
+          cp dist/bin/agentmuxsrv-${{ matrix.target }}${{ matrix.platform == 'windows' && '.exe' || '' }} \
+             src-tauri/binaries/
+          cp dist/bin/wsh-${{ matrix.target }}${{ matrix.platform == 'windows' && '.exe' || '' }} \
+             src-tauri/binaries/
+          ls -lh src-tauri/binaries/
+
+      - name: Build frontend
+        run: npm run build:prod
+
+      - name: Build Tauri application
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tauriScript: npm run tauri:build
+          args: -- --target ${{ matrix.target }}
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: agentmux-${{ matrix.platform }}-${{ matrix.arch }}
+          path: |
+            src-tauri/target/${{ matrix.target }}/release/bundle/**/*
+          retention-days: 30
+
+  create-release:
+    needs: build-tauri
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: artifacts/**/*
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

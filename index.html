@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color scheme" content="light dark" />
+    <title>AgentMux</title>
+    <style>
+      /* Prevent color flashing during startup */
+      html, body {
+        margin: 0;
+        padding: 0;
+        background: rgb(34, 34, 34);
+        color: #f7f7f7;
+      }
+      #startup-loading {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        font-size: 14px;
+        color: rgba(255, 255, 255, 0.6);
+      }
+    </style>
+    <link rel="stylesheet" href="/fontawesome/css/fontawesome.min.css" />
+    <link rel="stylesheet" href="/fontawesome/css/brands.min.css" />
+    <link rel="stylesheet" href="/fontawesome/css/solid.min.css" />
+    <link rel="stylesheet" href="/fontawesome/css/sharp-solid.min.css" />
+    <link rel="stylesheet" href="/fontawesome/css/sharp-regular.min.css" />
+    <link rel="stylesheet" href="/fontawesome/css/custom-icons.min.css" />
+    <script type="module" src="frontend/tauri-bootstrap.ts"></script>
+  </head>
+  <body class="init" data-colorscheme="dark">
+    <div id="startup-loading">Starting AgentMux...</div>
+    <div id="main"></div>
+  </body>
+</html>

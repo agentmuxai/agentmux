@@ -1,0 +1,28 @@
+{
+  "name": "@agentmuxhq/sandbox",
+  "version": "1.0.0",
+  "description": "AgentMux development sandbox setup and management tools",
+  "private": true,
+  "bin": {
+    "setup-sandbox-host": "bin/setup-sandbox-host.ps1",
+    "sandbox-health": "bin/sandbox-health.ps1"
+  },
+  "scripts": {
+    "setup": "pwsh scripts/setup-sandbox-impl.ps1",
+    "setup:skip-parsec": "pwsh scripts/setup-sandbox-impl.ps1 -SkipParsec",
+    "setup:verbose": "pwsh scripts/setup-sandbox-impl.ps1 -Verbose",
+    "health": "pwsh scripts/sandbox-health-impl.ps1",
+    "health:verbose": "pwsh scripts/sandbox-health-impl.ps1 -Verbose",
+    "health:json": "pwsh scripts/sandbox-health-impl.ps1 -OutputFormat json",
+    "test": "pwsh -Command \"Invoke-Pester -Path tests/ -PassThru\""
+  },
+  "keywords": [
+    "sandbox",
+    "agentmux",
+    "development",
+    "parsec",
+    "remote-desktop"
+  ],
+  "author": "AgentMux Corp",
+  "license": "MIT"
+}

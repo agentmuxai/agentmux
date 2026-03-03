@@ -1,0 +1,40 @@
+{
+    "defwidget@agent": {
+        "display:order": -5,
+        "icon": "sparkles",
+        "color": "#cc785c",
+        "label": "agent",
+        "description": "Unified AI agent with streaming output and tool execution",
+        "blockdef": {
+            "meta": {
+                "view": "agent",
+                "controller": "cmd",
+                "cmd": "",
+                "cmd:args": [],
+                "cmd:interactive": true,
+                "cmd:runonstart": false
+            }
+        }
+    },
+    "defwidget@terminal": {
+        "display:order": -4,
+        "icon": "square-terminal",
+        "label": "terminal",
+        "blockdef": {
+            "meta": {
+                "view": "term",
+                "controller": "shell"
+            }
+        }
+    },
+    "defwidget@sysinfo": {
+        "display:order": -3,
+        "icon": "chart-line",
+        "label": "sysinfo",
+        "blockdef": {
+            "meta": {
+                "view": "sysinfo"
+            }
+        }
+    }
+}
