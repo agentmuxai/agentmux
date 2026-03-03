@@ -12,7 +12,6 @@
         "appId": "com.agentmuxhq.agentmux"
     },
     "private": true,
-    "main": "./dist/main/index.js",
     "type": "module",
     "browserslist": [
         "Chrome >= 128"

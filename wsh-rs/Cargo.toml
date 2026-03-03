@@ -2,7 +2,7 @@
 name = "wsh-rs"
 version = "0.31.20"
 edition = "2021"
-description = "Wave Shell Helper - CLI tool to control AgentMux"
+description = "Shell integration CLI for AgentMux"
 
 [[bin]]
 name = "wsh"

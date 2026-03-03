@@ -1,5 +1,5 @@
 {
-    "include": ["frontend/**/*", "emain/**/*"],
+    "include": ["frontend/**/*"],
     "compilerOptions": {
         "target": "es6",
         "module": "es2020",

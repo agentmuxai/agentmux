@@ -1,8 +1,8 @@
-import { UserConfig, defineConfig, mergeConfig } from "vitest/config";
-import electronViteConfig from "./electron.vite.config";
+import { defineConfig, mergeConfig, type UserConfig } from "vitest/config";
+import viteConfig from "./vite.config.tauri";
 
 export default mergeConfig(
-    electronViteConfig.renderer as UserConfig,
+    viteConfig as UserConfig,
     defineConfig({
         test: {
             reporters: ["verbose", "junit"],
