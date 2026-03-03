@@ -1,0 +1,28 @@
+{
+  "id": "widgets",
+  "title": "Widgets",
+  "description": "Every individual Component is contained in its own widget. These can be added, removed, moved and resized. Each widget has its own header which can be right clicked to reveal more operations you can do with that widget.",
+  "source": "@site/docs/widgets.mdx",
+  "sourceDirName": ".",
+  "slug": "/widgets",
+  "permalink": "/docsite/widgets",
+  "draft": false,
+  "unlisted": false,
+  "tags": [],
+  "version": "current",
+  "sidebarPosition": 3.3,
+  "frontMatter": {
+    "sidebar_position": 3.3,
+    "id": "widgets",
+    "title": "Widgets"
+  },
+  "sidebar": "defaultSidebar",
+  "previous": {
+    "title": "Tabs",
+    "permalink": "/docsite/tabs"
+  },
+  "next": {
+    "title": "Configuration",
+    "permalink": "/docsite/config"
+  }
+}

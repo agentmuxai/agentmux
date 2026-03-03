@@ -1,0 +1,164 @@
+// Copyright 2024, Command Line Inc.
+// SPDX-License-Identifier: Apache-2.0
+
+.init-prompt {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    padding: 24px;
+    background: var(--panel-bg-color);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    margin: 20px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+
+    .init-prompt-header {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+
+        .init-prompt-icon {
+            font-size: 24px;
+        }
+
+        .init-prompt-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: var(--main-text-color);
+        }
+    }
+
+    .init-prompt-message {
+        color: var(--secondary-text-color);
+        font-size: 14px;
+        line-height: 1.5;
+    }
+
+    .init-prompt-options {
+        display: flex;
+        gap: 12px;
+        margin-top: 8px;
+
+        .init-option-btn {
+            flex: 1;
+            padding: 12px 20px;
+            font-size: 14px;
+            font-weight: 500;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            background: var(--button-bg-color);
+            color: var(--button-text-color);
+            cursor: pointer;
+            transition: all 0.2s ease;
+
+            &:hover {
+                background: var(--button-hover-bg-color);
+                border-color: var(--accent-color);
+                transform: translateY(-1px);
+            }
+
+            &:active {
+                transform: translateY(0);
+            }
+
+            &.light {
+                background: linear-gradient(135deg, #fff 0%, #f5f5f5 100%);
+                color: #333;
+                border-color: #ddd;
+
+                &:hover {
+                    border-color: #ffa500;
+                    box-shadow: 0 2px 8px rgba(255, 165, 0, 0.2);
+                }
+            }
+
+            &.dark {
+                background: linear-gradient(135deg, #2c2c2c 0%, #1a1a1a 100%);
+                color: #fff;
+                border-color: #444;
+
+                &:hover {
+                    border-color: #4a90e2;
+                    box-shadow: 0 2px 8px rgba(74, 144, 226, 0.2);
+                }
+            }
+
+            &.yes {
+                background: linear-gradient(135deg, #4caf50 0%, #45a049 100%);
+                color: white;
+                border-color: #4caf50;
+
+                &:hover {
+                    box-shadow: 0 2px 8px rgba(76, 175, 80, 0.3);
+                }
+            }
+
+            &.no {
+                background: linear-gradient(135deg, #f44336 0%, #e53935 100%);
+                color: white;
+                border-color: #f44336;
+
+                &:hover {
+                    box-shadow: 0 2px 8px rgba(244, 67, 54, 0.3);
+                }
+            }
+        }
+    }
+
+    .init-prompt-input-row {
+        display: flex;
+        gap: 12px;
+        margin-top: 8px;
+
+        .init-prompt-input {
+            flex: 1;
+            padding: 10px 14px;
+            font-size: 14px;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            background: var(--input-bg-color);
+            color: var(--main-text-color);
+            outline: none;
+
+            &:focus {
+                border-color: var(--accent-color);
+                box-shadow: 0 0 0 2px rgba(74, 144, 226, 0.1);
+            }
+        }
+
+        .init-submit-btn {
+            padding: 10px 24px;
+            font-size: 14px;
+            font-weight: 500;
+            border: 1px solid var(--accent-color);
+            border-radius: 6px;
+            background: var(--accent-color);
+            color: white;
+            cursor: pointer;
+            transition: all 0.2s ease;
+
+            &:hover:not(:disabled) {
+                background: var(--accent-hover-color);
+                transform: translateY(-1px);
+            }
+
+            &:disabled {
+                opacity: 0.5;
+                cursor: not-allowed;
+            }
+        }
+    }
+
+    // Specific variant styles
+    &.theme-prompt {
+        border-left: 4px solid #ff9800;
+    }
+
+    &.login-prompt {
+        border-left: 4px solid #2196f3;
+    }
+
+    &.generic-prompt {
+        border-left: 4px solid #9c27b0;
+    }
+}

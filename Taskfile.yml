@@ -1,0 +1,616 @@
+# Copyright 2024, Command Line Inc. Copyright 2026, AgentMux Corp.
+# SPDX-License-Identifier: Apache-2.0
+
+version: "3"
+
+vars:
+    APP_NAME: "AgentMux"
+    BIN_DIR: "bin"
+    VERSION:
+        sh: node version.cjs
+    RM: '{{if eq OS "windows"}}powershell Remove-Item -Force -ErrorAction SilentlyContinue{{else}}rm -f{{end}}'
+    RMRF: '{{if eq OS "windows"}}powershell Remove-Item -Force -Recurse -ErrorAction SilentlyContinue{{else}}rm -rf{{end}}'
+    DATE: '{{if eq OS "windows"}}powershell Get-Date -UFormat{{else}}date{{end}}'
+    ARTIFACTS_BUCKET: agentmux-github-artifacts/staging
+    RELEASES_BUCKET: dl.agentmux.ai/releases
+    WINGET_PACKAGE: AgentMux.AgentMux
+
+tasks:
+    dev:
+        desc: Run the Tauri application in development mode (hot reload enabled).
+        cmd: npx tauri dev
+        deps:
+            - npm:install
+            - docsite:build:embedded
+            - build:backend
+            - sync:dev:binaries
+        env:
+            AGENTMUX_ENVFILE: "{{.ROOT_DIR}}/.env"
+            WCLOUD_ENDPOINT: "https://api-dev.agentmux.ai/central"
+            WCLOUD_WS_ENDPOINT: "wss://wsapi-dev.agentmux.ai"
+
+    sync:dev:binaries:
+        desc: Sync built binaries to Tauri dev/release cache (prevents stale binary issues)
+        cmds:
+            - task: sync:dev:binaries:{{OS}}
+
+    sync:dev:binaries:windows:
+        internal: true
+        platforms: [windows]
+        cmds:
+            - powershell Copy-Item -Force dist/bin/agentmuxsrv-rs.x64.exe src-tauri/target/debug/agentmuxsrv-rs.exe -ErrorAction SilentlyContinue
+            - powershell Copy-Item -Force dist/bin/agentmuxsrv-rs.x64.exe src-tauri/target/release/agentmuxsrv-rs.exe -ErrorAction SilentlyContinue
+            - powershell Copy-Item -Force dist/bin/agentmuxsrv-rs.x64.exe src-tauri/binaries/agentmuxsrv-rs-x86_64-pc-windows-msvc.exe -ErrorAction SilentlyContinue
+            - echo "✓ Synced agentmuxsrv-rs to Tauri dev/release cache (Windows)"
+
+    sync:dev:binaries:darwin:
+        internal: true
+        platforms: [darwin]
+        cmds:
+            - mkdir -p src-tauri/target/debug/bin src-tauri/target/release/bin
+            - cp -f dist/bin/agentmuxsrv-rs.arm64 src-tauri/target/debug/agentmuxsrv-rs || true
+            - cp -f dist/bin/agentmuxsrv-rs.arm64 src-tauri/target/release/agentmuxsrv-rs || true
+            - cp -f dist/bin/wsh-{{.VERSION}}-darwin.arm64 src-tauri/target/debug/bin/ || true
+            - cp -f dist/bin/wsh-{{.VERSION}}-darwin.arm64 src-tauri/target/release/bin/ || true
+            - cp -f dist/bin/wsh-{{.VERSION}}-darwin.x64 src-tauri/target/debug/bin/ || true
+            - cp -f dist/bin/wsh-{{.VERSION}}-darwin.x64 src-tauri/target/release/bin/ || true
+            - echo "✓ Synced agentmuxsrv-rs + wsh to Tauri dev/release cache (macOS)"
+
+    sync:dev:binaries:linux:
+        internal: true
+        platforms: [linux]
+        cmds:
+            - mkdir -p src-tauri/target/debug src-tauri/target/release
+            - cp -f dist/bin/agentmuxsrv-rs.x64 src-tauri/target/debug/agentmuxsrv-rs || true
+            - cp -f dist/bin/agentmuxsrv-rs.x64 src-tauri/target/release/agentmuxsrv-rs || true
+            - echo "✓ Synced agentmuxsrv-rs to Tauri dev/release cache (Linux)"
+
+    start:
+        desc: Build and run the Tauri application in production mode (no installer).
+        cmd: cd src-tauri && cargo run --release
+        deps:
+            - npm:install
+            - docsite:build:embedded
+            - build:backend
+        env:
+            AGENTMUX_ENVFILE: "{{.ROOT_DIR}}/.env"
+            WCLOUD_ENDPOINT: "https://api-dev.agentmux.ai/central"
+            WCLOUD_WS_ENDPOINT: "wss://wsapi-dev.agentmux.ai"
+
+    quickdev:
+        desc: Run the Tauri application in quick dev mode (no docsite, no wsh).
+        cmd: tauri dev
+        deps:
+            - npm:install
+            - build:backend:rust
+        env:
+            AGENTMUX_ENVFILE: "{{.ROOT_DIR}}/.env"
+            WCLOUD_ENDPOINT: "https://api-dev.agentmux.ai/central"
+            WCLOUD_WS_ENDPOINT: "wss://wsapi-dev.agentmux.ai/"
+
+    storybook:
+        desc: Start the Storybook server.
+        cmd: npm run storybook
+        deps:
+            - npm:install
+
+    storybook:build:
+        desc: Build the Storybook static site.
+        cmd: npm run build-storybook
+        generates:
+            - storybook-static/**/*
+        deps:
+            - npm:install
+
+    docs:npm:install:
+        desc: Runs `npm install` in docs directory
+        internal: true
+        generates:
+            - docs/node_modules/**/*
+            - docs/package-lock.json
+        sources:
+            - docs/package-lock.json
+            - docs/package.json
+        cmd: npm install
+        dir: docs
+
+    docsite:start:
+        desc: Start the docsite dev server.
+        cmd: npm run start
+        dir: docs
+        aliases:
+            - docsite
+        deps:
+            - docs:npm:install
+
+    docsite:build:public:
+        desc: Build the full docsite.
+        cmds:
+            - cd docs && npm run build
+            - task: copyfiles:'storybook-static':'docs/build/storybook'
+        env:
+            USE_SIMPLE_CSS_MINIFIER: "true"
+        sources:
+            - "docs/*"
+            - "docs/src/**/*"
+            - "docs/docs/**/*"
+            - "docs/static/**/*"
+            - storybook-static/**/*
+        generates:
+            - "docs/build/**/*"
+        deps:
+            - docs:npm:install
+            - storybook:build
+
+    docsite:build:embedded:
+        desc: Build the embedded docsite and copy it to dist/docsite
+        sources:
+            - "docs/*"
+            - "docs/src/**/*"
+            - "docs/docs/**/*"
+            - "docs/static/**/*"
+        generates:
+            - "dist/docsite/**/*"
+        cmds:
+            - cd docs && npm run build-embedded
+            - task: copyfiles:'docs/build/':'dist/docsite'
+        env:
+            EMBEDDED: "true"
+            USE_SIMPLE_CSS_MINIFIER: "true"
+        deps:
+            - docs:npm:install
+
+    copy:schema:
+        desc: Copy schema directory to dist for Tauri bundling
+        cmds:
+            - cmd: powershell -Command "New-Item -ItemType Directory -Force -Path dist/schema | Out-Null; Copy-Item schema/* dist/schema/ -Recurse -Force"
+              platforms: [windows]
+            - cmd: mkdir -p dist/schema && cp -r schema/* dist/schema/
+              platforms: [linux, darwin]
+
+    package:
+        desc: Package the application for the current platform (Tauri).
+        cmds:
+            - task: build:backend
+            - task: tauri:copy-sidecars
+            - task: copy:schema
+            - npx tauri build {{.CLI_ARGS}}
+        deps:
+            - clean
+            - npm:install
+            - docsite:build:embedded
+
+    package:portable:
+        desc: Package the application as a portable ZIP bundle (Windows only).
+        platforms: [windows]
+        cmds:
+            - task: package
+            - powershell -ExecutionPolicy Bypass -Command "& ./scripts/package-portable.ps1"
+
+    package:macos:
+        desc: Package the application for macOS (creates .app and .dmg).
+        platforms: [darwin]
+        cmds:
+            - task: build:backend
+            - task: tauri:copy-sidecars
+            - npx tauri build --bundles dmg,app {{.CLI_ARGS}}
+        deps:
+            - clean
+            - npm:install
+            - docsite:build:embedded
+
+    package:portable:linux:
+        desc: Package the application as a portable AppImage (Linux only).
+        platforms: [linux]
+        cmds:
+            - task: build:backend
+            - task: tauri:copy-sidecars
+            - task: copy:schema
+            # Tauri prepares the AppDir but linuxdeploy crashes on some systems.
+            # We ignore the linuxdeploy failure and run appimagetool directly.
+            - npx tauri build --bundles appimage {{.CLI_ARGS}} 2>&1 | grep -v "failed to run linuxdeploy" || true
+            - cmd: |
+                APPDIR="target/release/bundle/appimage/AgentMux.AppDir"
+                if [ ! -d "$APPDIR" ]; then
+                  echo "❌ AppDir not found — Tauri build failed before linuxdeploy stage"
+                  exit 1
+                fi
+                # Ensure lowercase icon exists (desktop file references 'agentmux')
+                [ -f "$APPDIR/agentmux.png" ] || cp "$APPDIR/AgentMux.png" "$APPDIR/agentmux.png"
+                VERSION=$(node version.cjs)
+                OUTPUT="target/release/bundle/appimage/AgentMux_${VERSION}_amd64.AppImage"
+                ARCH=x86_64 appimagetool "$APPDIR" "$OUTPUT"
+                if [ -d "$HOME/Desktop" ]; then
+                  cp "$OUTPUT" "$HOME/Desktop/"
+                  echo "✅ Copied to Desktop: $OUTPUT"
+                fi
+                echo "✅ AppImage created: $OUTPUT"
+        deps:
+            - clean
+            - npm:install
+            - docsite:build:embedded
+
+    build:frontend:
+        desc: Build the frontend (production mode).
+        cmd: npx vite build --mode production --config vite.config.tauri.ts
+        deps:
+            - npm:install
+
+    build:frontend:dev:
+        desc: Build the frontend in development mode.
+        cmd: npx vite build --mode dev --config vite.config.tauri.ts
+        deps:
+            - npm:install
+
+    build:backend:
+        desc: Build the agentmuxsrv-rs and wsh-rs Rust components.
+        cmds:
+            - task: build:backend:rust
+            - task: build:wsh
+
+    # ========================================
+    # Rust Backend Build Tasks
+    # ========================================
+
+    build:backend:rust:
+        desc: Build the agentmuxsrv-rs Rust backend binary.
+        cmds:
+            - task: build:backend:rust:{{OS}}
+
+    build:backend:rust:darwin:
+        internal: true
+        platforms: [darwin]
+        cmds:
+            - cargo build --release -p agentmuxsrv-rs
+            - mkdir -p dist/bin
+            - cp target/release/agentmuxsrv-rs dist/bin/agentmuxsrv-rs.arm64
+            - echo "✓ Built agentmuxsrv-rs for macOS"
+
+    build:backend:rust:linux:
+        internal: true
+        platforms: [linux]
+        cmds:
+            - cargo build --release -p agentmuxsrv-rs
+            - mkdir -p dist/bin
+            - cp target/release/agentmuxsrv-rs dist/bin/agentmuxsrv-rs.x64
+            - echo "✓ Built agentmuxsrv-rs for Linux"
+
+    build:backend:rust:windows:
+        internal: true
+        platforms: [windows]
+        cmds:
+            - cargo build --release -p agentmuxsrv-rs
+            - cmd: powershell -Command "New-Item -ItemType Directory -Force -Path dist/bin | Out-Null; Copy-Item target/release/agentmuxsrv-rs.exe dist/bin/agentmuxsrv-rs.x64.exe -Force"
+            - echo "✓ Built agentmuxsrv-rs for Windows"
+
+    # ========================================
+    # wsh-rs (Rust) Build Tasks
+    # ========================================
+
+    build:wsh:
+        desc: Build the wsh-rs component for the current platform.
+        cmds:
+            - task: build:wsh:{{OS}}
+        sources:
+            - "wsh-rs/src/**/*.rs"
+            - "wsh-rs/Cargo.toml"
+        generates:
+            - "dist/bin/wsh*"
+
+    build:wsh:windows:
+        internal: true
+        platforms: [windows]
+        cmds:
+            - cargo build --release -p wsh-rs
+            - cmd: powershell -Command "New-Item -ItemType Directory -Force -Path dist/bin | Out-Null; Copy-Item target/release/wsh.exe dist/bin/wsh-{{.VERSION}}-windows.x64.exe -Force"
+            - echo "✓ Built wsh-rs for Windows (dist/bin/wsh-{{.VERSION}}-windows.x64.exe)"
+
+    build:wsh:darwin:
+        internal: true
+        platforms: [darwin]
+        cmds:
+            - cargo build --release -p wsh-rs
+            - mkdir -p dist/bin
+            - cp target/release/wsh dist/bin/wsh-{{.VERSION}}-darwin.arm64
+            - echo "✓ Built wsh-rs for macOS (dist/bin/wsh-{{.VERSION}}-darwin.arm64)"
+
+    build:wsh:linux:
+        internal: true
+        platforms: [linux]
+        cmds:
+            - cargo build --release -p wsh-rs
+            - mkdir -p dist/bin
+            - cp target/release/wsh dist/bin/wsh-{{.VERSION}}-linux.x64
+            - echo "✓ Built wsh-rs for Linux (dist/bin/wsh-{{.VERSION}}-linux.x64)"
+
+    outdated:
+        desc: Check for outdated packages using npm-check-updates.
+        cmd: npx npm-check-updates@latest
+
+    version:
+        desc: Get the current package version, or bump version if args are present. To pass args to `version.cjs`, add them after `--`. See `version.cjs` for usage definitions for the arguments.
+        cmd: node version.cjs {{.CLI_ARGS}}
+
+    artifacts:upload:
+        desc: Uploads build artifacts to the staging bucket in S3. To add additional AWS CLI arguments, add them after `--`.
+        vars:
+            ORIGIN: "make/"
+            DESTINATION: "{{.ARTIFACTS_BUCKET}}/{{.VERSION}}"
+        cmd: aws s3 cp {{.ORIGIN}}/ s3://{{.DESTINATION}}/ --recursive --exclude "*/*" --exclude "builder-*.yml" {{.CLI_ARGS}}
+
+    artifacts:download:*:
+        desc: Downloads the specified artifacts version from the staging bucket. To add additional AWS CLI arguments, add them after `--`.
+        vars:
+            DL_VERSION: '{{ replace "v" "" (index .MATCH 0)}}'
+            ORIGIN: "{{.ARTIFACTS_BUCKET}}/{{.DL_VERSION}}"
+            DESTINATION: "artifacts/{{.DL_VERSION}}"
+        cmds:
+            - '{{.RMRF}} "{{.DESTINATION}}"'
+            - aws s3 cp s3://{{.ORIGIN}}/ {{.DESTINATION}}/ --recursive {{.CLI_ARGS}}
+
+    artifacts:publish:*:
+        desc: Publishes the specified artifacts version from the staging bucket to the releases bucket. To add additional AWS CLI arguments, add them after `--`.
+        vars:
+            UP_VERSION: '{{ replace "v" "" (index .MATCH 0)}}'
+            ORIGIN: "{{.ARTIFACTS_BUCKET}}/{{.UP_VERSION}}"
+            DESTINATION: "{{.RELEASES_BUCKET}}"
+        cmd: |
+            OUTPUT=$(aws s3 cp s3://{{.ORIGIN}}/ s3://{{.DESTINATION}}/ --recursive {{.CLI_ARGS}})
+
+            for line in $OUTPUT; do
+                PREFIX=${line%%{{.DESTINATION}}*}
+                SUFFIX=${line:${#PREFIX}}
+                if [[ -n "$SUFFIX" ]]; then
+                    echo "https://$SUFFIX"
+                fi
+            done
+    artifacts:snap:publish:*:
+        desc: Publishes the specified artifacts version to Snapcraft.
+        vars:
+            UP_VERSION: '{{ replace "v" "" (index .MATCH 0)}}'
+            CHANNEL: '{{if contains "beta" .UP_VERSION}}beta{{else}}beta,stable{{end}}'
+        cmd: |
+            echo "Releasing to channels: [{{.CHANNEL}}]"
+            for file in agentmux_{{.UP_VERSION}}_*.snap; do
+                echo "Publishing $file"
+                snapcraft upload --release={{.CHANNEL}} $file
+                echo "Finished publishing $file"
+            done
+
+    artifacts:winget:publish:*:
+        desc: Submits a version bump request to WinGet for the latest release.
+        status:
+            - exit {{if contains "beta" .UP_VERSION}}0{{else}}1{{end}}
+        vars:
+            UP_VERSION: '{{ replace "v" "" (index .MATCH 0)}}'
+        cmd: |
+            wingetcreate update {{.WINGET_PACKAGE}} -s -v {{.UP_VERSION}} -u "https://{{.RELEASES_BUCKET}}/{{.APP_NAME}}-win32-x64-{{.UP_VERSION}}.msi" -t {{.GITHUB_TOKEN}}
+
+    dev:installwsh:
+        desc: Quick shortcut to rebuild wsh-rs and install for macOS arm64
+        platforms: [darwin]
+        requires:
+            vars:
+                - VERSION
+        cmds:
+            - task: build:wsh:darwin
+            - cp dist/bin/wsh-{{.VERSION}}-darwin.arm64 ~/Library/Application\ Support/agentmux-dev/bin/wsh
+
+    dev:clearconfig:
+        desc: Clear the config directory for agentmux-dev
+        cmd: "{{.RMRF}} ~/.config/agentmux-dev"
+
+    dev:cleardata:
+        desc: Clear the data directory for agentmux-dev
+        cmds:
+            - task: dev:cleardata:windows
+            - task: dev:cleardata:linux
+            - task: dev:cleardata:macos
+
+    init:
+        desc: Initialize the project for development.
+        cmds:
+            - npm install
+            - cd docs && npm install
+
+    dev:cleardata:windows:
+        internal: true
+        platforms: [windows]
+        cmd: '{{.RMRF}} %LOCALAPPDATA%\agentmux-dev\Data'
+
+    dev:cleardata:linux:
+        internal: true
+        platforms: [linux]
+        cmd: "rm -rf ~/.local/share/agentmux-dev"
+
+    dev:cleardata:macos:
+        internal: true
+        platforms: [darwin]
+        cmd: 'rm -rf ~/Library/Application\ Support/agentmux-dev'
+
+    npm:install:
+        desc: Runs `npm install`
+        internal: true
+        generates:
+            - node_modules/**/*
+            - package-lock.json
+        sources:
+            - package-lock.json
+            - package.json
+        cmd: npm install
+
+    copyfiles:*:*:
+        desc: Recursively copy directory and its contents.
+        internal: true
+        cmd: '{{if eq OS "windows"}}powershell Copy-Item -Recurse -Force -Path {{index .MATCH 0}} -Destination {{index .MATCH 1}}{{else}}mkdir -p "$(dirname {{index .MATCH 1}})" && cp -r {{index .MATCH 0}} {{index .MATCH 1}}{{end}}'
+
+    clean:
+        desc: clean make/dist directories
+        cmds:
+            - cmd: '{{.RMRF}} "make"'
+              ignore_error: true
+            - cmd: '{{.RMRF}} "dist"'
+              ignore_error: true
+
+    tsunami:demo:todo:
+        desc: Run the tsunami todo demo application
+        cmd: go run demo/todo/*.go
+        dir: tsunami
+        env:
+            TSUNAMI_LISTENADDR: "localhost:12026"
+
+    tsunami:frontend:dev:
+        desc: Run the tsunami frontend vite dev server
+        cmd: npm run dev
+        dir: tsunami/frontend
+
+    tsunami:frontend:build:
+        desc: Build the tsunami frontend
+        cmd: npm run build
+        dir: tsunami/frontend
+
+    tsunami:frontend:devbuild:
+        desc: Build the tsunami frontend in development mode (with source maps and symbols)
+        cmd: npm run build:dev
+        dir: tsunami/frontend
+
+    tsunami:scaffold:
+        desc: Build scaffold for tsunami frontend development
+        deps:
+            - tsunami:frontend:build
+        cmds:
+            - task: tsunami:scaffold:internal
+
+    tsunami:devscaffold:
+        desc: Build scaffold for tsunami frontend development (with source maps and symbols)
+        deps:
+            - tsunami:frontend:devbuild
+        cmds:
+            - task: tsunami:scaffold:internal
+
+    tsunami:scaffold:packagejson:
+        desc: Create package.json for tsunami scaffold using npm commands
+        dir: tsunami/frontend/scaffold
+        cmds:
+            - cmd: "{{.RM}} package.json"
+              ignore_error: true
+            - npm --no-workspaces init -y --init-license Apache-2.0
+            - npm pkg set name=tsunami-scaffold
+            - npm pkg delete author
+            - npm pkg set author.name="AgentMux Corp"
+            - npm --no-workspaces install tailwindcss@4.1.13 @tailwindcss/cli@4.1.13
+
+    tsunami:scaffold:internal:
+        desc: Internal task to create scaffold directory structure
+        dir: tsunami/frontend
+        internal: true
+        cmds:
+            - cmd: "{{.RMRF}} scaffold"
+              ignore_error: true
+            - mkdir scaffold
+            - cp ../templates/package.json.tmpl scaffold/package.json
+            - cd scaffold && npm install
+            - cp -r dist scaffold/
+            - cp ../templates/app-main.go.tmpl scaffold/app-main.go
+            - cp ../templates/tailwind.css scaffold/
+            - cp ../templates/gitignore.tmpl scaffold/.gitignore
+
+    tsunami:build:
+        desc: Build the tsunami binary.
+        cmds:
+            - cmd: "{{.RM}} bin/tsunami*"
+              ignore_error: true
+            - mkdir -p bin
+            - cd tsunami && go build -ldflags "-X main.BuildTime=$({{.DATE}} +'%Y%m%d%H%M') -X main.TsunamiVersion={{.VERSION}}" -o ../bin/tsunami{{exeExt}} cmd/main-tsunami.go
+        sources:
+            - "tsunami/**/*.go"
+            - "tsunami/go.mod"
+            - "tsunami/go.sum"
+        generates:
+            - "bin/tsunami{{exeExt}}"
+
+    tsunami:clean:
+        desc: Clean tsunami frontend build artifacts
+        dir: tsunami/frontend
+        cmds:
+            - cmd: "{{.RMRF}} dist"
+              ignore_error: true
+            - cmd: "{{.RMRF}} scaffold"
+              ignore_error: true
+
+    tsunami:godoc:
+        desc: Start the Go documentation server for the tsunami module
+        cmd: $(go env GOPATH)/bin/pkgsite -http=:6060
+        dir: tsunami
+
+    # ========================================
+    # Tauri Build Tasks
+    # ========================================
+
+    tauri:dev:
+        desc: Run Tauri in development mode
+        cmds:
+            - task: build:backend
+            - task: tauri:copy-sidecars
+            - npm run tauri:dev
+        deps:
+            - npm:install
+
+    tauri:build:
+        desc: Build Tauri application for current platform
+        cmds:
+            - task: build:frontend:prod
+            - task: build:backend
+            - task: tauri:copy-sidecars
+            - npx tauri build
+        deps:
+            - npm:install
+
+    tauri:copy-sidecars:
+        desc: Copy agentmuxsrv-rs and wsh binaries to src-tauri/binaries with target-specific names
+        cmds:
+            - mkdir -p src-tauri/binaries
+            - |
+                {{if eq OS "windows"}}
+                powershell -Command "Copy-Item dist/bin/agentmuxsrv-rs.x64.exe src-tauri/binaries/agentmuxsrv-rs-x86_64-pc-windows-msvc.exe -Force; Copy-Item dist/bin/wsh-{{.VERSION}}-windows.x64.exe src-tauri/binaries/wsh-x86_64-pc-windows-msvc.exe -Force; Write-Host 'Copied binaries for x86_64-pc-windows-msvc'"
+                {{else}}
+                TRIPLE=$(rustc -vV | grep host | awk '{print $2}');
+                {{if eq OS "darwin"}}
+                cp dist/bin/agentmuxsrv-rs.arm64 src-tauri/binaries/agentmuxsrv-rs-$TRIPLE 2>/dev/null || cp dist/bin/agentmuxsrv-rs.x64 src-tauri/binaries/agentmuxsrv-rs-$TRIPLE;
+                cp dist/bin/wsh-{{.VERSION}}-darwin.arm64 src-tauri/binaries/wsh-$TRIPLE 2>/dev/null || cp dist/bin/wsh-{{.VERSION}}-darwin.x64 src-tauri/binaries/wsh-$TRIPLE;
+                {{else}}
+                cp dist/bin/agentmuxsrv-rs.x64 src-tauri/binaries/agentmuxsrv-rs-$TRIPLE;
+                cp dist/bin/wsh-{{.VERSION}}-linux.x64 src-tauri/binaries/wsh-$TRIPLE;
+                {{end}}
+                echo "Copied binaries for $TRIPLE"
+                {{end}}
+            # Also create bin/ directory with versioned wsh names (backend expects AGENTMUX_APP_PATH/bin/wsh-VERSION-OS.ARCH)
+            - |
+                {{if eq OS "windows"}}
+                powershell -Command "New-Item -ItemType Directory -Force -Path src-tauri/binaries/bin | Out-Null; Copy-Item dist/bin/wsh-{{.VERSION}}-windows.x64.exe src-tauri/binaries/bin/ -Force; Write-Host 'Copied wsh to bin/ for backend deployment'"
+                {{else if eq OS "darwin"}}
+                mkdir -p src-tauri/binaries/bin;
+                cp dist/bin/wsh-{{.VERSION}}-darwin.arm64 src-tauri/binaries/bin/ 2>/dev/null || true;
+                cp dist/bin/wsh-{{.VERSION}}-darwin.x64 src-tauri/binaries/bin/ 2>/dev/null || true;
+                echo "Copied wsh to bin/ for backend deployment"
+                {{else}}
+                mkdir -p src-tauri/binaries/bin;
+                cp dist/bin/wsh-{{.VERSION}}-linux.* src-tauri/binaries/bin/ 2>/dev/null || true;
+                echo "Copied wsh to bin/ for backend deployment"
+                {{end}}
+
+    test:e2e:macos:
+        desc: Run E2E tests on macOS (frontend-only with mocked Tauri IPC)
+        platforms: [darwin]
+        deps:
+            - npm:install
+        cmds:
+            - npx vite --config vite.config.tauri.ts &
+            - sleep 5
+            - npx wdio run wdio.macos.conf.cjs || EXIT_CODE=$?; kill %1 2>/dev/null; exit ${EXIT_CODE:-0}
+
+    build:frontend:prod:
+        desc: Build the frontend for production (used by Tauri)
+        cmd: npx vite build --mode production --config vite.config.tauri.ts
+        deps:
+            - npm:install

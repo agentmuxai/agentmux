@@ -1,0 +1,28 @@
+{
+  "id": "config",
+  "title": "Configuration",
+  "description": "Wave's configuration files are located at ~/.config/waveterm/.",
+  "source": "@site/docs/config.mdx",
+  "sourceDirName": ".",
+  "slug": "/config",
+  "permalink": "/docsite/config",
+  "draft": false,
+  "unlisted": false,
+  "tags": [],
+  "version": "current",
+  "sidebarPosition": 3.45,
+  "frontMatter": {
+    "sidebar_position": 3.45,
+    "id": "config",
+    "title": "Configuration"
+  },
+  "sidebar": "defaultSidebar",
+  "previous": {
+    "title": "Widgets",
+    "permalink": "/docsite/widgets"
+  },
+  "next": {
+    "title": "Presets",
+    "permalink": "/docsite/presets"
+  }
+}
