@@ -14,7 +14,7 @@ import { TermStickers } from "./termsticker";
 import { TermThemeUpdater } from "./termtheme";
 import { computeTheme } from "./termutil";
 import { TermResyncHandler, TermToolbarVDomNode, TermVDomNode } from "./termVDom";
-import { makeTerminalModel, TermViewModel } from "./termViewModel";
+import { makeTerminalModel, setTerminalViewComponent, TermViewModel } from "./termViewModel";
 import { TermWrap } from "./termwrap";
 import "./xterm.css";
 
@@ -233,5 +233,8 @@ const TerminalView = ({ blockId, model }: ViewComponentProps<TermViewModel>) => 
         </div>
     );
 };
+
+// Register TerminalView with the ViewModel to break the circular dependency
+setTerminalViewComponent(TerminalView);
 
 export { makeTerminalModel, TerminalView, TermViewModel };
