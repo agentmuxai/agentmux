@@ -12,6 +12,7 @@ pub mod ds;
 pub mod envutil;
 pub mod eventbus;
 pub mod fileutil;
+pub mod messagebus;
 pub mod ijson;
 pub mod iochan;
 pub mod logview;

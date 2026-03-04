@@ -1,5 +1,6 @@
 mod ai;
 mod files;
+mod messagebus;
 mod reactive;
 mod service;
 mod websocket;
@@ -22,6 +23,7 @@ use serde_json::json;
 use tower_http::cors::{Any, CorsLayer};
 
 use crate::backend::eventbus::EventBus;
+use crate::backend::messagebus::MessageBus;
 use crate::backend::reactive::{Poller, ReactiveHandler};
 use crate::backend::storage::filestore::FileStore;
 use crate::backend::storage::wstore::WaveStore;
@@ -42,6 +44,7 @@ pub struct AppState {
     pub reactive_handler: &'static ReactiveHandler,
     pub poller: Arc<Poller>,
     pub config_watcher: Arc<wconfig::ConfigWatcher>,
+    pub messagebus: Arc<MessageBus>,
 }
 
 /// Build the Axum router with all routes, auth middleware, and CORS.
@@ -89,6 +92,16 @@ pub fn build_router(state: AppState) -> Router {
         .route("/{uuid}", get(stub_501))
         .route("/{uuid}/*rest", get(stub_501));
 
+    // MessageBus routes (authed, localhost-only)
+    let bus_routes = Router::new()
+        .route("/api/bus/register", post(messagebus::handle_register))
+        .route("/api/bus/send", post(messagebus::handle_send))
+        .route("/api/bus/inject", post(messagebus::handle_inject))
+        .route("/api/bus/broadcast", post(messagebus::handle_broadcast))
+        .route("/api/bus/messages", get(messagebus::handle_read_messages))
+        .route("/api/bus/messages/delete", post(messagebus::handle_delete_messages))
+        .route("/api/bus/agents", get(messagebus::handle_list_agents));
+
     let authed_routes = Router::new()
         .route("/ws", get(websocket::handle_ws))
         .route("/wave/service", post(service::handle_service))
@@ -101,6 +114,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/post-chat-message", get(stub_501).post(stub_501))
         .route("/docsite/*path", get(files::handle_docsite))
         .route("/schema/*path", get(files::handle_schema))
+        .merge(bus_routes)
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             auth_middleware,

@@ -42,6 +42,15 @@ struct WSIncoming {
     blockid: Option<String>,
     inputdata64: Option<String>,
     termsize: Option<serde_json::Value>,
+    // Fields for bus:* commands
+    agent_id: Option<String>,
+    from: Option<String>,
+    to: Option<String>,
+    target: Option<String>,
+    payload: Option<String>,
+    #[serde(rename = "bus_message")]
+    bus_message_text: Option<String>,
+    priority: Option<String>,
 }
 
 pub(super) async fn handle_ws(
@@ -58,6 +67,10 @@ async fn handle_ws_connection(mut socket: WebSocket, state: AppState) {
 
     let mut event_rx = state.event_bus.register_ws(&conn_id, &tab_id);
     tracing::info!("[ws-perf] register_ws: {:.2}ms", ws_start.elapsed().as_secs_f64() * 1000.0);
+
+    // Optional messagebus receiver — activated when pane sends bus:register
+    let mut bus_rx: Option<tokio::sync::mpsc::UnboundedReceiver<crate::backend::messagebus::BusMessage>> = None;
+    let mut bus_agent_id: Option<String> = None;
 
     // Send initial "config" wave event via the RPC eventrecv path so the frontend
     // populates fullConfigAtom (and shows the widget bar).
@@ -118,6 +131,23 @@ async fn handle_ws_connection(mut socket: WebSocket, state: AppState) {
                 }
             }
 
+            // Forward MessageBus messages → WebSocket (if registered as agent)
+            Some(bus_msg) = async {
+                match bus_rx.as_mut() {
+                    Some(rx) => rx.recv().await,
+                    None => std::future::pending().await,
+                }
+            } => {
+                let wrapped = json!({
+                    "type": "bus:message",
+                    "data": bus_msg,
+                });
+                let msg = serde_json::to_string(&wrapped).unwrap_or_default();
+                if socket.send(Message::Text(msg.into())).await.is_err() {
+                    break;
+                }
+            }
+
             // Incoming WebSocket messages → parse & dispatch
             msg = socket.recv() => {
                 match msg {
@@ -126,10 +156,14 @@ async fn handle_ws_connection(mut socket: WebSocket, state: AppState) {
                         let _ = socket.send(Message::Pong(data)).await;
                     }
                     Some(Ok(Message::Text(text))) => {
-                        if let Err(send_err) = handle_incoming_text(&text, &engine, &mut socket).await {
-                            if send_err {
-                                break;
+                        match handle_incoming_text(&text, &engine, &state, &mut socket).await {
+                            Err(true) => break,
+                            Ok(Some((new_rx, agent_id))) => {
+                                // bus:register returned a new receiver
+                                bus_rx = Some(new_rx);
+                                bus_agent_id = Some(agent_id);
                             }
+                            _ => {}
                         }
                     }
                     Some(Ok(_)) => {
@@ -155,19 +189,27 @@ async fn handle_ws_connection(mut socket: WebSocket, state: AppState) {
     }
 
     state.event_bus.unregister_ws(&conn_id);
+
+    // Unregister from messagebus if this connection was an agent
+    if let Some(ref agent_id) = bus_agent_id {
+        state.messagebus.unregister(agent_id);
+    }
 }
 
-/// Handle an incoming text message, returns Err(true) if the socket send failed.
+/// Handle an incoming text message.
+/// Returns Err(true) if the socket send failed.
+/// Returns Ok(Some((rx, agent_id))) if a bus:register was processed.
 async fn handle_incoming_text(
     text: &str,
     engine: &Arc<WshRpcEngine>,
+    state: &AppState,
     socket: &mut WebSocket,
-) -> Result<(), bool> {
+) -> Result<Option<(tokio::sync::mpsc::UnboundedReceiver<crate::backend::messagebus::BusMessage>, String)>, bool> {
     let incoming: WSIncoming = match serde_json::from_str(text) {
         Ok(v) => v,
         Err(e) => {
             tracing::warn!("ws: invalid JSON: {}", e);
-            return Ok(());
+            return Ok(None);
         }
     };
 
@@ -184,11 +226,85 @@ async fn handle_incoming_text(
                 if socket.send(Message::Text(msg.into())).await.is_err() {
                     return Err(true);
                 }
-                return Ok(());
+                return Ok(None);
             }
             "pong" => {
-                // Ignore pong responses
-                return Ok(());
+                return Ok(None);
+            }
+            "bus:register" => {
+                if let Some(ref agent_id) = incoming.agent_id {
+                    let rx = state.messagebus.register(agent_id, "websocket");
+                    let ack = json!({ "type": "bus:registered", "agent_id": agent_id });
+                    let msg = serde_json::to_string(&ack).unwrap_or_default();
+                    if socket.send(Message::Text(msg.into())).await.is_err() {
+                        return Err(true);
+                    }
+                    return Ok(Some((rx, agent_id.clone())));
+                }
+                return Ok(None);
+            }
+            "bus:send" => {
+                if let (Some(ref from), Some(ref to), Some(ref payload)) =
+                    (&incoming.from, &incoming.to, &incoming.payload)
+                {
+                    let priority = match incoming.priority.as_deref() {
+                        Some("high") => crate::backend::messagebus::Priority::High,
+                        Some("urgent") => crate::backend::messagebus::Priority::Urgent,
+                        _ => crate::backend::messagebus::Priority::Normal,
+                    };
+                    let bus_msg = crate::backend::messagebus::BusMessage::new(
+                        from, to, crate::backend::messagebus::MessageType::Send, payload, priority,
+                    );
+                    let msg_id = bus_msg.id.clone();
+                    let _ = state.messagebus.send(bus_msg);
+                    let ack = json!({ "type": "bus:sent", "message_id": msg_id });
+                    let msg = serde_json::to_string(&ack).unwrap_or_default();
+                    if socket.send(Message::Text(msg.into())).await.is_err() {
+                        return Err(true);
+                    }
+                }
+                return Ok(None);
+            }
+            "bus:inject" => {
+                let from = incoming.from.as_deref().unwrap_or("unknown");
+                if let (Some(ref target), Some(ref message)) =
+                    (&incoming.target, &incoming.bus_message_text)
+                {
+                    let priority = match incoming.priority.as_deref() {
+                        Some("high") => crate::backend::messagebus::Priority::High,
+                        Some("urgent") => crate::backend::messagebus::Priority::Urgent,
+                        _ => crate::backend::messagebus::Priority::Normal,
+                    };
+                    match state.messagebus.inject(from, target, message, priority) {
+                        Ok(msg_id) => {
+                            let ack = json!({ "type": "bus:injected", "message_id": msg_id });
+                            let msg = serde_json::to_string(&ack).unwrap_or_default();
+                            if socket.send(Message::Text(msg.into())).await.is_err() {
+                                return Err(true);
+                            }
+                        }
+                        Err(e) => {
+                            let err = json!({ "type": "bus:error", "error": e });
+                            let msg = serde_json::to_string(&err).unwrap_or_default();
+                            if socket.send(Message::Text(msg.into())).await.is_err() {
+                                return Err(true);
+                            }
+                        }
+                    }
+                }
+                return Ok(None);
+            }
+            "bus:broadcast" => {
+                let from = incoming.from.as_deref().unwrap_or("unknown");
+                if let Some(ref payload) = incoming.payload {
+                    let priority = match incoming.priority.as_deref() {
+                        Some("high") => crate::backend::messagebus::Priority::High,
+                        Some("urgent") => crate::backend::messagebus::Priority::Urgent,
+                        _ => crate::backend::messagebus::Priority::Normal,
+                    };
+                    let _ = state.messagebus.broadcast(from, payload, priority);
+                }
+                return Ok(None);
             }
             _ => {}
         }
@@ -246,7 +362,7 @@ async fn handle_incoming_text(
         }
     }
 
-    Ok(())
+    Ok(None)
 }
 
 fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
