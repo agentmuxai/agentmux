@@ -2,6 +2,9 @@ name: Build Tauri
 
 on:
   workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
 
 jobs:
   build-tauri:
@@ -150,10 +153,19 @@ jobs:
         with:
           path: artifacts
 
+      - name: List downloaded artifacts
+        run: find artifacts -type f | head -50
+
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
-          files: artifacts/**/*
+          files: |
+            artifacts/**/*.exe
+            artifacts/**/*.deb
+            artifacts/**/*.AppImage
+            artifacts/**/*.dmg
+            artifacts/**/*.tar.gz
+            artifacts/**/*.sig
           draft: false
           prerelease: false
           generate_release_notes: true
