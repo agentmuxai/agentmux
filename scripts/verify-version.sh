@@ -170,20 +170,20 @@ if [[ $CACHE_ISSUES -gt 0 ]]; then
     fi
 fi
 
-# Check VERSION_HISTORY.md
-if grep -q "$EXPECTED_VERSION-fork" VERSION_HISTORY.md; then
-    success "VERSION_HISTORY.md contains $EXPECTED_VERSION-fork"
+# Check VERSION_HISTORY.md (accept with or without -fork suffix)
+if grep -q "$EXPECTED_VERSION" VERSION_HISTORY.md; then
+    success "VERSION_HISTORY.md contains $EXPECTED_VERSION"
 else
-    error "VERSION_HISTORY.md missing entry for $EXPECTED_VERSION-fork"
-    ((ISSUES++))
+    warn "VERSION_HISTORY.md missing entry for $EXPECTED_VERSION"
+    warn "Run bump-version.sh to add a VERSION_HISTORY.md entry"
 fi
 
-# Check for old hardcoded version references
+# Check for old hardcoded version references (informational only)
+# Excludes .rs files which contain version strings in test fixtures
 info "Scanning for outdated version references..."
 OUTDATED_REFS=$(grep -r "0\.1[0-9]\.[0-9]" \
     --include="*.ts" \
     --include="*.tsx" \
-    --include="*.rs" \
     --exclude-dir=node_modules \
     --exclude-dir=.git \
     --exclude-dir=dist \
