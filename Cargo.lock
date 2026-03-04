@@ -10,7 +10,7 @@ checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
 name = "agentmux"
-version = "0.31.20"
+version = "0.31.27"
 dependencies = [
  "chrono",
  "reqwest 0.12.28",
@@ -40,7 +40,7 @@ dependencies = [
 
 [[package]]
 name = "agentmuxsrv-rs"
-version = "0.31.26"
+version = "0.31.27"
 dependencies = [
  "async-stream",
  "axum",
@@ -49,6 +49,7 @@ dependencies = [
  "clap",
  "dirs 5.0.1",
  "libc",
+ "parking_lot",
  "portable-pty",
  "reqwest 0.12.28",
  "rusqlite",
@@ -6830,7 +6831,7 @@ dependencies = [
 
 [[package]]
 name = "wsh-rs"
-version = "0.31.26"
+version = "0.31.27"
 dependencies = [
  "base64 0.22.1",
  "clap",
