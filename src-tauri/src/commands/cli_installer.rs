@@ -133,3 +133,92 @@ pub async fn get_cli_path(provider: String) -> Result<Option<String>, String> {
         Ok(None)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_get_provider_install_dir_claude() {
+        let dir = get_provider_install_dir("claude").unwrap();
+        assert!(dir.ends_with(".agentmux/cli/claude") || dir.ends_with(".agentmux\\cli\\claude"));
+    }
+
+    #[test]
+    fn test_get_provider_install_dir_codex() {
+        let dir = get_provider_install_dir("codex").unwrap();
+        assert!(dir.ends_with("cli/codex") || dir.ends_with("cli\\codex"));
+    }
+
+    #[test]
+    fn test_get_provider_install_dir_gemini() {
+        let dir = get_provider_install_dir("gemini").unwrap();
+        assert!(dir.ends_with("cli/gemini") || dir.ends_with("cli\\gemini"));
+    }
+
+    #[test]
+    fn test_get_cli_bin_path_known_providers() {
+        for provider in &["claude", "codex", "gemini"] {
+            let path = get_cli_bin_path(provider).unwrap();
+            let path_str = path.to_string_lossy();
+            assert!(path_str.contains("node_modules"));
+            assert!(path_str.contains(".bin"));
+            assert!(path_str.contains(provider));
+        }
+    }
+
+    #[test]
+    fn test_get_cli_bin_path_unknown_provider() {
+        let result = get_cli_bin_path("unknown");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Unknown provider"));
+    }
+
+    #[test]
+    fn test_get_npm_package_claude() {
+        assert_eq!(get_npm_package("claude").unwrap(), "@anthropic-ai/claude-code");
+    }
+
+    #[test]
+    fn test_get_npm_package_codex() {
+        assert_eq!(get_npm_package("codex").unwrap(), "@openai/codex");
+    }
+
+    #[test]
+    fn test_get_npm_package_gemini() {
+        assert_eq!(get_npm_package("gemini").unwrap(), "@anthropic-ai/gemini-cli");
+    }
+
+    #[test]
+    fn test_get_npm_package_unknown() {
+        let result = get_npm_package("unknown");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_cli_bin_path_windows_extension() {
+        let path = get_cli_bin_path("claude").unwrap();
+        let path_str = path.to_string_lossy();
+        if cfg!(windows) {
+            assert!(path_str.ends_with(".cmd"));
+        } else {
+            assert!(!path_str.ends_with(".cmd"));
+        }
+    }
+
+    #[test]
+    fn test_install_dirs_are_isolated() {
+        let claude_dir = get_provider_install_dir("claude").unwrap();
+        let codex_dir = get_provider_install_dir("codex").unwrap();
+        let gemini_dir = get_provider_install_dir("gemini").unwrap();
+
+        // Each provider has its own directory
+        assert_ne!(claude_dir, codex_dir);
+        assert_ne!(claude_dir, gemini_dir);
+        assert_ne!(codex_dir, gemini_dir);
+
+        // All share the same parent
+        assert_eq!(claude_dir.parent(), codex_dir.parent());
+        assert_eq!(codex_dir.parent(), gemini_dir.parent());
+    }
+}
