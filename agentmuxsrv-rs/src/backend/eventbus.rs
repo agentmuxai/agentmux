@@ -13,11 +13,11 @@ use serde::{Deserialize, Serialize};
 
 use super::wps::{WaveEvent, WpsClient};
 
-// ---- Event type constants (match Go) ----
+// ---- Event type constants ----
 
-pub const WS_EVENT_ELECTRON_NEW_WINDOW: &str = "electron:newwindow";
-pub const WS_EVENT_ELECTRON_CLOSE_WINDOW: &str = "electron:closewindow";
-pub const WS_EVENT_ELECTRON_UPDATE_ACTIVE_TAB: &str = "electron:updateactivetab";
+pub const WS_EVENT_TAURI_NEW_WINDOW: &str = "electron:newwindow";
+pub const WS_EVENT_TAURI_CLOSE_WINDOW: &str = "electron:closewindow";
+pub const WS_EVENT_TAURI_UPDATE_ACTIVE_TAB: &str = "electron:updateactivetab";
 pub const WS_EVENT_RPC: &str = "rpc";
 
 // ---- Types ----
