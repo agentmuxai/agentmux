@@ -1,1 +1,0 @@
-"use strict";(globalThis.webpackChunkwaveterm_docs=globalThis.webpackChunkwaveterm_docs||[]).push([[401],{6740(e,s,a){a.d(s,{A:()=>c});var r=a(3208),t=a(4848);function c(e){return(0,t.jsxs)(t.Fragment,{children:[(0,t.jsx)("div",{style:{clear:"both"}}),(0,t.jsx)(r.A,{...e})]})}}}]);
