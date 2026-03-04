@@ -19,9 +19,9 @@ use crate::backend::rpc_types::{
     CommandBlockInputData, CommandControllerResyncData, CommandEventReadHistoryData,
     CommandGetMetaData, CommandSetMetaData, RpcMessage, COMMAND_CONTROLLER_INPUT,
     COMMAND_CONTROLLER_RESYNC, COMMAND_EVENT_READ_HISTORY, COMMAND_EVENT_SUB, COMMAND_EVENT_UNSUB,
-    COMMAND_EVENT_UNSUB_ALL, COMMAND_GET_FULL_CONFIG, COMMAND_GET_META, COMMAND_GET_WAVE_AI_CHAT,
-    COMMAND_GET_WAVE_AI_RATE_LIMIT, COMMAND_ROUTE_ANNOUNCE, COMMAND_ROUTE_UNANNOUNCE,
-    COMMAND_SET_META, COMMAND_WAVE_INFO,
+    COMMAND_EVENT_UNSUB_ALL, COMMAND_GET_FULL_CONFIG, COMMAND_GET_META, COMMAND_GET_AI_CHAT,
+    COMMAND_GET_AI_RATE_LIMIT, COMMAND_ROUTE_ANNOUNCE, COMMAND_ROUTE_UNANNOUNCE,
+    COMMAND_SET_META, COMMAND_APP_INFO,
 };
 use crate::backend::waveobj::{Block, TermSize};
 use super::service::update_object_meta;
@@ -379,7 +379,7 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
     // waveinfo → return version and build info
     let version_info = state.version.clone();
     engine.register_handler(
-        COMMAND_WAVE_INFO,
+        COMMAND_APP_INFO,
         Box::new(move |_data, _ctx| {
             let version = version_info.clone();
             Box::pin(async move {
@@ -392,7 +392,7 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
 
     // getwaveaichat → return UIChat for the given chatid (null if not found)
     engine.register_handler(
-        COMMAND_GET_WAVE_AI_CHAT,
+        COMMAND_GET_AI_CHAT,
         Box::new(|data, _ctx| {
             Box::pin(async move {
                 let obj: serde_json::Map<String, serde_json::Value> =
@@ -410,7 +410,7 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
 
     // getwaveairatelimit → AgentMux has no rate limits; return unlimited/unknown
     engine.register_handler(
-        COMMAND_GET_WAVE_AI_RATE_LIMIT,
+        COMMAND_GET_AI_RATE_LIMIT,
         Box::new(|_data, _ctx| {
             Box::pin(async move {
                 Ok(Some(serde_json::json!({

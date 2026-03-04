@@ -276,7 +276,7 @@ Add cursor styling:
 - Click any widget name to toggle visibility
 - Checkbox updates immediately
 - Widget appears/disappears in WidgetBar without reload
-- Changes saved to `~/.waveterm/config/widgets.json`
+- Changes saved to `~/.agentmux/config/widgets.json`
 
 ### Implementation
 
@@ -408,7 +408,7 @@ User clicks widget to toggle
     ↓
 RpcApi.SetConfigCommand updates display:hidden
     ↓
-Backend updates ~/.waveterm/config/widgets.json
+Backend updates ~/.agentmux/config/widgets.json
     ↓
 Config atom updates (via subscription)
     ↓

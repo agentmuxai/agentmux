@@ -201,7 +201,7 @@ pub const COMMAND_REMOTE_GET_INFO: &str = "remotegetinfo";
 pub const COMMAND_REMOTE_INSTALL_RC_FILES: &str = "remoteinstallrcfiles";
 
 // Info/activity commands
-pub const COMMAND_WAVE_INFO: &str = "waveinfo";
+pub const COMMAND_APP_INFO: &str = "waveinfo";
 pub const COMMAND_WSH_ACTIVITY: &str = "wshactivity";
 pub const COMMAND_ACTIVITY: &str = "activity";
 pub const COMMAND_GET_VAR: &str = "getvar";
@@ -238,11 +238,11 @@ pub const COMMAND_VDOM_URL_REQUEST: &str = "vdomurlrequest";
 
 // AI commands
 pub const COMMAND_AI_SEND_MESSAGE: &str = "aisendmessage";
-pub const COMMAND_WAVE_AI_ENABLE_TELEMETRY: &str = "waveaienabletelemetry";
-pub const COMMAND_GET_WAVE_AI_CHAT: &str = "getwaveaichat";
-pub const COMMAND_GET_WAVE_AI_RATE_LIMIT: &str = "getwaveairatelimit";
-pub const COMMAND_WAVE_AI_TOOL_APPROVE: &str = "waveaitoolapprove";
-pub const COMMAND_WAVE_AI_ADD_CONTEXT: &str = "waveaiaddcontext";
+pub const COMMAND_AI_ENABLE_TELEMETRY: &str = "waveaienabletelemetry";
+pub const COMMAND_GET_AI_CHAT: &str = "getwaveaichat";
+pub const COMMAND_GET_AI_RATE_LIMIT: &str = "getwaveairatelimit";
+pub const COMMAND_AI_TOOL_APPROVE: &str = "waveaitoolapprove";
+pub const COMMAND_AI_ADD_CONTEXT: &str = "waveaiaddcontext";
 
 // Screenshot
 pub const COMMAND_CAPTURE_BLOCK_SCREENSHOT: &str = "captureblockscreenshot";

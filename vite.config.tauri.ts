@@ -75,7 +75,7 @@ export default defineConfig({
         strictPort: true, // Fail if port 5173 is already in use (required for Tauri)
         open: false,
         watch: {
-            ignored: ["dist/**", "**/*.go", "**/go.mod", "**/go.sum", "**/*.md", "**/*.json", "emain/**", "src-tauri/**"],
+            ignored: ["dist/**", "**/*.md", "**/*.json", "src-tauri/**"],
         },
     },
     css: {

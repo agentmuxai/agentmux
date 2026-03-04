@@ -16,12 +16,12 @@ use super::super::rpc_types::{
     COMMAND_ROUTE_UNANNOUNCE,
 };
 
-// ---- Route constants (match Go) ----
+// ---- Route constants ----
 
 pub const DEFAULT_ROUTE: &str = "wavesrv";
 pub const UPSTREAM_ROUTE: &str = "upstream";
 pub const SYS_ROUTE: &str = "sys";
-pub const ELECTRON_ROUTE: &str = "electron";
+pub const TAURI_ROUTE: &str = "electron";
 
 pub const ROUTE_PREFIX_CONN: &str = "conn:";
 pub const ROUTE_PREFIX_CONTROLLER: &str = "controller:";

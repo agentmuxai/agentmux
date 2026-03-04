@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use super::storage::filestore::{FileMeta, FileOpts, WaveFile};
 
 /// URL pattern for wave file paths.
-pub const WAVE_FILE_PATH_PATTERN: &str = "wavefile://";
+pub const FILE_PATH_PATTERN: &str = "wavefile://";
 
 /// File information as exposed over the RPC wire.
 /// Matches Go's `wshrpc.FileInfo`.
@@ -62,7 +62,7 @@ fn is_zero(v: &i64) -> bool {
 pub fn wave_file_to_file_info(file: &WaveFile) -> FileInfo {
     let path = format!(
         "{}{}/{}",
-        WAVE_FILE_PATH_PATTERN, file.zoneid, file.name
+        FILE_PATH_PATTERN, file.zoneid, file.name
     );
     FileInfo {
         path,
@@ -89,7 +89,7 @@ pub fn wave_file_list_to_file_info_list(files: &[WaveFile]) -> Vec<FileInfo> {
 /// Parse a wave file path into (zone_id, file_name).
 /// Expects format: `wavefile://zone-id/filename`
 pub fn parse_wave_file_path(path: &str) -> Option<(String, String)> {
-    let rest = path.strip_prefix(WAVE_FILE_PATH_PATTERN)?;
+    let rest = path.strip_prefix(FILE_PATH_PATTERN)?;
     let slash_pos = rest.find('/')?;
     let zone_id = &rest[..slash_pos];
     let name = &rest[slash_pos + 1..];
