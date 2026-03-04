@@ -113,9 +113,6 @@ jobs:
           fi
           ls -lh src-tauri/binaries/
 
-      - name: Build frontend
-        run: npm run build:prod
-
       - name: Copy schema to dist
         shell: bash
         run: |
