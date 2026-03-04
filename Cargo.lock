@@ -40,7 +40,7 @@ dependencies = [
 
 [[package]]
 name = "agentmuxsrv-rs"
-version = "0.31.20"
+version = "0.31.26"
 dependencies = [
  "async-stream",
  "axum",
@@ -6830,7 +6830,7 @@ dependencies = [
 
 [[package]]
 name = "wsh-rs"
-version = "0.31.20"
+version = "0.31.26"
 dependencies = [
  "base64 0.22.1",
  "clap",
