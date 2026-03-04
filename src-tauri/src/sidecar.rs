@@ -8,7 +8,7 @@ pub struct BackendSpawnResult {
     pub ws_endpoint: String,
     pub web_endpoint: String,
     pub auth_key: String,
-    pub instance_id: String,  // "default", "instance-1", etc.
+    pub instance_id: String,  // version-namespaced, e.g. "v0.31.23"
     pub version: String,      // Backend version (e.g., "0.27.12")
     pub is_reused: bool,      // true if reusing an existing backend (not spawned by this process)
 }
@@ -38,84 +38,75 @@ pub async fn spawn_backend(app: &tauri::AppHandle) -> Result<BackendSpawnResult,
     tracing::info!("Using config_dir: {}", config_dir.display());
     tracing::info!("Using data_dir: {}", data_dir.display());
 
-    // Check for existing backend in nested instance directories
-    let instances_to_check = vec!["default", "instance-1", "instance-2", "instance-3",
-                                   "instance-4", "instance-5", "instance-6", "instance-7",
-                                   "instance-8", "instance-9", "instance-10"];
-
+    // Check for existing backend with matching version (O(1) lookup by version)
     let current_version = env!("CARGO_PKG_VERSION");
+    let version_instance_id = format!("v{}", current_version);
 
-    for instance_id in instances_to_check {
-        let instance_dir = config_dir.join("instances").join(instance_id);
+    {
+        let instance_dir = config_dir.join("instances").join(&version_instance_id);
         let endpoints_file = instance_dir.join("wave-endpoints.json");
 
-        if !endpoints_file.exists() {
-            continue;
-        }
+        if endpoints_file.exists() {
+            tracing::info!("Checking for existing backend at: {}", endpoints_file.display());
 
-        tracing::info!("Checking for existing backend at: {}", endpoints_file.display());
+            if let Ok(contents) = std::fs::read_to_string(&endpoints_file) {
+                if let Ok(json) = serde_json::from_str::<serde_json::Value>(&contents) {
+                    let backend_version = json["version"].as_str().unwrap_or("");
 
-        if let Ok(contents) = std::fs::read_to_string(&endpoints_file) {
-            // Parse as generic JSON first to handle extra fields
-            if let Ok(json) = serde_json::from_str::<serde_json::Value>(&contents) {
-                // Extract version first to check compatibility
-                let backend_version = json["version"].as_str().unwrap_or("");
+                    if backend_version == current_version {
+                        let existing = BackendSpawnResult {
+                            ws_endpoint: json["ws_endpoint"].as_str().unwrap_or_default().to_string(),
+                            web_endpoint: json["web_endpoint"].as_str().unwrap_or_default().to_string(),
+                            auth_key: json["auth_key"].as_str().unwrap_or_default().to_string(),
+                            instance_id: json["instance_id"].as_str().unwrap_or_default().to_string(),
+                            version: backend_version.to_string(),
+                            is_reused: true,
+                        };
 
-                if backend_version != current_version {
-                    tracing::warn!(
-                        "Backend version mismatch: backend={}, frontend={}. Skipping instance {}.",
-                        backend_version,
-                        current_version,
-                        instance_id
-                    );
-                    continue;
-                }
-
-                // Version matches - safe to parse as BackendSpawnResult
-                let existing = BackendSpawnResult {
-                    ws_endpoint: json["ws_endpoint"].as_str().unwrap_or_default().to_string(),
-                    web_endpoint: json["web_endpoint"].as_str().unwrap_or_default().to_string(),
-                    auth_key: json["auth_key"].as_str().unwrap_or_default().to_string(),
-                    instance_id: json["instance_id"].as_str().unwrap_or_default().to_string(),
-                    version: backend_version.to_string(),
-                    is_reused: true,
-                };
-
-                // Test if the existing backend is still responsive
-                let test_url = if existing.web_endpoint.starts_with("http") {
-                    existing.web_endpoint.clone()
-                } else {
-                    format!("http://{}", existing.web_endpoint)
-                };
-
-                tracing::info!("Testing connection to existing backend at: {}", test_url);
-                match reqwest::get(&test_url).await {
-                    Ok(resp) => {
-                        if resp.status().is_success() || resp.status().is_client_error() {
-                            tracing::info!(
-                                "✅ Reusing existing backend v{} (instance: {})",
-                                existing.version,
-                                existing.instance_id
-                            );
-
-                            // Reuse the auth key from the existing backend
-                            let state = app.state::<crate::state::AppState>();
-                            let mut auth_key_guard = state.auth_key.lock().unwrap();
-                            *auth_key_guard = existing.auth_key.clone();
-
-                            return Ok(existing);
+                        // Test if the existing backend is still responsive
+                        let test_url = if existing.web_endpoint.starts_with("http") {
+                            existing.web_endpoint.clone()
                         } else {
-                            tracing::warn!("Backend returned unexpected status: {}", resp.status());
+                            format!("http://{}", existing.web_endpoint)
+                        };
+
+                        tracing::info!("Testing connection to existing backend at: {}", test_url);
+                        match reqwest::get(&test_url).await {
+                            Ok(resp) => {
+                                if resp.status().is_success() || resp.status().is_client_error() {
+                                    tracing::info!(
+                                        "Reusing existing backend v{} (instance: {})",
+                                        existing.version,
+                                        existing.instance_id
+                                    );
+
+                                    // Reuse the auth key from the existing backend
+                                    let state = app.state::<crate::state::AppState>();
+                                    let mut auth_key_guard = state.auth_key.lock().unwrap();
+                                    *auth_key_guard = existing.auth_key.clone();
+
+                                    return Ok(existing);
+                                } else {
+                                    tracing::warn!("Backend returned unexpected status: {}", resp.status());
+                                }
+                            }
+                            Err(e) => {
+                                tracing::warn!("Failed to connect to existing backend: {}", e);
+                            }
                         }
-                    }
-                    Err(e) => {
-                        tracing::warn!("Failed to connect to existing backend: {}", e);
+
+                        // Backend not responsive - remove stale file
+                        tracing::warn!("Backend not responsive, removing stale endpoints file");
+                        let _ = std::fs::remove_file(&endpoints_file);
+                    } else {
+                        tracing::warn!(
+                            "Backend version mismatch in endpoints file: backend={}, frontend={}. Removing stale file.",
+                            backend_version,
+                            current_version
+                        );
+                        let _ = std::fs::remove_file(&endpoints_file);
                     }
                 }
-
-                // Backend not responsive - remove stale file
-                tracing::warn!("Backend not responsive, removing stale endpoints file");
-                let _ = std::fs::remove_file(&endpoints_file);
             }
         }
     }
@@ -128,15 +119,15 @@ pub async fn spawn_backend(app: &tauri::AppHandle) -> Result<BackendSpawnResult,
     std::fs::create_dir_all(&config_dir)
         .map_err(|e| format!("Failed to create config dir: {}", e))?;
 
-    // Pre-create instance directory structure for default instance
+    // Pre-create version-namespaced instance directory structure
     // Backend needs these to exist before it starts
-    let default_data_instance_dir = data_dir.join("instances").join("default").join("db");
-    std::fs::create_dir_all(&default_data_instance_dir)
-        .map_err(|e| format!("Failed to create default instance data dir: {}", e))?;
+    let version_data_instance_dir = data_dir.join("instances").join(&version_instance_id).join("db");
+    std::fs::create_dir_all(&version_data_instance_dir)
+        .map_err(|e| format!("Failed to create version instance data dir: {}", e))?;
 
-    let default_config_instance_dir = config_dir.join("instances").join("default");
-    std::fs::create_dir_all(&default_config_instance_dir)
-        .map_err(|e| format!("Failed to create default instance config dir: {}", e))?;
+    let version_config_instance_dir = config_dir.join("instances").join(&version_instance_id);
+    std::fs::create_dir_all(&version_config_instance_dir)
+        .map_err(|e| format!("Failed to create version instance config dir: {}", e))?;
 
     // Get auth key from app state
     let auth_key = app.state::<crate::state::AppState>().auth_key.lock().unwrap().clone();
@@ -215,14 +206,20 @@ pub async fn spawn_backend(app: &tauri::AppHandle) -> Result<BackendSpawnResult,
     let app_path_str = app_path.to_string_lossy().to_string();
     tracing::info!("Setting AGENTMUX_APP_PATH to: {}", app_path_str);
 
+    // Version-specific data/config directories to isolate SQLite databases per version
+    let version_data_home = data_dir.join("instances").join(&version_instance_id);
+    let version_config_home = config_dir.join("instances").join(&version_instance_id);
+
     let (mut rx, child) = sidecar_cmd
         .args([
             "--wavedata",
-            &data_dir.to_string_lossy(),
+            &version_data_home.to_string_lossy(),
+            "--instance",
+            &version_instance_id,
         ])
         .env("AGENTMUX_AUTH_KEY", &auth_key)
-        .env("AGENTMUX_CONFIG_HOME", config_dir.to_string_lossy().to_string())
-        .env("AGENTMUX_DATA_HOME", data_dir.to_string_lossy().to_string())
+        .env("AGENTMUX_CONFIG_HOME", version_config_home.to_string_lossy().to_string())
+        .env("AGENTMUX_DATA_HOME", version_data_home.to_string_lossy().to_string())
         .env("AGENTMUX_APP_PATH", &app_path_str)
         .env("AGENTMUX_DEV", if cfg!(debug_assertions) { "1" } else { "" })
         .env("WCLOUD_ENDPOINT", "https://api.agentmux.ai/central")
