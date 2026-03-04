@@ -148,8 +148,8 @@ async fn main() {
 
     // 6. Emit WAVESRV-ESTART on stderr (exact format from cmd/server/main-server.go:617)
     eprintln!(
-        "WAVESRV-ESTART ws:{} web:{} version:{} buildtime:{} instance:default",
-        ws_addr, web_addr, version, build_time
+        "WAVESRV-ESTART ws:{} web:{} version:{} buildtime:{} instance:{}",
+        ws_addr, web_addr, version, build_time, config.instance_id
     );
 
     // 7. Build router and serve on both listeners
