@@ -30,7 +30,11 @@ import { TermWrap } from "./termwrap";
 import { buildSettingsMenuItems } from "./termSettingsMenu";
 import * as jotai from "jotai";
 
-import type { TerminalView as TerminalViewType } from "./term";
+let _terminalViewComponent: ViewComponent = null;
+
+export function setTerminalViewComponent(component: ViewComponent) {
+    _terminalViewComponent = component;
+}
 
 class TermViewModel implements ViewModel {
     viewType: string;
@@ -345,9 +349,7 @@ class TermViewModel implements ViewModel {
     }
 
     get viewComponent(): ViewComponent {
-        // Lazy import to avoid circular dependency
-        const { TerminalView } = require("./term");
-        return TerminalView;
+        return _terminalViewComponent;
     }
 
     isBasicTerm(getFn: jotai.Getter): boolean {
