@@ -28,8 +28,8 @@ use tokio::sync::mpsc;
 use super::{
     BlockControllerRuntimeStatus, BlockInputUnion, Controller, META_KEY_CMD, META_KEY_CMD_ARGS,
     META_KEY_CMD_CLEAR_ON_START, META_KEY_CMD_CLOSE_ON_EXIT, META_KEY_CMD_CLOSE_ON_EXIT_DELAY,
-    META_KEY_CMD_CLOSE_ON_EXIT_FORCE, META_KEY_CMD_RUN_ONCE, META_KEY_CMD_RUN_ON_START,
-    META_KEY_CONNECTION, STATUS_DONE, STATUS_INIT, STATUS_RUNNING,
+    META_KEY_CMD_CLOSE_ON_EXIT_FORCE, META_KEY_CMD_ENV, META_KEY_CMD_RUN_ONCE,
+    META_KEY_CMD_RUN_ON_START, META_KEY_CONNECTION, STATUS_DONE, STATUS_INIT, STATUS_RUNNING,
 };
 use crate::backend::eventbus::EventBus;
 use crate::backend::shellexec::{ConnInterface, ShellProc};
@@ -408,6 +408,48 @@ impl Controller for ShellController {
                 c.env("AGENTMUX", wsh_path.to_string_lossy().as_ref());
             } else {
                 c.env("AGENTMUX", "1");
+            }
+
+            // Inject cmd:env from wconfig settings and block metadata.
+            // Track whether AGENTMUX_AGENT_ID is explicitly set so we know
+            // whether to apply the backward-compat WAVEMUX bridge.
+            let mut has_agent_id = false;
+
+            // Settings (global defaults, lowest priority)
+            let config = crate::backend::wconfig::ConfigWatcher::with_config(
+                crate::backend::wconfig::build_default_config(),
+            );
+            let settings = config.get_settings();
+            for (k, v) in &settings.cmd_env {
+                if k == "AGENTMUX_AGENT_ID" {
+                    has_agent_id = true;
+                }
+                c.env(k, v);
+            }
+
+            // Block metadata (per-block overrides, highest priority)
+            if let Some(env_map) = block_meta.get(META_KEY_CMD_ENV) {
+                if let Some(obj) = env_map.as_object() {
+                    for (k, v) in obj {
+                        if let Some(val) = v.as_str() {
+                            if k == "AGENTMUX_AGENT_ID" {
+                                has_agent_id = true;
+                            }
+                            c.env(k, val);
+                        }
+                    }
+                }
+            }
+
+            // Backward compat: bridge WAVEMUX_AGENT_ID → AGENTMUX_AGENT_ID
+            // only if not already set by settings or block metadata above
+            if !has_agent_id {
+                if let Ok(val) = std::env::var("WAVEMUX_AGENT_ID") {
+                    c.env("AGENTMUX_AGENT_ID", &val);
+                }
+                if let Ok(val) = std::env::var("WAVEMUX_AGENT_COLOR") {
+                    c.env("AGENTMUX_AGENT_COLOR", &val);
+                }
             }
 
             c
