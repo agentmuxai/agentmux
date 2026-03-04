@@ -3,6 +3,7 @@
 
 import clsx from "clsx";
 import React, { forwardRef } from "react";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 
 import "./windowdrag.scss";
 
@@ -13,8 +14,14 @@ interface WindowDragProps {
 }
 
 const WindowDrag = forwardRef<HTMLDivElement, WindowDragProps>(({ children, className, style }, ref) => {
+    const handleMouseDown = async (e: React.MouseEvent) => {
+        if (e.button !== 0) return;
+        e.preventDefault();
+        await getCurrentWindow().startDragging().catch(() => {});
+    };
+
     return (
-        <div ref={ref} className={clsx(`window-drag`, className)} style={style}>
+        <div ref={ref} className={clsx(`window-drag`, className)} style={style} onMouseDown={handleMouseDown}>
             {children}
         </div>
     );

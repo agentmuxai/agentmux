@@ -2,6 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 .window-drag {
-    -webkit-app-region: drag !important;
+    -webkit-app-region: no-drag;
     z-index: var(--zindex-window-drag);
+    cursor: grab;
+
+    &:active {
+        cursor: grabbing;
+    }
 }

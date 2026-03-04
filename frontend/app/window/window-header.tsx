@@ -6,6 +6,7 @@ import { WindowDrag } from "@/element/windowdrag";
 import { atoms } from "@/store/global";
 import { PLATFORM, PlatformMacOS } from "@/util/platformutil";
 import { useAtomValue } from "jotai";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { memo, useCallback, useRef } from "react";
 import { createTabBarMenu } from "@/app/menu/base-menus";
 import { WindowControls } from "@/app/window/window-controls";
@@ -25,6 +26,15 @@ const WindowHeader = memo(({ workspace }: WindowHeaderProps) => {
     const settings = useAtomValue(atoms.settingsAtom);
     const fullConfig = useAtomValue(atoms.fullConfigAtom);
 
+    // Handle window drag for Linux (startDragging API works cross-platform)
+    const handleHeaderMouseDown = useCallback((e: React.MouseEvent) => {
+        if (e.button !== 0) return;
+        const target = e.target as HTMLElement;
+        if (target.closest("button, input, a, [data-no-drag]")) return;
+        e.preventDefault();
+        getCurrentWindow().startDragging().catch(() => {});
+    }, []);
+
     // Handle window header context menu
     const handleContextMenu = useCallback(
         (e: React.MouseEvent) => {
@@ -40,6 +50,7 @@ const WindowHeader = memo(({ workspace }: WindowHeaderProps) => {
             ref={windowHeaderRef}
             className="window-header"
             data-testid="window-header"
+            onMouseDown={handleHeaderMouseDown}
             onContextMenu={handleContextMenu}
         >
             <WindowDrag ref={draggerLeftRef} className="left" />
