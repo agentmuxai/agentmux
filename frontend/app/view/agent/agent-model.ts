@@ -25,7 +25,7 @@ import { createTranslator } from "./providers/translator-factory";
 import type { OutputTranslator } from "./providers/translator";
 import type { DocumentNode } from "./types";
 
-const TermFileName = "claude-code.jsonl";
+const TermFileName = "term";
 
 // Hardcoded to Claude for now. Expand later.
 const PROVIDER = PROVIDERS.claude;

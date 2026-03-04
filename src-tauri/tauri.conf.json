@@ -6,7 +6,7 @@
   "build": {
     "devUrl": "http://localhost:5173",
     "frontendDist": "../dist/frontend",
-    "beforeDevCommand": "npx vite --config vite.config.tauri.ts",
+    "beforeDevCommand": "node -e \"require('fs').rmSync('dist/frontend',{recursive:true,force:true})\" && npx vite --config vite.config.tauri.ts",
     "beforeBuildCommand": "npx vite build --config vite.config.tauri.ts"
   },
   "app": {
