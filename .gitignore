@@ -13,7 +13,6 @@ bin/
 .DS_Store
 *~
 out/
-make/
 artifacts/
 mikework/
 .env
@@ -35,6 +34,8 @@ storybook-static/
 test-results.xml
 
 docsite/
+docs/build/
+docs/.docusaurus/
 test-results/
 
 # Tauri / Cargo workspace

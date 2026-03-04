@@ -334,7 +334,7 @@ tasks:
     artifacts:upload:
         desc: Uploads build artifacts to the staging bucket in S3. To add additional AWS CLI arguments, add them after `--`.
         vars:
-            ORIGIN: "make/"
+            ORIGIN: "src-tauri/target/release/bundle/"
             DESTINATION: "{{.ARTIFACTS_BUCKET}}/{{.VERSION}}"
         cmd: aws s3 cp {{.ORIGIN}}/ s3://{{.DESTINATION}}/ --recursive --exclude "*/*" --exclude "builder-*.yml" {{.CLI_ARGS}}
 
@@ -445,10 +445,8 @@ tasks:
         cmd: '{{if eq OS "windows"}}powershell Copy-Item -Recurse -Force -Path {{index .MATCH 0}} -Destination {{index .MATCH 1}}{{else}}mkdir -p "$(dirname {{index .MATCH 1}})" && cp -r {{index .MATCH 0}} {{index .MATCH 1}}{{end}}'
 
     clean:
-        desc: clean make/dist directories
+        desc: clean dist directories
         cmds:
-            - cmd: '{{.RMRF}} "make"'
-              ignore_error: true
             - cmd: '{{.RMRF}} "dist"'
               ignore_error: true
 
