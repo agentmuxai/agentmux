@@ -532,6 +532,12 @@ async function fetchWaveFile(
     if (offset != null) {
         usp.set("offset", offset.toString());
     }
+    if (globalThis.window != null) {
+        const authKey = getApi()?.getAuthKey?.();
+        if (authKey) {
+            usp.set("authkey", authKey);
+        }
+    }
     const resp = await fetch(getWebServerEndpoint() + "/wave/file?" + usp.toString());
     if (!resp.ok) {
         if (resp.status === 404) {
