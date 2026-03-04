@@ -39,7 +39,7 @@ pub mod userinput;
 pub mod utilds;
 pub mod utilfn;
 pub mod vdom;
-pub mod waveapp;
+pub mod apprunner;
 pub mod wavebase;
 pub mod wavefileutil;
 pub mod waveobj;

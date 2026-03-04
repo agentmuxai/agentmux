@@ -21,10 +21,10 @@ use serde::{Deserialize, Serialize};
 pub const TEXT_TAG: &str = "#text";
 
 /// Wave text tag (explicit text element).
-pub const WAVE_TEXT_TAG: &str = "wave:text";
+pub const VDOM_TEXT_TAG: &str = "wave:text";
 
 /// Wave null tag (empty placeholder).
-pub const WAVE_NULL_TAG: &str = "wave:null";
+pub const VDOM_NULL_TAG: &str = "wave:null";
 
 /// Fragment tag (multiple children without wrapper).
 pub const FRAGMENT_TAG: &str = "#fragment";
@@ -92,7 +92,7 @@ impl VDomElem {
     /// Create a null element.
     pub fn null() -> Self {
         Self {
-            tag: Some(WAVE_NULL_TAG.to_string()),
+            tag: Some(VDOM_NULL_TAG.to_string()),
             ..Default::default()
         }
     }
@@ -662,7 +662,7 @@ mod tests {
     #[test]
     fn test_null_elem() {
         let elem = VDomElem::null();
-        assert_eq!(elem.tag.as_deref(), Some(WAVE_NULL_TAG));
+        assert_eq!(elem.tag.as_deref(), Some(VDOM_NULL_TAG));
         assert!(elem.is_wave_tag());
     }
 

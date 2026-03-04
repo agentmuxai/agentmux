@@ -377,13 +377,13 @@ pub async fn spawn_backend(app: &tauri::AppHandle) -> Result<BackendSpawnResult,
     Ok(result)
 }
 
-/// Handle WAVESRV-EVENT messages from the backend.
+/// Handle backend event messages from agentmuxsrv-rs.
 /// These are forwarded to the frontend via Tauri events.
 fn handle_backend_event(app: &tauri::AppHandle, event_data: &str) {
     tracing::debug!("Backend event: {}", event_data);
 
     // Forward raw event to frontend
     if let Some(window) = app.get_webview_window("main") {
-        let _ = window.emit("wavesrv-event", event_data.to_string());
+        let _ = window.emit("agentmuxsrv-event", event_data.to_string());
     }
 }
