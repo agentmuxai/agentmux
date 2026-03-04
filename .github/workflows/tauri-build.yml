@@ -99,19 +99,23 @@ jobs:
       - name: Copy sidecar binaries to Tauri
         shell: bash
         run: |
-          mkdir -p src-tauri/binaries
+          mkdir -p src-tauri/binaries/bin
           if [ "${{ matrix.platform }}" = "windows" ]; then
             cp dist/bin/agentmuxsrv-rs.${{ matrix.arch }}.exe \
                src-tauri/binaries/agentmuxsrv-rs-${{ matrix.target }}.exe
             cp dist/bin/wsh-*-${{ matrix.platform }}.${{ matrix.arch }}.exe \
                src-tauri/binaries/wsh-${{ matrix.target }}.exe
+            cp dist/bin/wsh-*-${{ matrix.platform }}.${{ matrix.arch }}.exe \
+               src-tauri/binaries/bin/
           else
             cp dist/bin/agentmuxsrv-rs.${{ matrix.arch }} \
                src-tauri/binaries/agentmuxsrv-rs-${{ matrix.target }}
             cp dist/bin/wsh-*-${{ matrix.platform }}.${{ matrix.arch }} \
                src-tauri/binaries/wsh-${{ matrix.target }}
+            cp dist/bin/wsh-*-${{ matrix.platform }}.${{ matrix.arch }} \
+               src-tauri/binaries/bin/
           fi
-          ls -lh src-tauri/binaries/
+          ls -lhR src-tauri/binaries/
 
       - name: Copy schema to dist
         shell: bash
