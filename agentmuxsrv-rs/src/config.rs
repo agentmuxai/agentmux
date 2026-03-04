@@ -8,6 +8,10 @@ pub struct CliArgs {
     /// Path to wave data directory (overrides AGENTMUX_DATA_HOME)
     #[arg(long = "wavedata")]
     pub wavedata: Option<String>,
+
+    /// Instance identifier (used for multi-version coexistence)
+    #[arg(long = "instance", default_value = "default")]
+    pub instance: String,
 }
 
 #[derive(Debug, Clone)]
@@ -19,6 +23,7 @@ pub struct Config {
     pub is_dev: bool,
     pub version: &'static str,
     pub build_time: &'static str,
+    pub instance_id: String,
 }
 
 impl Config {
@@ -55,6 +60,7 @@ impl Config {
             is_dev,
             version: env!("CARGO_PKG_VERSION"),
             build_time: option_env!("BUILD_TIME").unwrap_or("dev"),
+            instance_id: args.instance.clone(),
         })
     }
 }
@@ -71,7 +77,7 @@ mod tests {
     fn missing_auth_key_errors() {
         let _lock = ENV_LOCK.lock().unwrap();
         std::env::remove_var("AGENTMUX_AUTH_KEY");
-        let args = CliArgs { wavedata: None };
+        let args = CliArgs { wavedata: None, instance: "default".to_string() };
         let result = Config::from_env_and_args(&args);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("AGENTMUX_AUTH_KEY"));
@@ -81,7 +87,7 @@ mod tests {
     fn empty_auth_key_errors() {
         let _lock = ENV_LOCK.lock().unwrap();
         std::env::set_var("AGENTMUX_AUTH_KEY", "");
-        let args = CliArgs { wavedata: None };
+        let args = CliArgs { wavedata: None, instance: "default".to_string() };
         let result = Config::from_env_and_args(&args);
         assert!(result.is_err());
         std::env::remove_var("AGENTMUX_AUTH_KEY");
@@ -94,6 +100,7 @@ mod tests {
         std::env::set_var("AGENTMUX_DATA_HOME", "/from/env");
         let args = CliArgs {
             wavedata: Some("/from/cli".to_string()),
+            instance: "default".to_string(),
         };
         let config = Config::from_env_and_args(&args).unwrap();
         assert_eq!(config.data_home, "/from/cli");
@@ -109,7 +116,7 @@ mod tests {
         std::env::set_var("AGENTMUX_CONFIG_HOME", "/config");
         std::env::set_var("AGENTMUX_APP_PATH", "/app");
         std::env::set_var("AGENTMUX_DEV", "1");
-        let args = CliArgs { wavedata: None };
+        let args = CliArgs { wavedata: None, instance: "default".to_string() };
         let config = Config::from_env_and_args(&args).unwrap();
         assert_eq!(config.data_home, "/data");
         assert_eq!(config.config_home, "/config");
