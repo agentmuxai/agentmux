@@ -513,3 +513,4 @@ The bump scripts automatically:
 - Run `task build:backend` after Go changes
 - Run `task dev` for development with hot reload
 - Run `task package` only for final release builds
+
