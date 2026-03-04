@@ -21,7 +21,6 @@ tasks:
         cmd: npx tauri dev
         deps:
             - npm:install
-            - docsite:build:embedded
             - build:backend
             - sync:dev:binaries
         env:
@@ -70,7 +69,6 @@ tasks:
         cmd: cd src-tauri && cargo run --release
         deps:
             - npm:install
-            - docsite:build:embedded
             - build:backend
         env:
             AGENTMUX_ENVFILE: "{{.ROOT_DIR}}/.env"
@@ -102,64 +100,6 @@ tasks:
         deps:
             - npm:install
 
-    docs:npm:install:
-        desc: Runs `npm install` in docs directory
-        internal: true
-        generates:
-            - docs/node_modules/**/*
-            - docs/package-lock.json
-        sources:
-            - docs/package-lock.json
-            - docs/package.json
-        cmd: npm install
-        dir: docs
-
-    docsite:start:
-        desc: Start the docsite dev server.
-        cmd: npm run start
-        dir: docs
-        aliases:
-            - docsite
-        deps:
-            - docs:npm:install
-
-    docsite:build:public:
-        desc: Build the full docsite.
-        cmds:
-            - cd docs && npm run build
-            - task: copyfiles:'storybook-static':'docs/build/storybook'
-        env:
-            USE_SIMPLE_CSS_MINIFIER: "true"
-        sources:
-            - "docs/*"
-            - "docs/src/**/*"
-            - "docs/docs/**/*"
-            - "docs/static/**/*"
-            - storybook-static/**/*
-        generates:
-            - "docs/build/**/*"
-        deps:
-            - docs:npm:install
-            - storybook:build
-
-    docsite:build:embedded:
-        desc: Build the embedded docsite and copy it to dist/docsite
-        sources:
-            - "docs/*"
-            - "docs/src/**/*"
-            - "docs/docs/**/*"
-            - "docs/static/**/*"
-        generates:
-            - "dist/docsite/**/*"
-        cmds:
-            - cd docs && npm run build-embedded
-            - task: copyfiles:'docs/build/':'dist/docsite'
-        env:
-            EMBEDDED: "true"
-            USE_SIMPLE_CSS_MINIFIER: "true"
-        deps:
-            - docs:npm:install
-
     copy:schema:
         desc: Copy schema directory to dist for Tauri bundling
         cmds:
@@ -178,7 +118,7 @@ tasks:
         deps:
             - clean
             - npm:install
-            - docsite:build:embedded
+
 
     package:portable:
         desc: Package the application as a portable ZIP bundle (Windows only).
@@ -197,7 +137,7 @@ tasks:
         deps:
             - clean
             - npm:install
-            - docsite:build:embedded
+
 
     package:portable:linux:
         desc: Package the application as a portable AppImage (Linux only).
@@ -228,7 +168,7 @@ tasks:
         deps:
             - clean
             - npm:install
-            - docsite:build:embedded
+
 
     build:frontend:
         desc: Build the frontend (production mode).
@@ -411,7 +351,6 @@ tasks:
         desc: Initialize the project for development.
         cmds:
             - npm install
-            - cd docs && npm install
 
     dev:cleardata:windows:
         internal: true
