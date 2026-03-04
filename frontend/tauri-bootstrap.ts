@@ -105,6 +105,13 @@ async function bootstrap() {
         log("INFO", "User Agent:", navigator.userAgent);
         log("INFO", "Location:", window.location.href);
 
+        // Dev vs production mode detection
+        if (import.meta.env.DEV) {
+            console.log("%c[DEV MODE] Loading from Vite dev server — HMR active", "color: lime; font-size: 14px; font-weight: bold");
+        } else {
+            console.warn("%c[PRODUCTION BUILD] Loading from dist/frontend — source changes will NOT hot-reload!", "color: red; font-size: 14px; font-weight: bold");
+        }
+
         // Check if we're in Tauri
         const isTauriRuntime = typeof (window as any).__TAURI_INTERNALS__ !== "undefined";
         log("INFO", "Is Tauri:", isTauriRuntime);

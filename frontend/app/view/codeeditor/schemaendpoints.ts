@@ -19,7 +19,9 @@ allFilepaths.set(`${getWebServerEndpoint()}/schema/widgets.json`, [`${getApi().g
 async function getSchemaEndpointInfo(endpoint: string): Promise<EndpointInfo> {
     let schema: Object;
     try {
-        const data = await fetch(endpoint);
+        const authKey = getApi()?.getAuthKey?.();
+        const url = authKey ? `${endpoint}${endpoint.includes("?") ? "&" : "?"}authkey=${encodeURIComponent(authKey)}` : endpoint;
+        const data = await fetch(url);
         schema = await data.json();
     } catch (e) {
         console.log("cannot find schema:", e);

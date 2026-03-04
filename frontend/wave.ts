@@ -255,8 +255,8 @@ async function initTauriWave(): Promise<void> {
 
         // Show the window now that it's fully initialized (Tauri starts hidden)
         try {
-            const { getCurrent } = await import("@tauri-apps/api/window");
-            const currentWindow = getCurrent();
+            const { getCurrentWindow } = await import("@tauri-apps/api/window");
+            const currentWindow = getCurrentWindow();
             await currentWindow.show();
             await currentWindow.setFocus();
         } catch (showError) {
@@ -269,8 +269,8 @@ async function initTauriWave(): Promise<void> {
         showStartupError(String(error));
         // Show window even on error so user can see the error message
         try {
-            const { getCurrent } = await import("@tauri-apps/api/window");
-            await getCurrent().show();
+            const { getCurrentWindow } = await import("@tauri-apps/api/window");
+            await getCurrentWindow().show();
         } catch {}
     }
 }
@@ -342,8 +342,8 @@ async function initTauriNewWindow(): Promise<void> {
 
         // Show the window now that it's initialized
         try {
-            const { getCurrent } = await import("@tauri-apps/api/window");
-            const currentWindow = getCurrent();
+            const { getCurrentWindow } = await import("@tauri-apps/api/window");
+            const currentWindow = getCurrentWindow();
             await currentWindow.show();
             await currentWindow.setFocus();
             getApi().sendLog("[initTauriNewWindow] Window shown and focused");
@@ -357,8 +357,8 @@ async function initTauriNewWindow(): Promise<void> {
         showStartupError("New window: " + String(error));
         // Show Tauri window so user sees the error
         try {
-            const { getCurrent } = await import("@tauri-apps/api/window");
-            await getCurrent().show();
+            const { getCurrentWindow } = await import("@tauri-apps/api/window");
+            await getCurrentWindow().show();
         } catch {}
     }
 }
