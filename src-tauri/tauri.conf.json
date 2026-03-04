@@ -1,12 +1,12 @@
 {
   "$schema": "https://raw.githubusercontent.com/tauri-apps/tauri/dev/crates/tauri-config-schema/schema.json",
   "productName": "AgentMux",
-  "version": "0.31.24",
+  "version": "0.31.25",
   "identifier": "com.agentmuxhq.agentmux",
   "build": {
     "devUrl": "http://localhost:5173",
     "frontendDist": "../dist/frontend",
-    "beforeDevCommand": "npx vite --config vite.config.tauri.ts",
+    "beforeDevCommand": "node -e \"require('fs').rmSync('dist/frontend',{recursive:true,force:true})\" && npx vite --config vite.config.tauri.ts",
     "beforeBuildCommand": "npx vite build --config vite.config.tauri.ts"
   },
   "app": {

@@ -1,6 +1,6 @@
 [package]
 name = "agentmux"
-version = "0.31.24"
+version = "0.31.25"
 description = "AgentMux - AI-Native Terminal"
 authors = ["AgentMux Corp"]
 edition = "2021"
@@ -10,11 +10,14 @@ rust-version = "1.77"
 name = "agentmux_lib"
 crate-type = ["lib", "cdylib", "staticlib"]
 
+[features]
+custom-protocol = ["tauri/custom-protocol"]
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "=2.10", features = ["tray-icon", "devtools", "custom-protocol"] }
+tauri = { version = "=2.10", features = ["tray-icon", "devtools"] }
 tauri-plugin-shell = "=2.3"
 tauri-plugin-dialog = "=2.6"
 tauri-plugin-notification = "=2.3"

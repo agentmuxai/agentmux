@@ -16,6 +16,14 @@ use tauri::Manager;
 /// and the React frontend connects to it via WebSocket/HTTP.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // In dev mode, disable WebView2 HTTP cache to prevent stale bundle loading.
+    // Without this, the webview caches production bundles and ignores Vite dev server updates.
+    #[cfg(all(debug_assertions, target_os = "windows"))]
+    {
+        // SAFETY: Called before any threads are spawned, at the very start of main.
+        unsafe { std::env::set_var("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", "--disable-http-cache --disk-cache-size=0") };
+    }
+
     let builder = tauri::Builder::default()
         // Plugins
         .plugin(tauri_plugin_shell::init())
@@ -103,6 +111,20 @@ pub fn run() {
 
             // Initialize logging
             let log_dir = init_logging(&handle);
+
+            // In dev mode, clear the WebView2 cache to prevent stale bundles
+            #[cfg(all(debug_assertions, target_os = "windows"))]
+            {
+                if let Ok(data_dir) = handle.path().app_local_data_dir() {
+                    let cache_dir = data_dir.join("EBWebView").join("Default").join("Cache");
+                    if cache_dir.exists() {
+                        match std::fs::remove_dir_all(&cache_dir) {
+                            Ok(_) => tracing::info!("Cleared WebView2 cache for dev mode"),
+                            Err(e) => tracing::debug!("Could not clear WebView2 cache: {}", e),
+                        }
+                    }
+                }
+            }
 
             // Initialize crash handler
             crash::init_crash_handler(log_dir.clone());
