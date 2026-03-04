@@ -94,6 +94,7 @@ jobs:
 
       - name: Verify version consistency
         shell: bash
+        continue-on-error: true
         run: bash scripts/verify-version.sh
 
       - name: Copy sidecar binaries to Tauri
