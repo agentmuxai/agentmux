@@ -122,6 +122,9 @@ async fn main() {
 
     let config_watcher = Arc::new(wconfig::ConfigWatcher::with_config(wconfig::build_default_config()));
 
+    // Local MessageBus for inter-agent communication
+    let messagebus = Arc::new(backend::messagebus::MessageBus::new());
+
     let state = AppState {
         auth_key: config.auth_key.clone(),
         version: version.clone(),
@@ -133,6 +136,7 @@ async fn main() {
         reactive_handler,
         poller,
         config_watcher,
+        messagebus,
     };
 
     // 5. Bind 2 TCP listeners on 127.0.0.1:0 (web + ws — separate ports matching Go)
