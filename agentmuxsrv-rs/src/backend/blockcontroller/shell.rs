@@ -410,20 +410,31 @@ impl Controller for ShellController {
                 c.env("AGENTMUX", "1");
             }
 
-            // Inject cmd:env from wconfig settings (global defaults, lowest priority)
+            // Inject cmd:env from wconfig settings and block metadata.
+            // Track whether AGENTMUX_AGENT_ID is explicitly set so we know
+            // whether to apply the backward-compat WAVEMUX bridge.
+            let mut has_agent_id = false;
+
+            // Settings (global defaults, lowest priority)
             let config = crate::backend::wconfig::ConfigWatcher::with_config(
                 crate::backend::wconfig::build_default_config(),
             );
             let settings = config.get_settings();
             for (k, v) in &settings.cmd_env {
+                if k == "AGENTMUX_AGENT_ID" {
+                    has_agent_id = true;
+                }
                 c.env(k, v);
             }
 
-            // Inject cmd:env from block metadata (per-block overrides, highest priority)
+            // Block metadata (per-block overrides, highest priority)
             if let Some(env_map) = block_meta.get(META_KEY_CMD_ENV) {
                 if let Some(obj) = env_map.as_object() {
                     for (k, v) in obj {
                         if let Some(val) = v.as_str() {
+                            if k == "AGENTMUX_AGENT_ID" {
+                                has_agent_id = true;
+                            }
                             c.env(k, val);
                         }
                     }
@@ -431,10 +442,8 @@ impl Controller for ShellController {
             }
 
             // Backward compat: bridge WAVEMUX_AGENT_ID → AGENTMUX_AGENT_ID
-            // if the new var isn't already set by block meta or settings
-            if std::env::var("WAVEMUX_AGENT_ID").is_ok()
-                && std::env::var("AGENTMUX_AGENT_ID").is_err()
-            {
+            // only if not already set by settings or block metadata above
+            if !has_agent_id {
                 if let Ok(val) = std::env::var("WAVEMUX_AGENT_ID") {
                     c.env("AGENTMUX_AGENT_ID", &val);
                 }
