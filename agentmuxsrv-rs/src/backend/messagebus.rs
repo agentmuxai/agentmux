@@ -4,14 +4,17 @@
 //! and broadcast — all over localhost with no cloud dependency.
 
 use std::collections::{HashMap, VecDeque};
-use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 
 /// Maximum messages queued per offline agent.
 const MAX_OFFLINE_QUEUE: usize = 1000;
+
+/// Maximum messages returned per read_messages call.
+const MAX_READ_LIMIT: usize = 500;
 
 /// Message time-to-live in seconds (1 hour).
 const MESSAGE_TTL_SECS: u64 = 3600;
@@ -92,6 +95,7 @@ pub struct AgentInfo {
 struct AgentConnection {
     info: AgentInfo,
     /// Channel sender for pushing messages to this agent's WebSocket.
+    /// None for HTTP-polling agents (they read from the offline queue instead).
     ws_sender: Option<mpsc::UnboundedSender<BusMessage>>,
 }
 
@@ -110,8 +114,8 @@ impl MessageBus {
         }
     }
 
-    /// Register an agent on the bus.
-    /// Returns a receiver for messages pushed to this agent (for WebSocket connections).
+    /// Register an agent on the bus with a WebSocket push channel.
+    /// Returns a receiver for messages pushed to this agent.
     pub fn register(&self, agent_id: &str, connection_type: &str) -> mpsc::UnboundedReceiver<BusMessage> {
         let (tx, rx) = mpsc::unbounded_channel();
         let now = SystemTime::now()
@@ -129,10 +133,7 @@ impl MessageBus {
             ws_sender: Some(tx),
         };
 
-        {
-            let mut agents = self.agents.lock().unwrap();
-            agents.insert(agent_id.to_string(), conn);
-        }
+        self.agents.lock().insert(agent_id.to_string(), conn);
 
         tracing::info!("messagebus: agent '{}' registered ({})", agent_id, connection_type);
 
@@ -142,18 +143,40 @@ impl MessageBus {
         rx
     }
 
+    /// Register an HTTP-polling agent (no WebSocket push channel).
+    /// Messages sent to this agent are queued in the offline queue and
+    /// retrieved via `read_messages`.
+    pub fn register_http(&self, agent_id: &str) {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+
+        let conn = AgentConnection {
+            info: AgentInfo {
+                id: agent_id.to_string(),
+                registered_at: now,
+                last_seen: now,
+                connection_type: "http".to_string(),
+            },
+            ws_sender: None,
+        };
+
+        self.agents.lock().insert(agent_id.to_string(), conn);
+
+        tracing::info!("messagebus: agent '{}' registered (http-polling)", agent_id);
+    }
+
     /// Unregister an agent from the bus.
     pub fn unregister(&self, agent_id: &str) {
-        let mut agents = self.agents.lock().unwrap();
-        if agents.remove(agent_id).is_some() {
+        if self.agents.lock().remove(agent_id).is_some() {
             tracing::info!("messagebus: agent '{}' unregistered", agent_id);
         }
     }
 
     /// Update last_seen timestamp for an agent (called on HTTP polling).
     pub fn touch(&self, agent_id: &str) {
-        let mut agents = self.agents.lock().unwrap();
-        if let Some(conn) = agents.get_mut(agent_id) {
+        if let Some(conn) = self.agents.lock().get_mut(agent_id) {
             conn.info.last_seen = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap_or_default()
@@ -164,16 +187,24 @@ impl MessageBus {
     /// Send a message to a specific agent.
     pub fn send(&self, msg: BusMessage) -> Result<(), String> {
         let target = msg.to.clone();
-        let agents = self.agents.lock().unwrap();
 
-        if let Some(conn) = agents.get(&target) {
-            if let Some(ref tx) = conn.ws_sender {
-                if tx.send(msg.clone()).is_ok() {
-                    return Ok(());
+        // Try to push via WebSocket channel (short lock scope)
+        let sent = {
+            let agents = self.agents.lock();
+            if let Some(conn) = agents.get(&target) {
+                if let Some(ref tx) = conn.ws_sender {
+                    tx.send(msg.clone()).is_ok()
+                } else {
+                    false
                 }
+            } else {
+                false
             }
+        };
+
+        if sent {
+            return Ok(());
         }
-        drop(agents);
 
         // Agent not connected or send failed — queue for later
         self.queue_offline(msg);
@@ -191,18 +222,23 @@ impl MessageBus {
 
     /// Broadcast a message to all connected agents (except sender).
     pub fn broadcast(&self, from: &str, payload: &str, priority: Priority) -> Result<usize, String> {
-        let agents = self.agents.lock().unwrap();
-        let mut delivered = 0;
+        // Collect senders under short lock
+        let targets: Vec<(String, mpsc::UnboundedSender<BusMessage>)> = {
+            let agents = self.agents.lock();
+            agents
+                .iter()
+                .filter(|(id, _)| id.as_str() != from)
+                .filter_map(|(id, conn)| {
+                    conn.ws_sender.as_ref().map(|tx| (id.clone(), tx.clone()))
+                })
+                .collect()
+        };
 
-        for (agent_id, conn) in agents.iter() {
-            if agent_id == from {
-                continue;
-            }
-            let msg = BusMessage::new(from, agent_id, MessageType::Broadcast, payload, priority.clone());
-            if let Some(ref tx) = conn.ws_sender {
-                if tx.send(msg).is_ok() {
-                    delivered += 1;
-                }
+        let mut delivered = 0;
+        for (agent_id, tx) in targets {
+            let msg = BusMessage::new(from, &agent_id, MessageType::Broadcast, payload, priority.clone());
+            if tx.send(msg).is_ok() {
+                delivered += 1;
             }
         }
 
@@ -211,21 +247,15 @@ impl MessageBus {
 
     /// List all registered agents.
     pub fn list_agents(&self) -> Vec<AgentInfo> {
-        let agents = self.agents.lock().unwrap();
-        agents.values().map(|c| c.info.clone()).collect()
-    }
-
-    /// Check if a specific agent is connected.
-    pub fn is_connected(&self, agent_id: &str) -> bool {
-        let agents = self.agents.lock().unwrap();
-        agents.contains_key(agent_id)
+        self.agents.lock().values().map(|c| c.info.clone()).collect()
     }
 
     /// Read (and drain) queued offline messages for an agent.
     /// Used by HTTP-polling agents that don't have a WebSocket connection.
     pub fn read_messages(&self, agent_id: &str, limit: usize) -> Vec<BusMessage> {
         self.touch(agent_id);
-        let mut queues = self.offline_queues.lock().unwrap();
+        let limit = limit.min(MAX_READ_LIMIT);
+        let mut queues = self.offline_queues.lock();
         let queue = match queues.get_mut(agent_id) {
             Some(q) => q,
             None => return Vec::new(),
@@ -240,7 +270,7 @@ impl MessageBus {
 
     /// Delete specific messages by ID from an agent's offline queue.
     pub fn delete_messages(&self, agent_id: &str, message_ids: &[String]) -> usize {
-        let mut queues = self.offline_queues.lock().unwrap();
+        let mut queues = self.offline_queues.lock();
         let queue = match queues.get_mut(agent_id) {
             Some(q) => q,
             None => return 0,
@@ -251,16 +281,11 @@ impl MessageBus {
         before - queue.len()
     }
 
-    /// Get the count of connected agents.
-    pub fn agent_count(&self) -> usize {
-        self.agents.lock().unwrap().len()
-    }
-
     // ---- Internal ----
 
     fn queue_offline(&self, msg: BusMessage) {
         let target = msg.to.clone();
-        let mut queues = self.offline_queues.lock().unwrap();
+        let mut queues = self.offline_queues.lock();
         let queue = queues.entry(target).or_insert_with(VecDeque::new);
 
         // Evict oldest if at capacity
@@ -271,8 +296,9 @@ impl MessageBus {
     }
 
     fn drain_offline_queue(&self, agent_id: &str) {
+        // Collect messages and the sender under separate lock scopes
         let messages: Vec<BusMessage> = {
-            let mut queues = self.offline_queues.lock().unwrap();
+            let mut queues = self.offline_queues.lock();
             match queues.get_mut(agent_id) {
                 Some(queue) => {
                     queue.retain(|m| !m.is_expired());
@@ -286,15 +312,20 @@ impl MessageBus {
             return;
         }
 
-        let agents = self.agents.lock().unwrap();
-        if let Some(conn) = agents.get(agent_id) {
-            if let Some(ref tx) = conn.ws_sender {
-                let count = messages.len();
-                for msg in messages {
-                    let _ = tx.send(msg);
-                }
-                tracing::info!("messagebus: drained {} offline messages to '{}'", count, agent_id);
+        // Get the sender clone, then drop the lock before sending
+        let tx = {
+            let agents = self.agents.lock();
+            agents
+                .get(agent_id)
+                .and_then(|conn| conn.ws_sender.clone())
+        };
+
+        if let Some(tx) = tx {
+            let count = messages.len();
+            for msg in messages {
+                let _ = tx.send(msg);
             }
+            tracing::info!("messagebus: drained {} offline messages to '{}'", count, agent_id);
         }
     }
 }

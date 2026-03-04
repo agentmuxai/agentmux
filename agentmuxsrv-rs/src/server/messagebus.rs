@@ -24,12 +24,6 @@ use super::AppState;
 #[derive(Deserialize)]
 pub(super) struct RegisterRequest {
     agent_id: String,
-    #[serde(default = "default_connection_type")]
-    connection_type: String,
-}
-
-fn default_connection_type() -> String {
-    "http".to_string()
 }
 
 #[derive(Deserialize)]
@@ -92,10 +86,9 @@ pub(super) async fn handle_register(
     State(state): State<AppState>,
     Json(req): Json<RegisterRequest>,
 ) -> Json<Value> {
-    let _rx = state.messagebus.register(&req.agent_id, &req.connection_type);
-    // Note: the receiver is dropped here for HTTP-registered agents.
-    // They use /api/bus/messages to poll. WebSocket agents get their
-    // receiver wired into the WS connection loop.
+    // HTTP-registered agents use polling via /api/bus/messages.
+    // WebSocket agents get their push channel wired in the WS handler.
+    state.messagebus.register_http(&req.agent_id);
     Json(json!({
         "status": "registered",
         "agent_id": req.agent_id,
