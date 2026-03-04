@@ -1,6 +1,6 @@
 [package]
 name = "agentmux"
-version = "0.31.23"
+version = "0.31.24"
 description = "AgentMux - AI-Native Terminal"
 authors = ["AgentMux Corp"]
 edition = "2021"
