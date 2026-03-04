@@ -138,7 +138,7 @@ jobs:
         with:
           name: agentmux-${{ matrix.platform }}-${{ matrix.arch }}
           path: |
-            src-tauri/target/${{ matrix.target }}/release/bundle/**/*
+            target/${{ matrix.target }}/release/bundle/**/*
           retention-days: 30
 
   create-release:
