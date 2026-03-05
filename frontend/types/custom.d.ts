@@ -17,6 +17,7 @@ declare global {
         hasCustomAIPresetsAtom: jotai.Atom<boolean>; // derived from fullConfig
         tabAtom: jotai.Atom<Tab>; // driven from WOS
         staticTabId: jotai.Atom<string>;
+        activeTabId: jotai.Atom<string>;
         isFullScreen: jotai.PrimitiveAtom<boolean>;
         controlShiftDelayAtom: jotai.PrimitiveAtom<boolean>;
         prefersReducedMotionAtom: jotai.Atom<boolean>;

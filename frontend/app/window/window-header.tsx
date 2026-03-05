@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { ContextMenuModel } from "@/app/store/contextmenu";
+import { TabBar } from "@/app/tab/tabbar";
 import { WindowDrag } from "@/element/windowdrag";
 import { atoms } from "@/store/global";
 import { useAtomValue } from "jotai";
@@ -40,7 +41,7 @@ const WindowHeader = memo(({ workspace }: WindowHeaderProps) => {
         >
             <WindowDrag ref={draggerLeftRef} className="left" />
 
-            <WindowDrag className="middle" />
+            <TabBar workspace={workspace} />
 
             <SystemStatus />
         </div>
