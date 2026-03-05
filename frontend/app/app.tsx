@@ -3,7 +3,7 @@
 
 import { Workspace } from "@/app/workspace/workspace";
 import { ContextMenuModel } from "@/store/contextmenu";
-import { atoms, createBlock, getSettingsPrefixAtom, globalStore, isDev, removeFlashError } from "@/store/global";
+import { atoms, createBlock, getApi, getSettingsPrefixAtom, globalStore, isDev, openLink, removeFlashError } from "@/store/global";
 import { appHandleKeyDown, keyboardMouseDownHandler } from "@/store/keymodel";
 import { zoomIn, zoomOut, WHEEL_STEP } from "@/store/zoom";
 import { getElemAsStr } from "@/util/focusutil";
@@ -108,12 +108,7 @@ async function handleContextMenu(e: React.MouseEvent<HTMLDivElement>) {
         menu.push({
             label: "Open Clipboard URL (" + clipboardURL.hostname + ")",
             click: () => {
-                createBlock({
-                    meta: {
-                        view: "web",
-                        url: clipboardURL.toString(),
-                    },
-                });
+                openLink(clipboardURL.toString());
             },
         });
     }

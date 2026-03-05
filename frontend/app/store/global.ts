@@ -614,22 +614,11 @@ function getHostName(): string {
 }
 
 /**
- * Open a link in a new window, or in a new web widget. The user can set all links to open in a new web widget using the `web:openlinksinternally` setting.
+ * Open a link in the user's default browser.
  * @param uri The link to open.
- * @param forceOpenInternally Force the link to open in a new web widget.
  */
-async function openLink(uri: string, forceOpenInternally = false) {
-    if (forceOpenInternally || globalStore.get(atoms.settingsAtom)?.["web:openlinksinternally"]) {
-        const blockDef: BlockDef = {
-            meta: {
-                view: "web",
-                url: uri,
-            },
-        };
-        await createBlock(blockDef);
-    } else {
-        getApi().openExternal(uri);
-    }
+async function openLink(uri: string) {
+    getApi().openExternal(uri);
 }
 
 function registerBlockComponentModel(blockId: string, bcm: BlockComponentModel) {

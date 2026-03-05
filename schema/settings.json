@@ -119,18 +119,6 @@
         "editor:fontsize": {
           "type": "number"
         },
-        "web:*": {
-          "type": "boolean"
-        },
-        "web:openlinksinternally": {
-          "type": "boolean"
-        },
-        "web:defaulturl": {
-          "type": "string"
-        },
-        "web:defaultsearch": {
-          "type": "string"
-        },
         "blockheader:*": {
           "type": "boolean"
         },
