@@ -166,7 +166,7 @@ export function generateAutoTitle(block: Block, settingsEnv?: Record<string, str
         case "preview":
             return generatePreviewTitle(block);
         case "codeeditor":
-            return generateEditorTitle(block);
+            return "Editor";
         case "chat":
             return generateChatTitle(block);
         case "help":
@@ -242,30 +242,6 @@ function generatePreviewTitle(block: Block): string {
     return "Preview";
 }
 
-/**
- * Generate title for code editor blocks
- * Uses filename with parent directory context
- */
-function generateEditorTitle(block: Block): string {
-    const file = block.meta!.file;
-
-    if (isBlank(file)) {
-        return "Editor";
-    }
-
-    const parts = file!.split("/");
-
-    // Show parent directory for context if available
-    if (parts.length > 2) {
-        const parent = parts[parts.length - 2];
-        const filename = parts[parts.length - 1];
-        return `${parent}/${filename}`;
-    } else if (parts.length === 2) {
-        return `${parts[0]}/${parts[1]}`;
-    }
-
-    return parts[0] || "Editor";
-}
 
 /**
  * Generate title for chat blocks
