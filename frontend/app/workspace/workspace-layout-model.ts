@@ -89,7 +89,7 @@ class WorkspaceLayoutModel {
     }
 
     private getTabId(): string {
-        return globalStore.get(atoms.staticTabId);
+        return globalStore.get(atoms.activeTabId);
     }
 
     private getPanelOpenAtom(): jotai.Atom<boolean> {

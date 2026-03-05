@@ -1,0 +1,64 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+.tab-bar {
+    display: flex;
+    flex-direction: row;
+    align-items: flex-end;
+    flex: 1 1 0;
+    min-width: 0;
+    height: 100%;
+    overflow: hidden;
+    -webkit-app-region: no-drag;
+
+    .tab-bar-scroll {
+        display: flex;
+        flex-direction: row;
+        align-items: flex-end;
+        flex: 1 1 0;
+        min-width: 0;
+        height: 100%;
+        overflow-x: auto;
+        overflow-y: hidden;
+        scrollbar-width: none; // Firefox
+
+        &::-webkit-scrollbar {
+            display: none; // Chrome/Safari
+        }
+    }
+
+    .pinned-tab-spacer {
+        flex-shrink: 0;
+        width: 1px;
+        height: 18px;
+        margin: 0 3px 4px;
+        background: var(--border-color);
+        align-self: flex-end;
+    }
+
+    .add-tab-btn {
+        flex-shrink: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 28px;
+        height: 27px;
+        padding: 0;
+        background: transparent;
+        border: none;
+        color: var(--secondary-text-color);
+        cursor: pointer;
+        opacity: 0.5;
+        align-self: flex-end;
+        margin-bottom: 2px;
+
+        &:hover {
+            opacity: 1;
+            color: var(--main-text-color);
+        }
+
+        i {
+            font-size: 11px;
+        }
+    }
+}

@@ -12,7 +12,7 @@ import { useWaveObjectValue } from "./store/wos";
 
 export function AppBackground() {
     const bgRef = useRef<HTMLDivElement>(null);
-    const tabId = useAtomValue(atoms.staticTabId);
+    const tabId = useAtomValue(atoms.activeTabId);
     const [tabData] = useWaveObjectValue<Tab>(WOS.makeORef("tab", tabId));
     const style: CSSProperties = computeBgStyleFromMeta(tabData?.meta, 0.5) ?? {};
     const getAvgColor = useCallback(

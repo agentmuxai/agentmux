@@ -22,7 +22,7 @@ import {
 
 const WorkspaceElem = memo(() => {
     const workspaceLayoutModel = WorkspaceLayoutModel.getInstance();
-    const tabId = useAtomValue(atoms.staticTabId);
+    const tabId = useAtomValue(atoms.activeTabId);
     const ws = useAtomValue(atoms.workspace);
     const initialAiPanelPercentage = workspaceLayoutModel.getAIPanelPercentage(window.innerWidth);
     const panelGroupRef = useRef<ImperativePanelGroupHandle>(null);
