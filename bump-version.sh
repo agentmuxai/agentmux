@@ -163,16 +163,11 @@ if [[ -f "$TAURI_CONF" ]]; then
     sed -i "s/\"version\": \"[0-9.]*\"/\"version\": \"$NEW_VERSION\"/" "$TAURI_CONF"
     success "Updated $TAURI_CONF"
 
-    # Update bundle identifier on minor or major bumps so different minor versions
-    # can run as separate macOS processes (each has its own CFBundleIdentifier).
-    # Patch bumps share the same identifier (they replace each other).
-    if [[ "$TYPE" == "minor" || "$TYPE" == "major" || "$TYPE" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-        MAJOR=$(echo "$NEW_VERSION" | cut -d. -f1)
-        MINOR=$(echo "$NEW_VERSION" | cut -d. -f2)
-        NEW_IDENTIFIER="com.agentmuxhq.agentmux.v${MAJOR}-${MINOR}"
-        sed -i "s|\"identifier\": \"com\.agentmuxhq\.agentmux[^\"]*\"|\"identifier\": \"${NEW_IDENTIFIER}\"|" "$TAURI_CONF"
-        success "Updated bundle identifier to $NEW_IDENTIFIER"
-    fi
+    # Always update bundle identifier to full version so every build is a distinct
+    # macOS app — no two versions ever share a CFBundleIdentifier.
+    NEW_IDENTIFIER="com.agentmuxhq.agentmux.v$(echo "$NEW_VERSION" | tr '.' '-')"
+    sed -i "s|\"identifier\": \"com\.agentmuxhq\.agentmux[^\"]*\"|\"identifier\": \"${NEW_IDENTIFIER}\"|" "$TAURI_CONF"
+    success "Updated bundle identifier to $NEW_IDENTIFIER"
 else
     error "$TAURI_CONF not found!"
 fi
