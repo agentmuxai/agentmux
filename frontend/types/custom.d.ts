@@ -76,6 +76,7 @@ declare global {
         getConfigDir: () => string; // get-config-dir
         getWebviewPreload: () => string; // get-webview-preload
         getAboutModalDetails: () => AboutModalDetails; // get-about-modal-details
+        getBackendInfo: () => Promise<{ pid?: number; started_at?: string; web_endpoint?: string; version: string }>; // get-backend-info
         getDocsiteUrl: () => string; // get-docsite-url
         getZoomFactor: () => number; // get-zoom-factor
         showContextMenu: (workspaceId: string, menu?: NativeContextMenuItem[]) => void; // contextmenu-show

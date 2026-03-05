@@ -48,6 +48,37 @@ pub fn get_wave_init_opts(
     }))
 }
 
+/// Get backend process info (PID, start time, endpoint) for the status bar popover.
+/// Reads from the version-namespaced wave-endpoints.json file written at spawn time.
+#[tauri::command]
+pub fn get_backend_info(app: tauri::AppHandle) -> serde_json::Value {
+    let current_version = env!("CARGO_PKG_VERSION");
+    let version_instance_id = format!("v{}", current_version);
+
+    let config_dir = match app.path().app_config_dir() {
+        Ok(d) => d,
+        Err(_) => return serde_json::json!({ "version": current_version }),
+    };
+
+    let endpoints_file = config_dir
+        .join("instances")
+        .join(&version_instance_id)
+        .join("wave-endpoints.json");
+
+    if let Ok(contents) = std::fs::read_to_string(&endpoints_file) {
+        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&contents) {
+            return serde_json::json!({
+                "pid": json["pid"],
+                "started_at": json["started_at"],
+                "web_endpoint": json["web_endpoint"],
+                "version": current_version,
+            });
+        }
+    }
+
+    serde_json::json!({ "version": current_version })
+}
+
 /// Log a message from the frontend.
 /// Replaces: ipcMain.on("fe-log") in emain/emain.ts
 #[tauri::command]
