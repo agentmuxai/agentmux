@@ -3,17 +3,16 @@
 
 /**
  * SystemStatus - Right side of window header
- * Contains action widgets, update banner, config errors, and close button
+ * Contains action widgets and window controls.
+ * Update status and config errors have moved to StatusBar.
  */
 
-import { Button } from "@/app/element/button";
-import { modalsModel } from "@/app/store/modalmodel";
 import { atoms, getApi } from "@/store/global";
 import { useAtomValue } from "jotai";
-import { forwardRef, memo } from "react";
+import { memo } from "react";
 import { ActionWidgets } from "./action-widgets";
-import { UpdateStatusBanner } from "./update-banner";
 import "./system-status.scss";
+
 
 const ConfigErrorMessage = () => {
     const fullConfig = useAtomValue(atoms.fullConfigAtom);
@@ -50,28 +49,6 @@ const ConfigErrorMessage = () => {
         </div>
     );
 };
-
-const ConfigErrorIcon = forwardRef<HTMLElement>((_, ref) => {
-    const fullConfig = useAtomValue(atoms.fullConfigAtom);
-
-    function handleClick() {
-        modalsModel.pushModal("MessageModal", { children: <ConfigErrorMessage /> });
-    }
-
-    if (fullConfig?.configerrors == null || fullConfig?.configerrors.length == 0) {
-        return null;
-    }
-    return (
-        <Button
-            ref={ref as React.RefObject<HTMLButtonElement>}
-            className="config-error-button red"
-            onClick={handleClick}
-        >
-            <i className="fa fa-solid fa-exclamation-triangle" />
-            Config Error
-        </Button>
-    );
-});
 
 const WindowActionButtons = memo(() => {
     const handleMinimize = () => {
@@ -116,17 +93,10 @@ const WindowActionButtons = memo(() => {
     );
 });
 
-interface SystemStatusProps {
-    updateStatusBannerRef?: React.RefObject<HTMLButtonElement>;
-    configErrorRef?: React.RefObject<HTMLElement>;
-}
-
-const SystemStatus = memo(({ updateStatusBannerRef, configErrorRef }: SystemStatusProps) => {
+const SystemStatus = memo(() => {
     return (
         <div className="system-status">
             <ActionWidgets />
-            <UpdateStatusBanner ref={updateStatusBannerRef} />
-            <ConfigErrorIcon ref={configErrorRef} />
             <WindowActionButtons />
         </div>
     );
