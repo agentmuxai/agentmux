@@ -120,7 +120,6 @@ export function buildTauriApi(): AppApi {
         getConfigDir: () => cachedValues!.configDir,
         getDocsiteUrl: () => cachedValues!.docsiteUrl,
         getZoomFactor: () => cachedValues!.zoomFactor,
-        getWebviewPreload: () => "", // Not applicable in Tauri
         getEnv: (varName: string) => {
             // In Tauri, we can't synchronously get env vars.
             // Fire-and-forget the invoke and return empty for now.
@@ -225,15 +224,6 @@ export function buildTauriApi(): AppApi {
             });
         },
 
-        // --- Webview focus ---
-        setWebviewFocus: (focusedId: number) => {
-            // In Tauri, single webview per window — this is a no-op.
-            // Focus management is handled in React.
-        },
-        registerGlobalWebviewKeys: (keys: string[]) => {
-            invoke("register_global_webview_keys", { keys }).catch(console.error);
-        },
-
         // --- Window Management (Multi-Window Support) ---
         openNewWindow: async () => {
             return await invoke<string>("open_new_window");
@@ -313,11 +303,6 @@ export function buildTauriApi(): AppApi {
             // No equivalent in Tauri — return empty string
             // If needed, can be implemented with html-to-image library
             return "";
-        },
-
-        // --- Storage ---
-        clearWebviewStorage: async (_webContentsId: number): Promise<void> => {
-            // No webContentsId concept in Tauri
         },
 
         // --- AI ---
