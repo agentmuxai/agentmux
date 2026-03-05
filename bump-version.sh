@@ -21,7 +21,6 @@ TYPE=""
 AGENT=""
 MESSAGE=""
 NO_COMMIT=false
-NO_TAG=false
 
 usage() {
     cat << EOF
@@ -35,8 +34,7 @@ Arguments:
 Options:
     --agent NAME    Agent name (default: current branch agent prefix or 'agentx')
     --message MSG   Commit message describing changes
-    --no-commit     Skip git commit and tag creation
-    --no-tag        Skip git tag creation (still commits)
+    --no-commit     Skip git commit
     -h, --help      Show this help message
 
 Examples:
@@ -68,10 +66,6 @@ while [[ $# -gt 0 ]]; do
             ;;
         --no-commit)
             NO_COMMIT=true
-            shift
-            ;;
-        --no-tag)
-            NO_TAG=true
             shift
             ;;
         -h|--help)
@@ -155,14 +149,12 @@ else
     error "$CARGO_TOML not found!"
 fi
 
-# Update src-tauri/Cargo.lock
-CARGO_LOCK="src-tauri/Cargo.lock"
-if [[ -f "$CARGO_LOCK" ]]; then
-    # Update the wavemux package version in Cargo.lock
-    sed -i '/^name = "wavemux"$/,/^version = "/ s/^version = "[0-9.]*"/version = "'"$NEW_VERSION"'"/' "$CARGO_LOCK"
-    success "Updated $CARGO_LOCK"
+# Update Cargo.lock via cargo update (syncs all workspace crates)
+info "Syncing Cargo.lock..."
+if cargo update --workspace >/dev/null 2>&1; then
+    success "Updated Cargo.lock"
 else
-    warn "$CARGO_LOCK not found, skipping"
+    warn "cargo update failed — Cargo.lock may be stale"
 fi
 
 # Update src-tauri/tauri.conf.json
@@ -227,7 +219,7 @@ fi
 if [[ "$NO_COMMIT" != true ]]; then
     info "Committing version bump..."
 
-    git add package.json package-lock.json VERSION_HISTORY.md src-tauri/Cargo.toml src-tauri/tauri.conf.json agentmuxsrv-rs/Cargo.toml wsh-rs/Cargo.toml
+    git add package.json package-lock.json Cargo.lock VERSION_HISTORY.md src-tauri/Cargo.toml src-tauri/tauri.conf.json agentmuxsrv-rs/Cargo.toml wsh-rs/Cargo.toml
 
     if [[ -n "$MESSAGE" ]]; then
         COMMIT_MSG="chore: bump version to $NEW_VERSION
@@ -239,15 +231,6 @@ $MESSAGE"
 
     git commit -m "$COMMIT_MSG"
     success "Committed version bump"
-
-    # Create git tag if requested
-    if [[ "$NO_TAG" != true ]]; then
-        info "Creating git tag v$NEW_VERSION-fork..."
-        git tag -a "v$NEW_VERSION-fork" -m "Release $NEW_VERSION-fork"
-        success "Created tag v$NEW_VERSION-fork"
-        BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
-        info "Push with: git push origin $BRANCH --tags"
-    fi
 fi
 
 echo ""
@@ -268,6 +251,3 @@ echo "  1. Rebuild binaries: task build:backend (to update Rust binaries)"
 echo "  2. Review changes: git show HEAD"
 BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
 echo "  3. Push to remote: git push origin $BRANCH"
-if [[ "$NO_TAG" != true ]]; then
-    echo "  4. Push tags: git push origin --tags"
-fi
