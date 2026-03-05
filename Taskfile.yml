@@ -13,7 +13,7 @@ vars:
     APP_NAME: "AgentMux"
     BIN_DIR: "bin"
     VERSION:
-        sh: 'PATH="$HOME/.cargo/bin:/opt/homebrew/opt/node@20/bin:/opt/homebrew/bin:/usr/local/bin:$PATH" node version.cjs 2>/dev/null || node version.cjs'
+        sh: 'PATH="$HOME/.cargo/bin:/opt/homebrew/opt/node@20/bin:/opt/homebrew/bin:/usr/local/bin:$PATH" node version.cjs'
     RM: '{{if eq OS "windows"}}powershell Remove-Item -Force -ErrorAction SilentlyContinue{{else}}rm -f{{end}}'
     RMRF: '{{if eq OS "windows"}}powershell Remove-Item -Force -Recurse -ErrorAction SilentlyContinue{{else}}rm -rf{{end}}'
     DATE: '{{if eq OS "windows"}}powershell Get-Date -UFormat{{else}}date{{end}}'
@@ -140,7 +140,7 @@ tasks:
             - task: build:backend
             - task: tauri:copy-sidecars
             - task: copy:schema
-            - npx tauri build --bundles dmg,app {{.CLI_ARGS}}
+            - bash -c 'source "$HOME/.cargo/env" 2>/dev/null; PATH="$HOME/.cargo/bin:/opt/homebrew/opt/node@20/bin:/opt/homebrew/bin:/usr/local/bin:$PATH" npx tauri build --bundles dmg,app {{.CLI_ARGS}}'
         deps:
             - clean
             - npm:install
@@ -208,7 +208,7 @@ tasks:
         internal: true
         platforms: [darwin]
         cmds:
-            - bash -c 'source "$HOME/.cargo/env" 2>/dev/null || export PATH="$HOME/.cargo/bin:$PATH"; cargo build --release -p agentmuxsrv-rs'
+            - bash -c 'source "$HOME/.cargo/env" 2>/dev/null; PATH="$HOME/.cargo/bin:$PATH" cargo build --release -p agentmuxsrv-rs'
             - mkdir -p dist/bin
             - cp target/release/agentmuxsrv-rs dist/bin/agentmuxsrv-rs.arm64
             - echo "✓ Built agentmuxsrv-rs for macOS"
@@ -217,7 +217,7 @@ tasks:
         internal: true
         platforms: [linux]
         cmds:
-            - bash -c 'source "$HOME/.cargo/env" 2>/dev/null || export PATH="$HOME/.cargo/bin:$PATH"; cargo build --release -p agentmuxsrv-rs'
+            - bash -c 'source "$HOME/.cargo/env" 2>/dev/null; PATH="$HOME/.cargo/bin:$PATH" cargo build --release -p agentmuxsrv-rs'
             - mkdir -p dist/bin
             - cp target/release/agentmuxsrv-rs dist/bin/agentmuxsrv-rs.x64
             - echo "✓ Built agentmuxsrv-rs for Linux"
@@ -256,7 +256,7 @@ tasks:
         internal: true
         platforms: [darwin]
         cmds:
-            - bash -c 'source "$HOME/.cargo/env" 2>/dev/null || export PATH="$HOME/.cargo/bin:$PATH"; cargo build --release -p wsh-rs'
+            - bash -c 'source "$HOME/.cargo/env" 2>/dev/null; PATH="$HOME/.cargo/bin:$PATH" cargo build --release -p wsh-rs'
             - mkdir -p dist/bin
             - cp target/release/wsh dist/bin/wsh-{{.VERSION}}-darwin.arm64
             - echo "✓ Built wsh-rs for macOS (dist/bin/wsh-{{.VERSION}}-darwin.arm64)"
@@ -265,7 +265,7 @@ tasks:
         internal: true
         platforms: [linux]
         cmds:
-            - bash -c 'source "$HOME/.cargo/env" 2>/dev/null || export PATH="$HOME/.cargo/bin:$PATH"; cargo build --release -p wsh-rs'
+            - bash -c 'source "$HOME/.cargo/env" 2>/dev/null; PATH="$HOME/.cargo/bin:$PATH" cargo build --release -p wsh-rs'
             - mkdir -p dist/bin
             - cp target/release/wsh dist/bin/wsh-{{.VERSION}}-linux.x64
             - echo "✓ Built wsh-rs for Linux (dist/bin/wsh-{{.VERSION}}-linux.x64)"
