@@ -244,6 +244,44 @@ function switchBlockByBlockNum(index: number) {
     }, 10);
 }
 
+function shouldInterceptTabForCycle(): boolean {
+    const activeEl = document.activeElement;
+    if (
+        activeEl instanceof HTMLInputElement ||
+        activeEl instanceof HTMLTextAreaElement ||
+        (activeEl as HTMLElement)?.isContentEditable
+    ) {
+        return false;
+    }
+    if (activeEl?.closest(".xterm")) {
+        return false;
+    }
+    if (focusManager.getFocusType() === "waveai") {
+        return false;
+    }
+    return true;
+}
+
+function cyclePaneFocus(direction: "forward" | "backward") {
+    const layoutModel = getLayoutModelForStaticTab();
+    const spiralOrder = globalStore.get(layoutModel.spiralLeafOrder);
+    if (spiralOrder.length <= 1) return;
+
+    const focusedNode = globalStore.get(layoutModel.focusedNode);
+    const currentIndex = spiralOrder.findIndex((entry) => entry.nodeid === focusedNode?.id);
+
+    let nextIndex: number;
+    if (direction === "forward") {
+        nextIndex = (currentIndex + 1) % spiralOrder.length;
+    } else {
+        nextIndex = (currentIndex - 1 + spiralOrder.length) % spiralOrder.length;
+    }
+
+    const nextEntry = spiralOrder[nextIndex];
+    layoutModel.focusNode(nextEntry.nodeid);
+    setTimeout(() => globalRefocus(), 10);
+}
+
 function switchBlockInDirection(direction: NavigateDirection) {
     const layoutModel = getLayoutModelForStaticTab();
     const focusType = focusManager.getFocusType();
@@ -560,6 +598,20 @@ function registerGlobalKeys() {
     globalKeyMap.set("Ctrl:Shift:ArrowRight", () => {
         switchBlockInDirection(NavigateDirection.Right);
         return true;
+    });
+    globalKeyMap.set("Tab", () => {
+        if (shouldInterceptTabForCycle()) {
+            cyclePaneFocus("forward");
+            return true;
+        }
+        return false;
+    });
+    globalKeyMap.set("Ctrl:Tab", () => {
+        if (shouldInterceptTabForCycle()) {
+            cyclePaneFocus("backward");
+            return true;
+        }
+        return false;
     });
     globalKeyMap.set("Ctrl:Shift:k", () => {
         const blockId = getFocusedBlockId();
