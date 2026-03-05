@@ -275,14 +275,15 @@ export function getBoundingRect(model: LayoutModel): Dimensions {
  * Tab = spiral inward (forward through this order).
  * Ctrl+Tab = spiral outward (backward through this order).
  *
- * Example for a 5-column, 2-row grid:
+ * Example for a 5-column, 3-row grid (15 panes):
  *   ┌───┬───┬───┬───┬───┐
- *   │ 1 │ 2 │ 3 │ 4 │ 5 │
+ *   │ 1 │ 2 │ 3 │ 4 │ 5 │   top row L→R
  *   ├───┼───┼───┼───┼───┤
- *   │10 │ … │ … │ … │ 6 │   (outer ring: 1→2→3→4→5→6→7→8→9→10)
- *   ├───┼───┼───┼───┼───┤     inner ring: 11→12→...
- *   │ 9 │ 8 │ 7 │   │   │
+ *   │12 │13 │14 │15 │ 6 │   right col T→B (6), left col B→T (12), inner (13-15)
+ *   ├───┼───┼───┼───┼───┤
+ *   │11 │10 │ 9 │ 8 │ 7 │   bottom row R→L
  *   └───┴───┴───┴───┴───┘
+ *   Outer ring: 1→2→3→4→5→6→7→8→9→10→11→12, Inner: 13→14→15
  */
 export function computeSpiralOrder(
     leafOrder: LeafOrderEntry[],
