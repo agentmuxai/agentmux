@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { MagnifyIcon } from "@/app/element/magnify";
-import { CodeEditor } from "@/app/view/codeeditor/codeeditor";
 import { cn, makeIconClass } from "@/util/util";
 import React, { Suspense, useLayoutEffect, useRef, useState } from "react";
 
@@ -37,9 +36,9 @@ export const FakeBlock = ({ icon, name, highlighted, className, markdown, imgsrc
             </div>
             <div className="flex-1 flex items-center justify-center overflow-auto p-4">
                 {editorText ? (
-                    <div className="w-full h-full">
-                        <CodeEditor blockId="fake-block" text={editorText} readonly={true} language="shell" />
-                    </div>
+                    <pre className="w-full h-full text-xs font-mono text-foreground/80 whitespace-pre-wrap overflow-auto">
+                        {editorText}
+                    </pre>
                 ) : imgsrc ? (
                     <img src={imgsrc} alt={name} className="max-w-full max-h-full object-contain" />
                 ) : markdown ? (
