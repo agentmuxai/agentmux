@@ -1,5 +1,6 @@
 mod commands;
 mod crash;
+mod drag;
 mod heartbeat;
 mod menu;
 mod sidecar;
@@ -157,6 +158,10 @@ pub fn run() {
                 if let Err(e) = window.set_title(&title) {
                     tracing::error!("Failed to set window title: {}", e);
                 }
+
+                // On Linux: attach native GTK drag handler to this window.
+                #[cfg(target_os = "linux")]
+                drag::attach_drag_handler(&window);
             }
 
             // Register deep link handler for OAuth callback (agentmux://auth?code=...)
