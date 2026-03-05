@@ -12,7 +12,6 @@ import * as fs from "fs";
 import * as path from "path";
 import { defineConfig, type Plugin } from "vite";
 import { ViteImageOptimizer } from "vite-plugin-image-optimizer";
-import { viteStaticCopy } from "vite-plugin-static-copy";
 import svgr from "vite-plugin-svgr";
 import tsconfigPaths from "vite-tsconfig-paths";
 
@@ -56,19 +55,13 @@ export default defineConfig({
             output: {
                 manualChunks(id) {
                     const p = id.replace(/\\/g, "/");
-                    if (p.includes("node_modules/monaco") || p.includes("node_modules/@monaco")) return "monaco";
                     if (p.includes("node_modules/mermaid") || p.includes("node_modules/@mermaid")) return "mermaid";
                     if (p.includes("node_modules/katex") || p.includes("node_modules/@katex")) return "katex";
                     if (p.includes("node_modules/shiki") || p.includes("node_modules/@shiki")) return "shiki";
-                    if (p.includes("node_modules/cytoscape") || p.includes("node_modules/@cytoscape"))
-                        return "cytoscape";
                     return undefined;
                 },
             },
         },
-    },
-    optimizeDeps: {
-        include: ["monaco-yaml/yaml.worker.js"],
     },
     server: {
         port: 5173,
@@ -94,33 +87,6 @@ export default defineConfig({
         }),
         react({}),
         tailwindcss(),
-        viteStaticCopy({
-            targets: [
-                {
-                    // Copy Monaco editor runtime (languages, themes, core).
-                    // Exclude assets/ (duplicate workers already bundled by Vite ?worker imports)
-                    // and NLS locale packs (app is English-only).
-                    src: [
-                        "node_modules/monaco-editor/min/vs/*",
-                        "!node_modules/monaco-editor/min/vs/assets",
-                        "!node_modules/monaco-editor/min/vs/nls.messages.cs.js.js",
-                        "!node_modules/monaco-editor/min/vs/nls.messages.de.js.js",
-                        "!node_modules/monaco-editor/min/vs/nls.messages.es.js.js",
-                        "!node_modules/monaco-editor/min/vs/nls.messages.fr.js.js",
-                        "!node_modules/monaco-editor/min/vs/nls.messages.it.js.js",
-                        "!node_modules/monaco-editor/min/vs/nls.messages.ja.js.js",
-                        "!node_modules/monaco-editor/min/vs/nls.messages.ko.js.js",
-                        "!node_modules/monaco-editor/min/vs/nls.messages.pl.js.js",
-                        "!node_modules/monaco-editor/min/vs/nls.messages.pt-br.js.js",
-                        "!node_modules/monaco-editor/min/vs/nls.messages.ru.js.js",
-                        "!node_modules/monaco-editor/min/vs/nls.messages.tr.js.js",
-                        "!node_modules/monaco-editor/min/vs/nls.messages.zh-cn.js.js",
-                        "!node_modules/monaco-editor/min/vs/nls.messages.zh-tw.js.js",
-                    ],
-                    dest: "monaco",
-                },
-            ],
-        }),
         stripKatexLegacyFonts(),
     ],
 

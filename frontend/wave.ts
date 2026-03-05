@@ -629,12 +629,4 @@ async function initWave(initOpts: AgentMuxInitOpts) {
     }
 
     getApi().setWindowInitStatus("wave-ready");
-
-    // Preload Monaco on idle so first editor open is instant
-    const preload = () => import("@/app/view/codeeditor/codeeditor").then((m) => m.loadMonaco());
-    if (typeof requestIdleCallback === "function") {
-        requestIdleCallback(preload);
-    } else {
-        setTimeout(preload, 200);
-    }
 }
