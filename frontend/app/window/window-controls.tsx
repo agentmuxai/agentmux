@@ -1,22 +1,12 @@
 // Copyright 2025, Command Line Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-import { getApi, globalStore, windowCountAtom, windowInstanceNumAtom } from "@/store/global";
+import { getApi, windowCountAtom, windowInstanceNumAtom } from "@/store/global";
 import { useAtomValue } from "jotai";
 import { memo } from "react";
 import "./window-controls.scss";
 
-interface WindowControlsProps {
-    platform: string;
-    showNativeControls: boolean;
-}
-
-const WindowControls = memo(({ platform, showNativeControls }: WindowControlsProps) => {
-    // On macOS with native controls, don't show custom window controls
-    if (platform === "darwin" && showNativeControls) {
-        return null;
-    }
-
+const WindowControls = memo(() => {
     const instanceNum = useAtomValue(windowInstanceNumAtom);
     const windowCount = useAtomValue(windowCountAtom);
 
