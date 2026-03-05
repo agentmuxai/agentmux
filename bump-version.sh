@@ -140,14 +140,20 @@ fi
 
 success "New version: $NEW_VERSION"
 
+# Helper: update first occurrence of version = "x.y.z" in a Cargo.toml
+# Works on macOS (BSD sed) and Linux (GNU sed) via perl
+update_cargo_version() {
+    local file="$1"
+    if [[ -f "$file" ]]; then
+        perl -i -pe 'if (!$done && /^version = "/) { s/"[0-9.]+"/"'"$NEW_VERSION"'"/; $done=1 }' "$file"
+        success "Updated $file"
+    else
+        error "$file not found!"
+    fi
+}
+
 # Update src-tauri/Cargo.toml
-CARGO_TOML="src-tauri/Cargo.toml"
-if [[ -f "$CARGO_TOML" ]]; then
-    sed -i "0,/^version = \"[0-9.]*\"/{s/^version = \"[0-9.]*\"/version = \"$NEW_VERSION\"/}" "$CARGO_TOML"
-    success "Updated $CARGO_TOML"
-else
-    error "$CARGO_TOML not found!"
-fi
+update_cargo_version "src-tauri/Cargo.toml"
 
 # Update Cargo.lock via cargo update (syncs all workspace crates)
 info "Syncing Cargo.lock..."
@@ -160,31 +166,23 @@ fi
 # Update src-tauri/tauri.conf.json
 TAURI_CONF="src-tauri/tauri.conf.json"
 if [[ -f "$TAURI_CONF" ]]; then
-    sed -i "s/\"version\": \"[0-9.]*\"/\"version\": \"$NEW_VERSION\"/" "$TAURI_CONF"
+    perl -i -pe 's/"version": "[0-9.]+"/"version": "'"$NEW_VERSION"'"/' "$TAURI_CONF"
     success "Updated $TAURI_CONF"
 
     # Always update bundle identifier to full version so every build is a distinct
     # macOS app — no two versions ever share a CFBundleIdentifier.
     NEW_IDENTIFIER="com.agentmuxhq.agentmux.v$(echo "$NEW_VERSION" | tr '.' '-')"
-    sed -i "s|\"identifier\": \"com\.agentmuxhq\.agentmux[^\"]*\"|\"identifier\": \"${NEW_IDENTIFIER}\"|" "$TAURI_CONF"
+    perl -i -pe 's|"identifier": "com\.agentmuxhq\.agentmux[^"]*"|"identifier": "'"$NEW_IDENTIFIER"'"|' "$TAURI_CONF"
     success "Updated bundle identifier to $NEW_IDENTIFIER"
 else
     error "$TAURI_CONF not found!"
 fi
 
 # Update agentmuxsrv-rs/Cargo.toml version
-AGENTMUXSRV_CARGO="agentmuxsrv-rs/Cargo.toml"
-if [[ -f "$AGENTMUXSRV_CARGO" ]]; then
-    sed -i "0,/^version = \"[0-9.]*\"/{s/^version = \"[0-9.]*\"/version = \"$NEW_VERSION\"/}" "$AGENTMUXSRV_CARGO"
-    success "Updated $AGENTMUXSRV_CARGO"
-fi
+update_cargo_version "agentmuxsrv-rs/Cargo.toml"
 
 # Update wsh-rs/Cargo.toml version
-WSH_CARGO="wsh-rs/Cargo.toml"
-if [[ -f "$WSH_CARGO" ]]; then
-    sed -i "0,/^version = \"[0-9.]*\"/{s/^version = \"[0-9.]*\"/version = \"$NEW_VERSION\"/}" "$WSH_CARGO"
-    success "Updated $WSH_CARGO"
-fi
+update_cargo_version "wsh-rs/Cargo.toml"
 
 # Determine agent name
 if [[ -z "$AGENT" ]]; then
@@ -204,17 +202,12 @@ VERSION_HISTORY="VERSION_HISTORY.md"
 
 if [[ -f "$VERSION_HISTORY" ]]; then
     # Update current version at top
-    sed -i "s/Current Version: [0-9.]*\(-fork\)\?/Current Version: $NEW_VERSION-fork/" "$VERSION_HISTORY"
+    perl -i -pe 's/Current Version: [0-9.]+(-fork)?/Current Version: '"$NEW_VERSION"'-fork/' "$VERSION_HISTORY"
 
-    # Add new entry to table
+    # Add new entry after the separator row (---|---) that follows the table header
     CHANGE_MSG="${MESSAGE:-Version bump}"
     NEW_ENTRY="| $NEW_VERSION-fork | v0.12.0 | $TODAY | $AGENT | $CHANGE_MSG |"
-
-    # Find the table header and insert after it
-    sed -i "/| Fork Version | Upstream Base | Date | Agent | Changes |/,/|[-|]*|/ {
-        /|[-|]*|/ a\\
-$NEW_ENTRY
-    }" "$VERSION_HISTORY"
+    perl -i -pe 'print "'"$NEW_ENTRY"'\n" if /^\|[-| ]+\|$/ && !$done++' "$VERSION_HISTORY"
 
     success "Updated VERSION_HISTORY.md"
 else
