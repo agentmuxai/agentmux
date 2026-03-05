@@ -105,6 +105,9 @@ pub fn run() {
             commands::providers::clear_provider_auth,
             commands::providers::get_provider_auth_status,
             commands::providers::check_cli_auth_status,
+            // CLI installer commands
+            commands::cli_installer::install_cli,
+            commands::cli_installer::get_cli_path,
         ])
         // Application setup
         .setup(|app| {
