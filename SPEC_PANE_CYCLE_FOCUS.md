@@ -28,9 +28,24 @@ For a 2x2 grid:                For a 3-pane layout:
 Tab: 1→2→3→4→1...              Tab: 1→2→3→1...
 ```
 
+For larger grids, the spiral peels the outer ring first, then recurses inward:
+
+```
+5x3 grid — Tab spirals inward:
+┌────┬────┬────┬────┬────┐
+│  1 │  2 │  3 │  4 │  5 │   ← top row L→R
+├────┼────┼────┼────┼────┤
+│ 14 │ 11 │ 12 │ 13 │  6 │   ← right col T→B (6), inner ring (11-14)
+├────┼────┼────┼────┼────┤
+│ 10 │  9 │  8 │  7 │    │   ← bottom row R→L, left col B→T
+└────┴────┴────┴────┴────┘
+Outer ring: 1→2→3→4→5→6→7→8→9→10
+Inner ring: 11→12→13→14
+```
+
 ### `Ctrl+Tab` — Spiral Outward (Counter-Clockwise)
 
-Reverses the spiral order.
+Reverses the spiral order — moves from center toward edges.
 
 ### Focus Guard
 
