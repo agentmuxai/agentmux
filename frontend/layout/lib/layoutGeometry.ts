@@ -268,6 +268,77 @@ export function getBoundingRect(model: LayoutModel): Dimensions {
 }
 
 /**
+ * Compute a clockwise spiral ordering of leaf nodes based on their screen positions.
+ * Processes outermost panes first (clockwise), then recurses inward.
+ * For Tab cycling: forward = spiral inward, backward = spiral outward.
+ */
+export function computeSpiralOrder(
+    leafOrder: LeafOrderEntry[],
+    additionalProps: Record<string, LayoutNodeAdditionalProps>
+): LeafOrderEntry[] {
+    if (leafOrder.length <= 2) return [...leafOrder];
+
+    const entries = leafOrder
+        .map((entry) => ({
+            ...entry,
+            rect: additionalProps[entry.nodeid]?.rect,
+        }))
+        .filter((e) => e.rect);
+
+    if (entries.length <= 2) return entries.map(({ nodeid, blockid }) => ({ nodeid, blockid }));
+
+    const result: LeafOrderEntry[] = [];
+    const remaining = [...entries];
+
+    while (remaining.length > 0) {
+        if (remaining.length <= 2) {
+            result.push(...remaining.map(({ nodeid, blockid }) => ({ nodeid, blockid })));
+            break;
+        }
+
+        const epsilon = 2;
+        const minLeft = Math.min(...remaining.map((e) => e.rect.left));
+        const maxRight = Math.max(...remaining.map((e) => e.rect.left + e.rect.width));
+        const minTop = Math.min(...remaining.map((e) => e.rect.top));
+        const maxBottom = Math.max(...remaining.map((e) => e.rect.top + e.rect.height));
+
+        const outer = remaining.filter(
+            (e) =>
+                e.rect.left <= minLeft + epsilon ||
+                e.rect.left + e.rect.width >= maxRight - epsilon ||
+                e.rect.top <= minTop + epsilon ||
+                e.rect.top + e.rect.height >= maxBottom - epsilon
+        );
+
+        const toSort = outer.length === 0 || outer.length === remaining.length ? remaining : outer;
+        const cx = (minLeft + maxRight) / 2;
+        const cy = (minTop + maxBottom) / 2;
+
+        toSort.sort((a, b) => {
+            const ax = a.rect.left + a.rect.width / 2;
+            const ay = a.rect.top + a.rect.height / 2;
+            const bx = b.rect.left + b.rect.width / 2;
+            const by = b.rect.top + b.rect.height / 2;
+            // atan2 gives angle from center; shift so top-left (~ -PI) starts at 0
+            const angleA = (Math.atan2(ay - cy, ax - cx) + Math.PI * 2) % (Math.PI * 2);
+            const angleB = (Math.atan2(by - cy, bx - cx) + Math.PI * 2) % (Math.PI * 2);
+            return angleA - angleB;
+        });
+
+        if (outer.length === 0 || outer.length === remaining.length) {
+            result.push(...remaining.map(({ nodeid, blockid }) => ({ nodeid, blockid })));
+            break;
+        }
+
+        result.push(...outer.map(({ nodeid, blockid }) => ({ nodeid, blockid })));
+        const outerIds = new Set(outer.map((e) => e.nodeid));
+        remaining.splice(0, remaining.length, ...remaining.filter((e) => !outerIds.has(e.nodeid)));
+    }
+
+    return result;
+}
+
+/**
  * Compute sorted leaf order from leaf nodes and their additional properties.
  * @param leafs The leaf nodes.
  * @param additionalProps The additional properties for all nodes.
