@@ -140,7 +140,7 @@ tasks:
             - task: build:backend
             - task: tauri:copy-sidecars
             - task: copy:schema
-            - bash -c 'source "$HOME/.cargo/env" 2>/dev/null; PATH="$HOME/.cargo/bin:/opt/homebrew/opt/node@20/bin:/opt/homebrew/bin:/usr/local/bin:$PATH" npx tauri build --bundles dmg,app {{.CLI_ARGS}}'
+            - bash -c 'source "$HOME/.cargo/env" 2>/dev/null; PATH="$HOME/.cargo/bin:/opt/homebrew/opt/node@20/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$PATH" npx tauri build --bundles dmg,app {{.CLI_ARGS}}'
         deps:
             - clean
             - npm:install
