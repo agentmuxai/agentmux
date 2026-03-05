@@ -7,7 +7,6 @@ import { atoms } from "@/store/global";
 import { useAtomValue } from "jotai";
 import { memo, useCallback, useRef } from "react";
 import { createTabBarMenu } from "@/app/menu/base-menus";
-import { WindowControls } from "@/app/window/window-controls";
 import { SystemStatus } from "@/app/window/system-status";
 import "./window-header.scss";
 
@@ -40,8 +39,6 @@ const WindowHeader = memo(({ workspace }: WindowHeaderProps) => {
             onContextMenu={handleContextMenu}
         >
             <WindowDrag ref={draggerLeftRef} className="left" />
-
-            <WindowControls />
 
             <WindowDrag className="middle" />
 
