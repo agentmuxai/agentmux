@@ -31,11 +31,6 @@ pub fn set_keyboard_chord_mode() {
 }
 
 #[tauri::command]
-pub fn register_global_webview_keys(keys: Vec<String>) {
-    tracing::debug!("stub: register_global_webview_keys keys={:?}", keys);
-}
-
-#[tauri::command]
 pub fn create_workspace() {
     tracing::debug!("stub: create_workspace");
 }

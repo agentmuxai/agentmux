@@ -28,16 +28,13 @@ pub fn run() {
     let builder = tauri::Builder::default()
         // Plugins
         .plugin(tauri_plugin_shell::init())
-        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_clipboard_manager::init())
-        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(tauri_plugin_window_state::Builder::default().build())
-        .plugin(tauri_plugin_websocket::init())
         // Managed state
         .manage(state::AppState::default())
         // Commands (IPC handlers replacing Electron's ipcMain)
@@ -86,7 +83,6 @@ pub fn run() {
             commands::stubs::quicklook,
             commands::stubs::update_wco,
             commands::stubs::set_keyboard_chord_mode,
-            commands::stubs::register_global_webview_keys,
             commands::stubs::create_workspace,
             commands::stubs::switch_workspace,
             commands::stubs::delete_workspace,

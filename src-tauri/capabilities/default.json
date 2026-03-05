@@ -35,10 +35,8 @@
         { "name": "binaries/wsh", "sidecar": true }
       ]
     },
-    "dialog:default",
     "notification:default",
     "clipboard-manager:default",
-    "global-shortcut:default",
     "fs:default",
     {
       "identifier": "fs:allow-read-file",
@@ -51,7 +49,6 @@
     "opener:default",
     "process:default",
     "store:default",
-    "window-state:default",
-    "websocket:default"
+    "window-state:default"
   ]
 }
