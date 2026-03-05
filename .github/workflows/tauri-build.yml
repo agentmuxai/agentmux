@@ -2,9 +2,6 @@ name: Build Tauri
 
 on:
   workflow_dispatch:
-  push:
-    tags:
-      - 'v*'
 
 jobs:
   build-tauri:
