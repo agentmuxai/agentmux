@@ -145,6 +145,11 @@
         &.right {
             flex-grow: 1;
         }
+
+        &.middle {
+            flex-grow: 1;
+            width: unset;
+        }
     }
 
     // Customize scrollbar styles

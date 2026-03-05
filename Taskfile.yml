@@ -133,6 +133,7 @@ tasks:
         cmds:
             - task: build:backend
             - task: tauri:copy-sidecars
+            - task: copy:schema
             - npx tauri build --bundles dmg,app {{.CLI_ARGS}}
         deps:
             - clean
