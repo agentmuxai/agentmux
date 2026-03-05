@@ -277,53 +277,104 @@ pub struct CliAuthStatus {
     pub subscription_type: Option<String>,
 }
 
-/// Check CLI authentication status by running `<cli> auth status --json`.
+/// Check CLI authentication status by running the provider's auth check command.
 ///
-/// This runs the provider's own auth check command (e.g. `claude auth status --json`)
-/// and parses the JSON output. Returns a structured result indicating whether
-/// the user is logged in and with what method.
+/// Accepts an optional `cli_path` for locally-installed CLIs (from ~/.agentmux/cli/).
+/// Falls back to the provider name on system PATH if no cli_path is given.
+///
+/// Provider-specific parsing:
+/// - Claude: `<cli> auth status --json` → parse JSON (camelCase fields)
+/// - Codex: `<cli> login status` → check exit code
+/// - Gemini: `<cli> auth status` → check exit code
 #[tauri::command]
-pub async fn check_cli_auth_status(provider: String) -> Result<CliAuthStatus, String> {
-    let cli_name = match provider.as_str() {
-        "claude" => "claude",
-        "gemini" => "gemini",
-        "codex" => "codex",
-        _ => return Err(format!("Unknown provider: {provider}")),
-    };
-
-    let result = tokio::task::spawn_blocking(move || {
-        let output = std::process::Command::new(cli_name)
-            .args(["auth", "status", "--json"])
-            .output()
-            .map_err(|e| format!("Failed to run `{cli_name} auth status`: {e}"))?;
-
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let trimmed = stdout.trim();
-
-        if trimmed.is_empty() {
-            return Ok(CliAuthStatus {
-                logged_in: false,
-                auth_method: None,
-                api_provider: None,
-                email: None,
-                subscription_type: None,
-            });
+pub async fn check_cli_auth_status(
+    provider: String,
+    cli_path: Option<String>,
+) -> Result<CliAuthStatus, String> {
+    let cli_cmd = cli_path.unwrap_or_else(|| {
+        match provider.as_str() {
+            "claude" => "claude".to_string(),
+            "gemini" => "gemini".to_string(),
+            "codex" => "codex".to_string(),
+            _ => provider.clone(),
         }
+    });
 
-        // Parse the JSON output — Claude uses camelCase field names
-        let json: serde_json::Value = serde_json::from_str(trimmed)
-            .map_err(|e| format!("Failed to parse auth status JSON: {e}"))?;
-
-        Ok(CliAuthStatus {
-            logged_in: json.get("loggedIn").and_then(|v| v.as_bool()).unwrap_or(false),
-            auth_method: json.get("authMethod").and_then(|v| v.as_str()).map(|s| s.to_string()),
-            api_provider: json.get("apiProvider").and_then(|v| v.as_str()).map(|s| s.to_string()),
-            email: json.get("email").and_then(|v| v.as_str()).map(|s| s.to_string()),
-            subscription_type: json.get("subscriptionType").and_then(|v| v.as_str()).map(|s| s.to_string()),
-        })
+    let provider_clone = provider.clone();
+    let result = tokio::task::spawn_blocking(move || {
+        match provider_clone.as_str() {
+            "claude" => check_claude_auth(&cli_cmd),
+            "codex" => check_codex_auth(&cli_cmd),
+            "gemini" => check_gemini_auth(&cli_cmd),
+            _ => Err(format!("Unknown provider: {provider_clone}")),
+        }
     })
     .await
     .map_err(|e| format!("Auth check task failed: {e}"))?;
 
     result
+}
+
+/// Claude: `<cli> auth status --json` → parse JSON
+fn check_claude_auth(cli_cmd: &str) -> Result<CliAuthStatus, String> {
+    let output = std::process::Command::new(cli_cmd)
+        .args(["auth", "status", "--json"])
+        .output()
+        .map_err(|e| format!("Failed to run `{cli_cmd} auth status`: {e}"))?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let trimmed = stdout.trim();
+
+    if trimmed.is_empty() {
+        return Ok(CliAuthStatus {
+            logged_in: false,
+            auth_method: None,
+            api_provider: None,
+            email: None,
+            subscription_type: None,
+        });
+    }
+
+    let json: serde_json::Value = serde_json::from_str(trimmed)
+        .map_err(|e| format!("Failed to parse auth status JSON: {e}"))?;
+
+    Ok(CliAuthStatus {
+        logged_in: json.get("loggedIn").and_then(|v| v.as_bool()).unwrap_or(false),
+        auth_method: json.get("authMethod").and_then(|v| v.as_str()).map(|s| s.to_string()),
+        api_provider: json.get("apiProvider").and_then(|v| v.as_str()).map(|s| s.to_string()),
+        email: json.get("email").and_then(|v| v.as_str()).map(|s| s.to_string()),
+        subscription_type: json.get("subscriptionType").and_then(|v| v.as_str()).map(|s| s.to_string()),
+    })
+}
+
+/// Codex: `<cli> login status` → exit code 0 means logged in
+fn check_codex_auth(cli_cmd: &str) -> Result<CliAuthStatus, String> {
+    let output = std::process::Command::new(cli_cmd)
+        .args(["login", "status"])
+        .output()
+        .map_err(|e| format!("Failed to run `{cli_cmd} login status`: {e}"))?;
+
+    Ok(CliAuthStatus {
+        logged_in: output.status.success(),
+        auth_method: if output.status.success() { Some("oauth".to_string()) } else { None },
+        api_provider: None,
+        email: None,
+        subscription_type: None,
+    })
+}
+
+/// Gemini: `<cli> auth status` → exit code 0 means logged in
+fn check_gemini_auth(cli_cmd: &str) -> Result<CliAuthStatus, String> {
+    let output = std::process::Command::new(cli_cmd)
+        .args(["auth", "status"])
+        .output()
+        .map_err(|e| format!("Failed to run `{cli_cmd} auth status`: {e}"))?;
+
+    Ok(CliAuthStatus {
+        logged_in: output.status.success(),
+        auth_method: if output.status.success() { Some("oauth".to_string()) } else { None },
+        api_provider: None,
+        email: None,
+        subscription_type: None,
+    })
 }

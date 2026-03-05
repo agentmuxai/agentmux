@@ -32,6 +32,7 @@ export interface AgentAtoms {
     userInfoAtom: PrimitiveAtom<UserInfo | null>;
     providerConfigAtom: PrimitiveAtom<ProviderConfig | null>;
     sessionIdAtom: PrimitiveAtom<string>;  // CLI session ID from system.init
+    rawOutputAtom: PrimitiveAtom<string>;  // Raw CLI output (when translation is disabled)
 }
 
 /**
@@ -82,6 +83,7 @@ export function createAgentAtoms(agentId: string): AgentAtoms {
         userInfoAtom: atom<UserInfo | null>(null),
         providerConfigAtom: atom<ProviderConfig | null>(null),
         sessionIdAtom: atom<string>(""),
+        rawOutputAtom: atom<string>(""),
     };
 }
 

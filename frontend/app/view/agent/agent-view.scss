@@ -58,6 +58,82 @@
         }
     }
 
+    // === Provider Selection ===
+    .agent-connect-header {
+        font-size: 16px;
+        font-weight: 600;
+        color: var(--main-text-color);
+        margin-bottom: 8px;
+    }
+
+    .agent-provider-buttons {
+        display: flex;
+        gap: 12px;
+    }
+
+    .agent-provider-btn {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 8px;
+        padding: 16px 24px;
+        border: 1px solid var(--border-color);
+        background: color-mix(in srgb, var(--main-text-color) 3%, transparent);
+        border-radius: 8px;
+        cursor: pointer;
+        transition: all 0.15s;
+        color: var(--main-text-color);
+        min-width: 100px;
+
+        &:hover:not(:disabled) {
+            border-color: var(--accent-color);
+            background: color-mix(in srgb, var(--accent-color) 8%, transparent);
+        }
+
+        &:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .agent-provider-icon {
+            font-size: 24px;
+        }
+
+        .agent-provider-name {
+            font-size: 12px;
+            font-weight: 500;
+        }
+    }
+
+    .agent-install-status {
+        font-size: 12px;
+        color: var(--secondary-text-color);
+        animation: pulse 1.5s ease-in-out infinite;
+    }
+
+    .agent-install-error {
+        font-size: 12px;
+        color: var(--error-color);
+        max-width: 400px;
+        text-align: center;
+    }
+
+    @keyframes pulse {
+        0%, 100% { opacity: 0.6; }
+        50% { opacity: 1; }
+    }
+
+    // === Raw Output ===
+    .agent-raw-output {
+        margin: 0;
+        padding: 4px 0;
+        white-space: pre-wrap;
+        word-break: break-word;
+        font-size: var(--termfontsize, 13px);
+        line-height: 1.5;
+        color: var(--main-text-color);
+    }
+
     // === Markdown Block ===
     .agent-markdown-block {
         padding: 4px 8px;
