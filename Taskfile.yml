@@ -3,11 +3,17 @@
 
 version: "3"
 
+# Load machine-local env overrides (gitignored).
+# Use .env to extend PATH with cargo, node, brew, etc.
+# Windows: cargo/node are usually in PATH from their installers — no .env needed.
+# macOS/Linux: create .env with e.g. PATH=/home/user/.cargo/bin:/opt/homebrew/bin:...
+dotenv: [".env"]
+
 vars:
     APP_NAME: "AgentMux"
     BIN_DIR: "bin"
     VERSION:
-        sh: node version.cjs
+        sh: 'PATH="$HOME/.cargo/bin:/opt/homebrew/opt/node@20/bin:/opt/homebrew/bin:/usr/local/bin:$PATH" node version.cjs 2>/dev/null || node version.cjs'
     RM: '{{if eq OS "windows"}}powershell Remove-Item -Force -ErrorAction SilentlyContinue{{else}}rm -f{{end}}'
     RMRF: '{{if eq OS "windows"}}powershell Remove-Item -Force -Recurse -ErrorAction SilentlyContinue{{else}}rm -rf{{end}}'
     DATE: '{{if eq OS "windows"}}powershell Get-Date -UFormat{{else}}date{{end}}'
@@ -202,7 +208,7 @@ tasks:
         internal: true
         platforms: [darwin]
         cmds:
-            - cargo build --release -p agentmuxsrv-rs
+            - bash -c 'source "$HOME/.cargo/env" 2>/dev/null || export PATH="$HOME/.cargo/bin:$PATH"; cargo build --release -p agentmuxsrv-rs'
             - mkdir -p dist/bin
             - cp target/release/agentmuxsrv-rs dist/bin/agentmuxsrv-rs.arm64
             - echo "✓ Built agentmuxsrv-rs for macOS"
@@ -211,7 +217,7 @@ tasks:
         internal: true
         platforms: [linux]
         cmds:
-            - cargo build --release -p agentmuxsrv-rs
+            - bash -c 'source "$HOME/.cargo/env" 2>/dev/null || export PATH="$HOME/.cargo/bin:$PATH"; cargo build --release -p agentmuxsrv-rs'
             - mkdir -p dist/bin
             - cp target/release/agentmuxsrv-rs dist/bin/agentmuxsrv-rs.x64
             - echo "✓ Built agentmuxsrv-rs for Linux"
@@ -250,7 +256,7 @@ tasks:
         internal: true
         platforms: [darwin]
         cmds:
-            - cargo build --release -p wsh-rs
+            - bash -c 'source "$HOME/.cargo/env" 2>/dev/null || export PATH="$HOME/.cargo/bin:$PATH"; cargo build --release -p wsh-rs'
             - mkdir -p dist/bin
             - cp target/release/wsh dist/bin/wsh-{{.VERSION}}-darwin.arm64
             - echo "✓ Built wsh-rs for macOS (dist/bin/wsh-{{.VERSION}}-darwin.arm64)"
@@ -259,7 +265,7 @@ tasks:
         internal: true
         platforms: [linux]
         cmds:
-            - cargo build --release -p wsh-rs
+            - bash -c 'source "$HOME/.cargo/env" 2>/dev/null || export PATH="$HOME/.cargo/bin:$PATH"; cargo build --release -p wsh-rs'
             - mkdir -p dist/bin
             - cp target/release/wsh dist/bin/wsh-{{.VERSION}}-linux.x64
             - echo "✓ Built wsh-rs for Linux (dist/bin/wsh-{{.VERSION}}-linux.x64)"
