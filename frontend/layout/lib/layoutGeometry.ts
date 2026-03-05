@@ -268,6 +268,109 @@ export function getBoundingRect(model: LayoutModel): Dimensions {
 }
 
 /**
+ * Compute a clockwise spiral ordering of leaf nodes based on their screen positions.
+ * Peels the outer ring clockwise (top row L→R, right col T→B, bottom row R→L,
+ * left col B→T), then recurses into the remaining interior panes.
+ *
+ * Tab = spiral inward (forward through this order).
+ * Ctrl+Tab = spiral outward (backward through this order).
+ *
+ * Example for a 5-column, 3-row grid (15 panes):
+ *   ┌───┬───┬───┬───┬───┐
+ *   │ 1 │ 2 │ 3 │ 4 │ 5 │   top row L→R
+ *   ├───┼───┼───┼───┼───┤
+ *   │12 │13 │14 │15 │ 6 │   right col T→B (6), left col B→T (12), inner (13-15)
+ *   ├───┼───┼───┼───┼───┤
+ *   │11 │10 │ 9 │ 8 │ 7 │   bottom row R→L
+ *   └───┴───┴───┴───┴───┘
+ *   Outer ring: 1→2→3→4→5→6→7→8→9→10→11→12, Inner: 13→14→15
+ */
+export function computeSpiralOrder(
+    leafOrder: LeafOrderEntry[],
+    additionalProps: Record<string, LayoutNodeAdditionalProps>
+): LeafOrderEntry[] {
+    if (leafOrder.length <= 1) return [...leafOrder];
+
+    type EntryWithRect = LeafOrderEntry & { rect: Dimensions };
+    const entries: EntryWithRect[] = leafOrder
+        .map((entry) => ({
+            ...entry,
+            rect: additionalProps[entry.nodeid]?.rect,
+        }))
+        .filter((e): e is EntryWithRect => e.rect != null);
+
+    if (entries.length <= 1) return entries.map(({ nodeid, blockid }) => ({ nodeid, blockid }));
+
+    const result: LeafOrderEntry[] = [];
+    const remaining = [...entries];
+    const epsilon = 2;
+
+    while (remaining.length > 0) {
+        if (remaining.length === 1) {
+            result.push({ nodeid: remaining[0].nodeid, blockid: remaining[0].blockid });
+            break;
+        }
+
+        const minLeft = Math.min(...remaining.map((e) => e.rect.left));
+        const maxRight = Math.max(...remaining.map((e) => e.rect.left + e.rect.width));
+        const minTop = Math.min(...remaining.map((e) => e.rect.top));
+        const maxBottom = Math.max(...remaining.map((e) => e.rect.top + e.rect.height));
+
+        // Classify panes by which edge(s) of the bounding box they touch
+        const onTop = remaining.filter((e) => e.rect.top <= minTop + epsilon);
+        const onRight = remaining.filter((e) => e.rect.left + e.rect.width >= maxRight - epsilon);
+        const onBottom = remaining.filter((e) => e.rect.top + e.rect.height >= maxBottom - epsilon);
+        const onLeft = remaining.filter((e) => e.rect.left <= minLeft + epsilon);
+
+        // Build the outer ring in clockwise order, deduplicating
+        const seen = new Set<string>();
+        const ring: EntryWithRect[] = [];
+        const addToRing = (entries: EntryWithRect[]) => {
+            for (const e of entries) {
+                if (!seen.has(e.nodeid)) {
+                    seen.add(e.nodeid);
+                    ring.push(e);
+                }
+            }
+        };
+
+        // Top edge: left to right
+        onTop.sort((a, b) => a.rect.left - b.rect.left);
+        addToRing(onTop);
+
+        // Right edge: top to bottom (skip corner already added)
+        onRight.sort((a, b) => a.rect.top - b.rect.top);
+        addToRing(onRight);
+
+        // Bottom edge: right to left (skip corner already added)
+        onBottom.sort((a, b) => b.rect.left - a.rect.left);
+        addToRing(onBottom);
+
+        // Left edge: bottom to top (skip corners already added)
+        onLeft.sort((a, b) => b.rect.top - a.rect.top);
+        addToRing(onLeft);
+
+        if (ring.length === 0) {
+            // Shouldn't happen, but safety: dump everything and stop
+            result.push(...remaining.map(({ nodeid, blockid }) => ({ nodeid, blockid })));
+            break;
+        }
+
+        result.push(...ring.map(({ nodeid, blockid }) => ({ nodeid, blockid })));
+
+        if (ring.length === remaining.length) {
+            // All panes were in the outer ring — we're done
+            break;
+        }
+
+        // Remove outer ring, continue with interior panes
+        remaining.splice(0, remaining.length, ...remaining.filter((e) => !seen.has(e.nodeid)));
+    }
+
+    return result;
+}
+
+/**
  * Compute sorted leaf order from leaf nodes and their additional properties.
  * @param leafs The leaf nodes.
  * @param additionalProps The additional properties for all nodes.
