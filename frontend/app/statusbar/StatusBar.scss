@@ -1,0 +1,81 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+.status-bar {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    height: calc(22px * var(--zoomfactor-inv));
+    flex-shrink: 0;
+    font-size: calc(11px * var(--zoomfactor));
+    background: rgba(0, 0, 0, 0.35);
+    border-top: 1px solid var(--border-color);
+    color: var(--secondary-text-color);
+    user-select: none;
+    -webkit-app-region: no-drag;
+    z-index: calc(var(--zindex-modal-wrapper) - 1);
+    padding: 0 6px;
+    gap: 0;
+
+    .status-bar-left {
+        display: flex;
+        flex-direction: row;
+        align-items: center;
+        gap: 4px;
+    }
+
+    .status-bar-center {
+        flex-grow: 1;
+    }
+
+    .status-bar-right {
+        display: flex;
+        flex-direction: row;
+        align-items: center;
+        gap: 4px;
+    }
+
+    .status-bar-item {
+        display: flex;
+        flex-direction: row;
+        align-items: center;
+        gap: 3px;
+        padding: 0 5px;
+        height: 100%;
+        white-space: nowrap;
+        border-radius: 2px;
+
+        &.clickable {
+            cursor: pointer;
+
+            &:hover {
+                background: var(--hover-bg-color);
+            }
+        }
+
+        .status-icon {
+            font-size: 9px;
+            line-height: 1;
+        }
+
+        .status-icon-spin {
+            display: inline-block;
+            animation: status-icon-spin 1.2s linear infinite;
+        }
+    }
+
+    .status-version {
+        opacity: 0.4;
+        font-size: calc(10px * var(--zoomfactor));
+        padding: 0 5px;
+    }
+}
+
+@keyframes status-icon-spin {
+    from {
+        transform: rotate(0deg);
+    }
+    to {
+        transform: rotate(360deg);
+    }
+}
