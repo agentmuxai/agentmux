@@ -74,7 +74,6 @@ declare global {
         getHostName: () => string; // get-host-name
         getDataDir: () => string; // get-data-dir
         getConfigDir: () => string; // get-config-dir
-        getWebviewPreload: () => string; // get-webview-preload
         getAboutModalDetails: () => AboutModalDetails; // get-about-modal-details
         getBackendInfo: () => Promise<{ pid?: number; started_at?: string; web_endpoint?: string; version: string }>; // get-backend-info
         getDocsiteUrl: () => string; // get-docsite-url
@@ -95,8 +94,6 @@ declare global {
         onMenuItemAbout: (callback: () => void) => void; // menu-item-about
         updateWindowControlsOverlay: (rect: Dimensions) => void; // update-window-controls-overlay
         onReinjectKey: (callback: (waveEvent: WaveKeyboardEvent) => void) => void; // reinject-key
-        setWebviewFocus: (focusedId: number) => void; // webview-focus, focusedId is the getWebContentsId of the webview
-        registerGlobalWebviewKeys: (keys: string[]) => void; // register-global-webview-keys
         onControlShiftStateUpdate: (callback: (state: boolean) => void) => void; // control-shift-state-update
         // Window management (multi-window support)
         openNewWindow: () => Promise<string>; // open-new-window, returns window label
@@ -123,7 +120,6 @@ declare global {
         openNativePath(filePath: string): void; // open-native-path
         captureScreenshot(rect: { x: number; y: number; width: number; height: number }): Promise<string>; // capture-screenshot
         setKeyboardChordMode: () => void; // set-keyboard-chord-mode
-        clearWebviewStorage: (webContentsId: number) => Promise<void>; // clear-webview-storage
         setWaveAIOpen: (isOpen: boolean) => void; // set-waveai-open
         // Claude Code auth commands
         openClaudeCodeAuth: () => Promise<void>; // open-claude-code-auth

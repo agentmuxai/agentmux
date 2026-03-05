@@ -690,11 +690,6 @@ function registerGlobalKeys() {
         return true;
     });
 
-    const allKeys = Array.from(globalKeyMap.keys());
-    // special case keys, handled by web view
-    allKeys.push("Cmd:l", "Cmd:r", "Cmd:ArrowRight", "Cmd:ArrowLeft", "Cmd:o");
-    getApi().registerGlobalWebviewKeys(allKeys);
-
     const splitBlockKeys = new Map<string, KeyHandler>();
     splitBlockKeys.set("ArrowUp", () => {
         handleSplitVertical("before");

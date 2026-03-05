@@ -145,19 +145,6 @@ pub struct SettingsType {
     #[serde(rename = "editor:fontsize", default, skip_serializing_if = "is_zero_f64")]
     pub editor_font_size: f64,
 
-    // -- Web settings --
-    #[serde(rename = "web:*", default, skip_serializing_if = "is_false")]
-    pub web_clear: bool,
-
-    #[serde(rename = "web:openlinksinternally", default, skip_serializing_if = "is_false")]
-    pub web_open_links_internally: bool,
-
-    #[serde(rename = "web:defaulturl", default, skip_serializing_if = "String::is_empty")]
-    pub web_default_url: String,
-
-    #[serde(rename = "web:defaultsearch", default, skip_serializing_if = "String::is_empty")]
-    pub web_default_search: String,
-
     // -- Block header settings --
     #[serde(rename = "blockheader:*", default, skip_serializing_if = "is_false")]
     pub block_header_clear: bool,

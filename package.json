@@ -6,7 +6,7 @@
   "productName": "AgentMux",
   "description": "Open-Source AI-Native Terminal Built for Seamless Workflows",
   "license": "Apache-2.0",
-  "version": "0.31.44",
+  "version": "0.31.45",
   "homepage": "https://github.com/agentmuxhq/agentmux",
   "build": {
     "appId": "com.agentmuxhq.agentmux"
@@ -131,7 +131,6 @@
     "react-hook-form": "^7.70.0",
     "react-markdown": "^9.0.3",
     "react-resizable-panels": "^3.0.6",
-    "react-zoom-pan-pinch": "^3.7.0",
     "recharts": "^2.15.4",
     "rehype-highlight": "^7.0.2",
     "rehype-raw": "^7.0.0",

@@ -70,7 +70,6 @@ declare global {
         shellprocstatus?: string;
         shellprocconnname?: string;
         shellprocexitcode: number;
-        tsunamiport?: number;
     };
 
     // waveobj.BlockDef
@@ -668,17 +667,8 @@ declare global {
         "term:allowbracketedpaste"?: boolean;
         "term:shiftenternewline"?: boolean;
         "term:conndebug"?: string;
-        "web:zoom"?: number;
-        "web:hidenav"?: boolean;
-        "web:partition"?: string;
-        "web:useragenttype"?: string;
         "markdown:fontsize"?: number;
         "markdown:fixedfontsize"?: number;
-        "tsunami:*"?: boolean;
-        "tsunami:sdkreplacepath"?: string;
-        "tsunami:apppath"?: string;
-        "tsunami:scaffoldpath"?: string;
-        "tsunami:env"?: {[key: string]: string};
         "vdom:*"?: boolean;
         "vdom:initialized"?: boolean;
         "vdom:correlationid"?: string;
@@ -707,9 +697,6 @@ declare global {
 
     // waveobj.ObjRTInfo
     type ObjRTInfo = {
-        "tsunami:title"?: string;
-        "tsunami:shortdesc"?: string;
-        "tsunami:schemas"?: any;
         "cmd:hascurcwd"?: boolean;
         "shell:state"?: string;
         "shell:type"?: string;
@@ -832,10 +819,6 @@ declare global {
         "editor:stickyscrollenabled"?: boolean;
         "editor:wordwrap"?: boolean;
         "editor:fontsize"?: number;
-        "web:*"?: boolean;
-        "web:openlinksinternally"?: boolean;
-        "web:defaulturl"?: string;
-        "web:defaultsearch"?: string;
         "blockheader:*"?: boolean;
         "blockheader:showblockids"?: boolean;
         "autoupdate:*"?: boolean;
