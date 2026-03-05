@@ -4,6 +4,8 @@
 // Agent widget styling - living document interface for agent monitoring
 
 .agent-view {
+    container-type: inline-size;
+    container-name: agent-pane;
     background: var(--main-bg-color);
     color: var(--main-text-color);
     font-family: var(--termfontfamily, "JetBrains Mono", "Fira Code", "Consolas", monospace);
@@ -68,7 +70,9 @@
 
     .agent-provider-buttons {
         display: flex;
+        flex-wrap: wrap;
         gap: 12px;
+        justify-content: center;
     }
 
     .agent-provider-btn {
@@ -96,7 +100,7 @@
         }
 
         .agent-provider-icon {
-            font-size: 24px;
+            font-size: 28px;
         }
 
         .agent-provider-name {
@@ -1124,6 +1128,90 @@
                 color: var(--secondary-text-color);
                 opacity: 0.75;
             }
+        }
+    }
+
+    // === Responsive Container Queries ===
+
+    // Medium pane (250-399px)
+    @container agent-pane (max-width: 399px) {
+        .agent-provider-btn {
+            padding: 12px 16px;
+            min-width: 72px;
+
+            .agent-provider-icon {
+                font-size: 22px;
+            }
+
+            .agent-provider-name {
+                font-size: 11px;
+            }
+        }
+
+        .agent-connect-header {
+            font-size: 14px;
+        }
+    }
+
+    // Narrow pane (150-249px): switch to column, inline layout
+    @container agent-pane (max-width: 249px) {
+        .agent-provider-buttons {
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .agent-provider-btn {
+            flex-direction: row;
+            justify-content: flex-start;
+            padding: 10px 12px;
+            min-width: unset;
+            width: 100%;
+            gap: 10px;
+
+            .agent-provider-icon {
+                font-size: 20px;
+            }
+
+            .agent-provider-name {
+                font-size: 12px;
+            }
+        }
+
+        .agent-document {
+            padding: 8px;
+        }
+    }
+
+    // Very narrow pane (< 150px): icon only
+    @container agent-pane (max-width: 149px) {
+        .agent-provider-buttons {
+            flex-direction: column;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .agent-provider-btn {
+            flex-direction: column;
+            padding: 8px;
+            width: auto;
+            min-width: 48px;
+
+            .agent-provider-icon {
+                font-size: 16px;
+            }
+
+            .agent-provider-name {
+                display: none;
+            }
+        }
+
+        .agent-connect-header {
+            font-size: 12px;
+        }
+
+        .agent-install-status,
+        .agent-install-error {
+            font-size: 10px;
         }
     }
 
