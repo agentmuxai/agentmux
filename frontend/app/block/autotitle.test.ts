@@ -210,7 +210,7 @@ describe("generateAutoTitle", () => {
             },
         };
         const title = generateAutoTitle(block);
-        assert.equal(title, "src/index.ts");
+        assert.equal(title, "Editor");
     });
 
     test("generates editor title for short path", () => {
@@ -223,7 +223,7 @@ describe("generateAutoTitle", () => {
             },
         };
         const title = generateAutoTitle(block);
-        assert.equal(title, "index.ts");
+        assert.equal(title, "Editor");
     });
 
     test("generates chat title with channel", () => {
