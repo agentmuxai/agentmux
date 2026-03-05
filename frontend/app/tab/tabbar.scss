@@ -21,9 +21,19 @@
         overflow-x: auto;
         overflow-y: hidden;
         scrollbar-width: none; // Firefox
+        position: relative; // needed for absolutely-positioned .tab children
 
         &::-webkit-scrollbar {
             display: none; // Chrome/Safari
+        }
+
+        // Override tab.scss absolute positioning — render tabs in flex flow
+        .tab {
+            position: relative;
+            opacity: 1;
+            flex-shrink: 0;
+            left: unset;
+            transform: none;
         }
     }
 
