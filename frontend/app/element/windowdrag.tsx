@@ -13,8 +13,25 @@ interface WindowDragProps {
 }
 
 const WindowDrag = forwardRef<HTMLDivElement, WindowDragProps>(({ children, className, style }, ref) => {
+    const handleMouseDown = async (e: React.MouseEvent) => {
+        if (e.button !== 0) return;
+        e.preventDefault();
+        try {
+            const { getCurrentWindow } = await import("@tauri-apps/api/window");
+            await getCurrentWindow().startDragging();
+        } catch {
+            // fallback to CSS -webkit-app-region:drag
+        }
+    };
+
     return (
-        <div ref={ref} className={clsx(`window-drag`, className)} style={style}>
+        <div
+            ref={ref}
+            className={clsx(`window-drag`, className)}
+            style={style}
+            data-tauri-drag-region
+            onMouseDown={handleMouseDown}
+        >
             {children}
         </div>
     );

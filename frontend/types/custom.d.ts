@@ -30,6 +30,7 @@ declare global {
         reinitVersion: jotai.PrimitiveAtom<number>;
         isTermMultiInput: jotai.PrimitiveAtom<boolean>;
         waveAIRateLimitInfoAtom: jotai.PrimitiveAtom<RateLimitInfo>;
+        backendStatusAtom: jotai.PrimitiveAtom<"connecting" | "running" | "crashed">;
     };
 
     type WritableWaveObjectAtom<T extends WaveObj> = jotai.WritableAtom<T, [value: T], void>;

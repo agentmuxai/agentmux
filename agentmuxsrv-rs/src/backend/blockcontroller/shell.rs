@@ -398,6 +398,11 @@ impl Controller for ShellController {
             }
 
             // Inject AgentMux identity env vars into the PTY environment
+            #[cfg(not(windows))]
+            {
+                c.env("TERM", "xterm-256color");
+                c.env("COLORTERM", "truecolor");
+            }
             c.env("TERM_PROGRAM", "agentmux");
             c.env("AGENTMUX_BLOCKID", &self.block_id);
             c.env("AGENTMUX_TABID", &self.tab_id);
