@@ -138,6 +138,11 @@ export function buildTauriApi(): AppApi {
         getAboutModalDetails: () => {
             return cachedValues!.aboutDetails;
         },
+        getBackendInfo: async () => {
+            return await invoke<{ pid?: number; started_at?: string; web_endpoint?: string; version: string }>(
+                "get_backend_info"
+            );
+        },
 
         // --- Context menu ---
         showContextMenu: (workspaceId: string, menu?: NativeContextMenuItem[]) => {
