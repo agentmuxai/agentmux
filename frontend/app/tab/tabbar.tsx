@@ -4,7 +4,7 @@
 import { atoms, createTab, setActiveTab } from "@/store/global";
 import { fireAndForget } from "@/util/util";
 import { useAtomValue } from "jotai";
-import { memo, useCallback, useRef } from "react";
+import { memo, useCallback } from "react";
 import { WorkspaceService } from "../store/services";
 import { deleteLayoutModelForTab } from "@/layout/index";
 import { Tab } from "./tab";
@@ -16,7 +16,6 @@ interface TabBarProps {
 
 const TabBar = memo(({ workspace }: TabBarProps) => {
     const activeTabId = useAtomValue(atoms.activeTabId);
-    const newTabRef = useRef<string | null>(null);
 
     const pinnedTabIds = workspace?.pinnedtabids ?? [];
     const regularTabIds = workspace?.tabids ?? [];
@@ -101,7 +100,7 @@ const TabBar = memo(({ workspace }: TabBarProps) => {
                             isBeforeActive={isBeforeActive}
                             isDragging={false}
                             tabWidth={130}
-                            isNew={tabId === newTabRef.current}
+                            isNew={false}
                             isPinned={false}
                             onSelect={() => handleSelect(tabId)}
                             onClose={() => handleClose(tabId)}
