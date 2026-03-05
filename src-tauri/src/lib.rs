@@ -165,6 +165,16 @@ pub fn run() {
                 // On Linux: attach native GTK drag handler to this window.
                 #[cfg(target_os = "linux")]
                 drag::attach_drag_handler(&window);
+
+                // On Linux: center the window if no saved position exists.
+                // tauri_plugin_window_state auto-restores saved state at window creation.
+                // If no state was saved yet, the window lands at (0,0) on Linux because
+                // X11 has no default centering behavior (unlike macOS/Windows). So if
+                // the window is still at the origin after plugin restoration, center it.
+                #[cfg(target_os = "linux")]
+                if window.outer_position().map(|p| p.x == 0 && p.y == 0).unwrap_or(true) {
+                    let _ = window.center();
+                }
             }
 
             // Register deep link handler for OAuth callback (agentmux://auth?code=...)
