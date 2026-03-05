@@ -361,8 +361,14 @@ export function buildTauriApi(): AppApi {
         getProviderAuthStatus: async (provider: string) => {
             return await invoke<ProviderAuthStatus>("get_provider_auth_status", { provider });
         },
-        checkCliAuthStatus: async (provider: string) => {
-            return await invoke<CliAuthStatus>("check_cli_auth_status", { provider });
+        checkCliAuthStatus: async (provider: string, cliPath?: string) => {
+            return await invoke<CliAuthStatus>("check_cli_auth_status", { provider, cliPath: cliPath ?? null });
+        },
+        installCli: async (provider: string) => {
+            return await invoke<CliInstallResult>("install_cli", { provider });
+        },
+        getCliPath: async (provider: string) => {
+            return await invoke<string | null>("get_cli_path", { provider });
         },
 
         listen: async (event: string, callback: (event: any) => void) => {

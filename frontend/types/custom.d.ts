@@ -135,7 +135,9 @@ declare global {
         setProviderAuth: (provider: string, token: string) => Promise<void>;
         clearProviderAuth: (provider: string) => Promise<void>;
         getProviderAuthStatus: (provider: string) => Promise<ProviderAuthStatus>;
-        checkCliAuthStatus: (provider: string) => Promise<CliAuthStatus>;
+        checkCliAuthStatus: (provider: string, cliPath?: string) => Promise<CliAuthStatus>;
+        installCli: (provider: string) => Promise<CliInstallResult>;
+        getCliPath: (provider: string) => Promise<string | null>;
         listen: (event: string, callback: (event: any) => void) => Promise<() => void>; // listen to events
     };
 
@@ -503,6 +505,13 @@ declare global {
         api_provider: string | null;  // "firstParty" | "anthropic" | null
         email: string | null;
         subscription_type: string | null; // "max" | "pro" | "teams" | "enterprise" | null
+    };
+
+    type CliInstallResult = {
+        provider: string;
+        cli_path: string;
+        version: string;
+        already_installed: boolean;
     };
 
     type DraggedFile = {
