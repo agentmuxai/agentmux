@@ -18,7 +18,10 @@ pub async fn open_new_window<R: Runtime>(app: tauri::AppHandle<R>) -> Result<Str
     let version = env!("CARGO_PKG_VERSION");
     let title = format!("AgentMux {}", version);
 
-    let new_window = tauri::WebviewWindowBuilder::new(
+    // On Linux: new windows have UUID labels so tauri_plugin_window_state never
+    // has saved state for them. Center explicitly; macOS/Windows handle this natively.
+    #[cfg(not(target_os = "linux"))]
+    let builder = tauri::WebviewWindowBuilder::new(
         &app,
         &label,
         tauri::WebviewUrl::App("index.html".into()),
@@ -27,9 +30,24 @@ pub async fn open_new_window<R: Runtime>(app: tauri::AppHandle<R>) -> Result<Str
     .inner_size(1200.0, 800.0)
     .min_inner_size(400.0, 300.0)
     .decorations(false)
-    .visible(false) // Start hidden, show after initialization
-    .build()
-    .map_err(|e| format!("Failed to create window: {}", e))?;
+    .visible(false);
+
+    #[cfg(target_os = "linux")]
+    let builder = tauri::WebviewWindowBuilder::new(
+        &app,
+        &label,
+        tauri::WebviewUrl::App("index.html".into()),
+    )
+    .title(&title)
+    .inner_size(1200.0, 800.0)
+    .min_inner_size(400.0, 300.0)
+    .decorations(false)
+    .visible(false)
+    .center();
+
+    let new_window = builder
+        .build()
+        .map_err(|e| format!("Failed to create window: {}", e))?;
 
     // On Linux: attach native GTK drag handler so the header is draggable.
     #[cfg(target_os = "linux")]
