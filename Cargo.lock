@@ -10,9 +10,11 @@ checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
 name = "agentmux"
-version = "0.31.29"
+version = "0.31.38"
 dependencies = [
  "chrono",
+ "glib",
+ "gtk",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
@@ -35,12 +37,13 @@ dependencies = [
  "tracing-subscriber",
  "url",
  "uuid",
+ "webkit2gtk",
  "whoami",
 ]
 
 [[package]]
 name = "agentmuxsrv-rs"
-version = "0.31.29"
+version = "0.31.38"
 dependencies = [
  "async-stream",
  "axum",
@@ -6831,7 +6834,7 @@ dependencies = [
 
 [[package]]
 name = "wsh-rs"
-version = "0.31.29"
+version = "0.31.38"
 dependencies = [
  "base64 0.22.1",
  "clap",

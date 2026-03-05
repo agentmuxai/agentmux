@@ -1,6 +1,6 @@
 [package]
 name = "agentmux"
-version = "0.31.37"
+version = "0.31.38"
 description = "AgentMux - AI-Native Terminal"
 authors = ["AgentMux Corp"]
 edition = "2021"
@@ -40,3 +40,8 @@ tracing-appender = "0.2"
 whoami = "1"
 chrono = "0.4"
 url = "2"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+gtk = "0.18"
+glib = "0.18"
+webkit2gtk = { version = "2.0", features = ["v2_40"] }
