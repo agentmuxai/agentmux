@@ -599,19 +599,13 @@ function registerGlobalKeys() {
         switchBlockInDirection(NavigateDirection.Right);
         return true;
     });
-    globalKeyMap.set("Tab", () => {
-        if (shouldInterceptTabForCycle()) {
-            cyclePaneFocus("forward");
-            return true;
-        }
-        return false;
+    globalKeyMap.set("Ctrl:]", () => {
+        cyclePaneFocus("forward");
+        return true;
     });
-    globalKeyMap.set("Ctrl:Tab", () => {
-        if (shouldInterceptTabForCycle()) {
-            cyclePaneFocus("backward");
-            return true;
-        }
-        return false;
+    globalKeyMap.set("Ctrl:[", () => {
+        cyclePaneFocus("backward");
+        return true;
     });
     globalKeyMap.set("Ctrl:Shift:k", () => {
         const blockId = getFocusedBlockId();
