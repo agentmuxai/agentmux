@@ -1,4 +1,5 @@
 use crate::state::AppState;
+use tauri::Manager;
 
 /// Get the backend WebSocket and HTTP endpoints.
 ///
@@ -55,7 +56,7 @@ pub fn get_backend_info(app: tauri::AppHandle) -> serde_json::Value {
     let current_version = env!("CARGO_PKG_VERSION");
     let version_instance_id = format!("v{}", current_version);
 
-    let config_dir = match app.path().app_config_dir() {
+    let config_dir: std::path::PathBuf = match app.path().app_config_dir() {
         Ok(d) => d,
         Err(_) => return serde_json::json!({ "version": current_version }),
     };
