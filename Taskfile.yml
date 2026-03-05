@@ -528,16 +528,18 @@ tasks:
                 {{end}}
                 echo "Copied binaries for $TRIPLE"
                 {{end}}
-            # Also create bin/ directory with versioned wsh names (backend expects AGENTMUX_APP_PATH/bin/wsh-VERSION-OS.ARCH)
+            # Clear stale wsh binaries then copy only current version (prevents DMG bloat)
             - |
                 {{if eq OS "windows"}}
-                powershell -Command "New-Item -ItemType Directory -Force -Path src-tauri/binaries/bin | Out-Null; Copy-Item dist/bin/wsh-{{.VERSION}}-windows.x64.exe src-tauri/binaries/bin/ -Force; Write-Host 'Copied wsh to bin/ for backend deployment'"
+                powershell -Command "New-Item -ItemType Directory -Force -Path src-tauri/binaries/bin | Out-Null; Remove-Item src-tauri/binaries/bin/wsh-* -Force -ErrorAction SilentlyContinue; Copy-Item dist/bin/wsh-{{.VERSION}}-windows.x64.exe src-tauri/binaries/bin/ -Force; Write-Host 'Copied wsh to bin/ for backend deployment'"
                 {{else if eq OS "darwin"}}
+                rm -f src-tauri/binaries/bin/wsh-*;
                 mkdir -p src-tauri/binaries/bin;
                 cp dist/bin/wsh-{{.VERSION}}-darwin.arm64 src-tauri/binaries/bin/ 2>/dev/null || true;
                 cp dist/bin/wsh-{{.VERSION}}-darwin.x64 src-tauri/binaries/bin/ 2>/dev/null || true;
                 echo "Copied wsh to bin/ for backend deployment"
                 {{else}}
+                rm -f src-tauri/binaries/bin/wsh-*;
                 mkdir -p src-tauri/binaries/bin;
                 cp dist/bin/wsh-{{.VERSION}}-linux.* src-tauri/binaries/bin/ 2>/dev/null || true;
                 echo "Copied wsh to bin/ for backend deployment"
