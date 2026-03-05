@@ -2,6 +2,7 @@ use tauri::Emitter;
 use tauri::Manager;
 use tauri::Runtime;
 
+use crate::drag;
 use crate::state::AppState;
 
 /// Open a new AgentMux window.
@@ -17,7 +18,7 @@ pub async fn open_new_window<R: Runtime>(app: tauri::AppHandle<R>) -> Result<Str
     let version = env!("CARGO_PKG_VERSION");
     let title = format!("AgentMux {}", version);
 
-    tauri::WebviewWindowBuilder::new(
+    let new_window = tauri::WebviewWindowBuilder::new(
         &app,
         &label,
         tauri::WebviewUrl::App("index.html".into()),
@@ -29,6 +30,10 @@ pub async fn open_new_window<R: Runtime>(app: tauri::AppHandle<R>) -> Result<Str
     .visible(false) // Start hidden, show after initialization
     .build()
     .map_err(|e| format!("Failed to create window: {}", e))?;
+
+    // On Linux: attach native GTK drag handler so the header is draggable.
+    #[cfg(target_os = "linux")]
+    drag::attach_drag_handler(&new_window);
 
     // Assign a stable instance number to the new window and notify all windows.
     let state = app.state::<AppState>();

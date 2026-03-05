@@ -1,5 +1,6 @@
 mod commands;
 mod crash;
+mod drag;
 mod heartbeat;
 mod menu;
 mod sidecar;
@@ -158,57 +159,9 @@ pub fn run() {
                     tracing::error!("Failed to set window title: {}", e);
                 }
 
-                // On Linux: attach a native GTK button-press-event handler for window dragging.
-                // The JavaScript startDragging() IPC path passes timestamp=0 to begin_move_drag,
-                // but on Wayland the event serial must be from the actual GDK event. By connecting
-                // at the GTK level we can pass event.time() which GDK maps to the correct serial.
+                // On Linux: attach native GTK drag handler to this window.
                 #[cfg(target_os = "linux")]
-                {
-                    use gtk::prelude::*;
-                    window.with_webview(|webview| {
-                        let webview = webview.inner();
-                        // Walk up to find the gtk::Window (WebView → GtkBox → GtkWindow)
-                        let gtk_win = webview
-                            .parent()
-                            .and_then(|p| p.parent())
-                            .and_then(|w| w.dynamic_cast::<gtk::Window>().ok());
-
-                        // Must explicitly enable BUTTON_PRESS events on the webview widget.
-                        // Without this, GTK never delivers button-press-event to signal handlers.
-                        webview.add_events(
-                            gtk::gdk::EventMask::BUTTON_PRESS_MASK
-                                | gtk::gdk::EventMask::BUTTON1_MOTION_MASK,
-                        );
-
-                        // Header height in logical pixels (matches window-header.scss)
-                        const HEADER_HEIGHT: f64 = 40.0;
-
-                        // Connect to the WebView's button-press-event.
-                        // Using event.time() preserves the Wayland input serial in GDK,
-                        // which is required for xdg_toplevel_move to be accepted by the compositor.
-                        webview.connect_button_press_event(move |_wv, event| {
-                            let (_, y) = event.position();
-                            if event.button() != 1 {
-                                return glib::Propagation::Proceed;
-                            }
-                            if y > HEADER_HEIGHT {
-                                return glib::Propagation::Proceed;
-                            }
-                            if let Some(win) = gtk_win.as_ref() {
-                                let (root_x, root_y) = event.root();
-                                win.begin_move_drag(
-                                    1,
-                                    root_x as i32,
-                                    root_y as i32,
-                                    event.time(),
-                                );
-                            }
-                            // Propagate so header buttons still receive clicks
-                            glib::Propagation::Proceed
-                        });
-                        tracing::info!("[linux-drag] Native GTK drag handler attached to webview");
-                    }).ok();
-                }
+                drag::attach_drag_handler(&window);
             }
 
             // Register deep link handler for OAuth callback (agentmux://auth?code=...)
