@@ -6,11 +6,12 @@ export interface ProviderDefinition {
     displayName: string;
     cliCommand: string;
     defaultArgs: string[];
-    outputFormat: "claude-stream-json" | "gemini-json" | "codex-json";
+    outputFormat: "claude-stream-json" | "gemini-json" | "codex-json" | "raw";
     authType: "oauth" | "api-key";
     authCheckCommand: string[];  // e.g. ["auth", "status", "--json"]
     authLoginCommand: string[];  // e.g. ["auth", "login"]
-    installCommand: string;
+    npmPackage: string;          // npm package name for local install
+    pinnedVersion: string;       // version to install ("latest" or specific)
     docsUrl: string;
     icon: string;
 }
@@ -20,40 +21,43 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         id: "claude",
         displayName: "Claude Code",
         cliCommand: "claude",
-        defaultArgs: ["-p", "--verbose", "--output-format", "stream-json", "--include-partial-messages"],
-        outputFormat: "claude-stream-json",
+        defaultArgs: [],  // raw mode — no stream-json for now
+        outputFormat: "raw",
         authType: "oauth",
         authCheckCommand: ["auth", "status", "--json"],
         authLoginCommand: ["auth", "login"],
-        installCommand: "npm install -g @anthropic-ai/claude-code",
+        npmPackage: "@anthropic-ai/claude-code",
+        pinnedVersion: "latest",
         docsUrl: "https://docs.anthropic.com/claude-code",
         icon: "sparkles",
-    },
-    gemini: {
-        id: "gemini",
-        displayName: "Gemini CLI",
-        cliCommand: "gemini",
-        defaultArgs: ["--output-format", "json"],
-        outputFormat: "gemini-json",
-        authType: "api-key",
-        authCheckCommand: [],
-        authLoginCommand: [],
-        installCommand: "npm install -g @anthropic-ai/gemini-cli",
-        docsUrl: "https://ai.google.dev/gemini-cli",
-        icon: "diamond",
     },
     codex: {
         id: "codex",
         displayName: "Codex CLI",
         cliCommand: "codex",
-        defaultArgs: ["--output-format", "json"],
-        outputFormat: "codex-json",
-        authType: "api-key",
-        authCheckCommand: [],
-        authLoginCommand: [],
-        installCommand: "npm install -g @openai/codex",
+        defaultArgs: [],  // raw mode
+        outputFormat: "raw",
+        authType: "oauth",
+        authCheckCommand: ["login", "status"],
+        authLoginCommand: ["login"],
+        npmPackage: "@openai/codex",
+        pinnedVersion: "latest",
         docsUrl: "https://platform.openai.com/docs/codex",
         icon: "robot",
+    },
+    gemini: {
+        id: "gemini",
+        displayName: "Gemini CLI",
+        cliCommand: "gemini",
+        defaultArgs: [],  // raw mode
+        outputFormat: "raw",
+        authType: "oauth",
+        authCheckCommand: ["auth", "status"],
+        authLoginCommand: ["auth", "login"],
+        npmPackage: "@anthropic-ai/gemini-cli",
+        pinnedVersion: "latest",
+        docsUrl: "https://ai.google.dev/gemini-cli",
+        icon: "diamond",
     },
 };
 

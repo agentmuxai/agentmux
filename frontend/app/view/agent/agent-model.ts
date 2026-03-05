@@ -20,15 +20,12 @@ import {
     createDocumentStatsAtom,
     createToggleNodeCollapsed,
 } from "./state";
-import { PROVIDERS } from "./providers";
+import { PROVIDERS, type ProviderDefinition } from "./providers";
 import { createTranslator } from "./providers/translator-factory";
 import type { OutputTranslator } from "./providers/translator";
 import type { DocumentNode } from "./types";
 
 const TermFileName = "term";
-
-// Hardcoded to Claude for now. Expand later.
-const PROVIDER = PROVIDERS.claude;
 
 export class AgentViewModel implements ViewModel {
     viewType = "agent";
@@ -53,14 +50,18 @@ export class AgentViewModel implements ViewModel {
     shellProcExitCodeAtom: Atom<number>;
 
     // Internal
+    private provider: ProviderDefinition | null = null;
+    private cliPath: string | null = null;
     private parser: ClaudeCodeStreamParser;
-    private translator: OutputTranslator;
+    private translator: OutputTranslator | null = null;
     private fileSubjectSub: Subscription | null = null;
     private fileSubjectRef: any = null;
     private procStatusUnsub: (() => void) | null = null;
     private shellProcFullStatusAtom: PrimitiveAtom<BlockControllerRuntimeStatus>;
     private loginMode: boolean = false;
     private loginUrlOpened: boolean = false;
+    private viewIconAtom: PrimitiveAtom<string>;
+    private viewNameAtom: PrimitiveAtom<string>;
 
     constructor(blockId: string, nodeModel: BlockNodeModel) {
         this.blockId = blockId;
@@ -78,8 +79,10 @@ export class AgentViewModel implements ViewModel {
         this.documentStatsAtom = createDocumentStatsAtom(this.atoms.documentAtom);
         this.toggleNodeCollapsed = createToggleNodeCollapsed(this.atoms.documentStateAtom);
 
-        this.viewIcon = atom("sparkles");
-        this.viewName = atom("Claude Code");
+        this.viewIconAtom = atom("sparkles") as PrimitiveAtom<string>;
+        this.viewNameAtom = atom("Agent") as PrimitiveAtom<string>;
+        this.viewIcon = this.viewIconAtom;
+        this.viewName = this.viewNameAtom;
         this.viewText = atom((get) => {
             const stats = get(this.documentStatsAtom);
             const parts: HeaderElem[] = [];
@@ -111,23 +114,42 @@ export class AgentViewModel implements ViewModel {
         });
 
         this.parser = new ClaudeCodeStreamParser();
-        this.translator = createTranslator(PROVIDER.outputFormat);
     }
 
     // =============================================
-    // Connect: single entry point for the UI
+    // Connect with provider: the new entry point
     // =============================================
 
     /**
-     * Called when user clicks "Connect".
-     * Checks auth → starts session or opens login.
+     * Called when user clicks a provider button.
+     * Installs CLI if needed, then checks auth and starts session.
      */
-    connect = async (): Promise<void> => {
+    connectWithProvider = async (providerId: string, cliPath: string): Promise<void> => {
+        const provider = PROVIDERS[providerId];
+        if (!provider) {
+            console.error("[agent] Unknown provider:", providerId);
+            return;
+        }
+
+        this.provider = provider;
+        this.cliPath = cliPath;
+
+        // Update header to show provider
+        globalStore.set(this.viewIconAtom, provider.icon);
+        globalStore.set(this.viewNameAtom, provider.displayName);
+
+        // Create translator only if not raw mode
+        if (provider.outputFormat !== "raw") {
+            this.translator = createTranslator(provider.outputFormat);
+        } else {
+            this.translator = null;
+        }
+
         globalStore.set(this.atoms.authAtom, { status: "connecting" });
-        console.log("[agent] Checking Claude auth status...");
+        console.log(`[agent] Checking ${providerId} auth status (cli: ${cliPath})...`);
 
         try {
-            const authStatus = await getApi().checkCliAuthStatus("claude");
+            const authStatus = await getApi().checkCliAuthStatus(providerId, cliPath);
             console.log("[agent] Auth result:", authStatus);
 
             if (authStatus.logged_in) {
@@ -138,7 +160,6 @@ export class AgentViewModel implements ViewModel {
                 });
                 this.startSession();
             } else {
-                // Not logged in — spawn `claude auth login` in PTY
                 this.startAuthLogin();
             }
         } catch (error) {
@@ -151,11 +172,22 @@ export class AgentViewModel implements ViewModel {
     };
 
     /**
-     * Spawn `claude auth login` in the PTY so user can authenticate via browser.
+     * Legacy connect method — kept for backward compat but now requires
+     * connectWithProvider to be called instead.
+     */
+    connect = async (): Promise<void> => {
+        // No-op: the 3-button UI calls connectWithProvider directly
+        console.warn("[agent] connect() called without provider — use connectWithProvider()");
+    };
+
+    /**
+     * Spawn auth login in the PTY so user can authenticate via browser.
      * When the process exits, we re-check auth.
      */
     private startAuthLogin(): void {
-        console.log("[agent] Starting claude auth login...");
+        if (!this.provider || !this.cliPath) return;
+
+        console.log(`[agent] Starting ${this.provider.id} auth login...`);
         this.loginMode = true;
         globalStore.set(this.atoms.authAtom, { status: "connecting" });
 
@@ -163,8 +195,8 @@ export class AgentViewModel implements ViewModel {
         RpcApi.SetMetaCommand(TabRpcClient, {
             oref,
             meta: {
-                "cmd": PROVIDER.cliCommand,
-                "cmd:args": PROVIDER.authLoginCommand,
+                "cmd": this.cliPath,
+                "cmd:args": this.provider.authLoginCommand,
             },
         }).then(() => {
             this.connectToTerminal();
@@ -183,18 +215,20 @@ export class AgentViewModel implements ViewModel {
     }
 
     /**
-     * Start the Claude CLI session with stream-json output.
+     * Start the CLI session. In raw mode, just launch the CLI with defaultArgs.
      */
     private startSession(): void {
+        if (!this.provider || !this.cliPath) return;
+
         this.loginMode = false;
-        console.log("[agent] Starting Claude session...");
+        console.log(`[agent] Starting ${this.provider.id} session (raw mode)...`);
 
         const oref = WOS.makeORef("block", this.blockId);
         RpcApi.SetMetaCommand(TabRpcClient, {
             oref,
             meta: {
-                "cmd": PROVIDER.cliCommand,
-                "cmd:args": PROVIDER.defaultArgs,
+                "cmd": this.cliPath,
+                "cmd:args": this.provider.defaultArgs,
             },
         }).then(() => {
             this.connectToTerminal();
@@ -237,7 +271,7 @@ export class AgentViewModel implements ViewModel {
     private async handleTerminalData(msg: any): Promise<void> {
         if (msg.fileop === "truncate") {
             this.parser.reset();
-            this.translator.reset();
+            if (this.translator) this.translator.reset();
             return;
         }
         if (msg.fileop === "append" && msg.data64) {
@@ -261,7 +295,15 @@ export class AgentViewModel implements ViewModel {
                 return;
             }
 
-            // Parse NDJSON stream
+            // Raw mode: strip ANSI and append to rawOutputAtom
+            if (!this.translator) {
+                const plain = text.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "");
+                const current = globalStore.get(this.atoms.rawOutputAtom);
+                globalStore.set(this.atoms.rawOutputAtom, current + plain);
+                return;
+            }
+
+            // Structured mode: parse NDJSON stream
             const lines = text.split('\n').filter(line => line.trim());
             for (const line of lines) {
                 try {
@@ -293,6 +335,7 @@ export class AgentViewModel implements ViewModel {
             case "stream_event":
             case "assistant":
             case "user": {
+                if (!this.translator) break;
                 const streamEvents = this.translator.translate(event);
                 for (const se of streamEvents) {
                     const nodes = await this.parser.parseEvent(se);
@@ -338,8 +381,14 @@ export class AgentViewModel implements ViewModel {
     restartAgent = (): void => {
         this.loginMode = false;
         this.loginUrlOpened = false;
+        this.provider = null;
+        this.cliPath = null;
+        this.translator = null;
         globalStore.set(this.atoms.documentAtom, []);
+        globalStore.set(this.atoms.rawOutputAtom, "");
         globalStore.set(this.atoms.authAtom, { status: "disconnected" });
+        globalStore.set(this.viewIconAtom, "sparkles");
+        globalStore.set(this.viewNameAtom, "Agent");
         this.disconnectTerminal();
     };
 
@@ -356,7 +405,9 @@ export class AgentViewModel implements ViewModel {
                 this.loginUrlOpened = false;
                 this.disconnectTerminal();
                 // Re-check auth after login
-                this.connect();
+                if (this.provider && this.cliPath) {
+                    this.connectWithProvider(this.provider.id, this.cliPath);
+                }
             }
         }
     }
@@ -376,6 +427,6 @@ export class AgentViewModel implements ViewModel {
             this.procStatusUnsub = null;
         }
         this.parser.reset();
-        this.translator.reset();
+        if (this.translator) this.translator.reset();
     }
 }
