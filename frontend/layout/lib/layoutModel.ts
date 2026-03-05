@@ -98,6 +98,7 @@ import {
 import {
     updateTree as updateTreeImpl,
     getBoundingRect as getBoundingRectImpl,
+    computeSpiralOrder,
 } from "./layoutGeometry";
 
 // Debug logging function - uses getApi().sendLog() which writes to task dev output
@@ -176,6 +177,10 @@ export class LayoutModel {
      * An ordered list of node ids starting from the top left corner to the bottom right corner.
      */
     leafOrder: PrimitiveAtom<LeafOrderEntry[]>;
+    /**
+     * Leaf nodes ordered in a clockwise spiral pattern for Tab cycling.
+     */
+    spiralLeafOrder: Atom<LeafOrderEntry[]>;
     /**
      * Atom representing the number of leaf nodes in a layout.
      */
@@ -327,6 +332,11 @@ export class LayoutModel {
 
         this.leafs = atom([]);
         this.leafOrder = atom([]);
+        this.spiralLeafOrder = atom((get) => {
+            const leafOrd = get(this.leafOrder);
+            const addlProps = get(this.additionalProps);
+            return computeSpiralOrder(leafOrd, addlProps);
+        });
         this.numLeafs = atom((get) => get(this.leafOrder).length);
 
         this.nodeModels = new Map();
