@@ -153,6 +153,20 @@ function initGlobalAtoms(initOpts: GlobalInitOptions) {
         });
     }
 
+    type BackendStatusState = "connecting" | "running" | "crashed";
+    // Backend starts as "running" — initTauriApi() waits for backend-ready before React renders.
+    const backendStatusAtom = atom<BackendStatusState>("running") as PrimitiveAtom<BackendStatusState>;
+    try {
+        getApi().listen("backend-terminated", () => {
+            globalStore.set(backendStatusAtom, "crashed");
+        });
+        getApi().listen("backend-ready", () => {
+            globalStore.set(backendStatusAtom, "running");
+        });
+    } catch (_) {
+        // do nothing
+    }
+
     const typeAheadModalAtom = atom({});
     const modalOpen = atom(false);
     const allConnStatusAtom = atom<ConnStatus[]>((get) => {
@@ -190,6 +204,7 @@ function initGlobalAtoms(initOpts: GlobalInitOptions) {
         reinitVersion,
         isTermMultiInput: atom(false),
         waveAIRateLimitInfoAtom: rateLimitInfoAtom,
+        backendStatusAtom,
     };
 }
 

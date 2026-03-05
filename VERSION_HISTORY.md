@@ -2,13 +2,19 @@
 
 This document tracks the version history of AgentMux (forked from waveterm).
 
-## Latest Version: 0.31.18
+## Latest Version: 0.31.42
 
 **Base:** Upstream waveterm v0.12.0 + extensive custom features
 
 ---
 
 ## Version History (Latest First)
+
+### v0.31.42-fork (2026-03-04)
+- **Agent:** AgentX
+- **Changes:**
+  - feat: add bottom status bar (backend health, connections, config errors, update status, version)
+  - fix: version-specific bundle identifier (v0-31) for macOS multi-instance coexistence
 
 ### v0.31.18-fork (2026-03-02)
 - **Agent:** AgentA

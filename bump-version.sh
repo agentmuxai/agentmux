@@ -162,6 +162,12 @@ TAURI_CONF="src-tauri/tauri.conf.json"
 if [[ -f "$TAURI_CONF" ]]; then
     sed -i "s/\"version\": \"[0-9.]*\"/\"version\": \"$NEW_VERSION\"/" "$TAURI_CONF"
     success "Updated $TAURI_CONF"
+
+    # Always update bundle identifier to full version so every build is a distinct
+    # macOS app — no two versions ever share a CFBundleIdentifier.
+    NEW_IDENTIFIER="com.agentmuxhq.agentmux.v$(echo "$NEW_VERSION" | tr '.' '-')"
+    sed -i "s|\"identifier\": \"com\.agentmuxhq\.agentmux[^\"]*\"|\"identifier\": \"${NEW_IDENTIFIER}\"|" "$TAURI_CONF"
+    success "Updated bundle identifier to $NEW_IDENTIFIER"
 else
     error "$TAURI_CONF not found!"
 fi
