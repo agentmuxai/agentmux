@@ -68,6 +68,55 @@
         opacity: 0.4;
         font-size: calc(10px * var(--zoomfactor));
         padding: 0 5px;
+        border-radius: 2px;
+
+        &.clickable {
+            cursor: pointer;
+            color: inherit;
+
+            &:hover {
+                opacity: 0.7;
+                background: var(--hover-bg-color);
+                color: inherit;
+            }
+        }
+
+        .instance-num {
+            opacity: 0.6;
+            font-size: 0.9em;
+        }
+    }
+}
+
+.status-bar-popover {
+    position: absolute;
+    bottom: calc(100% + 4px);
+    left: 0;
+    background: var(--modal-bg-color, #1e1e1e);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    padding: 8px 10px;
+    min-width: 200px;
+    z-index: var(--zindex-modal-wrapper);
+    font-size: calc(11px * var(--zoomfactor));
+    color: var(--main-text-color);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+
+    .status-bar-popover-row {
+        display: flex;
+        justify-content: space-between;
+        gap: 16px;
+        padding: 2px 0;
+    }
+
+    .status-bar-popover-label {
+        opacity: 0.5;
+        white-space: nowrap;
+    }
+
+    .status-bar-popover-mono {
+        font-family: monospace;
+        font-size: 0.95em;
     }
 }
 

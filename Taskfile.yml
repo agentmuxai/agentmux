@@ -3,11 +3,17 @@
 
 version: "3"
 
+# Load machine-local env overrides (gitignored).
+# Use .env to extend PATH with cargo, node, brew, etc.
+# Windows: cargo/node are usually in PATH from their installers — no .env needed.
+# macOS/Linux: create .env with e.g. PATH=/home/user/.cargo/bin:/opt/homebrew/bin:...
+dotenv: [".env"]
+
 vars:
     APP_NAME: "AgentMux"
     BIN_DIR: "bin"
     VERSION:
-        sh: node version.cjs
+        sh: 'PATH="$HOME/.cargo/bin:/opt/homebrew/opt/node@20/bin:/opt/homebrew/bin:/usr/local/bin:$PATH" node version.cjs'
     RM: '{{if eq OS "windows"}}powershell Remove-Item -Force -ErrorAction SilentlyContinue{{else}}rm -f{{end}}'
     RMRF: '{{if eq OS "windows"}}powershell Remove-Item -Force -Recurse -ErrorAction SilentlyContinue{{else}}rm -rf{{end}}'
     DATE: '{{if eq OS "windows"}}powershell Get-Date -UFormat{{else}}date{{end}}'
@@ -134,7 +140,7 @@ tasks:
             - task: build:backend
             - task: tauri:copy-sidecars
             - task: copy:schema
-            - npx tauri build --bundles dmg,app {{.CLI_ARGS}}
+            - bash -c 'source "$HOME/.cargo/env" 2>/dev/null; PATH="$HOME/.cargo/bin:/opt/homebrew/opt/node@20/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$PATH" npx tauri build --bundles dmg,app {{.CLI_ARGS}}'
         deps:
             - clean
             - npm:install
@@ -202,7 +208,7 @@ tasks:
         internal: true
         platforms: [darwin]
         cmds:
-            - cargo build --release -p agentmuxsrv-rs
+            - bash -c 'source "$HOME/.cargo/env" 2>/dev/null; PATH="$HOME/.cargo/bin:$PATH" cargo build --release -p agentmuxsrv-rs'
             - mkdir -p dist/bin
             - cp target/release/agentmuxsrv-rs dist/bin/agentmuxsrv-rs.arm64
             - echo "✓ Built agentmuxsrv-rs for macOS"
@@ -211,7 +217,7 @@ tasks:
         internal: true
         platforms: [linux]
         cmds:
-            - cargo build --release -p agentmuxsrv-rs
+            - bash -c 'source "$HOME/.cargo/env" 2>/dev/null; PATH="$HOME/.cargo/bin:$PATH" cargo build --release -p agentmuxsrv-rs'
             - mkdir -p dist/bin
             - cp target/release/agentmuxsrv-rs dist/bin/agentmuxsrv-rs.x64
             - echo "✓ Built agentmuxsrv-rs for Linux"
@@ -250,7 +256,7 @@ tasks:
         internal: true
         platforms: [darwin]
         cmds:
-            - cargo build --release -p wsh-rs
+            - bash -c 'source "$HOME/.cargo/env" 2>/dev/null; PATH="$HOME/.cargo/bin:$PATH" cargo build --release -p wsh-rs'
             - mkdir -p dist/bin
             - cp target/release/wsh dist/bin/wsh-{{.VERSION}}-darwin.arm64
             - echo "✓ Built wsh-rs for macOS (dist/bin/wsh-{{.VERSION}}-darwin.arm64)"
@@ -259,7 +265,7 @@ tasks:
         internal: true
         platforms: [linux]
         cmds:
-            - cargo build --release -p wsh-rs
+            - bash -c 'source "$HOME/.cargo/env" 2>/dev/null; PATH="$HOME/.cargo/bin:$PATH" cargo build --release -p wsh-rs'
             - mkdir -p dist/bin
             - cp target/release/wsh dist/bin/wsh-{{.VERSION}}-linux.x64
             - echo "✓ Built wsh-rs for Linux (dist/bin/wsh-{{.VERSION}}-linux.x64)"
@@ -522,16 +528,18 @@ tasks:
                 {{end}}
                 echo "Copied binaries for $TRIPLE"
                 {{end}}
-            # Also create bin/ directory with versioned wsh names (backend expects AGENTMUX_APP_PATH/bin/wsh-VERSION-OS.ARCH)
+            # Clear stale wsh binaries then copy only current version (prevents DMG bloat)
             - |
                 {{if eq OS "windows"}}
-                powershell -Command "New-Item -ItemType Directory -Force -Path src-tauri/binaries/bin | Out-Null; Copy-Item dist/bin/wsh-{{.VERSION}}-windows.x64.exe src-tauri/binaries/bin/ -Force; Write-Host 'Copied wsh to bin/ for backend deployment'"
+                powershell -Command "New-Item -ItemType Directory -Force -Path src-tauri/binaries/bin | Out-Null; Remove-Item src-tauri/binaries/bin/wsh-* -Force -ErrorAction SilentlyContinue; Copy-Item dist/bin/wsh-{{.VERSION}}-windows.x64.exe src-tauri/binaries/bin/ -Force; Write-Host 'Copied wsh to bin/ for backend deployment'"
                 {{else if eq OS "darwin"}}
+                rm -f src-tauri/binaries/bin/wsh-*;
                 mkdir -p src-tauri/binaries/bin;
                 cp dist/bin/wsh-{{.VERSION}}-darwin.arm64 src-tauri/binaries/bin/ 2>/dev/null || true;
                 cp dist/bin/wsh-{{.VERSION}}-darwin.x64 src-tauri/binaries/bin/ 2>/dev/null || true;
                 echo "Copied wsh to bin/ for backend deployment"
                 {{else}}
+                rm -f src-tauri/binaries/bin/wsh-*;
                 mkdir -p src-tauri/binaries/bin;
                 cp dist/bin/wsh-{{.VERSION}}-linux.* src-tauri/binaries/bin/ 2>/dev/null || true;
                 echo "Copied wsh to bin/ for backend deployment"

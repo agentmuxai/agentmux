@@ -1,5 +1,7 @@
 # Spec: Bottom Status Bar
 
+## Status: Complete
+
 ## Overview
 
 A persistent, single-line status bar anchored to the bottom of the app window. It surfaces ambient system state — backend health, active connections, update status — without interrupting the user's workflow. Read-only. Non-interactive by default; individual items may be clickable to reveal detail.
