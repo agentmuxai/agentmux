@@ -6,6 +6,8 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
 use tauri_plugin_store::StoreExt;
 
 // ---- Types ----
@@ -91,9 +93,12 @@ fn save_config_to_store(app: &tauri::AppHandle, config: &ProviderConfig) -> Resu
 fn detect_cli(name: &str) -> CliDetectionResult {
     let find_cmd = if cfg!(windows) { "where" } else { "which" };
 
-    let path = std::process::Command::new(find_cmd)
-        .arg(name)
-        .output()
+    let mut find = std::process::Command::new(find_cmd);
+    find.arg(name);
+    #[cfg(windows)]
+    find.creation_flags(0x08000000); // CREATE_NO_WINDOW
+
+    let path = find.output()
         .ok()
         .and_then(|output| {
             if output.status.success() {
@@ -106,9 +111,12 @@ fn detect_cli(name: &str) -> CliDetectionResult {
         });
 
     let version = if path.is_some() {
-        std::process::Command::new(name)
-            .arg("--version")
-            .output()
+        let mut ver = std::process::Command::new(name);
+        ver.arg("--version");
+        #[cfg(windows)]
+        ver.creation_flags(0x08000000); // CREATE_NO_WINDOW
+
+        ver.output()
             .ok()
             .and_then(|output| {
                 if output.status.success() {
@@ -189,7 +197,7 @@ pub async fn get_provider_install_info(provider: String) -> Result<ProviderInsta
         }),
         "gemini" => Ok(ProviderInstallInfo {
             provider: "gemini".to_string(),
-            install_command: "npm install -g @anthropic-ai/gemini-cli".to_string(),
+            install_command: "npm install -g @google/gemini-cli".to_string(),
             docs_url: "https://ai.google.dev/gemini-cli".to_string(),
         }),
         "codex" => Ok(ProviderInstallInfo {
@@ -317,9 +325,12 @@ pub async fn check_cli_auth_status(
 
 /// Claude: `<cli> auth status --json` → parse JSON
 fn check_claude_auth(cli_cmd: &str) -> Result<CliAuthStatus, String> {
-    let output = std::process::Command::new(cli_cmd)
-        .args(["auth", "status", "--json"])
-        .output()
+    let mut cmd = std::process::Command::new(cli_cmd);
+    cmd.args(["auth", "status", "--json"]);
+    #[cfg(windows)]
+    cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+
+    let output = cmd.output()
         .map_err(|e| format!("Failed to run `{cli_cmd} auth status`: {e}"))?;
 
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -349,9 +360,12 @@ fn check_claude_auth(cli_cmd: &str) -> Result<CliAuthStatus, String> {
 
 /// Codex: `<cli> login status` → exit code 0 means logged in
 fn check_codex_auth(cli_cmd: &str) -> Result<CliAuthStatus, String> {
-    let output = std::process::Command::new(cli_cmd)
-        .args(["login", "status"])
-        .output()
+    let mut cmd = std::process::Command::new(cli_cmd);
+    cmd.args(["login", "status"]);
+    #[cfg(windows)]
+    cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+
+    let output = cmd.output()
         .map_err(|e| format!("Failed to run `{cli_cmd} login status`: {e}"))?;
 
     Ok(CliAuthStatus {
@@ -365,9 +379,12 @@ fn check_codex_auth(cli_cmd: &str) -> Result<CliAuthStatus, String> {
 
 /// Gemini: `<cli> auth status` → exit code 0 means logged in
 fn check_gemini_auth(cli_cmd: &str) -> Result<CliAuthStatus, String> {
-    let output = std::process::Command::new(cli_cmd)
-        .args(["auth", "status"])
-        .output()
+    let mut cmd = std::process::Command::new(cli_cmd);
+    cmd.args(["auth", "status"]);
+    #[cfg(windows)]
+    cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+
+    let output = cmd.output()
         .map_err(|e| format!("Failed to run `{cli_cmd} auth status`: {e}"))?;
 
     Ok(CliAuthStatus {
