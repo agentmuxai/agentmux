@@ -74,7 +74,7 @@ const TabBar = memo(({ workspace }: TabBarProps) => {
                             isFirst={i === 0}
                             isBeforeActive={isBeforeActive}
                             isDragging={false}
-                            tabWidth={130}
+                            tabWidth={0}
                             isNew={false}
                             isPinned={true}
                             onSelect={() => handleSelect(tabId)}
@@ -99,7 +99,7 @@ const TabBar = memo(({ workspace }: TabBarProps) => {
                             isFirst={pinnedTabIds.length === 0 && i === 0}
                             isBeforeActive={isBeforeActive}
                             isDragging={false}
-                            tabWidth={130}
+                            tabWidth={0}
                             isNew={false}
                             isPinned={false}
                             onSelect={() => handleSelect(tabId)}
