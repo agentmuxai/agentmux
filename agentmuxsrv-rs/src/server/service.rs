@@ -164,7 +164,20 @@ fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType {
                 Ok(mut tab) => {
                     tab.name = name;
                     match store.update(&mut tab) {
-                        Ok(_) => WebReturnType::success_empty(),
+                        Ok(_) => {
+                            // Return updated tab so frontend WOS cache stays in sync
+                            if let Ok(updated_tab) = store.must_get::<Tab>(&tab_id) {
+                                let update = WaveObjUpdate {
+                                    updatetype: "update".into(),
+                                    otype: OTYPE_TAB.to_string(),
+                                    oid: tab_id.clone(),
+                                    obj: Some(wave_obj_to_value(&updated_tab)),
+                                };
+                                WebReturnType::success_with_updates(vec![update])
+                            } else {
+                                WebReturnType::success_empty()
+                            }
+                        }
                         Err(e) => WebReturnType::error(e.to_string()),
                     }
                 }

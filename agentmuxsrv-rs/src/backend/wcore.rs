@@ -186,7 +186,7 @@ pub fn list_workspaces(store: &WaveStore) -> Result<Vec<WorkspaceListEntry>, Sto
 }
 
 /// Create a new tab in a workspace.
-/// If `tab_name` is empty, auto-generates "T1", "T2", etc. (matching Go).
+/// If `tab_name` is empty, auto-generates "Untitled1", "Untitled2", etc.
 /// If `pinned` is true, the tab goes into `pinnedtabids` instead of `tabids`.
 pub fn create_tab(store: &WaveStore, ws_id: &str) -> Result<Tab, StoreError> {
     create_tab_with_opts(store, ws_id, "", false)
@@ -201,9 +201,9 @@ pub fn create_tab_with_opts(
 ) -> Result<Tab, StoreError> {
     let mut ws = store.must_get::<Workspace>(ws_id)?;
 
-    // Auto-generate tab name if not provided (matches Go: "T" + count)
+    // Auto-generate tab name if not provided
     let name = if tab_name.is_empty() {
-        format!("T{}", ws.tabids.len() + ws.pinnedtabids.len() + 1)
+        format!("Untitled{}", ws.tabids.len() + ws.pinnedtabids.len() + 1)
     } else {
         tab_name.to_string()
     };
@@ -626,8 +626,8 @@ mod tests {
 
         let tabs = store.get_all::<Tab>().unwrap();
         assert_eq!(tabs.len(), 1);
-        // Tab should be named "T1" (matching Go's auto-naming)
-        assert_eq!(tabs[0].name, "T1");
+        // Tab should be named "Untitled1"
+        assert_eq!(tabs[0].name, "Untitled1");
     }
 
     #[test]

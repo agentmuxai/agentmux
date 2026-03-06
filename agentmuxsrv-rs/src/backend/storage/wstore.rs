@@ -619,7 +619,7 @@ mod tests {
 
                 let mut tab = Tab {
                     oid: "tab-tx".to_string(),
-                    name: "T1".to_string(),
+                    name: "Untitled1".to_string(),
                     layoutstate: "ls-tx".to_string(),
                     meta: MetaMapType::new(),
                     ..Default::default()
@@ -641,7 +641,7 @@ mod tests {
         assert_eq!(ws.version, 2); // insert=v1, update=v2
 
         let tab = store.must_get::<Tab>("tab-tx").unwrap();
-        assert_eq!(tab.name, "T1");
+        assert_eq!(tab.name, "Untitled1");
     }
 
     #[test]
