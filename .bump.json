@@ -1,0 +1,66 @@
+{
+  "sourceOfTruth": "package.json",
+  "targets": [
+    {
+      "file": "package.json",
+      "type": "json",
+      "path": "version"
+    },
+    {
+      "file": "src-tauri/Cargo.toml",
+      "type": "toml",
+      "path": "package.version"
+    },
+    {
+      "file": "agentmuxsrv-rs/Cargo.toml",
+      "type": "toml",
+      "path": "package.version"
+    },
+    {
+      "file": "wsh-rs/Cargo.toml",
+      "type": "toml",
+      "path": "package.version"
+    },
+    {
+      "file": "src-tauri/tauri.conf.json",
+      "type": "json",
+      "path": "version"
+    },
+    {
+      "file": "src-tauri/tauri.conf.json",
+      "type": "json",
+      "path": "identifier",
+      "transform": "template",
+      "template": "com.agentmuxhq.agentmux.v{{version | replace('.', '-')}}"
+    }
+  ],
+  "lockfiles": [
+    {
+      "type": "npm",
+      "command": "npm install --package-lock-only",
+      "allowFailure": true
+    },
+    {
+      "type": "cargo",
+      "command": "cargo generate-lockfile"
+    }
+  ],
+  "history": {
+    "file": "VERSION_HISTORY.md",
+    "format": "table",
+    "template": "| {{version}}-fork | v0.12.0 | {{date}} | {{agent}} | {{message}} |"
+  },
+  "git": {
+    "add": [
+      "package.json",
+      "package-lock.json",
+      "Cargo.lock",
+      "VERSION_HISTORY.md",
+      "src-tauri/Cargo.toml",
+      "src-tauri/tauri.conf.json",
+      "agentmuxsrv-rs/Cargo.toml",
+      "wsh-rs/Cargo.toml"
+    ],
+    "commitMessage": "chore: bump version to {{version}}"
+  }
+}
