@@ -141,7 +141,18 @@ tasks:
             - task: build:backend
             - task: tauri:copy-sidecars
             - task: copy:schema
-            - bash -c 'source "$HOME/.cargo/env" 2>/dev/null; PATH="$HOME/.cargo/bin:/opt/homebrew/opt/node@20/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$PATH" npx tauri build --bundles dmg,app {{.CLI_ARGS}}'
+            - bash -c 'source "$HOME/.cargo/env" 2>/dev/null; PATH="$HOME/.cargo/bin:/opt/homebrew/opt/node@20/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$PATH" npx tauri build --bundles app {{.CLI_ARGS}}'
+            - |
+                VERSION=$(node -p "require('./package.json').version")
+                APP=target/release/bundle/macos/AgentMux.app
+                OUT=target/release/bundle/macos/AgentMux_${VERSION}_aarch64.dmg
+                echo "Creating DMG from $APP..."
+                hdiutil create -volname "AgentMux" -srcfolder "$APP" -ov -format UDZO "$OUT"
+                echo "✓ DMG created: $OUT"
+                if [ -d "$HOME/Desktop" ]; then
+                  cp "$OUT" "$HOME/Desktop/"
+                  echo "✓ Copied to Desktop: AgentMux_${VERSION}_aarch64.dmg"
+                fi
         deps:
             - clean
             - npm:install
