@@ -28,13 +28,23 @@ const TabBar = memo(({ workspace }: TabBarProps) => {
     }, [activeTabId]);
 
     const handleClose = useCallback((tabId: string) => {
-        const totalTabs = pinnedTabIds.length + regularTabIds.length;
-        if (totalTabs <= 1) return; // never close last tab
+        const allTabs = [...pinnedTabIds, ...regularTabIds];
+        if (allTabs.length <= 1) return; // never close last tab
+
         fireAndForget(async () => {
+            // If closing the active tab, switch to an adjacent tab first
+            // and await the backend round-trip to prevent race conditions
+            if (tabId === activeTabId) {
+                const idx = allTabs.indexOf(tabId);
+                const nextTab = allTabs[idx + 1] ?? allTabs[idx - 1];
+                if (nextTab) {
+                    await setActiveTab(nextTab);
+                }
+            }
             await WorkspaceService.CloseTab(workspace.oid, tabId);
             deleteLayoutModelForTab(tabId);
         });
-    }, [workspace?.oid, pinnedTabIds.length, regularTabIds.length]);
+    }, [workspace?.oid, pinnedTabIds, regularTabIds, activeTabId]);
 
     const handlePinChange = useCallback((tabId: string) => {
         const isPinned = pinnedTabIds.includes(tabId);
