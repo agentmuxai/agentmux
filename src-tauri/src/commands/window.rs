@@ -6,6 +6,12 @@ use tauri::Runtime;
 use crate::drag;
 use crate::state::AppState;
 
+#[cfg(target_os = "macos")]
+use window_vibrancy::{apply_vibrancy, NSVisualEffectMaterial};
+
+#[cfg(target_os = "windows")]
+use window_vibrancy::{apply_acrylic, apply_mica};
+
 /// Open a new AgentMux window.
 /// Replaces: ipcMain.on("open-new-window") in emain/emain.ts
 ///
@@ -31,6 +37,7 @@ pub async fn open_new_window<R: Runtime>(app: tauri::AppHandle<R>) -> Result<Str
     .inner_size(1200.0, 800.0)
     .min_inner_size(400.0, 300.0)
     .decorations(false)
+    .transparent(true)
     .visible(false);
 
     #[cfg(target_os = "linux")]
@@ -43,6 +50,7 @@ pub async fn open_new_window<R: Runtime>(app: tauri::AppHandle<R>) -> Result<Str
     .inner_size(1200.0, 800.0)
     .min_inner_size(400.0, 300.0)
     .decorations(false)
+    .transparent(true)
     .visible(false)
     .center();
 
@@ -215,5 +223,59 @@ pub fn focus_window(app: tauri::AppHandle, label: String) -> Result<(), String> 
     } else {
         return Err(format!("Window not found: {}", label));
     }
+    Ok(())
+}
+
+/// Apply window transparency and platform-specific blur effects.
+///
+/// When `transparent` is true, the window background becomes see-through
+/// at the given `opacity` level. When `blur` is also true, platform-native
+/// blur effects are applied (macOS vibrancy, Windows Mica/Acrylic).
+#[tauri::command]
+pub fn set_window_transparency(
+    window: tauri::WebviewWindow,
+    transparent: bool,
+    blur: bool,
+    opacity: f64,
+) -> Result<(), String> {
+    let opacity = opacity.clamp(0.0, 1.0);
+    tracing::info!(
+        "set_window_transparency: transparent={}, blur={}, opacity={}",
+        transparent, blur, opacity
+    );
+
+    if !transparent && !blur {
+        // Nothing to apply — frontend CSS handles the opaque case
+        return Ok(());
+    }
+
+    // Platform-specific blur effects
+    #[cfg(target_os = "macos")]
+    if blur {
+        apply_vibrancy(&window, NSVisualEffectMaterial::HudWindow, None, None)
+            .map_err(|e| format!("Failed to apply vibrancy: {}", e))?;
+        tracing::info!("Applied macOS vibrancy (HudWindow)");
+    }
+
+    #[cfg(target_os = "windows")]
+    if blur {
+        // Try Mica first (Windows 11), fall back to Acrylic (Windows 10)
+        if apply_mica(&window, Some(true)).is_err() {
+            let alpha = (opacity * 255.0) as u8;
+            apply_acrylic(&window, Some((18, 18, 18, alpha)))
+                .map_err(|e| format!("Failed to apply acrylic: {}", e))?;
+            tracing::info!("Applied Windows Acrylic (alpha={})", alpha);
+        } else {
+            tracing::info!("Applied Windows Mica");
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    if blur {
+        // Linux blur is compositor-dependent; CSS backdrop-filter is the primary fallback.
+        // No reliable cross-compositor API exists.
+        tracing::info!("Linux blur requested — using CSS fallback (no native API)");
+    }
+
     Ok(())
 }
