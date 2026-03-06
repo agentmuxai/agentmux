@@ -244,24 +244,6 @@ function switchBlockByBlockNum(index: number) {
     }, 10);
 }
 
-function shouldInterceptTabForCycle(): boolean {
-    const activeEl = document.activeElement;
-    if (
-        activeEl instanceof HTMLInputElement ||
-        activeEl instanceof HTMLTextAreaElement ||
-        (activeEl as HTMLElement)?.isContentEditable
-    ) {
-        return false;
-    }
-    if (activeEl?.closest(".xterm")) {
-        return false;
-    }
-    if (focusManager.getFocusType() === "waveai") {
-        return false;
-    }
-    return true;
-}
-
 function cyclePaneFocus(direction: "forward" | "backward") {
     const layoutModel = getLayoutModelForStaticTab();
     const spiralOrder = globalStore.get(layoutModel.spiralLeafOrder);
