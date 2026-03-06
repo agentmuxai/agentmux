@@ -72,7 +72,6 @@ exports.config = {
               show_context_menu: null,
               set_window_init_status: null,
               fe_log: null,
-              register_global_webview_keys: null,
               update_wco: null,
               set_keyboard_chord_mode: null,
               set_waveai_open: null,
