@@ -10,6 +10,7 @@
     "beforeBuildCommand": "npx vite build --config vite.config.tauri.ts"
   },
   "app": {
+    "macOSPrivateApi": true,
     "windows": [
       {
         "title": "AgentMux",
