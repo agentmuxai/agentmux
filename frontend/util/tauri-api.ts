@@ -9,7 +9,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { openUrl } from "@tauri-apps/plugin-opener";
+import { openUrl, openPath } from "@tauri-apps/plugin-opener";
 
 // Tauri injects this global at build time via TAURI_ENV_APP_VERSION
 declare const __TAURI_APP_VERSION__: string | undefined;
@@ -169,7 +169,7 @@ export function buildTauriApi(): AppApi {
             openUrl(url).catch(console.error);
         },
         openNativePath: (filePath: string) => {
-            openUrl(filePath).catch(console.error);
+            openPath(filePath).catch(console.error);
         },
         onQuicklook: (filePath: string) => {
             invoke("quicklook", { filePath }).catch(console.error);

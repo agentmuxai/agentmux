@@ -47,6 +47,7 @@
       "allow": [{ "path": "$APPDATA/**" }, { "path": "$APPCONFIG/**" }]
     },
     "opener:default",
+    "opener:allow-open-path",
     "process:default",
     "store:default",
     "window-state:default"
