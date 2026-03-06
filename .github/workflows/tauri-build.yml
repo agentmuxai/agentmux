@@ -130,6 +130,40 @@ jobs:
           tauriScript: npx tauri
           args: --target ${{ matrix.target }}
 
+      - name: Create Windows portable ZIP
+        if: matrix.platform == 'windows'
+        shell: powershell
+        run: |
+          $version = (node -p "require('./package.json').version")
+          $bundleDir = "target/${{ matrix.target }}/release"
+          $zipName = "AgentMux_${version}_${{ matrix.arch }}-portable.zip"
+          $outDir = "$bundleDir/bundle/portable"
+          New-Item -ItemType Directory -Force -Path $outDir
+
+          # Stage the main exe and its dependencies
+          $staging = "$outDir/AgentMux-portable"
+          New-Item -ItemType Directory -Force -Path $staging
+          Copy-Item "$bundleDir/agentmux.exe" "$staging/"
+
+          # Copy sidecar binaries
+          if (Test-Path "src-tauri/binaries") {
+            Copy-Item "src-tauri/binaries/*" "$staging/" -Recurse
+          }
+
+          # Copy schema resources
+          if (Test-Path "dist/schema") {
+            New-Item -ItemType Directory -Force -Path "$staging/schema"
+            Copy-Item "dist/schema/*" "$staging/schema/" -Recurse
+          }
+
+          # Copy WebView2Loader if present
+          Get-ChildItem "$bundleDir" -Filter "WebView2Loader.dll" -ErrorAction SilentlyContinue |
+            Copy-Item -Destination "$staging/"
+
+          Compress-Archive -Path "$staging/*" -DestinationPath "$outDir/$zipName"
+          Write-Host "Created portable ZIP: $outDir/$zipName"
+          Get-ChildItem "$outDir"
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -159,6 +193,7 @@ jobs:
         with:
           files: |
             artifacts/**/*.exe
+            artifacts/**/*.zip
             artifacts/**/*.deb
             artifacts/**/*.AppImage
             artifacts/**/*.dmg
