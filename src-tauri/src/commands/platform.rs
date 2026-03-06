@@ -53,6 +53,27 @@ pub fn get_config_dir(app: tauri::AppHandle) -> Result<String, String> {
         .map_err(|e| format!("Failed to get config dir: {}", e))
 }
 
+/// Ensure settings.json exists in the config directory, creating the directory
+/// and a default file if needed. Returns the absolute path to settings.json.
+#[tauri::command]
+pub fn ensure_settings_file(app: tauri::AppHandle) -> Result<String, String> {
+    let config_dir = app
+        .path()
+        .app_config_dir()
+        .map_err(|e| format!("Failed to get config dir: {}", e))?;
+
+    std::fs::create_dir_all(&config_dir)
+        .map_err(|e| format!("Failed to create config dir: {}", e))?;
+
+    let settings_path = config_dir.join("settings.json");
+    if !settings_path.exists() {
+        std::fs::write(&settings_path, "{\n}\n")
+            .map_err(|e| format!("Failed to create settings.json: {}", e))?;
+    }
+
+    Ok(settings_path.to_string_lossy().to_string())
+}
+
 /// Get an environment variable value.
 /// Replaces: ipcMain.on("get-env") in emain/emain.ts
 #[tauri::command]

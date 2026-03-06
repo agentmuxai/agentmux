@@ -46,6 +46,7 @@ pub fn run() {
             commands::platform::get_is_dev,
             commands::platform::get_data_dir,
             commands::platform::get_config_dir,
+            commands::platform::ensure_settings_file,
             commands::platform::get_env,
             commands::platform::get_about_modal_details,
             commands::platform::get_docsite_url,
