@@ -338,7 +338,26 @@ fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType {
                     if activate {
                         let _ = wcore::set_active_tab(store, &ws_id, &tab.oid);
                     }
-                    WebReturnType::success(serde_json::to_value(&tab.oid).unwrap_or_default())
+                    let tab_oid = tab.oid.clone();
+                    let tab_update = WaveObjUpdate {
+                        updatetype: "update".into(),
+                        otype: OTYPE_TAB.to_string(),
+                        oid: tab.oid.clone(),
+                        obj: Some(wave_obj_to_value(&tab)),
+                    };
+                    let mut updates = vec![tab_update];
+                    if let Ok(ws) = store.must_get::<Workspace>(&ws_id) {
+                        updates.push(WaveObjUpdate {
+                            updatetype: "update".into(),
+                            otype: OTYPE_WORKSPACE.to_string(),
+                            oid: ws_id.clone(),
+                            obj: Some(wave_obj_to_value(&ws)),
+                        });
+                    }
+                    WebReturnType::success_data_updates(
+                        serde_json::to_value(&tab_oid).unwrap_or_default(),
+                        updates,
+                    )
                 }
                 Err(e) => WebReturnType::error(e.to_string()),
             }
@@ -353,7 +372,19 @@ fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType {
                 Err(e) => return WebReturnType::error(e),
             };
             match wcore::set_active_tab(store, &ws_id, &tab_id) {
-                Ok(()) => WebReturnType::success_empty(),
+                Ok(()) => {
+                    if let Ok(ws) = store.must_get::<Workspace>(&ws_id) {
+                        let update = WaveObjUpdate {
+                            updatetype: "update".into(),
+                            otype: OTYPE_WORKSPACE.to_string(),
+                            oid: ws_id.clone(),
+                            obj: Some(wave_obj_to_value(&ws)),
+                        };
+                        WebReturnType::success_with_updates(vec![update])
+                    } else {
+                        WebReturnType::success_empty()
+                    }
+                }
                 Err(e) => WebReturnType::error(e.to_string()),
             }
         }
@@ -367,13 +398,32 @@ fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType {
                 Err(e) => return WebReturnType::error(e),
             };
             match wcore::delete_tab(store, &ws_id, &tab_id) {
-                Ok(()) => WebReturnType::success(
-                    serde_json::to_value(&CloseTabRtnType {
+                Ok(()) => {
+                    let rtn = CloseTabRtnType {
                         closewindow: false,
                         newactivetabid: String::new(),
-                    })
-                    .unwrap_or_default(),
-                ),
+                    };
+                    let mut updates = vec![];
+                    // Include deleted tab update so frontend removes it from cache
+                    updates.push(WaveObjUpdate {
+                        updatetype: "delete".into(),
+                        otype: OTYPE_TAB.to_string(),
+                        oid: tab_id.clone(),
+                        obj: None,
+                    });
+                    if let Ok(ws) = store.must_get::<Workspace>(&ws_id) {
+                        updates.push(WaveObjUpdate {
+                            updatetype: "update".into(),
+                            otype: OTYPE_WORKSPACE.to_string(),
+                            oid: ws_id.clone(),
+                            obj: Some(wave_obj_to_value(&ws)),
+                        });
+                    }
+                    WebReturnType::success_data_updates(
+                        serde_json::to_value(&rtn).unwrap_or_default(),
+                        updates,
+                    )
+                }
                 Err(e) => WebReturnType::error(e.to_string()),
             }
         }
@@ -425,7 +475,19 @@ fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType {
                     ws.tabids = tab_ids;
                     ws.pinnedtabids = pinned_tab_ids;
                     match store.update(&mut ws) {
-                        Ok(_) => WebReturnType::success_empty(),
+                        Ok(_) => {
+                            if let Ok(updated_ws) = store.must_get::<Workspace>(&ws_id) {
+                                let update = WaveObjUpdate {
+                                    updatetype: "update".into(),
+                                    otype: OTYPE_WORKSPACE.to_string(),
+                                    oid: ws_id.clone(),
+                                    obj: Some(wave_obj_to_value(&updated_ws)),
+                                };
+                                WebReturnType::success_with_updates(vec![update])
+                            } else {
+                                WebReturnType::success_empty()
+                            }
+                        }
                         Err(e) => WebReturnType::error(e.to_string()),
                     }
                 }

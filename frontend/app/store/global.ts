@@ -123,6 +123,12 @@ function initGlobalAtoms(initOpts: GlobalInitOptions) {
     });
     // this is *the* tab that this tabview represents.  it should never change.
     const staticTabIdAtom: Atom<string> = atom(initOpts.tabId);
+    // reactive active tab — derived from workspace.activetabid, updated via waveobj:update
+    const activeTabIdAtom: Atom<string> = atom((get) => {
+        const ws = get(workspaceAtom);
+        if (!ws) return initOpts.tabId;
+        return ws.activetabid || ws.pinnedtabids?.[0] || ws.tabids?.[0] || initOpts.tabId;
+    });
     const controlShiftDelayAtom = atom(false);
     const updaterStatusAtom = atom<UpdaterStatus>("up-to-date") as PrimitiveAtom<UpdaterStatus>;
     try {
@@ -191,6 +197,7 @@ function initGlobalAtoms(initOpts: GlobalInitOptions) {
         hasCustomAIPresetsAtom,
         tabAtom,
         staticTabId: staticTabIdAtom,
+        activeTabId: activeTabIdAtom,
         isFullScreen: isFullScreenAtom,
         controlShiftDelayAtom,
         updaterStatusAtom,
