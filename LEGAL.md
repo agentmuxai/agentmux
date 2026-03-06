@@ -10,15 +10,9 @@ AgentMux is developed and maintained by **AgentMux Corp.**, a corporation incorp
 | **Jurisdiction** | Delaware, United States |
 | **Registered in** | California (foreign qualification) |
 
-## Registered Agent (California)
-
-[REDACTED]
-[REDACTED]
-[REDACTED]
-
 ## Contact
 
-For legal inquiries, please open an issue in this repository or contact the maintainers via GitHub.
+For legal inquiries: [legal@agentmux.ai](mailto:legal@agentmux.ai)
 
 ## License
 

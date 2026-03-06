@@ -210,7 +210,7 @@ These are in the `docs` workspace. The docs package references upstream Wave plu
 
 ### `SECURITY_CLEANUP_REPORT_2026-03-03.md`
 This is a private internal report. Should not be in the public repo.
-**Fix:** Delete from repo (already pushed to `private corporate repo`).
+**Fix:** Delete from repo (already archived to private corporate repo).
 
 ---
 
