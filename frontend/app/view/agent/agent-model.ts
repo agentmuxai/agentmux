@@ -5,7 +5,6 @@ import { BlockNodeModel } from "@/app/block/blocktypes";
 import { RpcApi } from "@/app/store/wshclientapi";
 import { TabRpcClient } from "@/app/store/wshrpcutil";
 import { atoms, globalStore, WOS } from "@/app/store/global";
-import { stringToBase64 } from "@/util/util";
 import { atom, Atom, PrimitiveAtom } from "jotai";
 import React from "react";
 import { AgentViewWrapper } from "./agent-view";
@@ -49,34 +48,23 @@ export class AgentViewModel implements ViewModel {
         console.log(`[agent] Starting ${provider.id} — switching to terminal view...`);
 
         const oref = WOS.makeORef("block", this.blockId);
-        const blockId = this.blockId;
         try {
-            // Switch to interactive shell (no cmd, no cmd:args — just a plain shell)
             await RpcApi.SetMetaCommand(TabRpcClient, {
                 oref,
                 meta: {
                     "view": "term",
-                    "controller": "shell",
+                    "controller": "cmd",
+                    "cmd": cliPath,
+                    "cmd:args": provider.defaultArgs,
+                    "cmd:interactive": true,
+                    "cmd:runonstart": true,
                 },
             });
             await RpcApi.ControllerResyncCommand(TabRpcClient, {
                 tabid: globalStore.get(atoms.staticTabId),
-                blockid: blockId,
+                blockid: this.blockId,
                 forcerestart: true,
             });
-
-            // Inject the CLI command after a short delay for the shell to initialize
-            setTimeout(async () => {
-                const cmdText =
-                    provider.defaultArgs.length > 0
-                        ? `${cliPath} ${provider.defaultArgs.join(" ")}\n`
-                        : `${cliPath}\n`;
-                const b64data = stringToBase64(cmdText);
-                await RpcApi.ControllerInputCommand(TabRpcClient, {
-                    blockid: blockId,
-                    inputdata64: b64data,
-                });
-            }, 500);
         } catch (e: any) {
             console.error("[agent] Failed to start session:", e);
         }
