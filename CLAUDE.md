@@ -59,23 +59,30 @@ AgentMux is built on **Tauri v2** with a **100% Rust backend**:
 
 ## Version Management
 
-**CRITICAL:** Always use the versioning scripts - never manually edit version numbers.
+**CRITICAL:** Always use `@a5af/bump-cli` - never manually edit version numbers.
 
-See [README.md](README.md) for complete guide.
+### Install bump-cli (one-time)
+
+```bash
+# Configure npm for @a5af GitHub Packages (requires GITHUB_TOKEN with read:packages)
+echo "@a5af:registry=https://npm.pkg.github.com" >> ~/.npmrc
+echo "//npm.pkg.github.com/:_authToken=${GITHUB_TOKEN}" >> ~/.npmrc
+npm install -g @a5af/bump-cli
+```
 
 ### Mandatory Workflow
 
-**Step 1: Bump version** (updates ALL files automatically)
+**Step 1: Bump version** (updates ALL files automatically via `.bump.json`)
 ```bash
-./bump-version.sh patch --message "Description"
-# OR minor / major
+bump patch -m "Description"
+# OR: bump minor / bump major / bump 1.2.3
 ```
 
-This script updates: `package.json`, `package-lock.json`, `src-tauri/Cargo.toml`, `src-tauri/Cargo.lock`, `src-tauri/tauri.conf.json`, `agentmuxsrv-rs/Cargo.toml`, `wsh-rs/Cargo.toml`, `VERSION_HISTORY.md`
+This updates: `package.json`, `package-lock.json`, `src-tauri/Cargo.toml`, `Cargo.lock`, `src-tauri/tauri.conf.json`, `agentmuxsrv-rs/Cargo.toml`, `wsh-rs/Cargo.toml`, `VERSION_HISTORY.md`
 
 **Step 2: Verify consistency**
 ```bash
-bash scripts/verify-version.sh
+bump verify
 ```
 
 **Step 3: Rebuild binaries**
@@ -83,9 +90,11 @@ bash scripts/verify-version.sh
 task build:backend
 ```
 
-**Step 4: Push with tags**
+**Step 4: Commit and push**
 ```bash
-git push origin <branch> --tags
+# bump --commit stages and commits all version files automatically:
+bump patch -m "Description" --commit
+git push origin <branch>
 ```
 
 ### Tauri Version Management

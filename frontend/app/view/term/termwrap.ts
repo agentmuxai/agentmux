@@ -763,10 +763,15 @@ export class TermWrap {
 
     runProcessIdleTimeout() {
         setTimeout(() => {
-            window.requestIdleCallback(() => {
+            if (typeof window.requestIdleCallback === "function") {
+                window.requestIdleCallback(() => {
+                    this.processAndCacheData();
+                    this.runProcessIdleTimeout();
+                });
+            } else {
                 this.processAndCacheData();
                 this.runProcessIdleTimeout();
-            });
+            }
         }, 5000);
     }
 }
