@@ -5,7 +5,7 @@
     display: flex;
     flex-direction: row;
     align-items: flex-end;
-    flex: 1 1 0;
+    flex: 0 1 auto;
     min-width: 0;
     height: 100%;
     overflow: hidden;
@@ -15,7 +15,7 @@
         display: flex;
         flex-direction: row;
         align-items: flex-end;
-        flex: 1 1 0;
+        flex: 0 1 auto;
         min-width: 0;
         height: 100%;
         overflow-x: auto;
@@ -56,15 +56,13 @@
         padding: 0;
         background: transparent;
         border: none;
-        color: var(--secondary-text-color);
+        color: #22c55e;
         cursor: pointer;
-        opacity: 0.5;
         align-self: flex-end;
         margin-bottom: 2px;
 
         &:hover {
-            opacity: 1;
-            color: var(--main-text-color);
+            color: #4ade80;
         }
 
         i {
