@@ -1,54 +1,37 @@
 // Copyright 2025, Command Line Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-import { WaveAIModel } from "@/app/aipanel/agentai-model";
 import { globalStore } from "@/app/store/jotaiStore";
 import * as WOS from "@/app/store/wos";
 import { RpcApi } from "@/app/store/wshclientapi";
 import { TabRpcClient } from "@/app/store/wshrpcutil";
-import { getLayoutModelForStaticTab } from "@/layout/lib/layoutModelHooks";
-import { atoms, getApi, getTabMetaKeyAtom, recordTEvent, refocusNode } from "@/app/store/global";
-import debug from "debug";
+import { atoms, getApi, getTabMetaKeyAtom, recordTEvent } from "@/app/store/global";
 import * as jotai from "jotai";
 import { debounce } from "lodash-es";
-import { ImperativePanelGroupHandle, ImperativePanelHandle } from "react-resizable-panels";
-
-const dlog = debug("wave:workspace");
+import { ImperativePanelGroupHandle } from "react-resizable-panels";
 
 const AIPANEL_DEFAULTWIDTH = 300;
 const AIPANEL_DEFAULTWIDTHRATIO = 0.33;
 const AIPANEL_MINWIDTH = 300;
 const AIPANEL_MAXWIDTHRATIO = 0.66;
 
+/**
+ * Simple state holder for the AI panel.
+ * Does NOT hold React refs or call imperative panel APIs.
+ * Expand/collapse is handled by useEffect in the component.
+ */
 class WorkspaceLayoutModel {
     private static instance: WorkspaceLayoutModel | null = null;
 
-    aiPanelRef: ImperativePanelHandle | null;
-    panelGroupRef: ImperativePanelGroupHandle | null;
-    panelContainerRef: HTMLDivElement | null;
-    aiPanelWrapperRef: HTMLDivElement | null;
-    inResize: boolean; // prevents recursive setLayout calls (setLayout triggers onLayout which calls setLayout)
-    private aiPanelVisible: boolean;
-    private aiPanelWidth: number | null;
-    private debouncedPersistWidth: (width: number) => void;
-    private initialized: boolean = false;
-    private transitionTimeoutRef: NodeJS.Timeout | null = null;
-    private focusTimeoutRef: NodeJS.Timeout | null = null;
     panelVisibleAtom: jotai.PrimitiveAtom<boolean>;
+    private aiPanelWidth: number | null = null;
+    private initialized = false;
+    private _inResize = false;
+    private panelGroupRef: ImperativePanelGroupHandle | null = null;
+    private debouncedPersistWidth: (width: number) => void;
 
     private constructor() {
-        this.aiPanelRef = null;
-        this.panelGroupRef = null;
-        this.panelContainerRef = null;
-        this.aiPanelWrapperRef = null;
-        this.inResize = false;
-        this.aiPanelVisible = false;
-        this.aiPanelWidth = null;
-        this.panelVisibleAtom = jotai.atom(this.aiPanelVisible);
-
-        this.handleWindowResize = this.handleWindowResize.bind(this);
-        this.handlePanelLayout = this.handlePanelLayout.bind(this);
-
+        this.panelVisibleAtom = jotai.atom(false);
         this.debouncedPersistWidth = debounce((width: number) => {
             try {
                 RpcApi.SetMetaCommand(TabRpcClient, {
@@ -68,16 +51,21 @@ class WorkspaceLayoutModel {
         return WorkspaceLayoutModel.instance;
     }
 
+    private getTabId(): string {
+        return globalStore.get(atoms.activeTabId);
+    }
+
     private initializeFromTabMeta(): void {
         if (this.initialized) return;
         this.initialized = true;
-
         try {
-            const savedVisible = globalStore.get(this.getPanelOpenAtom());
-            const savedWidth = globalStore.get(this.getPanelWidthAtom());
-
+            const savedVisible = globalStore.get(
+                getTabMetaKeyAtom(this.getTabId(), "waveai:panelopen")
+            );
+            const savedWidth = globalStore.get(
+                getTabMetaKeyAtom(this.getTabId(), "waveai:panelwidth")
+            );
             if (savedVisible != null) {
-                this.aiPanelVisible = savedVisible;
                 globalStore.set(this.panelVisibleAtom, savedVisible);
             }
             if (savedWidth != null) {
@@ -88,212 +76,118 @@ class WorkspaceLayoutModel {
         }
     }
 
-    private getTabId(): string {
-        return globalStore.get(atoms.activeTabId);
-    }
-
-    private getPanelOpenAtom(): jotai.Atom<boolean> {
-        return getTabMetaKeyAtom(this.getTabId(), "waveai:panelopen");
-    }
-
-    private getPanelWidthAtom(): jotai.Atom<number> {
-        return getTabMetaKeyAtom(this.getTabId(), "waveai:panelwidth");
-    }
-
-    registerRefs(
-        aiPanelRef: ImperativePanelHandle,
-        panelGroupRef: ImperativePanelGroupHandle,
-        panelContainerRef: HTMLDivElement,
-        aiPanelWrapperRef: HTMLDivElement
-    ): void {
-        this.aiPanelRef = aiPanelRef;
-        this.panelGroupRef = panelGroupRef;
-        this.panelContainerRef = panelContainerRef;
-        this.aiPanelWrapperRef = aiPanelWrapperRef;
-        this.syncAIPanelRef();
-        this.updateWrapperWidth();
-    }
-
-    updateWrapperWidth(): void {
-        if (!this.aiPanelWrapperRef) {
-            return;
+    private getStoredWidth(): number {
+        this.initializeFromTabMeta();
+        if (this.aiPanelWidth == null) {
+            this.aiPanelWidth = Math.max(
+                AIPANEL_DEFAULTWIDTH,
+                window.innerWidth * AIPANEL_DEFAULTWIDTHRATIO
+            );
         }
-        const width = this.getAIPanelWidth();
-        const clampedWidth = this.getClampedAIPanelWidth(width, window.innerWidth);
-        this.aiPanelWrapperRef.style.width = `${clampedWidth}px`;
+        return this.aiPanelWidth;
     }
 
-    enableTransitions(duration: number): void {
-        if (!this.panelContainerRef) {
-            return;
-        }
-        const panels = this.panelContainerRef.querySelectorAll("[data-panel]");
-        panels.forEach((panel: HTMLElement) => {
-            panel.style.transition = "flex 0.2s ease-in-out";
-        });
-
-        if (this.transitionTimeoutRef) {
-            clearTimeout(this.transitionTimeoutRef);
-        }
-        this.transitionTimeoutRef = setTimeout(() => {
-            if (!this.panelContainerRef) {
-                return;
-            }
-            const panels = this.panelContainerRef.querySelectorAll("[data-panel]");
-            panels.forEach((panel: HTMLElement) => {
-                panel.style.transition = "none";
-            });
-        }, duration);
-    }
-
-    private applyLayout(aiPanelPercentage: number): void {
-        if (!this.panelGroupRef) return;
-        if (aiPanelPercentage <= 0) {
-            // Use collapse API instead of setLayout([0, 100]) which the library rejects
-            this.aiPanelRef?.collapse();
-            return;
-        }
-        this.inResize = true;
-        this.panelGroupRef.setLayout([aiPanelPercentage, 100 - aiPanelPercentage]);
-        this.inResize = false;
-    }
-
-    handleWindowResize(): void {
-        if (!this.panelGroupRef) {
-            return;
-        }
-        const newWindowWidth = window.innerWidth;
-        const aiPanelPercentage = this.getAIPanelPercentage(newWindowWidth);
-        this.applyLayout(aiPanelPercentage);
-        this.updateWrapperWidth();
-    }
-
-    handlePanelLayout(sizes: number[]): void {
-        if (this.inResize) {
-            return;
-        }
-        if (!this.panelGroupRef) {
-            return;
-        }
-
-        const currentWindowWidth = window.innerWidth;
-        const aiPanelPixelWidth = (sizes[0] / 100) * currentWindowWidth;
-        this.handleAIPanelResize(aiPanelPixelWidth, currentWindowWidth);
-        const newPercentage = this.getAIPanelPercentage(currentWindowWidth);
-        this.applyLayout(newPercentage);
-    }
-
-    syncAIPanelRef(): void {
-        if (!this.aiPanelRef || !this.panelGroupRef) {
-            return;
-        }
-
-        const currentWindowWidth = window.innerWidth;
-        const aiPanelPercentage = this.getAIPanelPercentage(currentWindowWidth);
-
-        if (this.getAIPanelVisible()) {
-            this.aiPanelRef.expand();
-        } else {
-            this.aiPanelRef.collapse();
-        }
-
-        this.applyLayout(aiPanelPercentage);
-    }
-
-    getMaxAIPanelWidth(windowWidth: number): number {
-        return Math.floor(windowWidth * AIPANEL_MAXWIDTHRATIO);
-    }
-
-    getClampedAIPanelWidth(width: number, windowWidth: number): number {
-        const maxWidth = this.getMaxAIPanelWidth(windowWidth);
-        if (AIPANEL_MINWIDTH > maxWidth) {
-            return AIPANEL_MINWIDTH;
-        }
+    private clampWidth(width: number, windowWidth: number): number {
+        const maxWidth = Math.floor(windowWidth * AIPANEL_MAXWIDTHRATIO);
+        if (AIPANEL_MINWIDTH > maxWidth) return AIPANEL_MINWIDTH;
         return Math.max(AIPANEL_MINWIDTH, Math.min(width, maxWidth));
+    }
+
+    // --- Ref management (only panelGroupRef for window resize) ---
+
+    setPanelGroupRef(ref: ImperativePanelGroupHandle | null): void {
+        this.panelGroupRef = ref;
+    }
+
+    get inResize(): boolean {
+        return this._inResize;
+    }
+
+    // --- Public API ---
+
+    getDefaultSize(): number {
+        this.initializeFromTabMeta();
+        const isVisible = globalStore.get(this.panelVisibleAtom);
+        if (!isVisible) return 0;
+        const width = this.getStoredWidth();
+        const clamped = this.clampWidth(width, window.innerWidth);
+        const pct = (clamped / window.innerWidth) * 100;
+        return Math.max(0, Math.min(pct, AIPANEL_MAXWIDTHRATIO * 100));
     }
 
     getAIPanelVisible(): boolean {
         this.initializeFromTabMeta();
-        return this.aiPanelVisible;
+        return globalStore.get(this.panelVisibleAtom);
     }
 
     setAIPanelVisible(visible: boolean, opts?: { nofocus?: boolean }): void {
-        if (this.focusTimeoutRef != null) {
-            clearTimeout(this.focusTimeoutRef);
-            this.focusTimeoutRef = null;
-        }
-        const wasVisible = this.aiPanelVisible;
-        this.aiPanelVisible = visible;
-        if (visible && !wasVisible) {
-            recordTEvent("action:openwaveai");
-        }
+        const wasVisible = globalStore.get(this.panelVisibleAtom);
+        if (visible === wasVisible) return;
+        if (visible) recordTEvent("action:openwaveai");
         globalStore.set(this.panelVisibleAtom, visible);
         getApi().setWaveAIOpen(visible);
         RpcApi.SetMetaCommand(TabRpcClient, {
             oref: WOS.makeORef("tab", this.getTabId()),
             meta: { "waveai:panelopen": visible },
         });
-        this.enableTransitions(250);
-        this.syncAIPanelRef();
+        // nofocus flag is read by the component's useEffect
+        this._lastSetVisibleOpts = opts ?? null;
+    }
 
-        if (visible) {
-            if (!opts?.nofocus) {
-                this.focusTimeoutRef = setTimeout(() => {
-                    WaveAIModel.getInstance().focusInput();
-                    this.focusTimeoutRef = null;
-                }, 350);
-            }
-        } else {
-            const layoutModel = getLayoutModelForStaticTab();
-            const focusedNode = globalStore.get(layoutModel.focusedNode);
-            if (focusedNode == null) {
-                layoutModel.focusFirstNode();
-                return;
-            }
-            const blockId = focusedNode?.data?.blockId;
-            if (blockId != null) {
-                refocusNode(blockId);
-            }
+    // Expose last opts so component can check nofocus
+    _lastSetVisibleOpts: { nofocus?: boolean } | null = null;
+
+    // --- Panel callbacks (called from Panel props, never re-enter library) ---
+
+    captureResize(sizePct: number): void {
+        if (this._inResize) return;
+        const pixelWidth = (sizePct / 100) * window.innerWidth;
+        if (pixelWidth >= AIPANEL_MINWIDTH) {
+            this.aiPanelWidth = pixelWidth;
+            this.debouncedPersistWidth(pixelWidth);
         }
     }
 
-    getAIPanelWidth(): number {
-        this.initializeFromTabMeta();
-        if (this.aiPanelWidth == null) {
-            this.aiPanelWidth = Math.max(AIPANEL_DEFAULTWIDTH, window.innerWidth * AIPANEL_DEFAULTWIDTHRATIO);
+    onCollapsed(): void {
+        const wasVisible = globalStore.get(this.panelVisibleAtom);
+        if (wasVisible) {
+            globalStore.set(this.panelVisibleAtom, false);
+            getApi().setWaveAIOpen(false);
+            RpcApi.SetMetaCommand(TabRpcClient, {
+                oref: WOS.makeORef("tab", this.getTabId()),
+                meta: { "waveai:panelopen": false },
+            });
         }
-        return this.aiPanelWidth;
     }
 
-    setAIPanelWidth(width: number): void {
-        this.aiPanelWidth = width;
-        this.updateWrapperWidth();
-        this.debouncedPersistWidth(width);
-    }
-
-    getAIPanelPercentage(windowWidth: number): number {
-        const isVisible = this.getAIPanelVisible();
-        if (!isVisible) {
-            return 0;
+    onExpanded(): void {
+        const wasVisible = globalStore.get(this.panelVisibleAtom);
+        if (!wasVisible) {
+            recordTEvent("action:openwaveai");
+            globalStore.set(this.panelVisibleAtom, true);
+            getApi().setWaveAIOpen(true);
+            RpcApi.SetMetaCommand(TabRpcClient, {
+                oref: WOS.makeORef("tab", this.getTabId()),
+                meta: { "waveai:panelopen": true },
+            });
         }
-        const aiPanelWidth = this.getAIPanelWidth();
-        const clampedWidth = this.getClampedAIPanelWidth(aiPanelWidth, windowWidth);
-        const percentage = (clampedWidth / windowWidth) * 100;
-        return Math.max(0, Math.min(percentage, 100));
     }
 
-    getMainContentPercentage(windowWidth: number): number {
-        const aiPanelPercentage = this.getAIPanelPercentage(windowWidth);
-        return Math.max(0, 100 - aiPanelPercentage);
-    }
+    // --- Window resize (only place setLayout is called) ---
 
-    handleAIPanelResize(width: number, windowWidth: number): void {
-        if (!this.getAIPanelVisible()) {
-            return;
-        }
-        const clampedWidth = this.getClampedAIPanelWidth(width, windowWidth);
-        this.setAIPanelWidth(clampedWidth);
-    }
+    handleWindowResize = (): void => {
+        const isVisible = globalStore.get(this.panelVisibleAtom);
+        if (!isVisible || !this.panelGroupRef) return;
+
+        const width = this.getStoredWidth();
+        const windowWidth = window.innerWidth;
+        const clamped = this.clampWidth(width, windowWidth);
+        const pct = (clamped / windowWidth) * 100;
+
+        this._inResize = true;
+        this.panelGroupRef.setLayout([pct, 100 - pct]);
+        this._inResize = false;
+    };
 }
 
 export { WorkspaceLayoutModel };
