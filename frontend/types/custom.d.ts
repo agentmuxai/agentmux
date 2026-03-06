@@ -101,6 +101,7 @@ declare global {
         minimizeWindow: () => void; // minimize-window
         maximizeWindow: () => void; // maximize-window (toggles)
         toggleDevtools: () => void; // toggle-devtools
+        setWindowTransparency: (transparent: boolean, blur: boolean, opacity: number) => void; // set-window-transparency
         getWindowLabel: () => Promise<string>; // get-window-label
         isMainWindow: () => Promise<boolean>; // is-main-window
         listWindows: () => Promise<string[]>; // list-windows
