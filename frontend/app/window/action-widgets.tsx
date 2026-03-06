@@ -33,6 +33,12 @@ async function handleWidgetSelect(widget: WidgetConfigType) {
         getApi().toggleDevtools();
         return;
     }
+    // Special handling for settings widget -- open in external editor
+    if (widget.blockdef?.meta?.view === "settings") {
+        const path = `${getApi().getConfigDir()}/settings.json`;
+        getApi().openNativePath(path);
+        return;
+    }
     const blockDef = widget.blockdef;
     createBlock(blockDef, widget.magnified);
 }
@@ -70,6 +76,16 @@ const ActionWidgets = memo(() => {
         blockdef: {
             meta: {
                 view: "help",
+            },
+        },
+    };
+    const settingsWidget: WidgetConfigType = {
+        icon: "cog",
+        label: "settings",
+        description: "Open Settings (external editor)",
+        blockdef: {
+            meta: {
+                view: "settings",
             },
         },
     };
@@ -138,6 +154,7 @@ const ActionWidgets = memo(() => {
         >
             {widgets?.map((data, idx) => <ActionWidget key={`widget-${idx}`} widget={data} />)}
             {showHelp && <ActionWidget key="help" widget={helpWidget} />}
+            <ActionWidget key="settings" widget={settingsWidget} />
             <ActionWidget key="devtools" widget={devToolsWidget} />
         </div>
     );
