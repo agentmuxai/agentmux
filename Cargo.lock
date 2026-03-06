@@ -10,7 +10,7 @@ checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
 name = "agentmux"
-version = "0.31.51"
+version = "0.31.52"
 dependencies = [
  "chrono",
  "dirs 5.0.1",
@@ -41,7 +41,7 @@ dependencies = [
 
 [[package]]
 name = "agentmuxsrv-rs"
-version = "0.31.50"
+version = "0.31.51"
 dependencies = [
  "async-stream",
  "axum",
@@ -6691,7 +6691,7 @@ dependencies = [
 
 [[package]]
 name = "wsh-rs"
-version = "0.31.50"
+version = "0.31.51"
 dependencies = [
  "base64 0.22.1",
  "clap",
