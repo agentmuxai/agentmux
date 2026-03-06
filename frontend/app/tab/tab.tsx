@@ -9,11 +9,26 @@ import { ContextMenuModel } from "@/store/contextmenu";
 import { fireAndForget } from "@/util/util";
 import clsx from "clsx";
 import { useAtomValue } from "jotai";
-import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
+import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { ObjectService } from "../store/services";
 import { makeORef, useWaveObjectValue } from "../store/wos";
 import { TabBarModel } from "./tabbar-model";
 import "./tab.scss";
+
+const TAB_COLORS = [
+    { label: "Red", color: "#ef4444" },
+    { label: "Orange", color: "#f97316" },
+    { label: "Amber", color: "#f59e0b" },
+    { label: "Yellow", color: "#eab308" },
+    { label: "Lime", color: "#84cc16" },
+    { label: "Green", color: "#22c55e" },
+    { label: "Teal", color: "#14b8a6" },
+    { label: "Cyan", color: "#06b6d4" },
+    { label: "Blue", color: "#3b82f6" },
+    { label: "Purple", color: "#a855f7" },
+    { label: "Pink", color: "#ec4899" },
+    { label: "White", color: "#e2e8f0" },
+];
 
 interface TabProps {
     id: string;
@@ -56,6 +71,12 @@ const Tab = memo(
             const [isJiggling, setIsJiggling] = useState(false);
 
             const jiggleTrigger = useAtomValue(TabBarModel.getInstance().jigglePinAtom);
+
+            const tabColor = tabData?.meta?.["tab:color"] ?? null;
+            const tabStyle = useMemo(
+                () => (tabColor ? ({ "--tab-accent": tabColor } as React.CSSProperties) : undefined),
+                [tabColor]
+            );
 
             const editableRef = useRef<HTMLDivElement>(null);
             const editableTimeoutRef = useRef<NodeJS.Timeout>(null);
@@ -156,11 +177,6 @@ const Tab = memo(
                 }
             }, [jiggleTrigger, active, isPinned]);
 
-            // Prevent drag from being triggered on mousedown
-            const handleMouseDownOnClose = (event: React.MouseEvent<HTMLButtonElement, MouseEvent>) => {
-                event.stopPropagation();
-            };
-
             const handleContextMenu = useCallback(
                 (e: React.MouseEvent<HTMLDivElement, MouseEvent>) => {
                     e.preventDefault();
@@ -205,6 +221,23 @@ const Tab = memo(
                         }
                         menu.push({ label: "Backgrounds", type: "submenu", submenu }, { type: "separator" });
                     }
+                    const oref = makeORef("tab", id);
+                    const colorSubmenu: ContextMenuItem[] = TAB_COLORS.map(({ label, color }) => ({
+                        label,
+                        click: () =>
+                            fireAndForget(async () => {
+                                await ObjectService.UpdateObjectMeta(oref, { "tab:color": color });
+                            }),
+                    }));
+                    colorSubmenu.push({ type: "separator" });
+                    colorSubmenu.push({
+                        label: "Clear Color",
+                        click: () =>
+                            fireAndForget(async () => {
+                                await ObjectService.UpdateObjectMeta(oref, { "tab:color": null });
+                            }),
+                    });
+                    menu.push({ label: "Tab Color", type: "submenu", submenu: colorSubmenu }, { type: "separator" });
                     menu.push({ label: "Close Tab", click: () => onClose(null) });
                     ContextMenuModel.showContextMenu(menu, e);
                 },
@@ -219,7 +252,9 @@ const Tab = memo(
                         dragging: isDragging,
                         "before-active": isBeforeActive,
                         "new-tab": isNew,
+                        "has-color": !!tabColor,
                     })}
+                    style={tabStyle}
                     onMouseDown={onDragStart}
                     onClick={onSelect}
                     onContextMenu={handleContextMenu}
@@ -237,7 +272,7 @@ const Tab = memo(
                         >
                             {tabData?.name}
                         </div>
-                        {isPinned ? (
+                        {isPinned && (
                             <Button
                                 className={clsx("ghost grey pin", { jiggling: isJiggling })}
                                 onClick={(e) => {
@@ -248,17 +283,21 @@ const Tab = memo(
                             >
                                 <i className="fa fa-solid fa-thumbtack" />
                             </Button>
-                        ) : (
-                            <Button
-                                className="ghost grey close"
-                                onClick={onClose}
-                                onMouseDown={handleMouseDownOnClose}
-                                title="Close Tab"
-                            >
-                                <i className="fa fa-solid fa-xmark" />
-                            </Button>
                         )}
                     </div>
+                    {!isPinned && (
+                        <div
+                            className="close-circle"
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                onClose(null);
+                            }}
+                            onMouseDown={(e) => e.stopPropagation()}
+                            title="Close Tab"
+                        >
+                            <i className="fa fa-solid fa-xmark" />
+                        </div>
+                    )}
                 </div>
             );
         }

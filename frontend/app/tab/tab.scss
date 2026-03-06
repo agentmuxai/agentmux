@@ -96,12 +96,51 @@
         transition: none !important;
     }
 
-    .close {
-        visibility: hidden;
+    .close-circle {
+        position: absolute;
+        bottom: 0px;
+        left: 50%;
+        transform: translateX(-50%);
+        width: 16px;
+        height: 16px;
+        border-radius: 50%;
+        background: #ef4444;
+        color: white;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 8px;
+        cursor: pointer;
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.15s ease;
+        z-index: var(--zindex-tab-name, 4);
+
+        &:hover {
+            background: #f87171;
+        }
+    }
+
+    // Tab color accent
+    &.has-color .tab-inner {
+        border-bottom: 2px solid var(--tab-accent);
+    }
+
+    &.has-color .name {
+        color: var(--tab-accent);
+    }
+
+    &.active.has-color .tab-inner {
+        background: rgb(from var(--tab-accent) r g b / 0.15);
+    }
+
+    &.active.has-color .name {
+        color: var(--tab-accent);
+        filter: brightness(1.2);
     }
 }
 
-// Only apply hover effects when not in nohover mode. This prevents the previously-hovered tab from remaining hovered while a tab view is not mounted.
+// Only apply hover effects when not in nohover mode.
 body:not(.nohover) .tab:hover,
 body:not(.nohover) .tab.dragging {
     & + .tab::after,
@@ -113,17 +152,22 @@ body:not(.nohover) .tab.dragging {
         border-color: transparent;
         background: rgb(from var(--main-text-color) r g b / 0.1);
     }
-    .close {
-        visibility: visible;
-        &:hover {
-            color: var(--main-text-color);
-        }
+
+    .close-circle {
+        opacity: 1;
+        pointer-events: auto;
     }
 }
 
-// When in nohover mode, always show the close button on the active tab. This prevents the close button of the active tab from flickering when nohover is toggled.
-body.nohover .tab.active .close {
-    visibility: visible;
+// Hover with tab color accent
+body:not(.nohover) .tab.has-color:hover .tab-inner {
+    background: rgb(from var(--tab-accent) r g b / 0.1);
+}
+
+// When in nohover mode, always show close on the active tab.
+body.nohover .tab.active .close-circle {
+    opacity: 1;
+    pointer-events: auto;
 }
 
 @keyframes expandWidthAndFadeIn {

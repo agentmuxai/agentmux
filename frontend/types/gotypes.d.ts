@@ -592,6 +592,7 @@ declare global {
         "display:order"?: number;
         icon?: string;
         "icon:color"?: string;
+        "tab:color"?: string;
         "frame:*"?: boolean;
         frame?: boolean;
         "frame:bordercolor"?: string;
