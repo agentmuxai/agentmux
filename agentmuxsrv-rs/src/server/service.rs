@@ -529,9 +529,28 @@ fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType {
         }
 
         // ---- BlockService ----
-        ("block", "SendCommand") | ("block", "GetControllerStatus") | ("block", "SaveTerminalState") => {
-            // Block controller not yet wired
-            WebReturnType::error("block service not yet implemented")
+        ("block", "GetControllerStatus") => {
+            let block_id: String = match service::get_arg(args, 0) {
+                Ok(v) => v,
+                Err(e) => return WebReturnType::error(e),
+            };
+            match crate::backend::blockcontroller::get_block_controller_status(&block_id) {
+                Some(status) => WebReturnType::success(
+                    serde_json::to_value(&status).unwrap_or(serde_json::Value::Null),
+                ),
+                None => {
+                    let default_status = crate::backend::blockcontroller::BlockControllerRuntimeStatus {
+                        blockid: block_id,
+                        ..Default::default()
+                    };
+                    WebReturnType::success(
+                        serde_json::to_value(&default_status).unwrap_or(serde_json::Value::Null),
+                    )
+                }
+            }
+        }
+        ("block", "SendCommand") | ("block", "SaveTerminalState") => {
+            WebReturnType::success_empty()
         }
 
         _ => WebReturnType::error(format!(

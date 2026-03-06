@@ -139,14 +139,23 @@ npm run coverage
 
 ## Version Management
 
-Always use `bump-version.sh` - never edit version numbers manually:
+Always use `@a5af/bump-cli` — never edit version numbers manually.
 
+**Install (one-time):**
 ```bash
-./bump-version.sh patch --message "Description"
-bash scripts/verify-version.sh   # verify consistency
+echo "@a5af:registry=https://npm.pkg.github.com" >> ~/.npmrc
+echo "//npm.pkg.github.com/:_authToken=${GITHUB_TOKEN}" >> ~/.npmrc
+npm install -g @a5af/bump-cli
 ```
 
-See [BUILD.md](./BUILD.md) for the full version management workflow.
+**Usage:**
+```bash
+bump patch -m "Description" --commit   # bump, stage, and commit all version files
+bump verify                            # check all files are consistent
+bump show                              # display current version state
+```
+
+Config lives in `.bump.json`. See [BUILD.md](./BUILD.md) for the full workflow.
 
 ## License
 
