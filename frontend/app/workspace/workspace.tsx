@@ -56,7 +56,7 @@ const WorkspaceElem = memo(() => {
                         onLayout={workspaceLayoutModel.handlePanelLayout}
                         ref={panelGroupRef}
                     >
-                        <Panel ref={aiPanelRef} collapsible defaultSize={initialAiPanelPercentage} order={1} className="overflow-hidden">
+                        <Panel ref={aiPanelRef} collapsible minSize={0} defaultSize={initialAiPanelPercentage} order={1} className="overflow-hidden">
                             <div ref={aiPanelWrapperRef} className="w-full h-full">
                                 <AIPanel onClose={() => workspaceLayoutModel.setAIPanelVisible(false)} />
                             </div>
