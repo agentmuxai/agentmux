@@ -54,7 +54,11 @@ const AgentProviderPicker: React.FC<AgentProviderPickerProps> = memo(({ onConnec
             const provider = getProviderList().find((p) => p.id === providerId);
             if (!provider) return;
             setLaunching(providerId);
-            await onConnectWithProvider(providerId, provider.cliCommand);
+            try {
+                await onConnectWithProvider(providerId, provider.cliCommand);
+            } catch {
+                setLaunching(null);
+            }
         },
         [onConnectWithProvider]
     );
