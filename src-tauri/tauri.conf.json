@@ -18,8 +18,8 @@
         "minWidth": 400,
         "minHeight": 300,
         "decorations": false,
-        "transparent": false,
-        "backgroundColor": "#222222",
+        "transparent": true,
+        "backgroundColor": "#00000000",
         "dragDropEnabled": false,
         "visible": false
       }

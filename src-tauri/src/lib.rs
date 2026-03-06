@@ -69,6 +69,7 @@ pub fn run() {
             commands::window::get_cursor_point,
             commands::window::get_instance_number,
             commands::window::get_window_count,
+            commands::window::set_window_transparency,
             // Backend commands
             commands::backend::get_backend_endpoints,
             commands::backend::get_wave_init_opts,

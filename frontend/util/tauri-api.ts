@@ -242,6 +242,9 @@ export function buildTauriApi(): AppApi {
         maximizeWindow: () => {
             invoke("maximize_window").catch(console.error);
         },
+        setWindowTransparency: (transparent: boolean, blur: boolean, opacity: number) => {
+            invoke("set_window_transparency", { transparent, blur, opacity }).catch(console.error);
+        },
         toggleDevtools: () => {
             invoke("toggle_devtools").catch(console.error);
         },
