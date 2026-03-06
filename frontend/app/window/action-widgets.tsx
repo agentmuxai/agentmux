@@ -12,6 +12,7 @@ import { RpcApi } from "@/app/store/wshclientapi";
 import { TabRpcClient } from "@/app/store/wshrpcutil";
 import { atoms, createBlock, getApi } from "@/store/global";
 import { fireAndForget, isBlank, makeIconClass } from "@/util/util";
+import { invoke } from "@tauri-apps/api/core";
 import { useAtomValue } from "jotai";
 import { memo } from "react";
 import "./action-widgets.scss";
@@ -35,8 +36,12 @@ async function handleWidgetSelect(widget: WidgetConfigType) {
     }
     // Special handling for settings widget -- open in external editor
     if (widget.blockdef?.meta?.view === "settings") {
-        const path = `${getApi().getConfigDir()}/settings.json`;
-        getApi().openNativePath(path);
+        try {
+            const path = await invoke<string>("ensure_settings_file");
+            getApi().openNativePath(path);
+        } catch (e) {
+            console.error("Failed to open settings:", e);
+        }
         return;
     }
     const blockDef = widget.blockdef;
