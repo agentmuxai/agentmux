@@ -520,12 +520,12 @@ tasks:
                 powershell -Command "Copy-Item dist/bin/agentmuxsrv-rs.x64.exe src-tauri/binaries/agentmuxsrv-rs-x86_64-pc-windows-msvc.exe -Force; Copy-Item dist/bin/wsh-{{.VERSION}}-windows.x64.exe src-tauri/binaries/wsh-x86_64-pc-windows-msvc.exe -Force; Write-Host 'Copied binaries for x86_64-pc-windows-msvc'"
                 {{else}}
                 TRIPLE=$(rustc -vV | grep host | awk '{print $2}');
-                # Remove stale agentmuxsrv (old non-rs binary name) to prevent AppImage bloat
-                rm -f src-tauri/binaries/agentmuxsrv-$TRIPLE;
                 {{if eq OS "darwin"}}
                 cp dist/bin/agentmuxsrv-rs.arm64 src-tauri/binaries/agentmuxsrv-rs-$TRIPLE 2>/dev/null || cp dist/bin/agentmuxsrv-rs.x64 src-tauri/binaries/agentmuxsrv-rs-$TRIPLE;
                 cp dist/bin/wsh-{{.VERSION}}-darwin.arm64 src-tauri/binaries/wsh-$TRIPLE 2>/dev/null || cp dist/bin/wsh-{{.VERSION}}-darwin.x64 src-tauri/binaries/wsh-$TRIPLE;
                 {{else}}
+                # Remove stale agentmuxsrv (old non-rs binary name) to prevent AppImage bloat
+                rm -f src-tauri/binaries/agentmuxsrv-$TRIPLE;
                 cp dist/bin/agentmuxsrv-rs.x64 src-tauri/binaries/agentmuxsrv-rs-$TRIPLE;
                 cp dist/bin/wsh-{{.VERSION}}-linux.x64 src-tauri/binaries/wsh-$TRIPLE;
                 {{end}}
