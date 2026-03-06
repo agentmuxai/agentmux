@@ -819,12 +819,10 @@ function createTab() {
     });
 }
 
-function setActiveTab(tabId: string) {
+async function setActiveTab(tabId: string): Promise<void> {
     const ws = globalStore.get(atoms.workspace);
     if (ws == null) return;
-    WorkspaceService.SetActiveTab(ws.oid, tabId).catch((e) => {
-        console.error("[setActiveTab] failed:", e);
-    });
+    await WorkspaceService.SetActiveTab(ws.oid, tabId);
 }
 
 function recordTEvent(event: string, props?: TEventProps) {

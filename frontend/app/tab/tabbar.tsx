@@ -31,16 +31,16 @@ const TabBar = memo(({ workspace }: TabBarProps) => {
         const allTabs = [...pinnedTabIds, ...regularTabIds];
         if (allTabs.length <= 1) return; // never close last tab
 
-        // If closing the active tab, switch to an adjacent tab first
-        if (tabId === activeTabId) {
-            const idx = allTabs.indexOf(tabId);
-            const nextTab = allTabs[idx + 1] ?? allTabs[idx - 1];
-            if (nextTab) {
-                setActiveTab(nextTab);
-            }
-        }
-
         fireAndForget(async () => {
+            // If closing the active tab, switch to an adjacent tab first
+            // and await the backend round-trip to prevent race conditions
+            if (tabId === activeTabId) {
+                const idx = allTabs.indexOf(tabId);
+                const nextTab = allTabs[idx + 1] ?? allTabs[idx - 1];
+                if (nextTab) {
+                    await setActiveTab(nextTab);
+                }
+            }
             await WorkspaceService.CloseTab(workspace.oid, tabId);
             deleteLayoutModelForTab(tabId);
         });
