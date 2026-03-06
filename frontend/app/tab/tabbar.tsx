@@ -60,6 +60,9 @@ const TabBar = memo(({ workspace }: TabBarProps) => {
 
     return (
         <div className="tab-bar" data-tauri-drag-region="false">
+            <button className="add-tab-btn" onClick={handleAddTab} title="New Tab">
+                <i className="fa fa-plus" />
+            </button>
             <div className="tab-bar-scroll">
                 {pinnedTabIds.map((tabId, i) => {
                     const idx = i;
@@ -111,9 +114,6 @@ const TabBar = memo(({ workspace }: TabBarProps) => {
                     );
                 })}
             </div>
-            <button className="add-tab-btn" onClick={handleAddTab} title="New Tab">
-                <i className="fa fa-plus" />
-            </button>
         </div>
     );
 });
