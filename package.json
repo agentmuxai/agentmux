@@ -9,7 +9,7 @@
   "version": "0.31.60",
   "homepage": "https://github.com/agentmuxhq/agentmux",
   "build": {
-    "appId": "com.agentmuxhq.agentmux"
+    "appId": "ai.agentmux.app"
   },
   "private": true,
   "type": "module",

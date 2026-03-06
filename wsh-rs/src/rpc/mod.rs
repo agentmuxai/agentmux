@@ -26,9 +26,10 @@ struct Endpoints {
 
 /// Find and read the wave-endpoints.json file.
 fn read_endpoints() -> Result<Endpoints, String> {
-    // On Windows: %APPDATA%/com.agentmuxhq.agentmux/instances/default/wave-endpoints.json
-    // On macOS:   ~/Library/Application Support/com.agentmuxhq.agentmux/instances/default/...
-    // On Linux:   ~/.config/com.agentmuxhq.agentmux/instances/default/...
+    // Use compile-time version to match Tauri's versioned identifier.
+    // On Windows: %APPDATA%/ai.agentmux.app.v0-31-60/instances/v0.31.60/wave-endpoints.json
+    // On macOS:   ~/Library/Application Support/ai.agentmux.app.v0-31-60/instances/v0.31.60/...
+    // On Linux:   ~/.config/ai.agentmux.app.v0-31-60/instances/v0.31.60/...
 
     let config_dir = if cfg!(windows) {
         std::env::var("APPDATA")
@@ -38,10 +39,15 @@ fn read_endpoints() -> Result<Endpoints, String> {
         dirs::config_dir().ok_or("cannot determine config directory")?
     };
 
+    let version = env!("CARGO_PKG_VERSION");
+    let version_dashed = version.replace('.', "-");
+    let app_dir = format!("ai.agentmux.app.v{}", version_dashed);
+    let instance_dir = format!("v{}", version);
+
     let endpoints_path = config_dir
-        .join("com.agentmuxhq.agentmux")
+        .join(&app_dir)
         .join("instances")
-        .join("default")
+        .join(&instance_dir)
         .join("wave-endpoints.json");
 
     let contents = std::fs::read_to_string(&endpoints_path).map_err(|e| {

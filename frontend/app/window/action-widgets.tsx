@@ -12,6 +12,7 @@ import { RpcApi } from "@/app/store/wshclientapi";
 import { TabRpcClient } from "@/app/store/wshrpcutil";
 import { atoms, createBlock, getApi } from "@/store/global";
 import { fireAndForget, isBlank, makeIconClass } from "@/util/util";
+import { exists, writeTextFile } from "@tauri-apps/plugin-fs";
 import { useAtomValue } from "jotai";
 import { memo } from "react";
 import "./action-widgets.scss";
@@ -36,6 +37,13 @@ async function handleWidgetSelect(widget: WidgetConfigType) {
     // Special handling for settings widget -- open in external editor
     if (widget.blockdef?.meta?.view === "settings") {
         const path = `${getApi().getConfigDir()}/settings.json`;
+        try {
+            if (!(await exists(path))) {
+                await writeTextFile(path, "{\n}\n");
+            }
+        } catch (e) {
+            console.error("Failed to ensure settings.json exists:", e);
+        }
         getApi().openNativePath(path);
         return;
     }

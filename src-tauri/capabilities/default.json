@@ -47,7 +47,11 @@
       "allow": [{ "path": "$APPDATA/**" }, { "path": "$APPCONFIG/**" }]
     },
     "opener:default",
-    "opener:allow-open-path",
+    {
+      "identifier": "opener:allow-open-path",
+      "allow": [{ "path": "$APPCONFIG/**" }, { "path": "$APPDATA/**" }]
+    },
+    "fs:allow-exists",
     "process:default",
     "store:default",
     "window-state:default"
