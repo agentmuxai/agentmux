@@ -89,7 +89,7 @@ class WorkspaceLayoutModel {
     }
 
     private getTabId(): string {
-        return globalStore.get(atoms.staticTabId);
+        return globalStore.get(atoms.activeTabId);
     }
 
     private getPanelOpenAtom(): jotai.Atom<boolean> {
@@ -146,22 +146,29 @@ class WorkspaceLayoutModel {
         }, duration);
     }
 
+    private applyLayout(aiPanelPercentage: number): void {
+        if (!this.panelGroupRef) return;
+        if (aiPanelPercentage <= 0) {
+            // Use collapse API instead of setLayout([0, 100]) which the library rejects
+            this.aiPanelRef?.collapse();
+            return;
+        }
+        this.inResize = true;
+        this.panelGroupRef.setLayout([aiPanelPercentage, 100 - aiPanelPercentage]);
+        this.inResize = false;
+    }
+
     handleWindowResize(): void {
         if (!this.panelGroupRef) {
             return;
         }
         const newWindowWidth = window.innerWidth;
         const aiPanelPercentage = this.getAIPanelPercentage(newWindowWidth);
-        const mainContentPercentage = this.getMainContentPercentage(newWindowWidth);
-        this.inResize = true;
-        const layout = [aiPanelPercentage, mainContentPercentage];
-        this.panelGroupRef.setLayout(layout);
-        this.inResize = false;
+        this.applyLayout(aiPanelPercentage);
         this.updateWrapperWidth();
     }
 
     handlePanelLayout(sizes: number[]): void {
-        // dlog("handlePanelLayout", "inResize:", this.inResize, "sizes:", sizes);
         if (this.inResize) {
             return;
         }
@@ -173,11 +180,7 @@ class WorkspaceLayoutModel {
         const aiPanelPixelWidth = (sizes[0] / 100) * currentWindowWidth;
         this.handleAIPanelResize(aiPanelPixelWidth, currentWindowWidth);
         const newPercentage = this.getAIPanelPercentage(currentWindowWidth);
-        const mainContentPercentage = 100 - newPercentage;
-        this.inResize = true;
-        const layout = [newPercentage, mainContentPercentage];
-        this.panelGroupRef.setLayout(layout);
-        this.inResize = false;
+        this.applyLayout(newPercentage);
     }
 
     syncAIPanelRef(): void {
@@ -187,7 +190,6 @@ class WorkspaceLayoutModel {
 
         const currentWindowWidth = window.innerWidth;
         const aiPanelPercentage = this.getAIPanelPercentage(currentWindowWidth);
-        const mainContentPercentage = this.getMainContentPercentage(currentWindowWidth);
 
         if (this.getAIPanelVisible()) {
             this.aiPanelRef.expand();
@@ -195,10 +197,7 @@ class WorkspaceLayoutModel {
             this.aiPanelRef.collapse();
         }
 
-        this.inResize = true;
-        const layout = [aiPanelPercentage, mainContentPercentage];
-        this.panelGroupRef.setLayout(layout);
-        this.inResize = false;
+        this.applyLayout(aiPanelPercentage);
     }
 
     getMaxAIPanelWidth(windowWidth: number): number {

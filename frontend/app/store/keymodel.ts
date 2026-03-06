@@ -147,7 +147,7 @@ function shouldDispatchToBlock(e: WaveKeyboardEvent): boolean {
 }
 
 function getStaticTabBlockCount(): number {
-    const tabId = globalStore.get(atoms.staticTabId);
+    const tabId = globalStore.get(atoms.activeTabId);
     const tabORef = WOS.makeORef("tab", tabId);
     const tabAtom = WOS.getWaveObjectAtom<Tab>(tabORef);
     const tabData = globalStore.get(tabAtom);
@@ -156,14 +156,14 @@ function getStaticTabBlockCount(): number {
 
 function isStaticTabPinned(): boolean {
     const ws = globalStore.get(atoms.workspace);
-    const tabId = globalStore.get(atoms.staticTabId);
+    const tabId = globalStore.get(atoms.activeTabId);
     return ws.pinnedtabids?.includes(tabId) ?? false;
 }
 
 function simpleCloseStaticTab() {
     debugLog("simpleCloseStaticTab called");
     const ws = globalStore.get(atoms.workspace);
-    const tabId = globalStore.get(atoms.staticTabId);
+    const tabId = globalStore.get(atoms.activeTabId);
     WorkspaceService.CloseTab(ws.oid, tabId).catch((e) => {
         console.error("[closeTab] failed:", e);
     });
@@ -314,7 +314,7 @@ function switchTabAbs(index: number) {
 function switchTab(offset: number) {
     console.log("switchTab", offset);
     const ws = globalStore.get(atoms.workspace);
-    const curTabId = globalStore.get(atoms.staticTabId);
+    const curTabId = globalStore.get(atoms.activeTabId);
     let tabIdx = -1;
     const tabids = getAllTabs(ws);
     for (let i = 0; i < tabids.length; i++) {
