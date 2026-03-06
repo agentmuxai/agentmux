@@ -197,7 +197,7 @@ pub async fn get_provider_install_info(provider: String) -> Result<ProviderInsta
         }),
         "gemini" => Ok(ProviderInstallInfo {
             provider: "gemini".to_string(),
-            install_command: "npm install -g @anthropic-ai/gemini-cli".to_string(),
+            install_command: "npm install -g @google/gemini-cli".to_string(),
             docs_url: "https://ai.google.dev/gemini-cli".to_string(),
         }),
         "codex" => Ok(ProviderInstallInfo {
