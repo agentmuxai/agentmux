@@ -37,7 +37,6 @@ pub async fn open_new_window<R: Runtime>(app: tauri::AppHandle<R>) -> Result<Str
     .inner_size(1200.0, 800.0)
     .min_inner_size(400.0, 300.0)
     .decorations(false)
-    .transparent(true)
     .visible(false);
 
     #[cfg(target_os = "linux")]
@@ -50,7 +49,6 @@ pub async fn open_new_window<R: Runtime>(app: tauri::AppHandle<R>) -> Result<Str
     .inner_size(1200.0, 800.0)
     .min_inner_size(400.0, 300.0)
     .decorations(false)
-    .transparent(true)
     .visible(false)
     .center();
 
