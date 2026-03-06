@@ -52,6 +52,10 @@
       "allow": [{ "path": "$APPCONFIG/**" }, { "path": "$APPDATA/**" }]
     },
     "fs:allow-exists",
+    {
+      "identifier": "fs:allow-mkdir",
+      "allow": [{ "path": "$APPDATA/**" }, { "path": "$APPCONFIG/**" }]
+    },
     "process:default",
     "store:default",
     "window-state:default"

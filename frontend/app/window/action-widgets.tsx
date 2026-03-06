@@ -12,7 +12,7 @@ import { RpcApi } from "@/app/store/wshclientapi";
 import { TabRpcClient } from "@/app/store/wshrpcutil";
 import { atoms, createBlock, getApi } from "@/store/global";
 import { fireAndForget, isBlank, makeIconClass } from "@/util/util";
-import { exists, writeTextFile } from "@tauri-apps/plugin-fs";
+import { exists, mkdir, writeTextFile } from "@tauri-apps/plugin-fs";
 import { useAtomValue } from "jotai";
 import { memo } from "react";
 import "./action-widgets.scss";
@@ -38,6 +38,10 @@ async function handleWidgetSelect(widget: WidgetConfigType) {
     if (widget.blockdef?.meta?.view === "settings") {
         const path = `${getApi().getConfigDir()}/settings.json`;
         try {
+            const configDir = getApi().getConfigDir();
+            if (!(await exists(configDir))) {
+                await mkdir(configDir, { recursive: true });
+            }
             if (!(await exists(path))) {
                 await writeTextFile(path, "{\n}\n");
             }
