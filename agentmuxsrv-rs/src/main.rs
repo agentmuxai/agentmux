@@ -19,8 +19,35 @@ use backend::wps::Broker;
 use backend::wconfig;
 use backend::{docsite, sysinfo, wavebase, wcore};
 
+/// Start a ppid polling watchdog on Linux/macOS.
+/// If the parent process dies, getppid() changes (reparented to init/launchd).
+/// This is safer than PR_SET_PDEATHSIG which tracks the parent *thread*, not process,
+/// and can fire spuriously with async runtimes like Tokio.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn start_ppid_watchdog() {
+    let original_ppid = unsafe { libc::getppid() };
+    std::thread::spawn(move || {
+        loop {
+            std::thread::sleep(std::time::Duration::from_secs(2));
+            let current_ppid = unsafe { libc::getppid() };
+            if current_ppid != original_ppid {
+                eprintln!(
+                    "parent process died (ppid changed {} -> {}), shutting down",
+                    original_ppid, current_ppid
+                );
+                std::process::exit(0);
+            }
+        }
+    });
+}
+
 #[tokio::main]
 async fn main() {
+    // 0. Start ppid watchdog BEFORE tokio runtime does real work (Linux/macOS only).
+    // On Windows, the frontend uses a Job Object with KILL_ON_JOB_CLOSE instead.
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    start_ppid_watchdog();
+
     // 1. Init tracing (stderr writer)
     tracing_subscriber::fmt()
         .with_writer(std::io::stderr)
