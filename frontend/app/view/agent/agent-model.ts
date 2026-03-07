@@ -74,8 +74,8 @@ export class AgentViewModel implements ViewModel {
             setTimeout(async () => {
                 const cmdText =
                     provider.defaultArgs.length > 0
-                        ? `${cliPath} ${provider.defaultArgs.join(" ")}\n`
-                        : `${cliPath}\n`;
+                        ? `${cliPath} ${provider.defaultArgs.join(" ")}\r`
+                        : `${cliPath}\r`;
                 const b64data = stringToBase64(cmdText);
                 await RpcApi.ControllerInputCommand(TabRpcClient, {
                     blockid: blockId,
