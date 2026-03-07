@@ -3,7 +3,7 @@
 ## Repository
 
 - **Name:** AgentMux
-- **GitHub:** https://github.com/agentmuxhq/agentmux
+- **GitHub:** https://github.com/agentmuxai/agentmux
 - **Type:** Tauri v2 terminal application
 - **Build System:** Task (Taskfile.yml)
 

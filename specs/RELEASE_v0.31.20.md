@@ -2,7 +2,7 @@
 
 **Date:** 2026-03-03
 **Version:** 0.31.20
-**Goal:** Produce Windows, macOS, and Linux installers + portables from the fresh `agentmuxhq/agentmux` repo.
+**Goal:** Produce Windows, macOS, and Linux installers + portables from the fresh `agentmuxai/agentmux` repo.
 
 ---
 
@@ -196,7 +196,7 @@ Alternatively, keep `"targets": ["nsis"]` and override per-platform in CI:
 
 ### Step 4: GitHub Secrets Required
 
-The following secrets must be configured on `agentmuxhq/agentmux`:
+The following secrets must be configured on `agentmuxai/agentmux`:
 
 | Secret | Purpose | Required? |
 |--------|---------|-----------|
@@ -224,7 +224,7 @@ For macOS code signing (optional but recommended):
 # Go to Actions > Build Tauri > Run workflow
 
 # Option B: Via gh CLI
-gh workflow run tauri-build.yml --repo agentmuxhq/agentmux
+gh workflow run tauri-build.yml --repo agentmuxai/agentmux
 
 # Option C: Tag-triggered (if workflow is updated to trigger on tags)
 git tag v0.31.20
@@ -488,7 +488,7 @@ jobs:
 
 - [ ] Rewrite `.github/workflows/tauri-build.yml` (remove Go, add Rust)
 - [ ] Update `src-tauri/tauri.conf.json` bundle targets if needed
-- [ ] Install GitHub App permissions for Actions on `agentmuxhq/agentmux`
+- [ ] Install GitHub App permissions for Actions on `agentmuxai/agentmux`
 - [ ] Configure secrets (TAURI_SIGNING keys - optional for first release)
 - [ ] Push workflow to main (requires branch protection bypass or PR)
 - [ ] Trigger workflow via Actions UI or `gh workflow run`

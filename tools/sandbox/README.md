@@ -1,4 +1,4 @@
-# @agentmuxhq/sandbox - AgentMux Development Tools
+# @agentmuxai/sandbox - AgentMux Development Tools
 
 AgentMux development sandbox setup and management tools.
 

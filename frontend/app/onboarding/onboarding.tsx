@@ -74,7 +74,7 @@ const InitPage = ({ isCompact }: { isCompact: boolean }) => {
                         <div>
                             <a
                                 target="_blank"
-                                href="https://github.com/agentmuxhq/agentmux?ref=install"
+                                href="https://github.com/agentmuxai/agentmux?ref=install"
                                 rel={"noopener"}
                             >
                                 <i className="text-[32px] text-white/50 fa-brands fa-github"></i>
@@ -87,10 +87,10 @@ const InitPage = ({ isCompact }: { isCompact: boolean }) => {
                                 users. Please show your support by giving us a star on{" "}
                                 <a
                                     target="_blank"
-                                    href="https://github.com/agentmuxhq/agentmux?ref=install"
+                                    href="https://github.com/agentmuxai/agentmux?ref=install"
                                     rel={"noopener"}
                                 >
-                                    Github&nbsp;(agentmuxhq/agentmux)
+                                    Github&nbsp;(agentmuxai/agentmux)
                                 </a>
                             </div>
                         </div>
@@ -147,7 +147,7 @@ const NoTelemetryStarPage = ({ isCompact }: { isCompact: boolean }) => {
             oref: WOS.makeORef("client", clientId),
             meta: { "onboarding:githubstar": true },
         });
-        window.open("https://github.com/agentmuxhq/agentmux?ref=not", "_blank");
+        window.open("https://github.com/agentmuxai/agentmux?ref=not", "_blank");
         setPageName("features");
     };
 

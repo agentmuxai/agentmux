@@ -82,7 +82,7 @@ See full instructions: https://taskfile.dev/installation/
 ## Clone the Repository
 
 ```bash
-git clone https://github.com/agentmuxhq/agentmux.git
+git clone https://github.com/agentmuxai/agentmux.git
 cd agentmux
 ```
 
