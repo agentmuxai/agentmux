@@ -13,7 +13,6 @@ import { createTabBarMenu } from "@/app/menu/base-menus";
 import { SystemStatus } from "@/app/window/system-status";
 import "./window-header.scss";
 
-const isLinux = PLATFORM === "linux";
 
 interface WindowHeaderProps {
     workspace: Workspace;
@@ -29,7 +28,7 @@ const WindowHeader = memo(({ workspace }: WindowHeaderProps) => {
     // On Linux, drag.rs handles this via GTK motion detection to avoid
     // Wayland compositor pointer grab that kills header button clicks.
     const handleHeaderMouseDown = useCallback((e: React.MouseEvent) => {
-        if (isLinux) return;
+        if (PLATFORM === "linux") return;
         if (e.button !== 0) return;
         const target = e.target as HTMLElement;
         if (target.closest("button, input, a, [data-no-drag]")) return;
@@ -52,7 +51,7 @@ const WindowHeader = memo(({ workspace }: WindowHeaderProps) => {
             ref={windowHeaderRef}
             className="window-header"
             data-testid="window-header"
-            {...(!isLinux && { "data-tauri-drag-region": true })}
+            {...(PLATFORM !== "linux" && { "data-tauri-drag-region": true })}
             onMouseDown={handleHeaderMouseDown}
             onContextMenu={handleContextMenu}
         >
