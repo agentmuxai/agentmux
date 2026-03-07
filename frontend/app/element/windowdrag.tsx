@@ -19,7 +19,6 @@ const WindowDrag = forwardRef<HTMLDivElement, WindowDragProps>(({ children, clas
         try {
             const { getCurrentWindow } = await import("@tauri-apps/api/window");
             await getCurrentWindow().startDragging();
-<<<<<<< Updated upstream
         } catch {
             // fallback to CSS -webkit-app-region:drag
         }
@@ -33,7 +32,6 @@ const WindowDrag = forwardRef<HTMLDivElement, WindowDragProps>(({ children, clas
             data-tauri-drag-region
             onMouseDown={handleMouseDown}
         >
->>>>>>> Stashed changes
             {children}
         </div>
     );
