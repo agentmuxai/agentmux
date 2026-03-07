@@ -4,6 +4,7 @@
 pub mod ai;
 pub mod blockcontroller;
 pub mod colprint;
+pub mod config_watcher_fs;
 pub mod cssparser;
 pub mod daystr;
 pub mod dbutil;

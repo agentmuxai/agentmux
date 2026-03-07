@@ -38,6 +38,7 @@ fn test_state() -> AppState {
         reactive_handler,
         poller,
         config_watcher,
+        messagebus: Arc::new(crate::backend::messagebus::MessageBus::new()),
     }
 }
 

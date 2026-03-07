@@ -152,6 +152,15 @@ async fn main() {
 
     let config_watcher = Arc::new(wconfig::ConfigWatcher::with_config(wconfig::build_default_config()));
 
+    // Load user's settings.json from disk (merges with defaults)
+    backend::config_watcher_fs::load_settings_from_disk(&config_watcher);
+
+    // Watch settings.json for changes and broadcast to WebSocket clients
+    let _settings_watcher = backend::config_watcher_fs::spawn_settings_watcher(
+        config_watcher.clone(),
+        event_bus.clone(),
+    );
+
     // Local MessageBus for inter-agent communication
     let messagebus = Arc::new(backend::messagebus::MessageBus::new());
 
