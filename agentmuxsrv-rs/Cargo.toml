@@ -1,6 +1,6 @@
 [package]
 name = "agentmuxsrv-rs"
-version = "0.31.67"
+version = "0.31.68"
 edition = "2021"
 description = "AgentMux Rust backend (drop-in replacement for Go agentmuxsrv)"
 
@@ -15,6 +15,7 @@ tower-http = { version = "0.6", features = ["cors"] }
 tower = { version = "0.5" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+json_comments = "0.2"
 clap = { version = "4", features = ["derive"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
