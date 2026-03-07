@@ -56,7 +56,7 @@ export class AgentViewModel implements ViewModel {
                     "controller": "cmd",
                     "cmd": cliPath,
                     "cmd:args": provider.defaultArgs,
-                    "cmd:interactive": false,
+                    "cmd:interactive": true,
                     "cmd:runonstart": true,
                 },
             });
