@@ -10,7 +10,52 @@ pub struct BackendSpawnResult {
     pub auth_key: String,
     pub instance_id: String,  // version-namespaced, e.g. "v0.31.23"
     pub version: String,      // Backend version (e.g., "0.27.12")
-    pub is_reused: bool,      // true if reusing an existing backend (not spawned by this process)
+}
+
+/// Create a Windows Job Object and assign the child process to it.
+/// The Job Object has KILL_ON_JOB_CLOSE set, so when the last handle closes
+/// (including on crash/force-kill), Windows terminates all assigned processes.
+/// Returns the Job Object handle which MUST be kept alive for the app's lifetime.
+#[cfg(target_os = "windows")]
+fn create_job_object_for_child(pid: u32) -> Result<*mut std::ffi::c_void, String> {
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::JobObjects::*;
+    use windows_sys::Win32::System::Threading::*;
+
+    unsafe {
+        let job = CreateJobObjectW(std::ptr::null(), std::ptr::null());
+        if job.is_null() {
+            return Err("Failed to create job object".into());
+        }
+
+        let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
+        info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        let ok = SetInformationJobObject(
+            job,
+            JobObjectExtendedLimitInformation,
+            &info as *const _ as *const std::ffi::c_void,
+            std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+        );
+        if ok == 0 {
+            CloseHandle(job);
+            return Err("Failed to set job object info".into());
+        }
+
+        let process = OpenProcess(PROCESS_SET_QUOTA | PROCESS_TERMINATE, 0, pid);
+        if process.is_null() {
+            CloseHandle(job);
+            return Err(format!("Failed to open process {}", pid));
+        }
+
+        let ok = AssignProcessToJobObject(job, process);
+        CloseHandle(process);
+        if ok == 0 {
+            CloseHandle(job);
+            return Err("Failed to assign process to job object".into());
+        }
+
+        Ok(job)
+    }
 }
 
 /// Spawn the agentmuxsrv-rs Rust backend as a Tauri sidecar.
@@ -21,7 +66,7 @@ pub struct BackendSpawnResult {
 /// We parse that line to get the WebSocket and HTTP endpoints,
 /// then the frontend connects to them directly.
 pub async fn spawn_backend(app: &tauri::AppHandle) -> Result<BackendSpawnResult, String> {
-    tracing::info!("🚀 spawn_backend() called");
+    tracing::info!("spawn_backend() called");
 
     // Use app_local_data_dir for database storage (AppData\Local on Windows)
     // Use app_config_dir for configuration (AppData\Roaming on Windows)
@@ -38,80 +83,11 @@ pub async fn spawn_backend(app: &tauri::AppHandle) -> Result<BackendSpawnResult,
     tracing::info!("Using config_dir: {}", config_dir.display());
     tracing::info!("Using data_dir: {}", data_dir.display());
 
-    // Check for existing backend with matching version (O(1) lookup by version)
     let current_version = env!("CARGO_PKG_VERSION");
     let version_instance_id = format!("v{}", current_version);
 
-    {
-        let instance_dir = config_dir.join("instances").join(&version_instance_id);
-        let endpoints_file = instance_dir.join("wave-endpoints.json");
-
-        if endpoints_file.exists() {
-            tracing::info!("Checking for existing backend at: {}", endpoints_file.display());
-
-            if let Ok(contents) = std::fs::read_to_string(&endpoints_file) {
-                if let Ok(json) = serde_json::from_str::<serde_json::Value>(&contents) {
-                    let backend_version = json["version"].as_str().unwrap_or("");
-
-                    if backend_version == current_version {
-                        let existing = BackendSpawnResult {
-                            ws_endpoint: json["ws_endpoint"].as_str().unwrap_or_default().to_string(),
-                            web_endpoint: json["web_endpoint"].as_str().unwrap_or_default().to_string(),
-                            auth_key: json["auth_key"].as_str().unwrap_or_default().to_string(),
-                            instance_id: json["instance_id"].as_str().unwrap_or_default().to_string(),
-                            version: backend_version.to_string(),
-                            is_reused: true,
-                        };
-
-                        // Test if the existing backend is still responsive
-                        let test_url = if existing.web_endpoint.starts_with("http") {
-                            existing.web_endpoint.clone()
-                        } else {
-                            format!("http://{}", existing.web_endpoint)
-                        };
-
-                        tracing::info!("Testing connection to existing backend at: {}", test_url);
-                        match reqwest::get(&test_url).await {
-                            Ok(resp) => {
-                                if resp.status().is_success() || resp.status().is_client_error() {
-                                    tracing::info!(
-                                        "Reusing existing backend v{} (instance: {})",
-                                        existing.version,
-                                        existing.instance_id
-                                    );
-
-                                    // Reuse the auth key from the existing backend
-                                    let state = app.state::<crate::state::AppState>();
-                                    let mut auth_key_guard = state.auth_key.lock().unwrap();
-                                    *auth_key_guard = existing.auth_key.clone();
-
-                                    return Ok(existing);
-                                } else {
-                                    tracing::warn!("Backend returned unexpected status: {}", resp.status());
-                                }
-                            }
-                            Err(e) => {
-                                tracing::warn!("Failed to connect to existing backend: {}", e);
-                            }
-                        }
-
-                        // Backend not responsive - remove stale file
-                        tracing::warn!("Backend not responsive, removing stale endpoints file");
-                        let _ = std::fs::remove_file(&endpoints_file);
-                    } else {
-                        tracing::warn!(
-                            "Backend version mismatch in endpoints file: backend={}, frontend={}. Removing stale file.",
-                            backend_version,
-                            current_version
-                        );
-                        let _ = std::fs::remove_file(&endpoints_file);
-                    }
-                }
-            }
-        }
-    }
-
-    tracing::info!("No existing backend found, spawning new one");
+    // Clean up any stale endpoints files from previous versions that used the reuse mechanism
+    cleanup_stale_endpoints(&config_dir);
 
     // Ensure base directories exist
     std::fs::create_dir_all(&data_dir)
@@ -120,7 +96,6 @@ pub async fn spawn_backend(app: &tauri::AppHandle) -> Result<BackendSpawnResult,
         .map_err(|e| format!("Failed to create config dir: {}", e))?;
 
     // Pre-create version-namespaced instance directory structure
-    // Backend needs these to exist before it starts
     let version_data_instance_dir = data_dir.join("instances").join(&version_instance_id).join("db");
     std::fs::create_dir_all(&version_data_instance_dir)
         .map_err(|e| format!("Failed to create version instance data dir: {}", e))?;
@@ -160,15 +135,13 @@ pub async fn spawn_backend(app: &tauri::AppHandle) -> Result<BackendSpawnResult,
             .map_err(|e| format!("Failed to find {} sidecar: {}", backend_name, e))?
     };
 
-    // Resolve AGENTMUX_APP_PATH and deploy wsh binary for the Go backend.
-    // Tauri bundles wsh as a sidecar at Contents/MacOS/wsh (stripped platform suffix).
-    // The Go backend expects: AGENTMUX_APP_PATH/bin/wsh-VERSION-OS.ARCH
+    // Resolve AGENTMUX_APP_PATH and deploy wsh binary for the backend.
     let app_path = std::env::current_exe()
         .ok()
         .and_then(|p| p.parent().map(|d| d.to_path_buf()))
         .unwrap_or_default();
 
-    // Deploy bundled wsh to bin/ with the name the Go backend expects
+    // Deploy bundled wsh to bin/ with the name the backend expects
     let bin_dir = app_path.join("bin");
     if let Err(e) = std::fs::create_dir_all(&bin_dir) {
         tracing::warn!("Failed to create bin dir for wsh: {}", e);
@@ -189,7 +162,6 @@ pub async fn spawn_backend(app: &tauri::AppHandle) -> Result<BackendSpawnResult,
                 if let Err(e) = std::fs::copy(&bundled_wsh, &dest) {
                     tracing::warn!("Failed to copy wsh to {}: {}", dest.display(), e);
                 } else {
-                    // Ensure executable permission on Unix
                     #[cfg(unix)]
                     {
                         use std::os::unix::fs::PermissionsExt;
@@ -227,11 +199,32 @@ pub async fn spawn_backend(app: &tauri::AppHandle) -> Result<BackendSpawnResult,
         .spawn()
         .map_err(|e| format!("Failed to spawn agentmuxsrv-rs: {}", e))?;
 
+    // Get the child PID before storing the handle
+    let child_pid = child.pid();
+
     // Store child handle for graceful shutdown
     {
         let state = app.state::<crate::state::AppState>();
         let mut sidecar = state.sidecar_child.lock().unwrap();
         *sidecar = Some(child);
+    }
+
+    // Windows: Create Job Object and assign the backend process to it.
+    // This ensures the backend is killed by the kernel if the frontend crashes.
+    #[cfg(target_os = "windows")]
+    {
+        match create_job_object_for_child(child_pid) {
+            Ok(job_handle) => {
+                tracing::info!("Created Job Object for backend (pid={}), KILL_ON_JOB_CLOSE active", child_pid);
+                let state = app.state::<crate::state::AppState>();
+                let mut handle = state.job_handle.lock().unwrap();
+                *handle = Some(crate::state::JobHandle::new(job_handle));
+            }
+            Err(e) => {
+                tracing::error!("Failed to create Job Object for backend: {}. Backend may orphan on crash.", e);
+                // Non-fatal — graceful shutdown via child.kill() still works
+            }
+        }
     }
 
     // Wait for WAVESRV-ESTART line from stderr
@@ -287,7 +280,6 @@ pub async fn spawn_backend(app: &tauri::AppHandle) -> Result<BackendSpawnResult,
                 }
                 CommandEvent::Terminated(status) => {
                     tracing::warn!("[agentmuxsrv-rs] terminated with status: {:?}", status);
-                    // Emit quit event to frontend
                     if let Some(window) = app_handle.get_webview_window("main") {
                         let _ = window.emit("backend-terminated", serde_json::json!({
                             "code": status.code,
@@ -316,70 +308,38 @@ pub async fn spawn_backend(app: &tauri::AppHandle) -> Result<BackendSpawnResult,
         version: timeout.2,
         instance_id: timeout.3,
         auth_key: auth_key.clone(),
-        is_reused: false,
     };
 
     let key_preview = result.auth_key.chars().take(8).collect::<String>();
-    tracing::info!("Backend successfully started with endpoints: ws={}, web={}, version={}, instance={}, auth_key={}...",
+    tracing::info!("Backend successfully started: ws={}, web={}, version={}, instance={}, auth_key={}...",
         result.ws_endpoint, result.web_endpoint, result.version, result.instance_id, key_preview);
-
-    // Compute nested instance directory inside base config dir
-    let instance_dir = config_dir.join("instances").join(&result.instance_id);
-
-    // Ensure instance directory exists
-    if let Err(e) = std::fs::create_dir_all(&instance_dir) {
-        tracing::error!("Failed to create instance config dir: {}", e);
-        return Err(format!("Failed to create instance config dir: {}", e));
-    }
-
-    let endpoints_file = instance_dir.join("wave-endpoints.json");
-    tracing::info!("Saving endpoints to: {}", endpoints_file.display());
-
-    // Save endpoints with additional metadata
-    let endpoints_json = serde_json::json!({
-        "version": result.version,
-        "ws_endpoint": result.ws_endpoint,
-        "web_endpoint": result.web_endpoint,
-        "auth_key": result.auth_key,
-        "instance_id": result.instance_id,
-        "pid": std::process::id(),
-        "started_at": chrono::Utc::now().to_rfc3339(),
-    });
-
-    match serde_json::to_string_pretty(&endpoints_json) {
-        Ok(json) => {
-            tracing::info!("Serialized endpoints: {}", json);
-            match std::fs::write(&endpoints_file, &json) {
-                Ok(_) => {
-                    tracing::info!("✅ Successfully saved endpoints to {} for multi-window reuse", endpoints_file.display());
-                    // Verify the file was written
-                    if endpoints_file.exists() {
-                        if let Ok(contents) = std::fs::read_to_string(&endpoints_file) {
-                            tracing::info!("Verified file contents: {}", contents);
-                        }
-                    } else {
-                        tracing::error!("❌ File doesn't exist after write!");
-                    }
-                }
-                Err(e) => {
-                    tracing::error!("❌ Failed to write endpoints file: {}", e);
-                }
-            }
-        }
-        Err(e) => {
-            tracing::error!("Failed to serialize endpoints: {}", e);
-        }
-    }
 
     Ok(result)
 }
 
+/// Remove stale wave-endpoints.json files from all instance directories.
+/// These files were written by older versions that used backend reuse.
+/// Transitional cleanup — can be removed once all users have upgraded.
+fn cleanup_stale_endpoints(config_dir: &std::path::Path) {
+    let instances_dir = config_dir.join("instances");
+    if let Ok(entries) = std::fs::read_dir(&instances_dir) {
+        for entry in entries.flatten() {
+            let endpoints_file = entry.path().join("wave-endpoints.json");
+            if endpoints_file.exists() {
+                if let Err(e) = std::fs::remove_file(&endpoints_file) {
+                    tracing::warn!("Failed to remove stale endpoints file {}: {}", endpoints_file.display(), e);
+                } else {
+                    tracing::info!("Removed stale endpoints file: {}", endpoints_file.display());
+                }
+            }
+        }
+    }
+}
+
 /// Handle backend event messages from agentmuxsrv-rs.
-/// These are forwarded to the frontend via Tauri events.
 fn handle_backend_event(app: &tauri::AppHandle, event_data: &str) {
     tracing::debug!("Backend event: {}", event_data);
 
-    // Forward raw event to frontend
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.emit("agentmuxsrv-event", event_data.to_string());
     }

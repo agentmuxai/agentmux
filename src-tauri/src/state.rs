@@ -40,6 +40,34 @@ impl WindowInstanceRegistry {
     }
 }
 
+/// Wrapper for a Windows HANDLE that is Send + Sync.
+/// Windows HANDLEs are safe to use from any thread.
+#[cfg(target_os = "windows")]
+pub struct JobHandle(*mut std::ffi::c_void);
+
+#[cfg(target_os = "windows")]
+unsafe impl Send for JobHandle {}
+#[cfg(target_os = "windows")]
+unsafe impl Sync for JobHandle {}
+
+#[cfg(target_os = "windows")]
+impl JobHandle {
+    pub fn new(handle: *mut std::ffi::c_void) -> Self {
+        Self(handle)
+    }
+}
+
+#[cfg(target_os = "windows")]
+impl Drop for JobHandle {
+    fn drop(&mut self) {
+        if !self.0.is_null() {
+            unsafe {
+                windows_sys::Win32::Foundation::CloseHandle(self.0);
+            }
+        }
+    }
+}
+
 /// Shared application state managed by Tauri.
 /// Replaces the scattered state across emain/*.ts files.
 pub struct AppState {
@@ -73,13 +101,17 @@ pub struct AppState {
 
     /// Sequential instance numbers for each open window.
     pub window_instance_registry: Mutex<WindowInstanceRegistry>,
+
+    /// Windows Job Object handle — keeps backend alive until frontend exits.
+    /// When this handle is closed (including on crash), Windows kills all assigned processes.
+    #[cfg(target_os = "windows")]
+    pub job_handle: Mutex<Option<JobHandle>>,
 }
 
 #[derive(Default, Clone, serde::Serialize)]
 pub struct BackendEndpoints {
     pub ws_endpoint: String,
     pub web_endpoint: String,
-    pub is_reused: bool,
 }
 
 impl Default for AppState {
@@ -94,6 +126,8 @@ impl Default for AppState {
             active_tab_id: Mutex::new(None),
             window_init_status: Mutex::new(String::new()),
             window_instance_registry: Mutex::new(WindowInstanceRegistry::new()),
+            #[cfg(target_os = "windows")]
+            job_handle: Mutex::new(None),
         }
     }
 }

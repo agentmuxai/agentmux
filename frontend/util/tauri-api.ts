@@ -39,15 +39,15 @@ export async function initTauriApi(): Promise<void> {
     // Try fetching backend endpoints first (in case backend is already ready)
     // If it fails, wait for the backend-ready event
     console.log("[tauri-api] Checking if backend is ready...");
-    let backendEndpoints: { ws: string; web: string; is_reused?: boolean };
+    let backendEndpoints: { ws: string; web: string };
 
     try {
         backendEndpoints = await invoke<{ ws: string; web: string }>("get_backend_endpoints");
         console.log("[tauri-api] Backend already ready:", backendEndpoints);
     } catch (e) {
         console.log("[tauri-api] Backend not ready yet, waiting for backend-ready event...");
-        backendEndpoints = await new Promise<{ ws: string; web: string; is_reused?: boolean }>((resolve) => {
-            listen<{ ws: string; web: string; is_reused?: boolean }>("backend-ready", (event) => {
+        backendEndpoints = await new Promise<{ ws: string; web: string }>((resolve) => {
+            listen<{ ws: string; web: string }>("backend-ready", (event) => {
                 console.log("[tauri-api] Backend ready:", event.payload);
                 resolve(event.payload);
             });
@@ -58,8 +58,6 @@ export async function initTauriApi(): Promise<void> {
     // Set endpoints as window globals for getEnv() to find
     (window as any).__WAVE_SERVER_WS_ENDPOINT__ = backendEndpoints.ws;
     (window as any).__WAVE_SERVER_WEB_ENDPOINT__ = backendEndpoints.web;
-    // Track whether this frontend is reusing an existing backend (another window already owns it)
-    (window as any).__WAVE_BACKEND_REUSED__ = backendEndpoints.is_reused ?? false;
 
     const [
         authKey,

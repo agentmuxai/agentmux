@@ -208,7 +208,6 @@ pub fn run() {
                         let mut endpoints = state.backend_endpoints.lock().unwrap();
                         endpoints.ws_endpoint = backend_state.ws_endpoint;
                         endpoints.web_endpoint = backend_state.web_endpoint;
-                        endpoints.is_reused = backend_state.is_reused;
                         tracing::info!("Backend ready: ws={}, web={}",
                             endpoints.ws_endpoint, endpoints.web_endpoint);
 
@@ -223,7 +222,6 @@ pub fn run() {
                             let _ = window.emit("backend-ready", serde_json::json!({
                                 "ws": endpoints.ws_endpoint.clone(),
                                 "web": endpoints.web_endpoint.clone(),
-                                "is_reused": backend_state.is_reused,
                             }));
                         }
                     }
@@ -266,27 +264,15 @@ pub fn run() {
 
                     // Only shut down the backend sidecar when the last window is closing
                     if remaining_windows == 0 {
+                        // Graceful shutdown: kill the sidecar child directly.
+                        // On Windows, the Job Object (KILL_ON_JOB_CLOSE) is the crash safety net —
+                        // it kills the backend even if this code never runs. But for normal close,
+                        // child.kill() lets the backend flush writes before exiting.
                         let state = window.app_handle().state::<state::AppState>();
                         let mut sidecar = state.sidecar_child.lock().unwrap();
                         if let Some(child) = sidecar.take() {
                             tracing::info!("Shutting down backend sidecar (last window closing)");
                             let _ = child.kill();
-
-                            // Clean up endpoints file to prevent stale file race conditions
-                            if let Ok(config_dir) = window.app_handle().path().app_config_dir() {
-                                let version = env!("CARGO_PKG_VERSION");
-                                let endpoints_file = config_dir
-                                    .join("instances")
-                                    .join(format!("v{}", version))
-                                    .join("wave-endpoints.json");
-                                if endpoints_file.exists() {
-                                    if let Err(e) = std::fs::remove_file(&endpoints_file) {
-                                        tracing::warn!("Failed to remove endpoints file on shutdown: {}", e);
-                                    } else {
-                                        tracing::info!("Removed endpoints file on shutdown: {}", endpoints_file.display());
-                                    }
-                                }
-                            }
                         }
 
                         // Clean up heartbeat file
