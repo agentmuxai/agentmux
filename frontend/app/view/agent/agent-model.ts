@@ -4,7 +4,7 @@
 import { BlockNodeModel } from "@/app/block/blocktypes";
 import { RpcApi } from "@/app/store/wshclientapi";
 import { TabRpcClient } from "@/app/store/wshrpcutil";
-import { atoms, globalStore, WOS } from "@/app/store/global";
+import { atoms, getApi, globalStore, WOS } from "@/app/store/global";
 import { atom, Atom, PrimitiveAtom } from "jotai";
 import React from "react";
 import { AgentViewWrapper } from "./agent-view";
@@ -72,10 +72,22 @@ export class AgentViewModel implements ViewModel {
 
             // Inject the CLI command after a short delay for the shell to initialize
             setTimeout(async () => {
-                const cmdText =
-                    provider.defaultArgs.length > 0
-                        ? `${cliPath} ${provider.defaultArgs.join(" ")}\r`
-                        : `${cliPath}\r`;
+                // Build env cleanup prefix (e.g. CLAUDECODE nested-session guard)
+                let envPrefix = "";
+                if (provider.unsetEnv?.length) {
+                    const isWindows = getApi().getPlatform() === "win32";
+                    if (isWindows) {
+                        // PowerShell: $env:VAR=$null; ...
+                        envPrefix = provider.unsetEnv.map((v) => `$env:${v}=$null`).join("; ") + "; ";
+                    } else {
+                        // bash/zsh: unset VAR; ...
+                        envPrefix = provider.unsetEnv.map((v) => `unset ${v}`).join("; ") + "; ";
+                    }
+                }
+                const cliCmd = provider.defaultArgs.length > 0
+                    ? `${cliPath} ${provider.defaultArgs.join(" ")}`
+                    : cliPath;
+                const cmdText = `${envPrefix}${cliCmd}\r`;
                 const b64data = stringToBase64(cmdText);
                 await RpcApi.ControllerInputCommand(TabRpcClient, {
                     blockid: blockId,
