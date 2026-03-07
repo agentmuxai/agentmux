@@ -460,6 +460,28 @@ impl Controller for ShellController {
             c
         };
 
+        // Inject cmd:env from block metadata for cmd controller paths.
+        // The shell controller path (above) already handles its own env injection;
+        // this block covers the "direct spawn" and "shell-wrapped" paths.
+        if !cmd_str.is_empty() {
+            if let Some(env_map) = block_meta.get(META_KEY_CMD_ENV) {
+                if let Some(obj) = env_map.as_object() {
+                    for (k, v) in obj {
+                        if let Some(val) = v.as_str() {
+                            if k.eq_ignore_ascii_case("PATH") {
+                                // Prepend to existing PATH rather than replacing
+                                let sep = if cfg!(windows) { ";" } else { ":" };
+                                let existing = std::env::var("PATH").unwrap_or_default();
+                                cmd.env(k, &format!("{val}{sep}{existing}"));
+                            } else {
+                                cmd.env(k, val);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         // Set working directory if specified
         let cwd = waveobj::meta_get_string(&block_meta, super::META_KEY_CMD_CWD, "");
         if !cwd.is_empty() {

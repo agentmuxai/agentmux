@@ -82,23 +82,35 @@ export class AgentViewModel implements ViewModel {
             }
         }
 
-        // 3. Launch terminal with resolved path
+        // 3. Launch terminal with bare command name + PATH to bin directory
         globalStore.set(this.providerStatus, "launching");
         globalStore.set(this.statusMessage, `Launching ${provider.displayName}...`);
-        console.log(`[agent] Starting ${provider.id} from ${cliPath}`);
+
+        // Extract the bin directory from the full CLI path so we can add it to PATH.
+        // Use bare command name (e.g. "claude") as cmd — Windows PTY can't spawn .cmd files directly.
+        const sep = cliPath.includes("/") ? "/" : "\\";
+        const binDir = cliPath.substring(0, cliPath.lastIndexOf(sep));
+        console.log(`[agent] Starting ${provider.id}: cmd=${provider.cliCommand}, binDir=${binDir}`);
+
+        const meta: Record<string, any> = {
+            "view": "term",
+            "controller": "cmd",
+            "cmd": provider.cliCommand,
+            "cmd:args": provider.defaultArgs,
+            "cmd:interactive": true,
+            "cmd:runonstart": true,
+        };
+
+        // Add bin directory to PATH so the bare command name resolves
+        if (binDir) {
+            meta["cmd:env"] = { PATH: binDir };
+        }
 
         const oref = WOS.makeORef("block", this.blockId);
         try {
             await RpcApi.SetMetaCommand(TabRpcClient, {
                 oref,
-                meta: {
-                    "view": "term",
-                    "controller": "cmd",
-                    "cmd": cliPath,
-                    "cmd:args": provider.defaultArgs,
-                    "cmd:interactive": true,
-                    "cmd:runonstart": true,
-                },
+                meta,
             });
             await RpcApi.ControllerResyncCommand(TabRpcClient, {
                 tabid: globalStore.get(atoms.staticTabId),
