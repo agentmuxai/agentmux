@@ -732,7 +732,11 @@ pub fn read_config_file<T: serde::de::DeserializeOwned + Default>(
         }
     };
 
-    match serde_json::from_str(&content) {
+    // Strip // and /* */ comments so users can annotate settings.json
+    let stripped = json_comments::StripComments::new(content.as_bytes());
+    let clean: Result<T, _> = serde_json::from_reader(stripped);
+
+    match clean {
         Ok(parsed) => (parsed, errors),
         Err(e) => {
             errors.push(ConfigError {
@@ -1265,6 +1269,32 @@ mod tests {
         let (config, errors): (SettingsType, _) = read_config_file(&path);
         assert!(errors.is_empty()); // Missing file is not an error
         assert!(config.ai_model.is_empty());
+    }
+
+    #[test]
+    fn test_read_config_file_with_comments() {
+        let dir = std::env::temp_dir().join("agentmux_test_jsonc");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("settings_comments.json");
+        std::fs::write(
+            &path,
+            r#"
+// Terminal settings
+{
+    "term:fontsize": 16.0,
+    /* AI config */
+    "ai:model": "claude-sonnet-4-6" // inline comment
+}
+"#,
+        )
+        .unwrap();
+
+        let (config, errors): (SettingsType, _) = read_config_file(&path);
+        assert!(errors.is_empty(), "errors: {:?}", errors);
+        assert_eq!(config.term_font_size, 16.0);
+        assert_eq!(config.ai_model, "claude-sonnet-4-6");
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     // -- AiSettingsType serde --
