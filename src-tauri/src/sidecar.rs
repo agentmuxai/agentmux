@@ -192,6 +192,7 @@ pub async fn spawn_backend(app: &tauri::AppHandle) -> Result<BackendSpawnResult,
         .env("AGENTMUX_AUTH_KEY", &auth_key)
         .env("AGENTMUX_CONFIG_HOME", version_config_home.to_string_lossy().to_string())
         .env("AGENTMUX_DATA_HOME", version_data_home.to_string_lossy().to_string())
+        .env("AGENTMUX_SETTINGS_DIR", config_dir.to_string_lossy().to_string())
         .env("AGENTMUX_APP_PATH", &app_path_str)
         .env("AGENTMUX_DEV", if cfg!(debug_assertions) { "1" } else { "" })
         .env("WCLOUD_ENDPOINT", "https://api.agentmux.ai/central")
