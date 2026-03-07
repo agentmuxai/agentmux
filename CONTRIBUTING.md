@@ -2,8 +2,8 @@
 
 We welcome contributions to AgentMux! There are several ways to get involved:
 
-- Report bugs or request features via [GitHub Issues](https://github.com/agentmuxhq/agentmux/issues)
-- Fix outstanding [issues](https://github.com/agentmuxhq/agentmux/issues) in the existing code
+- Report bugs or request features via [GitHub Issues](https://github.com/agentmuxai/agentmux/issues)
+- Fix outstanding [issues](https://github.com/agentmuxai/agentmux/issues) in the existing code
 - Improve [documentation](./docs)
 - Star the repository to show your appreciation
 
@@ -27,7 +27,7 @@ Contributions must be accompanied by a Contributor License Agreement (CLA). You 
 ## How to Contribute
 
 - For minor changes, open a pull request directly.
-- For major changes, [create an issue](https://github.com/agentmuxhq/agentmux/issues/new) first to discuss the approach.
+- For major changes, [create an issue](https://github.com/agentmuxai/agentmux/issues/new) first to discuss the approach.
 - Branch naming: `agenta/feature-name` (e.g., `agenta/fix-terminal-scroll`)
 
 ### Development Environment

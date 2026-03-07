@@ -1,5 +1,5 @@
 {
-  "name": "@agentmuxhq/sandbox",
+  "name": "@agentmuxai/sandbox",
   "version": "1.0.0",
   "description": "AgentMux development sandbox setup and management tools",
   "private": true,
