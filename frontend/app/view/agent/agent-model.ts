@@ -10,6 +10,7 @@ import React from "react";
 import { AgentViewWrapper } from "./agent-view";
 import { PROVIDERS } from "./providers";
 import { Logger } from "@/util/logger";
+import { stringToBase64 } from "@/util/util";
 
 export class AgentViewModel implements ViewModel {
     viewType = "agent";
@@ -53,23 +54,34 @@ export class AgentViewModel implements ViewModel {
         });
 
         const oref = WOS.makeORef("block", this.blockId);
+        const blockId = this.blockId;
         try {
+            // Switch to interactive shell — no cmd/cmd:args, just a plain shell
             await RpcApi.SetMetaCommand(TabRpcClient, {
                 oref,
                 meta: {
                     "view": "term",
-                    "controller": "cmd",
-                    "cmd": cliPath,
-                    "cmd:args": provider.defaultArgs,
-                    "cmd:interactive": false,
-                    "cmd:runonstart": true,
+                    "controller": "shell",
                 },
             });
             await RpcApi.ControllerResyncCommand(TabRpcClient, {
                 tabid: globalStore.get(atoms.staticTabId),
-                blockid: this.blockId,
+                blockid: blockId,
                 forcerestart: true,
             });
+
+            // Inject the CLI command after a short delay for the shell to initialize
+            setTimeout(async () => {
+                const cmdText =
+                    provider.defaultArgs.length > 0
+                        ? `${cliPath} ${provider.defaultArgs.join(" ")}\n`
+                        : `${cliPath}\n`;
+                const b64data = stringToBase64(cmdText);
+                await RpcApi.ControllerInputCommand(TabRpcClient, {
+                    blockid: blockId,
+                    inputdata64: b64data,
+                });
+            }, 500);
         } catch (e: any) {
             Logger.error("agent", "Failed to start session", { error: String(e) });
         }
