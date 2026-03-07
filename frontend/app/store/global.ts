@@ -228,7 +228,6 @@ function initGlobalEventSubs(initOpts: AgentMuxInitOpts) {
         {
             eventType: "config",
             handler: (event) => {
-                // console.log("config wave event handler", event);
                 const fullConfig = (event.data as WatcherUpdate).fullconfig;
                 globalStore.set(atoms.fullConfigAtom, fullConfig);
             },
