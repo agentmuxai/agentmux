@@ -1,7 +1,8 @@
 // Copyright 2024, Command Line Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-import React, { memo, useCallback, useState } from "react";
+import React, { memo, useCallback } from "react";
+import { useAtomValue } from "jotai";
 import type { AgentViewModel } from "./agent-model";
 import { getProviderList, type ProviderDefinition } from "./providers";
 import "./agent-view.scss";
@@ -10,7 +11,7 @@ import "./agent-view.scss";
  * Top-level wrapper: passes connectWithProvider into the provider picker.
  */
 export const AgentViewWrapper: React.FC<ViewComponentProps<AgentViewModel>> = memo(({ model }) => {
-    return <AgentProviderPicker onConnectWithProvider={model.connectWithProvider} />;
+    return <AgentProviderPicker model={model} />;
 });
 
 AgentViewWrapper.displayName = "AgentViewWrapper";
@@ -38,29 +39,20 @@ const ProviderButton: React.FC<{
     );
 };
 
-interface AgentProviderPickerProps {
-    onConnectWithProvider: (providerId: string, cliPath: string) => Promise<void>;
-}
-
 /**
- * Provider selection screen. Clicking a button switches the block to a terminal.
+ * Provider selection screen. Clicking a button detects/installs the CLI, then launches terminal.
  */
-const AgentProviderPicker: React.FC<AgentProviderPickerProps> = memo(({ onConnectWithProvider }) => {
-    const [launching, setLaunching] = useState<string | null>(null);
+const AgentProviderPicker: React.FC<{ model: AgentViewModel }> = memo(({ model }) => {
+    const status = useAtomValue(model.providerStatus);
+    const statusMessage = useAtomValue(model.statusMessage);
     const providers = getProviderList();
+    const busy = status !== "idle" && status !== "error";
 
     const handleProviderSelect = useCallback(
         async (providerId: string) => {
-            const provider = getProviderList().find((p) => p.id === providerId);
-            if (!provider) return;
-            setLaunching(providerId);
-            try {
-                await onConnectWithProvider(providerId, provider.cliCommand);
-            } catch {
-                setLaunching(null);
-            }
+            await model.connectWithProvider(providerId);
         },
-        [onConnectWithProvider]
+        [model]
     );
 
     return (
@@ -74,13 +66,13 @@ const AgentProviderPicker: React.FC<AgentProviderPickerProps> = memo(({ onConnec
                                 key={provider.id}
                                 provider={provider}
                                 onSelect={handleProviderSelect}
-                                disabled={launching != null}
+                                disabled={busy}
                             />
                         ))}
                     </div>
-                    {launching && (
-                        <div className="agent-install-status">
-                            Launching {launching}...
+                    {statusMessage && (
+                        <div className={`agent-install-status ${status === "error" ? "agent-install-error" : ""}`}>
+                            {statusMessage}
                         </div>
                     )}
                 </div>
