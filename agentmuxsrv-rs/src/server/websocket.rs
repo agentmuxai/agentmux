@@ -23,7 +23,7 @@ use crate::backend::rpc_types::{
     COMMAND_GET_AI_RATE_LIMIT, COMMAND_ROUTE_ANNOUNCE, COMMAND_ROUTE_UNANNOUNCE,
     COMMAND_SET_META, COMMAND_APP_INFO,
 };
-use crate::backend::waveobj::{Block, TermSize};
+use crate::backend::waveobj::{Block, TermSize, WaveObjUpdate, wave_obj_to_value};
 use super::service::update_object_meta;
 
 use super::AppState;
@@ -462,11 +462,24 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                 let meta_keys: Vec<&String> = cmd.meta.keys().collect();
                 tracing::info!(oref = %oref_str, keys = ?meta_keys, "SetMeta");
                 update_object_meta(&wstore, &oref_str, &cmd.meta)?;
-                // Broadcast waveobj:update so all WS clients refresh their atoms
+                // Read the updated object and broadcast a proper WaveObjUpdate
+                // so all WS clients refresh their atoms with the new data.
+                let oref = crate::backend::ORef::parse(&oref_str)
+                    .map_err(|e| e.to_string())?;
+                let update_data = if oref.otype == "block" {
+                    if let Ok(block) = wstore.must_get::<Block>(&oref.oid) {
+                        Some(serde_json::to_value(&WaveObjUpdate {
+                            updatetype: "update".into(),
+                            otype: oref.otype.clone(),
+                            oid: oref.oid.clone(),
+                            obj: Some(wave_obj_to_value(&block)),
+                        }).unwrap_or_default())
+                    } else { None }
+                } else { None };
                 event_bus.broadcast_event(&crate::backend::eventbus::WSEventType {
                     eventtype: "waveobj:update".to_string(),
                     oref: oref_str,
-                    data: None,
+                    data: update_data,
                 });
                 Ok(None)
             })
