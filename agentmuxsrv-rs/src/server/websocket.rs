@@ -23,7 +23,7 @@ use crate::backend::rpc_types::{
     COMMAND_GET_AI_RATE_LIMIT, COMMAND_ROUTE_ANNOUNCE, COMMAND_ROUTE_UNANNOUNCE,
     COMMAND_SET_META, COMMAND_APP_INFO,
 };
-use crate::backend::waveobj::{Block, TermSize};
+use crate::backend::waveobj::{Block, TermSize, WaveObjUpdate, wave_obj_to_value};
 use super::service::update_object_meta;
 
 use super::AppState;
@@ -113,9 +113,35 @@ async fn handle_ws_connection(mut socket: WebSocket, state: AppState) {
 
     loop {
         tokio::select! {
-            // Forward event bus events → WebSocket
+            // Forward event bus events → WebSocket.
+            // Two sources feed the event bus:
+            //   1. WPS Broker (via EventBusBridge) — already wrapped as
+            //      { eventtype: "rpc", data: { command: "eventrecv", data: WaveEvent } }
+            //   2. Direct broadcasts (e.g., SetMeta's waveobj:update) — raw
+            //      { eventtype: "waveobj:update", oref: "block:xxx", data: ... }
+            // Type 1: forward as-is (already RPC-wrapped).
+            // Type 2: wrap as RPC "eventrecv" so the frontend WshRouter routes
+            //         it to handleWaveEvent → updateWaveObject → Jotai re-render.
             Some(event) = event_rx.recv() => {
-                let msg = serde_json::to_string(&event).unwrap_or_default();
+                let msg = if event["eventtype"] == "rpc" {
+                    // Already an RPC message (from WPS broker via EventBusBridge)
+                    serde_json::to_string(&event).unwrap_or_default()
+                } else {
+                    // Raw event bus event — wrap as RPC eventrecv
+                    let wave_event = json!({
+                        "event": event["eventtype"],
+                        "scopes": [event["oref"]],
+                        "data": event["data"],
+                    });
+                    let wrapped = json!({
+                        "eventtype": "rpc",
+                        "data": {
+                            "command": "eventrecv",
+                            "data": wave_event,
+                        },
+                    });
+                    serde_json::to_string(&wrapped).unwrap_or_default()
+                };
                 if socket.send(Message::Text(msg.into())).await.is_err() {
                     break;
                 }
@@ -462,11 +488,24 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                 let meta_keys: Vec<&String> = cmd.meta.keys().collect();
                 tracing::info!(oref = %oref_str, keys = ?meta_keys, "SetMeta");
                 update_object_meta(&wstore, &oref_str, &cmd.meta)?;
-                // Broadcast waveobj:update so all WS clients refresh their atoms
+                // Read the updated object and broadcast a proper WaveObjUpdate
+                // so all WS clients refresh their atoms with the new data.
+                let oref = crate::backend::ORef::parse(&oref_str)
+                    .map_err(|e| e.to_string())?;
+                let update_data = if oref.otype == "block" {
+                    if let Ok(block) = wstore.must_get::<Block>(&oref.oid) {
+                        Some(serde_json::to_value(&WaveObjUpdate {
+                            updatetype: "update".into(),
+                            otype: oref.otype.clone(),
+                            oid: oref.oid.clone(),
+                            obj: Some(wave_obj_to_value(&block)),
+                        }).unwrap_or_default())
+                    } else { None }
+                } else { None };
                 event_bus.broadcast_event(&crate::backend::eventbus::WSEventType {
                     eventtype: "waveobj:update".to_string(),
                     oref: oref_str,
-                    data: None,
+                    data: update_data,
                 });
                 Ok(None)
             })
