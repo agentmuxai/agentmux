@@ -14,6 +14,7 @@ export interface ProviderDefinition {
     pinnedVersion: string;       // version to install ("latest" or specific)
     docsUrl: string;
     icon: string;
+    unsetEnv?: string[];         // env vars to unset before launching (e.g. nested-session guards)
 }
 
 export const PROVIDERS: Record<string, ProviderDefinition> = {
@@ -30,6 +31,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         pinnedVersion: "latest",
         docsUrl: "https://docs.anthropic.com/claude-code",
         icon: "sparkles",
+        unsetEnv: ["CLAUDECODE"],
     },
     codex: {
         id: "codex",
