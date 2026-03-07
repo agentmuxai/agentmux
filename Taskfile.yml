@@ -24,7 +24,7 @@ vars:
 tasks:
     dev:
         desc: Run the Tauri application in development mode (hot reload enabled).
-        cmd: npx tauri dev
+        cmd: npx tauri dev --config src-tauri/tauri.dev.conf.json
         deps:
             - npm:install
             - build:backend
@@ -84,7 +84,7 @@ tasks:
 
     quickdev:
         desc: Run the Tauri application in quick dev mode (no docsite, no wsh).
-        cmd: tauri dev
+        cmd: tauri dev --config src-tauri/tauri.dev.conf.json
         deps:
             - npm:install
             - build:backend:rust
