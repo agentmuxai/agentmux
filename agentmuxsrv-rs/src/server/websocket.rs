@@ -457,11 +457,28 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                     serde_json::from_value(data).map_err(|e| format!("setmeta: {e}"))?;
                 let oref_str = cmd.oref.to_string();
                 update_object_meta(&wstore, &oref_str, &cmd.meta)?;
-                // Broadcast waveobj:update so all WS clients refresh their atoms
+                // Broadcast waveobj:update as RPC eventrecv so frontend updates its atoms
+                let oref = crate::backend::ORef::parse(&oref_str)
+                    .map_err(|e| format!("setmeta oref parse: {e}"))?;
+                let updated_obj = wstore
+                    .get_raw(&oref.otype, &oref.oid)
+                    .map_err(|e| format!("setmeta: read updated obj: {e}"))?;
                 event_bus.broadcast_event(&crate::backend::eventbus::WSEventType {
-                    eventtype: "waveobj:update".to_string(),
-                    oref: oref_str,
-                    data: None,
+                    eventtype: crate::backend::eventbus::WS_EVENT_RPC.to_string(),
+                    oref: String::new(),
+                    data: Some(json!({
+                        "command": "eventrecv",
+                        "data": {
+                            "event": "waveobj:update",
+                            "scopes": [oref_str],
+                            "data": {
+                                "updatetype": "update",
+                                "otype": oref.otype,
+                                "oid": oref.oid,
+                                "obj": updated_obj,
+                            }
+                        }
+                    })),
                 });
                 Ok(None)
             })

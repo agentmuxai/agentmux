@@ -15,6 +15,9 @@ function initWshrpc(tabId: string): WSControl {
     const router = new WshRouter(new UpstreamWshRpcProxy());
     setDefaultRouter(router);
     const handleFn = (event: WSEventType) => {
+        if (event.data == null) {
+            return;
+        }
         DefaultRouter.recvRpcMessage(event.data);
     };
 
