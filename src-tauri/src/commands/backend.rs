@@ -65,3 +65,15 @@ pub fn get_backend_info(state: tauri::State<'_, AppState>) -> serde_json::Value 
 pub fn fe_log(msg: String) {
     tracing::info!("[frontend] {}", msg);
 }
+
+/// Structured log from the frontend with level, module, message, and optional data.
+/// Persisted to the host log file for post-mortem debugging.
+#[tauri::command]
+pub fn fe_log_structured(level: String, module: String, message: String, data: Option<serde_json::Value>) {
+    match level.as_str() {
+        "error" => tracing::error!(module = %module, data = ?data, "[fe] {}", message),
+        "warn"  => tracing::warn!(module = %module, data = ?data, "[fe] {}", message),
+        "debug" => tracing::debug!(module = %module, data = ?data, "[fe] {}", message),
+        _       => tracing::info!(module = %module, data = ?data, "[fe] {}", message),
+    }
+}

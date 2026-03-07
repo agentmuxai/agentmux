@@ -118,6 +118,7 @@ declare global {
         setWindowInitStatus: (status: "ready" | "wave-ready") => void; // set-window-init-status
         onAgentMuxInit: (callback: (initOpts: AgentMuxInitOpts) => void) => void; // agentmux-init
         sendLog: (log: string) => void; // fe-log
+        sendLogStructured: (level: string, module: string, message: string, data: Record<string, any> | null) => void; // fe-log-structured
         onQuicklook: (filePath: string) => void; // quicklook
         openNativePath(filePath: string): void; // open-native-path
         captureScreenshot(rect: { x: number; y: number; width: number; height: number }): Promise<string>; // capture-screenshot
