@@ -14,6 +14,7 @@ import { SearchAddon } from "@xterm/addon-search";
 import { SerializeAddon } from "@xterm/addon-serialize";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { CanvasAddon } from "@xterm/addon-canvas";
+import { UnicodeGraphemesAddon } from "@xterm/addon-unicode-graphemes";
 import { WebglAddon } from "@xterm/addon-webgl";
 import * as TermTypes from "@xterm/xterm";
 import { Terminal } from "@xterm/xterm";
@@ -482,6 +483,9 @@ export class TermWrap {
         this.terminal.loadAddon(this.searchAddon);
         this.terminal.loadAddon(this.fitAddon);
         this.terminal.loadAddon(this.serializeAddon);
+        const unicodeAddon = new UnicodeGraphemesAddon();
+        this.terminal.loadAddon(unicodeAddon);
+        this.terminal.unicode.activeVersion = "Unicode 15.1.0";
         this.terminal.loadAddon(
             new WebLinksAddon((e, uri) => {
                 e.preventDefault();
