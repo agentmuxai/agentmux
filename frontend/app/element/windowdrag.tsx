@@ -17,9 +17,12 @@ interface WindowDragProps {
 // (drag.rs) that distinguishes clicks from drags. Tauri's startDragging() and
 // data-tauri-drag-region trigger an immediate Wayland compositor pointer grab
 // which swallows button clicks — so we skip them on Linux.
-const isLinux = PLATFORM === "linux";
+// NOTE: PLATFORM is read at render time (not module load) because setPlatform()
+// runs during app init and module-scope consts would capture the default "darwin".
 
 const WindowDrag = forwardRef<HTMLDivElement, WindowDragProps>(({ children, className, style }, ref) => {
+    const isLinux = PLATFORM === "linux";
+
     const handleMouseDown = async (e: React.MouseEvent) => {
         if (isLinux) return;
         if (e.button !== 0) return;
