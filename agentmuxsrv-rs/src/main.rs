@@ -265,6 +265,8 @@ fn init_logging() -> tracing_appender::non_blocking::WorkerGuard {
     use tracing_subscriber::{fmt, layer::SubscriberExt, EnvFilter};
 
     // Determine log directory: {AGENTMUX_DATA_HOME}/logs/ or ~/.agentmux/logs/
+    // Include version in filename so multiple versions can run side-by-side.
+    let version = env!("CARGO_PKG_VERSION");
     let log_dir = std::env::var("AGENTMUX_DATA_HOME")
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|_| dirs::home_dir().unwrap_or_default().join(".agentmux"))
@@ -272,7 +274,8 @@ fn init_logging() -> tracing_appender::non_blocking::WorkerGuard {
     let _ = std::fs::create_dir_all(&log_dir);
 
     // Rolling daily log file with JSON structured output
-    let file_appender = tracing_appender::rolling::daily(&log_dir, "agentmuxsrv.log");
+    let log_prefix = format!("agentmuxsrv-v{}.log", version);
+    let file_appender = tracing_appender::rolling::daily(&log_dir, &log_prefix);
     let (non_blocking_file, guard) = tracing_appender::non_blocking(file_appender);
 
     let subscriber = tracing_subscriber::registry()

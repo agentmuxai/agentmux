@@ -308,10 +308,13 @@ pub fn run() {
 // Deep link handler removed — auth is now handled by `claude auth login` via shell controller.
 // See docs/SPEC_CLAUDE_CLI_INTEGRATION.md for the auth flow.
 
-fn init_logging(handle: &tauri::AppHandle) -> std::path::PathBuf {
+fn init_logging(_handle: &tauri::AppHandle) -> std::path::PathBuf {
     use tracing_subscriber::{fmt, layer::SubscriberExt, EnvFilter};
 
-    // Use ~/.agentmux/logs/ for consistency with the backend sidecar
+    // Use ~/.agentmux/logs/ for consistency with the backend sidecar.
+    // Include version in the filename so multiple versions can run side-by-side
+    // without colliding on the same log file.
+    let version = env!("CARGO_PKG_VERSION");
     let log_dir = dirs::home_dir()
         .unwrap_or_else(|| std::path::PathBuf::from("."))
         .join(".agentmux")
@@ -319,7 +322,8 @@ fn init_logging(handle: &tauri::AppHandle) -> std::path::PathBuf {
 
     let _ = std::fs::create_dir_all(&log_dir);
 
-    let file_appender = tracing_appender::rolling::daily(&log_dir, "agentmux-host.log");
+    let log_prefix = format!("agentmux-host-v{}.log", version);
+    let file_appender = tracing_appender::rolling::daily(&log_dir, &log_prefix);
     let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
 
     // Keep the guard alive for the lifetime of the app
