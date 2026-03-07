@@ -113,24 +113,35 @@ async fn handle_ws_connection(mut socket: WebSocket, state: AppState) {
 
     loop {
         tokio::select! {
-            // Forward event bus events → WebSocket as RPC "eventrecv" messages.
-            // The frontend WshRouter dispatches "eventrecv" commands to the WPS
-            // handler (handleWaveEvent), which updates Jotai atoms and triggers
-            // re-renders (e.g., view switches from "agent" → "term").
+            // Forward event bus events → WebSocket.
+            // Two sources feed the event bus:
+            //   1. WPS Broker (via EventBusBridge) — already wrapped as
+            //      { eventtype: "rpc", data: { command: "eventrecv", data: WaveEvent } }
+            //   2. Direct broadcasts (e.g., SetMeta's waveobj:update) — raw
+            //      { eventtype: "waveobj:update", oref: "block:xxx", data: ... }
+            // Type 1: forward as-is (already RPC-wrapped).
+            // Type 2: wrap as RPC "eventrecv" so the frontend WshRouter routes
+            //         it to handleWaveEvent → updateWaveObject → Jotai re-render.
             Some(event) = event_rx.recv() => {
-                let wave_event = json!({
-                    "event": event["eventtype"],
-                    "scopes": [event["oref"]],
-                    "data": event["data"],
-                });
-                let wrapped = json!({
-                    "eventtype": "rpc",
-                    "data": {
-                        "command": "eventrecv",
-                        "data": wave_event,
-                    },
-                });
-                let msg = serde_json::to_string(&wrapped).unwrap_or_default();
+                let msg = if event["eventtype"] == "rpc" {
+                    // Already an RPC message (from WPS broker via EventBusBridge)
+                    serde_json::to_string(&event).unwrap_or_default()
+                } else {
+                    // Raw event bus event — wrap as RPC eventrecv
+                    let wave_event = json!({
+                        "event": event["eventtype"],
+                        "scopes": [event["oref"]],
+                        "data": event["data"],
+                    });
+                    let wrapped = json!({
+                        "eventtype": "rpc",
+                        "data": {
+                            "command": "eventrecv",
+                            "data": wave_event,
+                        },
+                    });
+                    serde_json::to_string(&wrapped).unwrap_or_default()
+                };
                 if socket.send(Message::Text(msg.into())).await.is_err() {
                     break;
                 }
