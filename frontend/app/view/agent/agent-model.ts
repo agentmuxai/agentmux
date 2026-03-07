@@ -99,6 +99,45 @@ export class AgentViewModel implements ViewModel {
         }
     };
 
+    /**
+     * Called when user clicks a styled provider button.
+     * Keeps view as "agent" and sets styled session meta for the translator pipeline.
+     */
+    connectStyled = async (providerId: string, cliPath: string): Promise<void> => {
+        const provider = PROVIDERS[providerId];
+        if (!provider) {
+            Logger.error("agent", "Unknown provider", { providerId });
+            return;
+        }
+
+        Logger.info("agent", `Starting ${provider.id} in styled mode`, {
+            provider: provider.id,
+            cliPath,
+            styledArgs: provider.styledArgs,
+            outputFormat: provider.styledOutputFormat,
+        });
+
+        const sep = cliPath.includes("/") ? "/" : "\\";
+        const binDir = cliPath.substring(0, cliPath.lastIndexOf(sep));
+
+        const oref = WOS.makeORef("block", this.blockId);
+        try {
+            await RpcApi.SetMetaCommand(TabRpcClient, {
+                oref,
+                meta: {
+                    "agentMode": "styled",
+                    "agentProvider": provider.id,
+                    "agentCliPath": cliPath,
+                    "agentCliArgs": provider.styledArgs,
+                    "agentOutputFormat": provider.styledOutputFormat,
+                    "agentBinDir": binDir,
+                },
+            });
+        } catch (e: any) {
+            Logger.error("agent", "Failed to set styled session meta", { error: String(e) });
+        }
+    };
+
     giveFocus(): boolean {
         return false;
     }

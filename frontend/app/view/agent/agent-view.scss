@@ -68,6 +68,29 @@
         margin-bottom: 8px;
     }
 
+    // Mode group: label + row of buttons
+    .agent-mode-group {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 8px;
+        width: 100%;
+    }
+
+    .agent-mode-label {
+        font-size: 10px;
+        font-weight: 600;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--secondary-text-color);
+        align-self: flex-start;
+        padding-left: 4px;
+
+        &--styled {
+            color: var(--accent-color);
+        }
+    }
+
     .agent-provider-buttons {
         display: flex;
         flex-wrap: wrap;
@@ -107,6 +130,18 @@
             font-size: 12px;
             font-weight: 500;
         }
+
+        // Styled variant: accent tint border + glow on hover
+        &--styled {
+            border-color: color-mix(in srgb, var(--accent-color) 35%, var(--border-color));
+            background: color-mix(in srgb, var(--accent-color) 5%, transparent);
+
+            &:hover:not(:disabled) {
+                border-color: var(--accent-color);
+                background: color-mix(in srgb, var(--accent-color) 12%, transparent);
+                box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent-color) 30%, transparent);
+            }
+        }
     }
 
     .agent-install-status {
@@ -125,6 +160,96 @@
     @keyframes pulse {
         0%, 100% { opacity: 0.6; }
         50% { opacity: 1; }
+    }
+
+    // === Styled Session ===
+    &--styled {
+        display: flex;
+        flex-direction: column;
+    }
+
+    .agent-styled-header {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 12px;
+        border-bottom: 1px solid var(--border-color);
+        background: color-mix(in srgb, var(--accent-color) 5%, transparent);
+        flex-shrink: 0;
+    }
+
+    .agent-styled-icon {
+        font-size: 16px;
+    }
+
+    .agent-styled-provider {
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--main-text-color);
+    }
+
+    .agent-styled-badge {
+        font-size: 10px;
+        font-weight: 600;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--accent-color);
+        border: 1px solid color-mix(in srgb, var(--accent-color) 50%, transparent);
+        border-radius: 3px;
+        padding: 1px 5px;
+    }
+
+    .agent-styled-disconnect {
+        margin-left: auto;
+        background: none;
+        border: none;
+        color: var(--secondary-text-color);
+        cursor: pointer;
+        font-size: 12px;
+        padding: 2px 6px;
+        border-radius: 3px;
+        transition: color 0.1s, background 0.1s;
+
+        &:hover {
+            color: var(--main-text-color);
+            background: color-mix(in srgb, var(--main-text-color) 8%, transparent);
+        }
+    }
+
+    .agent-styled-empty {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        height: 100%;
+        gap: 12px;
+        color: var(--secondary-text-color);
+    }
+
+    .agent-styled-spinner {
+        width: 20px;
+        height: 20px;
+        border: 2px solid color-mix(in srgb, var(--accent-color) 25%, transparent);
+        border-top-color: var(--accent-color);
+        border-radius: 50%;
+        animation: agent-spin 0.8s linear infinite;
+    }
+
+    @keyframes agent-spin {
+        to { transform: rotate(360deg); }
+    }
+
+    .agent-styled-status-text {
+        font-size: 13px;
+    }
+
+    .agent-styled-cli-info {
+        font-size: 11px;
+        opacity: 0.5;
+
+        code {
+            font-family: var(--termfontfamily, monospace);
+        }
     }
 
     // === Raw Output ===

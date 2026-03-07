@@ -677,6 +677,13 @@ declare global {
         "onboarding:githubstar"?: boolean;
         "onboarding:lastversion"?: string;
         count?: number;
+        "agent:*"?: boolean;
+        agentMode?: string;
+        agentProvider?: string;
+        agentCliPath?: string;
+        agentCliArgs?: string[];
+        agentOutputFormat?: string;
+        agentBinDir?: string;
     };
 
     // tsgenmeta.MethodMeta
