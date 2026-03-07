@@ -734,7 +734,13 @@ pub fn read_config_file<T: serde::de::DeserializeOwned + Default>(
 
     // Strip // and /* */ comments so users can annotate settings.json
     let stripped = json_comments::StripComments::new(content.as_bytes());
-    let clean: Result<T, _> = serde_json::from_reader(stripped);
+    let mut json_bytes = Vec::new();
+    std::io::Read::read_to_end(&mut std::io::BufReader::new(stripped), &mut json_bytes)
+        .unwrap_or_default();
+
+    // Strip trailing commas before } or ] (common when commented-out lines follow values)
+    let json_str = strip_trailing_commas(&String::from_utf8_lossy(&json_bytes));
+    let clean: Result<T, _> = serde_json::from_str(&json_str);
 
     match clean {
         Ok(parsed) => (parsed, errors),
@@ -746,6 +752,57 @@ pub fn read_config_file<T: serde::de::DeserializeOwned + Default>(
             (T::default(), errors)
         }
     }
+}
+
+/// Remove trailing commas before `}` or `]` in JSON text.
+/// This handles the common JSONC pattern where commented-out lines follow a value,
+/// leaving a trailing comma that strict JSON parsers reject.
+fn strip_trailing_commas(input: &str) -> String {
+    let mut result = String::with_capacity(input.len());
+    let mut chars = input.chars().peekable();
+    let mut in_string = false;
+    let mut last_comma_pos: Option<usize> = None;
+
+    while let Some(ch) = chars.next() {
+        if in_string {
+            result.push(ch);
+            if ch == '\\' {
+                if let Some(&next) = chars.peek() {
+                    result.push(next);
+                    chars.next();
+                }
+            } else if ch == '"' {
+                in_string = false;
+            }
+        } else {
+            match ch {
+                '"' => {
+                    in_string = true;
+                    last_comma_pos = None;
+                    result.push(ch);
+                }
+                ',' => {
+                    last_comma_pos = Some(result.len());
+                    result.push(ch);
+                }
+                '}' | ']' => {
+                    if let Some(pos) = last_comma_pos {
+                        result.replace_range(pos..pos + 1, " ");
+                    }
+                    last_comma_pos = None;
+                    result.push(ch);
+                }
+                c if c.is_whitespace() => {
+                    result.push(ch);
+                }
+                _ => {
+                    last_comma_pos = None;
+                    result.push(ch);
+                }
+            }
+        }
+    }
+    result
 }
 
 /// Replace `$ENV:VAR_NAME` and `$ENV:VAR_NAME:fallback` in a string.
@@ -1295,6 +1352,36 @@ mod tests {
         assert_eq!(config.ai_model, "claude-sonnet-4-6");
 
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn test_read_config_file_trailing_commas() {
+        let dir = std::env::temp_dir().join("agentmux_test_trailing");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("settings_trailing.json");
+        std::fs::write(
+            &path,
+            r#"{
+    // "term:fontsize": 12,
+     "window:opacity": 0.7,
+    // "window:bgcolor": ""
+}"#,
+        )
+        .unwrap();
+
+        let (config, errors): (SettingsType, _) = read_config_file(&path);
+        assert!(errors.is_empty(), "trailing comma should be tolerated: {:?}", errors);
+        assert_eq!(config.window_opacity, Some(0.7));
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn test_strip_trailing_commas_basic() {
+        assert_eq!(strip_trailing_commas(r#"{"a": 1,}"#), r#"{"a": 1 }"#);
+        assert_eq!(strip_trailing_commas(r#"[1, 2,]"#), r#"[1, 2 ]"#);
+        assert_eq!(strip_trailing_commas(r#"{"a": "b,}"}"#), r#"{"a": "b,}"}"#);
+        assert_eq!(strip_trailing_commas(r#"{"a": 1, "b": 2}"#), r#"{"a": 1, "b": 2}"#);
     }
 
     // -- AiSettingsType serde --
