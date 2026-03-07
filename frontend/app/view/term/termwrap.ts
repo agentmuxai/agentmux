@@ -485,7 +485,6 @@ export class TermWrap {
         this.terminal.loadAddon(this.serializeAddon);
         const unicodeAddon = new UnicodeGraphemesAddon();
         this.terminal.loadAddon(unicodeAddon);
-        this.terminal.unicode.activeVersion = "Unicode 15.1.0";
         this.terminal.loadAddon(
             new WebLinksAddon((e, uri) => {
                 e.preventDefault();
