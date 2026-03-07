@@ -113,9 +113,24 @@ async fn handle_ws_connection(mut socket: WebSocket, state: AppState) {
 
     loop {
         tokio::select! {
-            // Forward event bus events → WebSocket
+            // Forward event bus events → WebSocket as RPC "eventrecv" messages.
+            // The frontend WshRouter dispatches "eventrecv" commands to the WPS
+            // handler (handleWaveEvent), which updates Jotai atoms and triggers
+            // re-renders (e.g., view switches from "agent" → "term").
             Some(event) = event_rx.recv() => {
-                let msg = serde_json::to_string(&event).unwrap_or_default();
+                let wave_event = json!({
+                    "event": event["eventtype"],
+                    "scopes": [event["oref"]],
+                    "data": event["data"],
+                });
+                let wrapped = json!({
+                    "eventtype": "rpc",
+                    "data": {
+                        "command": "eventrecv",
+                        "data": wave_event,
+                    },
+                });
+                let msg = serde_json::to_string(&wrapped).unwrap_or_default();
                 if socket.send(Message::Text(msg.into())).await.is_err() {
                     break;
                 }
