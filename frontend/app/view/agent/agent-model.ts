@@ -9,6 +9,7 @@ import { atom, Atom, PrimitiveAtom } from "jotai";
 import React from "react";
 import { AgentViewWrapper } from "./agent-view";
 import { PROVIDERS } from "./providers";
+import { Logger } from "@/util/logger";
 
 export class AgentViewModel implements ViewModel {
     viewType = "agent";
@@ -41,11 +42,15 @@ export class AgentViewModel implements ViewModel {
     connectWithProvider = async (providerId: string, cliPath: string): Promise<void> => {
         const provider = PROVIDERS[providerId];
         if (!provider) {
-            console.error("[agent] Unknown provider:", providerId);
+            Logger.error("agent", "Unknown provider", { providerId });
             return;
         }
 
-        console.log(`[agent] Starting ${provider.id} — switching to terminal view...`);
+        Logger.info("agent", `Starting ${provider.id} — switching to terminal view`, {
+            provider: provider.id,
+            cliPath,
+            args: provider.defaultArgs,
+        });
 
         const oref = WOS.makeORef("block", this.blockId);
         try {
@@ -66,7 +71,7 @@ export class AgentViewModel implements ViewModel {
                 forcerestart: true,
             });
         } catch (e: any) {
-            console.error("[agent] Failed to start session:", e);
+            Logger.error("agent", "Failed to start session", { error: String(e) });
         }
     };
 

@@ -65,6 +65,8 @@ async fn handle_ws_connection(mut socket: WebSocket, state: AppState) {
     let conn_id = uuid::Uuid::new_v4().to_string();
     let tab_id = String::new();
 
+    tracing::info!(conn_id = %conn_id, "WebSocket client connected");
+
     let mut event_rx = state.event_bus.register_ws(&conn_id, &tab_id);
     tracing::info!("[ws-perf] register_ws: {:.2}ms", ws_start.elapsed().as_secs_f64() * 1000.0);
 
@@ -188,6 +190,7 @@ async fn handle_ws_connection(mut socket: WebSocket, state: AppState) {
         }
     }
 
+    tracing::info!(conn_id = %conn_id, "WebSocket client disconnected");
     state.event_bus.unregister_ws(&conn_id);
 
     // Unregister from messagebus if this connection was an agent
@@ -456,6 +459,8 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                 let cmd: CommandSetMetaData =
                     serde_json::from_value(data).map_err(|e| format!("setmeta: {e}"))?;
                 let oref_str = cmd.oref.to_string();
+                let meta_keys: Vec<&String> = cmd.meta.keys().collect();
+                tracing::info!(oref = %oref_str, keys = ?meta_keys, "SetMeta");
                 update_object_meta(&wstore, &oref_str, &cmd.meta)?;
                 // Broadcast waveobj:update so all WS clients refresh their atoms
                 event_bus.broadcast_event(&crate::backend::eventbus::WSEventType {
@@ -554,6 +559,12 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
             Box::pin(async move {
                 let cmd: CommandControllerResyncData = serde_json::from_value(data)
                     .map_err(|e| format!("controllerresync: {e}"))?;
+                tracing::info!(
+                    block_id = %cmd.blockid,
+                    tab_id = %cmd.tabid,
+                    forcerestart = cmd.forcerestart,
+                    "ControllerResync"
+                );
                 let block: Block = wstore
                     .get(&cmd.blockid)
                     .map_err(|e| format!("controllerresync: load block: {e}"))?

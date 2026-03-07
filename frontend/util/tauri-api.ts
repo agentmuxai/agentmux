@@ -303,6 +303,9 @@ export function buildTauriApi(): AppApi {
         sendLog: (log: string) => {
             invoke("fe_log", { msg: log }).catch(console.error);
         },
+        sendLogStructured: (level: string, module: string, message: string, data: Record<string, any> | null) => {
+            invoke("fe_log_structured", { level, module, message, data }).catch(() => {});
+        },
 
         // --- Screenshot ---
         captureScreenshot: async (_rect: { x: number; y: number; width: number; height: number }): Promise<string> => {

@@ -76,6 +76,7 @@ pub fn run() {
             commands::backend::get_wave_init_opts,
             commands::backend::get_backend_info,
             commands::backend::fe_log,
+            commands::backend::fe_log_structured,
             // Devtools commands
             commands::devtools::toggle_devtools,
             commands::devtools::is_devtools_open,
@@ -307,33 +308,87 @@ pub fn run() {
 // Deep link handler removed — auth is now handled by `claude auth login` via shell controller.
 // See docs/SPEC_CLAUDE_CLI_INTEGRATION.md for the auth flow.
 
-fn init_logging(handle: &tauri::AppHandle) -> std::path::PathBuf {
+/// Leaked log guard — stored in a static to keep the non-blocking writer alive
+/// for the entire lifetime of the app without using `std::mem::forget`.
+static LOG_GUARD: std::sync::OnceLock<tracing_appender::non_blocking::WorkerGuard> =
+    std::sync::OnceLock::new();
+
+fn init_logging(_handle: &tauri::AppHandle) -> std::path::PathBuf {
     use tracing_subscriber::{fmt, layer::SubscriberExt, EnvFilter};
 
-    let log_dir = handle
-        .path()
-        .app_log_dir()
-        .unwrap_or_else(|_| std::path::PathBuf::from("."));
+    // Use ~/.agentmux/logs/ for consistency with the backend sidecar.
+    // Include version in the filename so multiple versions can run side-by-side
+    // without colliding on the same log file.
+    let version = env!("CARGO_PKG_VERSION");
+    let log_dir = dirs::home_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join(".agentmux")
+        .join("logs");
 
     let _ = std::fs::create_dir_all(&log_dir);
 
-    let file_appender = tracing_appender::rolling::daily(&log_dir, "agentmux.log");
-    let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
+    let log_prefix = format!("agentmux-host-v{}.log", version);
+    let file_appender = tracing_appender::rolling::daily(&log_dir, &log_prefix);
+    let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
 
-    // Keep the guard alive for the lifetime of the app
-    // by leaking it (acceptable for a long-running app)
-    std::mem::forget(_guard);
+    // Store the guard in a static so the non-blocking writer stays alive
+    // and flushes properly for the entire app lifetime.
+    let _ = LOG_GUARD.set(guard);
 
     let subscriber = tracing_subscriber::registry()
         .with(
             EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| EnvFilter::new("agentmux=info,warn")),
+                .unwrap_or_else(|_| EnvFilter::new("info")),
         )
-        .with(fmt::layer().with_writer(non_blocking))
+        .with(
+            fmt::layer()
+                .json()
+                .with_writer(non_blocking)
+                .with_target(true),
+        )
         .with(fmt::layer().with_writer(std::io::stderr));
 
     tracing::subscriber::set_global_default(subscriber).ok();
-    tracing::info!("AgentMux starting");
+
+    tracing::info!(
+        version = env!("CARGO_PKG_VERSION"),
+        os = std::env::consts::OS,
+        arch = std::env::consts::ARCH,
+        log_dir = %log_dir.display(),
+        "AgentMux host starting"
+    );
+
+    // Clean up log files older than 7 days
+    cleanup_old_logs(&log_dir, 7);
 
     log_dir
+}
+
+/// Remove log files older than `retention_days` from the log directory.
+fn cleanup_old_logs(log_dir: &std::path::Path, retention_days: u64) {
+    let cutoff = std::time::SystemTime::now()
+        - std::time::Duration::from_secs(retention_days * 86400);
+
+    if let Ok(entries) = std::fs::read_dir(log_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_file() {
+                continue;
+            }
+            // Only clean up .log files with date suffixes
+            let name = path.file_name().unwrap_or_default().to_string_lossy();
+            if !name.contains(".log.") {
+                continue;
+            }
+            if let Ok(metadata) = entry.metadata() {
+                if let Ok(modified) = metadata.modified() {
+                    if modified < cutoff {
+                        if std::fs::remove_file(&path).is_ok() {
+                            tracing::info!(file = %path.display(), "removed old log file");
+                        }
+                    }
+                }
+            }
+        }
+    }
 }

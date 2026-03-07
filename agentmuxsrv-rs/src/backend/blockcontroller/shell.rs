@@ -253,8 +253,20 @@ impl Controller for ShellController {
         _rt_opts: Option<serde_json::Value>,
         force: bool,
     ) -> Result<(), String> {
+        let cmd_str_preview = Self::get_cmd_str(&block_meta);
+        let interactive_preview = Self::is_interactive(&block_meta);
+        tracing::info!(
+            block_id = %self.block_id,
+            controller = %self.controller_type,
+            cmd = %cmd_str_preview,
+            interactive = interactive_preview,
+            force = force,
+            "block start requested"
+        );
+
         // Check if we should run
         if !force && !Self::should_run_on_start(&block_meta) {
+            tracing::info!(block_id = %self.block_id, "skipping start: run_on_start is false");
             return Ok(());
         }
 
@@ -337,6 +349,7 @@ impl Controller for ShellController {
         };
 
         let pair = pty_system.openpty(pty_size).map_err(|e| {
+            tracing::error!(block_id = %self.block_id, error = %e, "failed to open PTY");
             let mut inner = self.inner.lock().unwrap();
             Self::set_status(&mut inner, STATUS_DONE);
             inner.proc_exit_code = -1;
@@ -344,6 +357,7 @@ impl Controller for ShellController {
             self.unlock_run();
             format!("failed to open PTY: {e}")
         })?;
+        tracing::info!(block_id = %self.block_id, rows = 25, cols = 80, "PTY opened");
 
         // Determine shell command
         let cmd_str = Self::get_cmd_str(&block_meta);
@@ -353,6 +367,7 @@ impl Controller for ShellController {
         let mut cmd = if !cmd_str.is_empty() && (!cmd_args.is_empty() || interactive) {
             // Direct spawn: cmd:args provided or cmd:interactive set.
             // Spawn the CLI directly (no sh -c wrapper) so args are passed correctly.
+            tracing::info!(block_id = %self.block_id, cmd = %cmd_str, args = ?cmd_args, "direct spawn path");
             let mut c = CommandBuilder::new(&cmd_str);
             if !cmd_args.is_empty() {
                 let arg_refs: Vec<&str> = cmd_args.iter().map(|s| s.as_str()).collect();
@@ -361,6 +376,7 @@ impl Controller for ShellController {
             c
         } else if !cmd_str.is_empty() {
             // "cmd" controller: run a specific command string via shell wrapper
+            tracing::info!(block_id = %self.block_id, cmd = %cmd_str, "shell-wrapped spawn path");
             if cfg!(windows) {
                 let mut c = CommandBuilder::new("cmd.exe");
                 c.args(["/C", &cmd_str]);
@@ -384,6 +400,8 @@ impl Controller for ShellController {
 
             // Deploy integration scripts (no-op if already up-to-date)
             crate::backend::shellintegration::deploy_scripts(&wave_data_dir);
+
+            tracing::info!(block_id = %self.block_id, shell = %shell_path, shell_type = ?shell_type, "interactive shell path");
 
             let mut c = CommandBuilder::new(&shell_path);
 
@@ -467,6 +485,7 @@ impl Controller for ShellController {
         }
 
         let mut child = pair.slave.spawn_command(cmd).map_err(|e| {
+            tracing::error!(block_id = %self.block_id, error = %e, cmd = %cmd_str, "spawn failed");
             let mut inner = self.inner.lock().unwrap();
             Self::set_status(&mut inner, STATUS_DONE);
             inner.proc_exit_code = -1;
@@ -474,6 +493,7 @@ impl Controller for ShellController {
             self.unlock_run();
             format!("failed to spawn command: {e}")
         })?;
+        tracing::info!(block_id = %self.block_id, "process spawned successfully");
 
         // Get reader/writer from master
         let reader = pair.master.try_clone_reader().map_err(|e| {
@@ -580,6 +600,8 @@ impl Controller for ShellController {
                     -1
                 }
             };
+
+            tracing::info!(block_id = %block_id_wait, exit_code = exit_code, "process exited");
 
             // Update inner state
             {
