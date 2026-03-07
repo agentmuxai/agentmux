@@ -6,11 +6,15 @@
     <meta name="color scheme" content="light dark" />
     <title>AgentMux</title>
     <style>
-      /* Prevent color flashing during startup */
+      /* Prevent color flashing during startup.
+         html gets opaque bg (cleared by AppSettingsUpdater when transparency is enabled).
+         body is transparent so app.scss can control it with --window-opacity. */
+      html {
+        background: rgb(34, 34, 34);
+      }
       html, body {
         margin: 0;
         padding: 0;
-        background: transparent;
         color: #f7f7f7;
       }
       #startup-loading {
