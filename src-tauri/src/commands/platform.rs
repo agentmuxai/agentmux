@@ -2,6 +2,89 @@ use tauri::Manager;
 
 use crate::state::AppState;
 
+const DEFAULT_SETTINGS_TEMPLATE: &str = r#"// AgentMux Settings
+// Save this file to apply changes immediately.
+// Uncomment a line to override its default value.
+//
+// Docs: https://docs.agentmux.ai/settings
+{
+    // -- Terminal --
+    // "term:fontsize":            12,
+    // "term:fontfamily":          "JetBrains Mono",
+    // "term:theme":               "default-dark",
+    // "term:scrollback":          1000,
+    // "term:copyonselect":        true,
+    // "term:transparency":        0.5,
+    // "term:localshellpath":      "/bin/bash",
+    // "term:localshellopts":      [],
+    // "term:disablewebgl":        false,
+    // "term:allowbracketedpaste": true,
+    // "term:shiftenternewline":   false,
+
+    // -- AI --
+    // "ai:preset":     "",
+    // "ai:apitype":    "anthropic",
+    // "ai:baseurl":    "",
+    // "ai:apitoken":   "",
+    // "ai:model":      "claude-sonnet-4-6",
+    // "ai:maxtokens":  4096,
+    // "ai:timeoutms":  60000,
+    // "ai:fontsize":   14,
+    // "ai:fixedfontsize": 14,
+
+    // -- Editor --
+    // "editor:fontsize":          14,
+    // "editor:minimapenabled":    false,
+    // "editor:stickyscrollenabled": false,
+    // "editor:wordwrap":          true,
+
+    // -- Window --
+    // "window:transparent":       false,
+    // "window:blur":              false,
+    // "window:opacity":           1.0,
+    // "window:bgcolor":           "",
+    // "window:zoom":              1.0,
+    // "window:tilegapsize":       3,
+    // "window:showmenubar":       false,
+    // "window:nativetitlebar":    false,
+    // "window:confirmclose":      false,
+    // "window:savelastwindow":    true,
+    // "window:dimensions":        "",
+    // "window:reducedmotion":     false,
+    // "window:magnifiedblockopacity": 0.6,
+    // "window:magnifiedblocksize":    0.9,
+    // "window:maxtabcachesize":   10,
+    // "window:disablehardwareacceleration": false,
+
+    // -- App --
+    // "app:globalhotkey":         "",
+    // "app:defaultnewblock":      "",
+    // "app:showoverlayblocknums": false,
+
+    // -- Shell Environment --
+    // "cmd:env":                  {},
+
+    // -- Auto Update --
+    // "autoupdate:enabled":       true,
+    // "autoupdate:installonquit": true,
+    // "autoupdate:channel":       "latest",
+
+    // -- Telemetry --
+    // "telemetry:enabled":        true,
+
+    // -- Connections --
+    // "conn:wshenabled":          true,
+    // "conn:askbeforewshinstall": true,
+
+    // -- Other --
+    // "widget:showhelp":          true,
+    // "blockheader:showblockids": false,
+    // "markdown:fontsize":        14,
+    // "preview:showhiddenfiles":  false,
+    // "tab:preset":               ""
+}
+"#;
+
 /// Get the current OS platform name.
 /// Replaces: ipcMain.on("get-platform") in emain/platform.ts
 #[tauri::command]
@@ -67,7 +150,7 @@ pub fn ensure_settings_file(app: tauri::AppHandle) -> Result<String, String> {
 
     let settings_path = config_dir.join("settings.json");
     if !settings_path.exists() {
-        std::fs::write(&settings_path, "{\n}\n")
+        std::fs::write(&settings_path, DEFAULT_SETTINGS_TEMPLATE)
             .map_err(|e| format!("Failed to create settings.json: {}", e))?;
     }
 
