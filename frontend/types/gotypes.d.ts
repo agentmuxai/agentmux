@@ -839,6 +839,7 @@ declare global {
         "tab:preset"?: string;
         "widget:*"?: boolean;
         "widget:showhelp"?: boolean;
+        "widget:icononly"?: boolean;
         "window:*"?: boolean;
         "window:transparent"?: boolean;
         "window:blur"?: boolean;
