@@ -86,11 +86,11 @@ function waveEventUnsubscribe(...unsubscribes: WaveEventUnsubscribe[]) {
     for (const unsubscribe of unsubscribes) {
         let subjects = waveEventSubjects.get(unsubscribe.eventType);
         if (subjects == null) {
-            return;
+            continue;
         }
         const idx = subjects.findIndex((s) => s.id === unsubscribe.id);
         if (idx === -1) {
-            return;
+            continue;
         }
         subjects.splice(idx, 1);
         if (subjects.length === 0) {
