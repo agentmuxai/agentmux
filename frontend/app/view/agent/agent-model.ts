@@ -9,6 +9,7 @@ import { atom, Atom, PrimitiveAtom } from "jotai";
 import React from "react";
 import { AgentViewWrapper } from "./agent-view";
 import { PROVIDERS } from "./providers";
+import { buildBootstrapScript, guessShellType } from "./bootstrap";
 import { Logger } from "@/util/logger";
 import { stringToBase64 } from "@/util/util";
 
@@ -36,27 +37,31 @@ export class AgentViewModel implements ViewModel {
     }
 
     /**
-     * Called when user clicks a provider button.
-     * Switches the block to a terminal view running the provider's CLI.
-     * This unmounts the AgentViewModel and creates a TermViewModel.
+     * Called when user clicks a provider button (raw mode).
+     * Switches to terminal view, injects a bootstrap script that:
+     * 1. Checks for the CLI in a version-isolated directory
+     * 2. Installs via npm if missing (visible in terminal)
+     * 3. Launches the CLI
      */
-    connectWithProvider = async (providerId: string, cliPath: string): Promise<void> => {
+    connectWithProvider = async (providerId: string, _cliPath: string): Promise<void> => {
         const provider = PROVIDERS[providerId];
         if (!provider) {
             Logger.error("agent", "Unknown provider", { providerId });
             return;
         }
 
-        Logger.info("agent", `Starting ${provider.id} — switching to terminal view`, {
+        const version = getApi().getAboutModalDetails().version;
+        const shellType = guessShellType(getApi().getPlatform());
+
+        Logger.info("agent", `Starting ${provider.id} — isolated CLI (v${version})`, {
             provider: provider.id,
-            cliPath,
+            shellType,
             args: provider.defaultArgs,
         });
 
         const oref = WOS.makeORef("block", this.blockId);
         const blockId = this.blockId;
         try {
-            // Switch to interactive shell — no cmd/cmd:args, just a plain shell
             await RpcApi.SetMetaCommand(TabRpcClient, {
                 oref,
                 meta: {
@@ -70,25 +75,14 @@ export class AgentViewModel implements ViewModel {
                 forcerestart: true,
             });
 
-            // Inject the CLI command after a short delay for the shell to initialize
             setTimeout(async () => {
-                // Build env cleanup prefix (e.g. CLAUDECODE nested-session guard)
-                let envPrefix = "";
-                if (provider.unsetEnv?.length) {
-                    const isWindows = getApi().getPlatform() === "win32";
-                    if (isWindows) {
-                        // PowerShell: $env:VAR=$null; ...
-                        envPrefix = provider.unsetEnv.map((v) => `$env:${v}=$null`).join("; ") + "; ";
-                    } else {
-                        // bash/zsh: unset VAR; ...
-                        envPrefix = provider.unsetEnv.map((v) => `unset ${v}`).join("; ") + "; ";
-                    }
-                }
-                const cliCmd = provider.defaultArgs.length > 0
-                    ? `${cliPath} ${provider.defaultArgs.join(" ")}`
-                    : cliPath;
-                const cmdText = `${envPrefix}${cliCmd}\r`;
-                const b64data = stringToBase64(cmdText);
+                const script = buildBootstrapScript({
+                    version,
+                    provider,
+                    shellType,
+                    args: provider.defaultArgs,
+                });
+                const b64data = stringToBase64(script + "\r");
                 await RpcApi.ControllerInputCommand(TabRpcClient, {
                     blockid: blockId,
                     inputdata64: b64data,
@@ -102,66 +96,53 @@ export class AgentViewModel implements ViewModel {
     /**
      * Called when user clicks a styled provider button.
      * Keeps view as "agent" but starts a shell controller underneath,
-     * then injects the CLI command with styled output flags.
+     * then injects a bootstrap script with styled output flags.
      * The PTY output is subscribed to by useAgentStream and rendered as styled blocks.
      */
-    connectStyled = async (providerId: string, cliPath: string): Promise<void> => {
+    connectStyled = async (providerId: string, _cliPath: string): Promise<void> => {
         const provider = PROVIDERS[providerId];
         if (!provider) {
             Logger.error("agent", "Unknown provider", { providerId });
             return;
         }
 
-        Logger.info("agent", `Starting ${provider.id} in styled mode`, {
+        const version = getApi().getAboutModalDetails().version;
+        const shellType = guessShellType(getApi().getPlatform());
+
+        Logger.info("agent", `Starting ${provider.id} in styled mode (v${version})`, {
             provider: provider.id,
-            cliPath,
+            shellType,
             styledArgs: provider.styledArgs,
             outputFormat: provider.styledOutputFormat,
         });
 
-        const sep = cliPath.includes("/") ? "/" : "\\";
-        const binDir = cliPath.substring(0, cliPath.lastIndexOf(sep));
-
         const oref = WOS.makeORef("block", this.blockId);
         const blockId = this.blockId;
         try {
-            // Set styled session meta AND start a shell controller (view stays "agent")
             await RpcApi.SetMetaCommand(TabRpcClient, {
                 oref,
                 meta: {
                     "agentMode": "styled",
                     "agentProvider": provider.id,
-                    "agentCliPath": cliPath,
-                    "agentCliArgs": provider.styledArgs,
                     "agentOutputFormat": provider.styledOutputFormat,
-                    "agentBinDir": binDir,
                     "controller": "shell",
                 },
             });
 
-            // Start the shell controller
             await RpcApi.ControllerResyncCommand(TabRpcClient, {
                 tabid: globalStore.get(atoms.staticTabId),
                 blockid: blockId,
                 forcerestart: true,
             });
 
-            // Inject the CLI command after the shell initializes
             setTimeout(async () => {
-                let envPrefix = "";
-                if (provider.unsetEnv?.length) {
-                    const isWindows = getApi().getPlatform() === "win32";
-                    if (isWindows) {
-                        envPrefix = provider.unsetEnv.map((v) => `$env:${v}=$null`).join("; ") + "; ";
-                    } else {
-                        envPrefix = provider.unsetEnv.map((v) => `unset ${v}`).join("; ") + "; ";
-                    }
-                }
-                const cliCmd = provider.styledArgs.length > 0
-                    ? `${cliPath} ${provider.styledArgs.join(" ")}`
-                    : cliPath;
-                const cmdText = `${envPrefix}${cliCmd}\r`;
-                const b64data = stringToBase64(cmdText);
+                const script = buildBootstrapScript({
+                    version,
+                    provider,
+                    shellType,
+                    args: provider.styledArgs,
+                });
+                const b64data = stringToBase64(script + "\r");
                 await RpcApi.ControllerInputCommand(TabRpcClient, {
                     blockid: blockId,
                     inputdata64: b64data,

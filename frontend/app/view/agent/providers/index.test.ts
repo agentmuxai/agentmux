@@ -92,7 +92,7 @@ describe("gemini provider", () => {
     });
 
     test("has correct npm package", () => {
-        expect(gemini.npmPackage).toBe("@anthropic-ai/gemini-cli");
+        expect(gemini.npmPackage).toBe("@google/gemini-cli");
     });
 });
 
