@@ -177,6 +177,11 @@ tasks:
                   echo "❌ AppDir not found — Tauri build failed before linuxdeploy stage"
                   exit 1
                 fi
+                # Remove bundled system libraries — WebKitGTK, GTK3, glib, etc. are
+                # system dependencies on Linux and should not be shipped in the AppImage.
+                # Bundling them bloats the image from ~15MB to ~90MB.
+                rm -rf "$APPDIR/usr/lib"
+                echo "✓ Stripped bundled system libraries from AppDir"
                 # Ensure lowercase icon exists (desktop file references 'agentmux')
                 [ -f "$APPDIR/agentmux.png" ] || cp "$APPDIR/AgentMux.png" "$APPDIR/agentmux.png"
                 VERSION=$(node version.cjs)
