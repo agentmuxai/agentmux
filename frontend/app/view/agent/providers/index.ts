@@ -6,7 +6,9 @@ export interface ProviderDefinition {
     displayName: string;
     cliCommand: string;
     defaultArgs: string[];
+    styledArgs: string[];        // CLI flags for JSON streaming mode
     outputFormat: "claude-stream-json" | "gemini-json" | "codex-json" | "raw";
+    styledOutputFormat: "claude-stream-json" | "gemini-json" | "codex-json";
     authType: "oauth" | "api-key";
     authCheckCommand: string[];  // e.g. ["auth", "status", "--json"]
     authLoginCommand: string[];  // e.g. ["auth", "login"]
@@ -22,8 +24,10 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         id: "claude",
         displayName: "Claude Code",
         cliCommand: "claude",
-        defaultArgs: [],  // raw mode — no stream-json for now
+        defaultArgs: [],
+        styledArgs: ["--output-format", "stream-json", "--verbose"],
         outputFormat: "raw",
+        styledOutputFormat: "claude-stream-json",
         authType: "oauth",
         authCheckCommand: ["auth", "status", "--json"],
         authLoginCommand: ["auth", "login"],
@@ -37,8 +41,10 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         id: "codex",
         displayName: "Codex CLI",
         cliCommand: "codex",
-        defaultArgs: [],  // raw mode
+        defaultArgs: [],
+        styledArgs: ["--full-auto"],
         outputFormat: "raw",
+        styledOutputFormat: "codex-json",
         authType: "oauth",
         authCheckCommand: ["login", "status"],
         authLoginCommand: ["login"],
@@ -51,8 +57,10 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         id: "gemini",
         displayName: "Gemini CLI",
         cliCommand: "gemini",
-        defaultArgs: [],  // raw mode
+        defaultArgs: [],
+        styledArgs: ["--yolo"],
         outputFormat: "raw",
+        styledOutputFormat: "gemini-json",
         authType: "oauth",
         authCheckCommand: ["auth", "status"],
         authLoginCommand: ["auth", "login"],
