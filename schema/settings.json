@@ -158,6 +158,9 @@
         "widget:showhelp": {
           "type": "boolean"
         },
+        "widget:icononly": {
+          "type": "boolean"
+        },
         "window:*": {
           "type": "boolean"
         },
