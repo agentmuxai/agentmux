@@ -180,9 +180,8 @@ ls -lh dist/bin/wsh-*       # Verify
 Ensure `frontend/wave.ts` uses `getApi().getAboutModalDetails().version`
 
 ### Build Fails After Clean
-`dist/schema/` is wiped by `task clean` but not recreated.
-Workaround: `cp -r schema dist/schema` before `npx tauri build`
-Permanent fix: `copy:schema` task in Taskfile.yml
+`dist/schema/` is wiped by `task clean` but automatically recreated by the
+`copy:schema` dependency in `dev`, `start`, `quickdev`, and `package` tasks.
 
 ### Port Conflicts
 - Dev server port: 1420 (Vite) + backend port (varies)

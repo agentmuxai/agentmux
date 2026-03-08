@@ -29,6 +29,7 @@ tasks:
             - npm:install
             - build:backend
             - sync:dev:binaries
+            - copy:schema
         env:
             AGENTMUX_ENVFILE: "{{.ROOT_DIR}}/.env"
             WCLOUD_ENDPOINT: "https://api-dev.agentmux.ai/central"
@@ -77,6 +78,7 @@ tasks:
         deps:
             - npm:install
             - build:backend
+            - copy:schema
         env:
             AGENTMUX_ENVFILE: "{{.ROOT_DIR}}/.env"
             WCLOUD_ENDPOINT: "https://api-dev.agentmux.ai/central"
@@ -88,6 +90,7 @@ tasks:
         deps:
             - npm:install
             - build:backend:rust
+            - copy:schema
         env:
             AGENTMUX_ENVFILE: "{{.ROOT_DIR}}/.env"
             WCLOUD_ENDPOINT: "https://api-dev.agentmux.ai/central"
@@ -508,6 +511,7 @@ tasks:
         cmds:
             - task: build:backend
             - task: tauri:copy-sidecars
+            - task: copy:schema
             - npm run tauri:dev
         deps:
             - npm:install
