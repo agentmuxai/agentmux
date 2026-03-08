@@ -111,8 +111,8 @@ export function makeFilePathHandler(getCwd: () => string | undefined): (rawPath:
             // Open in VS Code at specific line
             api.openExternal(`vscode://file/${encodeURI(resolved)}:${line}`);
         } else {
-            // Open in native file explorer / default application
-            api.openNativePath(resolved);
+            // Reveal in file explorer (Explorer/Finder/file manager)
+            api.revealInFileExplorer(resolved);
         }
     };
 }
