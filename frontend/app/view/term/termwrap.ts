@@ -20,6 +20,7 @@ import * as TermTypes from "@xterm/xterm";
 import { Terminal } from "@xterm/xterm";
 import debug from "debug";
 import { debounce } from "throttle-debounce";
+import { FilePathLinkProvider, makeFilePathHandler } from "./filelinkprovider";
 import { FitAddon } from "./fitaddon";
 
 const dlog = debug("wave:termwrap");
@@ -488,19 +489,19 @@ export class TermWrap {
         this.terminal.loadAddon(
             new WebLinksAddon((e, uri) => {
                 e.preventDefault();
-                switch (PLATFORM) {
-                    case PlatformMacOS:
-                        if (e.metaKey) {
-                            fireAndForget(() => openLink(uri));
-                        }
-                        break;
-                    default:
-                        if (e.ctrlKey) {
-                            fireAndForget(() => openLink(uri));
-                        }
-                        break;
-                }
+                fireAndForget(() => openLink(uri));
             })
+        );
+        const getCwd = (): string | undefined => {
+            try {
+                const blockData = WOS.getObjectValue<Block>(WOS.makeORef("block", this.blockId));
+                return blockData?.meta?.["cmd:cwd"];
+            } catch {
+                return undefined;
+            }
+        };
+        this.terminal.registerLinkProvider(
+            new FilePathLinkProvider(this.terminal, makeFilePathHandler(getCwd))
         );
         if (WebGLSupported && waveOptions.useWebGl) {
             try {
