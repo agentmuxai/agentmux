@@ -127,6 +127,7 @@ function AppSettingsUpdater() {
         // console.log("window settings", windowSettings, isTransparentOrBlur, opacity, baseBgColor, mainDiv);
         if (isTransparentOrBlur) {
             mainDiv.classList.add("is-transparent");
+            document.documentElement.style.background = "transparent";
             if (opacity != null) {
                 document.body.style.setProperty("--window-opacity", `${opacity}`);
             } else {
@@ -134,6 +135,7 @@ function AppSettingsUpdater() {
             }
         } else {
             mainDiv.classList.remove("is-transparent");
+            document.documentElement.style.removeProperty("background");
             document.body.style.removeProperty("--window-opacity");
         }
         if (baseBgColor != null) {
