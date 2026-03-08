@@ -4,9 +4,8 @@
 import { ContextMenuModel } from "@/app/store/contextmenu";
 import { TabBar } from "@/app/tab/tabbar";
 import { WindowDrag } from "@/element/windowdrag";
+import { useWindowDrag } from "@/app/hook/useWindowDrag";
 import { atoms } from "@/store/global";
-import { PLATFORM } from "@/util/platformutil";
-import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useAtomValue } from "jotai";
 import { memo, useCallback, useRef } from "react";
 import { createTabBarMenu } from "@/app/menu/base-menus";
@@ -23,18 +22,7 @@ const WindowHeader = memo(({ workspace }: WindowHeaderProps) => {
     const draggerLeftRef = useRef<HTMLDivElement>(null);
 
     const fullConfig = useAtomValue(atoms.fullConfigAtom);
-
-    // On non-Linux, use Tauri's startDragging() for window dragging.
-    // On Linux, drag.rs handles this via GTK motion detection to avoid
-    // Wayland compositor pointer grab that kills header button clicks.
-    const handleHeaderMouseDown = useCallback((e: React.MouseEvent) => {
-        if (PLATFORM === "linux") return;
-        if (e.button !== 0) return;
-        const target = e.target as HTMLElement;
-        if (target.closest("button, input, a, [data-no-drag]")) return;
-        e.preventDefault();
-        getCurrentWindow().startDragging().catch(() => {});
-    }, []);
+    const { dragProps, onMouseDown } = useWindowDrag();
 
     // Handle window header context menu
     const handleContextMenu = useCallback(
@@ -51,8 +39,8 @@ const WindowHeader = memo(({ workspace }: WindowHeaderProps) => {
             ref={windowHeaderRef}
             className="window-header"
             data-testid="window-header"
-            {...(PLATFORM !== "linux" && { "data-tauri-drag-region": true })}
-            onMouseDown={handleHeaderMouseDown}
+            {...dragProps}
+            onMouseDown={onMouseDown}
             onContextMenu={handleContextMenu}
         >
             <WindowDrag ref={draggerLeftRef} className="left" />
