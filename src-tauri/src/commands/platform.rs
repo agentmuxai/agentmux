@@ -78,6 +78,7 @@ const DEFAULT_SETTINGS_TEMPLATE: &str = r#"// AgentMux Settings
 
     // -- Other --
     // "widget:showhelp":          true,
+    // "widget:icononly":           false,
     // "blockheader:showblockids": false,
     // "markdown:fontsize":        14,
     // "preview:showhiddenfiles":  false,
