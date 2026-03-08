@@ -73,8 +73,8 @@ const AgentProviderPicker: React.FC<{ model: AgentViewModel }> = memo(({ model }
                 } else {
                     await model.connectStyled(providerId, provider.cliCommand);
                 }
-            } catch {
-                // model logs internally
+            } catch (e) {
+                console.error("[agent] handleSelect error", e);
             } finally {
                 setLaunching(null);
             }

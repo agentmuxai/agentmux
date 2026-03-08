@@ -69,6 +69,9 @@ export class AgentViewModel implements ViewModel {
                     "controller": "shell",
                 },
             });
+            // Proactively reload the block so the view switches even if the backend
+            // doesn't broadcast a waveobj:update event (older binary compatibility).
+            WOS.reloadWaveObject(`block:${blockId}`).catch(() => {});
             await RpcApi.ControllerResyncCommand(TabRpcClient, {
                 tabid: globalStore.get(atoms.staticTabId),
                 blockid: blockId,
@@ -128,6 +131,9 @@ export class AgentViewModel implements ViewModel {
                     "controller": "shell",
                 },
             });
+            // Proactively reload the block so the view switches even if the backend
+            // doesn't broadcast a waveobj:update event (older binary compatibility).
+            WOS.reloadWaveObject(`block:${blockId}`).catch(() => {});
 
             await RpcApi.ControllerResyncCommand(TabRpcClient, {
                 tabid: globalStore.get(atoms.staticTabId),
