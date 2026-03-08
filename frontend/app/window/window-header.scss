@@ -3,13 +3,6 @@
 
 .window-header {
     --default-indent: 10px;
-    --darwin-not-fullscreen-indent: calc(74px * var(--zoomfactor-inv));
-}
-
-.darwin:not(.fullscreen) .window-header {
-    .window-drag.left {
-        width: var(--darwin-not-fullscreen-indent);
-    }
 }
 
 .config-error-message {
