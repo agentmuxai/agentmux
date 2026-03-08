@@ -47,9 +47,10 @@
       "allow": [{ "path": "$APPDATA/**" }, { "path": "$APPCONFIG/**" }]
     },
     "opener:default",
+    "opener:allow-open-path",
     {
-      "identifier": "opener:allow-open-path",
-      "allow": [{ "path": "$APPCONFIG/**" }, { "path": "$APPDATA/**" }]
+      "identifier": "opener:allow-open-url",
+      "allow": [{ "url": "vscode://**" }]
     },
     "fs:allow-exists",
     {
