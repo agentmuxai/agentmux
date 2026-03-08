@@ -148,6 +148,12 @@ async fn main() {
 
     // Reactive handler (global singleton) + poller
     let reactive_handler = reactive::get_global_handler();
+    reactive_handler.set_input_sender(Arc::new(|block_id: &str, data: &[u8]| {
+        backend::blockcontroller::send_input(
+            block_id,
+            backend::blockcontroller::BlockInputUnion::data(data.to_vec()),
+        )
+    }));
     let poller = Arc::new(Poller::new(
         PollerConfig {
             agentmux_url: None,

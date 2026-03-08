@@ -101,7 +101,9 @@ export class AgentViewModel implements ViewModel {
 
     /**
      * Called when user clicks a styled provider button.
-     * Keeps view as "agent" and sets styled session meta for the translator pipeline.
+     * Keeps view as "agent" but starts a shell controller underneath,
+     * then injects the CLI command with styled output flags.
+     * The PTY output is subscribed to by useAgentStream and rendered as styled blocks.
      */
     connectStyled = async (providerId: string, cliPath: string): Promise<void> => {
         const provider = PROVIDERS[providerId];
@@ -121,7 +123,9 @@ export class AgentViewModel implements ViewModel {
         const binDir = cliPath.substring(0, cliPath.lastIndexOf(sep));
 
         const oref = WOS.makeORef("block", this.blockId);
+        const blockId = this.blockId;
         try {
+            // Set styled session meta AND start a shell controller (view stays "agent")
             await RpcApi.SetMetaCommand(TabRpcClient, {
                 oref,
                 meta: {
@@ -131,10 +135,40 @@ export class AgentViewModel implements ViewModel {
                     "agentCliArgs": provider.styledArgs,
                     "agentOutputFormat": provider.styledOutputFormat,
                     "agentBinDir": binDir,
+                    "controller": "shell",
                 },
             });
+
+            // Start the shell controller
+            await RpcApi.ControllerResyncCommand(TabRpcClient, {
+                tabid: globalStore.get(atoms.staticTabId),
+                blockid: blockId,
+                forcerestart: true,
+            });
+
+            // Inject the CLI command after the shell initializes
+            setTimeout(async () => {
+                let envPrefix = "";
+                if (provider.unsetEnv?.length) {
+                    const isWindows = getApi().getPlatform() === "win32";
+                    if (isWindows) {
+                        envPrefix = provider.unsetEnv.map((v) => `$env:${v}=$null`).join("; ") + "; ";
+                    } else {
+                        envPrefix = provider.unsetEnv.map((v) => `unset ${v}`).join("; ") + "; ";
+                    }
+                }
+                const cliCmd = provider.styledArgs.length > 0
+                    ? `${cliPath} ${provider.styledArgs.join(" ")}`
+                    : cliPath;
+                const cmdText = `${envPrefix}${cliCmd}\r`;
+                const b64data = stringToBase64(cmdText);
+                await RpcApi.ControllerInputCommand(TabRpcClient, {
+                    blockid: blockId,
+                    inputdata64: b64data,
+                });
+            }, 500);
         } catch (e: any) {
-            Logger.error("agent", "Failed to set styled session meta", { error: String(e) });
+            Logger.error("agent", "Failed to start styled session", { error: String(e) });
         }
     };
 

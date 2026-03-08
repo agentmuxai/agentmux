@@ -1,10 +1,17 @@
 // Copyright 2024, Command Line Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-import React, { memo, useCallback, useState } from "react";
+import React, { memo, useCallback, useMemo, useState } from "react";
 import { useAtomValue } from "jotai";
 import type { AgentViewModel } from "./agent-model";
 import { getProviderList, type ProviderDefinition } from "./providers";
+import { createAgentAtoms } from "./state";
+import { useAgentStream } from "./useAgentStream";
+import { AgentDocumentView } from "./components/AgentDocumentView";
+import { AgentFooter } from "./components/AgentFooter";
+import { RpcApi } from "@/app/store/wshclientapi";
+import { TabRpcClient } from "@/app/store/wshrpcutil";
+import { stringToBase64 } from "@/util/util";
 import "./agent-view.scss";
 
 const PROVIDER_ICONS: Record<string, string> = {
@@ -133,12 +140,35 @@ const AgentStyledSession: React.FC<{ model: AgentViewModel; providerId: string }
     ({ model, providerId }) => {
         const block = useAtomValue(model.blockAtom);
         const provider = getProviderList().find((p) => p.id === providerId);
-        const cliPath: string = block?.meta?.["agentCliPath"] ?? "";
-        const cliArgs: string[] = block?.meta?.["agentCliArgs"] ?? [];
+        const outputFormat: string = block?.meta?.["agentOutputFormat"] ?? "claude-stream-json";
+
+        // Create per-instance atoms (stable across re-renders via useMemo keyed on blockId)
+        const agentAtoms = useMemo(() => createAgentAtoms(model.blockId), [model.blockId]);
+
+        // Subscribe to PTY output and parse into DocumentNodes
+        useAgentStream({
+            blockId: model.blockId,
+            outputFormat,
+            documentAtom: agentAtoms.documentAtom,
+            streamingStateAtom: agentAtoms.streamingStateAtom,
+            enabled: true,
+        });
+
+        // Send user message to the PTY via ControllerInputCommand
+        const handleSendMessage = useCallback(
+            (message: string) => {
+                const b64data = stringToBase64(message + "\n");
+                RpcApi.ControllerInputCommand(TabRpcClient, {
+                    blockid: model.blockId,
+                    inputdata64: b64data,
+                }).catch(() => {
+                    // logged by RPC layer
+                });
+            },
+            [model.blockId]
+        );
 
         const handleDisconnect = useCallback(async () => {
-            const { RpcApi } = await import("@/app/store/wshclientapi");
-            const { TabRpcClient } = await import("@/app/store/wshrpcutil");
             const { WOS } = await import("@/app/store/global");
             const oref = WOS.makeORef("block", model.blockId);
             try {
@@ -151,6 +181,7 @@ const AgentStyledSession: React.FC<{ model: AgentViewModel; providerId: string }
                         agentCliArgs: null,
                         agentOutputFormat: null,
                         agentBinDir: null,
+                        controller: null,
                     },
                 });
             } catch {
@@ -169,15 +200,12 @@ const AgentStyledSession: React.FC<{ model: AgentViewModel; providerId: string }
                     </button>
                 </div>
 
-                <div className="agent-document">
-                    <div className="agent-styled-empty">
-                        <div className="agent-styled-spinner" />
-                        <div className="agent-styled-status-text">Starting session…</div>
-                        <div className="agent-styled-cli-info">
-                            <code>{cliPath} {cliArgs.join(" ")}</code>
-                        </div>
-                    </div>
-                </div>
+                <AgentDocumentView
+                    documentAtom={agentAtoms.documentAtom}
+                    documentStateAtom={agentAtoms.documentStateAtom}
+                />
+
+                <AgentFooter agentId={providerId} onSendMessage={handleSendMessage} />
             </div>
         );
     }
