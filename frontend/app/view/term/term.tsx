@@ -159,7 +159,7 @@ const TerminalView = ({ blockId, model }: ViewComponentProps<TermViewModel>) => 
             globalStore.set(searchProps.resultsIndex, results.resultIndex);
             globalStore.set(searchProps.resultsCount, results.resultCount);
         };
-        fireAndForget(termWrap.initTerminal.bind(termWrap));
+        fireAndForget(() => termWrap.init());
         if (wasFocused) {
             setTimeout(() => {
                 model.giveFocus();
