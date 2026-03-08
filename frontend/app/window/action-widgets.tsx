@@ -48,7 +48,7 @@ async function handleWidgetSelect(widget: WidgetConfigType) {
     createBlock(blockDef, widget.magnified);
 }
 
-const ActionWidget = memo(({ widget }: { widget: WidgetConfigType }) => {
+const ActionWidget = memo(({ widget, iconOnly }: { widget: WidgetConfigType; iconOnly: boolean }) => {
     if (widget["display:hidden"]) {
         return null;
     }
@@ -64,7 +64,7 @@ const ActionWidget = memo(({ widget }: { widget: WidgetConfigType }) => {
                 <div style={{ color: widget.color }} className="text-sm">
                     <i className={makeIconClass(widget.icon, true, { defaultIcon: "browser" })}></i>
                 </div>
-                {!isBlank(widget.label) && (
+                {!iconOnly && !isBlank(widget.label) && (
                     <div className="text-xs whitespace-nowrap">{widget.label}</div>
                 )}
             </Tooltip>
@@ -105,6 +105,7 @@ const ActionWidgets = memo(() => {
         },
     };
     const showHelp = fullConfig?.settings?.["widget:showhelp"] ?? true;
+    const iconOnly = fullConfig?.settings?.["widget:icononly"] ?? false;
     const widgets = sortByDisplayOrder(fullConfig?.widgets);
 
     const handleWidgetsBarContextMenu = (e: React.MouseEvent) => {
@@ -147,6 +148,16 @@ const ActionWidgets = memo(() => {
                     },
                 ],
             },
+            {
+                label: "Icon Only",
+                type: "checkbox",
+                checked: iconOnly,
+                click: () => {
+                    fireAndForget(async () => {
+                        await RpcApi.SetConfigCommand(TabRpcClient, { "widget:icononly": !iconOnly });
+                    });
+                },
+            },
         ];
         ContextMenuModel.showContextMenu(menu, e);
     };
@@ -157,10 +168,10 @@ const ActionWidgets = memo(() => {
             data-testid="action-widgets"
             onContextMenu={handleWidgetsBarContextMenu}
         >
-            {widgets?.map((data, idx) => <ActionWidget key={`widget-${idx}`} widget={data} />)}
-            {showHelp && <ActionWidget key="help" widget={helpWidget} />}
-            <ActionWidget key="settings" widget={settingsWidget} />
-            <ActionWidget key="devtools" widget={devToolsWidget} />
+            {widgets?.map((data, idx) => <ActionWidget key={`widget-${idx}`} widget={data} iconOnly={iconOnly} />)}
+            {showHelp && <ActionWidget key="help" widget={helpWidget} iconOnly={iconOnly} />}
+            <ActionWidget key="settings" widget={settingsWidget} iconOnly={iconOnly} />
+            <ActionWidget key="devtools" widget={devToolsWidget} iconOnly={iconOnly} />
         </div>
     );
 });
