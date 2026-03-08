@@ -507,6 +507,134 @@ fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType {
                 Err(e) => WebReturnType::error(e.to_string()),
             }
         }
+        ("workspace", "MoveBlockToTab") => {
+            let ws_id: String = match service::get_arg(args, 0) {
+                Ok(v) => v,
+                Err(e) => return WebReturnType::error(e),
+            };
+            let block_id: String = match service::get_arg(args, 1) {
+                Ok(v) => v,
+                Err(e) => return WebReturnType::error(e),
+            };
+            let source_tab_id: String = match service::get_arg(args, 2) {
+                Ok(v) => v,
+                Err(e) => return WebReturnType::error(e),
+            };
+            let dest_tab_id: String = match service::get_arg(args, 3) {
+                Ok(v) => v,
+                Err(e) => return WebReturnType::error(e),
+            };
+            let auto_close: bool = service::get_arg(args, 4).unwrap_or(true);
+            match wcore::move_block_to_tab(store, &block_id, &source_tab_id, &dest_tab_id, &ws_id, auto_close) {
+                Ok(()) => {
+                    let mut updates = vec![];
+                    if let Ok(src) = store.must_get::<Tab>(&source_tab_id) {
+                        updates.push(WaveObjUpdate {
+                            updatetype: "update".into(),
+                            otype: OTYPE_TAB.to_string(),
+                            oid: source_tab_id.clone(),
+                            obj: Some(wave_obj_to_value(&src)),
+                        });
+                    }
+                    if let Ok(dst) = store.must_get::<Tab>(&dest_tab_id) {
+                        updates.push(WaveObjUpdate {
+                            updatetype: "update".into(),
+                            otype: OTYPE_TAB.to_string(),
+                            oid: dest_tab_id.clone(),
+                            obj: Some(wave_obj_to_value(&dst)),
+                        });
+                    }
+                    if let Ok(ws) = store.must_get::<Workspace>(&ws_id) {
+                        updates.push(WaveObjUpdate {
+                            updatetype: "update".into(),
+                            otype: OTYPE_WORKSPACE.to_string(),
+                            oid: ws_id.clone(),
+                            obj: Some(wave_obj_to_value(&ws)),
+                        });
+                    }
+                    WebReturnType::success_with_updates(updates)
+                }
+                Err(e) => WebReturnType::error(e.to_string()),
+            }
+        }
+        ("workspace", "PromoteBlockToTab") => {
+            let ws_id: String = match service::get_arg(args, 0) {
+                Ok(v) => v,
+                Err(e) => return WebReturnType::error(e),
+            };
+            let block_id: String = match service::get_arg(args, 1) {
+                Ok(v) => v,
+                Err(e) => return WebReturnType::error(e),
+            };
+            let source_tab_id: String = match service::get_arg(args, 2) {
+                Ok(v) => v,
+                Err(e) => return WebReturnType::error(e),
+            };
+            let auto_close: bool = service::get_arg(args, 3).unwrap_or(true);
+            match wcore::promote_block_to_tab(store, &block_id, &source_tab_id, &ws_id, auto_close) {
+                Ok(new_tab) => {
+                    let new_tab_oid = new_tab.oid.clone();
+                    let mut updates = vec![];
+                    updates.push(WaveObjUpdate {
+                        updatetype: "update".into(),
+                        otype: OTYPE_TAB.to_string(),
+                        oid: new_tab.oid.clone(),
+                        obj: Some(wave_obj_to_value(&new_tab)),
+                    });
+                    if let Ok(src) = store.must_get::<Tab>(&source_tab_id) {
+                        updates.push(WaveObjUpdate {
+                            updatetype: "update".into(),
+                            otype: OTYPE_TAB.to_string(),
+                            oid: source_tab_id.clone(),
+                            obj: Some(wave_obj_to_value(&src)),
+                        });
+                    }
+                    if let Ok(ws) = store.must_get::<Workspace>(&ws_id) {
+                        updates.push(WaveObjUpdate {
+                            updatetype: "update".into(),
+                            otype: OTYPE_WORKSPACE.to_string(),
+                            oid: ws_id.clone(),
+                            obj: Some(wave_obj_to_value(&ws)),
+                        });
+                    }
+                    WebReturnType::success_data_updates(
+                        serde_json::to_value(&new_tab_oid).unwrap_or_default(),
+                        updates,
+                    )
+                }
+                Err(e) => WebReturnType::error(e.to_string()),
+            }
+        }
+        ("workspace", "ReorderTab") => {
+            let ws_id: String = match service::get_arg(args, 0) {
+                Ok(v) => v,
+                Err(e) => return WebReturnType::error(e),
+            };
+            let tab_id: String = match service::get_arg(args, 1) {
+                Ok(v) => v,
+                Err(e) => return WebReturnType::error(e),
+            };
+            let new_index: usize = match service::get_arg(args, 2) {
+                Ok(v) => v,
+                Err(e) => return WebReturnType::error(e),
+            };
+            match wcore::reorder_tab(store, &ws_id, &tab_id, new_index) {
+                Ok(()) => {
+                    if let Ok(ws) = store.must_get::<Workspace>(&ws_id) {
+                        let update = WaveObjUpdate {
+                            updatetype: "update".into(),
+                            otype: OTYPE_WORKSPACE.to_string(),
+                            oid: ws_id.clone(),
+                            obj: Some(wave_obj_to_value(&ws)),
+                        };
+                        WebReturnType::success_with_updates(vec![update])
+                    } else {
+                        WebReturnType::success_empty()
+                    }
+                }
+                Err(e) => WebReturnType::error(e.to_string()),
+            }
+        }
         ("workspace", "ChangeTabPinning") => {
             let ws_id: String = match service::get_arg(args, 0) {
                 Ok(v) => v,

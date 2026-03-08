@@ -31,7 +31,7 @@ import {
 } from "./types";
 import { determineDropDirection } from "./utils";
 
-const tileItemType = "TILE_ITEM";
+export const tileItemType = "TILE_ITEM";
 
 export interface TileLayoutProps {
     /**

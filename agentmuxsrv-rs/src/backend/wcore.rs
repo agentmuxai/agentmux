@@ -334,6 +334,124 @@ pub fn delete_block(
     Ok(())
 }
 
+/// Move a block from one tab to another.
+/// Removes the block from `source_tab_id.blockids` and adds it to `dest_tab_id.blockids`.
+/// Updates `block.parentoref` to point to the destination tab.
+/// If `auto_close_source` is true, deletes the source tab when it becomes empty
+/// (only if the workspace has other tabs).
+pub fn move_block_to_tab(
+    store: &WaveStore,
+    block_id: &str,
+    source_tab_id: &str,
+    dest_tab_id: &str,
+    ws_id: &str,
+    auto_close_source: bool,
+) -> Result<(), StoreError> {
+    if source_tab_id == dest_tab_id {
+        return Ok(()); // no-op
+    }
+
+    // Verify block exists
+    let mut block = store.must_get::<Block>(block_id)?;
+
+    // Remove block from source tab
+    let mut source_tab = store.must_get::<Tab>(source_tab_id)?;
+    source_tab.blockids.retain(|id| id != block_id);
+    store.update(&mut source_tab)?;
+
+    // Add block to destination tab
+    let mut dest_tab = store.must_get::<Tab>(dest_tab_id)?;
+    dest_tab.blockids.push(block_id.to_string());
+    store.update(&mut dest_tab)?;
+
+    // Update block's parent reference
+    block.parentoref = format!("tab:{}", dest_tab_id);
+    store.update(&mut block)?;
+
+    // Auto-close empty source tab if requested
+    if auto_close_source && source_tab.blockids.is_empty() {
+        let ws = store.must_get::<Workspace>(ws_id)?;
+        let total_tabs = ws.tabids.len() + ws.pinnedtabids.len();
+        if total_tabs > 1 {
+            delete_tab(store, ws_id, source_tab_id)?;
+        }
+    }
+
+    Ok(())
+}
+
+/// Promote a block to a new tab.
+/// Removes the block from `source_tab_id`, creates a new tab in `ws_id`,
+/// and adds the block to the new tab. Returns the new Tab.
+/// If `auto_close_source` is true, deletes the source tab when it becomes empty.
+pub fn promote_block_to_tab(
+    store: &WaveStore,
+    block_id: &str,
+    source_tab_id: &str,
+    ws_id: &str,
+    auto_close_source: bool,
+) -> Result<Tab, StoreError> {
+    // Verify block exists
+    let mut block = store.must_get::<Block>(block_id)?;
+
+    // Remove block from source tab
+    let mut source_tab = store.must_get::<Tab>(source_tab_id)?;
+    source_tab.blockids.retain(|id| id != block_id);
+    store.update(&mut source_tab)?;
+
+    // Create new tab
+    let new_tab = create_tab(store, ws_id)?;
+
+    // Add block to new tab
+    let mut new_tab = store.must_get::<Tab>(&new_tab.oid)?;
+    new_tab.blockids.push(block_id.to_string());
+    store.update(&mut new_tab)?;
+
+    // Update block's parent reference
+    block.parentoref = format!("tab:{}", new_tab.oid);
+    store.update(&mut block)?;
+
+    // Set the new tab as active
+    set_active_tab(store, ws_id, &new_tab.oid)?;
+
+    // Auto-close empty source tab if requested
+    if auto_close_source && source_tab.blockids.is_empty() {
+        let ws = store.must_get::<Workspace>(ws_id)?;
+        let total_tabs = ws.tabids.len() + ws.pinnedtabids.len();
+        if total_tabs > 1 {
+            delete_tab(store, ws_id, source_tab_id)?;
+        }
+    }
+
+    Ok(new_tab)
+}
+
+/// Reorder a tab within a workspace by moving it to a new index.
+pub fn reorder_tab(
+    store: &WaveStore,
+    ws_id: &str,
+    tab_id: &str,
+    new_index: usize,
+) -> Result<(), StoreError> {
+    let mut ws = store.must_get::<Workspace>(ws_id)?;
+
+    // Determine if tab is in regular or pinned list
+    if let Some(pos) = ws.tabids.iter().position(|id| id == tab_id) {
+        ws.tabids.remove(pos);
+        let insert_at = new_index.min(ws.tabids.len());
+        ws.tabids.insert(insert_at, tab_id.to_string());
+    } else if let Some(pos) = ws.pinnedtabids.iter().position(|id| id == tab_id) {
+        ws.pinnedtabids.remove(pos);
+        let insert_at = new_index.min(ws.pinnedtabids.len());
+        ws.pinnedtabids.insert(insert_at, tab_id.to_string());
+    } else {
+        return Err(StoreError::NotFound);
+    }
+
+    store.update(&mut ws)?;
+    Ok(())
+}
+
 /// Create a new window pointing to a workspace.
 /// If workspace_id is empty, auto-creates a new workspace + default tab (matches Go behavior).
 pub fn create_window(
@@ -833,5 +951,122 @@ mod tests {
         assert_ne!(fixed.workspaceid, "nonexistent");
         let ws = store.must_get::<Workspace>(&fixed.workspaceid).unwrap();
         assert_eq!(ws.tabids.len(), 1); // should have created a tab too
+    }
+
+    #[test]
+    fn test_move_block_to_tab() {
+        let store = make_store();
+        let ws = create_workspace(&store, "WS", "star", "#000").unwrap();
+        let tab1 = create_tab(&store, &ws.oid).unwrap();
+        let tab2 = create_tab(&store, &ws.oid).unwrap();
+
+        let meta = MetaMapType::new();
+        let block = create_block(&store, &tab1.oid, meta).unwrap();
+
+        // Verify block is in tab1
+        let t1 = store.must_get::<Tab>(&tab1.oid).unwrap();
+        assert_eq!(t1.blockids.len(), 1);
+        assert_eq!(t1.blockids[0], block.oid);
+
+        // Move block from tab1 to tab2
+        move_block_to_tab(&store, &block.oid, &tab1.oid, &tab2.oid, &ws.oid, false).unwrap();
+
+        // tab1 should be empty, tab2 should have the block
+        let t1 = store.must_get::<Tab>(&tab1.oid).unwrap();
+        let t2 = store.must_get::<Tab>(&tab2.oid).unwrap();
+        assert!(t1.blockids.is_empty());
+        assert_eq!(t2.blockids.len(), 1);
+        assert_eq!(t2.blockids[0], block.oid);
+
+        // Block parentoref should point to tab2
+        let b = store.must_get::<Block>(&block.oid).unwrap();
+        assert_eq!(b.parentoref, format!("tab:{}", tab2.oid));
+    }
+
+    #[test]
+    fn test_move_block_to_tab_auto_close() {
+        let store = make_store();
+        let ws = create_workspace(&store, "WS", "star", "#000").unwrap();
+        let tab1 = create_tab(&store, &ws.oid).unwrap();
+        let tab2 = create_tab(&store, &ws.oid).unwrap();
+
+        let block = create_block(&store, &tab1.oid, MetaMapType::new()).unwrap();
+
+        // Move with auto_close=true — tab1 should be deleted since it becomes empty
+        move_block_to_tab(&store, &block.oid, &tab1.oid, &tab2.oid, &ws.oid, true).unwrap();
+
+        // tab1 should be deleted
+        assert!(store.get::<Tab>(&tab1.oid).unwrap().is_none());
+
+        // workspace should only have tab2
+        let ws = store.must_get::<Workspace>(&ws.oid).unwrap();
+        assert_eq!(ws.tabids.len(), 1);
+        assert_eq!(ws.tabids[0], tab2.oid);
+    }
+
+    #[test]
+    fn test_move_block_same_tab_noop() {
+        let store = make_store();
+        let ws = create_workspace(&store, "WS", "star", "#000").unwrap();
+        let tab = create_tab(&store, &ws.oid).unwrap();
+        let block = create_block(&store, &tab.oid, MetaMapType::new()).unwrap();
+
+        // Moving to same tab should be a no-op
+        move_block_to_tab(&store, &block.oid, &tab.oid, &tab.oid, &ws.oid, false).unwrap();
+
+        let t = store.must_get::<Tab>(&tab.oid).unwrap();
+        assert_eq!(t.blockids.len(), 1);
+    }
+
+    #[test]
+    fn test_promote_block_to_tab() {
+        let store = make_store();
+        let ws = create_workspace(&store, "WS", "star", "#000").unwrap();
+        let tab = create_tab(&store, &ws.oid).unwrap();
+        let block = create_block(&store, &tab.oid, MetaMapType::new()).unwrap();
+
+        // Promote block to new tab
+        let new_tab = promote_block_to_tab(&store, &block.oid, &tab.oid, &ws.oid, false).unwrap();
+
+        // Original tab should be empty
+        let old_tab = store.must_get::<Tab>(&tab.oid).unwrap();
+        assert!(old_tab.blockids.is_empty());
+
+        // New tab should have the block
+        let nt = store.must_get::<Tab>(&new_tab.oid).unwrap();
+        assert_eq!(nt.blockids.len(), 1);
+        assert_eq!(nt.blockids[0], block.oid);
+
+        // Workspace should have both tabs
+        let ws = store.must_get::<Workspace>(&ws.oid).unwrap();
+        assert_eq!(ws.tabids.len(), 2);
+
+        // New tab should be active
+        assert_eq!(ws.activetabid, new_tab.oid);
+    }
+
+    #[test]
+    fn test_reorder_tab() {
+        let store = make_store();
+        let ws = create_workspace(&store, "WS", "star", "#000").unwrap();
+        let tab1 = create_tab(&store, &ws.oid).unwrap();
+        let tab2 = create_tab(&store, &ws.oid).unwrap();
+        let tab3 = create_tab(&store, &ws.oid).unwrap();
+
+        // Verify initial order: [tab1, tab2, tab3]
+        let ws_data = store.must_get::<Workspace>(&ws.oid).unwrap();
+        assert_eq!(ws_data.tabids, vec![tab1.oid.clone(), tab2.oid.clone(), tab3.oid.clone()]);
+
+        // Move tab3 to index 0
+        reorder_tab(&store, &ws.oid, &tab3.oid, 0).unwrap();
+
+        let ws_data = store.must_get::<Workspace>(&ws.oid).unwrap();
+        assert_eq!(ws_data.tabids, vec![tab3.oid.clone(), tab1.oid.clone(), tab2.oid.clone()]);
+
+        // Move tab1 to end (index 99 should clamp to len)
+        reorder_tab(&store, &ws.oid, &tab1.oid, 99).unwrap();
+
+        let ws_data = store.must_get::<Workspace>(&ws.oid).unwrap();
+        assert_eq!(ws_data.tabids, vec![tab3.oid.clone(), tab2.oid.clone(), tab1.oid.clone()]);
     }
 }

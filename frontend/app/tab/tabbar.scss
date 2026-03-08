@@ -69,4 +69,83 @@
             font-size: 11px;
         }
     }
+
+    // --- Drag-and-drop wrapper for each tab ---
+    .tab-drop-wrapper {
+        position: relative;
+        flex-shrink: 0;
+        display: flex;
+        align-items: flex-end;
+
+        // Pane dragged over a tab — highlight with accent border
+        &.tile-drop-hover {
+            .tab {
+                outline: 2px solid var(--accent-color, #22c55e);
+                outline-offset: -2px;
+                border-radius: 4px 4px 0 0;
+            }
+        }
+
+        // Tab being dragged — reduce opacity
+        &.tab-dragging {
+            opacity: 0.4;
+        }
+
+        // Tab reorder insertion indicators
+        &.tab-insert-left::before {
+            content: "";
+            position: absolute;
+            left: -1px;
+            top: 4px;
+            bottom: 2px;
+            width: 2px;
+            background: var(--accent-color, #22c55e);
+            border-radius: 1px;
+            z-index: 10;
+        }
+
+        &.tab-insert-right::after {
+            content: "";
+            position: absolute;
+            right: -1px;
+            top: 4px;
+            bottom: 2px;
+            width: 2px;
+            background: var(--accent-color, #22c55e);
+            border-radius: 1px;
+            z-index: 10;
+        }
+    }
+
+    // --- New-tab drop zone (end of tab bar) ---
+    .new-tab-drop-zone {
+        flex-shrink: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 28px;
+        height: 27px;
+        align-self: flex-end;
+        margin-bottom: 2px;
+        border: 1px dashed transparent;
+        border-radius: 4px;
+        color: var(--secondary-text-color, #666);
+        transition: all 0.15s ease;
+
+        i {
+            font-size: 11px;
+            opacity: 0;
+            transition: opacity 0.15s ease;
+        }
+
+        &.drop-hover {
+            border-color: var(--accent-color, #22c55e);
+            background: rgba(34, 197, 94, 0.1);
+            color: var(--accent-color, #22c55e);
+
+            i {
+                opacity: 1;
+            }
+        }
+    }
 }
