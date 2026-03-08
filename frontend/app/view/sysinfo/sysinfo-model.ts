@@ -35,6 +35,7 @@ class SysinfoViewModel implements ViewModel {
     plotMetaAtom: jotai.PrimitiveAtom<Map<string, TimeSeriesMeta>>;
     endIconButtons: jotai.Atom<IconButtonDecl[]>;
     plotTypeSelectedAtom: jotai.Atom<string>;
+    intervalSecsAtom: jotai.Atom<number>;
 
     constructor(blockId: string, viewType: string) {
         this.viewType = viewType;
@@ -162,16 +163,19 @@ class SysinfoViewModel implements ViewModel {
             const connAtom = getConnStatusAtom(connName);
             return get(connAtom);
         });
+        this.intervalSecsAtom = jotai.atom((get) => {
+            const fullConfig = get(atoms.fullConfigAtom);
+            const val = fullConfig?.settings?.["telemetry:interval"];
+            if (val == null || val <= 0) {
+                return 1.0;
+            }
+            return val as number;
+        });
     }
 
     /** Read the configured telemetry interval from settings (default 1.0s). */
     getConfiguredInterval(): number {
-        const fullConfig = globalStore.get(atoms.fullConfigAtom);
-        const val = fullConfig?.settings?.["telemetry:interval"];
-        if (val == null || val <= 0) {
-            return 1.0;
-        }
-        return val;
+        return globalStore.get(this.intervalSecsAtom);
     }
 
     get viewComponent(): ViewComponent {

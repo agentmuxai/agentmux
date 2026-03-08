@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { waveEventSubscribe } from "@/app/store/wps";
-import { atoms, globalStore } from "@/store/global";
+import { globalStore } from "@/store/global";
 import clsx from "clsx";
 import * as jotai from "jotai";
 import * as React from "react";
@@ -51,8 +51,7 @@ function SysinfoView({ model, blockId }: SysinfoViewProps) {
                 }
                 const prevData: DataItem[] = globalStore.get(model.dataAtom);
                 const prevLastTs = prevData[prevData.length - 1]?.ts ?? 0;
-                const fullConfig = globalStore.get(atoms.fullConfigAtom);
-                const intervalSecs = fullConfig?.settings?.["telemetry:interval"] || 1.0;
+                const intervalSecs = globalStore.get(model.intervalSecsAtom);
                 const gapThreshold = getGapThresholdMs(intervalSecs);
                 if (dataItem.ts - prevLastTs > gapThreshold) {
                     model.loadInitialData();
@@ -81,8 +80,7 @@ const SysinfoViewInner = React.memo(({ model }: SysinfoViewProps) => {
     const plotMeta = jotai.useAtomValue(model.plotMetaAtom);
     const osRef = React.useRef<OverlayScrollbarsComponentRef>(null);
     const targetLen = jotai.useAtomValue(model.numPoints) + 1;
-    const fullConfig = jotai.useAtomValue(atoms.fullConfigAtom);
-    const intervalSecs = fullConfig?.settings?.["telemetry:interval"] || 1.0;
+    const intervalSecs = jotai.useAtomValue(model.intervalSecsAtom);
     let title = false;
     let cols2 = false;
     if (yvals.length > 1) {
