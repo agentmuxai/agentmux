@@ -367,6 +367,40 @@ export function buildTauriApi(): AppApi {
             const unlisten = await listen(event, callback);
             return unlisten;
         },
+
+        // --- Cross-window drag ---
+        startCrossDrag: async (
+            dragType: "pane" | "tab",
+            sourceWindow: string,
+            sourceWorkspaceId: string,
+            sourceTabId: string,
+            payload: { blockId?: string; tabId?: string }
+        ) => {
+            return await invoke<string>("start_cross_drag", {
+                dragType,
+                sourceWindow,
+                sourceWorkspaceId,
+                sourceTabId,
+                payload,
+            });
+        },
+        updateCrossDrag: async (dragId: string, screenX: number, screenY: number) => {
+            return await invoke<string | null>("update_cross_drag", { dragId, screenX, screenY });
+        },
+        completeCrossDrag: async (
+            dragId: string,
+            targetWindow: string | null,
+            screenX: number,
+            screenY: number
+        ) => {
+            await invoke("complete_cross_drag", { dragId, targetWindow, screenX, screenY });
+        },
+        cancelCrossDrag: async (dragId: string) => {
+            await invoke("cancel_cross_drag", { dragId });
+        },
+        openWindowAtPosition: async (screenX: number, screenY: number) => {
+            return await invoke<string>("open_window_at_position", { screenX, screenY });
+        },
     };
 
     return api;

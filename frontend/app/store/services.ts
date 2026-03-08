@@ -200,6 +200,24 @@ class WorkspaceServiceType {
     ReorderTab(workspaceId: string, tabId: string, newIndex: number): Promise<void> {
         return WOS.callBackendService("workspace", "ReorderTab", Array.from(arguments))
     }
+
+    // Move a tab from one workspace to another
+    // @returns object updates
+    MoveTabToWorkspace(tabId: string, sourceWsId: string, destWsId: string, insertIndex?: number): Promise<void> {
+        return WOS.callBackendService("workspace", "MoveTabToWorkspace", Array.from(arguments))
+    }
+
+    // Tear off a block into a new workspace
+    // @returns new workspace id (and object updates)
+    TearOffBlock(blockId: string, sourceTabId: string, sourceWsId: string, autoClose?: boolean): Promise<string> {
+        return WOS.callBackendService("workspace", "TearOffBlock", Array.from(arguments))
+    }
+
+    // Tear off a tab into a new workspace
+    // @returns new workspace id (and object updates)
+    TearOffTab(tabId: string, sourceWsId: string): Promise<string> {
+        return WOS.callBackendService("workspace", "TearOffTab", Array.from(arguments))
+    }
 }
 
 export const WorkspaceService = new WorkspaceServiceType();

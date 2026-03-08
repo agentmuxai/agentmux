@@ -452,6 +452,148 @@ pub fn reorder_tab(
     Ok(())
 }
 
+/// Move a tab from one workspace to another.
+/// Removes the tab from the source workspace's tabids/pinnedtabids and adds it
+/// to the destination workspace's tabids at the specified index.
+/// The tab is always added as unpinned in the destination.
+/// If the tab was the active tab in the source workspace, a new active tab is chosen.
+pub fn move_tab_to_workspace(
+    store: &WaveStore,
+    tab_id: &str,
+    source_ws_id: &str,
+    dest_ws_id: &str,
+    insert_index: Option<usize>,
+) -> Result<(), StoreError> {
+    if source_ws_id == dest_ws_id {
+        return Ok(()); // no-op
+    }
+
+    // Verify tab exists
+    let _tab = store.must_get::<Tab>(tab_id)?;
+
+    // Remove tab from source workspace
+    let mut source_ws = store.must_get::<Workspace>(source_ws_id)?;
+    let total_tabs = source_ws.tabids.len() + source_ws.pinnedtabids.len();
+    if total_tabs <= 1 {
+        return Err(StoreError::Other(
+            "cannot move last tab out of workspace".to_string(),
+        ));
+    }
+    source_ws.tabids.retain(|id| id != tab_id);
+    source_ws.pinnedtabids.retain(|id| id != tab_id);
+    if source_ws.activetabid == tab_id {
+        source_ws.activetabid = source_ws
+            .tabids
+            .first()
+            .or(source_ws.pinnedtabids.first())
+            .cloned()
+            .unwrap_or_default();
+    }
+    store.update(&mut source_ws)?;
+
+    // Add tab to destination workspace
+    let mut dest_ws = store.must_get::<Workspace>(dest_ws_id)?;
+    let idx = insert_index.unwrap_or(dest_ws.tabids.len());
+    let insert_at = idx.min(dest_ws.tabids.len());
+    dest_ws.tabids.insert(insert_at, tab_id.to_string());
+    dest_ws.activetabid = tab_id.to_string();
+    store.update(&mut dest_ws)?;
+
+    Ok(())
+}
+
+/// Tear off a block into a new workspace.
+/// Removes the block from `source_tab_id`, creates a new workspace with a
+/// single tab containing the block. Returns the new workspace.
+/// If `auto_close_source` is true, deletes the source tab when it becomes empty.
+pub fn tear_off_block(
+    store: &WaveStore,
+    block_id: &str,
+    source_tab_id: &str,
+    source_ws_id: &str,
+    auto_close_source: bool,
+) -> Result<Workspace, StoreError> {
+    // Verify block exists
+    let mut block = store.must_get::<Block>(block_id)?;
+
+    // Remove block from source tab
+    let mut source_tab = store.must_get::<Tab>(source_tab_id)?;
+    source_tab.blockids.retain(|id| id != block_id);
+    store.update(&mut source_tab)?;
+
+    // Create new workspace
+    let new_ws = create_workspace(store, "", "", "")?;
+    // create_tab adds a tab and sets it as active
+    let new_tab = create_tab(store, &new_ws.oid)?;
+
+    // Add block to the new tab
+    let mut new_tab = store.must_get::<Tab>(&new_tab.oid)?;
+    new_tab.blockids.push(block_id.to_string());
+    store.update(&mut new_tab)?;
+
+    // Update block's parent reference
+    block.parentoref = format!("tab:{}", new_tab.oid);
+    store.update(&mut block)?;
+
+    // Auto-close empty source tab if requested
+    if auto_close_source && source_tab.blockids.is_empty() {
+        let ws = store.must_get::<Workspace>(source_ws_id)?;
+        let total_tabs = ws.tabids.len() + ws.pinnedtabids.len();
+        if total_tabs > 1 {
+            delete_tab(store, source_ws_id, source_tab_id)?;
+        }
+    }
+
+    // Re-fetch workspace to return updated state
+    store.must_get::<Workspace>(&new_ws.oid)
+}
+
+/// Tear off a tab into a new workspace.
+/// Removes the tab from the source workspace and creates a new workspace
+/// containing just that tab. Returns the new workspace.
+/// The source workspace must have more than one tab.
+pub fn tear_off_tab(
+    store: &WaveStore,
+    tab_id: &str,
+    source_ws_id: &str,
+) -> Result<Workspace, StoreError> {
+    // Remove tab from source workspace
+    let mut source_ws = store.must_get::<Workspace>(source_ws_id)?;
+    let total_tabs = source_ws.tabids.len() + source_ws.pinnedtabids.len();
+    if total_tabs <= 1 {
+        return Err(StoreError::Other(
+            "cannot tear off last tab from workspace".to_string(),
+        ));
+    }
+    source_ws.tabids.retain(|id| id != tab_id);
+    source_ws.pinnedtabids.retain(|id| id != tab_id);
+    if source_ws.activetabid == tab_id {
+        source_ws.activetabid = source_ws
+            .tabids
+            .first()
+            .or(source_ws.pinnedtabids.first())
+            .cloned()
+            .unwrap_or_default();
+    }
+    store.update(&mut source_ws)?;
+
+    // Create a new workspace with the tab
+    let mut new_ws = Workspace {
+        oid: Uuid::new_v4().to_string(),
+        name: String::new(),
+        icon: String::new(),
+        color: String::new(),
+        tabids: vec![tab_id.to_string()],
+        pinnedtabids: vec![],
+        activetabid: tab_id.to_string(),
+        meta: MetaMapType::new(),
+        ..Default::default()
+    };
+    store.insert(&mut new_ws)?;
+
+    Ok(new_ws)
+}
+
 /// Create a new window pointing to a workspace.
 /// If workspace_id is empty, auto-creates a new workspace + default tab (matches Go behavior).
 pub fn create_window(
@@ -1068,5 +1210,101 @@ mod tests {
 
         let ws_data = store.must_get::<Workspace>(&ws.oid).unwrap();
         assert_eq!(ws_data.tabids, vec![tab3.oid.clone(), tab2.oid.clone(), tab1.oid.clone()]);
+    }
+
+    #[test]
+    fn test_move_tab_to_workspace() {
+        let store = make_store();
+        let ws1 = create_workspace(&store, "WS1", "star", "#000").unwrap();
+        let ws2 = create_workspace(&store, "WS2", "moon", "#fff").unwrap();
+        let tab1 = create_tab(&store, &ws1.oid).unwrap();
+        let tab2 = create_tab(&store, &ws1.oid).unwrap();
+        let tab3 = create_tab(&store, &ws2.oid).unwrap();
+
+        // Set tab1 as active in ws1
+        set_active_tab(&store, &ws1.oid, &tab1.oid).unwrap();
+
+        // Move tab2 from ws1 to ws2
+        move_tab_to_workspace(&store, &tab2.oid, &ws1.oid, &ws2.oid, None).unwrap();
+
+        let ws1_data = store.must_get::<Workspace>(&ws1.oid).unwrap();
+        let ws2_data = store.must_get::<Workspace>(&ws2.oid).unwrap();
+
+        assert_eq!(ws1_data.tabids, vec![tab1.oid.clone()]);
+        assert!(ws2_data.tabids.contains(&tab2.oid));
+        assert!(ws2_data.tabids.contains(&tab3.oid));
+        // Moved tab becomes active in destination
+        assert_eq!(ws2_data.activetabid, tab2.oid);
+    }
+
+    #[test]
+    fn test_move_tab_to_workspace_last_tab_blocked() {
+        let store = make_store();
+        let ws1 = create_workspace(&store, "WS1", "star", "#000").unwrap();
+        let ws2 = create_workspace(&store, "WS2", "moon", "#fff").unwrap();
+        let tab1 = create_tab(&store, &ws1.oid).unwrap();
+        let _tab2 = create_tab(&store, &ws2.oid).unwrap();
+
+        // Should fail — can't move the only tab out
+        let result = move_tab_to_workspace(&store, &tab1.oid, &ws1.oid, &ws2.oid, None);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_tear_off_block() {
+        let store = make_store();
+        let ws = create_workspace(&store, "WS", "star", "#000").unwrap();
+        let tab = create_tab(&store, &ws.oid).unwrap();
+        let block = create_block(&store, &tab.oid, MetaMapType::new()).unwrap();
+        let block2 = create_block(&store, &tab.oid, MetaMapType::new()).unwrap();
+
+        // Tear off block (not auto_close because tab still has block2)
+        let new_ws = tear_off_block(&store, &block.oid, &tab.oid, &ws.oid, true).unwrap();
+
+        // Block removed from source tab
+        let tab_data = store.must_get::<Tab>(&tab.oid).unwrap();
+        assert!(!tab_data.blockids.contains(&block.oid));
+        assert!(tab_data.blockids.contains(&block2.oid));
+
+        // New workspace created with the block
+        assert!(!new_ws.oid.is_empty());
+        assert_eq!(new_ws.tabids.len(), 1);
+        let new_tab = store.must_get::<Tab>(&new_ws.tabids[0]).unwrap();
+        assert!(new_tab.blockids.contains(&block.oid));
+
+        // Block parent ref updated
+        let block_data = store.must_get::<Block>(&block.oid).unwrap();
+        assert_eq!(block_data.parentoref, format!("tab:{}", new_tab.oid));
+    }
+
+    #[test]
+    fn test_tear_off_tab() {
+        let store = make_store();
+        let ws = create_workspace(&store, "WS", "star", "#000").unwrap();
+        let tab1 = create_tab(&store, &ws.oid).unwrap();
+        let tab2 = create_tab(&store, &ws.oid).unwrap();
+        set_active_tab(&store, &ws.oid, &tab1.oid).unwrap();
+
+        // Tear off tab2
+        let new_ws = tear_off_tab(&store, &tab2.oid, &ws.oid).unwrap();
+
+        // Source workspace no longer has tab2
+        let ws_data = store.must_get::<Workspace>(&ws.oid).unwrap();
+        assert_eq!(ws_data.tabids, vec![tab1.oid.clone()]);
+
+        // New workspace has tab2
+        assert_eq!(new_ws.tabids, vec![tab2.oid.clone()]);
+        assert_eq!(new_ws.activetabid, tab2.oid);
+    }
+
+    #[test]
+    fn test_tear_off_last_tab_blocked() {
+        let store = make_store();
+        let ws = create_workspace(&store, "WS", "star", "#000").unwrap();
+        let tab1 = create_tab(&store, &ws.oid).unwrap();
+
+        // Should fail — can't tear off the only tab
+        let result = tear_off_tab(&store, &tab1.oid, &ws.oid);
+        assert!(result.is_err());
     }
 }

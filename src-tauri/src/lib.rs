@@ -108,6 +108,12 @@ pub fn run() {
             // CLI installer commands
             commands::cli_installer::install_cli,
             commands::cli_installer::get_cli_path,
+            // Cross-window drag commands
+            commands::drag::start_cross_drag,
+            commands::drag::update_cross_drag,
+            commands::drag::complete_cross_drag,
+            commands::drag::cancel_cross_drag,
+            commands::drag::open_window_at_position,
         ])
         // Application setup
         .setup(|app| {
