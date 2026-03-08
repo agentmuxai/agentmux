@@ -365,6 +365,8 @@ function SysinfoView({ model, blockId }: SysinfoViewProps) {
     const lastConnName = React.useRef(connName);
     const connStatus = jotai.useAtomValue(model.connStatus);
     const addContinuousData = jotai.useSetAtom(model.addContinuousDataAtom);
+    const addContinuousDataRef = React.useRef(addContinuousData);
+    addContinuousDataRef.current = addContinuousData;
     const loading = jotai.useAtomValue(model.loadingAtom);
 
     React.useEffect(() => {
@@ -394,7 +396,7 @@ function SysinfoView({ model, blockId }: SysinfoViewProps) {
                 if (dataItem.ts - prevLastTs > 2000) {
                     model.loadInitialData();
                 } else {
-                    addContinuousData(dataItem);
+                    addContinuousDataRef.current(dataItem);
                 }
             },
         });
@@ -402,7 +404,7 @@ function SysinfoView({ model, blockId }: SysinfoViewProps) {
         return () => {
             unsubFn();
         };
-    }, [connName, addContinuousData]);
+    }, [connName]);
     if (connStatus?.status != "connected") {
         return null;
     }
