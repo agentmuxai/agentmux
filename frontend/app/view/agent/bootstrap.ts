@@ -3,10 +3,19 @@
 
 import type { ProviderDefinition } from "./providers";
 
+/**
+ * Shell types that determine which bootstrap script syntax to generate.
+ *
+ * The backend shell controller knows which shell it spawned (pwsh, cmd, bash, etc.)
+ * and can write it to block meta as "shell:type". If unavailable, guessShellType()
+ * provides a platform-based fallback.
+ */
+export type ShellType = "pwsh" | "powershell" | "cmd" | "bash" | "zsh" | "sh";
+
 interface BootstrapOptions {
     version: string;
     provider: ProviderDefinition;
-    isWindows: boolean;
+    shellType: ShellType;
     args: string[];
 }
 
@@ -16,46 +25,110 @@ interface BootstrapOptions {
  * 2. If missing, runs npm install (visible in terminal)
  * 3. Launches the CLI with env cleanup and args
  *
- * The script is injected into the terminal via ControllerInputCommand,
- * so the user sees install progress, errors, and output directly.
+ * Dispatches to the correct script builder based on shell type.
  */
 export function buildBootstrapScript(opts: BootstrapOptions): string {
-    const { version, provider, isWindows, args } = opts;
-    const cliDir = `$HOME/.agentmux/instances/v${version}/cli/${provider.id}`;
-    const pkg = `${provider.npmPackage}@${provider.pinnedVersion}`;
-
-    // Build env cleanup prefix
-    let envPrefix = "";
-    if (provider.unsetEnv?.length) {
-        if (isWindows) {
-            envPrefix = provider.unsetEnv.map((v) => `$env:${v}=$null`).join("; ") + "; ";
-        } else {
-            envPrefix = provider.unsetEnv.map((v) => `unset ${v}`).join("; ") + "; ";
-        }
+    switch (opts.shellType) {
+        case "pwsh":
+        case "powershell":
+            return buildPowerShellBootstrap(opts);
+        case "cmd":
+            return buildCmdBootstrap(opts);
+        case "bash":
+        case "zsh":
+        case "sh":
+        default:
+            return buildBashBootstrap(opts);
     }
+}
 
-    // Build args suffix
+/**
+ * Guess the shell type from the platform string.
+ * Used as a fallback when the backend hasn't reported the actual shell.
+ *
+ * - "win32" / "windows" → "pwsh" (most common Windows shell in AgentMux)
+ * - everything else → "bash"
+ */
+export function guessShellType(platform: string): ShellType {
+    if (platform === "win32" || platform === "windows") {
+        return "pwsh";
+    }
+    return "bash";
+}
+
+// ---------------------------------------------------------------------------
+// Shell-specific script builders
+// ---------------------------------------------------------------------------
+
+/**
+ * PowerShell bootstrap (works in both pwsh 7 and powershell 5.1).
+ *
+ * Uses $HOME, Test-Path, & invocation, and .cmd shim extension.
+ */
+function buildPowerShellBootstrap(opts: BootstrapOptions): string {
+    const { version, provider, args } = opts;
+    const cliDir = `$HOME/.agentmux/instances/v${version}/cli/${provider.id}`;
+    const bin = `$d/node_modules/.bin/${provider.cliCommand}.cmd`;
+    const pkg = `${provider.npmPackage}@${provider.pinnedVersion}`;
     const argsSuffix = args.length > 0 ? " " + args.join(" ") : "";
 
-    if (isWindows) {
-        // PowerShell one-liner
-        const bin = `$d/node_modules/.bin/${provider.cliCommand}.cmd`;
-        return [
-            `$d="${cliDir}"`,
-            `$b="${bin}"`,
-            `if(!(Test-Path $b)){Write-Host "Installing ${provider.displayName}..."`,
-            `npm install --prefix $d ${pkg} --no-fund --no-audit}`,
-            `${envPrefix}& $b${argsSuffix}`,
-        ].join("; ");
-    } else {
-        // Bash one-liner
-        const bin = `$CLI_DIR/node_modules/.bin/${provider.cliCommand}`;
-        return [
-            `CLI_DIR="${cliDir}"`,
-            `CLI_BIN="${bin}"`,
-            `{ [ -x "$CLI_BIN" ] || { echo "Installing ${provider.displayName}..."`,
-            `npm install --prefix "$CLI_DIR" ${pkg} --no-fund --no-audit; }; }`,
-            `${envPrefix}"$CLI_BIN"${argsSuffix}`,
-        ].join(" && ");
+    let envPrefix = "";
+    if (provider.unsetEnv?.length) {
+        envPrefix = provider.unsetEnv.map((v) => `$env:${v}=$null`).join("; ") + "; ";
     }
+
+    return [
+        `$d="${cliDir}"`,
+        `$b="${bin}"`,
+        `if(!(Test-Path $b)){Write-Host "Installing ${provider.displayName}..."`,
+        `npm install --prefix $d ${pkg} --no-fund --no-audit}`,
+        `${envPrefix}& $b${argsSuffix}`,
+    ].join("; ");
+}
+
+/**
+ * cmd.exe bootstrap.
+ *
+ * Uses %USERPROFILE%, backslash paths, `if not exist`, @ echo suppression.
+ */
+function buildCmdBootstrap(opts: BootstrapOptions): string {
+    const { version, provider, args } = opts;
+    // cmd.exe uses %USERPROFILE% and backslashes
+    const cliDir = `%USERPROFILE%\\.agentmux\\instances\\v${version}\\cli\\${provider.id}`;
+    const bin = `%d%\\node_modules\\.bin\\${provider.cliCommand}.cmd`;
+    const pkg = `${provider.npmPackage}@${provider.pinnedVersion}`;
+    const argsSuffix = args.length > 0 ? " " + args.join(" ") : "";
+
+    let envPrefix = "";
+    if (provider.unsetEnv?.length) {
+        envPrefix = provider.unsetEnv.map((v) => `set "${v}=" && `).join("") ;
+    }
+
+    return `@set "d=${cliDir}" && @set "b=${bin}" && @if not exist "%b%" (echo Installing ${provider.displayName}... && npm install --prefix "%d%" ${pkg} --no-fund --no-audit) && ${envPrefix}"%b%"${argsSuffix}`;
+}
+
+/**
+ * Bash/zsh/sh bootstrap (Unix + WSL + Git Bash).
+ *
+ * Uses $HOME, [ -x ] test, forward slashes, no .cmd extension.
+ */
+function buildBashBootstrap(opts: BootstrapOptions): string {
+    const { version, provider, args } = opts;
+    const cliDir = `$HOME/.agentmux/instances/v${version}/cli/${provider.id}`;
+    const bin = `$CLI_DIR/node_modules/.bin/${provider.cliCommand}`;
+    const pkg = `${provider.npmPackage}@${provider.pinnedVersion}`;
+    const argsSuffix = args.length > 0 ? " " + args.join(" ") : "";
+
+    let envPrefix = "";
+    if (provider.unsetEnv?.length) {
+        envPrefix = provider.unsetEnv.map((v) => `unset ${v}`).join("; ") + "; ";
+    }
+
+    return [
+        `CLI_DIR="${cliDir}"`,
+        `CLI_BIN="${bin}"`,
+        `{ [ -x "$CLI_BIN" ] || { echo "Installing ${provider.displayName}..."`,
+        `npm install --prefix "$CLI_DIR" ${pkg} --no-fund --no-audit; }; }`,
+        `${envPrefix}"$CLI_BIN"${argsSuffix}`,
+    ].join(" && ");
 }

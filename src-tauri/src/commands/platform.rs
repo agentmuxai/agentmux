@@ -93,6 +93,7 @@ const DEFAULT_SETTINGS_TEMPLATE: &str = r#"// AgentMux Settings
 pub fn get_platform() -> String {
     match std::env::consts::OS {
         "macos" => "darwin".to_string(),
+        "windows" => "win32".to_string(),
         other => other.to_string(),
     }
 }

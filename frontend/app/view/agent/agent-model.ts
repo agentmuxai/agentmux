@@ -9,7 +9,7 @@ import { atom, Atom, PrimitiveAtom } from "jotai";
 import React from "react";
 import { AgentViewWrapper } from "./agent-view";
 import { PROVIDERS } from "./providers";
-import { buildBootstrapScript } from "./bootstrap";
+import { buildBootstrapScript, guessShellType } from "./bootstrap";
 import { Logger } from "@/util/logger";
 import { stringToBase64 } from "@/util/util";
 
@@ -51,11 +51,11 @@ export class AgentViewModel implements ViewModel {
         }
 
         const version = getApi().getAboutModalDetails().version;
-        const isWindows = getApi().getPlatform() === "win32";
+        const shellType = guessShellType(getApi().getPlatform());
 
         Logger.info("agent", `Starting ${provider.id} — isolated CLI (v${version})`, {
             provider: provider.id,
-            isWindows,
+            shellType,
             args: provider.defaultArgs,
         });
 
@@ -79,7 +79,7 @@ export class AgentViewModel implements ViewModel {
                 const script = buildBootstrapScript({
                     version,
                     provider,
-                    isWindows,
+                    shellType,
                     args: provider.defaultArgs,
                 });
                 const b64data = stringToBase64(script + "\r");
@@ -107,10 +107,11 @@ export class AgentViewModel implements ViewModel {
         }
 
         const version = getApi().getAboutModalDetails().version;
-        const isWindows = getApi().getPlatform() === "win32";
+        const shellType = guessShellType(getApi().getPlatform());
 
         Logger.info("agent", `Starting ${provider.id} in styled mode (v${version})`, {
             provider: provider.id,
+            shellType,
             styledArgs: provider.styledArgs,
             outputFormat: provider.styledOutputFormat,
         });
@@ -138,7 +139,7 @@ export class AgentViewModel implements ViewModel {
                 const script = buildBootstrapScript({
                     version,
                     provider,
-                    isWindows,
+                    shellType,
                     args: provider.styledArgs,
                 });
                 const b64data = stringToBase64(script + "\r");
