@@ -387,10 +387,11 @@ async function initBare() {
         updateZoomFactor(zoomFactor);
     });
 
-    // Initialize zoom state
-    import("@/app/store/zoom").then(({ loadZoom }) => {
-        loadZoom(globalStore);
-    });
+    // Reset global window zoom to 1.0 (zoom is now per-pane via block metadata)
+    const api = getApi();
+    if (api && typeof api.setZoomFactor === "function") {
+        api.setZoomFactor(1.0);
+    }
 
     // Use Promise.race to add a timeout fallback for fonts.ready
     // In Tauri, fonts.ready might not resolve promptly
