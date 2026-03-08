@@ -415,12 +415,12 @@ impl Controller for ShellController {
                 }
             }
 
-            // Inject AgentMux identity env vars into the PTY environment
-            #[cfg(not(windows))]
-            {
-                c.env("TERM", "xterm-256color");
-                c.env("COLORTERM", "truecolor");
-            }
+            // Inject terminal capability env vars into the PTY environment.
+            // ConPTY on Windows fully supports VT/ANSI sequences, so set TERM
+            // on all platforms. Without this, CLI tools (e.g. Claude Code) use
+            // different Unicode width tables, causing ANSI color offset on Windows.
+            c.env("TERM", "xterm-256color");
+            c.env("COLORTERM", "truecolor");
             c.env("TERM_PROGRAM", "agentmux");
             c.env("AGENTMUX_BLOCKID", &self.block_id);
             c.env("AGENTMUX_TABID", &self.tab_id);
