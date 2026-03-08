@@ -33,8 +33,9 @@ pub fn attach_drag_handler<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>) 
                     | gtk::gdk::EventMask::BUTTON1_MOTION_MASK,
             );
 
-            // Header height in logical pixels (matches window-header.scss)
-            const HEADER_HEIGHT: f64 = 40.0;
+            // Header height in logical pixels. CSS base is 33px but grows at
+            // low zoom via max(33px, 33px * zoomfactor-inv). 42px covers ~0.8x zoom.
+            const HEADER_HEIGHT: f64 = 42.0;
             // Minimum pointer movement (pixels) before treating press-move as a drag
             const DRAG_THRESHOLD: f64 = 4.0;
 
