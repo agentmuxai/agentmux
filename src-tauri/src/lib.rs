@@ -155,8 +155,8 @@ pub fn run() {
             // See cmd/server/tray.go for implementation
 
             // Create main window programmatically (frameless on all platforms).
-            // Linux drag works via GDK_BACKEND=x11 (see main.rs) + GTK handler below.
-            // macOS/Windows drag is handled by data-tauri-drag-region + startDragging() in JS.
+            // Linux drag: native GTK motion handler in drag.rs (Wayland-safe).
+            // macOS/Windows drag: useWindowDrag() hook — data-tauri-drag-region + startDragging().
             // Set window title with version
             if let Some(window) = handle.get_webview_window("main") {
                 let version = env!("CARGO_PKG_VERSION");
