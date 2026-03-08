@@ -3,6 +3,7 @@
 
 import clsx from "clsx";
 import React, { forwardRef } from "react";
+import { PLATFORM } from "@/util/platformutil";
 
 import "./windowdrag.scss";
 
@@ -12,8 +13,18 @@ interface WindowDragProps {
     children?: React.ReactNode;
 }
 
+// On Linux, window dragging is handled by a native GTK motion-detection handler
+// (drag.rs) that distinguishes clicks from drags. Tauri's startDragging() and
+// data-tauri-drag-region trigger an immediate Wayland compositor pointer grab
+// which swallows button clicks — so we skip them on Linux.
+// NOTE: PLATFORM is read at render time (not module load) because setPlatform()
+// runs during app init and module-scope consts would capture the default "darwin".
+
 const WindowDrag = forwardRef<HTMLDivElement, WindowDragProps>(({ children, className, style }, ref) => {
+    const isLinux = PLATFORM === "linux";
+
     const handleMouseDown = async (e: React.MouseEvent) => {
+        if (isLinux) return;
         if (e.button !== 0) return;
         e.preventDefault();
         try {
@@ -29,7 +40,7 @@ const WindowDrag = forwardRef<HTMLDivElement, WindowDragProps>(({ children, clas
             ref={ref}
             className={clsx(`window-drag`, className)}
             style={style}
-            data-tauri-drag-region
+            {...(!isLinux && { "data-tauri-drag-region": true })}
             onMouseDown={handleMouseDown}
         >
             {children}

@@ -2,19 +2,16 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    // On Linux/Wayland: force X11 (XWayland) so window dragging works.
-    // Wayland's xdg_toplevel_move requires a compositor event serial that is not
-    // available through the async Tauri IPC path, so dragging never works natively
-    // on Wayland. GDK_BACKEND=x11 uses XWayland where X11's timestamp=0 works.
-    // WEBKIT_DISABLE_DMABUF_RENDERER=1 prevents the blank-screen issue caused by
-    // WebKit's DMA-BUF GPU renderer failing when GTK switches to X11 backend.
-    #[cfg(target_os = "linux")]
-    if std::env::var("GDK_BACKEND").is_err() && std::env::var("WAYLAND_DISPLAY").is_ok() {
-        std::env::set_var("GDK_BACKEND", "x11");
-        if std::env::var("WEBKIT_DISABLE_DMABUF_RENDERER").is_err() {
-            std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
-        }
-    }
+    // NOTE: We previously forced GDK_BACKEND=x11 on Wayland so that GTK's
+    // begin_move_drag worked for window dragging (via drag.rs). However, this caused
+    // GTK to use the XIM input method bridge (via IBus's XIM server), which has a bug
+    // that makes the first Backspace in a sequence insert a spurious character instead
+    // of deleting. Since drag.rs already uses a direct GTK button-press-event signal
+    // handler with event.time(), begin_move_drag works fine on the native Wayland backend
+    // too — the GDK_BACKEND=x11 workaround is no longer needed.
+    //
+    // If window dragging breaks on Wayland, re-examine drag.rs and the
+    // GDK_BACKEND=x11 approach; but keyboard input correctness takes priority.
 
     agentmux_lib::run()
 }
