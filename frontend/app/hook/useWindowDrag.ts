@@ -1,4 +1,4 @@
-// Copyright 2025, Command Line Inc.
+// Copyright 2026, Command Line Inc.
 // SPDX-License-Identifier: Apache-2.0
 
 import { isLinux } from "@/util/platformutil";
@@ -16,14 +16,14 @@ const DRAG_EXCLUDE_SELECTOR = 'button, input, a, [data-tauri-drag-region="false"
  * On Linux, drag is handled natively by drag.rs (GTK motion detection) —
  * JS-level startDragging() and data-tauri-drag-region both trigger an
  * immediate Wayland compositor pointer grab that swallows button clicks.
- * So on Linux this hook returns no-ops.
+ * So on Linux the mousedown handler is a no-op and no drag attributes are set.
  *
  * On macOS/Windows, returns startDragging() mousedown handler +
  * data-tauri-drag-region attribute.
  */
 export function useWindowDrag(): {
     dragProps: Record<string, unknown>;
-    onMouseDown: ((e: React.MouseEvent) => void) | undefined;
+    onMouseDown: (e: React.MouseEvent) => void;
 } {
     const onMouseDown = useCallback((e: React.MouseEvent) => {
         if (isLinux()) return;
@@ -34,12 +34,7 @@ export function useWindowDrag(): {
         getCurrentWindow().startDragging().catch(() => {});
     }, []);
 
-    if (isLinux()) {
-        return { dragProps: {}, onMouseDown: undefined };
-    }
+    const dragProps = isLinux() ? {} : { "data-tauri-drag-region": true };
 
-    return {
-        dragProps: { "data-tauri-drag-region": true },
-        onMouseDown,
-    };
+    return { dragProps, onMouseDown };
 }

@@ -4,6 +4,7 @@
 export const PlatformMacOS = "darwin";
 export const PlatformLinux = "linux";
 export const PlatformWindows = "win32";
+/** @deprecated Use getPlatform(), isMacOS(), isLinux(), isWindows() instead. Direct reads at module scope capture the default "darwin" before setPlatform() runs. */
 export let PLATFORM: NodeJS.Platform = PlatformMacOS;
 
 export function setPlatform(platform: NodeJS.Platform) {
