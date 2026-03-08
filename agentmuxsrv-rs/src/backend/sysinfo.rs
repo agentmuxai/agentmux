@@ -2,21 +2,26 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Sysinfo data collection loop: collects CPU, memory, and network metrics
-//! at 1-second intervals and publishes them via the WPS broker.
-//! Port of Go's pkg/wshrpc/wshremote/sysinfo.go.
+//! and publishes them via the WPS broker. Sampling interval is configurable
+//! via the `telemetry:interval` setting (0.1s–2.0s, default 1.0s).
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use sysinfo::Networks;
+use tokio::time::MissedTickBehavior;
 
 use crate::backend::rpc_types::TimeSeriesData;
+use crate::backend::wconfig::ConfigWatcher;
 use crate::backend::wps::{Broker, WaveEvent, EVENT_SYS_INFO};
 
 const BYTES_PER_GB: f64 = 1_073_741_824.0;
 const BYTES_PER_MB: f64 = 1_048_576.0;
 const PERSIST_COUNT: usize = 1024;
+const DEFAULT_INTERVAL_SECS: f64 = 1.0;
+const MIN_INTERVAL_SECS: f64 = 0.2;
+const MAX_INTERVAL_SECS: f64 = 2.0;
 
 /// Collect CPU usage (total + per-core).
 fn get_cpu_data(sys: &sysinfo::System, values: &mut HashMap<String, f64>) {
@@ -89,18 +94,43 @@ impl NetState {
     }
 }
 
-/// Run the sysinfo collection loop. Collects CPU/memory/network metrics every second
-/// and publishes them to the WPS broker with the given connection name as scope.
-pub async fn run_sysinfo_loop(broker: Arc<Broker>, conn_name: String) {
+/// Read the telemetry interval from config, clamped to [MIN, MAX].
+fn get_interval_secs(config_watcher: &ConfigWatcher) -> f64 {
+    let val = config_watcher.get_settings().telemetry_interval;
+    if val <= 0.0 {
+        return DEFAULT_INTERVAL_SECS;
+    }
+    val.clamp(MIN_INTERVAL_SECS, MAX_INTERVAL_SECS)
+}
+
+/// Run the sysinfo collection loop. Uses `tokio::time::interval` for steady
+/// tick rate regardless of refresh duration. Interval is re-read from config
+/// each tick and the timer is reset if it changes.
+pub async fn run_sysinfo_loop(broker: Arc<Broker>, config_watcher: Arc<ConfigWatcher>, conn_name: String) {
     let mut sys = sysinfo::System::new_all();
     let mut networks = Networks::new_with_refreshed_list();
     let mut net_state = NetState::new();
-    let mut interval = tokio::time::interval(std::time::Duration::from_secs(1));
+
+    let mut current_interval = get_interval_secs(&config_watcher);
+    let mut ticker = tokio::time::interval(Duration::from_secs_f64(current_interval));
+    ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
+    // Skip the first immediate tick
+    ticker.tick().await;
 
     tracing::info!("sysinfo loop started for conn:{}", conn_name);
 
     loop {
-        interval.tick().await;
+        ticker.tick().await;
+
+        // Check if interval changed and reset ticker if so
+        let new_interval = get_interval_secs(&config_watcher);
+        if (new_interval - current_interval).abs() > 0.001 {
+            current_interval = new_interval;
+            ticker = tokio::time::interval(Duration::from_secs_f64(current_interval));
+            ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
+            ticker.tick().await; // consume immediate first tick
+            tracing::info!("sysinfo interval changed to {}s", current_interval);
+        }
 
         // Refresh CPU and memory data
         sys.refresh_cpu_usage();

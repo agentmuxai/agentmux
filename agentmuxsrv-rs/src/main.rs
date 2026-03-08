@@ -127,10 +127,23 @@ async fn main() {
     let bridge = backend::eventbus::EventBusBridge::new(event_bus.clone());
     broker.set_client(Box::new(bridge));
 
-    // Start sysinfo collection loop (CPU/memory/network metrics at 1s intervals)
+    // Config watcher (created before sysinfo loop so it can read telemetry:interval)
+    let config_watcher = Arc::new(wconfig::ConfigWatcher::with_config(wconfig::build_default_config()));
+
+    // Load user's settings.json from disk (merges with defaults)
+    backend::config_watcher_fs::load_settings_from_disk(&config_watcher);
+
+    // Watch settings.json for changes and broadcast to WebSocket clients
+    let _settings_watcher = backend::config_watcher_fs::spawn_settings_watcher(
+        config_watcher.clone(),
+        event_bus.clone(),
+    );
+
+    // Start sysinfo collection loop (interval configurable via telemetry:interval)
     let sysinfo_broker = broker.clone();
+    let sysinfo_config = config_watcher.clone();
     tokio::spawn(async move {
-        sysinfo::run_sysinfo_loop(sysinfo_broker, "local".to_string()).await;
+        sysinfo::run_sysinfo_loop(sysinfo_broker, sysinfo_config, "local".to_string()).await;
     });
 
     // Reactive handler (global singleton) + poller
@@ -149,17 +162,6 @@ async fn main() {
         let docsite_dir = app_path.join("docsite");
         docsite::set_docsite_dir(docsite_dir);
     }
-
-    let config_watcher = Arc::new(wconfig::ConfigWatcher::with_config(wconfig::build_default_config()));
-
-    // Load user's settings.json from disk (merges with defaults)
-    backend::config_watcher_fs::load_settings_from_disk(&config_watcher);
-
-    // Watch settings.json for changes and broadcast to WebSocket clients
-    let _settings_watcher = backend::config_watcher_fs::spawn_settings_watcher(
-        config_watcher.clone(),
-        event_bus.clone(),
-    );
 
     // Local MessageBus for inter-agent communication
     let messagebus = Arc::new(backend::messagebus::MessageBus::new());

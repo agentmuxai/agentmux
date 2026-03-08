@@ -71,6 +71,7 @@ const DEFAULT_SETTINGS_TEMPLATE: &str = r#"// AgentMux Settings
 
     // -- Telemetry --
     // "telemetry:enabled":        true,
+    // "telemetry:interval":       1.0,
 
     // -- Connections --
     // "conn:wshenabled":          true,

@@ -861,6 +861,7 @@ declare global {
         "window:zoom"?: number;
         "telemetry:*"?: boolean;
         "telemetry:enabled"?: boolean;
+        "telemetry:interval"?: number;
         "conn:*"?: boolean;
         "conn:askbeforewshinstall"?: boolean;
         "conn:wshenabled"?: boolean;

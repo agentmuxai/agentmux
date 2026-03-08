@@ -224,6 +224,9 @@
         "telemetry:enabled": {
           "type": "boolean"
         },
+        "telemetry:interval": {
+          "type": "number"
+        },
         "conn:*": {
           "type": "boolean"
         },
