@@ -141,17 +141,21 @@ const AgentStyledSession: React.FC<{ model: AgentViewModel; providerId: string }
             const { TabRpcClient } = await import("@/app/store/wshrpcutil");
             const { WOS } = await import("@/app/store/global");
             const oref = WOS.makeORef("block", model.blockId);
-            await RpcApi.SetMetaCommand(TabRpcClient, {
-                oref,
-                meta: {
-                    agentMode: null,
-                    agentProvider: null,
-                    agentCliPath: null,
-                    agentCliArgs: null,
-                    agentOutputFormat: null,
-                    agentBinDir: null,
-                },
-            });
+            try {
+                await RpcApi.SetMetaCommand(TabRpcClient, {
+                    oref,
+                    meta: {
+                        agentMode: null,
+                        agentProvider: null,
+                        agentCliPath: null,
+                        agentCliArgs: null,
+                        agentOutputFormat: null,
+                        agentBinDir: null,
+                    },
+                });
+            } catch {
+                // model logs internally
+            }
         }, [model.blockId]);
 
         return (
