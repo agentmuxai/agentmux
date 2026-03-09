@@ -69,4 +69,120 @@
             font-size: 11px;
         }
     }
+
+    // --- Drag-and-drop wrapper for each tab ---
+    .tab-drop-wrapper {
+        position: relative;
+        flex-shrink: 0;
+        display: flex;
+        align-items: flex-end;
+        transition: opacity 0.15s ease;
+
+        // Pane dragged over a tab — highlight with accent border
+        &.tile-drop-hover {
+            .tab {
+                outline: 2px solid var(--accent-color, #22c55e);
+                outline-offset: -2px;
+                border-radius: 4px 4px 0 0;
+                animation: tab-drop-pulse 0.8s ease-in-out infinite alternate;
+            }
+        }
+
+        // Tab being dragged — reduce opacity
+        &.tab-dragging {
+            opacity: 0.4;
+            transition: opacity 0.1s ease;
+        }
+
+        // Tab reorder insertion indicators
+        &.tab-insert-left::before {
+            content: "";
+            position: absolute;
+            left: -1px;
+            top: 4px;
+            bottom: 2px;
+            width: 2px;
+            background: var(--accent-color, #22c55e);
+            border-radius: 1px;
+            z-index: 10;
+            animation: insert-line-pulse 0.6s ease-in-out infinite alternate;
+        }
+
+        &.tab-insert-right::after {
+            content: "";
+            position: absolute;
+            right: -1px;
+            top: 4px;
+            bottom: 2px;
+            width: 2px;
+            background: var(--accent-color, #22c55e);
+            border-radius: 1px;
+            z-index: 10;
+            animation: insert-line-pulse 0.6s ease-in-out infinite alternate;
+        }
+    }
+
+    // --- New-tab drop zone (end of tab bar) ---
+    .new-tab-drop-zone {
+        flex-shrink: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 28px;
+        height: 27px;
+        align-self: flex-end;
+        margin-bottom: 2px;
+        border: 1px dashed transparent;
+        border-radius: 4px;
+        color: var(--secondary-text-color, #666);
+        transition: all 0.15s ease;
+
+        i {
+            font-size: 11px;
+            opacity: 0;
+            transition: opacity 0.15s ease;
+        }
+
+        &.drop-hover {
+            border-color: var(--accent-color, #22c55e);
+            background: rgba(34, 197, 94, 0.1);
+            color: var(--accent-color, #22c55e);
+            animation: new-tab-zone-pulse 0.8s ease-in-out infinite alternate;
+
+            i {
+                opacity: 1;
+            }
+        }
+    }
+}
+
+// --- Drag-and-drop animations ---
+
+@keyframes tab-drop-pulse {
+    from {
+        outline-color: var(--accent-color, #22c55e);
+    }
+    to {
+        outline-color: rgba(34, 197, 94, 0.5);
+    }
+}
+
+@keyframes insert-line-pulse {
+    from {
+        opacity: 1;
+        width: 2px;
+    }
+    to {
+        opacity: 0.6;
+        width: 3px;
+    }
+}
+
+@keyframes new-tab-zone-pulse {
+    from {
+        background: rgba(34, 197, 94, 0.1);
+    }
+    to {
+        background: rgba(34, 197, 94, 0.18);
+    }
 }

@@ -68,6 +68,37 @@ impl Drop for JobHandle {
     }
 }
 
+/// Type of drag item being moved across windows.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DragType {
+    Pane,
+    Tab,
+}
+
+/// Payload carried by a cross-window drag session.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DragPayload {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub block_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tab_id: Option<String>,
+}
+
+/// Active cross-window drag session state.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DragSession {
+    pub drag_id: String,
+    pub drag_type: DragType,
+    pub source_window: String,
+    pub source_workspace_id: String,
+    pub source_tab_id: String,
+    pub payload: DragPayload,
+    pub started_at: u64,
+}
+
 /// Shared application state managed by Tauri.
 /// Replaces the scattered state across emain/*.ts files.
 pub struct AppState {
@@ -102,6 +133,10 @@ pub struct AppState {
     /// Sequential instance numbers for each open window.
     pub window_instance_registry: Mutex<WindowInstanceRegistry>,
 
+    /// Active cross-window drag session.
+    /// Set when a drag leaves the source window and enters cross-window mode.
+    pub active_drag: Mutex<Option<DragSession>>,
+
     /// Windows Job Object handle — keeps backend alive until frontend exits.
     /// When this handle is closed (including on crash), Windows kills all assigned processes.
     #[cfg(target_os = "windows")]
@@ -126,6 +161,7 @@ impl Default for AppState {
             active_tab_id: Mutex::new(None),
             window_init_status: Mutex::new(String::new()),
             window_instance_registry: Mutex::new(WindowInstanceRegistry::new()),
+            active_drag: Mutex::new(None),
             #[cfg(target_os = "windows")]
             job_handle: Mutex::new(None),
         }

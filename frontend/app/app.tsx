@@ -18,6 +18,8 @@ import { Fragment, useEffect, useState } from "react";
 import { DndProvider } from "react-dnd";
 import { HTML5Backend } from "react-dnd-html5-backend";
 import { AppBackground } from "./app-bg";
+import { CrossWindowDragMonitor } from "./drag/CrossWindowDragMonitor";
+import { DragOverlay } from "./drag/DragOverlay";
 import { CenteredDiv } from "./element/quickelems";
 import { ZoomIndicator } from "./element/zoomindicator";
 import { NotificationBubbles } from "./notification/notificationbubbles";
@@ -343,7 +345,9 @@ const AppInner = () => {
             <AppSettingsUpdater />
             <DndProvider backend={HTML5Backend}>
                 <Workspace />
+                <CrossWindowDragMonitor />
             </DndProvider>
+            <DragOverlay />
             <FlashError />
             {isDev() ? <NotificationBubbles></NotificationBubbles> : null}
             <ZoomIndicator />

@@ -139,6 +139,25 @@ declare global {
         installCli: (provider: string) => Promise<CliInstallResult>;
         getCliPath: (provider: string) => Promise<string | null>;
         listen: (event: string, callback: (event: any) => void) => Promise<() => void>; // listen to events
+        // Cross-window drag commands
+        startCrossDrag: (
+            dragType: "pane" | "tab",
+            sourceWindow: string,
+            sourceWorkspaceId: string,
+            sourceTabId: string,
+            payload: { blockId?: string; tabId?: string }
+        ) => Promise<string>; // returns dragId
+        updateCrossDrag: (dragId: string, screenX: number, screenY: number) => Promise<string | null>; // returns target window label
+        completeCrossDrag: (
+            dragId: string,
+            targetWindow: string | null,
+            screenX: number,
+            screenY: number
+        ) => Promise<void>;
+        cancelCrossDrag: (dragId: string) => Promise<void>;
+        openWindowAtPosition: (screenX: number, screenY: number) => Promise<string>; // returns window label
+        setDragCursor: () => Promise<void>;
+        restoreDragCursor: () => Promise<void>;
     };
 
     type NativeContextMenuItem = {
