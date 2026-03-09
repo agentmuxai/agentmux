@@ -123,18 +123,47 @@ pub fn set_zoom_factor<R: Runtime>(
     Ok(())
 }
 
-/// Get the cursor position relative to the screen.
+/// Get the cursor position in absolute screen coordinates.
 /// Replaces: ipcMain.on("get-cursor-point") in emain/emain.ts
+///
+/// Uses platform-native APIs to get the true screen position, which is
+/// essential for cross-window drag operations where the cursor may be
+/// outside any window.
 #[tauri::command]
-pub fn get_cursor_point(window: tauri::Window) -> Result<serde_json::Value, String> {
-    let position = window
-        .cursor_position()
-        .map_err(|e| format!("Failed to get cursor position: {}", e))?;
+pub fn get_cursor_point(#[allow(unused)] window: tauri::Window) -> Result<serde_json::Value, String> {
+    // On Windows, use GetCursorPos for absolute screen coordinates.
+    // Tauri's window.cursor_position() returns window-relative coords,
+    // which are wrong when the cursor is outside the window (e.g. tear-off).
+    #[cfg(target_os = "windows")]
+    {
+        use windows_sys::Win32::Foundation::POINT;
+        use windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos;
+        let mut point = POINT { x: 0, y: 0 };
+        let ok = unsafe { GetCursorPos(&mut point) };
+        if ok == 0 {
+            return Err("GetCursorPos failed".to_string());
+        }
+        tracing::debug!(
+            x = point.x, y = point.y,
+            "[cursor] get_cursor_point (Win32 GetCursorPos)"
+        );
+        return Ok(serde_json::json!({
+            "x": point.x,
+            "y": point.y,
+        }));
+    }
 
-    Ok(serde_json::json!({
-        "x": position.x,
-        "y": position.y,
-    }))
+    // On non-Windows platforms, fall back to Tauri's cursor_position.
+    #[cfg(not(target_os = "windows"))]
+    {
+        let position = window
+            .cursor_position()
+            .map_err(|e| format!("Failed to get cursor position: {}", e))?;
+        Ok(serde_json::json!({
+            "x": position.x,
+            "y": position.y,
+        }))
+    }
 }
 
 /// Close a specific window by label.

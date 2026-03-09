@@ -1,6 +1,6 @@
 [package]
 name = "agentmux"
-version = "0.31.91"
+version = "0.31.92"
 description = "AgentMux - AI-Native Terminal"
 authors = ["AgentMux Corp"]
 edition = "2021"
@@ -45,6 +45,7 @@ windows-sys = { version = "0.59", features = [
     "Win32_System_Threading",
     "Win32_Foundation",
     "Win32_Security",
+    "Win32_UI_WindowsAndMessaging",
 ] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
