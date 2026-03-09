@@ -525,6 +525,7 @@ fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType {
                 Err(e) => return WebReturnType::error(e),
             };
             let auto_close: bool = service::get_arg(args, 4).unwrap_or(true);
+            tracing::info!(ws_id = %ws_id, block_id = %block_id, source_tab = %source_tab_id, dest_tab = %dest_tab_id, "[dnd:svc] MoveBlockToTab");
             match wcore::move_block_to_tab(store, &block_id, &source_tab_id, &dest_tab_id, &ws_id, auto_close) {
                 Ok(()) => {
                     let mut updates = vec![];
@@ -571,6 +572,7 @@ fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType {
                 Err(e) => return WebReturnType::error(e),
             };
             let auto_close: bool = service::get_arg(args, 3).unwrap_or(true);
+            tracing::info!(ws_id = %ws_id, block_id = %block_id, source_tab = %source_tab_id, "[dnd:svc] PromoteBlockToTab");
             match wcore::promote_block_to_tab(store, &block_id, &source_tab_id, &ws_id, auto_close) {
                 Ok(new_tab) => {
                     let new_tab_oid = new_tab.oid.clone();
@@ -618,6 +620,7 @@ fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType {
                 Ok(v) => v,
                 Err(e) => return WebReturnType::error(e),
             };
+            tracing::info!(ws_id = %ws_id, tab_id = %tab_id, new_index = %new_index, "[dnd:svc] ReorderTab");
             match wcore::reorder_tab(store, &ws_id, &tab_id, new_index) {
                 Ok(()) => {
                     if let Ok(ws) = store.must_get::<Workspace>(&ws_id) {
@@ -649,6 +652,7 @@ fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType {
                 Err(e) => return WebReturnType::error(e),
             };
             let insert_index: Option<usize> = service::get_arg(args, 3).ok();
+            tracing::info!(tab_id = %tab_id, source_ws = %source_ws_id, dest_ws = %dest_ws_id, insert_index = ?insert_index, "[dnd:svc] MoveTabToWorkspace");
             match wcore::move_tab_to_workspace(store, &tab_id, &source_ws_id, &dest_ws_id, insert_index) {
                 Ok(()) => {
                     let mut updates = Vec::new();
@@ -687,6 +691,7 @@ fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType {
                 Err(e) => return WebReturnType::error(e),
             };
             let auto_close: bool = service::get_arg(args, 3).unwrap_or(true);
+            tracing::info!(block_id = %block_id, source_tab = %source_tab_id, source_ws = %source_ws_id, "[dnd:svc] TearOffBlock");
             match wcore::tear_off_block(store, &block_id, &source_tab_id, &source_ws_id, auto_close) {
                 Ok(new_ws) => {
                     let new_ws_oid = new_ws.oid.clone();
@@ -733,6 +738,7 @@ fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType {
                 Ok(v) => v,
                 Err(e) => return WebReturnType::error(e),
             };
+            tracing::info!(tab_id = %tab_id, source_ws = %source_ws_id, "[dnd:svc] TearOffTab");
             match wcore::tear_off_tab(store, &tab_id, &source_ws_id) {
                 Ok(new_ws) => {
                     let new_ws_oid = new_ws.oid.clone();

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { atoms, createTab, globalStore, setActiveTab } from "@/store/global";
+import { Logger } from "@/util/logger";
 import { fireAndForget } from "@/util/util";
 import { useAtomValue } from "jotai";
 import { memo, useCallback, useRef } from "react";
@@ -61,9 +62,18 @@ const DroppableTab = memo(
                 drop: (item: LayoutNode) => {
                     const sourceTabId = globalStore.get(atoms.activeTabId);
                     const blockId = item.data?.blockId;
-                    if (!blockId || sourceTabId === tabId) return;
+                    if (!blockId || sourceTabId === tabId) {
+                        Logger.debug("dnd", "tile-drop on tab ignored (same tab or no blockId)", { blockId, sourceTabId, tabId });
+                        return;
+                    }
+                    Logger.info("dnd", "tile-drop on tab: moving pane to tab", { blockId, sourceTabId, destTabId: tabId, workspaceId });
                     fireAndForget(async () => {
-                        await WorkspaceService.MoveBlockToTab(workspaceId, blockId, sourceTabId, tabId, true);
+                        try {
+                            await WorkspaceService.MoveBlockToTab(workspaceId, blockId, sourceTabId, tabId, true);
+                            Logger.info("dnd", "tile-drop on tab: move complete", { blockId, destTabId: tabId });
+                        } catch (e) {
+                            Logger.error("dnd", "tile-drop on tab: MoveBlockToTab failed", { blockId, sourceTabId, destTabId: tabId, error: String(e) });
+                        }
                     });
                 },
                 collect: (monitor) => ({
@@ -78,8 +88,15 @@ const DroppableTab = memo(
         const [{ isDraggingTab }, tabDragRef] = useDrag(
             () => ({
                 type: tabItemType,
-                item: { tabId, workspaceId, isPinned },
+                item: () => {
+                    Logger.info("dnd", "tab-drag started", { tabId, workspaceId, isPinned, allTabCount });
+                    return { tabId, workspaceId, isPinned };
+                },
                 canDrag: () => allTabCount > 1,
+                end: (_item, monitor) => {
+                    const didDrop = monitor.didDrop();
+                    Logger.info("dnd", "tab-drag ended", { tabId, didDrop });
+                },
                 collect: (monitor) => ({
                     isDraggingTab: monitor.isDragging(),
                 }),
@@ -106,8 +123,14 @@ const DroppableTab = memo(
                     if (item.tabId === tabId) return;
                     const side = (tabRef.current as any)?.__insertSide ?? "right";
                     const newIndex = side === "left" ? tabIndex : tabIndex + 1;
+                    Logger.info("dnd", "tab-reorder drop", { draggedTabId: item.tabId, targetTabId: tabId, side, newIndex, workspaceId });
                     fireAndForget(async () => {
-                        await WorkspaceService.ReorderTab(workspaceId, item.tabId, newIndex);
+                        try {
+                            await WorkspaceService.ReorderTab(workspaceId, item.tabId, newIndex);
+                            Logger.info("dnd", "tab-reorder complete", { tabId: item.tabId, newIndex });
+                        } catch (e) {
+                            Logger.error("dnd", "tab-reorder failed", { tabId: item.tabId, newIndex, error: String(e) });
+                        }
                     });
                 },
                 collect: (monitor) => ({
@@ -176,9 +199,18 @@ const NewTabDropZone = memo(({ workspaceId }: { workspaceId: string }) => {
             drop: (item: LayoutNode) => {
                 const sourceTabId = globalStore.get(atoms.activeTabId);
                 const blockId = item.data?.blockId;
-                if (!blockId) return;
+                if (!blockId) {
+                    Logger.debug("dnd", "new-tab-zone drop ignored (no blockId)");
+                    return;
+                }
+                Logger.info("dnd", "new-tab-zone drop: promoting pane to new tab", { blockId, sourceTabId, workspaceId });
                 fireAndForget(async () => {
-                    await WorkspaceService.PromoteBlockToTab(workspaceId, blockId, sourceTabId, true);
+                    try {
+                        await WorkspaceService.PromoteBlockToTab(workspaceId, blockId, sourceTabId, true);
+                        Logger.info("dnd", "new-tab-zone drop: promote complete", { blockId });
+                    } catch (e) {
+                        Logger.error("dnd", "new-tab-zone drop: PromoteBlockToTab failed", { blockId, sourceTabId, error: String(e) });
+                    }
                 });
             },
             collect: (monitor) => ({

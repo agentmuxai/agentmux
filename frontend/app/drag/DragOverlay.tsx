@@ -12,6 +12,7 @@
  */
 
 import { getApi } from "@/store/global";
+import { Logger } from "@/util/logger";
 import { memo, useEffect, useState } from "react";
 import "./drag-overlay.scss";
 
@@ -49,12 +50,25 @@ const DragOverlay = memo(() => {
 
         const api = getApi();
 
+        Logger.debug("dnd:overlay", "DragOverlay listening for events", { windowLabel });
+
         api.listen("cross-drag-update", (event: { payload: CrossDragUpdateEvent }) => {
             const data = event.payload;
             if (data.targetWindow === windowLabel && data.sourceWindow !== windowLabel) {
+                Logger.info("dnd:overlay", "this window is drop target", {
+                    windowLabel,
+                    dragId: data.dragId,
+                    dragType: data.dragType,
+                    sourceWindow: data.sourceWindow,
+                    screenX: data.screenX,
+                    screenY: data.screenY,
+                });
                 setIsTarget(true);
                 setDragType(data.dragType);
             } else {
+                if (isTarget) {
+                    Logger.debug("dnd:overlay", "no longer drop target", { windowLabel, targetWindow: data.targetWindow });
+                }
                 setIsTarget(false);
                 setDragType(null);
             }
@@ -62,7 +76,8 @@ const DragOverlay = memo(() => {
             unlistenUpdate = fn;
         });
 
-        api.listen("cross-drag-end", (_event: { payload: CrossDragEndEvent }) => {
+        api.listen("cross-drag-end", (event: { payload: CrossDragEndEvent }) => {
+            Logger.info("dnd:overlay", "cross-drag ended", { dragId: event.payload.dragId, result: event.payload.result });
             setIsTarget(false);
             setDragType(null);
         }).then((fn) => {
@@ -72,6 +87,7 @@ const DragOverlay = memo(() => {
         // Also listen for cross-drag-start to clear stale state
         let unlistenStart: (() => void) | null = null;
         api.listen("cross-drag-start", () => {
+            Logger.debug("dnd:overlay", "cross-drag started — resetting overlay state");
             // New drag started — reset state
             setIsTarget(false);
             setDragType(null);

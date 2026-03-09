@@ -347,7 +347,16 @@ pub fn move_block_to_tab(
     ws_id: &str,
     auto_close_source: bool,
 ) -> Result<(), StoreError> {
+    tracing::info!(
+        block_id = %block_id,
+        source_tab = %source_tab_id,
+        dest_tab = %dest_tab_id,
+        ws_id = %ws_id,
+        auto_close = %auto_close_source,
+        "[dnd] move_block_to_tab"
+    );
     if source_tab_id == dest_tab_id {
+        tracing::debug!("[dnd] move_block_to_tab: same tab, no-op");
         return Ok(()); // no-op
     }
 
@@ -373,10 +382,14 @@ pub fn move_block_to_tab(
         let ws = store.must_get::<Workspace>(ws_id)?;
         let total_tabs = ws.tabids.len() + ws.pinnedtabids.len();
         if total_tabs > 1 {
+            tracing::info!(source_tab = %source_tab_id, "[dnd] auto-closing empty source tab");
             delete_tab(store, ws_id, source_tab_id)?;
+        } else {
+            tracing::debug!(source_tab = %source_tab_id, "[dnd] source tab empty but is last tab — keeping");
         }
     }
 
+    tracing::info!(block_id = %block_id, dest_tab = %dest_tab_id, "[dnd] move_block_to_tab complete");
     Ok(())
 }
 
@@ -391,6 +404,13 @@ pub fn promote_block_to_tab(
     ws_id: &str,
     auto_close_source: bool,
 ) -> Result<Tab, StoreError> {
+    tracing::info!(
+        block_id = %block_id,
+        source_tab = %source_tab_id,
+        ws_id = %ws_id,
+        auto_close = %auto_close_source,
+        "[dnd] promote_block_to_tab"
+    );
     // Verify block exists
     let mut block = store.must_get::<Block>(block_id)?;
 
@@ -419,10 +439,12 @@ pub fn promote_block_to_tab(
         let ws = store.must_get::<Workspace>(ws_id)?;
         let total_tabs = ws.tabids.len() + ws.pinnedtabids.len();
         if total_tabs > 1 {
+            tracing::info!(source_tab = %source_tab_id, "[dnd] auto-closing empty source tab after promote");
             delete_tab(store, ws_id, source_tab_id)?;
         }
     }
 
+    tracing::info!(block_id = %block_id, new_tab = %new_tab.oid, "[dnd] promote_block_to_tab complete");
     Ok(new_tab)
 }
 
@@ -433,6 +455,7 @@ pub fn reorder_tab(
     tab_id: &str,
     new_index: usize,
 ) -> Result<(), StoreError> {
+    tracing::info!(ws_id = %ws_id, tab_id = %tab_id, new_index = %new_index, "[dnd] reorder_tab");
     let mut ws = store.must_get::<Workspace>(ws_id)?;
 
     // Determine if tab is in regular or pinned list
@@ -449,6 +472,7 @@ pub fn reorder_tab(
     }
 
     store.update(&mut ws)?;
+    tracing::info!(tab_id = %tab_id, new_index = %new_index, "[dnd] reorder_tab complete");
     Ok(())
 }
 
@@ -464,7 +488,15 @@ pub fn move_tab_to_workspace(
     dest_ws_id: &str,
     insert_index: Option<usize>,
 ) -> Result<(), StoreError> {
+    tracing::info!(
+        tab_id = %tab_id,
+        source_ws = %source_ws_id,
+        dest_ws = %dest_ws_id,
+        insert_index = ?insert_index,
+        "[dnd] move_tab_to_workspace"
+    );
     if source_ws_id == dest_ws_id {
+        tracing::debug!("[dnd] move_tab_to_workspace: same workspace, no-op");
         return Ok(()); // no-op
     }
 
@@ -475,6 +507,7 @@ pub fn move_tab_to_workspace(
     let mut source_ws = store.must_get::<Workspace>(source_ws_id)?;
     let total_tabs = source_ws.tabids.len() + source_ws.pinnedtabids.len();
     if total_tabs <= 1 {
+        tracing::warn!(tab_id = %tab_id, total_tabs = %total_tabs, "[dnd] move_tab_to_workspace blocked: last tab");
         return Err(StoreError::Other(
             "cannot move last tab out of workspace".to_string(),
         ));
@@ -482,12 +515,14 @@ pub fn move_tab_to_workspace(
     source_ws.tabids.retain(|id| id != tab_id);
     source_ws.pinnedtabids.retain(|id| id != tab_id);
     if source_ws.activetabid == tab_id {
-        source_ws.activetabid = source_ws
+        let new_active = source_ws
             .tabids
             .first()
             .or(source_ws.pinnedtabids.first())
             .cloned()
             .unwrap_or_default();
+        tracing::info!(old_active = %tab_id, new_active = %new_active, "[dnd] switching active tab in source workspace");
+        source_ws.activetabid = new_active;
     }
     store.update(&mut source_ws)?;
 
@@ -499,6 +534,7 @@ pub fn move_tab_to_workspace(
     dest_ws.activetabid = tab_id.to_string();
     store.update(&mut dest_ws)?;
 
+    tracing::info!(tab_id = %tab_id, dest_ws = %dest_ws_id, insert_at = %insert_at, "[dnd] move_tab_to_workspace complete");
     Ok(())
 }
 
@@ -513,6 +549,13 @@ pub fn tear_off_block(
     source_ws_id: &str,
     auto_close_source: bool,
 ) -> Result<Workspace, StoreError> {
+    tracing::info!(
+        block_id = %block_id,
+        source_tab = %source_tab_id,
+        source_ws = %source_ws_id,
+        auto_close = %auto_close_source,
+        "[dnd] tear_off_block"
+    );
     // Verify block exists
     let mut block = store.must_get::<Block>(block_id)?;
 
@@ -540,10 +583,17 @@ pub fn tear_off_block(
         let ws = store.must_get::<Workspace>(source_ws_id)?;
         let total_tabs = ws.tabids.len() + ws.pinnedtabids.len();
         if total_tabs > 1 {
+            tracing::info!(source_tab = %source_tab_id, "[dnd] auto-closing empty source tab after tear-off");
             delete_tab(store, source_ws_id, source_tab_id)?;
         }
     }
 
+    tracing::info!(
+        block_id = %block_id,
+        new_ws = %new_ws.oid,
+        new_tab = %new_tab.oid,
+        "[dnd] tear_off_block complete"
+    );
     // Re-fetch workspace to return updated state
     store.must_get::<Workspace>(&new_ws.oid)
 }
@@ -557,10 +607,12 @@ pub fn tear_off_tab(
     tab_id: &str,
     source_ws_id: &str,
 ) -> Result<Workspace, StoreError> {
+    tracing::info!(tab_id = %tab_id, source_ws = %source_ws_id, "[dnd] tear_off_tab");
     // Remove tab from source workspace
     let mut source_ws = store.must_get::<Workspace>(source_ws_id)?;
     let total_tabs = source_ws.tabids.len() + source_ws.pinnedtabids.len();
     if total_tabs <= 1 {
+        tracing::warn!(tab_id = %tab_id, total_tabs = %total_tabs, "[dnd] tear_off_tab blocked: last tab");
         return Err(StoreError::Other(
             "cannot tear off last tab from workspace".to_string(),
         ));
@@ -568,12 +620,14 @@ pub fn tear_off_tab(
     source_ws.tabids.retain(|id| id != tab_id);
     source_ws.pinnedtabids.retain(|id| id != tab_id);
     if source_ws.activetabid == tab_id {
-        source_ws.activetabid = source_ws
+        let new_active = source_ws
             .tabids
             .first()
             .or(source_ws.pinnedtabids.first())
             .cloned()
             .unwrap_or_default();
+        tracing::info!(old_active = %tab_id, new_active = %new_active, "[dnd] switching active tab after tear-off");
+        source_ws.activetabid = new_active;
     }
     store.update(&mut source_ws)?;
 
@@ -591,6 +645,7 @@ pub fn tear_off_tab(
     };
     store.insert(&mut new_ws)?;
 
+    tracing::info!(tab_id = %tab_id, new_ws = %new_ws.oid, "[dnd] tear_off_tab complete");
     Ok(new_ws)
 }
 

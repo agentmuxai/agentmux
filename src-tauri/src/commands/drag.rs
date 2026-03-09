@@ -31,6 +31,16 @@ pub async fn start_cross_drag(
         .unwrap_or_default()
         .as_millis() as u64;
 
+    tracing::info!(
+        drag_id = %drag_id,
+        drag_type = ?drag_type,
+        source_window = %source_window,
+        source_ws = %source_workspace_id,
+        source_tab = %source_tab_id,
+        payload = ?payload,
+        "[dnd:tauri] start_cross_drag"
+    );
+
     let session = DragSession {
         drag_id: drag_id.clone(),
         drag_type,
@@ -46,7 +56,6 @@ pub async fn start_cross_drag(
     // Notify all windows that a cross-window drag has started
     let _ = app.emit("cross-drag-start", &session);
 
-    tracing::info!("Cross-drag started: {}", drag_id);
     Ok(drag_id)
 }
 
@@ -65,13 +74,32 @@ pub async fn update_cross_drag(
         let guard = state.active_drag.lock().unwrap();
         match guard.as_ref() {
             Some(s) if s.drag_id == drag_id => s.clone(),
-            Some(_) => return Err("drag_id mismatch".to_string()),
-            None => return Err("no active drag session".to_string()),
+            Some(s) => {
+                tracing::warn!(
+                    expected = %drag_id,
+                    actual = %s.drag_id,
+                    "[dnd:tauri] update_cross_drag: drag_id mismatch"
+                );
+                return Err("drag_id mismatch".to_string());
+            }
+            None => {
+                tracing::warn!(drag_id = %drag_id, "[dnd:tauri] update_cross_drag: no active session");
+                return Err("no active drag session".to_string());
+            }
         }
     };
 
     // Hit-test all windows to find which one the cursor is over
     let target_window = hit_test_windows(&app, screen_x, screen_y);
+
+    tracing::info!(
+        drag_id = %drag_id,
+        screen_x = %screen_x,
+        screen_y = %screen_y,
+        target_window = ?target_window,
+        source_window = %session.source_window,
+        "[dnd:tauri] update_cross_drag hit-test"
+    );
 
     // Broadcast position update to all windows
     let _ = app.emit(
@@ -107,11 +135,19 @@ pub async fn complete_cross_drag(
         match guard.take() {
             Some(s) if s.drag_id == drag_id => s,
             Some(s) => {
+                tracing::warn!(
+                    expected = %drag_id,
+                    actual = %s.drag_id,
+                    "[dnd:tauri] complete_cross_drag: drag_id mismatch"
+                );
                 // Put it back if ID doesn't match
                 *guard = Some(s);
                 return Err("drag_id mismatch".to_string());
             }
-            None => return Err("no active drag session".to_string()),
+            None => {
+                tracing::warn!(drag_id = %drag_id, "[dnd:tauri] complete_cross_drag: no active session");
+                return Err("no active drag session".to_string());
+            }
         }
     };
 
@@ -120,6 +156,18 @@ pub async fn complete_cross_drag(
     } else {
         "tearoff"
     };
+
+    tracing::info!(
+        drag_id = %drag_id,
+        result = %result,
+        target_window = ?target_window,
+        source_window = %session.source_window,
+        drag_type = ?session.drag_type,
+        payload = ?session.payload,
+        screen_x = %screen_x,
+        screen_y = %screen_y,
+        "[dnd:tauri] complete_cross_drag"
+    );
 
     let _ = app.emit(
         "cross-drag-end",
@@ -137,7 +185,6 @@ pub async fn complete_cross_drag(
         }),
     );
 
-    tracing::info!("Cross-drag completed: {} ({})", drag_id, result);
     Ok(())
 }
 
@@ -151,9 +198,15 @@ pub async fn cancel_cross_drag(
     let mut guard = state.active_drag.lock().unwrap();
     match guard.as_ref() {
         Some(s) if s.drag_id != drag_id => {
+            tracing::warn!(
+                expected = %drag_id,
+                actual = %s.drag_id,
+                "[dnd:tauri] cancel_cross_drag: drag_id mismatch"
+            );
             return Err("drag_id mismatch".to_string());
         }
         None => {
+            tracing::warn!(drag_id = %drag_id, "[dnd:tauri] cancel_cross_drag: no active session");
             return Err("no active drag session".to_string());
         }
         _ => {}
@@ -169,7 +222,7 @@ pub async fn cancel_cross_drag(
         }),
     );
 
-    tracing::info!("Cross-drag cancelled: {}", drag_id);
+    tracing::info!(drag_id = %drag_id, "[dnd:tauri] cancel_cross_drag complete");
     Ok(())
 }
 
@@ -183,6 +236,8 @@ pub async fn open_window_at_position(
     screen_x: f64,
     screen_y: f64,
 ) -> Result<String, String> {
+    tracing::info!(screen_x = %screen_x, screen_y = %screen_y, "[dnd:tauri] open_window_at_position");
+
     let window_id = uuid::Uuid::new_v4();
     let label = format!("window-{}", window_id.simple());
     let version = env!("CARGO_PKG_VERSION");
@@ -203,7 +258,10 @@ pub async fn open_window_at_position(
 
     let _new_window = builder
         .build()
-        .map_err(|e| format!("Failed to create window: {}", e))?;
+        .map_err(|e| {
+            tracing::error!(error = %e, "[dnd:tauri] open_window_at_position: window creation failed");
+            format!("Failed to create window: {}", e)
+        })?;
 
     // On Linux: attach native GTK drag handler
     #[cfg(target_os = "linux")]
@@ -214,11 +272,11 @@ pub async fn open_window_at_position(
         let mut reg = state.window_instance_registry.lock().unwrap();
         let num = reg.register(&label);
         tracing::info!(
-            "Tear-off window {} assigned instance #{} at ({}, {})",
-            label,
-            num,
-            screen_x,
-            screen_y
+            label = %label,
+            instance = %num,
+            screen_x = %screen_x,
+            screen_y = %screen_y,
+            "[dnd:tauri] tear-off window registered"
         );
         reg.count()
     };
@@ -231,22 +289,41 @@ pub async fn open_window_at_position(
 /// Returns the window label if found, or None if cursor is outside all windows.
 fn hit_test_windows(app: &tauri::AppHandle, screen_x: f64, screen_y: f64) -> Option<String> {
     let windows = app.webview_windows();
+    tracing::debug!(
+        window_count = %windows.len(),
+        screen_x = %screen_x,
+        screen_y = %screen_y,
+        "[dnd:tauri] hit_test_windows"
+    );
     for (label, window) in &windows {
         let pos = match window.outer_position() {
             Ok(p) => p,
-            Err(_) => continue,
+            Err(e) => {
+                tracing::debug!(label = %label, error = %e, "[dnd:tauri] hit_test: failed to get position");
+                continue;
+            }
         };
         let size = match window.outer_size() {
             Ok(s) => s,
-            Err(_) => continue,
+            Err(e) => {
+                tracing::debug!(label = %label, error = %e, "[dnd:tauri] hit_test: failed to get size");
+                continue;
+            }
         };
         let x = pos.x as f64;
         let y = pos.y as f64;
         let w = size.width as f64;
         let h = size.height as f64;
+        tracing::debug!(
+            label = %label,
+            win_x = %x, win_y = %y, win_w = %w, win_h = %h,
+            "[dnd:tauri] hit_test: checking window bounds"
+        );
         if screen_x >= x && screen_x <= x + w && screen_y >= y && screen_y <= y + h {
+            tracing::debug!(label = %label, "[dnd:tauri] hit_test: HIT");
             return Some(label.clone());
         }
     }
+    tracing::debug!("[dnd:tauri] hit_test: no window hit (tear-off zone)");
     None
 }

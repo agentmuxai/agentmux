@@ -17,6 +17,7 @@
 
 import { atoms, getApi, globalStore } from "@/store/global";
 import { WorkspaceService } from "@/app/store/services";
+import { Logger } from "@/util/logger";
 import { fireAndForget } from "@/util/util";
 import { memo, useEffect, useRef } from "react";
 import { useDragLayer } from "react-dnd";
@@ -39,6 +40,7 @@ const CrossWindowDragMonitor = memo(() => {
             .getWindowLabel()
             .then((label) => {
                 windowLabelRef.current = label;
+                Logger.debug("dnd:cross", "CrossWindowDragMonitor mounted", { windowLabel: label });
             });
     }, []);
 
@@ -52,6 +54,7 @@ const CrossWindowDragMonitor = memo(() => {
     useEffect(() => {
         if (isDragging && itemType && item) {
             lastDragRef.current = { itemType, item };
+            Logger.debug("dnd:cross", "drag-layer active", { itemType: String(itemType), item });
         }
     }, [isDragging, itemType, item]);
 
@@ -59,6 +62,10 @@ const CrossWindowDragMonitor = memo(() => {
     useEffect(() => {
         if (prevDraggingRef.current && !isDragging) {
             const { itemType: savedType, item: savedItem } = lastDragRef.current;
+            Logger.info("dnd:cross", "drag ended — checking for cross-window", {
+                hasItem: !!savedType,
+                itemType: savedType ? String(savedType) : null,
+            });
             if (savedType && savedItem) {
                 // Delay slightly to let react-dnd process the drop first
                 setTimeout(() => {
@@ -87,14 +94,19 @@ async function handleDragEnd(
 ) {
     // Only handle known drag types
     const typeStr = String(dragItemType);
-    if (typeStr !== tileItemType && typeStr !== tabItemType) return;
+    if (typeStr !== tileItemType && typeStr !== tabItemType) {
+        Logger.debug("dnd:cross", "ignoring unknown drag type", { type: typeStr });
+        return;
+    }
 
     // Get cursor position via Tauri (async)
     let cursorPoint: { x: number; y: number };
     try {
         const { invoke } = await import("@tauri-apps/api/core");
         cursorPoint = await invoke<{ x: number; y: number }>("get_cursor_point");
-    } catch {
+        Logger.debug("dnd:cross", "cursor position", { x: cursorPoint.x, y: cursorPoint.y });
+    } catch (e) {
+        Logger.error("dnd:cross", "failed to get cursor position", { error: String(e) });
         return;
     }
 
@@ -102,16 +114,23 @@ async function handleDragEnd(
     let windows: string[];
     try {
         windows = await getApi().listWindows();
-    } catch {
+    } catch (e) {
+        Logger.error("dnd:cross", "failed to list windows", { error: String(e) });
         return;
     }
-    if (windows.length <= 1) return;
+    if (windows.length <= 1) {
+        Logger.debug("dnd:cross", "single window — skipping cross-window check", { windowCount: windows.length });
+        return;
+    }
 
     const api = getApi();
     const src = sourceWindow ?? "main";
     const workspace = globalStore.get(atoms.workspace);
     const activeTabId = globalStore.get(atoms.activeTabId);
-    if (!workspace) return;
+    if (!workspace) {
+        Logger.warn("dnd:cross", "no workspace found — aborting cross-window drag");
+        return;
+    }
 
     // Build payload from drag item
     let payload: { blockId?: string; tabId?: string };
@@ -120,35 +139,59 @@ async function handleDragEnd(
     if (typeStr === tileItemType) {
         const node = dragItem as LayoutNode;
         const blockId = node?.data?.blockId;
-        if (!blockId) return;
+        if (!blockId) {
+            Logger.warn("dnd:cross", "tile drag item has no blockId", { dragItem });
+            return;
+        }
         payload = { blockId };
         dragType = "pane";
     } else {
         const tabId = dragItem?.tabId;
-        if (!tabId) return;
+        if (!tabId) {
+            Logger.warn("dnd:cross", "tab drag item has no tabId", { dragItem });
+            return;
+        }
         payload = { tabId };
         dragType = "tab";
     }
 
+    Logger.info("dnd:cross", "starting cross-window drag check", {
+        dragType,
+        payload,
+        sourceWindow: src,
+        workspaceId: workspace.oid,
+        activeTabId,
+        cursor: cursorPoint,
+        windowCount: windows.length,
+    });
+
     try {
         // Use Tauri cross-drag infrastructure for hit-testing
         const dragId = await api.startCrossDrag(dragType, src, workspace.oid, activeTabId, payload);
+        Logger.debug("dnd:cross", "cross-drag session started", { dragId });
+
         const targetWindow = await api.updateCrossDrag(dragId, cursorPoint.x, cursorPoint.y);
+        Logger.info("dnd:cross", "hit-test result", { dragId, targetWindow, sourceWindow: src });
 
         if (targetWindow && targetWindow !== src) {
             // Cross-window drop
+            Logger.info("dnd:cross", "CROSS-WINDOW DROP", { dragType, targetWindow, payload });
             await performCrossWindowDrop(dragType, payload, workspace.oid, activeTabId);
             await api.completeCrossDrag(dragId, targetWindow, cursorPoint.x, cursorPoint.y);
+            Logger.info("dnd:cross", "cross-window drop complete", { dragId, targetWindow });
         } else if (!targetWindow) {
             // Tear-off (outside all windows)
+            Logger.info("dnd:cross", "TEAR-OFF (outside all windows)", { dragType, payload, cursor: cursorPoint });
             await performTearOff(dragType, payload, workspace.oid, activeTabId, cursorPoint.x, cursorPoint.y);
             await api.completeCrossDrag(dragId, null, cursorPoint.x, cursorPoint.y);
+            Logger.info("dnd:cross", "tear-off complete", { dragId });
         } else {
             // Same window — no cross-window action needed
+            Logger.debug("dnd:cross", "same window — cancelling cross-drag", { dragId, targetWindow });
             await api.cancelCrossDrag(dragId);
         }
     } catch (e) {
-        console.error("[cross-drag] Error:", e);
+        Logger.error("dnd:cross", "cross-window drag error", { error: String(e), dragType, payload });
     }
 }
 
@@ -162,10 +205,18 @@ async function performCrossWindowDrop(
     sourceWsId: string,
     sourceTabId: string
 ) {
-    if (dragType === "pane" && payload.blockId) {
-        await WorkspaceService.TearOffBlock(payload.blockId, sourceTabId, sourceWsId, true);
-    } else if (dragType === "tab" && payload.tabId) {
-        await WorkspaceService.TearOffTab(payload.tabId, sourceWsId);
+    Logger.info("dnd:cross", "performCrossWindowDrop", { dragType, payload, sourceWsId, sourceTabId });
+    try {
+        if (dragType === "pane" && payload.blockId) {
+            const newWsId = await WorkspaceService.TearOffBlock(payload.blockId, sourceTabId, sourceWsId, true);
+            Logger.info("dnd:cross", "TearOffBlock result", { blockId: payload.blockId, newWsId });
+        } else if (dragType === "tab" && payload.tabId) {
+            const newWsId = await WorkspaceService.TearOffTab(payload.tabId, sourceWsId);
+            Logger.info("dnd:cross", "TearOffTab result", { tabId: payload.tabId, newWsId });
+        }
+    } catch (e) {
+        Logger.error("dnd:cross", "performCrossWindowDrop failed", { dragType, payload, error: String(e) });
+        throw e;
     }
 }
 
@@ -181,22 +232,36 @@ async function performTearOff(
     screenY: number
 ) {
     const api = getApi();
+    Logger.info("dnd:cross", "performTearOff", { dragType, payload, sourceWsId, sourceTabId, screenX, screenY });
 
-    if (dragType === "pane" && payload.blockId) {
-        const newWsId = await WorkspaceService.TearOffBlock(
-            payload.blockId,
-            sourceTabId,
-            sourceWsId,
-            true
-        );
-        if (newWsId) {
-            await api.openWindowAtPosition(screenX, screenY);
+    try {
+        if (dragType === "pane" && payload.blockId) {
+            const newWsId = await WorkspaceService.TearOffBlock(
+                payload.blockId,
+                sourceTabId,
+                sourceWsId,
+                true
+            );
+            Logger.info("dnd:cross", "TearOffBlock for tear-off result", { blockId: payload.blockId, newWsId });
+            if (newWsId) {
+                const newLabel = await api.openWindowAtPosition(screenX, screenY);
+                Logger.info("dnd:cross", "new window opened for pane tear-off", { newLabel, screenX, screenY });
+            } else {
+                Logger.warn("dnd:cross", "TearOffBlock returned no workspace — skipping window creation");
+            }
+        } else if (dragType === "tab" && payload.tabId) {
+            const newWsId = await WorkspaceService.TearOffTab(payload.tabId, sourceWsId);
+            Logger.info("dnd:cross", "TearOffTab for tear-off result", { tabId: payload.tabId, newWsId });
+            if (newWsId) {
+                const newLabel = await api.openWindowAtPosition(screenX, screenY);
+                Logger.info("dnd:cross", "new window opened for tab tear-off", { newLabel, screenX, screenY });
+            } else {
+                Logger.warn("dnd:cross", "TearOffTab returned no workspace — skipping window creation");
+            }
         }
-    } else if (dragType === "tab" && payload.tabId) {
-        const newWsId = await WorkspaceService.TearOffTab(payload.tabId, sourceWsId);
-        if (newWsId) {
-            await api.openWindowAtPosition(screenX, screenY);
-        }
+    } catch (e) {
+        Logger.error("dnd:cross", "performTearOff failed", { dragType, payload, error: String(e) });
+        throw e;
     }
 }
 
