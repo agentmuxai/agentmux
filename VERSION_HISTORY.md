@@ -519,3 +519,5 @@ The bump scripts automatically:
 - Run `task package` only for final release builds
 
 | 0.31.87-fork | v0.12.0 | 2026-03-08 | AgentO-asaf | remove legacy AI panel sidebar |
+
+| 0.31.91-fork | v0.12.0 | 2026-03-09 | AgentO-asaf | open settings in code editor |
