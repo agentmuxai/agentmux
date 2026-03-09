@@ -23,7 +23,9 @@
     display: flex;
     flex-direction: row;
     align-items: end;
-    width: 100vw;
+    // Compensate for CSS zoom so the header always fills exactly 100vw after scaling.
+    // Without this, zoom > 1 shrinks the usable inner width, pushing flex children toward center.
+    width: calc(100vw / var(--zoomfactor, 1));
     height: 33px;
     zoom: var(--zoomfactor);
     cursor: grab;
