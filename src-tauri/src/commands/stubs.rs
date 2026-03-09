@@ -71,11 +71,6 @@ pub fn set_window_init_status(
     *state.window_init_status.lock().unwrap() = status;
 }
 
-#[tauri::command(rename_all = "camelCase")]
-pub fn set_waveai_open(is_open: bool) {
-    tracing::debug!("stub: set_waveai_open is_open={}", is_open);
-}
-
 #[tauri::command]
 pub fn install_update() {
     tracing::debug!("stub: install_update");

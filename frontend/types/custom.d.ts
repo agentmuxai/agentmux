@@ -30,7 +30,6 @@ declare global {
         notificationPopoverMode: jotai.Atom<boolean>;
         reinitVersion: jotai.PrimitiveAtom<number>;
         isTermMultiInput: jotai.PrimitiveAtom<boolean>;
-        waveAIRateLimitInfoAtom: jotai.PrimitiveAtom<RateLimitInfo>;
         backendStatusAtom: jotai.PrimitiveAtom<"connecting" | "running" | "crashed">;
     };
 
@@ -124,7 +123,6 @@ declare global {
         revealInFileExplorer(filePath: string): void; // reveal-item-in-dir
         captureScreenshot(rect: { x: number; y: number; width: number; height: number }): Promise<string>; // capture-screenshot
         setKeyboardChordMode: () => void; // set-keyboard-chord-mode
-        setWaveAIOpen: (isOpen: boolean) => void; // set-waveai-open
         // Claude Code auth commands
         openClaudeCodeAuth: () => Promise<void>; // open-claude-code-auth
         getClaudeCodeAuth: () => Promise<{ connected: boolean; email?: string; expires_at?: number }>; // get-claude-code-auth

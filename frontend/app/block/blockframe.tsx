@@ -16,7 +16,6 @@ import {
     useBlockAtom,
     WOS,
 } from "@/app/store/global";
-import { WorkspaceLayoutModel } from "@/app/workspace/workspace-layout-model";
 import { RpcApi } from "@/app/store/wshclientapi";
 import { TabRpcClient } from "@/app/store/wshrpcutil";
 import { ErrorBoundary } from "@/element/errorboundary";
@@ -574,7 +573,6 @@ const BlockFrame_Default_Component = (props: BlockFrameProps) => {
     const { nodeModel, viewModel, blockModel, preview, numBlocksInTab, children } = props;
     const [blockData] = WOS.useWaveObjectValue<Block>(WOS.makeORef("block", nodeModel.blockId));
     const isFocused = jotai.useAtomValue(nodeModel.isFocused);
-    const aiPanelVisible = jotai.useAtomValue(WorkspaceLayoutModel.getInstance().panelVisibleAtom);
     const viewIconUnion = util.useAtomValueSafe(viewModel?.viewIcon) ?? blockViewToIcon(blockData?.meta?.view);
     const customBg = util.useAtomValueSafe(viewModel?.blockBg);
     const manageConnection = util.useAtomValueSafe(viewModel?.manageConnection);
@@ -669,7 +667,7 @@ const BlockFrame_Default_Component = (props: BlockFrameProps) => {
             className={clsx("block", "block-frame-default", "block-" + nodeModel.blockId, {
                 "block-focused": isFocused || preview,
                 "block-preview": preview,
-                "block-no-highlight": numBlocksInTab === 1 && !aiPanelVisible,
+                "block-no-highlight": numBlocksInTab === 1,
                 "has-agent-color": !!blockAgentColor,
                 ephemeral: isEphemeral,
                 magnified: isMagnified,

@@ -184,7 +184,6 @@ function initGlobalAtoms(initOpts: GlobalInitOptions) {
     const notificationsAtom = atom<NotificationType[]>([]);
     const notificationPopoverModeAtom = atom<boolean>(false);
     const reinitVersion = atom(0);
-    const rateLimitInfoAtom = atom(null) as PrimitiveAtom<RateLimitInfo>;
     atoms = {
         // initialized in wave.ts (will not be null inside of application)
         clientId: clientIdAtom,
@@ -210,7 +209,6 @@ function initGlobalAtoms(initOpts: GlobalInitOptions) {
         notificationPopoverMode: notificationPopoverModeAtom,
         reinitVersion,
         isTermMultiInput: atom(false),
-        waveAIRateLimitInfoAtom: rateLimitInfoAtom,
         backendStatusAtom,
     };
 }
@@ -252,13 +250,6 @@ function initGlobalEventSubs(initOpts: AgentMuxInitOpts) {
                 }
             },
         },
-        {
-            eventType: "waveai:ratelimit",
-            handler: (event) => {
-                const rateLimitInfo: RateLimitInfo = event.data;
-                globalStore.set(atoms.waveAIRateLimitInfoAtom, rateLimitInfo);
-            },
-        }
     );
 }
 

@@ -317,11 +317,6 @@ export function buildTauriApi(): AppApi {
             return "";
         },
 
-        // --- AI ---
-        setWaveAIOpen: (isOpen: boolean) => {
-            invoke("set_waveai_open", { isOpen }).catch(console.error);
-        },
-
         // --- Claude Code Auth ---
         openClaudeCodeAuth: async () => {
             console.trace("[LEGACY] openClaudeCodeAuth called — who called this?");

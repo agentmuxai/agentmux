@@ -94,7 +94,6 @@ pub fn run() {
             commands::stubs::create_tab,
             commands::stubs::close_tab,
             commands::stubs::set_window_init_status,
-            commands::stubs::set_waveai_open,
             commands::stubs::install_update,
             // Provider commands
             commands::providers::detect_installed_clis,
