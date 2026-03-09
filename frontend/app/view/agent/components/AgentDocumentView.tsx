@@ -13,6 +13,7 @@ import type { DocumentNode, DocumentState } from "../types";
 import { MarkdownBlock } from "./MarkdownBlock";
 import { ToolBlock } from "./ToolBlock";
 import { AgentMessageBlock } from "./AgentMessageBlock";
+import { TerminalOutputBlock } from "./TerminalOutputBlock";
 
 interface AgentDocumentViewProps {
     documentAtom: PrimitiveAtom<DocumentNode[]>;
@@ -111,6 +112,9 @@ const DocumentNodeRenderer: React.FC<{
                     </div>
                 </div>
             );
+
+        case "terminal_output":
+            return <TerminalOutputBlock node={node} />;
 
         case "section":
             return (

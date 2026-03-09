@@ -20,7 +20,7 @@ import { getFileSubject } from "@/app/store/wps";
 import { base64ToArray } from "@/util/util";
 import { createTranslator } from "./providers/translator-factory";
 import { ClaudeCodeStreamParser } from "./stream-parser";
-import type { DocumentNode, StreamEvent, StreamingState } from "./types";
+import type { DocumentNode, StreamEvent, StreamingState, TerminalOutputNode } from "./types";
 
 const TermFileName = "term";
 
@@ -74,6 +74,11 @@ export function useAgentStream({
     const parserRef = useRef(new ClaudeCodeStreamParser());
     // Track node IDs we've seen so we can update (tool_result) vs append
     const nodeIdSetRef = useRef(new Set<string>());
+    // Terminal output accumulation for non-JSON lines (bootstrap output)
+    const terminalNodeIdRef = useRef<string | null>(null);
+    const terminalNodeCounterRef = useRef(0);
+    // Whether we've seen at least one valid JSON line (marks end of bootstrap)
+    const jsonStartedRef = useRef(false);
 
     useEffect(() => {
         if (!enabled || !blockId) return;
@@ -83,6 +88,9 @@ export function useAgentStream({
         translatorRef.current = createTranslator(outputFormat);
         parserRef.current = new ClaudeCodeStreamParser();
         nodeIdSetRef.current = new Set();
+        terminalNodeIdRef.current = null;
+        terminalNodeCounterRef.current = 0;
+        jsonStartedRef.current = false;
 
         setStreaming((prev) => ({ ...prev, active: true, lastEventTime: Date.now() }));
 
@@ -96,6 +104,9 @@ export function useAgentStream({
                 translatorRef.current.reset();
                 parserRef.current.reset();
                 nodeIdSetRef.current = new Set();
+                terminalNodeIdRef.current = null;
+                terminalNodeCounterRef.current = 0;
+                jsonStartedRef.current = false;
                 return;
             }
 
@@ -123,8 +134,48 @@ export function useAgentStream({
                 try {
                     rawEvent = JSON.parse(trimmed);
                 } catch {
-                    // Not valid JSON — skip (could be raw CLI output during init)
+                    // Not valid JSON — capture as terminal output (bootstrap/init lines)
+                    // If JSON has already started and we get a non-JSON line,
+                    // start a new terminal node (separates bootstrap from mid-stream errors)
+                    if (jsonStartedRef.current) {
+                        terminalNodeIdRef.current = null;
+                    }
+
+                    if (terminalNodeIdRef.current === null) {
+                        terminalNodeIdRef.current = `term_${terminalNodeCounterRef.current++}`;
+                    }
+
+                    const termId = terminalNodeIdRef.current;
+                    const termNode: TerminalOutputNode = {
+                        type: "terminal_output",
+                        id: termId,
+                        content: trimmed + "\n",
+                        complete: false,
+                    };
+
+                    if (nodeIdSetRef.current.has(termId)) {
+                        // Update existing terminal node — accumulate content
+                        updatedNodes.push(termNode);
+                    } else {
+                        nodeIdSetRef.current.add(termId);
+                        newNodes.push(termNode);
+                    }
                     continue;
+                }
+
+                // First successful JSON parse — mark bootstrap terminal node as complete
+                if (!jsonStartedRef.current) {
+                    jsonStartedRef.current = true;
+                    if (terminalNodeIdRef.current !== null) {
+                        const completeTermNode: TerminalOutputNode = {
+                            type: "terminal_output",
+                            id: terminalNodeIdRef.current,
+                            content: "", // content filled by setDocument updater
+                            complete: true,
+                        };
+                        updatedNodes.push(completeTermNode);
+                        terminalNodeIdRef.current = null;
+                    }
                 }
 
                 // Translate provider-specific format → StreamEvent[]
@@ -154,7 +205,21 @@ export function useAgentStream({
                     for (const updated of updatedNodes) {
                         const idx = result.findIndex((n) => n.id === updated.id);
                         if (idx !== -1) {
-                            result[idx] = updated;
+                            if (updated.type === "terminal_output") {
+                                const existing = result[idx] as TerminalOutputNode;
+                                if (updated.complete) {
+                                    // Mark as complete, preserve accumulated content
+                                    result[idx] = { ...existing, complete: true };
+                                } else {
+                                    // Accumulate content into existing node
+                                    result[idx] = {
+                                        ...existing,
+                                        content: existing.content + updated.content,
+                                    };
+                                }
+                            } else {
+                                result[idx] = updated;
+                            }
                         }
                     }
 

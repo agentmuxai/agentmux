@@ -263,6 +263,42 @@
         color: var(--main-text-color);
     }
 
+    // === Terminal Output Block (bootstrap) ===
+    .agent-terminal-output {
+        border: 1px solid var(--border-color);
+        border-radius: 4px;
+        border-left: 3px solid var(--warning-color);
+        background: color-mix(in srgb, var(--main-text-color) 3%, transparent);
+
+        &.complete {
+            border-left-color: var(--success-color);
+            opacity: 0.7;
+        }
+
+        .agent-terminal-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 12px;
+            font-size: 11px;
+            color: var(--secondary-text-color);
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .agent-terminal-content {
+            padding: 8px 12px;
+            margin: 0;
+            font-size: 12px;
+            line-height: 1.4;
+            white-space: pre-wrap;
+            word-break: break-word;
+            max-height: 300px;
+            overflow-y: auto;
+            color: var(--main-text-color);
+            opacity: 0.85;
+        }
+    }
+
     // === Markdown Block ===
     .agent-markdown-block {
         padding: 4px 8px;
