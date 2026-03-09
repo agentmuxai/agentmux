@@ -149,10 +149,14 @@ pub async fn cancel_cross_drag(
     drag_id: String,
 ) -> Result<(), String> {
     let mut guard = state.active_drag.lock().unwrap();
-    if let Some(ref session) = *guard {
-        if session.drag_id != drag_id {
+    match guard.as_ref() {
+        Some(s) if s.drag_id != drag_id => {
             return Err("drag_id mismatch".to_string());
         }
+        None => {
+            return Err("no active drag session".to_string());
+        }
+        _ => {}
     }
     *guard = None;
     drop(guard);
