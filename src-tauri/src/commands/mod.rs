@@ -5,6 +5,7 @@ pub mod cli_installer;
 pub mod contextmenu;
 pub mod devtools;
 pub mod drag;
+pub mod file_ops;
 pub mod platform;
 pub mod providers;
 pub mod stubs;
