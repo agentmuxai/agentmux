@@ -17,6 +17,9 @@ import { TermResyncHandler, TermToolbarVDomNode, TermVDomNode } from "./termVDom
 import { makeTerminalModel, setTerminalViewComponent, TermViewModel } from "./termViewModel";
 import { TermWrap } from "./termwrap";
 import "./xterm.css";
+import { DragOverlay } from "@/app/element/dragoverlay";
+import { useFileDrop } from "@/app/hook/useFileDrop";
+import { invoke } from "@tauri-apps/api/core";
 
 const TerminalView = ({ blockId, model }: ViewComponentProps<TermViewModel>) => {
     const viewRef = React.useRef<HTMLDivElement>(null);
@@ -223,8 +226,35 @@ const TerminalView = ({ blockId, model }: ViewComponentProps<TermViewModel>) => 
 
     const termBg = computeBgStyleFromMeta(blockData?.meta);
 
+    const handleFilesDropped = React.useCallback(
+        (files: File[]) => {
+            const cwd = blockData?.meta?.["cmd:cwd"];
+            if (!cwd) {
+                console.warn("[term-drop] No working directory detected, ignoring drop");
+                return;
+            }
+            for (const file of files) {
+                const filePath = (file as any).path;
+                if (!filePath) continue;
+                invoke("copy_file_to_dir", { sourcePath: filePath, targetDir: cwd })
+                    .then(() => {
+                        console.log(`[term-drop] Copied ${file.name} to ${cwd}`);
+                    })
+                    .catch((err: any) => {
+                        console.warn(`[term-drop] ${err}`);
+                    });
+            }
+        },
+        [blockData]
+    );
+
+    const { isDragOver, handlers: dropHandlers } = useFileDrop(handleFilesDropped);
+    const cwd = blockData?.meta?.["cmd:cwd"];
+    const dropMessage = cwd ? `Copy to ${cwd}` : "No working directory detected";
+
     return (
-        <div className={clsx("view-term", "term-mode-" + termMode)} ref={viewRef}>
+        <div className={clsx("view-term", "term-mode-" + termMode)} ref={viewRef} {...dropHandlers} style={{ position: "relative" }}>
+            <DragOverlay message={dropMessage} visible={isDragOver} />
             {termBg && <div className="absolute inset-0 z-0 pointer-events-none" style={termBg} />}
             <TermResyncHandler blockId={blockId} model={model} />
             <TermThemeUpdater blockId={blockId} model={model} termRef={model.termRef} />
