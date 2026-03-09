@@ -23,6 +23,10 @@ pub async fn copy_file_to_dir(
         return Err(format!("Target directory not found: {}", target_dir.display()));
     }
 
+    if !target_dir.is_dir() {
+        return Err(format!("Target path is not a directory: {}", target_dir.display()));
+    }
+
     let file_name = source
         .file_name()
         .ok_or_else(|| "Invalid source path".to_string())?;
