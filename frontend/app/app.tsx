@@ -5,7 +5,7 @@ import { Workspace } from "@/app/workspace/workspace";
 import { ContextMenuModel } from "@/store/contextmenu";
 import { atoms, createBlock, getApi, getSettingsPrefixAtom, globalStore, isDev, openLink, removeFlashError } from "@/store/global";
 import { appHandleKeyDown, keyboardMouseDownHandler } from "@/store/keymodel";
-import { zoomIn, zoomOut, WHEEL_STEP } from "@/store/zoom";
+import { chromeZoomIn, chromeZoomOut, zoomBlockIn, zoomBlockOut, WHEEL_STEP } from "@/store/zoom";
 import { getElemAsStr } from "@/util/focusutil";
 import * as keyutil from "@/util/keyutil";
 import { PLATFORM } from "@/util/platformutil";
@@ -212,13 +212,23 @@ const AppZoomHandler = () => {
             // Prevent default browser zoom
             e.preventDefault();
 
-            // Zoom direction based on wheel delta
-            // Note: deltaY > 0 = scroll down = zoom out
-            if (e.deltaY > 0) {
-                zoomOut(globalStore, WHEEL_STEP);
-            } else if (e.deltaY < 0) {
-                zoomIn(globalStore, WHEEL_STEP);
+            const target = e.target as HTMLElement;
+            const zoomOut = e.deltaY > 0;
+
+            // Check if hovering over chrome (title bar or status bar)
+            if (target.closest(".window-header") || target.closest(".status-bar")) {
+                if (zoomOut) chromeZoomOut(WHEEL_STEP);
+                else chromeZoomIn(WHEEL_STEP);
+                return;
             }
+
+            // Otherwise zoom the terminal pane under the cursor
+            const blockEl = target.closest("[data-blockid]");
+            const blockId = blockEl?.getAttribute("data-blockid");
+            if (!blockId) return;
+
+            if (zoomOut) zoomBlockOut(blockId, WHEEL_STEP);
+            else zoomBlockIn(blockId, WHEEL_STEP);
         };
 
         // Add with passive: false to allow preventDefault
