@@ -20,9 +20,25 @@ import { getFileSubject } from "@/app/store/wps";
 import { base64ToArray } from "@/util/util";
 import { createTranslator } from "./providers/translator-factory";
 import { ClaudeCodeStreamParser } from "./stream-parser";
-import type { DocumentNode, StreamingState } from "./types";
+import type { DocumentNode, StreamEvent, StreamingState } from "./types";
 
 const TermFileName = "term";
+
+/**
+ * Strip ANSI escape sequences from text.
+ *
+ * PTY data may contain cursor control, color codes, and other terminal
+ * escape sequences from CLI startup before JSON streaming begins.
+ * These corrupt JSON parsing if embedded in NDJSON lines.
+ */
+function stripAnsi(text: string): string {
+    // Matches CSI sequences, OSC sequences, and other common escape codes
+    return text.replace(
+        // eslint-disable-next-line no-control-regex
+        /[\x1b\x9b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><~]/g,
+        ""
+    );
+}
 
 interface UseAgentStreamOpts {
     blockId: string;
@@ -85,9 +101,10 @@ export function useAgentStream({
 
             if (msg.fileop !== "append" || !msg.data64) return;
 
-            // Decode base64 PTY data to UTF-8 text
+            // Decode base64 PTY data to UTF-8 text, stripping ANSI escapes
             const bytes = base64ToArray(msg.data64);
-            const text = new TextDecoder().decode(bytes);
+            const rawText = new TextDecoder().decode(bytes);
+            const text = stripAnsi(rawText);
 
             // Accumulate into line buffer and process complete lines
             lineBufferRef.current += text;
@@ -115,7 +132,7 @@ export function useAgentStream({
 
                 // Convert StreamEvents → DocumentNodes
                 for (const event of streamEvents) {
-                    const node = parserRef.current.parseLine(JSON.stringify(event));
+                    const node = parserRef.current.parseStreamEvent(event as StreamEvent);
                     if (!node) continue;
 
                     if (nodeIdSetRef.current.has(node.id)) {

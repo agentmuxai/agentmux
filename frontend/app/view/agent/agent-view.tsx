@@ -177,10 +177,8 @@ const AgentStyledSession: React.FC<{ model: AgentViewModel; providerId: string }
                     meta: {
                         agentMode: null,
                         agentProvider: null,
-                        agentCliPath: null,
                         agentCliArgs: null,
                         agentOutputFormat: null,
-                        agentBinDir: null,
                         controller: null,
                     },
                 });
