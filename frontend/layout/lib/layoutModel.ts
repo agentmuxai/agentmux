@@ -679,8 +679,8 @@ export class LayoutModel {
         cleanupNodeModelsImpl(this, leafOrder);
     }
 
-    switchNodeFocusInDirection(direction: NavigateDirection, inWaveAI: boolean): NavigationResult {
-        return switchNodeFocusInDirectionImpl(this, direction, inWaveAI);
+    switchNodeFocusInDirection(direction: NavigateDirection): NavigationResult {
+        return switchNodeFocusInDirectionImpl(this, direction);
     }
 
     switchNodeFocusByBlockNum(newBlockNum: number) {

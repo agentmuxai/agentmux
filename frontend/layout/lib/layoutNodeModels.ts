@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { getApi } from "@/app/store/global";
-import { focusManager } from "@/app/store/focusManager";
+
 import { fireAndForget } from "@/util/util";
 import { Atom, atom } from "jotai";
 import { createRef, CSSProperties } from "react";
@@ -40,9 +40,7 @@ export function getNodeModel(model: LayoutModel, node: LayoutNode): NodeModel {
             blockNum: atom((get) => get(model.leafOrder).findIndex((leafEntry) => leafEntry.nodeid === nodeid) + 1),
             isFocused: atom((get) => {
                 const treeState = get(model.localTreeStateAtom);
-                const isFocused = treeState.focusedNodeId === nodeid;
-                const focusType = get(focusManager.focusType);
-                return isFocused && focusType === "node";
+                return treeState.focusedNodeId === nodeid;
             }),
             numLeafs: model.numLeafs,
             isResizing: model.isResizing,

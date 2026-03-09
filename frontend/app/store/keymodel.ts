@@ -1,7 +1,6 @@
 // Copyright 2025, Command Line Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-import { WaveAIModel } from "@/app/aipanel/agentai-model";
 import { focusManager } from "@/app/store/focusManager";
 import {
     atoms,
@@ -25,7 +24,6 @@ import { RpcApi } from "@/app/store/wshclientapi";
 import { TabRpcClient } from "@/app/store/wshrpcutil";
 import { zoomIn, zoomOut, zoomReset } from "@/app/store/zoom";
 import { TabBarModel } from "@/app/tab/tabbar-model";
-import { WorkspaceLayoutModel } from "@/app/workspace/workspace-layout-model";
 import { deleteLayoutModelForTab, getLayoutModelForStaticTab, NavigateDirection } from "@/layout/index";
 import * as keyutil from "@/util/keyutil";
 import { CHORD_TIMEOUT } from "@/util/sharedconst";
@@ -176,17 +174,6 @@ function uxCloseBlock(blockId: string) {
         return;
     }
 
-    const workspaceLayoutModel = WorkspaceLayoutModel.getInstance();
-    const isAIPanelOpen = workspaceLayoutModel.getAIPanelVisible();
-    if (isAIPanelOpen && getStaticTabBlockCount() === 1) {
-        const aiModel = WaveAIModel.getInstance();
-        const shouldSwitchToAI = !aiModel.isChatEmpty || aiModel.hasNonEmptyInput();
-        if (shouldSwitchToAI) {
-            replaceBlock(blockId, { meta: { view: "launcher" } }, false);
-            setTimeout(() => WaveAIModel.getInstance().focusInput(), 50);
-            return;
-        }
-    }
     const layoutModel = getLayoutModelForStaticTab();
     const node = layoutModel.getNodeByBlockId(blockId);
     if (node) {
@@ -196,30 +183,9 @@ function uxCloseBlock(blockId: string) {
 
 function genericClose() {
     debugLog("genericClose called");
-    const focusType = focusManager.getFocusType();
-    if (focusType === "waveai") {
-        WorkspaceLayoutModel.getInstance().setAIPanelVisible(false);
-        return;
-    }
     if (isStaticTabPinned() && getStaticTabBlockCount() === 1) {
         TabBarModel.getInstance().jiggleActivePinnedTab();
         return;
-    }
-
-    const workspaceLayoutModel = WorkspaceLayoutModel.getInstance();
-    const isAIPanelOpen = workspaceLayoutModel.getAIPanelVisible();
-    if (isAIPanelOpen && getStaticTabBlockCount() === 1) {
-        const aiModel = WaveAIModel.getInstance();
-        const shouldSwitchToAI = !aiModel.isChatEmpty || aiModel.hasNonEmptyInput();
-        if (shouldSwitchToAI) {
-            const layoutModel = getLayoutModelForStaticTab();
-            const focusedNode = globalStore.get(layoutModel.focusedNode);
-            if (focusedNode) {
-                replaceBlock(focusedNode.data.blockId, { meta: { view: "launcher" } }, false);
-                setTimeout(() => WaveAIModel.getInstance().focusInput(), 50);
-                return;
-            }
-        }
     }
     const blockCount = getStaticTabBlockCount();
     debugLog("genericClose blockCount", blockCount);
@@ -266,30 +232,7 @@ function cyclePaneFocus(direction: "forward" | "backward") {
 
 function switchBlockInDirection(direction: NavigateDirection) {
     const layoutModel = getLayoutModelForStaticTab();
-    const focusType = focusManager.getFocusType();
-
-    if (direction === NavigateDirection.Left) {
-        const numBlocks = globalStore.get(layoutModel.numLeafs);
-        if (focusType === "waveai") {
-            return;
-        }
-        if (numBlocks === 1) {
-            focusManager.requestWaveAIFocus();
-            return;
-        }
-    }
-
-    if (direction === NavigateDirection.Right && focusType === "waveai") {
-        focusManager.requestNodeFocus();
-        return;
-    }
-
-    const inWaveAI = focusType === "waveai";
-    const navResult = layoutModel.switchNodeFocusInDirection(direction, inWaveAI);
-    if (navResult.atLeft) {
-        focusManager.requestWaveAIFocus();
-        return;
-    }
+    layoutModel.switchNodeFocusInDirection(direction);
     setTimeout(() => {
         globalRefocus();
     }, 10);
@@ -635,14 +578,6 @@ function registerGlobalKeys() {
             return true;
         });
     }
-    globalKeyMap.set("Ctrl:Shift:c{Digit0}", () => {
-        WaveAIModel.getInstance().focusInput();
-        return true;
-    });
-    globalKeyMap.set("Ctrl:Shift:c{Numpad0}", () => {
-        WaveAIModel.getInstance().focusInput();
-        return true;
-    });
     function activateSearch(event: WaveKeyboardEvent): boolean {
         const bcm = getBlockComponentModel(getFocusedBlockInStaticTab());
         if (bcm == null) return false;
@@ -676,12 +611,6 @@ function registerGlobalKeys() {
         }
         return false;
     });
-    globalKeyMap.set("Cmd:Shift:a", () => {
-        const currentVisible = WorkspaceLayoutModel.getInstance().getAIPanelVisible();
-        WorkspaceLayoutModel.getInstance().setAIPanelVisible(!currentVisible);
-        return true;
-    });
-
     // Zoom controls - macOS
     globalKeyMap.set("Cmd:=", () => {
         zoomIn(globalStore);

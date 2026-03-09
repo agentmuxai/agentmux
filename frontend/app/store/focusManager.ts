@@ -1,48 +1,22 @@
-import { waveAIHasFocusWithin } from "@/app/aipanel/agentai-focus-utils";
-import { WaveAIModel } from "@/app/aipanel/agentai-model";
-import { atoms, getBlockComponentModel } from "@/app/store/global";
+import { getBlockComponentModel } from "@/app/store/global";
 import { globalStore } from "@/app/store/jotaiStore";
 import { focusedBlockId } from "@/util/focusutil";
 import { getLayoutModelForStaticTab } from "@/layout/index";
-import { Atom, atom, type PrimitiveAtom } from "jotai";
-
-export type FocusStrType = "node" | "waveai";
+import { Atom, atom } from "jotai";
 
 class FocusManager {
-    focusType: PrimitiveAtom<FocusStrType> = atom("node");
     blockFocusAtom: Atom<string | null>;
 
     constructor() {
         this.blockFocusAtom = atom((get) => {
-            if (get(this.focusType) == "waveai") {
-                return null;
-            }
             const layoutModel = getLayoutModelForStaticTab();
             const lnode = get(layoutModel.focusedNode);
             return lnode?.data?.blockId;
         });
     }
 
-    setWaveAIFocused(force: boolean = false) {
-        const isAlreadyFocused = globalStore.get(this.focusType) == "waveai";
-        if (!force && isAlreadyFocused) {
-            return;
-        }
-        globalStore.set(this.focusType, "waveai");
-        this.refocusNode();
-    }
-
     setBlockFocus(force: boolean = false) {
-        const ftype = globalStore.get(this.focusType);
-        if (!force && ftype == "node") {
-            return;
-        }
-        globalStore.set(this.focusType, "node");
         this.refocusNode();
-    }
-
-    waveAIFocusWithin(): boolean {
-        return waveAIHasFocusWithin();
     }
 
     nodeFocusWithin(): boolean {
@@ -50,23 +24,14 @@ class FocusManager {
     }
 
     requestNodeFocus(): void {
-        globalStore.set(this.focusType, "node");
+        // no-op, node is the only focus target now
     }
 
-    requestWaveAIFocus(): void {
-        globalStore.set(this.focusType, "waveai");
-    }
-
-    getFocusType(): FocusStrType {
-        return globalStore.get(this.focusType);
+    getFocusType(): "node" {
+        return "node";
     }
 
     refocusNode() {
-        const ftype = globalStore.get(this.focusType);
-        if (ftype == "waveai") {
-            WaveAIModel.getInstance().focusInput();
-            return;
-        }
         const layoutModel = getLayoutModelForStaticTab();
         const lnode = globalStore.get(layoutModel.focusedNode);
         if (lnode == null || lnode.data?.blockId == null) {

@@ -39,12 +39,10 @@ export function validateFocusedNode(model: LayoutModel, leafOrder: LeafOrderEntr
  * Switch focus to the next node in the given direction in the layout.
  * @param model The LayoutModel instance.
  * @param direction The direction in which to switch focus.
- * @param inWaveAI Whether the current focus is in the WaveAI panel.
  */
 export function switchNodeFocusInDirection(
     model: LayoutModel,
-    direction: NavigateDirection,
-    inWaveAI: boolean
+    direction: NavigateDirection
 ): NavigationResult {
     const curNodeId = model.focusedNodeId;
 
@@ -64,30 +62,11 @@ export function switchNodeFocusInDirection(
             nodePositions.set(leaf.id, pos);
         }
     }
-    let curNodePos: Dimensions;
-    if (inWaveAI) {
-        // For WaveAI, use a fake position to the left of all nodes
-        curNodePos = { left: -10, top: 10, width: 0, height: 0 };
-
-        // Only allow "right" navigation from WaveAI
-        if (direction !== NavigateDirection.Right) {
-            const result: NavigationResult = { success: false };
-            if (direction === NavigateDirection.Up) {
-                result.atTop = true;
-            } else if (direction === NavigateDirection.Down) {
-                result.atBottom = true;
-            } else if (direction === NavigateDirection.Left) {
-                result.atLeft = true;
-            }
-            return result;
-        }
-    } else {
-        curNodePos = nodePositions.get(curNodeId);
-        if (!curNodePos) {
-            return { success: false };
-        }
-        nodePositions.delete(curNodeId);
+    const curNodePos = nodePositions.get(curNodeId);
+    if (!curNodePos) {
+        return { success: false };
     }
+    nodePositions.delete(curNodeId);
     const boundingRect = model.displayContainerRef?.current.getBoundingClientRect();
     if (!boundingRect) {
         return { success: false };
