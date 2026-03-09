@@ -2,7 +2,7 @@ mod ai;
 mod files;
 mod messagebus;
 mod reactive;
-mod service;
+pub(crate) mod service;
 mod websocket;
 
 #[cfg(test)]

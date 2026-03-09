@@ -20,6 +20,7 @@ use std::sync::{Arc, RwLock};
 use serde::{Deserialize, Serialize};
 
 use super::eventbus::EventBus;
+use super::storage::wstore::WaveStore;
 use super::waveobj::{Block, MetaMapType, TermSize};
 use super::wps::Broker;
 
@@ -239,6 +240,7 @@ pub fn resync_controller(
     force: bool,
     broker: Option<Arc<Broker>>,
     event_bus: Option<Arc<EventBus>>,
+    wstore: Option<Arc<WaveStore>>,
 ) -> Result<(), String> {
     let block_id = &block.oid;
     let block_meta = &block.meta;
@@ -286,6 +288,7 @@ pub fn resync_controller(
                 block_id.to_string(),
                 broker,
                 event_bus,
+                wstore,
             );
             let ctrl = Arc::new(ctrl);
             register_controller(block_id, ctrl.clone());
@@ -428,7 +431,7 @@ mod tests {
             ..Default::default()
         };
         // No "controller" key in meta = no-op
-        let result = resync_controller(&block, "tab-1", None, false, None, None);
+        let result = resync_controller(&block, "tab-1", None, false, None, None, None);
         assert!(result.is_ok());
     }
 
@@ -445,7 +448,7 @@ mod tests {
             meta,
             ..Default::default()
         };
-        let result = resync_controller(&block, "tab-1", None, false, None, None);
+        let result = resync_controller(&block, "tab-1", None, false, None, None, None);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("unknown controller type"));
     }
