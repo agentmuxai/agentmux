@@ -19,22 +19,35 @@ function hasFilesDragged(dataTransfer: DataTransfer): boolean {
 
 function useFileDrop(onFilesDropped: (files: File[]) => void): FileDropResult {
     const [isDragOver, setIsDragOver] = React.useState(false);
+    // Counter tracks nested enter/leave events from child elements.
+    // dragLeave fires for each child element crossed — we only clear when counter
+    // reaches 0 (i.e., the drag has truly left the entire drop zone).
+    const dragCounter = React.useRef(0);
 
-    const onDragOver = React.useCallback(
-        (e: React.DragEvent) => {
-            e.preventDefault();
-            e.stopPropagation();
-            if (hasFilesDragged(e.dataTransfer) && !isDragOver) {
-                setIsDragOver(true);
-            }
-        },
-        [isDragOver]
-    );
+    // Reset counter + state when component unmounts or drag ends externally
+    React.useEffect(() => {
+        const handleDragEnd = () => {
+            dragCounter.current = 0;
+            setIsDragOver(false);
+        };
+        document.addEventListener("dragend", handleDragEnd);
+        document.addEventListener("drop", handleDragEnd);
+        return () => {
+            document.removeEventListener("dragend", handleDragEnd);
+            document.removeEventListener("drop", handleDragEnd);
+        };
+    }, []);
+
+    const onDragOver = React.useCallback((e: React.DragEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+    }, []);
 
     const onDragEnter = React.useCallback((e: React.DragEvent) => {
         e.preventDefault();
         e.stopPropagation();
         if (hasFilesDragged(e.dataTransfer)) {
+            dragCounter.current += 1;
             setIsDragOver(true);
         }
     }, []);
@@ -42,10 +55,9 @@ function useFileDrop(onFilesDropped: (files: File[]) => void): FileDropResult {
     const onDragLeave = React.useCallback((e: React.DragEvent) => {
         e.preventDefault();
         e.stopPropagation();
-        const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-        const x = e.clientX;
-        const y = e.clientY;
-        if (x <= rect.left || x >= rect.right || y <= rect.top || y >= rect.bottom) {
+        dragCounter.current -= 1;
+        if (dragCounter.current <= 0) {
+            dragCounter.current = 0;
             setIsDragOver(false);
         }
     }, []);
@@ -54,6 +66,7 @@ function useFileDrop(onFilesDropped: (files: File[]) => void): FileDropResult {
         (e: React.DragEvent) => {
             e.preventDefault();
             e.stopPropagation();
+            dragCounter.current = 0;
             setIsDragOver(false);
             const files = Array.from(e.dataTransfer.files);
             if (files.length > 0) {

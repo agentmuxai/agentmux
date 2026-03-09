@@ -3,20 +3,32 @@
 //
 // File operations for drag & drop support.
 
+fn copy_recursive(src: &std::path::Path, dst: &std::path::Path) -> Result<(), String> {
+    if src.is_file() {
+        std::fs::copy(src, dst).map_err(|e| format!("Copy failed: {}", e))?;
+    } else if src.is_dir() {
+        std::fs::create_dir_all(dst).map_err(|e| format!("Create dir failed: {}", e))?;
+        for entry in std::fs::read_dir(src).map_err(|e| format!("Read dir failed: {}", e))? {
+            let entry = entry.map_err(|e| format!("Dir entry error: {}", e))?;
+            let name = entry.file_name();
+            copy_recursive(&entry.path(), &dst.join(&name))?;
+        }
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn copy_file_to_dir(
     source_path: String,
     target_dir: String,
 ) -> Result<String, String> {
     let source = std::path::Path::new(&source_path);
-    let target_dir = std::path::Path::new(&target_dir);
+    // Normalize forward slashes — OSC 7 emits forward-slash paths on Windows (e.g. C:/Users/foo)
+    let target_dir_norm = target_dir.replace('/', std::path::MAIN_SEPARATOR_STR);
+    let target_dir = std::path::Path::new(&target_dir_norm);
 
     if !source.exists() {
-        return Err(format!("Source file not found: {}", source.display()));
-    }
-
-    if !source.is_file() {
-        return Err(format!("Source is not a file: {}", source.display()));
+        return Err(format!("Source not found: {}", source.display()));
     }
 
     if !target_dir.exists() {
@@ -27,17 +39,16 @@ pub async fn copy_file_to_dir(
         return Err(format!("Target path is not a directory: {}", target_dir.display()));
     }
 
-    let file_name = source
+    let name = source
         .file_name()
         .ok_or_else(|| "Invalid source path".to_string())?;
-    let target = target_dir.join(file_name);
+    let target = target_dir.join(name);
 
     if target.exists() {
-        return Err(format!("File already exists: {}", target.display()));
+        return Err(format!("Already exists: {}", target.display()));
     }
 
-    std::fs::copy(source, &target)
-        .map_err(|e| format!("Copy failed: {}", e))?;
+    copy_recursive(source, &target)?;
 
     Ok(target.display().to_string())
 }
