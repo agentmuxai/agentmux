@@ -177,7 +177,7 @@ const TerminalView = ({ blockId, model }: ViewComponentProps<TermViewModel>) => 
         const termWrap = model.termRef.current;
         if (termWrap?.terminal && termWrap.loaded) {
             termWrap.terminal.options.fontSize = termFontSize;
-            termWrap.fitAddon.fit();
+            termWrap.handleResize();
         }
     }, [termFontSize]);
 
