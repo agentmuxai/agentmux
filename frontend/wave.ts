@@ -97,10 +97,6 @@ setTimeout(updateWindowTitleWithInstanceID, 1000);
 (window as any).removeNotificationById = removeNotificationById;
 (window as any).modalsModel = modalsModel;
 
-function updateZoomFactor(zoomFactor: number) {
-    document.documentElement.style.setProperty("--zoomfactor", String(zoomFactor));
-    document.documentElement.style.setProperty("--zoomfactor-inv", String(1 / zoomFactor));
-}
 
 /** Wrap a promise with a timeout. Rejects with a descriptive error if it takes too long. */
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
@@ -382,14 +378,16 @@ async function initBare() {
     }
     setKeyUtilPlatform(platform);
     loadFonts();
-    updateZoomFactor(getApi().getZoomFactor());
-    getApi().onZoomFactorChange((zoomFactor) => {
-        updateZoomFactor(zoomFactor);
-    });
+    // Reset Tauri window zoom to 1.0 (per-pane zoom is handled via block metadata,
+    // chrome zoom via CSS custom properties)
+    const api = getApi();
+    if (api && typeof api.setZoomFactor === "function") {
+        api.setZoomFactor(1.0);
+    }
 
-    // Initialize zoom state
-    import("@/app/store/zoom").then(({ loadZoom }) => {
-        loadZoom(globalStore);
+    // Initialize chrome zoom CSS variables
+    import("@/app/store/zoom").then(({ initChromeZoom }) => {
+        initChromeZoom();
     });
 
     // Use Promise.race to add a timeout fallback for fonts.ready
