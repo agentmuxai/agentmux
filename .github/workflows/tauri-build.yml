@@ -204,15 +204,27 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            artifacts/**/*.exe
-            artifacts/**/*.zip
-            artifacts/**/*.deb
-            artifacts/**/*.AppImage
-            artifacts/**/*.dmg
-            artifacts/**/*.tar.gz
-            artifacts/**/*.sig
+            artifacts/**/AgentMux_*.dmg
+            artifacts/**/AgentMux_*-setup.exe
+            artifacts/**/AgentMux_*-portable.zip
+            artifacts/**/AgentMux_*.AppImage
+            artifacts/**/AgentMux_*.deb
           draft: false
           prerelease: false
-          generate_release_notes: true
+          generate_release_notes: false
+          body: |
+            ## AgentMux ${{ github.ref_name }}
+
+            ### Downloads
+            | Platform | File |
+            |----------|------|
+            | Windows x64 (installer) | `AgentMux_${{ github.ref_name }}_x64-setup.exe` |
+            | Windows x64 (portable) | `AgentMux_${{ github.ref_name }}_x64-portable.zip` |
+            | macOS Apple Silicon | `AgentMux_${{ github.ref_name }}_aarch64.dmg` |
+            | macOS Intel | `AgentMux_${{ github.ref_name }}_x64.dmg` |
+            | Linux x64 (AppImage) | `AgentMux_${{ github.ref_name }}_amd64.AppImage` |
+            | Linux x64 (deb) | `AgentMux_${{ github.ref_name }}_amd64.deb` |
+
+            **Full changelog:** https://github.com/agentmuxai/agentmux/commits/${{ github.ref_name }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
