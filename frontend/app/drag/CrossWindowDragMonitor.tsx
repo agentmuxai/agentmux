@@ -110,16 +110,12 @@ async function handleDragEnd(
         return;
     }
 
-    // Only proceed for multi-window scenarios
+    // List open windows (used for logging; tear-off works even with 1 window)
     let windows: string[];
     try {
         windows = await getApi().listWindows();
     } catch (e) {
         Logger.error("dnd:cross", "failed to list windows", { error: String(e) });
-        return;
-    }
-    if (windows.length <= 1) {
-        Logger.debug("dnd:cross", "single window — skipping cross-window check", { windowCount: windows.length });
         return;
     }
 
