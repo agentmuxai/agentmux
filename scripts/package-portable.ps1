@@ -1,7 +1,8 @@
 # Package portable build for AgentMux
 param(
     [string]$Version = "",
-    [string]$OutputDir = "dist"
+    [string]$OutputDir = "dist",
+    [string]$BuildDir = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -13,7 +14,9 @@ if ($Version -eq "") {
 }
 
 $RepoRoot = Split-Path $PSScriptRoot
-$BuildDir = "$RepoRoot\target\release"
+if ($BuildDir -eq "") {
+    $BuildDir = "$RepoRoot\target\release"
+}
 $PortableDir = "$OutputDir\agentmux-$Version-x64-portable"
 $ZipPath = "$OutputDir\agentmux-$Version-x64-portable.zip"
 
@@ -81,7 +84,7 @@ Files:
 - agentmuxsrv-rs.x64.exe: Backend server (auto-launched)
 - bin/wsh-$Version-windows.x64.exe: Shell integration binary
 
-Support: https://github.com/agentmuxhq/agentmux
+Support: https://github.com/agentmuxai/agentmux
 
 Build Date: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
 "@
