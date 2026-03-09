@@ -24,7 +24,8 @@
     flex-direction: row;
     align-items: end;
     width: 100vw;
-    height: max(33px, calc(33px * var(--zoomfactor-inv)));
+    height: 33px;
+    zoom: var(--zoomfactor);
     cursor: grab;
 
     &:active {

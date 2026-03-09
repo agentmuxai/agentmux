@@ -169,7 +169,17 @@ const TerminalView = ({ blockId, model }: ViewComponentProps<TermViewModel>) => 
             termWrap.dispose();
             rszObs.disconnect();
         };
-    }, [blockId, termSettings, termFontSize, connFontFamily]);
+    }, [blockId, termSettings, connFontFamily]);
+
+    // Update font size in-place when zoom changes (avoids full terminal reconstruction
+    // which would destroy/recreate WebGL contexts and cause other panes to lose content)
+    React.useEffect(() => {
+        const termWrap = model.termRef.current;
+        if (termWrap?.terminal && termWrap.loaded) {
+            termWrap.terminal.options.fontSize = termFontSize;
+            termWrap.handleResize();
+        }
+    }, [termFontSize]);
 
     React.useEffect(() => {
         if (termModeRef.current == "vdom" && termMode == "term") {

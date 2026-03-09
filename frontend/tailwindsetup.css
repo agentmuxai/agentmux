@@ -72,7 +72,6 @@
 
 :root {
     --zoomfactor: 1;
-    --zoomfactor-inv: 1;
 }
 
 /* Chart tooltip styling for sysinfo plots */

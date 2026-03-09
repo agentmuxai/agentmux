@@ -381,6 +381,7 @@ declare global {
         "term:*"?: boolean;
         "term:fontsize"?: number;
         "term:fontfamily"?: string;
+        "term:zoom"?: number;
         "term:theme"?: string;
         "cmd:env"?: {[key: string]: string};
         "cmd:initscript"?: string;
@@ -656,6 +657,7 @@ declare global {
         "term:*"?: boolean;
         "term:fontsize"?: number;
         "term:fontfamily"?: string;
+        "term:zoom"?: number;
         "term:mode"?: string;
         "term:theme"?: string;
         "term:localshellpath"?: string;
@@ -812,6 +814,7 @@ declare global {
         "term:*"?: boolean;
         "term:fontsize"?: number;
         "term:fontfamily"?: string;
+        "term:zoom"?: number;
         "term:theme"?: string;
         "term:disablewebgl"?: boolean;
         "term:localshellpath"?: string;
