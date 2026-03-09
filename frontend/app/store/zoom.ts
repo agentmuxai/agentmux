@@ -118,7 +118,6 @@ export function zoomReset(store: any): void {
 
 function applyChromeZoomCSS(factor: number): void {
     document.documentElement.style.setProperty("--zoomfactor", String(factor));
-    document.documentElement.style.setProperty("--zoomfactor-inv", String(1 / factor));
 }
 
 export function chromeZoomIn(step: number = WHEEL_STEP): void {
