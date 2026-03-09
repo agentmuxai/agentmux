@@ -38,7 +38,7 @@ async function handleWidgetSelect(widget: WidgetConfigType) {
     if (widget.blockdef?.meta?.view === "settings") {
         try {
             const path = await invoke<string>("ensure_settings_file");
-            getApi().openNativePath(path);
+            await invoke("open_in_editor", { path });
         } catch (e) {
             console.error("Failed to open settings:", e);
         }

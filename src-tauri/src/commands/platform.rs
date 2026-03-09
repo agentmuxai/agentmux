@@ -160,6 +160,47 @@ pub fn ensure_settings_file(app: tauri::AppHandle) -> Result<String, String> {
     Ok(settings_path.to_string_lossy().to_string())
 }
 
+/// Open a file in the best available code editor.
+/// Priority: known CLI editors on PATH → macOS .app bundles → OS default.
+#[tauri::command]
+pub fn open_in_editor(path: String) -> Result<(), String> {
+    // 1. CLI editors on PATH
+    let cli_editors = ["code", "cursor", "zed", "subl", "atom"];
+    for editor in &cli_editors {
+        if std::process::Command::new(editor).arg(&path).spawn().is_ok() {
+            return Ok(());
+        }
+    }
+
+    // 2. macOS .app bundles (handles editors not on PATH)
+    #[cfg(target_os = "macos")]
+    {
+        let app_bins = [
+            "/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code",
+            "/Applications/Cursor.app/Contents/Resources/app/bin/cursor",
+            "/Applications/Zed.app/Contents/MacOS/zed",
+            "/Applications/Sublime Text.app/Contents/SharedSupport/bin/subl",
+        ];
+        for bin in &app_bins {
+            if std::path::Path::new(bin).exists() {
+                if std::process::Command::new(bin).arg(&path).spawn().is_ok() {
+                    return Ok(());
+                }
+            }
+        }
+    }
+
+    // 3. OS default fallback
+    #[cfg(target_os = "macos")]
+    std::process::Command::new("open").arg(&path).spawn().map_err(|e| e.to_string())?;
+    #[cfg(target_os = "windows")]
+    std::process::Command::new("cmd").args(["/C", "start", "", &path]).spawn().map_err(|e| e.to_string())?;
+    #[cfg(target_os = "linux")]
+    std::process::Command::new("xdg-open").arg(&path).spawn().map_err(|e| e.to_string())?;
+
+    Ok(())
+}
+
 /// Get an environment variable value.
 /// Replaces: ipcMain.on("get-env") in emain/emain.ts
 #[tauri::command]
