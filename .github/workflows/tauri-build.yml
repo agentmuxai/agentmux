@@ -97,7 +97,13 @@ jobs:
 
       - name: Verify version consistency
         shell: bash
-        run: bash scripts/verify-version.sh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          npm config set @a5af:registry https://npm.pkg.github.com
+          npm config set //npm.pkg.github.com/:_authToken "${GITHUB_TOKEN}"
+          npm install -g @a5af/bump-cli
+          bump verify
 
       - name: Copy sidecar binaries to Tauri
         shell: bash
