@@ -107,6 +107,8 @@ pub fn run() {
             // CLI installer commands
             commands::cli_installer::install_cli,
             commands::cli_installer::get_cli_path,
+            // File operations
+            commands::file_ops::copy_file_to_dir,
         ])
         // Application setup
         .setup(|app| {
