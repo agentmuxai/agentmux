@@ -12,6 +12,7 @@ import { AgentFooter } from "./components/AgentFooter";
 import { RpcApi } from "@/app/store/wshclientapi";
 import { TabRpcClient } from "@/app/store/wshrpcutil";
 import { stringToBase64 } from "@/util/util";
+import { getWebServerEndpoint } from "@/util/endpoints";
 import "./agent-view.scss";
 
 const PROVIDER_ICONS: Record<string, string> = {
@@ -169,6 +170,13 @@ const AgentStyledSession: React.FC<{ model: AgentViewModel; providerId: string }
         );
 
         const handleDisconnect = useCallback(async () => {
+            // Unregister from jekt routing (best-effort, no auth required)
+            fetch(`${getWebServerEndpoint()}/wave/reactive/unregister`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ agent_id: model.blockId }),
+            }).catch(() => {});
+
             const { WOS } = await import("@/app/store/global");
             const oref = WOS.makeORef("block", model.blockId);
             try {
@@ -195,6 +203,12 @@ const AgentStyledSession: React.FC<{ model: AgentViewModel; providerId: string }
                     <span className="agent-styled-icon">{PROVIDER_ICONS[providerId] ?? "\u26A1"}</span>
                     <span className="agent-styled-provider">{provider?.displayName ?? providerId}</span>
                     <span className="agent-styled-badge">Styled</span>
+                    <span
+                        className="agent-styled-jekt-id"
+                        title={`Jekt target ID: ${model.blockId}`}
+                    >
+                        ⚡{model.blockId.slice(0, 8)}
+                    </span>
                     <button className="agent-styled-disconnect" onClick={handleDisconnect} title="Back to picker">
                         ✕
                     </button>
