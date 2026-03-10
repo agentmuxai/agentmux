@@ -128,6 +128,33 @@ jobs:
           mkdir -p dist/schema
           cp -r schema/* dist/schema/
 
+      - name: Sign macOS resource binaries
+        if: matrix.platform == 'darwin'
+        shell: bash
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+        run: |
+          # Import certificate into a temporary keychain
+          echo "$APPLE_CERTIFICATE" | base64 --decode > /tmp/certificate.p12
+          security create-keychain -p ci-keychain /tmp/build.keychain
+          security default-keychain -s /tmp/build.keychain
+          security unlock-keychain -p ci-keychain /tmp/build.keychain
+          security import /tmp/certificate.p12 -k /tmp/build.keychain \
+            -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s \
+            -k ci-keychain /tmp/build.keychain
+
+          # Sign resource binaries in binaries/bin/ — Tauri signs sidecars
+          # automatically but not resources, and notarization requires all
+          # binaries to be signed with hardened runtime + secure timestamp
+          for bin in src-tauri/binaries/bin/*; do
+            echo "Signing $bin"
+            codesign --force --sign "$APPLE_SIGNING_IDENTITY" \
+              --options runtime --timestamp "$bin"
+          done
+
       - name: Build Tauri application
         uses: tauri-apps/tauri-action@v0
         env:
