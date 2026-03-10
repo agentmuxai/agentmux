@@ -28,11 +28,7 @@
     width: calc(100vw / var(--zoomfactor, 1));
     height: 33px;
     zoom: var(--zoomfactor);
-    cursor: grab;
-
-    &:active {
-        cursor: grabbing;
-    }
+    cursor: default;
 
     .window-drag {
         height: 100%;
