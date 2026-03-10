@@ -22,7 +22,7 @@ const WindowHeader = memo(({ workspace }: WindowHeaderProps) => {
     const draggerLeftRef = useRef<HTMLDivElement>(null);
 
     const fullConfig = useAtomValue(atoms.fullConfigAtom);
-    const { dragProps, onMouseDown } = useWindowDrag();
+    const { dragProps } = useWindowDrag();
 
     // Handle window header context menu
     const handleContextMenu = useCallback(
@@ -40,7 +40,6 @@ const WindowHeader = memo(({ workspace }: WindowHeaderProps) => {
             className="window-header"
             data-testid="window-header"
             {...dragProps}
-            onMouseDown={onMouseDown}
             onContextMenu={handleContextMenu}
         >
             <WindowDrag ref={draggerLeftRef} className="left" />

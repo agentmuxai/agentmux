@@ -14,7 +14,7 @@ interface WindowDragProps {
 }
 
 const WindowDrag = forwardRef<HTMLDivElement, WindowDragProps>(({ children, className, style }, ref) => {
-    const { dragProps, onMouseDown } = useWindowDrag();
+    const { dragProps } = useWindowDrag();
 
     return (
         <div
@@ -22,7 +22,6 @@ const WindowDrag = forwardRef<HTMLDivElement, WindowDragProps>(({ children, clas
             className={clsx(`window-drag`, className)}
             style={style}
             {...dragProps}
-            onMouseDown={onMouseDown}
         >
             {children}
         </div>

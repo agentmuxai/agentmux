@@ -3,9 +3,5 @@
 
 .window-drag {
     z-index: var(--zindex-window-drag);
-    cursor: grab;
-
-    &:active {
-        cursor: grabbing;
-    }
+    cursor: default;
 }

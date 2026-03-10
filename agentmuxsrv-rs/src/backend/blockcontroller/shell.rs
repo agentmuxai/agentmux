@@ -33,6 +33,7 @@ use super::{
 };
 use crate::backend::eventbus::EventBus;
 use crate::backend::shellexec::{ConnInterface, ShellProc};
+use crate::backend::storage::wstore::WaveStore;
 use crate::backend::waveobj::{self, MetaMapType};
 use crate::backend::wps;
 
@@ -108,6 +109,8 @@ pub struct ShellController {
     /// Event bus (unused for now, reserved for future event routing).
     #[allow(dead_code)]
     event_bus: Option<Arc<EventBus>>,
+    /// Wave object store — used to seed cmd:cwd on shell spawn.
+    wstore: Option<Arc<WaveStore>>,
 }
 
 impl ShellController {
@@ -118,6 +121,7 @@ impl ShellController {
         block_id: String,
         broker: Option<Arc<wps::Broker>>,
         event_bus: Option<Arc<EventBus>>,
+        wstore: Option<Arc<WaveStore>>,
     ) -> Self {
         Self {
             controller_type,
@@ -135,6 +139,7 @@ impl ShellController {
             conn_factory: Mutex::new(None),
             broker,
             event_bus,
+            wstore,
         }
     }
 
@@ -494,6 +499,32 @@ impl Controller for ShellController {
             format!("failed to spawn command: {e}")
         })?;
         tracing::info!(block_id = %self.block_id, "process spawned successfully");
+
+        // Seed cmd:cwd in block meta immediately after spawn so drag-and-drop works
+        // before the shell emits its first OSC 7 (or for shells without integration).
+        if let Some(ref store) = self.wstore {
+            let effective_cwd = if !cwd.is_empty() {
+                cwd.clone()
+            } else {
+                std::env::current_dir()
+                    .map(|p| p.to_string_lossy().to_string())
+                    .unwrap_or_default()
+            };
+            if !effective_cwd.is_empty() {
+                let oref_str = format!("block:{}", self.block_id);
+                let mut meta_update = MetaMapType::new();
+                meta_update.insert(
+                    super::META_KEY_CMD_CWD.to_string(),
+                    serde_json::Value::String(effective_cwd),
+                );
+                // Only set if not already populated — don't clobber a restored session CWD
+                if let Ok(block) = store.must_get::<crate::backend::waveobj::Block>(&self.block_id) {
+                    if waveobj::meta_get_string(&block.meta, super::META_KEY_CMD_CWD, "").is_empty() {
+                        let _ = crate::server::service::update_object_meta(store, &oref_str, &meta_update);
+                    }
+                }
+            }
+        }
 
         // Get reader/writer from master
         let reader = pair.master.try_clone_reader().map_err(|e| {
@@ -1080,7 +1111,7 @@ mod tests {
             ..Default::default()
         };
 
-        let result = super::super::resync_controller(&block, "tab-1", None, false, None, None);
+        let result = super::super::resync_controller(&block, "tab-1", None, false, None, None, None);
         assert!(result.is_ok());
 
         let ctrl = super::super::get_controller("resync-test-block");
