@@ -1,8 +1,8 @@
 {
   "$schema": "https://raw.githubusercontent.com/tauri-apps/tauri/dev/crates/tauri-config-schema/schema.json",
   "productName": "AgentMux",
-  "version": "0.31.99",
-  "identifier": "ai.agentmux.app.v0-31-99",
+  "version": "0.31.100",
+  "identifier": "ai.agentmux.app.v0-31-100",
   "build": {
     "devUrl": "http://localhost:5173",
     "frontendDist": "../dist/frontend",
