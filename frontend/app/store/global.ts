@@ -218,8 +218,11 @@ function initGlobalEventSubs(initOpts: AgentMuxInitOpts) {
         {
             eventType: "waveobj:update",
             handler: (event) => {
-                // console.log("waveobj:update wave event handler", event);
                 const update: WaveObjUpdate = event.data;
+                if (update?.otype === "block") {
+                    const meta = (update?.obj as any)?.meta;
+                    console.log("[dnd-debug] waveobj:update block", update.oid, "cmd:cwd =", meta?.["cmd:cwd"] ?? "(not set)", "keys =", Object.keys(meta ?? {}));
+                }
                 WOS.updateWaveObject(update);
             },
         },

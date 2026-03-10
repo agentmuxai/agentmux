@@ -227,21 +227,21 @@ const TerminalView = ({ blockId, model }: ViewComponentProps<TermViewModel>) => 
     const termBg = computeBgStyleFromMeta(blockData?.meta);
 
     const handleFilesDropped = React.useCallback(
-        (files: File[]) => {
+        (paths: string[]) => {
             const cwd = blockData?.meta?.["cmd:cwd"];
             if (!cwd) {
                 console.warn("[term-drop] No working directory detected, ignoring drop");
                 return;
             }
-            for (const file of files) {
-                const filePath = (file as any).path;
-                if (!filePath) continue;
+            for (const filePath of paths) {
+                const fileName = filePath.split(/[\\/]/).pop() ?? filePath;
+                console.log(`[term-drop] copying ${filePath} → ${cwd}`);
                 invoke("copy_file_to_dir", { sourcePath: filePath, targetDir: cwd })
                     .then(() => {
-                        console.log(`[term-drop] Copied ${file.name} to ${cwd}`);
+                        console.log(`[term-drop] Copied ${fileName} to ${cwd}`);
                     })
                     .catch((err: any) => {
-                        console.warn(`[term-drop] ${err}`);
+                        console.warn(`[term-drop] failed: ${err}`);
                     });
             }
         },
@@ -251,6 +251,13 @@ const TerminalView = ({ blockId, model }: ViewComponentProps<TermViewModel>) => 
     const { isDragOver, handlers: dropHandlers } = useFileDrop(handleFilesDropped);
     const cwd = blockData?.meta?.["cmd:cwd"];
     const dropMessage = cwd ? `Copy to ${cwd}` : "No working directory detected";
+
+    React.useEffect(() => {
+        if (isDragOver) {
+            console.log("[dnd-debug] drag over block", blockId, "— full meta:", JSON.stringify(blockData?.meta ?? {}));
+            console.log("[dnd-debug] cmd:cwd =", cwd ?? "(undefined)");
+        }
+    }, [isDragOver]);
 
     return (
         <div className={clsx("view-term", "term-mode-" + termMode)} ref={viewRef} {...dropHandlers} style={{ position: "relative" }}>
