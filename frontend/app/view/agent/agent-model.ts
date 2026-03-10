@@ -12,6 +12,7 @@ import { PROVIDERS } from "./providers";
 import { buildBootstrapScript, guessShellType } from "./bootstrap";
 import { Logger } from "@/util/logger";
 import { stringToBase64 } from "@/util/util";
+import { getWebServerEndpoint } from "@/util/endpoints";
 
 export class AgentViewModel implements ViewModel {
     viewType = "agent";
@@ -148,6 +149,13 @@ export class AgentViewModel implements ViewModel {
                     inputdata64: b64data,
                 });
             }, 500);
+
+            // Register with reactive handler for Tier 1 jekt (no auth required)
+            fetch(`${getWebServerEndpoint()}/wave/reactive/register`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ agent_id: blockId, block_id: blockId }),
+            }).catch(() => {});
         } catch (e: any) {
             Logger.error("agent", "Failed to start styled session", { error: String(e) });
         }

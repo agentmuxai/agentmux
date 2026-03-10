@@ -199,8 +199,24 @@
         padding: 1px 5px;
     }
 
-    .agent-styled-disconnect {
+    .agent-styled-jekt-id {
         margin-left: auto;
+        font-size: 10px;
+        font-family: var(--termfontfamily, monospace);
+        color: var(--secondary-text-color);
+        opacity: 0.6;
+        cursor: default;
+        user-select: all;
+        letter-spacing: 0.03em;
+
+        &:hover {
+            opacity: 1;
+            color: var(--accent-color);
+        }
+    }
+
+    .agent-styled-disconnect {
+        margin-left: 8px;
         background: none;
         border: none;
         color: var(--secondary-text-color);
