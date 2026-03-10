@@ -615,6 +615,7 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                     cmd.forcerestart,
                     Some(broker),
                     Some(event_bus),
+                    Some(wstore),
                 )?;
                 Ok(None)
             })
