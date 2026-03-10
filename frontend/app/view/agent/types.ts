@@ -11,7 +11,7 @@
 /**
  * Document node types that make up the agent's markdown document
  */
-export type DocumentNode = MarkdownNode | SectionNode | ToolNode | AgentMessageNode | UserMessageNode;
+export type DocumentNode = MarkdownNode | SectionNode | ToolNode | AgentMessageNode | UserMessageNode | TerminalOutputNode;
 
 /**
  * Raw markdown text block
@@ -150,6 +150,17 @@ export interface UserMessageNode {
     timestamp: number;
     collapsed: boolean;
     summary: string; // "👤 User Message"
+}
+
+/**
+ * Raw terminal output block — displayed during bootstrap (npm install, CLI startup, auth).
+ * complete=false while bootstrap is running; true once JSON streaming begins.
+ */
+export interface TerminalOutputNode {
+    type: "terminal_output";
+    id: string;
+    content: string;   // Raw terminal text (ANSI already stripped)
+    complete: boolean; // true once JSON streaming begins (no more raw lines expected)
 }
 
 /**

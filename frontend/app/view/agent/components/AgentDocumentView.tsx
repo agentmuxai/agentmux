@@ -13,6 +13,7 @@ import type { DocumentNode, DocumentState } from "../types";
 import { MarkdownBlock } from "./MarkdownBlock";
 import { ToolBlock } from "./ToolBlock";
 import { AgentMessageBlock } from "./AgentMessageBlock";
+import { TerminalOutputBlock } from "./TerminalOutputBlock";
 
 interface AgentDocumentViewProps {
     documentAtom: PrimitiveAtom<DocumentNode[]>;
@@ -93,6 +94,9 @@ const DocumentNodeRenderer: React.FC<{
     onToggle: () => void;
 }> = memo(({ node, collapsed, onToggle }) => {
     switch (node.type) {
+        case "terminal_output":
+            return <TerminalOutputBlock node={node} />;
+
         case "markdown":
             return <MarkdownBlock node={node} />;
 

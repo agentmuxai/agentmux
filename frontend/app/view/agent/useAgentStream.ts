@@ -20,7 +20,7 @@ import { getFileSubject } from "@/app/store/wps";
 import { base64ToArray } from "@/util/util";
 import { createTranslator } from "./providers/translator-factory";
 import { ClaudeCodeStreamParser } from "./stream-parser";
-import type { DocumentNode, StreamingState } from "./types";
+import type { DocumentNode, StreamingState, TerminalOutputNode } from "./types";
 
 const TermFileName = "term";
 
@@ -58,6 +58,11 @@ export function useAgentStream({
     const parserRef = useRef(new ClaudeCodeStreamParser());
     // Track node IDs we've seen so we can update (tool_result) vs append
     const nodeIdSetRef = useRef(new Set<string>());
+    // Terminal output node state (bootstrap output before first valid JSON line)
+    const terminalNodeIdRef = useRef<string | null>(null);
+    const terminalContentRef = useRef<string>("");
+    const jsonStartedRef = useRef(false);
+    const terminalNodeDirtyRef = useRef(false);
 
     useEffect(() => {
         if (!enabled || !blockId) return;
@@ -67,6 +72,10 @@ export function useAgentStream({
         translatorRef.current = createTranslator(outputFormat);
         parserRef.current = new ClaudeCodeStreamParser();
         nodeIdSetRef.current = new Set();
+        terminalNodeIdRef.current = null;
+        terminalContentRef.current = "";
+        jsonStartedRef.current = false;
+        terminalNodeDirtyRef.current = false;
 
         setStreaming((prev) => ({ ...prev, active: true, lastEventTime: Date.now() }));
 
@@ -80,6 +89,10 @@ export function useAgentStream({
                 translatorRef.current.reset();
                 parserRef.current.reset();
                 nodeIdSetRef.current = new Set();
+                terminalNodeIdRef.current = null;
+                terminalContentRef.current = "";
+                jsonStartedRef.current = false;
+                terminalNodeDirtyRef.current = false;
                 return;
             }
 
@@ -106,8 +119,23 @@ export function useAgentStream({
                 try {
                     rawEvent = JSON.parse(trimmed);
                 } catch {
-                    // Not valid JSON — skip (could be raw CLI output during init)
+                    // Not valid JSON — capture as terminal output (bootstrap/install/auth output)
+                    if (!jsonStartedRef.current) {
+                        terminalContentRef.current += trimmed + "\n";
+                        if (!terminalNodeIdRef.current) {
+                            terminalNodeIdRef.current = `terminal-output-${Date.now()}`;
+                        }
+                        terminalNodeDirtyRef.current = true;
+                    }
                     continue;
+                }
+
+                // First valid JSON line — mark terminal node complete if one exists
+                if (!jsonStartedRef.current) {
+                    jsonStartedRef.current = true;
+                    if (terminalNodeIdRef.current) {
+                        terminalNodeDirtyRef.current = true;
+                    }
                 }
 
                 // Translate provider-specific format → StreamEvent[]
@@ -125,6 +153,23 @@ export function useAgentStream({
                         nodeIdSetRef.current.add(node.id);
                         newNodes.push(node);
                     }
+                }
+            }
+
+            // Flush terminal output node if it has new content or became complete
+            if (terminalNodeIdRef.current && terminalNodeDirtyRef.current) {
+                terminalNodeDirtyRef.current = false;
+                const termNode: TerminalOutputNode = {
+                    type: "terminal_output",
+                    id: terminalNodeIdRef.current,
+                    content: terminalContentRef.current,
+                    complete: jsonStartedRef.current,
+                };
+                if (nodeIdSetRef.current.has(terminalNodeIdRef.current)) {
+                    updatedNodes.push(termNode);
+                } else {
+                    nodeIdSetRef.current.add(terminalNodeIdRef.current);
+                    newNodes.push(termNode);
                 }
             }
 
