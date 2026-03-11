@@ -36,7 +36,8 @@
       ]
     },
     "notification:default",
-    "clipboard-manager:default",
+    "clipboard-manager:allow-read",
+    "clipboard-manager:allow-write",
     "fs:default",
     {
       "identifier": "fs:allow-read-file",
