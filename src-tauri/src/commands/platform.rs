@@ -72,6 +72,7 @@ const DEFAULT_SETTINGS_TEMPLATE: &str = r#"// AgentMux Settings
     // -- Telemetry --
     // "telemetry:enabled":        true,
     // "telemetry:interval":       1.0,
+    // "telemetry:numpoints":      120,
 
     // -- Connections --
     // "conn:wshenabled":          true,
@@ -161,18 +162,35 @@ pub fn ensure_settings_file(app: tauri::AppHandle) -> Result<String, String> {
 }
 
 /// Open a file in the best available code editor.
-/// Priority: known CLI editors on PATH → macOS .app bundles → OS default.
+/// On macOS/Linux: probe CLI editors on PATH, then .app bundles, then OS default.
+/// On Windows: use OS default directly (avoids cmd shell flash).
 #[tauri::command]
 pub fn open_in_editor(path: String) -> Result<(), String> {
-    // 1. CLI editors on PATH
-    let cli_editors = ["code", "cursor", "zed", "subl", "atom"];
-    for editor in &cli_editors {
-        if std::process::Command::new(editor).arg(&path).spawn().is_ok() {
-            return Ok(());
+    // Windows: use OS default directly via shell execute (no visible cmd window)
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        std::process::Command::new("cmd")
+            .args(["/C", "start", "", &path])
+            .creation_flags(CREATE_NO_WINDOW)
+            .spawn()
+            .map_err(|e| format!("Failed to open file: {}", e))?;
+        return Ok(());
+    }
+
+    // macOS/Linux: try CLI editors on PATH first
+    #[cfg(not(target_os = "windows"))]
+    {
+        let cli_editors = ["code", "cursor", "zed", "subl", "atom"];
+        for editor in &cli_editors {
+            if std::process::Command::new(editor).arg(&path).spawn().is_ok() {
+                return Ok(());
+            }
         }
     }
 
-    // 2. macOS .app bundles (handles editors not on PATH)
+    // macOS: try .app bundles (handles editors not on PATH)
     #[cfg(target_os = "macos")]
     {
         let app_bins = [
@@ -190,14 +208,19 @@ pub fn open_in_editor(path: String) -> Result<(), String> {
         }
     }
 
-    // 3. OS default fallback
+    // OS default fallback (macOS/Linux only — Windows already returned above)
     #[cfg(target_os = "macos")]
-    std::process::Command::new("open").arg(&path).spawn().map_err(|e| e.to_string())?;
-    #[cfg(target_os = "windows")]
-    std::process::Command::new("cmd").args(["/C", "start", "", &path]).spawn().map_err(|e| e.to_string())?;
+    {
+        std::process::Command::new("open").arg(&path).spawn().map_err(|e| e.to_string())?;
+        return Ok(());
+    }
     #[cfg(target_os = "linux")]
-    std::process::Command::new("xdg-open").arg(&path).spawn().map_err(|e| e.to_string())?;
+    {
+        std::process::Command::new("xdg-open").arg(&path).spawn().map_err(|e| e.to_string())?;
+        return Ok(());
+    }
 
+    #[allow(unreachable_code)]
     Ok(())
 }
 

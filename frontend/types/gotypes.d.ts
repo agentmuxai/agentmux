@@ -865,6 +865,7 @@ declare global {
         "telemetry:*"?: boolean;
         "telemetry:enabled"?: boolean;
         "telemetry:interval"?: number;
+        "telemetry:numpoints"?: number;
         "conn:*"?: boolean;
         "conn:askbeforewshinstall"?: boolean;
         "conn:wshenabled"?: boolean;

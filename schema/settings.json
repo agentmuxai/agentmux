@@ -227,6 +227,12 @@
         "telemetry:interval": {
           "type": "number"
         },
+        "telemetry:numpoints": {
+          "type": "integer",
+          "minimum": 30,
+          "maximum": 1024,
+          "default": 120
+        },
         "conn:*": {
           "type": "boolean"
         },
