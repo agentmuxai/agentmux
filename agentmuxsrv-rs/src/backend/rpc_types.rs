@@ -254,6 +254,12 @@ pub const COMMAND_SET_RT_INFO: &str = "setrtinfo";
 // Terminal
 pub const COMMAND_TERM_GET_SCROLLBACK_LINES: &str = "termgetscrollbacklines";
 
+// Forge
+pub const COMMAND_LIST_FORGE_AGENTS: &str = "listforgeagents";
+pub const COMMAND_CREATE_FORGE_AGENT: &str = "createforgeagent";
+pub const COMMAND_UPDATE_FORGE_AGENT: &str = "updateforgeagent";
+pub const COMMAND_DELETE_FORGE_AGENT: &str = "deleteforgeagent";
+
 // ---- Client type constants ----
 
 pub const CLIENT_TYPE_CONN_SERVER: &str = "connserver";
@@ -606,6 +612,40 @@ fn is_zero_i64(v: &i64) -> bool {
 
 fn is_zero_usize(v: &usize) -> bool {
     *v == 0
+}
+
+// ---- Forge command data types ----
+
+/// Input for createforgeagent
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommandCreateForgeAgentData {
+    pub name: String,
+    #[serde(default = "default_forge_icon")]
+    pub icon: String,
+    pub provider: String,
+    #[serde(default)]
+    pub description: String,
+}
+
+fn default_forge_icon() -> String {
+    "✦".to_string()
+}
+
+/// Input for updateforgeagent
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommandUpdateForgeAgentData {
+    pub id: String,
+    pub name: String,
+    pub icon: String,
+    pub provider: String,
+    #[serde(default)]
+    pub description: String,
+}
+
+/// Input for deleteforgeagent
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommandDeleteForgeAgentData {
+    pub id: String,
 }
 
 // ====================================================================

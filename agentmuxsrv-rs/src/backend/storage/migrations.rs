@@ -62,6 +62,22 @@ pub fn run_filestore_migrations(conn: &Connection) -> Result<(), StoreError> {
     Ok(())
 }
 
+/// Initialize the Forge schema.
+/// Creates the db_forge_agents table for user-defined AI agents.
+pub fn run_forge_migrations(conn: &Connection) -> Result<(), StoreError> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS db_forge_agents (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            icon TEXT NOT NULL DEFAULT '✦',
+            provider TEXT NOT NULL,
+            description TEXT NOT NULL DEFAULT '',
+            created_at INTEGER NOT NULL DEFAULT 0
+        );",
+    )?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

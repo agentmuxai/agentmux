@@ -10,3 +10,4 @@ pub mod migrations;
 pub mod wstore;
 
 pub use error::StoreError;
+pub use wstore::ForgeAgent;

@@ -1,151 +1,152 @@
 // Copyright 2024, Command Line Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-import React, { memo, useCallback, useMemo, useState } from "react";
+import React, { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { useAtomValue } from "jotai";
 import type { AgentViewModel } from "./agent-model";
-import { getProviderList, type ProviderDefinition } from "./providers";
+import { getProvider } from "./providers";
 import { createAgentAtoms } from "./state";
 import { useAgentStream } from "./useAgentStream";
 import { AgentDocumentView } from "./components/AgentDocumentView";
 import { AgentFooter } from "./components/AgentFooter";
 import { RpcApi } from "@/app/store/wshclientapi";
 import { TabRpcClient } from "@/app/store/wshrpcutil";
+import { waveEventSubscribe } from "@/app/store/wps";
 import { stringToBase64 } from "@/util/util";
 import "./agent-view.scss";
 
-const PROVIDER_ICONS: Record<string, string> = {
-    claude: "\u2728", // sparkles
-    codex: "\uD83E\uDD16", // robot
-    gemini: "\uD83D\uDC8E", // gem
-};
+// ── useForgeAgents hook ───────────────────────────────────────────────────────
+
+function useForgeAgents(): ForgeAgent[] {
+    const [agents, setAgents] = useState<ForgeAgent[]>([]);
+
+    useEffect(() => {
+        let cancelled = false;
+
+        async function load() {
+            try {
+                const result = await RpcApi.ListForgeAgentsCommand(TabRpcClient);
+                if (!cancelled) setAgents(result ?? []);
+            } catch {
+                // silently ignore
+            }
+        }
+
+        load();
+
+        const unsub = waveEventSubscribe({
+            eventType: "forgeagents:changed",
+            handler: () => load(),
+        });
+
+        return () => {
+            cancelled = true;
+            unsub();
+        };
+    }, []);
+
+    return agents;
+}
 
 /**
- * Top-level wrapper — switches between picker and styled session view.
+ * Top-level wrapper — switches between agent picker and presentation view.
  */
 export const AgentViewWrapper: React.FC<ViewComponentProps<AgentViewModel>> = memo(({ model }) => {
     const block = useAtomValue(model.blockAtom);
-    const agentMode = block?.meta?.["agentMode"];
-    const agentProvider = block?.meta?.["agentProvider"];
+    const agentId = block?.meta?.["agentId"];
 
-    if (agentMode === "styled" && agentProvider) {
-        return <AgentStyledSession model={model} providerId={agentProvider} />;
+    if (agentId) {
+        return <AgentPresentationView model={model} agentId={agentId} />;
     }
 
-    return <AgentProviderPicker model={model} />;
+    return <AgentPicker model={model} />;
 });
 
 AgentViewWrapper.displayName = "AgentViewWrapper";
 
-// ── Provider button ────────────────────────────────────────────────────────────
+// ── Agent Picker ────────────────────────────────────────────────────────────────
 
-const ProviderButton: React.FC<{
-    provider: ProviderDefinition;
-    mode: "raw" | "styled";
-    onSelect: (providerId: string, mode: "raw" | "styled") => void;
-    disabled: boolean;
-}> = ({ provider, mode, onSelect, disabled }) => (
-    <button
-        className={`agent-provider-btn agent-provider-btn--${mode}`}
-        onClick={() => onSelect(provider.id, mode)}
-        disabled={disabled}
-        title={mode === "styled" ? `${provider.displayName} — styled output` : `${provider.displayName} — raw terminal`}
-    >
-        <span className="agent-provider-icon">{PROVIDER_ICONS[provider.id] ?? "\u26A1"}</span>
-        <span className="agent-provider-name">{provider.displayName}</span>
-    </button>
-);
-
-// ── Picker ─────────────────────────────────────────────────────────────────────
-
-const AgentProviderPicker: React.FC<{ model: AgentViewModel }> = memo(({ model }) => {
+const AgentPicker: React.FC<{ model: AgentViewModel }> = memo(({ model }) => {
     const [launching, setLaunching] = useState<string | null>(null);
-    const providers = getProviderList();
+    const agents = useForgeAgents();
 
     const handleSelect = useCallback(
-        async (providerId: string, mode: "raw" | "styled") => {
-            const provider = providers.find((p) => p.id === providerId);
-            if (!provider) return;
-            setLaunching(`${providerId}-${mode}`);
+        async (agent: ForgeAgent) => {
+            setLaunching(agent.id);
             try {
-                if (mode === "raw") {
-                    await model.connectWithProvider(providerId, provider.cliCommand);
-                } else {
-                    await model.connectStyled(providerId, provider.cliCommand);
-                }
+                await model.launchForgeAgent(agent);
             } catch {
                 // model logs internally
             } finally {
                 setLaunching(null);
             }
         },
-        [model, providers]
+        [model]
     );
 
     const busy = launching !== null;
 
+    if (agents.length === 0) {
+        return (
+            <div className="agent-view">
+                <div className="agent-picker-empty">
+                    <div className="agent-picker-empty-icon">✦</div>
+                    <div className="agent-picker-empty-title">No agents configured</div>
+                    <div className="agent-picker-empty-desc">Create an agent in the Forge to get started.</div>
+                    <button className="agent-picker-forge-btn" disabled>
+                        + Create an agent in the Forge
+                    </button>
+                </div>
+            </div>
+        );
+    }
+
     return (
         <div className="agent-view">
-            <div className="agent-document">
-                <div className="agent-empty">
-                    <div className="agent-connect-header">Connect</div>
-
-                    <div className="agent-mode-group">
-                        <div className="agent-mode-label">Raw</div>
-                        <div className="agent-provider-buttons">
-                            {providers.map((p) => (
-                                <ProviderButton
-                                    key={p.id}
-                                    provider={p}
-                                    mode="raw"
-                                    onSelect={handleSelect}
-                                    disabled={busy}
-                                />
-                            ))}
-                        </div>
-                    </div>
-
-                    <div className="agent-mode-group">
-                        <div className="agent-mode-label agent-mode-label--styled">Styled</div>
-                        <div className="agent-provider-buttons">
-                            {providers.map((p) => (
-                                <ProviderButton
-                                    key={p.id}
-                                    provider={p}
-                                    mode="styled"
-                                    onSelect={handleSelect}
-                                    disabled={busy}
-                                />
-                            ))}
-                        </div>
-                    </div>
-
-                    {launching && (
-                        <div className="agent-install-status">
-                            Launching {launching.split("-")[0]}
-                            {launching.endsWith("-styled") ? " (styled)" : ""}…
-                        </div>
-                    )}
+            <div className="agent-picker">
+                <div className="agent-picker-list">
+                    {agents.map((agent) => (
+                        <button
+                            key={agent.id}
+                            className={`agent-card${launching === agent.id ? " agent-card--launching" : ""}`}
+                            onClick={() => handleSelect(agent)}
+                            disabled={busy}
+                        >
+                            <span className="agent-card-icon">{agent.icon}</span>
+                            <span className="agent-card-info">
+                                <span className="agent-card-name">{agent.name}</span>
+                                {agent.description && (
+                                    <span className="agent-card-desc">{agent.description}</span>
+                                )}
+                            </span>
+                            {launching === agent.id && <span className="agent-card-spinner" />}
+                        </button>
+                    ))}
+                </div>
+                <div className="agent-picker-footer">
+                    <button className="agent-picker-forge-btn" disabled>
+                        + New agent in Forge
+                    </button>
                 </div>
             </div>
         </div>
     );
 });
 
-AgentProviderPicker.displayName = "AgentProviderPicker";
+AgentPicker.displayName = "AgentPicker";
 
-// ── Styled session ─────────────────────────────────────────────────────────────
+// ── Presentation View ───────────────────────────────────────────────────────────
 
-const AgentStyledSession: React.FC<{ model: AgentViewModel; providerId: string }> = memo(
-    ({ model, providerId }) => {
+const AgentPresentationView: React.FC<{ model: AgentViewModel; agentId: string }> = memo(
+    ({ model, agentId }) => {
         const block = useAtomValue(model.blockAtom);
-        const provider = getProviderList().find((p) => p.id === providerId);
+        // agentProvider stores the provider id (claude/codex/gemini) — set when launching
+        const providerKey: string = block?.meta?.["agentProvider"] ?? agentId;
+        const provider = getProvider(providerKey);
         const outputFormat: string = block?.meta?.["agentOutputFormat"] ?? "claude-stream-json";
 
-        // Create per-instance atoms (stable across re-renders via useMemo keyed on blockId)
         const agentAtoms = useMemo(() => createAgentAtoms(model.blockId), [model.blockId]);
 
-        // Subscribe to PTY output and parse into DocumentNodes
         useAgentStream({
             blockId: model.blockId,
             outputFormat,
@@ -154,7 +155,6 @@ const AgentStyledSession: React.FC<{ model: AgentViewModel; providerId: string }
             enabled: true,
         });
 
-        // Send user message to the PTY via ControllerInputCommand
         const handleSendMessage = useCallback(
             (message: string) => {
                 const b64data = stringToBase64(message + "\n");
@@ -168,18 +168,20 @@ const AgentStyledSession: React.FC<{ model: AgentViewModel; providerId: string }
             [model.blockId]
         );
 
-        const handleDisconnect = useCallback(async () => {
+        const handleBack = useCallback(async () => {
             const { WOS } = await import("@/app/store/global");
             const oref = WOS.makeORef("block", model.blockId);
             try {
                 await RpcApi.SetMetaCommand(TabRpcClient, {
                     oref,
                     meta: {
-                        agentMode: null,
+                        agentId: null,
                         agentProvider: null,
+                        agentOutputFormat: null,
+                        agentName: null,
+                        agentIcon: null,
                         agentCliPath: null,
                         agentCliArgs: null,
-                        agentOutputFormat: null,
                         agentBinDir: null,
                         controller: null,
                     },
@@ -190,12 +192,11 @@ const AgentStyledSession: React.FC<{ model: AgentViewModel; providerId: string }
         }, [model.blockId]);
 
         return (
-            <div className="agent-view agent-view--styled">
-                <div className="agent-styled-header">
-                    <span className="agent-styled-icon">{PROVIDER_ICONS[providerId] ?? "\u26A1"}</span>
-                    <span className="agent-styled-provider">{provider?.displayName ?? providerId}</span>
-                    <span className="agent-styled-badge">Styled</span>
-                    <button className="agent-styled-disconnect" onClick={handleDisconnect} title="Back to picker">
+            <div className="agent-view agent-view--presentation">
+                <div className="agent-pres-header">
+                    <span className="agent-pres-icon">{block?.meta?.["agentIcon"] ?? "\u26A1"}</span>
+                    <span className="agent-pres-name">{block?.meta?.["agentName"] ?? provider?.displayName ?? agentId}</span>
+                    <button className="agent-pres-back" onClick={handleBack} title="Back to agents">
                         ✕
                     </button>
                 </div>
@@ -205,10 +206,10 @@ const AgentStyledSession: React.FC<{ model: AgentViewModel; providerId: string }
                     documentStateAtom={agentAtoms.documentStateAtom}
                 />
 
-                <AgentFooter agentId={providerId} onSendMessage={handleSendMessage} />
+                <AgentFooter agentId={agentId} onSendMessage={handleSendMessage} />
             </div>
         );
     }
 );
 
-AgentStyledSession.displayName = "AgentStyledSession";
+AgentPresentationView.displayName = "AgentPresentationView";

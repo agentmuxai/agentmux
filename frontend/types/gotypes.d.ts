@@ -194,6 +194,38 @@ declare global {
         blockdef: BlockDef;
     };
 
+    // ForgeAgent
+    type ForgeAgent = {
+        id: string;
+        name: string;
+        icon: string;
+        provider: string;
+        description: string;
+        created_at: number;
+    };
+
+    // CommandCreateForgeAgentData
+    type CommandCreateForgeAgentData = {
+        name: string;
+        icon: string;
+        provider: string;
+        description: string;
+    };
+
+    // CommandUpdateForgeAgentData
+    type CommandUpdateForgeAgentData = {
+        id: string;
+        name: string;
+        icon: string;
+        provider: string;
+        description: string;
+    };
+
+    // CommandDeleteForgeAgentData
+    type CommandDeleteForgeAgentData = {
+        id: string;
+    };
+
     // wshrpc.CommandDeleteBlockData
     type CommandDeleteBlockData = {
         blockid: string;
@@ -680,6 +712,9 @@ declare global {
         "onboarding:lastversion"?: string;
         count?: number;
         "agent:*"?: boolean;
+        agentId?: string;
+        agentName?: string;
+        agentIcon?: string;
         agentMode?: string;
         agentProvider?: string;
         agentCliPath?: string;

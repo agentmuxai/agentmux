@@ -21,8 +21,12 @@ use crate::backend::rpc_types::{
     COMMAND_CONTROLLER_RESYNC, COMMAND_EVENT_READ_HISTORY, COMMAND_EVENT_SUB, COMMAND_EVENT_UNSUB,
     COMMAND_EVENT_UNSUB_ALL, COMMAND_GET_FULL_CONFIG, COMMAND_GET_META, COMMAND_GET_AI_CHAT,
     COMMAND_GET_AI_RATE_LIMIT, COMMAND_ROUTE_ANNOUNCE, COMMAND_ROUTE_UNANNOUNCE,
-    COMMAND_SET_META, COMMAND_SET_CONFIG, COMMAND_APP_INFO,
+    COMMAND_SET_META, COMMAND_APP_INFO,
+    COMMAND_LIST_FORGE_AGENTS, COMMAND_CREATE_FORGE_AGENT, COMMAND_UPDATE_FORGE_AGENT,
+    COMMAND_DELETE_FORGE_AGENT, CommandCreateForgeAgentData, CommandUpdateForgeAgentData,
+    CommandDeleteForgeAgentData,
 };
+use crate::backend::storage::ForgeAgent;
 use crate::backend::waveobj::{Block, TermSize, WaveObjUpdate, wave_obj_to_value};
 use super::service::update_object_meta;
 
@@ -636,50 +640,6 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
         }),
     );
 
-    // setconfig → merge settings keys into settings.json AND update in-memory config immediately.
-    // Writing to disk + broadcasting directly gives instant UI response without waiting for
-    // the fs watcher (which has a ~300-800ms debounce + polling delay on Windows).
-    // The fs watcher's subsequent reload is a no-op (settings already up to date).
-    let config_watcher_setconfig = state.config_watcher.clone();
-    let event_bus_setconfig = state.event_bus.clone();
-    engine.register_handler(
-        COMMAND_SET_CONFIG,
-        Box::new(move |data, _ctx| {
-            let cw = config_watcher_setconfig.clone();
-            let eb = event_bus_setconfig.clone();
-            Box::pin(async move {
-                let new_keys: serde_json::Map<String, serde_json::Value> =
-                    serde_json::from_value(data).map_err(|e| format!("setconfig: {e}"))?;
-
-                // 1. Write to disk (fs watcher will re-broadcast, harmlessly)
-                crate::backend::config_watcher_fs::merge_settings_to_disk(new_keys.clone())
-                    .map_err(|e| format!("setconfig write: {e}"))?;
-
-                // 2. Update in-memory config immediately
-                let merged_settings = crate::backend::config_watcher_fs::merge_settings_into_current(&cw, new_keys);
-                cw.update_settings(merged_settings);
-
-                // 3. Broadcast updated config now — no waiting for fs watcher
-                let config = cw.get_full_config();
-                if let Ok(config_val) = serde_json::to_value(config.as_ref()) {
-                    let event = crate::backend::eventbus::WSEventType {
-                        eventtype: crate::backend::eventbus::WS_EVENT_RPC.to_string(),
-                        oref: String::new(),
-                        data: Some(serde_json::json!({
-                            "command": "eventrecv",
-                            "data": {
-                                "event": "config",
-                                "data": { "fullconfig": config_val }
-                            }
-                        })),
-                    };
-                    eb.broadcast_event(&event);
-                }
-                Ok(None)
-            })
-        }),
-    );
-
     // eventreadhistory → read persisted event history from the WPS broker
     let broker_history = state.broker.clone();
     engine.register_handler(
@@ -692,6 +652,118 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                 let max_items = if cmd.maxitems == 0 { 1024 } else { cmd.maxitems };
                 let events = broker.read_event_history(&cmd.event, &cmd.scope, max_items);
                 Ok(Some(serde_json::to_value(&events).unwrap_or_default()))
+            })
+        }),
+    );
+
+    // listforgeagents → return all forge agents
+    let wstore_lfa = state.wstore.clone();
+    engine.register_handler(
+        COMMAND_LIST_FORGE_AGENTS,
+        Box::new(move |_data, _ctx| {
+            let wstore = wstore_lfa.clone();
+            Box::pin(async move {
+                let agents = wstore.forge_list().map_err(|e| format!("listforgeagents: {e}"))?;
+                Ok(Some(serde_json::to_value(&agents).unwrap_or_default()))
+            })
+        }),
+    );
+
+    // createforgeagent → insert new agent, broadcast forgeagents:changed
+    let wstore_cfa = state.wstore.clone();
+    let broker_cfa = state.broker.clone();
+    engine.register_handler(
+        COMMAND_CREATE_FORGE_AGENT,
+        Box::new(move |data, _ctx| {
+            let wstore = wstore_cfa.clone();
+            let broker = broker_cfa.clone();
+            Box::pin(async move {
+                let cmd: CommandCreateForgeAgentData = serde_json::from_value(data)
+                    .map_err(|e| format!("createforgeagent: {e}"))?;
+                let now = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis() as i64;
+                let agent = ForgeAgent {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    name: cmd.name,
+                    icon: cmd.icon,
+                    provider: cmd.provider,
+                    description: cmd.description,
+                    created_at: now,
+                };
+                wstore.forge_insert(&agent).map_err(|e| format!("createforgeagent: {e}"))?;
+                broker.publish(crate::backend::wps::WaveEvent {
+                    event: "forgeagents:changed".to_string(),
+                    scopes: vec![],
+                    sender: String::new(),
+                    persist: 0,
+                    data: None,
+                });
+                Ok(Some(serde_json::to_value(&agent).unwrap_or_default()))
+            })
+        }),
+    );
+
+    // updateforgeagent → update existing agent, broadcast forgeagents:changed
+    let wstore_ufa = state.wstore.clone();
+    let broker_ufa = state.broker.clone();
+    engine.register_handler(
+        COMMAND_UPDATE_FORGE_AGENT,
+        Box::new(move |data, _ctx| {
+            let wstore = wstore_ufa.clone();
+            let broker = broker_ufa.clone();
+            Box::pin(async move {
+                let cmd: CommandUpdateForgeAgentData = serde_json::from_value(data)
+                    .map_err(|e| format!("updateforgeagent: {e}"))?;
+                // Fetch existing to preserve created_at
+                let existing = wstore.forge_list().map_err(|e| format!("updateforgeagent: {e}"))?;
+                let old = existing.iter().find(|a| a.id == cmd.id)
+                    .ok_or_else(|| format!("updateforgeagent: agent {} not found", cmd.id))?;
+                let agent = ForgeAgent {
+                    id: cmd.id,
+                    name: cmd.name,
+                    icon: cmd.icon,
+                    provider: cmd.provider,
+                    description: cmd.description,
+                    created_at: old.created_at,
+                };
+                let found = wstore.forge_update(&agent).map_err(|e| format!("updateforgeagent: {e}"))?;
+                if !found {
+                    return Err(format!("updateforgeagent: agent {} not found", agent.id));
+                }
+                broker.publish(crate::backend::wps::WaveEvent {
+                    event: "forgeagents:changed".to_string(),
+                    scopes: vec![],
+                    sender: String::new(),
+                    persist: 0,
+                    data: None,
+                });
+                Ok(Some(serde_json::to_value(&agent).unwrap_or_default()))
+            })
+        }),
+    );
+
+    // deleteforgeagent → delete agent by id, broadcast forgeagents:changed
+    let wstore_dfa = state.wstore.clone();
+    let broker_dfa = state.broker.clone();
+    engine.register_handler(
+        COMMAND_DELETE_FORGE_AGENT,
+        Box::new(move |data, _ctx| {
+            let wstore = wstore_dfa.clone();
+            let broker = broker_dfa.clone();
+            Box::pin(async move {
+                let cmd: CommandDeleteForgeAgentData = serde_json::from_value(data)
+                    .map_err(|e| format!("deleteforgeagent: {e}"))?;
+                wstore.forge_delete(&cmd.id).map_err(|e| format!("deleteforgeagent: {e}"))?;
+                broker.publish(crate::backend::wps::WaveEvent {
+                    event: "forgeagents:changed".to_string(),
+                    scopes: vec![],
+                    sender: String::new(),
+                    persist: 0,
+                    data: None,
+                });
+                Ok(None)
             })
         }),
     );

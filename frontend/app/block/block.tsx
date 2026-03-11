@@ -12,6 +12,7 @@ import {
 import { LauncherViewModel } from "@/app/view/launcher/launcher";
 import { SysinfoViewModel } from "@/app/view/sysinfo/sysinfo";
 import { AgentViewModel } from "@/app/view/agent";
+import { ForgeViewModel } from "@/app/view/forge/forge";
 import { VDomModel } from "@/app/view/vdom/vdom-model";
 import { ErrorBoundary } from "@/element/errorboundary";
 import { CenteredDiv } from "@/element/quickelems";
@@ -42,6 +43,7 @@ BlockRegistry.set("vdom", VDomModel);
 BlockRegistry.set("help", HelpViewModel);
 BlockRegistry.set("launcher", LauncherViewModel);
 BlockRegistry.set("agent", AgentViewModel);
+BlockRegistry.set("forge", ForgeViewModel);
 
 function makeViewModel(blockId: string, blockView: string, nodeModel: BlockNodeModel): ViewModel {
     const ctor = BlockRegistry.get(blockView);

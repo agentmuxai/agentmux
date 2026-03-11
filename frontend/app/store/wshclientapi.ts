@@ -508,6 +508,26 @@ class RpcApiType {
         return client.wshRpcCall("wslstatus", null, opts);
     }
 
+    // command "listforgeagents" [call]
+    ListForgeAgentsCommand(client: WshClient, opts?: RpcOpts): Promise<ForgeAgent[]> {
+        return client.wshRpcCall("listforgeagents", {}, opts);
+    }
+
+    // command "createforgeagent" [call]
+    CreateForgeAgentCommand(client: WshClient, data: CommandCreateForgeAgentData, opts?: RpcOpts): Promise<ForgeAgent> {
+        return client.wshRpcCall("createforgeagent", data, opts);
+    }
+
+    // command "updateforgeagent" [call]
+    UpdateForgeAgentCommand(client: WshClient, data: CommandUpdateForgeAgentData, opts?: RpcOpts): Promise<ForgeAgent> {
+        return client.wshRpcCall("updateforgeagent", data, opts);
+    }
+
+    // command "deleteforgeagent" [call]
+    DeleteForgeAgentCommand(client: WshClient, data: CommandDeleteForgeAgentData, opts?: RpcOpts): Promise<void> {
+        return client.wshRpcCall("deleteforgeagent", data, opts);
+    }
+
 }
 
 export const RpcApi = new RpcApiType();

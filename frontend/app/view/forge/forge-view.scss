@@ -1,0 +1,309 @@
+// Copyright 2025, Command Line Inc.
+// SPDX-License-Identifier: Apache-2.0
+
+.forge-pane {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    overflow: hidden;
+    padding: 16px;
+    box-sizing: border-box;
+    color: var(--main-text-color);
+    font-size: 13px;
+}
+
+.forge-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 8px;
+}
+
+.forge-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--main-text-color);
+}
+
+.forge-title-sub {
+    font-weight: 400;
+    color: var(--secondary-text-color);
+}
+
+.forge-divider {
+    height: 1px;
+    background: var(--border-color);
+    margin-bottom: 12px;
+}
+
+// ── Empty state ───────────────────────────────────────────────────────────────
+
+.forge-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    flex: 1;
+    gap: 6px;
+    color: var(--secondary-text-color);
+}
+
+.forge-empty-icon {
+    font-size: 28px;
+    margin-bottom: 4px;
+}
+
+.forge-empty-label {
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--main-text-color);
+}
+
+.forge-empty-sub {
+    font-size: 12px;
+    margin-bottom: 8px;
+}
+
+// ── List ──────────────────────────────────────────────────────────────────────
+
+.forge-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    overflow-y: auto;
+    flex: 1;
+}
+
+.forge-list-footer {
+    margin-top: 12px;
+    display: flex;
+    justify-content: flex-start;
+}
+
+// ── Agent card ────────────────────────────────────────────────────────────────
+
+.forge-card {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    background: var(--block-bg-color);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+
+    &:hover {
+        border-color: var(--highlight-bg-color);
+    }
+}
+
+.forge-card-icon {
+    font-size: 20px;
+    flex-shrink: 0;
+    width: 28px;
+    text-align: center;
+}
+
+.forge-card-info {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    overflow: hidden;
+    gap: 1px;
+}
+
+.forge-card-name {
+    font-weight: 500;
+    color: var(--main-text-color);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.forge-card-provider {
+    font-size: 11px;
+    color: var(--secondary-text-color);
+}
+
+.forge-card-desc {
+    font-size: 11px;
+    color: var(--secondary-text-color);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.forge-card-actions {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-shrink: 0;
+}
+
+.forge-card-btn {
+    padding: 3px 8px;
+    background: transparent;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    color: var(--secondary-text-color);
+    font-size: 11px;
+    cursor: pointer;
+
+    &:hover {
+        background: var(--highlight-bg-color);
+        color: var(--main-text-color);
+    }
+
+    &.forge-card-btn-delete {
+        &.confirming {
+            border-color: var(--error-color, #e55);
+            color: var(--error-color, #e55);
+        }
+    }
+}
+
+// ── Form ──────────────────────────────────────────────────────────────────────
+
+.forge-form {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    overflow-y: auto;
+    flex: 1;
+}
+
+.forge-form-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+
+    &.forge-form-row-col {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+}
+
+.forge-form-label {
+    width: 90px;
+    flex-shrink: 0;
+    color: var(--secondary-text-color);
+    font-size: 12px;
+}
+
+.forge-form-input {
+    flex: 1;
+    padding: 5px 8px;
+    background: var(--input-bg-color, var(--block-bg-color));
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    color: var(--main-text-color);
+    font-size: 13px;
+    outline: none;
+
+    &:focus {
+        border-color: var(--accent-color, #a78bfa);
+    }
+
+    &.forge-form-input-icon {
+        width: 60px;
+        flex: none;
+        text-align: center;
+        font-size: 18px;
+    }
+}
+
+.forge-form-providers {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    width: 100%;
+    padding-left: 4px;
+}
+
+.forge-form-provider-opt {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+
+    input[type="radio"] {
+        accent-color: var(--accent-color, #a78bfa);
+    }
+}
+
+.forge-form-provider-label {
+    font-weight: 500;
+    color: var(--main-text-color);
+    min-width: 90px;
+}
+
+.forge-form-provider-cmd {
+    font-size: 11px;
+    color: var(--secondary-text-color);
+    font-family: var(--termfontfamily, monospace);
+}
+
+.forge-form-error {
+    padding: 8px 10px;
+    background: rgba(229, 85, 85, 0.12);
+    border: 1px solid var(--error-color, #e55);
+    border-radius: 4px;
+    color: var(--error-color, #e55);
+    font-size: 12px;
+}
+
+.forge-form-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 4px;
+}
+
+// ── Buttons ───────────────────────────────────────────────────────────────────
+
+.forge-new-btn {
+    padding: 5px 12px;
+    background: transparent;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    color: var(--main-text-color);
+    font-size: 12px;
+    cursor: pointer;
+
+    &:hover {
+        background: var(--highlight-bg-color);
+        border-color: var(--accent-color, #a78bfa);
+    }
+}
+
+.forge-btn-primary {
+    padding: 6px 14px;
+    background: var(--accent-color, #a78bfa);
+    border: none;
+    border-radius: 4px;
+    color: #fff;
+    font-size: 13px;
+    cursor: pointer;
+
+    &:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
+
+    &:not(:disabled):hover {
+        filter: brightness(1.1);
+    }
+}
+
+.forge-btn-secondary {
+    padding: 6px 14px;
+    background: transparent;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    color: var(--secondary-text-color);
+    font-size: 13px;
+    cursor: pointer;
+
+    &:hover {
+        background: var(--highlight-bg-color);
+        color: var(--main-text-color);
+    }
+}

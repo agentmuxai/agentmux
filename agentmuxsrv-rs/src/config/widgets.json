@@ -1,6 +1,6 @@
 {
     "defwidget@agent": {
-        "display:order": -5,
+        "display:order": 1,
         "icon": "sparkles",
         "color": "#cc785c",
         "label": "agent",
@@ -16,8 +16,33 @@
             }
         }
     },
+    "defwidget@forge": {
+        "display:order": 2,
+        "icon": "hammer",
+        "color": "#a78bfa",
+        "label": "forge",
+        "description": "Create and manage your agents",
+        "blockdef": {
+            "meta": {
+                "view": "forge"
+            }
+        }
+    },
+    "defwidget@swarm": {
+        "display:order": 3,
+        "display:hidden": true,
+        "icon": "bee",
+        "color": "#f59e0b",
+        "label": "swarm",
+        "description": "Multi-agent orchestration",
+        "blockdef": {
+            "meta": {
+                "view": "swarm"
+            }
+        }
+    },
     "defwidget@terminal": {
-        "display:order": -4,
+        "display:order": 4,
         "icon": "square-terminal",
         "label": "terminal",
         "blockdef": {
@@ -28,45 +53,12 @@
         }
     },
     "defwidget@sysinfo": {
-        "display:order": -3,
+        "display:order": 5,
         "icon": "chart-line",
         "label": "sysinfo",
         "blockdef": {
             "meta": {
                 "view": "sysinfo"
-            }
-        }
-    },
-    "defwidget@help": {
-        "display:order": -2,
-        "icon": "circle-question",
-        "label": "help",
-        "description": "Help and documentation",
-        "blockdef": {
-            "meta": {
-                "view": "help"
-            }
-        }
-    },
-    "defwidget@settings": {
-        "display:order": -1,
-        "icon": "cog",
-        "label": "settings",
-        "description": "Open Settings (external editor)",
-        "blockdef": {
-            "meta": {
-                "view": "settings"
-            }
-        }
-    },
-    "defwidget@devtools": {
-        "display:order": 0,
-        "icon": "code",
-        "label": "devtools",
-        "description": "Toggle Developer Tools",
-        "blockdef": {
-            "meta": {
-                "view": "devtools"
             }
         }
     }

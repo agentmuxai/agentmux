@@ -13,11 +13,12 @@ use std::path::Path;
 use std::sync::Mutex;
 
 use rusqlite::{params, Connection};
+use serde::{Deserialize, Serialize};
 
 use crate::backend::waveobj::{wave_obj_from_json, wave_obj_to_json, WaveObj};
 
 use super::error::StoreError;
-use super::migrations::run_wstore_migrations;
+use super::migrations::{run_forge_migrations, run_wstore_migrations};
 
 /// SQLite-backed object store for WaveObj types.
 pub struct WaveStore {
@@ -48,6 +49,7 @@ impl WaveStore {
              PRAGMA temp_store=MEMORY;",
         )?;
         run_wstore_migrations(&conn)?;
+        run_forge_migrations(&conn)?;
         Ok(Self {
             conn: Mutex::new(conn),
         })
@@ -382,6 +384,92 @@ impl<'a> StoreTx<'a> {
             params![oid],
         )?;
         Ok(())
+    }
+}
+
+// ====================================================================
+// ForgeAgent CRUD
+// ====================================================================
+
+/// A user-defined AI agent managed by the Forge widget.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ForgeAgent {
+    pub id: String,
+    pub name: String,
+    pub icon: String,
+    pub provider: String,
+    pub description: String,
+    pub created_at: i64,
+}
+
+impl WaveStore {
+    /// List all forge agents, ordered by created_at ascending.
+    pub fn forge_list(&self) -> Result<Vec<ForgeAgent>, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, name, icon, provider, description, created_at
+             FROM db_forge_agents ORDER BY created_at ASC",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok(ForgeAgent {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                icon: row.get(2)?,
+                provider: row.get(3)?,
+                description: row.get(4)?,
+                created_at: row.get(5)?,
+            })
+        })?;
+        let mut agents = Vec::new();
+        for row in rows {
+            agents.push(row?);
+        }
+        Ok(agents)
+    }
+
+    /// Insert a new forge agent.
+    pub fn forge_insert(&self, agent: &ForgeAgent) -> Result<(), StoreError> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO db_forge_agents (id, name, icon, provider, description, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                agent.id,
+                agent.name,
+                agent.icon,
+                agent.provider,
+                agent.description,
+                agent.created_at
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Update an existing forge agent (all fields except id and created_at).
+    pub fn forge_update(&self, agent: &ForgeAgent) -> Result<bool, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let rows = conn.execute(
+            "UPDATE db_forge_agents SET name=?1, icon=?2, provider=?3, description=?4
+             WHERE id=?5",
+            params![
+                agent.name,
+                agent.icon,
+                agent.provider,
+                agent.description,
+                agent.id
+            ],
+        )?;
+        Ok(rows > 0)
+    }
+
+    /// Delete a forge agent by id. Returns true if a row was deleted.
+    pub fn forge_delete(&self, id: &str) -> Result<bool, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let rows = conn.execute(
+            "DELETE FROM db_forge_agents WHERE id=?1",
+            params![id],
+        )?;
+        Ok(rows > 0)
     }
 }
 

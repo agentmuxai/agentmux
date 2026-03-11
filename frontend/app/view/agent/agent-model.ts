@@ -37,80 +37,22 @@ export class AgentViewModel implements ViewModel {
     }
 
     /**
-     * Called when user clicks a provider button (raw mode).
-     * Switches to terminal view, injects a bootstrap script that:
-     * 1. Checks for the CLI in a version-isolated directory
-     * 2. Installs via npm if missing (visible in terminal)
-     * 3. Launches the CLI
+     * Launch an agent in presentation view.
+     * For Phase 1, agentId maps to a provider ID (claude/codex/gemini).
+     * In Phase 2 this will be a Forge agent UUID.
      */
-    connectWithProvider = async (providerId: string, _cliPath: string): Promise<void> => {
-        const provider = PROVIDERS[providerId];
+    launchAgent = async (agentId: string): Promise<void> => {
+        const provider = PROVIDERS[agentId];
         if (!provider) {
-            Logger.error("agent", "Unknown provider", { providerId });
+            Logger.error("agent", "Unknown agent", { agentId });
             return;
         }
 
         const version = getApi().getAboutModalDetails().version;
         const shellType = guessShellType(getApi().getPlatform());
 
-        Logger.info("agent", `Starting ${provider.id} — isolated CLI (v${version})`, {
-            provider: provider.id,
-            shellType,
-            args: provider.defaultArgs,
-        });
-
-        const oref = WOS.makeORef("block", this.blockId);
-        const blockId = this.blockId;
-        try {
-            await RpcApi.SetMetaCommand(TabRpcClient, {
-                oref,
-                meta: {
-                    "view": "term",
-                    "controller": "shell",
-                },
-            });
-            await RpcApi.ControllerResyncCommand(TabRpcClient, {
-                tabid: globalStore.get(atoms.staticTabId),
-                blockid: blockId,
-                forcerestart: true,
-            });
-
-            setTimeout(async () => {
-                const script = buildBootstrapScript({
-                    version,
-                    provider,
-                    shellType,
-                    args: provider.defaultArgs,
-                });
-                const b64data = stringToBase64(script + "\r");
-                await RpcApi.ControllerInputCommand(TabRpcClient, {
-                    blockid: blockId,
-                    inputdata64: b64data,
-                });
-            }, 500);
-        } catch (e: any) {
-            Logger.error("agent", "Failed to start session", { error: String(e) });
-        }
-    };
-
-    /**
-     * Called when user clicks a styled provider button.
-     * Keeps view as "agent" but starts a shell controller underneath,
-     * then injects a bootstrap script with styled output flags.
-     * The PTY output is subscribed to by useAgentStream and rendered as styled blocks.
-     */
-    connectStyled = async (providerId: string, _cliPath: string): Promise<void> => {
-        const provider = PROVIDERS[providerId];
-        if (!provider) {
-            Logger.error("agent", "Unknown provider", { providerId });
-            return;
-        }
-
-        const version = getApi().getAboutModalDetails().version;
-        const shellType = guessShellType(getApi().getPlatform());
-
-        Logger.info("agent", `Starting ${provider.id} in styled mode (v${version})`, {
-            provider: provider.id,
+        Logger.info("agent", `Launching agent ${agentId} (v${version})`, {
+            agentId,
             shellType,
             styledArgs: provider.styledArgs,
             outputFormat: provider.styledOutputFormat,
@@ -122,8 +64,7 @@ export class AgentViewModel implements ViewModel {
             await RpcApi.SetMetaCommand(TabRpcClient, {
                 oref,
                 meta: {
-                    "agentMode": "styled",
-                    "agentProvider": provider.id,
+                    "agentId": agentId,
                     "agentOutputFormat": provider.styledOutputFormat,
                     "controller": "shell",
                 },
@@ -149,7 +90,65 @@ export class AgentViewModel implements ViewModel {
                 });
             }, 500);
         } catch (e: any) {
-            Logger.error("agent", "Failed to start styled session", { error: String(e) });
+            Logger.error("agent", "Failed to launch agent", { error: String(e) });
+        }
+    };
+
+    /**
+     * Launch a Forge-managed agent in presentation view.
+     * Uses the ForgeAgent's provider to look up CLI config.
+     */
+    launchForgeAgent = async (agent: ForgeAgent): Promise<void> => {
+        const provider = PROVIDERS[agent.provider];
+        if (!provider) {
+            Logger.error("agent", "Unknown provider in forge agent", { agentId: agent.id, provider: agent.provider });
+            return;
+        }
+
+        const version = getApi().getAboutModalDetails().version;
+        const shellType = guessShellType(getApi().getPlatform());
+
+        Logger.info("agent", `Launching forge agent ${agent.name} (${agent.provider})`, {
+            agentId: agent.id,
+            provider: agent.provider,
+        });
+
+        const oref = WOS.makeORef("block", this.blockId);
+        const blockId = this.blockId;
+        try {
+            await RpcApi.SetMetaCommand(TabRpcClient, {
+                oref,
+                meta: {
+                    agentId: agent.id,
+                    agentProvider: agent.provider,
+                    agentOutputFormat: provider.styledOutputFormat,
+                    agentName: agent.name,
+                    agentIcon: agent.icon,
+                    controller: "shell",
+                },
+            });
+
+            await RpcApi.ControllerResyncCommand(TabRpcClient, {
+                tabid: globalStore.get(atoms.staticTabId),
+                blockid: blockId,
+                forcerestart: true,
+            });
+
+            setTimeout(async () => {
+                const script = buildBootstrapScript({
+                    version,
+                    provider,
+                    shellType,
+                    args: provider.styledArgs,
+                });
+                const b64data = stringToBase64(script + "\r");
+                await RpcApi.ControllerInputCommand(TabRpcClient, {
+                    blockid: blockId,
+                    inputdata64: b64data,
+                });
+            }, 500);
+        } catch (e: any) {
+            Logger.error("agent", "Failed to launch forge agent", { error: String(e) });
         }
     };
 
