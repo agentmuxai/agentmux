@@ -21,7 +21,7 @@ use crate::backend::rpc_types::{
     COMMAND_CONTROLLER_RESYNC, COMMAND_EVENT_READ_HISTORY, COMMAND_EVENT_SUB, COMMAND_EVENT_UNSUB,
     COMMAND_EVENT_UNSUB_ALL, COMMAND_GET_FULL_CONFIG, COMMAND_GET_META, COMMAND_GET_AI_CHAT,
     COMMAND_GET_AI_RATE_LIMIT, COMMAND_ROUTE_ANNOUNCE, COMMAND_ROUTE_UNANNOUNCE,
-    COMMAND_SET_META, COMMAND_APP_INFO,
+    COMMAND_SET_META, COMMAND_SET_CONFIG, COMMAND_APP_INFO,
 };
 use crate::backend::waveobj::{Block, TermSize, WaveObjUpdate, wave_obj_to_value};
 use super::service::update_object_meta;
@@ -631,6 +631,21 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                     .map_err(|e| format!("controllerinput: {e}"))?;
                 let input = parse_block_input(&cmd)?;
                 blockcontroller::send_input(&cmd.blockid, input)?;
+                Ok(None)
+            })
+        }),
+    );
+
+    // setconfig → merge provided settings keys into settings.json on disk.
+    // The fs watcher detects the write and broadcasts the updated config (~300ms).
+    engine.register_handler(
+        COMMAND_SET_CONFIG,
+        Box::new(move |data, _ctx| {
+            Box::pin(async move {
+                let new_keys: serde_json::Map<String, serde_json::Value> =
+                    serde_json::from_value(data).map_err(|e| format!("setconfig: {e}"))?;
+                crate::backend::config_watcher_fs::merge_settings_to_disk(new_keys)
+                    .map_err(|e| format!("setconfig write: {e}"))?;
                 Ok(None)
             })
         }),

@@ -273,6 +273,11 @@ pub struct SettingsType {
 
     #[serde(rename = "conn:wshenabled", default, skip_serializing_if = "is_false")]
     pub conn_wsh_enabled: bool,
+
+    /// Catch-all for unknown/dynamic keys (e.g. `widget:hidden@defwidget@sysinfo`).
+    /// These pass through serde unchanged so the frontend can access them as flat settings keys.
+    #[serde(flatten, default, skip_serializing_if = "HashMap::is_empty")]
+    pub extra: HashMap<String, serde_json::Value>,
 }
 
 // ---- AI settings subset ----
@@ -766,6 +771,25 @@ pub fn read_config_file<T: serde::de::DeserializeOwned + Default>(
 /// Remove trailing commas before `}` or `]` in JSON text.
 /// This handles the common JSONC pattern where commented-out lines follow a value,
 /// leaving a trailing comma that strict JSON parsers reject.
+/// Read `settings.json` as a raw `serde_json::Value::Object`, stripping comments/trailing commas.
+/// Returns an empty object if the file doesn't exist or can't be parsed.
+/// Used by the `setconfig` handler to merge individual keys without losing unknown fields.
+pub fn read_settings_raw(path: &PathBuf) -> serde_json::Map<String, serde_json::Value> {
+    if !path.exists() {
+        return serde_json::Map::new();
+    }
+    match std::fs::read_to_string(path) {
+        Ok(content) => {
+            let stripped = strip_trailing_commas(&content);
+            match serde_json::from_str::<serde_json::Value>(&stripped) {
+                Ok(serde_json::Value::Object(map)) => map,
+                _ => serde_json::Map::new(),
+            }
+        }
+        Err(_) => serde_json::Map::new(),
+    }
+}
+
 fn strip_trailing_commas(input: &str) -> String {
     let mut result = String::with_capacity(input.len());
     let mut chars = input.chars().peekable();
