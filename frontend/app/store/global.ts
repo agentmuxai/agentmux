@@ -55,14 +55,6 @@ function initGlobal(initOpts: GlobalInitOptions) {
 function initGlobalAtoms(initOpts: GlobalInitOptions) {
     const windowIdAtom = atom(initOpts.windowId) as PrimitiveAtom<string>;
     const clientIdAtom = atom(initOpts.clientId) as PrimitiveAtom<string>;
-    const uiContextAtom = atom((get) => {
-        const uiContext: UIContext = {
-            windowid: initOpts.windowId,
-            activetabid: initOpts.tabId,
-        };
-        return uiContext;
-    }) as Atom<UIContext>;
-
     const isFullScreenAtom = atom(false) as PrimitiveAtom<boolean>;
     try {
         getApi().onFullScreenChange((isFullScreen) => {
@@ -129,6 +121,14 @@ function initGlobalAtoms(initOpts: GlobalInitOptions) {
         if (!ws) return initOpts.tabId;
         return ws.activetabid || ws.pinnedtabids?.[0] || ws.tabids?.[0] || initOpts.tabId;
     });
+    // uiContext must be declared after activeTabIdAtom so it can reactively track the active tab
+    const uiContextAtom = atom((get) => {
+        const uiContext: UIContext = {
+            windowid: initOpts.windowId,
+            activetabid: get(activeTabIdAtom),
+        };
+        return uiContext;
+    }) as Atom<UIContext>;
     const controlShiftDelayAtom = atom(false);
     const updaterStatusAtom = atom<UpdaterStatus>("up-to-date") as PrimitiveAtom<UpdaterStatus>;
     try {
