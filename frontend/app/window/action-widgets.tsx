@@ -95,20 +95,6 @@ const ActionWidget = memo(
     }
 );
 
-const settingsWidget: WidgetConfigType = {
-    icon: "cog",
-    label: "settings",
-    description: "Open Settings (external editor)",
-    blockdef: { meta: { view: "settings" } },
-};
-
-const devToolsWidget: WidgetConfigType = {
-    icon: "code",
-    label: "devtools",
-    description: "Toggle Developer Tools",
-    blockdef: { meta: { view: "devtools" } },
-};
-
 const ActionWidgets = memo(() => {
     const fullConfig = useAtomValue(atoms.fullConfigAtom);
     const settings: Record<string, any> = fullConfig?.settings ?? {};
@@ -156,8 +142,6 @@ const ActionWidgets = memo(() => {
                     settings={settings}
                 />
             ))}
-            <ActionWidget key="settings" widget={settingsWidget} iconOnly={iconOnly} settings={settings} />
-            <ActionWidget key="devtools" widget={devToolsWidget} iconOnly={iconOnly} settings={settings} />
         </div>
     );
 });

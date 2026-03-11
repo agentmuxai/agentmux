@@ -143,6 +143,25 @@ pub fn spawn_settings_watcher(
     Some(watcher)
 }
 
+/// Merge new keys into the current in-memory SettingsType and return the result.
+/// Used by the setconfig handler to update in-memory state before the fs watcher fires.
+pub fn merge_settings_into_current(
+    config_watcher: &wconfig::ConfigWatcher,
+    new_keys: serde_json::Map<String, serde_json::Value>,
+) -> wconfig::SettingsType {
+    let mut current = config_watcher.get_settings();
+    // Merge via JSON round-trip so the extra HashMap catches all dynamic keys
+    if let Ok(mut current_val) = serde_json::to_value(&current) {
+        if let serde_json::Value::Object(ref mut map) = current_val {
+            map.extend(new_keys.into_iter().filter(|(_, v)| !v.is_null()));
+        }
+        if let Ok(merged) = serde_json::from_value(current_val) {
+            current = merged;
+        }
+    }
+    current
+}
+
 /// Merge a flat map of settings keys into `settings.json` on disk.
 /// Existing keys not present in `new_keys` are preserved.
 /// The fs watcher will detect the write (~300ms) and broadcast the updated config.
