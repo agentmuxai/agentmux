@@ -2,11 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Pane context menu actions: copy, paste, split, open in VSCode, and shared menu builder.
+ * Pane context menu actions: copy, paste, split, and shared menu builder.
  * Used from both handleHeaderContextMenu (header) and onContextMenu (body) in blockframe.tsx.
  */
 
-import { createBlockSplitHorizontally, createBlockSplitVertically, getApi } from "@/app/store/global";
+import { createBlockSplitHorizontally, createBlockSplitVertically } from "@/app/store/global";
 
 type SplitDirection = "up" | "down" | "left" | "right";
 
@@ -37,22 +37,19 @@ function paneAcceptsInput(blockData: Block): boolean {
 // ─── Split ────────────────────────────────────────────────────────────────────
 
 /**
- * Split the pane in the given direction, spawning a new terminal
- * that inherits the source pane's cwd and connection.
+ * Split the pane in the given direction, spawning a new pane of the same type
+ * that inherits the source pane's meta (view, controller, cwd, connection, etc.).
  */
 export async function handleSplitPane(blockData: Block, direction: SplitDirection): Promise<void> {
     const sourceConn = blockData.meta?.connection;
-    const blockDef: BlockDef = {
-        meta: {
-            view: "term",
-            controller: "shell",
-            // Only inherit connection for non-local connections (SSH/WSL).
-            // Local terminals have no connection field — setting it to "local"
-            // triggers the connection overlay and shows "Disconnected".
-            ...(sourceConn && sourceConn !== "local" ? { connection: sourceConn } : {}),
-            "cmd:cwd": blockData.meta?.["cmd:cwd"] ?? "",
-        },
-    };
+    const meta: Record<string, unknown> = { ...(blockData.meta ?? {}) };
+    // Only inherit connection for non-local connections (SSH/WSL).
+    // Local terminals have no connection field — setting it to "local"
+    // triggers the connection overlay and shows "Disconnected".
+    if (!sourceConn || sourceConn === "local") {
+        delete meta["connection"];
+    }
+    const blockDef: BlockDef = { meta };
 
     try {
         switch (direction) {
@@ -71,21 +68,6 @@ export async function handleSplitPane(blockData: Block, direction: SplitDirectio
         }
     } catch (e) {
         console.error("[pane-actions] split failed:", e);
-    }
-}
-
-/**
- * Open the pane's working directory in VS Code using the vscode:// URI scheme.
- * Falls back to opening VS Code's welcome screen if no cwd is available.
- */
-export function handleOpenInVSCode(blockData: Block): void {
-    const cwd = blockData.meta?.["cmd:cwd"];
-    if (cwd) {
-        // Normalize backslashes to forward slashes for the vscode:// URI
-        const normalized = cwd.replace(/\\/g, "/");
-        getApi().openExternal(`vscode://file/${encodeURI(normalized)}`);
-    } else {
-        getApi().openExternal("vscode://");
     }
 }
 
@@ -148,8 +130,6 @@ export function buildPaneContextMenu(
         { label: "Split Down",  click: () => void handleSplitPane(blockData, "down") },
         { label: "Split Left",  click: () => void handleSplitPane(blockData, "left") },
         { label: "Split Right", click: () => void handleSplitPane(blockData, "right") },
-        { type: "separator" },
-        { label: "Open in VSCode", click: () => handleOpenInVSCode(blockData) },
         { type: "separator" },
         {
             label: opts.magnified ? "Un-Magnify Block" : "Magnify Block",

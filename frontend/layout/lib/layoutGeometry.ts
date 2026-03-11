@@ -46,7 +46,7 @@ export function updateTree(model: LayoutModel, balanceTree = true) {
 
         const boundingRect = model.getBoundingRect();
 
-        const magnifiedNodeSize = model.getter(model.magnifiedNodeSizeAtom);
+        const magnifiedNodeSize = model.getter(model.magnifiedNodeSizeAtom) ?? 0.8;
 
         const callback = (node: LayoutNode) =>
             updateTreeHelper(
