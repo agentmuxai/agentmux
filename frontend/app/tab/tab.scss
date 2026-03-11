@@ -99,6 +99,23 @@
     .close {
         visibility: hidden;
     }
+
+    // Custom tab color — overrides all other backgrounds
+    &.tab-colored {
+        .tab-inner {
+            background: var(--tab-color) !important;
+        }
+        .name {
+            color: rgba(255, 255, 255, 0.95) !important;
+            text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+        }
+        .wave-button {
+            color: rgba(255, 255, 255, 0.65);
+            &:hover {
+                color: rgba(255, 255, 255, 1);
+            }
+        }
+    }
 }
 
 // Only apply hover effects when not in nohover mode. This prevents the previously-hovered tab from remaining hovered while a tab view is not mounted.
@@ -190,4 +207,58 @@ body.nohover .tab.active .close {
 
 .pin.jiggling i {
     animation: jigglePinIcon 0.5s ease-in-out;
+}
+
+// Colored tab — keep color on hover/drag, just brighten slightly
+body:not(.nohover) .tab.tab-colored:hover,
+body:not(.nohover) .tab.tab-colored.dragging {
+    .tab-inner {
+        background: var(--tab-color) !important;
+        filter: brightness(1.18);
+    }
+}
+
+// --- Tab color picker popup ---
+
+.tab-color-picker {
+    display: grid;
+    grid-template-columns: repeat(4, 20px);
+    gap: 4px;
+    padding: 8px;
+    background: var(--main-bg-color, #1a1a2e);
+    border: 1px solid var(--border-color, #333);
+    border-radius: 6px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+    user-select: none;
+}
+
+.tab-color-swatch {
+    width: 20px;
+    height: 20px;
+    border-radius: 4px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 9px;
+    border: 1.5px solid transparent;
+    transition: transform 0.1s ease, border-color 0.1s ease;
+    color: var(--secondary-text-color);
+
+    &:hover {
+        transform: scale(1.25);
+        border-color: rgba(255, 255, 255, 0.5);
+        z-index: 1;
+    }
+
+    &.selected {
+        border-color: rgba(255, 255, 255, 0.9);
+        box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.4);
+    }
+
+    // "None" swatch (last item, no background)
+    &:last-child {
+        background: rgba(255, 255, 255, 0.06);
+        border-color: rgba(255, 255, 255, 0.1);
+    }
 }

@@ -876,6 +876,7 @@ declare global {
         "markdown:fixedfontsize"?: number;
         "preview:showhiddenfiles"?: boolean;
         "tab:preset"?: string;
+        "tab:color"?: string | null;
         "widget:*"?: boolean;
         "widget:showhelp"?: boolean;
         "widget:icononly"?: boolean;
