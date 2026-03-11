@@ -261,6 +261,9 @@ pub struct SettingsType {
     #[serde(rename = "telemetry:interval", default, skip_serializing_if = "is_zero_f64")]
     pub telemetry_interval: f64,
 
+    #[serde(rename = "telemetry:numpoints", default, skip_serializing_if = "Option::is_none")]
+    pub telemetry_numpoints: Option<i64>,
+
     // -- Connection settings --
     #[serde(rename = "conn:*", default, skip_serializing_if = "is_false")]
     pub conn_clear: bool,

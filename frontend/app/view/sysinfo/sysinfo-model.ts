@@ -105,6 +105,12 @@ class SysinfoViewModel implements ViewModel {
         this.filterOutNowsh = jotai.atom(true);
         this.loadingAtom = jotai.atom(true);
         this.numPoints = jotai.atom((get) => {
+            // Global setting takes priority, then per-block meta, then default
+            const fullConfig = get(atoms.fullConfigAtom);
+            const settingsNumPoints = fullConfig?.settings?.["telemetry:numpoints"];
+            if (settingsNumPoints != null && settingsNumPoints > 0) {
+                return Math.max(30, Math.min(1024, settingsNumPoints));
+            }
             const blockData = get(this.blockAtom);
             const metaNumPoints = blockData?.meta?.["graph:numpoints"];
             if (metaNumPoints == null || metaNumPoints <= 0) {

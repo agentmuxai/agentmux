@@ -10,7 +10,7 @@ checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
 name = "agentmux"
-version = "0.31.100"
+version = "0.31.102"
 dependencies = [
  "chrono",
  "dirs 5.0.1",
@@ -42,7 +42,7 @@ dependencies = [
 
 [[package]]
 name = "agentmuxsrv-rs"
-version = "0.31.100"
+version = "0.31.102"
 dependencies = [
  "async-stream",
  "axum",
@@ -5223,9 +5223,9 @@ dependencies = [
 
 [[package]]
 name = "tempfile"
-version = "3.26.0"
+version = "3.27.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "82a72c767771b47409d2345987fda8628641887d5466101319899796367354a0"
+checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
  "getrandom 0.4.2",
@@ -7069,7 +7069,7 @@ dependencies = [
 
 [[package]]
 name = "wsh-rs"
-version = "0.31.100"
+version = "0.31.102"
 dependencies = [
  "base64 0.22.1",
  "clap",
