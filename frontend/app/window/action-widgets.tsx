@@ -13,18 +13,29 @@ import { atoms, createBlock, getApi } from "@/store/global";
 import { fireAndForget, isBlank, makeIconClass } from "@/util/util";
 import { invoke } from "@tauri-apps/api/core";
 import { useAtomValue } from "jotai";
-import { memo } from "react";
+import { Fragment, memo, useCallback, useRef, useState } from "react";
 import "./action-widgets.scss";
 
-function sortByDisplayOrder(wmap: { [key: string]: WidgetConfigType }): WidgetConfigType[] {
-    if (wmap == null) {
-        return [];
+function getSortedWidgets(
+    wmap: { [key: string]: WidgetConfigType },
+    settings: Record<string, any>
+): { key: string; widget: WidgetConfigType }[] {
+    if (wmap == null) return [];
+    const order: string[] | undefined = settings["widget:order"];
+    const entries = Object.entries(wmap).map(([key, widget]) => ({ key, widget }));
+    if (order && order.length > 0) {
+        entries.sort((a, b) => {
+            const ai = order.indexOf(a.key.replace("defwidget@", ""));
+            const bi = order.indexOf(b.key.replace("defwidget@", ""));
+            const an = ai === -1 ? 999 : ai;
+            const bn = bi === -1 ? 999 : bi;
+            if (an !== bn) return an - bn;
+            return (a.widget["display:order"] ?? 0) - (b.widget["display:order"] ?? 0);
+        });
+    } else {
+        entries.sort((a, b) => (a.widget["display:order"] ?? 0) - (b.widget["display:order"] ?? 0));
     }
-    const wlist = Object.values(wmap);
-    wlist.sort((a, b) => {
-        return (a["display:order"] ?? 0) - (b["display:order"] ?? 0);
-    });
-    return wlist;
+    return entries;
 }
 
 /**
@@ -95,20 +106,67 @@ const ActionWidget = memo(
     }
 );
 
+ActionWidget.displayName = "ActionWidget";
+
 const ActionWidgets = memo(() => {
     const fullConfig = useAtomValue(atoms.fullConfigAtom);
     const settings: Record<string, any> = fullConfig?.settings ?? {};
     const iconOnly = settings["widget:icononly"] ?? false;
-    const widgets = sortByDisplayOrder(fullConfig?.widgets);
+    const sortedWidgets = getSortedWidgets(fullConfig?.widgets, settings);
 
-    // Build widget key lookup: widget objects don't carry their own map key,
-    // so we re-derive it from fullConfig.widgets.
-    const widgetKeyMap = new Map<WidgetConfigType, string>();
-    if (fullConfig?.widgets) {
-        for (const [key, w] of Object.entries(fullConfig.widgets)) {
-            widgetKeyMap.set(w as WidgetConfigType, key);
-        }
-    }
+    const [draggingKey, setDraggingKey] = useState<string | null>(null);
+    const [dropIndex, setDropIndex] = useState<number | null>(null);
+    const dragActive = useRef(false);
+
+    const handleDragStart = useCallback((key: string, e: React.DragEvent) => {
+        e.dataTransfer.effectAllowed = "move";
+        e.dataTransfer.setData("text/plain", key);
+        dragActive.current = true;
+        setDraggingKey(key);
+    }, []);
+
+    const handleDragOver = useCallback((index: number, e: React.DragEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        e.dataTransfer.dropEffect = "move";
+        const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+        const midX = rect.left + rect.width / 2;
+        setDropIndex(e.clientX < midX ? index : index + 1);
+    }, []);
+
+    const handleDrop = useCallback(
+        (e: React.DragEvent) => {
+            e.preventDefault();
+            if (!dragActive.current || draggingKey == null || dropIndex == null) return;
+            dragActive.current = false;
+
+            const baseNames = sortedWidgets.map(({ key }) => key.replace("defwidget@", ""));
+            const dragBaseName = draggingKey.replace("defwidget@", "");
+            const fromIdx = baseNames.indexOf(dragBaseName);
+            if (fromIdx === -1) return;
+
+            const next = [...baseNames];
+            next.splice(fromIdx, 1);
+            const adjustedDrop = fromIdx < dropIndex ? dropIndex - 1 : dropIndex;
+            next.splice(adjustedDrop, 0, dragBaseName);
+
+            setDraggingKey(null);
+            setDropIndex(null);
+
+            if (next.join(",") !== baseNames.join(",")) {
+                fireAndForget(async () => {
+                    await RpcApi.SetConfigCommand(TabRpcClient, { "widget:order": next } as any);
+                });
+            }
+        },
+        [draggingKey, dropIndex, sortedWidgets]
+    );
+
+    const handleDragEnd = useCallback(() => {
+        dragActive.current = false;
+        setDraggingKey(null);
+        setDropIndex(null);
+    }, []);
 
     const handleWidgetsBarContextMenu = (e: React.MouseEvent) => {
         e.preventDefault();
@@ -127,23 +185,40 @@ const ActionWidgets = memo(() => {
         ContextMenuModel.showContextMenu(menu, e);
     };
 
+    const isDragging = draggingKey != null;
+
     return (
         <div
             className="action-widgets"
             data-testid="action-widgets"
             onContextMenu={handleWidgetsBarContextMenu}
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={handleDrop}
         >
-            {widgets?.map((data, idx) => (
-                <ActionWidget
-                    key={`widget-${idx}`}
-                    widget={data}
-                    widgetKey={widgetKeyMap.get(data)}
-                    iconOnly={iconOnly}
-                    settings={settings}
-                />
+            {sortedWidgets.map(({ key, widget }, idx) => (
+                <Fragment key={key}>
+                    {isDragging && dropIndex === idx && draggingKey !== key && (
+                        <div className="action-widget-drop-indicator" />
+                    )}
+                    <div
+                        className={`action-widget-slot${draggingKey === key ? " dragging" : ""}`}
+                        draggable
+                        data-tauri-drag-region="false"
+                        onDragStart={(e) => handleDragStart(key, e)}
+                        onDragOver={(e) => handleDragOver(idx, e)}
+                        onDragEnd={handleDragEnd}
+                    >
+                        <ActionWidget widget={widget} widgetKey={key} iconOnly={iconOnly} settings={settings} />
+                    </div>
+                </Fragment>
             ))}
+            {isDragging && dropIndex === sortedWidgets.length && (
+                <div className="action-widget-drop-indicator" />
+            )}
         </div>
     );
 });
+
+ActionWidgets.displayName = "ActionWidgets";
 
 export { ActionWidgets };
