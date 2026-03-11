@@ -147,7 +147,25 @@ fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType {
                 Err(e) => return WebReturnType::error(e),
             };
             match update_object_meta(store, &oref_str, &meta_update) {
-                Ok(()) => WebReturnType::success_empty(),
+                Ok(()) => {
+                    // Return the updated object so the frontend WOS cache stays in sync.
+                    // (Without this, atoms like cmd:cwd never update after OSC 7 fires.)
+                    let oref = match crate::backend::ORef::parse(&oref_str) {
+                        Ok(v) => v,
+                        Err(e) => return WebReturnType::error(e.to_string()),
+                    };
+                    if oref.otype == OTYPE_BLOCK {
+                        if let Ok(block) = store.must_get::<Block>(&oref.oid) {
+                            return WebReturnType::success_with_updates(vec![WaveObjUpdate {
+                                updatetype: "update".into(),
+                                otype: OTYPE_BLOCK.to_string(),
+                                oid: oref.oid.clone(),
+                                obj: Some(wave_obj_to_value(&block)),
+                            }]);
+                        }
+                    }
+                    WebReturnType::success_empty()
+                }
                 Err(e) => WebReturnType::error(e),
             }
         }

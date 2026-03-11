@@ -3,7 +3,7 @@
 
 import { Block } from "@/app/block/block";
 import { Search, useSearch } from "@/app/element/search";
-import { atoms, getOverrideConfigAtom, getSettingsPrefixAtom, globalStore, WOS } from "@/store/global";
+import { atoms, getOverrideConfigAtom, getSettingsPrefixAtom, globalStore, pushNotification, WOS } from "@/store/global";
 import { fireAndForget, useAtomValueSafe } from "@/util/util";
 import { computeBgStyleFromMeta } from "@/util/waveutil";
 import { ISearchOptions } from "@xterm/addon-search";
@@ -227,30 +227,54 @@ const TerminalView = ({ blockId, model }: ViewComponentProps<TermViewModel>) => 
     const termBg = computeBgStyleFromMeta(blockData?.meta);
 
     const handleFilesDropped = React.useCallback(
-        (files: File[]) => {
+        (paths: string[]) => {
             const cwd = blockData?.meta?.["cmd:cwd"];
             if (!cwd) {
                 console.warn("[term-drop] No working directory detected, ignoring drop");
+                pushNotification({
+                    icon: "fa-triangle-exclamation",
+                    title: "Drop failed",
+                    message: "No working directory detected for this terminal pane.",
+                    timestamp: new Date().toISOString(),
+                    type: "warning",
+                    expiration: Date.now() + 8000,
+                });
                 return;
             }
-            for (const file of files) {
-                const filePath = (file as any).path;
-                if (!filePath) continue;
+            for (const filePath of paths) {
+                const fileName = filePath.split(/[\\/]/).pop() ?? filePath;
+                console.log(`[term-drop] copying ${filePath} → ${cwd}`);
                 invoke("copy_file_to_dir", { sourcePath: filePath, targetDir: cwd })
-                    .then(() => {
-                        console.log(`[term-drop] Copied ${file.name} to ${cwd}`);
+                    .then((destPath: any) => {
+                        console.log(`[term-drop] ✓ copied ${fileName} → ${destPath}`);
                     })
                     .catch((err: any) => {
-                        console.warn(`[term-drop] ${err}`);
+                        const msg = String(err);
+                        console.warn(`[term-drop] ✗ failed: ${msg}`);
+                        pushNotification({
+                            icon: "fa-triangle-exclamation",
+                            title: `Copy failed: ${fileName}`,
+                            message: msg,
+                            timestamp: new Date().toISOString(),
+                            type: "error",
+                            expiration: Date.now() + 12000,
+                        });
                     });
             }
         },
         [blockData]
     );
 
-    const { isDragOver, handlers: dropHandlers } = useFileDrop(handleFilesDropped);
+    const { isDragOver, handlers: dropHandlers } = useFileDrop(handleFilesDropped, viewRef);
     const cwd = blockData?.meta?.["cmd:cwd"];
     const dropMessage = cwd ? `Copy to ${cwd}` : "No working directory detected";
+
+    React.useEffect(() => {
+        if (isDragOver) {
+            console.log("[dnd-debug] drag over block", blockId, "— full meta:", JSON.stringify(blockData?.meta ?? {}));
+            console.log("[dnd-debug] cmd:cwd =", cwd ?? "(undefined)");
+        }
+    }, [isDragOver]);
 
     return (
         <div className={clsx("view-term", "term-mode-" + termMode)} ref={viewRef} {...dropHandlers} style={{ position: "relative" }}>

@@ -253,6 +253,15 @@ pub fn resync_controller(
         return Ok(());
     }
 
+    tracing::info!(
+        block_id = %block_id,
+        controller_type = %controller_type,
+        wstore_present = wstore.is_some(),
+        event_bus_present = event_bus.is_some(),
+        force,
+        "[dnd-debug] resync_controller entry"
+    );
+
     // Check if existing controller needs to be replaced
     let existing = get_controller(block_id);
     if let Some(ref ctrl) = existing {
@@ -272,6 +281,11 @@ pub fn resync_controller(
         } else {
             // Existing controller is fine, just check if it needs starting
             let status = ctrl.get_runtime_status();
+            tracing::info!(
+                block_id = %block_id,
+                status = %status.shellprocstatus,
+                "[dnd-debug] existing controller — skipping spawn (no cmd:cwd seed)"
+            );
             if status.shellprocstatus == STATUS_INIT || status.shellprocstatus == STATUS_DONE {
                 return ctrl.start(block_meta.clone(), rt_opts, force);
             }

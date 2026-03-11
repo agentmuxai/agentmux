@@ -499,6 +499,12 @@ impl Controller for ShellController {
             format!("failed to spawn command: {e}")
         })?;
         tracing::info!(block_id = %self.block_id, "process spawned successfully");
+        tracing::info!(
+            block_id = %self.block_id,
+            wstore_present = self.wstore.is_some(),
+            event_bus_present = self.event_bus.is_some(),
+            "[dnd-debug] pre-seed state after spawn"
+        );
 
         // Seed cmd:cwd in block meta immediately after spawn so drag-and-drop works
         // before the shell emits its first OSC 7 (or for shells without integration).
@@ -510,6 +516,7 @@ impl Controller for ShellController {
                     .map(|p| p.to_string_lossy().to_string())
                     .unwrap_or_default()
             };
+            tracing::debug!(block_id = %self.block_id, cwd = %effective_cwd, "seeding cmd:cwd");
             if !effective_cwd.is_empty() {
                 let oref_str = format!("block:{}", self.block_id);
                 let mut meta_update = MetaMapType::new();
@@ -518,9 +525,42 @@ impl Controller for ShellController {
                     serde_json::Value::String(effective_cwd),
                 );
                 // Only set if not already populated — don't clobber a restored session CWD
-                if let Ok(block) = store.must_get::<crate::backend::waveobj::Block>(&self.block_id) {
-                    if waveobj::meta_get_string(&block.meta, super::META_KEY_CMD_CWD, "").is_empty() {
-                        let _ = crate::server::service::update_object_meta(store, &oref_str, &meta_update);
+                match store.must_get::<crate::backend::waveobj::Block>(&self.block_id) {
+                    Ok(block) if waveobj::meta_get_string(&block.meta, super::META_KEY_CMD_CWD, "").is_empty() => {
+                        match crate::server::service::update_object_meta(store, &oref_str, &meta_update) {
+                            Ok(()) => {
+                                // Re-read updated block and broadcast waveobj:update so the
+                                // frontend Jotai atom refreshes (update_object_meta only writes
+                                // to SQLite — it does NOT send a WebSocket event on its own).
+                                if let Ok(updated_block) = store.must_get::<crate::backend::waveobj::Block>(&self.block_id) {
+                                    if let Some(ref event_bus) = self.event_bus {
+                                        let update_data = serde_json::to_value(&waveobj::WaveObjUpdate {
+                                            updatetype: "update".into(),
+                                            otype: "block".into(),
+                                            oid: self.block_id.clone(),
+                                            obj: Some(waveobj::wave_obj_to_value(&updated_block)),
+                                        }).ok();
+                                        event_bus.broadcast_event(&crate::backend::eventbus::WSEventType {
+                                            eventtype: "waveobj:update".to_string(),
+                                            oref: oref_str.clone(),
+                                            data: update_data,
+                                        });
+                                        tracing::info!(block_id = %self.block_id, "cmd:cwd seeded and broadcast to frontend");
+                                    } else {
+                                        tracing::warn!(block_id = %self.block_id, "cmd:cwd written to store but no event_bus to broadcast — frontend won't update");
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                tracing::warn!(block_id = %self.block_id, error = %e, "failed to seed cmd:cwd in store");
+                            }
+                        }
+                    }
+                    Ok(_) => {
+                        tracing::debug!(block_id = %self.block_id, "cmd:cwd already set, skipping seed");
+                    }
+                    Err(e) => {
+                        tracing::warn!(block_id = %self.block_id, error = %e, "failed to read block for cmd:cwd seed");
                     }
                 }
             }
