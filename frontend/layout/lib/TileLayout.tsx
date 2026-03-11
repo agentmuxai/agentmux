@@ -142,8 +142,8 @@ function NodeBackdrops({ layoutModel }: { layoutModel: LayoutModel }) {
     const ephemeralNode = useAtomValue(layoutModel.ephemeralNode);
     const magnifiedNodeId = useAtomValue(layoutModel.magnifiedNodeIdAtom);
 
-    const [showMagnifiedBackdrop, setShowMagnifiedBackdrop] = useState(!!ephemeralNode);
-    const [showEphemeralBackdrop, setShowEphemeralBackdrop] = useState(!!magnifiedNodeId);
+    const [showMagnifiedBackdrop, setShowMagnifiedBackdrop] = useState(!!magnifiedNodeId);
+    const [showEphemeralBackdrop, setShowEphemeralBackdrop] = useState(!!ephemeralNode);
 
     const debouncedSetMagnifyBackdrop = useCallback(
         debounce(100, () => setShowMagnifiedBackdrop(true)),
