@@ -36,5 +36,38 @@
                 "view": "sysinfo"
             }
         }
+    },
+    "defwidget@help": {
+        "display:order": -2,
+        "icon": "circle-question",
+        "label": "help",
+        "description": "Help and documentation",
+        "blockdef": {
+            "meta": {
+                "view": "help"
+            }
+        }
+    },
+    "defwidget@settings": {
+        "display:order": -1,
+        "icon": "cog",
+        "label": "settings",
+        "description": "Open Settings (external editor)",
+        "blockdef": {
+            "meta": {
+                "view": "settings"
+            }
+        }
+    },
+    "defwidget@devtools": {
+        "display:order": 0,
+        "icon": "code",
+        "label": "devtools",
+        "description": "Toggle Developer Tools",
+        "blockdef": {
+            "meta": {
+                "view": "devtools"
+            }
+        }
     }
 }

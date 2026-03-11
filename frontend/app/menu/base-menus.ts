@@ -5,7 +5,7 @@ import { getApi } from "@/store/global";
 import { MenuBuilder } from "./menu-builder";
 
 /**
- * Create the base tabbar context menu
+ * Create the base tabbar context menu.
  * Includes: Version info
  */
 export function createTabBarBaseMenu(): MenuBuilder {
@@ -25,8 +25,22 @@ export function createTabBarBaseMenu(): MenuBuilder {
 }
 
 /**
- * Create the widgets menu section
- * Includes: Widget toggles and config editor
+ * Determine whether a widget is hidden.
+ * Priority: settings["widget:hidden@<key>"] > widget["display:hidden"] > false
+ */
+function isWidgetHidden(settings: Record<string, any>, widgetKey: string, widgetConfig: any): boolean {
+    const settingsKey = `widget:hidden@${widgetKey}`;
+    if (settingsKey in settings) {
+        return Boolean(settings[settingsKey]);
+    }
+    return widgetConfig?.["display:hidden"] ?? false;
+}
+
+/**
+ * Create the widgets menu section.
+ * Reads/writes widget visibility via settings.json ("widget:hidden@<key>").
+ * Also includes icononly toggle.
+ * "Edit widgets.json" is intentionally omitted — the menu IS the UI for this.
  */
 export function createWidgetsMenu(fullConfig: any): MenuBuilder {
     const menu = new MenuBuilder();
@@ -36,6 +50,9 @@ export function createWidgetsMenu(fullConfig: any): MenuBuilder {
     }
 
     const widgets = fullConfig.widgets || {};
+    const settings = fullConfig.settings || {};
+    const iconOnly = settings["widget:icononly"] ?? false;
+
     const widgetEntries = Object.entries(widgets)
         .filter(([key]) => key.startsWith("defwidget@"))
         .sort((a: any, b: any) => {
@@ -48,44 +65,36 @@ export function createWidgetsMenu(fullConfig: any): MenuBuilder {
         menu.section("Widgets");
 
         widgetEntries.forEach(([widgetKey, widgetConfig]: [string, any]) => {
-            const isHidden = widgetConfig["display:hidden"] ?? false;
+            const hidden = isWidgetHidden(settings, widgetKey, widgetConfig);
             const label = widgetConfig.label || widgetKey.replace("defwidget@", "");
 
             menu.add({
-                label: label,
+                label,
                 type: "checkbox" as const,
-                checked: !isHidden,
+                checked: !hidden,
                 click: async () => {
                     const RpcApi = (await import("@/app/store/wshclientapi")).RpcApi;
                     const TabRpcClient = (await import("@/app/store/wshrpcutil")).TabRpcClient;
-
-                    const newHiddenState = !isHidden;
-                    const updatedConfig = {
-                        ...widgetConfig,
-                        "display:hidden": newHiddenState,
-                    };
-
                     await RpcApi.SetConfigCommand(TabRpcClient, {
-                        [widgetKey]: updatedConfig,
-                    });
-
-                    getApi().sendLog(`Widget ${label} ${newHiddenState ? "hidden" : "shown"}`);
+                        [`widget:hidden@${widgetKey}`]: !hidden,
+                    } as any);
                 },
             });
         });
 
-        menu.separator().add({
-            label: "Edit widgets.json",
-            click: async () => {
-                const createBlock = (await import("@/store/global")).createBlock;
-                const path = `${getApi().getConfigDir()}/widgets.json`;
-                const blockDef: BlockDef = {
-                    meta: { view: "preview", file: path },
-                };
-                await createBlock(blockDef, false, true);
-            },
-        });
+        menu.separator();
     }
+
+    menu.add({
+        label: "Icon Only",
+        type: "checkbox" as const,
+        checked: iconOnly,
+        click: async () => {
+            const RpcApi = (await import("@/app/store/wshclientapi")).RpcApi;
+            const TabRpcClient = (await import("@/app/store/wshrpcutil")).TabRpcClient;
+            await RpcApi.SetConfigCommand(TabRpcClient, { "widget:icononly": !iconOnly } as any);
+        },
+    });
 
     return menu;
 }

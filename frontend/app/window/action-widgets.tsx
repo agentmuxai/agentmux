@@ -3,7 +3,6 @@
 
 /**
  * ActionWidgets - Right-aligned buttons for creating blocks
- * Renamed from WidgetBar for clarity - these are action buttons, not traditional widgets
  */
 
 import { Tooltip } from "@/app/element/tooltip";
@@ -28,6 +27,18 @@ function sortByDisplayOrder(wmap: { [key: string]: WidgetConfigType }): WidgetCo
     return wlist;
 }
 
+/**
+ * Determine whether a widget is hidden.
+ * Priority: settings["widget:hidden@<key>"] > widget["display:hidden"] > false
+ */
+function isWidgetHidden(settings: Record<string, any>, widgetKey: string, widgetConfig: WidgetConfigType): boolean {
+    const settingsKey = `widget:hidden@${widgetKey}`;
+    if (settingsKey in settings) {
+        return Boolean(settings[settingsKey]);
+    }
+    return widgetConfig?.["display:hidden"] ?? false;
+}
+
 async function handleWidgetSelect(widget: WidgetConfigType) {
     // Special handling for devtools widget
     if (widget.blockdef?.meta?.view === "devtools") {
@@ -48,113 +59,67 @@ async function handleWidgetSelect(widget: WidgetConfigType) {
     createBlock(blockDef, widget.magnified);
 }
 
-const ActionWidget = memo(({ widget, iconOnly }: { widget: WidgetConfigType; iconOnly: boolean }) => {
-    if (widget["display:hidden"]) {
-        return null;
-    }
+const ActionWidget = memo(
+    ({
+        widget,
+        widgetKey,
+        iconOnly,
+        settings,
+    }: {
+        widget: WidgetConfigType;
+        widgetKey?: string;
+        iconOnly: boolean;
+        settings: Record<string, any>;
+    }) => {
+        if (widgetKey && isWidgetHidden(settings, widgetKey, widget)) {
+            return null;
+        }
 
-    return (
-        <div data-tauri-drag-region="false">
-            <Tooltip
-                content={widget.description || widget.label}
-                placement="bottom"
-                divClassName="flex flex-row items-center gap-1 px-2 py-0.5 text-secondary hover:bg-hoverbg hover:text-white cursor-pointer rounded-sm h-full"
-                divOnClick={() => handleWidgetSelect(widget)}
-            >
-                <div style={{ color: widget.color }} className="text-sm">
-                    <i className={makeIconClass(widget.icon, true, { defaultIcon: "browser" })}></i>
-                </div>
-                {!iconOnly && !isBlank(widget.label) && (
-                    <div className="text-xs whitespace-nowrap">{widget.label}</div>
-                )}
-            </Tooltip>
-        </div>
-    );
-});
+        return (
+            <div data-tauri-drag-region="false">
+                <Tooltip
+                    content={widget.description || widget.label}
+                    placement="bottom"
+                    divClassName="flex flex-row items-center gap-1 px-2 py-0.5 text-secondary hover:bg-hoverbg hover:text-white cursor-pointer rounded-sm h-full"
+                    divOnClick={() => handleWidgetSelect(widget)}
+                >
+                    <div style={{ color: widget.color }} className="text-sm">
+                        <i className={makeIconClass(widget.icon, true, { defaultIcon: "browser" })}></i>
+                    </div>
+                    {!iconOnly && !isBlank(widget.label) && (
+                        <div className="text-xs whitespace-nowrap">{widget.label}</div>
+                    )}
+                </Tooltip>
+            </div>
+        );
+    }
+);
 
 const ActionWidgets = memo(() => {
     const fullConfig = useAtomValue(atoms.fullConfigAtom);
-
-    const helpWidget: WidgetConfigType = {
-        icon: "circle-question",
-        label: "help",
-        blockdef: {
-            meta: {
-                view: "help",
-            },
-        },
-    };
-    const settingsWidget: WidgetConfigType = {
-        icon: "cog",
-        label: "settings",
-        description: "Open Settings (external editor)",
-        blockdef: {
-            meta: {
-                view: "settings",
-            },
-        },
-    };
-    const devToolsWidget: WidgetConfigType = {
-        icon: "code",
-        label: "devtools",
-        description: "Toggle Developer Tools",
-        blockdef: {
-            meta: {
-                view: "devtools",
-            },
-        },
-    };
-    const showHelp = fullConfig?.settings?.["widget:showhelp"] ?? true;
-    const iconOnly = fullConfig?.settings?.["widget:icononly"] ?? false;
+    const settings: Record<string, any> = fullConfig?.settings ?? {};
+    const iconOnly = settings["widget:icononly"] ?? false;
     const widgets = sortByDisplayOrder(fullConfig?.widgets);
+
+    // Build widget key lookup: widget objects don't carry their own map key,
+    // so we re-derive it from fullConfig.widgets.
+    const widgetKeyMap = new Map<WidgetConfigType, string>();
+    if (fullConfig?.widgets) {
+        for (const [key, w] of Object.entries(fullConfig.widgets)) {
+            widgetKeyMap.set(w as WidgetConfigType, key);
+        }
+    }
 
     const handleWidgetsBarContextMenu = (e: React.MouseEvent) => {
         e.preventDefault();
         const menu: ContextMenuItem[] = [
-            {
-                label: "Edit widgets.json",
-                click: () => {
-                    fireAndForget(async () => {
-                        const path = `${getApi().getConfigDir()}/widgets.json`;
-                        const blockDef: BlockDef = {
-                            meta: { view: "preview", file: path },
-                        };
-                        await createBlock(blockDef, false, true);
-                    });
-                },
-            },
-            {
-                label: "Show Help Widgets",
-                submenu: [
-                    {
-                        label: "On",
-                        type: "checkbox",
-                        checked: showHelp,
-                        click: () => {
-                            fireAndForget(async () => {
-                                await RpcApi.SetConfigCommand(TabRpcClient, { "widget:showhelp": true });
-                            });
-                        },
-                    },
-                    {
-                        label: "Off",
-                        type: "checkbox",
-                        checked: !showHelp,
-                        click: () => {
-                            fireAndForget(async () => {
-                                await RpcApi.SetConfigCommand(TabRpcClient, { "widget:showhelp": false });
-                            });
-                        },
-                    },
-                ],
-            },
             {
                 label: "Icon Only",
                 type: "checkbox",
                 checked: iconOnly,
                 click: () => {
                     fireAndForget(async () => {
-                        await RpcApi.SetConfigCommand(TabRpcClient, { "widget:icononly": !iconOnly });
+                        await RpcApi.SetConfigCommand(TabRpcClient, { "widget:icononly": !iconOnly } as any);
                     });
                 },
             },
@@ -168,10 +133,15 @@ const ActionWidgets = memo(() => {
             data-testid="action-widgets"
             onContextMenu={handleWidgetsBarContextMenu}
         >
-            {widgets?.map((data, idx) => <ActionWidget key={`widget-${idx}`} widget={data} iconOnly={iconOnly} />)}
-            {showHelp && <ActionWidget key="help" widget={helpWidget} iconOnly={iconOnly} />}
-            <ActionWidget key="settings" widget={settingsWidget} iconOnly={iconOnly} />
-            <ActionWidget key="devtools" widget={devToolsWidget} iconOnly={iconOnly} />
+            {widgets?.map((data, idx) => (
+                <ActionWidget
+                    key={`widget-${idx}`}
+                    widget={data}
+                    widgetKey={widgetKeyMap.get(data)}
+                    iconOnly={iconOnly}
+                    settings={settings}
+                />
+            ))}
         </div>
     );
 });

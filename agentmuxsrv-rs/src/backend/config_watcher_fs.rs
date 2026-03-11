@@ -143,6 +143,51 @@ pub fn spawn_settings_watcher(
     Some(watcher)
 }
 
+/// Merge new keys into the current in-memory SettingsType and return the result.
+/// Used by the setconfig handler to update in-memory state before the fs watcher fires.
+pub fn merge_settings_into_current(
+    config_watcher: &wconfig::ConfigWatcher,
+    new_keys: serde_json::Map<String, serde_json::Value>,
+) -> wconfig::SettingsType {
+    let mut current = config_watcher.get_settings();
+    // Merge via JSON round-trip so the extra HashMap catches all dynamic keys
+    if let Ok(mut current_val) = serde_json::to_value(&current) {
+        if let serde_json::Value::Object(ref mut map) = current_val {
+            map.extend(new_keys.into_iter().filter(|(_, v)| !v.is_null()));
+        }
+        if let Ok(merged) = serde_json::from_value(current_val) {
+            current = merged;
+        }
+    }
+    current
+}
+
+/// Merge a flat map of settings keys into `settings.json` on disk.
+/// Existing keys not present in `new_keys` are preserved.
+/// The fs watcher will detect the write (~300ms) and broadcast the updated config.
+pub fn merge_settings_to_disk(new_keys: serde_json::Map<String, serde_json::Value>) -> Result<(), String> {
+    if new_keys.is_empty() {
+        return Ok(());
+    }
+    let settings_dir = resolve_settings_dir();
+    let settings_path = settings_dir.join(wconfig::SETTINGS_FILE);
+
+    let mut current = wconfig::read_settings_raw(&settings_path);
+    current.extend(new_keys);
+
+    // Remove keys explicitly set to null (deletion semantics)
+    current.retain(|_, v| !v.is_null());
+
+    let output = serde_json::to_string_pretty(&serde_json::Value::Object(current))
+        .map_err(|e| format!("serialize settings: {e}"))?;
+
+    std::fs::write(&settings_path, output)
+        .map_err(|e| format!("write settings.json: {e}"))?;
+
+    tracing::info!(path = %settings_path.display(), "settings.json updated via setconfig");
+    Ok(())
+}
+
 fn reload_and_broadcast(
     settings_path: &PathBuf,
     config_watcher: &Arc<ConfigWatcher>,
