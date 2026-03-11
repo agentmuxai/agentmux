@@ -10,3 +10,29 @@
     user-select: none;
     -webkit-app-region: no-drag;
 }
+
+.action-widget-slot {
+    display: flex;
+    align-items: center;
+    cursor: grab;
+    border-radius: 4px;
+    transition: opacity 120ms ease;
+    touch-action: none;
+
+    &:active {
+        cursor: grabbing;
+    }
+
+    &.dragging {
+        opacity: 0.3;
+    }
+}
+
+.action-widget-drop-indicator {
+    width: 2px;
+    height: 18px;
+    background-color: var(--accent-color, #7c6bff);
+    border-radius: 1px;
+    flex-shrink: 0;
+    pointer-events: none;
+}
