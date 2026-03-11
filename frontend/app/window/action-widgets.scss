@@ -17,6 +17,7 @@
     cursor: grab;
     border-radius: 4px;
     transition: opacity 120ms ease;
+    touch-action: none;
 
     &:active {
         cursor: grabbing;

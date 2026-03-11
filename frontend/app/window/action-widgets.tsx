@@ -108,6 +108,8 @@ const ActionWidget = memo(
 
 ActionWidget.displayName = "ActionWidget";
 
+const DRAG_THRESHOLD = 5;
+
 const ActionWidgets = memo(() => {
     const fullConfig = useAtomValue(atoms.fullConfigAtom);
     const settings: Record<string, any> = fullConfig?.settings ?? {};
@@ -119,21 +121,29 @@ const ActionWidgets = memo(() => {
     const containerRef = useRef<HTMLDivElement>(null);
     const draggingKeyRef = useRef<string | null>(null);
     const dropIndexRef = useRef<number | null>(null);
+    const dragStartRef = useRef<{ x: number; y: number; key: string } | null>(null);
 
-    const handleDragStart = useCallback((key: string, e: React.DragEvent) => {
-        e.dataTransfer.effectAllowed = "move";
-        e.dataTransfer.setData("text/plain", key);
-        draggingKeyRef.current = key;
-        setDraggingKey(key);
+    const handlePointerDown = useCallback((key: string, e: React.PointerEvent<HTMLDivElement>) => {
+        dragStartRef.current = { x: e.clientX, y: e.clientY, key };
     }, []);
 
-    const handleContainerDragOver = useCallback((e: React.DragEvent) => {
+    const handlePointerMove = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+        if (!dragStartRef.current) return;
+
+        if (!draggingKeyRef.current) {
+            const dx = e.clientX - dragStartRef.current.x;
+            const dy = e.clientY - dragStartRef.current.y;
+            if (Math.hypot(dx, dy) < DRAG_THRESHOLD) return;
+            // Threshold crossed — start drag with pointer capture
+            (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+            draggingKeyRef.current = dragStartRef.current.key;
+            setDraggingKey(dragStartRef.current.key);
+        }
+
         e.preventDefault();
-        e.dataTransfer.dropEffect = "move";
         if (!containerRef.current) return;
-        const slots = Array.from(
-            containerRef.current.querySelectorAll<HTMLElement>("[data-widget-slot]")
-        );
+
+        const slots = Array.from(containerRef.current.querySelectorAll<HTMLElement>("[data-widget-slot]"));
         let newIndex = slots.length;
         for (let i = 0; i < slots.length; i++) {
             const rect = slots[i].getBoundingClientRect();
@@ -148,17 +158,19 @@ const ActionWidgets = memo(() => {
         }
     }, []);
 
-    const handleDrop = useCallback(
-        (e: React.DragEvent) => {
-            e.preventDefault();
+    const handlePointerUp = useCallback(
+        (e: React.PointerEvent<HTMLDivElement>) => {
+            const wasActuallyDragging = draggingKeyRef.current != null;
             const dk = draggingKeyRef.current;
             const di = dropIndexRef.current;
-            if (dk == null || di == null) return;
 
+            dragStartRef.current = null;
             draggingKeyRef.current = null;
             dropIndexRef.current = null;
             setDraggingKey(null);
             setDropIndex(null);
+
+            if (!wasActuallyDragging || dk == null || di == null) return;
 
             const baseNames = sortedWidgets.map(({ key }) => key.replace("defwidget@", ""));
             const dragBaseName = dk.replace("defwidget@", "");
@@ -179,7 +191,8 @@ const ActionWidgets = memo(() => {
         [sortedWidgets]
     );
 
-    const handleDragEnd = useCallback(() => {
+    const handlePointerCancel = useCallback(() => {
+        dragStartRef.current = null;
         draggingKeyRef.current = null;
         dropIndexRef.current = null;
         setDraggingKey(null);
@@ -211,8 +224,6 @@ const ActionWidgets = memo(() => {
             className="action-widgets"
             data-testid="action-widgets"
             onContextMenu={handleWidgetsBarContextMenu}
-            onDragOver={handleContainerDragOver}
-            onDrop={handleDrop}
         >
             {sortedWidgets.map(({ key, widget }, idx) => (
                 <Fragment key={key}>
@@ -221,11 +232,12 @@ const ActionWidgets = memo(() => {
                     )}
                     <div
                         className={`action-widget-slot${draggingKey === key ? " dragging" : ""}`}
-                        draggable
                         data-widget-slot={idx}
                         data-tauri-drag-region="false"
-                        onDragStart={(e) => handleDragStart(key, e)}
-                        onDragEnd={handleDragEnd}
+                        onPointerDown={(e) => handlePointerDown(key, e)}
+                        onPointerMove={handlePointerMove}
+                        onPointerUp={handlePointerUp}
+                        onPointerCancel={handlePointerCancel}
                     >
                         <ActionWidget widget={widget} widgetKey={key} iconOnly={iconOnly} settings={settings} />
                     </div>
