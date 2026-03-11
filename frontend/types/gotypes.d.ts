@@ -711,6 +711,7 @@ declare global {
         "onboarding:githubstar"?: boolean;
         "onboarding:lastversion"?: string;
         count?: number;
+        "widget:order"?: string[];
         "agent:*"?: boolean;
         agentId?: string;
         agentName?: string;
