@@ -82,3 +82,188 @@ pub async fn copy_file_to_dir(
 
     Ok(target.display().to_string())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::path::Path;
+
+    // ── normalize_path_for_platform ───────────────────────────────────────────
+
+    #[cfg(windows)]
+    #[test]
+    fn test_normalize_msys2_style() {
+        assert_eq!(normalize_path_for_platform("/c/Users/foo"), r"C:\Users\foo");
+        assert_eq!(normalize_path_for_platform("/C/Users/foo"), r"C:\Users\foo");
+        assert_eq!(normalize_path_for_platform("/d/Projects"), r"D:\Projects");
+        assert_eq!(normalize_path_for_platform("/z"), "Z:");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn test_normalize_forward_slash_windows() {
+        assert_eq!(normalize_path_for_platform(r"C:/Users/foo"), r"C:\Users\foo");
+        assert_eq!(normalize_path_for_platform(r"C:\Users\foo"), r"C:\Users\foo");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn test_normalize_non_drive_path_unchanged_on_windows() {
+        // Paths that start with / but are not MSYS2 drive mounts (e.g. /tmp)
+        // fall through to the forward-slash replace branch — / stays as \
+        assert_eq!(normalize_path_for_platform("/tmp/file.txt"), r"\tmp\file.txt");
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn test_normalize_noop_on_unix() {
+        assert_eq!(normalize_path_for_platform("/tmp/file.txt"), "/tmp/file.txt");
+        assert_eq!(normalize_path_for_platform("/home/user/foo"), "/home/user/foo");
+    }
+
+    // ── copy_recursive ────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_copy_recursive_single_file() {
+        let dir = tempdir();
+        let src_file = dir.join("source.txt");
+        let dst_file = dir.join("dest.txt");
+        fs::write(&src_file, b"hello world").unwrap();
+
+        copy_recursive(&src_file, &dst_file).unwrap();
+
+        assert!(dst_file.exists());
+        assert_eq!(fs::read_to_string(&dst_file).unwrap(), "hello world");
+    }
+
+    #[test]
+    fn test_copy_recursive_directory() {
+        let dir = tempdir();
+        let src_dir = dir.join("src_folder");
+        let dst_dir = dir.join("dst_folder");
+        fs::create_dir(&src_dir).unwrap();
+        fs::write(src_dir.join("a.txt"), b"aaa").unwrap();
+        fs::write(src_dir.join("b.txt"), b"bbb").unwrap();
+        let nested = src_dir.join("nested");
+        fs::create_dir(&nested).unwrap();
+        fs::write(nested.join("c.txt"), b"ccc").unwrap();
+
+        copy_recursive(&src_dir, &dst_dir).unwrap();
+
+        assert!(dst_dir.join("a.txt").exists());
+        assert!(dst_dir.join("b.txt").exists());
+        assert!(dst_dir.join("nested").join("c.txt").exists());
+        assert_eq!(fs::read_to_string(dst_dir.join("nested").join("c.txt")).unwrap(), "ccc");
+    }
+
+    // ── copy_file_to_dir (sync wrapper for testing) ───────────────────────────
+
+    fn copy_file_to_dir_sync(source_path: &str, target_dir: &str) -> Result<String, String> {
+        let source = Path::new(source_path);
+        let target_dir_norm = normalize_path_for_platform(target_dir);
+        let target_dir = Path::new(&target_dir_norm);
+
+        if !source.exists() {
+            return Err(format!("Source not found: {}", source.display()));
+        }
+        if !target_dir.exists() {
+            return Err(format!("Target directory not found: {}", target_dir.display()));
+        }
+        if !target_dir.is_dir() {
+            return Err(format!("Target path is not a directory: {}", target_dir.display()));
+        }
+        let name = source.file_name().ok_or_else(|| "Invalid source path".to_string())?;
+        let target = target_dir.join(name);
+        if target.exists() {
+            return Err(format!("Already exists: {}", target.display()));
+        }
+        copy_recursive(source, &target)?;
+        Ok(target.display().to_string())
+    }
+
+    #[test]
+    fn test_copy_file_to_dir_success() {
+        let dir = tempdir();
+        let src = dir.join("myfile.txt");
+        let dst_dir = dir.join("output");
+        fs::create_dir(&dst_dir).unwrap();
+        fs::write(&src, b"content").unwrap();
+
+        let result = copy_file_to_dir_sync(src.to_str().unwrap(), dst_dir.to_str().unwrap());
+        assert!(result.is_ok(), "expected ok, got: {:?}", result);
+        assert!(dst_dir.join("myfile.txt").exists());
+    }
+
+    #[test]
+    fn test_copy_file_to_dir_missing_source() {
+        let dir = tempdir();
+        let result = copy_file_to_dir_sync(
+            dir.join("nonexistent.txt").to_str().unwrap(),
+            dir.to_str().unwrap(),
+        );
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Source not found"));
+    }
+
+    #[test]
+    fn test_copy_file_to_dir_missing_target() {
+        let dir = tempdir();
+        let src = dir.join("file.txt");
+        fs::write(&src, b"data").unwrap();
+
+        let result = copy_file_to_dir_sync(
+            src.to_str().unwrap(),
+            dir.join("no_such_dir").to_str().unwrap(),
+        );
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Target directory not found"));
+    }
+
+    #[test]
+    fn test_copy_file_to_dir_target_is_file_not_dir() {
+        let dir = tempdir();
+        let src = dir.join("src.txt");
+        let not_a_dir = dir.join("not_a_dir.txt");
+        fs::write(&src, b"data").unwrap();
+        fs::write(&not_a_dir, b"other").unwrap();
+
+        let result = copy_file_to_dir_sync(
+            src.to_str().unwrap(),
+            not_a_dir.to_str().unwrap(),
+        );
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not a directory"));
+    }
+
+    #[test]
+    fn test_copy_file_to_dir_already_exists() {
+        let dir = tempdir();
+        let src = dir.join("file.txt");
+        let dst_dir = dir.join("out");
+        fs::create_dir(&dst_dir).unwrap();
+        fs::write(&src, b"data").unwrap();
+        fs::write(dst_dir.join("file.txt"), b"existing").unwrap();
+
+        let result = copy_file_to_dir_sync(
+            src.to_str().unwrap(),
+            dst_dir.to_str().unwrap(),
+        );
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Already exists"));
+    }
+
+    // ── helpers ────────────────────────────────────────────────────────────────
+
+    fn tempdir() -> std::path::PathBuf {
+        let base = std::env::temp_dir().join(format!(
+            "agentmux_test_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .subsec_nanos()
+        ));
+        fs::create_dir_all(&base).unwrap();
+        base
+    }
+}

@@ -17,10 +17,16 @@ interface FileDropResult {
 // useFileDrop uses Tauri's onDragDropEvent (requires dragDropEnabled: true in tauri.conf.json)
 // which provides real OS filesystem paths. Element targeting uses getBoundingClientRect
 // against the drag position since Tauri fires window-level events, not element-level.
-// HTML5 drag events are also handled as a fallback for isDragOver visual state.
-function useFileDrop(onFilesDropped: (paths: string[]) => void): FileDropResult {
+//
+// KEY DESIGN NOTE: elementRef is passed in by the caller (already attached to the DOM via
+// React's ref prop at mount time). We do NOT rely on HTML5 onDragEnter to populate it,
+// because in WebView2 with dragDropEnabled:true, OS file drags use the native COM/IDropTarget
+// pipeline and HTML5 drag events (dragenter, dragover, dragleave) never fire.
+function useFileDrop(
+    onFilesDropped: (paths: string[]) => void,
+    elementRef: React.RefObject<HTMLElement>
+): FileDropResult {
     const [isDragOver, setIsDragOver] = React.useState(false);
-    const elementRef = React.useRef<HTMLElement | null>(null);
     const dragCounter = React.useRef(0);
     const onFilesDroppedRef = React.useRef(onFilesDropped);
     onFilesDroppedRef.current = onFilesDropped;
@@ -28,6 +34,7 @@ function useFileDrop(onFilesDropped: (paths: string[]) => void): FileDropResult 
     // Subscribe once to Tauri's window-level drag-drop event.
     // Use a ref for the callback to avoid re-subscribing on every render.
     React.useEffect(() => {
+        console.log("[dnd-debug] useFileDrop: subscribing to Tauri onDragDropEvent");
         let unlisten: (() => void) | null = null;
 
         getCurrentWebview()
@@ -36,47 +43,74 @@ function useFileDrop(onFilesDropped: (paths: string[]) => void): FileDropResult 
                 const pos = (event.payload as any).position as { x: number; y: number } | undefined;
 
                 const isOverElement = (): boolean => {
-                    if (!pos || !elementRef.current) return false;
+                    if (!pos) {
+                        console.log("[dnd-debug] isOverElement: no position in event payload");
+                        return false;
+                    }
+                    if (!elementRef.current) {
+                        console.log("[dnd-debug] isOverElement: elementRef.current is null — ref not attached");
+                        return false;
+                    }
                     const rect = elementRef.current.getBoundingClientRect();
-                    return (
+                    const inside =
                         pos.x >= rect.left &&
                         pos.x <= rect.right &&
                         pos.y >= rect.top &&
-                        pos.y <= rect.bottom
+                        pos.y <= rect.bottom;
+                    console.log(
+                        `[dnd-debug] isOverElement: pos=(${Math.round(pos.x)},${Math.round(pos.y)}) ` +
+                        `rect=(${Math.round(rect.left)},${Math.round(rect.top)},${Math.round(rect.right)},${Math.round(rect.bottom)}) ` +
+                        `inside=${inside}`
                     );
+                    return inside;
                 };
 
+                console.log(`[dnd-debug] Tauri onDragDropEvent type=${type}`, pos ? `pos=(${Math.round(pos.x)},${Math.round(pos.y)})` : "no-pos");
+
                 if (type === "enter" || type === "over") {
-                    if (isOverElement()) {
-                        setIsDragOver(true);
-                    } else {
-                        setIsDragOver(false);
+                    const inside = isOverElement();
+                    if (isDragOver !== inside) {
+                        console.log(`[dnd-debug] ${type}: setting isDragOver=${inside}`);
                     }
+                    setIsDragOver(inside);
                 } else if (type === "drop") {
                     const paths: string[] = (event.payload as any).paths ?? [];
-                    console.log("[dnd-debug] tauri drop event, paths:", paths, "over element:", isOverElement());
-                    if (isOverElement() && paths.length > 0) {
+                    const inside = isOverElement();
+                    console.log(`[dnd-debug] drop: paths=${JSON.stringify(paths)}, inside=${inside}`);
+                    if (inside && paths.length > 0) {
+                        console.log("[dnd-debug] drop: ✓ calling onFilesDropped with", paths);
                         onFilesDroppedRef.current(paths);
+                    } else if (!inside) {
+                        console.log("[dnd-debug] drop: ignoring — not over this element");
+                    } else {
+                        console.log("[dnd-debug] drop: ignoring — paths array is empty");
                     }
                     setIsDragOver(false);
                     dragCounter.current = 0;
                 } else if (type === "leave") {
+                    console.log("[dnd-debug] leave: clearing isDragOver");
                     setIsDragOver(false);
                     dragCounter.current = 0;
                 }
             })
             .then((fn) => {
                 unlisten = fn;
+                console.log("[dnd-debug] useFileDrop: ✓ subscribed to onDragDropEvent");
+            })
+            .catch((err) => {
+                console.error("[dnd-debug] useFileDrop: ✗ failed to subscribe to onDragDropEvent:", err);
             });
 
         return () => {
+            console.log("[dnd-debug] useFileDrop: unsubscribing");
             unlisten?.();
         };
     }, []); // subscribe once — callback accessed via ref
 
-    // HTML5 drag events: used as a fallback signal for isDragOver in case Tauri
-    // 'enter'/'over' events don't arrive (e.g. on some platforms).
-    // Also needed to call e.preventDefault() so the browser doesn't open the file.
+    // HTML5 drag events: kept as fallback for isDragOver on platforms where
+    // HTML5 events do fire alongside Tauri events. Also needed to call
+    // e.preventDefault() so the browser doesn't try to open the file.
+    // NOTE: these may NOT fire in WebView2 for OS file drags — that's expected.
     const onDragOver = React.useCallback((e: React.DragEvent) => {
         e.preventDefault();
         e.stopPropagation();
@@ -87,9 +121,8 @@ function useFileDrop(onFilesDropped: (paths: string[]) => void): FileDropResult 
         e.stopPropagation();
         if (e.dataTransfer.types.includes("Files")) {
             dragCounter.current += 1;
+            console.log(`[dnd-debug] HTML5 onDragEnter fired (counter=${dragCounter.current}) — note: may not fire in WebView2`);
             setIsDragOver(true);
-            // Store a ref to this element for Tauri position checks
-            elementRef.current = e.currentTarget as HTMLElement;
         }
     }, []);
 
@@ -97,6 +130,7 @@ function useFileDrop(onFilesDropped: (paths: string[]) => void): FileDropResult 
         e.preventDefault();
         e.stopPropagation();
         dragCounter.current -= 1;
+        console.log(`[dnd-debug] HTML5 onDragLeave fired (counter=${dragCounter.current})`);
         if (dragCounter.current <= 0) {
             dragCounter.current = 0;
             setIsDragOver(false);
@@ -106,8 +140,7 @@ function useFileDrop(onFilesDropped: (paths: string[]) => void): FileDropResult 
     const onDrop = React.useCallback((e: React.DragEvent) => {
         e.preventDefault();
         e.stopPropagation();
-        // Reset overlay — Tauri event handler does the actual file processing.
-        // This ensures the overlay clears even if the Tauri event fires slightly later.
+        console.log("[dnd-debug] HTML5 onDrop fired — Tauri handler does the actual file work");
         dragCounter.current = 0;
         setIsDragOver(false);
     }, []);

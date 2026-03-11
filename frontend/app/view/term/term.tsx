@@ -248,7 +248,7 @@ const TerminalView = ({ blockId, model }: ViewComponentProps<TermViewModel>) => 
         [blockData]
     );
 
-    const { isDragOver, handlers: dropHandlers } = useFileDrop(handleFilesDropped);
+    const { isDragOver, handlers: dropHandlers } = useFileDrop(handleFilesDropped, viewRef);
     const cwd = blockData?.meta?.["cmd:cwd"];
     const dropMessage = cwd ? `Copy to ${cwd}` : "No working directory detected";
 
