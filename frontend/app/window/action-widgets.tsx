@@ -116,42 +116,59 @@ const ActionWidgets = memo(() => {
 
     const [draggingKey, setDraggingKey] = useState<string | null>(null);
     const [dropIndex, setDropIndex] = useState<number | null>(null);
-    const dragActive = useRef(false);
+    const containerRef = useRef<HTMLDivElement>(null);
+    const draggingKeyRef = useRef<string | null>(null);
+    const dropIndexRef = useRef<number | null>(null);
 
     const handleDragStart = useCallback((key: string, e: React.DragEvent) => {
         e.dataTransfer.effectAllowed = "move";
         e.dataTransfer.setData("text/plain", key);
-        dragActive.current = true;
+        draggingKeyRef.current = key;
         setDraggingKey(key);
     }, []);
 
-    const handleDragOver = useCallback((index: number, e: React.DragEvent) => {
+    const handleContainerDragOver = useCallback((e: React.DragEvent) => {
         e.preventDefault();
-        e.stopPropagation();
         e.dataTransfer.dropEffect = "move";
-        const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-        const midX = rect.left + rect.width / 2;
-        setDropIndex(e.clientX < midX ? index : index + 1);
+        if (!containerRef.current) return;
+        const slots = Array.from(
+            containerRef.current.querySelectorAll<HTMLElement>("[data-widget-slot]")
+        );
+        let newIndex = slots.length;
+        for (let i = 0; i < slots.length; i++) {
+            const rect = slots[i].getBoundingClientRect();
+            if (e.clientX <= rect.right) {
+                newIndex = e.clientX <= rect.left + rect.width / 2 ? i : i + 1;
+                break;
+            }
+        }
+        if (newIndex !== dropIndexRef.current) {
+            dropIndexRef.current = newIndex;
+            setDropIndex(newIndex);
+        }
     }, []);
 
     const handleDrop = useCallback(
         (e: React.DragEvent) => {
             e.preventDefault();
-            if (!dragActive.current || draggingKey == null || dropIndex == null) return;
-            dragActive.current = false;
+            const dk = draggingKeyRef.current;
+            const di = dropIndexRef.current;
+            if (dk == null || di == null) return;
+
+            draggingKeyRef.current = null;
+            dropIndexRef.current = null;
+            setDraggingKey(null);
+            setDropIndex(null);
 
             const baseNames = sortedWidgets.map(({ key }) => key.replace("defwidget@", ""));
-            const dragBaseName = draggingKey.replace("defwidget@", "");
+            const dragBaseName = dk.replace("defwidget@", "");
             const fromIdx = baseNames.indexOf(dragBaseName);
             if (fromIdx === -1) return;
 
             const next = [...baseNames];
             next.splice(fromIdx, 1);
-            const adjustedDrop = fromIdx < dropIndex ? dropIndex - 1 : dropIndex;
+            const adjustedDrop = fromIdx < di ? di - 1 : di;
             next.splice(adjustedDrop, 0, dragBaseName);
-
-            setDraggingKey(null);
-            setDropIndex(null);
 
             if (next.join(",") !== baseNames.join(",")) {
                 fireAndForget(async () => {
@@ -159,11 +176,12 @@ const ActionWidgets = memo(() => {
                 });
             }
         },
-        [draggingKey, dropIndex, sortedWidgets]
+        [sortedWidgets]
     );
 
     const handleDragEnd = useCallback(() => {
-        dragActive.current = false;
+        draggingKeyRef.current = null;
+        dropIndexRef.current = null;
         setDraggingKey(null);
         setDropIndex(null);
     }, []);
@@ -189,10 +207,11 @@ const ActionWidgets = memo(() => {
 
     return (
         <div
+            ref={containerRef}
             className="action-widgets"
             data-testid="action-widgets"
             onContextMenu={handleWidgetsBarContextMenu}
-            onDragOver={(e) => e.preventDefault()}
+            onDragOver={handleContainerDragOver}
             onDrop={handleDrop}
         >
             {sortedWidgets.map(({ key, widget }, idx) => (
@@ -203,9 +222,9 @@ const ActionWidgets = memo(() => {
                     <div
                         className={`action-widget-slot${draggingKey === key ? " dragging" : ""}`}
                         draggable
+                        data-widget-slot={idx}
                         data-tauri-drag-region="false"
                         onDragStart={(e) => handleDragStart(key, e)}
-                        onDragOver={(e) => handleDragOver(idx, e)}
                         onDragEnd={handleDragEnd}
                     >
                         <ActionWidget widget={widget} widgetKey={key} iconOnly={iconOnly} settings={settings} />
