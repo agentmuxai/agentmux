@@ -75,7 +75,7 @@ export class ClaudeCodeApiClient {
             type: "user_message",
             content: text,
             timestamp: Date.now(),
-        } as StreamEvent;
+        } as unknown as StreamEvent;
 
         try {
             // Call Claude API with streaming
@@ -211,7 +211,7 @@ export class ClaudeCodeApiClient {
                         type: "text",
                         text: event.delta.text,
                         timestamp: Date.now(),
-                    } as StreamEvent;
+                    } as unknown as StreamEvent;
                 }
                 return null;
 

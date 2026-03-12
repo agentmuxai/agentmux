@@ -3,7 +3,7 @@
 
 import base64 from "base64-js";
 import clsx, { type ClassValue } from "clsx";
-import { Atom, atom, Getter, SetStateAction, Setter, useAtomValue } from "jotai";
+import { createSignal } from "solid-js";
 import { twMerge } from "tailwind-merge";
 import { debounce, throttle } from "throttle-debounce";
 const prevValueCache = new WeakMap<any, any>(); // stores a previous value for a deep equal comparison (used with the deepCompareReturnPrev function)
@@ -186,20 +186,28 @@ function getPromiseValue<T>(promise: Promise<T>, def: T): T {
     return value;
 }
 
-function jotaiLoadableValue<T>(value: Loadable<T>, def: T): T {
-    if (value.state === "hasData") {
-        return value.data;
-    }
-    return def;
+// ---------------------------------------------------------------------------
+// SignalAtom — a SolidJS signal that is also callable as an accessor.
+// Used to replace Jotai's WritableAtom pattern throughout the layout system.
+// Call it to read, use ._set() to write.
+// ---------------------------------------------------------------------------
+
+export type SignalAtom<T> = {
+    (): T;
+    _set(v: T | ((prev: T) => T)): void;
+};
+
+export function createSignalAtom<T>(initial: T): SignalAtom<T> {
+    const [get, set] = createSignal<T>(initial);
+    const atom = () => get() as T;
+    (atom as any)._set = set;
+    return atom as unknown as SignalAtom<T>;
 }
 
-const NullAtom = atom(null);
-
-function useAtomValueSafe<T>(atom: Atom<T> | Atom<Promise<T>>): T {
-    if (atom == null) {
-        return useAtomValue(NullAtom) as T;
-    }
-    return useAtomValue(atom);
+/** SolidJS-compatible useAtomValueSafe: safely call a signal accessor. Returns null when accessor is null. */
+function useAtomValueSafe<T>(accessor: (() => T) | null | undefined): T {
+    if (accessor == null) return null as T;
+    return (accessor as () => T)();
 }
 
 /**
@@ -229,48 +237,47 @@ function makeExternLink(url: string): string {
 }
 
 function atomWithThrottle<T>(initialValue: T, delayMilliseconds = 500): AtomWithThrottle<T> {
-    // DO NOT EXPORT currentValueAtom as using this atom to set state can cause
-    // inconsistent state between currentValueAtom and throttledValueAtom
-    const _currentValueAtom = atom(initialValue);
+    const [currentValue, setCurrentValue] = createSignal<T>(initialValue);
+    const [throttledValue, setThrottledValueDirect] = createSignal<T>(initialValue);
 
-    const throttledValueAtom = atom(initialValue, (get, set, update: SetStateAction<T>) => {
-        const prevValue = get(_currentValueAtom);
-        const nextValue = typeof update === "function" ? (update as (prev: T) => T)(prevValue) : update;
-        set(_currentValueAtom, nextValue);
-        throttleUpdate(get, set);
+    const throttleUpdate = throttle(delayMilliseconds, () => {
+        setThrottledValueDirect(() => currentValue() as T);
     });
 
-    const throttleUpdate = throttle(delayMilliseconds, (get: Getter, set: Setter) => {
-        const curVal = get(_currentValueAtom);
-        set(throttledValueAtom, curVal);
-    });
+    // throttledValueAtom is both readable and writable (SignalAtom)
+    const throttledAtom = () => throttledValue() as T;
+    (throttledAtom as any)._set = (update: T | ((prev: T) => T)) => {
+        const prevValue = currentValue();
+        const nextValue = typeof update === "function" ? (update as (prev: T) => T)(prevValue as T) : update;
+        setCurrentValue(() => nextValue as T);
+        throttleUpdate();
+    };
 
     return {
-        currentValueAtom: atom((get) => get(_currentValueAtom)),
-        throttledValueAtom,
+        currentValueAtom: currentValue as () => T,
+        throttledValueAtom: throttledAtom as unknown as SignalAtom<T>,
     };
 }
 
 function atomWithDebounce<T>(initialValue: T, delayMilliseconds = 500): AtomWithDebounce<T> {
-    // DO NOT EXPORT currentValueAtom as using this atom to set state can cause
-    // inconsistent state between currentValueAtom and debouncedValueAtom
-    const _currentValueAtom = atom(initialValue);
+    const [currentValue, setCurrentValue] = createSignal<T>(initialValue);
+    const [debouncedValue, setDebouncedValueDirect] = createSignal<T>(initialValue);
 
-    const debouncedValueAtom = atom(initialValue, (get, set, update: SetStateAction<T>) => {
-        const prevValue = get(_currentValueAtom);
-        const nextValue = typeof update === "function" ? (update as (prev: T) => T)(prevValue) : update;
-        set(_currentValueAtom, nextValue);
-        debounceUpdate(get, set);
+    const debounceUpdate = debounce(delayMilliseconds, () => {
+        setDebouncedValueDirect(() => currentValue() as T);
     });
 
-    const debounceUpdate = debounce(delayMilliseconds, (get: Getter, set: Setter) => {
-        const curVal = get(_currentValueAtom);
-        set(debouncedValueAtom, curVal);
-    });
+    const debouncedAtom = () => debouncedValue() as T;
+    (debouncedAtom as any)._set = (update: T | ((prev: T) => T)) => {
+        const prevValue = currentValue();
+        const nextValue = typeof update === "function" ? (update as (prev: T) => T)(prevValue as T) : update;
+        setCurrentValue(() => nextValue as T);
+        debounceUpdate();
+    };
 
     return {
-        currentValueAtom: atom((get) => get(_currentValueAtom)),
-        debouncedValueAtom,
+        currentValueAtom: currentValue as () => T,
+        debouncedValueAtom: debouncedAtom as unknown as SignalAtom<T>,
     };
 }
 
@@ -418,7 +425,6 @@ export {
     getPromiseState,
     getPromiseValue,
     isBlank,
-    jotaiLoadableValue,
     jsonDeepEqual,
     lazy,
     makeConnRoute,

@@ -4,7 +4,7 @@
 // Native notification integration for Tauri
 // Wraps tauri-plugin-notification for OS-level notifications
 
-import { isNativePresent, sendNotification as tauriSendNotification } from "@tauri-apps/plugin-notification";
+import { sendNotification as tauriSendNotification } from "@tauri-apps/plugin-notification";
 
 export interface NativeNotificationOptions {
     /**
@@ -43,11 +43,7 @@ export interface NativeNotificationOptions {
  * @returns true if running in Tauri with notification plugin enabled
  */
 export function isNativeNotificationAvailable(): Promise<boolean> {
-    try {
-        return isNativePresent();
-    } catch {
-        return Promise.resolve(false);
-    }
+    return Promise.resolve(typeof window !== "undefined" && "__TAURI_INTERNALS__" in window);
 }
 
 /**

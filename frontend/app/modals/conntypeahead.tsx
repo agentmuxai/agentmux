@@ -19,8 +19,7 @@ import { TabRpcClient } from "@/app/store/wshrpcutil";
 import { NodeModel } from "@/layout/index";
 import * as keyutil from "@/util/keyutil";
 import * as util from "@/util/util";
-import * as jotai from "jotai";
-import * as React from "react";
+import { createEffect, createSignal, onMount, type Accessor } from "solid-js";
 
 // newConnList -> connList => filteredList -> remoteItems -> sortedRemoteItems => remoteSuggestion
 // filteredList -> createNew
@@ -119,12 +118,6 @@ function createS3SuggestionItems(
     connStatusMap: Map<string, ConnStatus>,
     connection: string
 ): Array<SuggestionConnectionItem> {
-    // TODO-S3 rewrite this so it fits the way the
-    // s3 connections work. is there a connection status?
-    // probably not, so color may be weird
-    // also, this currently only changes the connection
-    // an onSelect option must be added for different
-    // behavior
     return s3Profiles.map((profileName) => {
         const connStatus = connStatusMap.get(profileName);
         const item: SuggestionConnectionItem = {
@@ -257,7 +250,7 @@ function getDisconnectItem(
 }
 
 function getConnectionsEditItem(
-    changeConnModalAtom: jotai.PrimitiveAtom<boolean>,
+    setChangeConnModalOpen: (v: boolean) => void,
     connSelected: string
 ): SuggestionConnectionItem | null {
     if (connSelected != "") {
@@ -271,7 +264,7 @@ function getConnectionsEditItem(
         label: "Edit Connections",
         onSelect: () => {
             util.fireAndForget(async () => {
-                globalStore.set(changeConnModalAtom, false);
+                setChangeConnModalOpen(false);
                 const path = `${getApi().getConfigDir()}/connections.json`;
                 const blockDef: BlockDef = {
                     meta: {
@@ -293,12 +286,10 @@ function getNewConnectionSuggestionItem(
     wslConns: Array<string>,
     s3Conns: Array<string>,
     changeConnection: (connName: string) => Promise<void>,
-    changeConnModalAtom: jotai.PrimitiveAtom<boolean>
+    setChangeConnModalOpen: (v: boolean) => void
 ): SuggestionConnectionItem | null {
     const allCons = ["", localName, ...remoteConns, ...wslConns, ...s3Conns];
     if (allCons.includes(connSelected)) {
-        // do not offer to create a new connection if one
-        // with the exact name already exists
         return null;
     }
     const newConnectionSuggestion: SuggestionConnectionItem = {
@@ -309,165 +300,164 @@ function getNewConnectionSuggestionItem(
         value: "",
         onSelect: (_: string) => {
             changeConnection(connSelected);
-            globalStore.set(changeConnModalAtom, false);
+            setChangeConnModalOpen(false);
         },
     };
     return newConnectionSuggestion;
 }
 
-const ChangeConnectionBlockModal = React.memo(
-    ({
-        blockId,
-        viewModel,
-        blockRef,
-        connBtnRef,
-        changeConnModalAtom,
-        nodeModel,
-    }: {
-        blockId: string;
-        viewModel: ViewModel;
-        blockRef: React.RefObject<HTMLDivElement>;
-        connBtnRef: React.RefObject<HTMLDivElement>;
-        changeConnModalAtom: jotai.PrimitiveAtom<boolean>;
-        nodeModel: NodeModel;
-    }) => {
-        const [connSelected, setConnSelected] = React.useState("");
-        const changeConnModalOpen = jotai.useAtomValue(changeConnModalAtom);
-        const [blockData] = WOS.useWaveObjectValue<Block>(WOS.makeORef("block", blockId));
-        const isNodeFocused = jotai.useAtomValue(nodeModel.isFocused);
-        const connection = blockData?.meta?.connection;
-        const connStatusAtom = getConnStatusAtom(connection);
-        const connStatus = jotai.useAtomValue(connStatusAtom);
-        const [connList, setConnList] = React.useState<Array<string>>([]);
-        const [wslList, setWslList] = React.useState<Array<string>>([]);
-        const [s3List, setS3List] = React.useState<Array<string>>([]);
-        const allConnStatus = jotai.useAtomValue(atoms.allConnStatus);
-        const [rowIndex, setRowIndex] = React.useState(0);
-        const connStatusMap = new Map<string, ConnStatus>();
-        const fullConfig = jotai.useAtomValue(atoms.fullConfigAtom);
-        let filterOutNowsh = util.useAtomValueSafe(viewModel.filterOutNowsh) ?? true;
-        const showS3 = util.useAtomValueSafe(viewModel.showS3) ?? false;
+const ChangeConnectionBlockModal = ({
+    blockId,
+    viewModel,
+    blockRef,
+    connBtnRef,
+    changeConnModalOpen,
+    setChangeConnModalOpen,
+    nodeModel,
+}: {
+    blockId: string;
+    viewModel: ViewModel;
+    blockRef: { current: HTMLDivElement };
+    connBtnRef: { current: HTMLDivElement };
+    changeConnModalOpen: Accessor<boolean>;
+    setChangeConnModalOpen: (v: boolean) => void;
+    nodeModel: NodeModel;
+}) => {
+    const [connSelected, setConnSelected] = createSignal("");
+    const [blockData] = WOS.useWaveObjectValue<Block>(WOS.makeORef("block", blockId));
+    const isNodeFocused = nodeModel.isFocused;
+    const connection = () => blockData()?.meta?.connection;
+    const connStatus = () => getConnStatusAtom(connection())();
+    const [connList, setConnList] = createSignal<Array<string>>([]);
+    const [wslList, setWslList] = createSignal<Array<string>>([]);
+    const [s3List, setS3List] = createSignal<Array<string>>([]);
+    const allConnStatus = atoms.allConnStatus;
+    const [rowIndex, setRowIndex] = createSignal(0);
+    const fullConfig = () => atoms.fullConfigAtom();
+    const filterOutNowsh = () => (viewModel.filterOutNowsh ? viewModel.filterOutNowsh() : true);
+    const showS3 = () => (viewModel.showS3 ? viewModel.showS3() : false);
 
+    createEffect(() => {
+        if (!changeConnModalOpen()) {
+            setConnList([]);
+            return;
+        }
+        const prtn = RpcApi.ConnListCommand(TabRpcClient, { timeout: 2000 });
+        prtn.then((newConnList) => {
+            setConnList(newConnList ?? []);
+        }).catch((e) => console.log("unable to load conn list from backend. using blank list: ", e));
+        const p2rtn = RpcApi.WslListCommand(TabRpcClient, { timeout: 2000 });
+        p2rtn
+            .then((newWslList) => {
+                console.log(newWslList);
+                setWslList(newWslList ?? []);
+            })
+            .catch((e) => {
+                // failing silently
+            });
+        RpcApi.ConnListAWSCommand(TabRpcClient, { timeout: 2000 })
+            .then((s3ListResult) => setS3List(s3ListResult ?? []))
+            .catch((e) => console.log("unable to load s3 list from backend:", e));
+    });
+
+    const changeConnection = async (connName: string) => {
+        if (connName == "") {
+            connName = null;
+        }
+        if (connName == blockData()?.meta?.connection) {
+            return;
+        }
+        const isAws = connName?.startsWith("aws:");
+        const oldFile = blockData()?.meta?.file ?? "";
+        let newFile: string;
+        if (oldFile == "") {
+            newFile = "";
+        } else if (isAws) {
+            newFile = "/";
+        } else {
+            newFile = "~";
+        }
+        await RpcApi.SetMetaCommand(TabRpcClient, {
+            oref: WOS.makeORef("block", blockId),
+            meta: { connection: connName, file: newFile, "cmd:cwd": null },
+        });
+
+        const rtInfo = { "cmd:hascurcwd": null };
+        const rtInfoData: CommandSetRTInfoData = {
+            oref: WOS.makeORef("block", blockId),
+            data: rtInfo,
+        };
+        RpcApi.SetRTInfoCommand(TabRpcClient, rtInfoData).catch((e) =>
+            console.log("error setting RT info", e)
+        );
+        try {
+            await RpcApi.ConnEnsureCommand(
+                TabRpcClient,
+                { connname: connName, logblockid: blockId },
+                { timeout: 60000 }
+            );
+        } catch (e) {
+            console.log("error connecting", blockId, connName, e);
+        }
+    };
+
+    const suggestions = () => {
+        const connStatusMap = new Map<string, ConnStatus>();
         let maxActiveConnNum = 1;
-        for (const conn of allConnStatus) {
+        for (const conn of allConnStatus()) {
             if (conn.activeconnnum > maxActiveConnNum) {
                 maxActiveConnNum = conn.activeconnnum;
             }
             connStatusMap.set(conn.connection, conn);
         }
-        React.useEffect(() => {
-            if (!changeConnModalOpen) {
-                setConnList([]);
-                return;
-            }
-            const prtn = RpcApi.ConnListCommand(TabRpcClient, { timeout: 2000 });
-            prtn.then((newConnList) => {
-                setConnList(newConnList ?? []);
-            }).catch((e) => console.log("unable to load conn list from backend. using blank list: ", e));
-            const p2rtn = RpcApi.WslListCommand(TabRpcClient, { timeout: 2000 });
-            p2rtn
-                .then((newWslList) => {
-                    console.log(newWslList);
-                    setWslList(newWslList ?? []);
-                })
-                .catch((e) => {
-                    // removing this log and failing silentyly since it will happen
-                    // if a system isn't using the wsl. and would happen every time the
-                    // typeahead was opened. good candidate for verbose log level.
-                    //console.log("unable to load wsl list from backend. using blank list: ", e)
-                });
-            RpcApi.ConnListAWSCommand(TabRpcClient, { timeout: 2000 })
-                .then((s3List) => setS3List(s3List ?? []))
-                .catch((e) => console.log("unable to load s3 list from backend:", e));
-        }, [changeConnModalOpen]);
 
-        const changeConnection = React.useCallback(
-            async (connName: string) => {
-                if (connName == "") {
-                    connName = null;
-                }
-                if (connName == blockData?.meta?.connection) {
-                    return;
-                }
-                const isAws = connName?.startsWith("aws:");
-                const oldFile = blockData?.meta?.file ?? "";
-                let newFile: string;
-                if (oldFile == "") {
-                    newFile = "";
-                } else if (isAws) {
-                    newFile = "/";
-                } else {
-                    newFile = "~";
-                }
-                await RpcApi.SetMetaCommand(TabRpcClient, {
-                    oref: WOS.makeORef("block", blockId),
-                    meta: { connection: connName, file: newFile, "cmd:cwd": null },
-                });
-                
-                const rtInfo = { "cmd:hascurcwd": null };
-                const rtInfoData: CommandSetRTInfoData = {
-                    oref: WOS.makeORef("block", blockId),
-                    data: rtInfo
-                };
-                RpcApi.SetRTInfoCommand(TabRpcClient, rtInfoData).catch((e) =>
-                    console.log("error setting RT info", e)
-                );
-                try {
-                    await RpcApi.ConnEnsureCommand(
-                        TabRpcClient,
-                        { connname: connName, logblockid: blockId },
-                        { timeout: 60000 }
-                    );
-                } catch (e) {
-                    console.log("error connecting", blockId, connName, e);
-                }
-            },
-            [blockId, blockData]
-        );
+        const cs = connStatus();
+        const conn = connection();
+        const fc = fullConfig();
 
-        const reconnectSuggestionItem = getReconnectItem(connStatus, connSelected, blockId);
+        const reconnectSuggestionItem = getReconnectItem(cs, connSelected(), blockId);
         const localName = getUserName() + "@" + getHostName();
         const localSuggestions = getLocalSuggestions(
             localName,
-            wslList,
-            connection,
-            connSelected,
+            wslList(),
+            conn,
+            connSelected(),
             connStatusMap,
-            fullConfig,
-            filterOutNowsh
+            fc,
+            filterOutNowsh()
         );
         const remoteSuggestions = getRemoteSuggestions(
-            connList,
-            connection,
-            connSelected,
+            connList(),
+            conn,
+            connSelected(),
             connStatusMap,
-            fullConfig,
-            filterOutNowsh
+            fc,
+            filterOutNowsh()
         );
         let s3Suggestions: SuggestionConnectionScope = null;
-        if (showS3) {
+        if (showS3()) {
             s3Suggestions = getS3Suggestions(
-                s3List,
-                connection,
-                connSelected,
+                s3List(),
+                conn,
+                connSelected(),
                 connStatusMap,
-                fullConfig,
-                filterOutNowsh
+                fc,
+                filterOutNowsh()
             );
         }
-        const connectionsEditItem = getConnectionsEditItem(changeConnModalAtom, connSelected);
-        const disconnectItem = getDisconnectItem(connection, connStatusMap);
+        const connectionsEditItem = getConnectionsEditItem(setChangeConnModalOpen, connSelected());
+        const disconnectItem = getDisconnectItem(conn, connStatusMap);
         const newConnectionSuggestionItem = getNewConnectionSuggestionItem(
-            connSelected,
+            connSelected(),
             localName,
-            connList,
-            wslList,
-            s3List,
+            connList(),
+            wslList(),
+            s3List(),
             changeConnection,
-            changeConnModalAtom
+            setChangeConnModalOpen
         );
 
-        const suggestions: Array<SuggestionsType> = [
+        const sug: Array<SuggestionsType> = [
             ...(reconnectSuggestionItem ? [reconnectSuggestionItem] : []),
             ...(localSuggestions ? [localSuggestions] : []),
             ...(remoteSuggestions ? [remoteSuggestions] : []),
@@ -476,8 +466,11 @@ const ChangeConnectionBlockModal = React.memo(
             ...(connectionsEditItem ? [connectionsEditItem] : []),
             ...(newConnectionSuggestionItem ? [newConnectionSuggestionItem] : []),
         ];
+        return sug;
+    };
 
-        let selectionList: Array<SuggestionConnectionItem> = suggestions.flatMap((item) => {
+    const selectionList = () => {
+        let list: Array<SuggestionConnectionItem> = suggestions().flatMap((item) => {
             if ("items" in item) {
                 return item.items;
             }
@@ -485,75 +478,76 @@ const ChangeConnectionBlockModal = React.memo(
         });
 
         // quick way to change icon color when highlighted
-        selectionList = selectionList.map((item, index) => {
-            if (index == rowIndex && item.iconColor == "var(--grey-text-color)") {
+        list = list.map((item, index) => {
+            if (index == rowIndex() && item.iconColor == "var(--grey-text-color)") {
                 item.iconColor = "var(--main-text-color)";
             }
             return item;
         });
+        return list;
+    };
 
-        const handleTypeAheadKeyDown = React.useCallback(
-            (waveEvent: WaveKeyboardEvent): boolean => {
-                if (keyutil.checkKeyPressed(waveEvent, "Enter")) {
-                    const rowItem = selectionList[rowIndex];
-                    if ("onSelect" in rowItem && rowItem.onSelect) {
-                        rowItem.onSelect(rowItem.value);
-                    } else {
-                        changeConnection(rowItem.value);
-                        globalStore.set(changeConnModalAtom, false);
-                        globalRefocusWithTimeout(10);
-                    }
-                    setRowIndex(0);
-                    return true;
-                }
-                if (keyutil.checkKeyPressed(waveEvent, "Escape")) {
-                    globalStore.set(changeConnModalAtom, false);
-                    setConnSelected("");
-                    globalRefocusWithTimeout(10);
-                    return true;
-                }
-                if (keyutil.checkKeyPressed(waveEvent, "ArrowUp")) {
-                    setRowIndex((idx) => Math.max(idx - 1, 0));
-                    return true;
-                }
-                if (keyutil.checkKeyPressed(waveEvent, "ArrowDown")) {
-                    setRowIndex((idx) => Math.min(idx + 1, selectionList.length - 1));
-                    return true;
-                }
-                setRowIndex(0);
-                return false;
-            },
-            [changeConnModalAtom, viewModel, blockId, connSelected, selectionList]
-        );
-        React.useEffect(() => {
-            // this is specifically for the case when the list shrinks due
-            // to a search filter
-            setRowIndex((idx) => Math.min(idx, selectionList.flat().length - 1));
-        }, [selectionList, setRowIndex]);
-        // this check was also moved to BlockFrame to prevent all the above code from running unnecessarily
-        if (!changeConnModalOpen) {
-            return null;
+    const handleTypeAheadKeyDown = (waveEvent: WaveKeyboardEvent): boolean => {
+        const sl = selectionList();
+        if (keyutil.checkKeyPressed(waveEvent, "Enter")) {
+            const rowItem = sl[rowIndex()];
+            if ("onSelect" in rowItem && rowItem.onSelect) {
+                rowItem.onSelect(rowItem.value);
+            } else {
+                changeConnection(rowItem.value);
+                setChangeConnModalOpen(false);
+                globalRefocusWithTimeout(10);
+            }
+            setRowIndex(0);
+            return true;
         }
-        return (
-            <TypeAheadModal
-                blockRef={blockRef}
-                anchorRef={connBtnRef}
-                suggestions={suggestions}
-                onSelect={(selected: string) => {
-                    changeConnection(selected);
-                    globalStore.set(changeConnModalAtom, false);
-                    globalRefocusWithTimeout(10);
-                }}
-                selectIndex={rowIndex}
-                autoFocus={isNodeFocused}
-                onKeyDown={(e) => keyutil.keydownWrapper(handleTypeAheadKeyDown)(e)}
-                onChange={(current: string) => setConnSelected(current)}
-                value={connSelected}
-                label="Connect to (username@host)..."
-                onClickBackdrop={() => globalStore.set(changeConnModalAtom, false)}
-            />
-        );
+        if (keyutil.checkKeyPressed(waveEvent, "Escape")) {
+            setChangeConnModalOpen(false);
+            setConnSelected("");
+            globalRefocusWithTimeout(10);
+            return true;
+        }
+        if (keyutil.checkKeyPressed(waveEvent, "ArrowUp")) {
+            setRowIndex((idx) => Math.max(idx - 1, 0));
+            return true;
+        }
+        if (keyutil.checkKeyPressed(waveEvent, "ArrowDown")) {
+            setRowIndex((idx) => Math.min(idx + 1, sl.length - 1));
+            return true;
+        }
+        setRowIndex(0);
+        return false;
+    };
+
+    // Clamp rowIndex when list shrinks
+    createEffect(() => {
+        const sl = selectionList();
+        setRowIndex((idx) => Math.min(idx, sl.flat().length - 1));
+    });
+
+    if (!changeConnModalOpen()) {
+        return null;
     }
-);
+
+    return (
+        <TypeAheadModal
+            blockRef={blockRef}
+            anchorRef={connBtnRef}
+            suggestions={suggestions()}
+            onSelect={(selected: string) => {
+                changeConnection(selected);
+                setChangeConnModalOpen(false);
+                globalRefocusWithTimeout(10);
+            }}
+            selectIndex={rowIndex()}
+            autoFocus={isNodeFocused()}
+            onKeyDown={(e) => keyutil.keydownWrapper(handleTypeAheadKeyDown)(e)}
+            onChange={(current: string) => setConnSelected(current)}
+            value={connSelected()}
+            label="Connect to (username@host)..."
+            onClickBackdrop={() => setChangeConnModalOpen(false)}
+        />
+    );
+};
 
 export { ChangeConnectionBlockModal };

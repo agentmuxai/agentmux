@@ -2,24 +2,17 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * useAgentStream — React hook that subscribes to a block's PTY output,
+ * useAgentStream — SolidJS hook that subscribes to a block's PTY output,
  * pipes it through the provider translator + stream parser, and feeds
- * the resulting DocumentNodes into Jotai atoms.
- *
- * Data flow:
- *   PTY FileSubject → base64 decode → UTF-8 text → NDJSON lines
- *     → OutputTranslator.translate() → StreamEvent[]
- *     → ClaudeCodeStreamParser.parseLine() → DocumentNode
- *     → Jotai documentAtom (append or update)
+ * the resulting DocumentNodes into SolidJS signals.
  */
 
-import { useEffect, useRef } from "react";
-import { useSetAtom } from "jotai";
-import type { PrimitiveAtom } from "jotai";
 import { getFileSubject } from "@/app/store/wps";
 import { base64ToArray } from "@/util/util";
+import { onCleanup, onMount } from "solid-js";
 import { createTranslator } from "./providers/translator-factory";
 import { ClaudeCodeStreamParser } from "./stream-parser";
+import type { SignalPair } from "./state";
 import type { DocumentNode, StreamingState } from "./types";
 
 const TermFileName = "term";
@@ -27,20 +20,13 @@ const TermFileName = "term";
 interface UseAgentStreamOpts {
     blockId: string;
     outputFormat: string;
-    documentAtom: PrimitiveAtom<DocumentNode[]>;
-    streamingStateAtom: PrimitiveAtom<StreamingState>;
+    documentAtom: SignalPair<DocumentNode[]>;
+    streamingStateAtom: SignalPair<StreamingState>;
     enabled: boolean;
 }
 
 /**
  * Subscribe to PTY output and parse it into styled DocumentNodes.
- *
- * The hook manages its own line buffer to handle NDJSON lines split across
- * multiple PTY data events. Each complete line is:
- *   1. Parsed as JSON
- *   2. Fed through the provider translator (e.g. ClaudeTranslator)
- *   3. Fed through ClaudeCodeStreamParser to produce DocumentNodes
- *   4. Written to the Jotai documentAtom
  */
 export function useAgentStream({
     blockId,
@@ -49,24 +35,23 @@ export function useAgentStream({
     streamingStateAtom,
     enabled,
 }: UseAgentStreamOpts): void {
-    const setDocument = useSetAtom(documentAtom);
-    const setStreaming = useSetAtom(streamingStateAtom);
+    const [, setDocument] = documentAtom;
+    const [, setStreaming] = streamingStateAtom;
 
-    // Refs for mutable state that persists across renders but doesn't trigger re-renders
-    const lineBufferRef = useRef("");
-    const translatorRef = useRef(createTranslator(outputFormat));
-    const parserRef = useRef(new ClaudeCodeStreamParser());
-    // Track node IDs we've seen so we can update (tool_result) vs append
-    const nodeIdSetRef = useRef(new Set<string>());
+    // Mutable state that doesn't trigger re-renders
+    let lineBuffer = "";
+    let translator = createTranslator(outputFormat);
+    let parser = new ClaudeCodeStreamParser();
+    let nodeIdSet = new Set<string>();
 
-    useEffect(() => {
+    onMount(() => {
         if (!enabled || !blockId) return;
 
         // Reset state on new subscription
-        lineBufferRef.current = "";
-        translatorRef.current = createTranslator(outputFormat);
-        parserRef.current = new ClaudeCodeStreamParser();
-        nodeIdSetRef.current = new Set();
+        lineBuffer = "";
+        translator = createTranslator(outputFormat);
+        parser = new ClaudeCodeStreamParser();
+        nodeIdSet = new Set();
 
         setStreaming((prev) => ({ ...prev, active: true, lastEventTime: Date.now() }));
 
@@ -76,10 +61,10 @@ export function useAgentStream({
             if (msg.fileop === "truncate") {
                 // Terminal was cleared — reset document
                 setDocument([]);
-                lineBufferRef.current = "";
-                translatorRef.current.reset();
-                parserRef.current.reset();
-                nodeIdSetRef.current = new Set();
+                lineBuffer = "";
+                translator.reset();
+                parser.reset();
+                nodeIdSet = new Set();
                 return;
             }
 
@@ -90,9 +75,9 @@ export function useAgentStream({
             const text = new TextDecoder().decode(bytes);
 
             // Accumulate into line buffer and process complete lines
-            lineBufferRef.current += text;
-            const lines = lineBufferRef.current.split("\n");
-            lineBufferRef.current = lines.pop() || ""; // Keep incomplete line
+            lineBuffer += text;
+            const lines = lineBuffer.split("\n");
+            lineBuffer = lines.pop() || ""; // Keep incomplete line
 
             const newNodes: DocumentNode[] = [];
             const updatedNodes: DocumentNode[] = [];
@@ -111,24 +96,24 @@ export function useAgentStream({
                 }
 
                 // Translate provider-specific format → StreamEvent[]
-                const streamEvents = translatorRef.current.translate(rawEvent);
+                const streamEvents = translator.translate(rawEvent);
 
                 // Convert StreamEvents → DocumentNodes
                 for (const event of streamEvents) {
-                    const node = parserRef.current.parseLine(JSON.stringify(event));
+                    const node = parser.parseLine(JSON.stringify(event));
                     if (!node) continue;
 
-                    if (nodeIdSetRef.current.has(node.id)) {
+                    if (nodeIdSet.has(node.id)) {
                         // Update existing node (e.g. tool_result completing a tool_call)
                         updatedNodes.push(node);
                     } else {
-                        nodeIdSetRef.current.add(node.id);
+                        nodeIdSet.add(node.id);
                         newNodes.push(node);
                     }
                 }
             }
 
-            // Batch update the document atom
+            // Batch update the document signal
             if (newNodes.length > 0 || updatedNodes.length > 0) {
                 setDocument((prev) => {
                     let result = [...prev];
@@ -157,9 +142,9 @@ export function useAgentStream({
             }
         });
 
-        return () => {
+        onCleanup(() => {
             subscription.unsubscribe();
             setStreaming((prev) => ({ ...prev, active: false }));
-        };
-    }, [blockId, outputFormat, enabled, setDocument, setStreaming]);
+        });
+    });
 }

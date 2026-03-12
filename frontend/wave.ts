@@ -27,12 +27,16 @@ import {
     subscribeToConnEvents,
     windowCountAtom,
     windowInstanceNumAtom,
+    setWindowInstanceNumAtom,
+    setWindowCountAtom,
+    setReinitVersion,
+    setUpdaterStatusAtom,
+    setFullConfigAtom,
 } from "@/app/store/global";
 import * as WOS from "@/app/store/wos";
 import { loadFonts } from "@/util/fontutil";
 import { setKeyUtilPlatform } from "@/util/keyutil";
-import { createElement } from "react";
-import { createRoot } from "react-dom/client";
+import { render } from "solid-js/web";
 
 
 const platform = getApi().getPlatform();
@@ -151,13 +155,13 @@ async function initInstanceTracking(): Promise<void> {
             getApi().getInstanceNumber(),
             getApi().getWindowCount(),
         ]);
-        globalStore.set(windowInstanceNumAtom, instanceNum);
-        globalStore.set(windowCountAtom, windowCount);
+        setWindowInstanceNumAtom(instanceNum);
+        setWindowCountAtom(windowCount);
 
         // Keep count in sync whenever any window opens or closes.
         const { listen } = await import("@tauri-apps/api/event");
         await listen<number>("window-instances-changed", (event) => {
-            globalStore.set(windowCountAtom, event.payload);
+            setWindowCountAtom(event.payload);
         });
     } catch (e) {
         console.warn("[initInstanceTracking] failed:", e);
@@ -488,8 +492,8 @@ async function reinitWave() {
     reloadAllWorkspaceTabs(ws);
     document.title = `AgentMux ${appVersion} - ${initialTab.name}`; // TODO update with tab name change
     getApi().setWindowInitStatus("wave-ready");
-    globalStore.set(atoms.reinitVersion, globalStore.get(atoms.reinitVersion) + 1);
-    globalStore.set(atoms.updaterStatusAtom, getApi().getUpdaterStatus());
+    setReinitVersion((v) => v + 1);
+    setUpdaterStatusAtom(getApi().getUpdaterStatus());
     setTimeout(() => {
         globalRefocus();
     }, 50);
@@ -605,20 +609,13 @@ async function initWave(initOpts: AgentMuxInitOpts) {
     t = performance.now();
     const fullConfig = await withTimeout(RpcApi.GetFullConfigCommand(TabRpcClient), RPC_TIMEOUT, "GetFullConfig");
     tlog("GetFullConfig", t);
-    globalStore.set(atoms.fullConfigAtom, fullConfig);
+    setFullConfigAtom(fullConfig);
 
     t = performance.now();
     console.log("Wave First Render");
-    let firstRenderResolveFn: () => void = null;
-    let firstRenderPromise = new Promise<void>((resolve) => {
-        firstRenderResolveFn = resolve;
-    });
-    const reactElem = createElement(App, { onFirstRender: firstRenderResolveFn }, null);
     const elem = document.getElementById("main");
-    const root = createRoot(elem);
-    root.render(reactElem);
-    await firstRenderPromise;
-    tlog("React render", t);
+    render(App, elem);
+    tlog("SolidJS render", t);
     tlog("TOTAL initWave", t0);
 
     // Hide startup loading message

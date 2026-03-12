@@ -2,51 +2,75 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
-import { atom, createStore, type PrimitiveAtom } from "jotai";
+import { createSignal } from "solid-js";
 import { LayoutModel } from "@/layout/lib/layoutModel";
 import { newLayoutNode } from "@/layout/lib/layoutNode";
-import { FlexDirection, LayoutTreeActionType } from "@/layout/lib/types";
+import {
+    FlexDirection,
+    LayoutTreeActionType,
+    LayoutTreeInsertNodeAction,
+    LayoutTreeSplitHorizontalAction,
+    LayoutTreeSetPendingAction,
+    LayoutTreeCommitPendingAction,
+} from "@/layout/lib/types";
+import type { SignalAtom } from "@/util/util";
 
-const layoutStateAtoms = new Map<string, PrimitiveAtom<LayoutState>>();
-const storeHolder: { current: ReturnType<typeof createStore> } = {
-    current: createStore(),
-};
+// Mock layoutState store keyed by oref
+const layoutStateSignals = new Map<string, SignalAtom<LayoutState>>();
+
+function makeLayoutStateSignal(oid: string): SignalAtom<LayoutState> {
+    const [get, set] = createSignal<LayoutState>({
+        otype: "layout",
+        oid,
+        version: 1,
+        meta: {},
+        rootnode: undefined,
+        magnifiednodeid: undefined,
+        focusednodeid: undefined,
+        leaforder: undefined,
+        pendingbackendactions: undefined,
+    });
+    const atom = () => get();
+    (atom as any)._set = set;
+    return atom as unknown as SignalAtom<LayoutState>;
+}
 
 vi.mock("@/app/store/global", () => {
-    const { atom } = require("jotai");
     return {
         WOS: {
             makeORef: (_otype: string, oid: string) => oid,
             getWaveObjectAtom: (oid: string) => {
-                if (!layoutStateAtoms.has(oid)) {
-                    layoutStateAtoms.set(
-                        oid,
-                        atom<LayoutState>({
-                            otype: "layout",
-                            oid,
-                            version: 1,
-                            meta: {},
-                            rootnode: undefined,
-                            magnifiednodeid: undefined,
-                            focusednodeid: undefined,
-                            leaforder: undefined,
-                            pendingbackendactions: undefined,
-                        }),
-                    );
+                if (!layoutStateSignals.has(oid)) {
+                    layoutStateSignals.set(oid, makeLayoutStateSignal(oid));
                 }
-                return layoutStateAtoms.get(oid);
+                return layoutStateSignals.get(oid);
+            },
+            getObjectValue: (oref: string) => {
+                const sig = layoutStateSignals.get(oref);
+                return sig ? sig() : undefined;
+            },
+            setObjectValue: (value: any) => {
+                const oref = `${value.otype}:${value.oid}`;
+                const sig = layoutStateSignals.get(value.oid) ?? layoutStateSignals.get(oref);
+                if (sig) sig._set(value);
             },
         },
-        getSettingsKeyAtom: () => atom(0.75),
+        getSettingsKeyAtom: () => {
+            const [get] = createSignal(0.75);
+            return get;
+        },
         globalStore: {
-            get: (targetAtom: any) => storeHolder.current.get(targetAtom),
-            set: (targetAtom: any, value: any) => storeHolder.current.set(targetAtom, value),
+            get: (accessor: any) => (typeof accessor === "function" ? accessor() : undefined),
+            set: (setter: any, value: any) => {
+                if (setter && typeof setter._set === "function") setter._set(value);
+                else if (typeof setter === "function") setter(value);
+            },
         },
     };
 });
 
 function createLayoutModel(): LayoutModel {
-    const tabAtom = atom<Tab>({
+    const [getTab] = createSignal<Tab>({
         otype: "tab",
         oid: "tab-1",
         version: 1,
@@ -55,7 +79,7 @@ function createLayoutModel(): LayoutModel {
         layoutstate: "layout-1",
         blockids: [],
     });
-    const model = new LayoutModel(tabAtom, storeHolder.current.get, storeHolder.current.set);
+    const model = new LayoutModel(getTab);
     model.getBoundingRect = () => ({
         top: 0,
         left: 0,
@@ -75,8 +99,7 @@ function createLayoutModel(): LayoutModel {
 
 describe("LayoutModel", () => {
     beforeEach(() => {
-        layoutStateAtoms.clear();
-        storeHolder.current = createStore();
+        layoutStateSignals.clear();
         vi.useFakeTimers();
     });
 
@@ -93,7 +116,7 @@ describe("LayoutModel", () => {
             node,
             magnified: false,
             focused: true,
-        });
+        } as LayoutTreeInsertNodeAction);
 
         expect(model.treeState.rootNode?.data?.blockId).toBe("block-1");
         expect(model.treeState.focusedNodeId).toBe(node.id);
@@ -108,7 +131,7 @@ describe("LayoutModel", () => {
             node: first,
             magnified: false,
             focused: true,
-        });
+        } as LayoutTreeInsertNodeAction);
 
         const second = newLayoutNode(undefined, undefined, undefined, { blockId: "right" });
         model.treeReducer(
@@ -118,7 +141,7 @@ describe("LayoutModel", () => {
                 newNode: second,
                 position: "after",
                 focused: true,
-            },
+            } as LayoutTreeSplitHorizontalAction,
             false,
         );
 
@@ -138,7 +161,7 @@ describe("LayoutModel", () => {
             node: first,
             magnified: false,
             focused: true,
-        });
+        } as LayoutTreeInsertNodeAction);
 
         const pending = newLayoutNode(undefined, undefined, undefined, { blockId: "secondary" });
         model.treeReducer(
@@ -149,14 +172,14 @@ describe("LayoutModel", () => {
                     node: pending,
                     magnified: false,
                     focused: true,
-                },
-            },
+                } as LayoutTreeInsertNodeAction,
+            } as LayoutTreeSetPendingAction,
             false,
         );
 
-        model.treeReducer({ type: LayoutTreeActionType.CommitPendingAction }, false);
+        model.treeReducer({ type: LayoutTreeActionType.CommitPendingAction } as LayoutTreeCommitPendingAction, false);
 
-        // Advance timers to allow throttled atom to update
+        // Advance timers to allow throttled signal to update
         vi.advanceTimersByTime(20);
 
         const root = model.treeState.rootNode!;
@@ -166,7 +189,8 @@ describe("LayoutModel", () => {
         expect(leafBlocks).toContain("primary");
         expect(leafBlocks).toContain("secondary");
 
-        const pendingAction = storeHolder.current.get(model.pendingTreeAction.throttledValueAtom);
+        // After commit, the pending action should be cleared
+        const pendingAction = model.pendingTreeAction.throttledValueAtom();
         expect(pendingAction).toBeUndefined();
     });
 });

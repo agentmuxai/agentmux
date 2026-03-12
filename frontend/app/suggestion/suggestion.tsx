@@ -3,13 +3,21 @@
 
 import { atoms } from "@/app/store/global";
 import { isBlank, makeIconClass } from "@/util/util";
-import { offset, useFloating } from "@floating-ui/react";
+import { computePosition, offset } from "@floating-ui/dom";
 import clsx from "clsx";
-import { Atom, useAtomValue } from "jotai";
-import React, { ReactNode, useEffect, useId, useRef, useState } from "react";
+import {
+    createEffect,
+    createMemo,
+    createSignal,
+    For,
+    onCleanup,
+    onMount,
+    Show,
+} from "solid-js";
+import type { Accessor, JSX } from "solid-js";
 
 interface SuggestionControlProps {
-    anchorRef: React.RefObject<HTMLElement>;
+    anchorRef: { current: HTMLElement | null };
     isOpen: boolean;
     onClose: () => void;
     onSelect: (item: SuggestionType, queryStr: string) => boolean;
@@ -17,52 +25,36 @@ interface SuggestionControlProps {
     fetchSuggestions: SuggestionsFnType;
     className?: string;
     placeholderText?: string;
-    children?: React.ReactNode;
+    children?: JSX.Element;
 }
 
 type BlockHeaderSuggestionControlProps = Omit<SuggestionControlProps, "anchorRef" | "isOpen"> & {
-    blockRef: React.RefObject<HTMLElement>;
-    openAtom: Atom<boolean>;
+    blockRef: { current: HTMLElement | null };
+    openAtom: Accessor<boolean>;
 };
 
-const SuggestionControl: React.FC<SuggestionControlProps> = ({
-    anchorRef,
-    isOpen,
-    onClose,
-    onSelect,
-    onTab,
-    fetchSuggestions,
-    className,
-    children,
-}) => {
-    if (!isOpen || !anchorRef.current || !fetchSuggestions) return null;
-
+function SuggestionControl(props: SuggestionControlProps): JSX.Element {
     return (
-        <SuggestionControlInner {...{ anchorRef, onClose, onSelect, onTab, fetchSuggestions, className, children }} />
+        <Show when={props.isOpen && props.anchorRef.current != null && props.fetchSuggestions != null}>
+            <SuggestionControlInner {...props} />
+        </Show>
     );
-};
+}
 
-function highlightPositions(target: string, positions: number[]): ReactNode[] {
-    if (target == null) {
-        return [];
-    }
-    if (positions == null) {
-        return [target];
-    }
-    const result: ReactNode[] = [];
+function highlightPositions(target: string, positions: number[]): JSX.Element[] {
+    if (target == null) return [];
+    if (positions == null) return [<span>{target}</span>];
+    const result: JSX.Element[] = [];
     let targetIndex = 0;
     let posIndex = 0;
-
     while (targetIndex < target.length) {
         if (posIndex < positions.length && targetIndex === positions[posIndex]) {
             result.push(
-                <span key={`h-${targetIndex}`} className="text-blue-500 font-bold">
-                    {target[targetIndex]}
-                </span>
+                <span class="text-blue-500 font-bold">{target[targetIndex]}</span>
             );
             posIndex++;
         } else {
-            result.push(target[targetIndex]);
+            result.push(<span>{target[targetIndex]}</span>);
         }
         targetIndex++;
     }
@@ -70,188 +62,176 @@ function highlightPositions(target: string, positions: number[]): ReactNode[] {
 }
 
 function getMimeTypeIconAndColor(fullConfig: FullConfigType, mimeType: string): [string, string] {
-    if (mimeType == null) {
-        return [null, null];
-    }
+    if (mimeType == null) return [null, null];
     while (mimeType.length > 0) {
         const icon = fullConfig.mimetypes?.[mimeType]?.icon ?? null;
         const iconColor = fullConfig.mimetypes?.[mimeType]?.color ?? null;
-        if (icon != null) {
-            return [icon, iconColor];
-        }
+        if (icon != null) return [icon, iconColor];
         mimeType = mimeType.slice(0, -1);
     }
     return [null, null];
 }
 
-const SuggestionIcon: React.FC<{ suggestion: SuggestionType }> = ({ suggestion }) => {
-    if (suggestion.iconsrc) {
-        return <img src={suggestion.iconsrc} alt="favicon" className="w-4 h-4 object-contain" />;
+function SuggestionIcon(props: { suggestion: SuggestionType }): JSX.Element {
+    if (props.suggestion.iconsrc) {
+        return <img src={props.suggestion.iconsrc} alt="favicon" class="w-4 h-4 object-contain" />;
     }
-    if (suggestion.icon) {
-        const iconClass = makeIconClass(suggestion.icon, true);
-        const iconColor = suggestion.iconcolor;
-        return <i className={iconClass} style={{ color: iconColor }} />;
+    if (props.suggestion.icon) {
+        const iconClass = makeIconClass(props.suggestion.icon, true);
+        return <i class={iconClass} style={{ color: props.suggestion.iconcolor }} />;
     }
-    if (suggestion.type === "url") {
+    if (props.suggestion.type === "url") {
         const iconClass = makeIconClass("globe", true);
-        const iconColor = suggestion.iconcolor;
-        return <i className={iconClass} style={{ color: iconColor }} />;
-    } else if (suggestion.type === "file") {
-        // For file suggestions, use the existing logic.
-        const fullConfig = useAtomValue(atoms.fullConfigAtom);
+        return <i class={iconClass} style={{ color: props.suggestion.iconcolor }} />;
+    } else if (props.suggestion.type === "file") {
+        const fullConfig = atoms.fullConfigAtom();
         let icon: string = null;
         let iconColor: string = null;
-        if (icon == null && suggestion["file:mimetype"] != null) {
-            [icon, iconColor] = getMimeTypeIconAndColor(fullConfig, suggestion["file:mimetype"]);
+        if (icon == null && props.suggestion["file:mimetype"] != null) {
+            [icon, iconColor] = getMimeTypeIconAndColor(fullConfig, props.suggestion["file:mimetype"]);
         }
         const iconClass = makeIconClass(icon, true, { defaultIcon: "file" });
-        return <i className={iconClass} style={{ color: iconColor }} />;
+        return <i class={iconClass} style={{ color: iconColor }} />;
     }
     const iconClass = makeIconClass("file", true);
-    return <i className={iconClass} />;
-};
+    return <i class={iconClass} />;
+}
 
-const SuggestionContent: React.FC<{
-    suggestion: SuggestionType;
-}> = ({ suggestion }) => {
-    if (!isBlank(suggestion.subtext)) {
+function SuggestionContent(props: { suggestion: SuggestionType }): JSX.Element {
+    if (!isBlank(props.suggestion.subtext)) {
         return (
-            <div className="flex flex-col">
-                {/* Title on the first line, with highlighting */}
-                <div className="truncate text-white">{highlightPositions(suggestion.display, suggestion.matchpos)}</div>
-                {/* Subtext on the second line in a smaller, grey style */}
-                <div className="truncate text-sm text-secondary">
-                    {highlightPositions(suggestion.subtext, suggestion.submatchpos)}
+            <div class="flex flex-col">
+                <div class="truncate text-white">{highlightPositions(props.suggestion.display, props.suggestion.matchpos)}</div>
+                <div class="truncate text-sm text-secondary">
+                    {highlightPositions(props.suggestion.subtext, props.suggestion.submatchpos)}
                 </div>
             </div>
         );
     }
-    return <span className="truncate">{highlightPositions(suggestion.display, suggestion.matchpos)}</span>;
-};
+    return <span class="truncate">{highlightPositions(props.suggestion.display, props.suggestion.matchpos)}</span>;
+}
 
-const BlockHeaderSuggestionControl: React.FC<BlockHeaderSuggestionControlProps> = (props) => {
-    const [headerElem, setHeaderElem] = useState<HTMLElement>(null);
-    const isOpen = useAtomValue(props.openAtom);
+function BlockHeaderSuggestionControl(props: BlockHeaderSuggestionControlProps): JSX.Element {
+    const [headerElem, setHeaderElem] = createSignal<HTMLElement | null>(null);
+    const isOpen = props.openAtom;
 
-    useEffect(() => {
-        if (props.blockRef.current == null) {
+    createEffect(() => {
+        const blockEl = props.blockRef.current;
+        if (blockEl == null) {
             setHeaderElem(null);
             return;
         }
-        const headerElem = props.blockRef.current.querySelector("[data-role='block-header']");
-        setHeaderElem(headerElem as HTMLElement);
-    }, [props.blockRef.current]);
+        const el = blockEl.querySelector("[data-role='block-header']");
+        setHeaderElem(el as HTMLElement);
+    });
 
     const newClass = clsx(props.className, "rounded-t-none");
-    return <SuggestionControl {...props} anchorRef={{ current: headerElem }} isOpen={isOpen} className={newClass} />;
-};
+    const anchorRef = createMemo(() => ({ current: headerElem() }));
 
-/**
- * The empty state component that can be used as a child of SuggestionControl.
- * If no children are provided to SuggestionControl, this default empty state will be used.
- */
-const SuggestionControlNoResults: React.FC<{ children?: React.ReactNode }> = ({ children }) => {
     return (
-        <div className="flex items-center justify-center min-h-[120px] p-4">
-            {children ?? <span className="text-gray-500">No Suggestions</span>}
-        </div>
+        <SuggestionControl
+            {...props}
+            anchorRef={anchorRef()}
+            isOpen={isOpen()}
+            className={newClass}
+        />
     );
-};
+}
 
-const SuggestionControlNoData: React.FC<{ children?: React.ReactNode }> = ({ children }) => {
-    return (
-        <div className="flex items-center justify-center min-h-[120px] p-4">
-            {children ?? <span className="text-gray-500">No Suggestions</span>}
-        </div>
-    );
-};
+const SuggestionControlNoResults = (props: { children?: JSX.Element }): JSX.Element => (
+    <div class="flex items-center justify-center min-h-[120px] p-4">
+        {props.children ?? <span class="text-gray-500">No Suggestions</span>}
+    </div>
+);
+
+const SuggestionControlNoData = (props: { children?: JSX.Element }): JSX.Element => (
+    <div class="flex items-center justify-center min-h-[120px] p-4">
+        {props.children ?? <span class="text-gray-500">No Suggestions</span>}
+    </div>
+);
 
 interface SuggestionControlInnerProps extends Omit<SuggestionControlProps, "isOpen"> {}
 
-const SuggestionControlInner: React.FC<SuggestionControlInnerProps> = ({
-    anchorRef,
-    onClose,
-    onSelect,
-    onTab,
-    fetchSuggestions,
-    className,
-    placeholderText,
-    children,
-}) => {
-    const widgetId = useId();
-    const [query, setQuery] = useState("");
-    const reqNumRef = useRef(0);
-    let [suggestions, setSuggestions] = useState<SuggestionType[]>([]);
-    const [selectedIndex, setSelectedIndex] = useState(0);
-    const [fetched, setFetched] = useState(false);
-    const inputRef = useRef<HTMLInputElement>(null);
-    const dropdownRef = useRef<HTMLDivElement>(null);
-    const { refs, floatingStyles, middlewareData } = useFloating({
-        placement: "bottom",
-        strategy: "absolute",
-        middleware: [offset(-1)],
+function SuggestionControlInner(props: SuggestionControlInnerProps): JSX.Element {
+    const widgetId = crypto.randomUUID();
+    const [query, setQuery] = createSignal("");
+    const [suggestions, setSuggestions] = createSignal<SuggestionType[]>([]);
+    const [selectedIndex, setSelectedIndex] = createSignal(0);
+    const [fetched, setFetched] = createSignal(false);
+    const [floatingStyle, setFloatingStyle] = createSignal<{ top: string; left: string }>({ top: "0px", left: "0px" });
+
+    let reqNum = 0;
+    let inputRef!: HTMLInputElement;
+    let dropdownRef!: HTMLDivElement;
+    let floatingRef!: HTMLDivElement;
+
+    // Position floating element relative to anchor
+    const updatePosition = async () => {
+        if (!props.anchorRef.current || !floatingRef) return;
+        const pos = await computePosition(props.anchorRef.current, floatingRef, {
+            placement: "bottom",
+            strategy: "absolute",
+            middleware: [offset(-1)],
+        });
+        setFloatingStyle({ top: `${pos.y}px`, left: `${pos.x}px` });
+    };
+
+    onMount(() => {
+        updatePosition();
+        inputRef?.focus();
     });
-    const emptyStateChild = React.Children.toArray(children).find(
-        (child) => React.isValidElement(child) && child.type === SuggestionControlNoResults
-    );
-    const noDataChild = React.Children.toArray(children).find(
-        (child) => React.isValidElement(child) && child.type === SuggestionControlNoData
-    );
 
-    useEffect(() => {
-        refs.setReference(anchorRef.current);
-    }, [anchorRef.current]);
+    createEffect(() => {
+        if (props.anchorRef.current) {
+            updatePosition();
+        }
+    });
 
-    useEffect(() => {
-        reqNumRef.current++;
-        fetchSuggestions(query, { widgetid: widgetId, reqnum: reqNumRef.current }).then((results) => {
-            if (results.reqnum !== reqNumRef.current) {
-                return;
-            }
+    // Fetch suggestions when query changes
+    createEffect(() => {
+        const q = query();
+        reqNum++;
+        const curReqNum = reqNum;
+        props.fetchSuggestions(q, { widgetid: widgetId, reqnum: curReqNum }).then((results) => {
+            if (results.reqnum !== curReqNum) return;
             setSuggestions(results.suggestions ?? []);
             setFetched(true);
         });
-    }, [query, fetchSuggestions]);
+    });
 
-    useEffect(() => {
-        return () => {
-            reqNumRef.current++;
-            fetchSuggestions("", { widgetid: widgetId, reqnum: reqNumRef.current, dispose: true });
-        };
-    }, []);
+    onCleanup(() => {
+        reqNum++;
+        props.fetchSuggestions("", { widgetid: widgetId, reqnum: reqNum, dispose: true });
+    });
 
-    useEffect(() => {
-        inputRef.current?.focus();
-    }, []);
+    // Click outside to close
+    const handleClickOutside = (event: MouseEvent) => {
+        if (floatingRef && !floatingRef.contains(event.target as Node)) {
+            props.onClose();
+        }
+    };
 
-    useEffect(() => {
-        const handleClickOutside = (event: MouseEvent) => {
-            if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
-                onClose();
-            }
-        };
+    onMount(() => {
         document.addEventListener("mousedown", handleClickOutside);
-        return () => document.removeEventListener("mousedown", handleClickOutside);
-    }, [onClose, anchorRef]);
+        onCleanup(() => document.removeEventListener("mousedown", handleClickOutside));
+    });
 
-    useEffect(() => {
-        if (dropdownRef.current) {
-            const children = dropdownRef.current.children;
-            if (children[selectedIndex]) {
-                (children[selectedIndex] as HTMLElement).scrollIntoView({
-                    behavior: "auto",
-                    block: "nearest",
-                });
+    // Scroll selected item into view
+    createEffect(() => {
+        const idx = selectedIndex();
+        if (dropdownRef) {
+            const children = dropdownRef.children;
+            if (children[idx]) {
+                (children[idx] as HTMLElement).scrollIntoView({ behavior: "auto", block: "nearest" });
             }
         }
-    }, [selectedIndex]);
+    });
 
-    const handleKeyDown = (e: React.KeyboardEvent) => {
+    const handleKeyDown = (e: KeyboardEvent) => {
         if (e.key === "ArrowDown") {
             e.preventDefault();
             e.stopPropagation();
-            setSelectedIndex((prev) => Math.min(prev + 1, suggestions.length - 1));
+            setSelectedIndex((prev) => Math.min(prev + 1, suggestions().length - 1));
         } else if (e.key === "ArrowUp") {
             e.preventDefault();
             e.stopPropagation();
@@ -259,92 +239,98 @@ const SuggestionControlInner: React.FC<SuggestionControlInnerProps> = ({
         } else if (e.key === "Enter") {
             e.preventDefault();
             e.stopPropagation();
+            const idx = selectedIndex();
             let suggestion: SuggestionType = null;
-            if (selectedIndex >= 0 && selectedIndex < suggestions.length) {
-                suggestion = suggestions[selectedIndex];
+            if (idx >= 0 && idx < suggestions().length) {
+                suggestion = suggestions()[idx];
             }
-            if (onSelect(suggestion, query)) {
-                onClose();
+            if (props.onSelect(suggestion, query())) {
+                props.onClose();
             }
         } else if (e.key === "Escape") {
             e.preventDefault();
             e.stopPropagation();
-            onClose();
+            props.onClose();
         } else if (e.key === "Tab") {
             e.preventDefault();
             e.stopPropagation();
-            const suggestion = suggestions[selectedIndex];
+            const suggestion = suggestions()[selectedIndex()];
             if (suggestion != null) {
-                const tabResult = onTab?.(suggestion, query);
-                if (tabResult != null) {
-                    setQuery(tabResult);
-                }
+                const tabResult = props.onTab?.(suggestion, query());
+                if (tabResult != null) setQuery(tabResult);
             }
         } else if (e.key === "PageDown") {
             e.preventDefault();
             e.stopPropagation();
-            setSelectedIndex((prev) => Math.min(prev + 10, suggestions.length - 1));
+            setSelectedIndex((prev) => Math.min(prev + 10, suggestions().length - 1));
         } else if (e.key === "PageUp") {
             e.preventDefault();
             e.stopPropagation();
             setSelectedIndex((prev) => Math.max(prev - 10, 0));
         }
     };
+
     return (
         <div
-            className={clsx(
+            ref={floatingRef!}
+            class={clsx(
                 "w-96 rounded-lg bg-modalbg shadow-lg border border-gray-700 z-[var(--zindex-typeahead-modal)] absolute",
-                middlewareData?.offset == null ? "opacity-0" : null,
-                className
+                props.className
             )}
-            ref={refs.setFloating}
-            style={floatingStyles}
+            style={{ position: "absolute", top: floatingStyle().top, left: floatingStyle().left }}
         >
-            <div className="p-2">
+            <div class="p-2">
                 <input
-                    ref={inputRef}
+                    ref={inputRef!}
                     type="text"
-                    value={query}
+                    value={query()}
                     onChange={(e) => {
                         setQuery(e.target.value);
                         setSelectedIndex(0);
                     }}
                     onKeyDown={handleKeyDown}
-                    className="w-full bg-gray-900 text-gray-100 px-4 py-2 rounded-md border border-gray-700 focus:outline-none focus:border-accent placeholder-secondary"
-                    placeholder={placeholderText}
+                    class="w-full bg-gray-900 text-gray-100 px-4 py-2 rounded-md border border-gray-700 focus:outline-none focus:border-accent placeholder-secondary"
+                    placeholder={props.placeholderText}
                 />
             </div>
-            {fetched &&
-                (suggestions.length > 0 ? (
-                    <div ref={dropdownRef} className="max-h-96 overflow-y-auto divide-y divide-gray-700">
-                        {suggestions.map((suggestion, index) => (
-                            <div
-                                key={suggestion.suggestionid}
-                                className={clsx(
-                                    "flex items-center gap-3 px-4 py-2 cursor-pointer",
-                                    index === selectedIndex ? "bg-accentbg" : "hover:bg-hoverbg",
-                                    "text-gray-100"
-                                )}
-                                onClick={() => {
-                                    onSelect(suggestion, query);
-                                    onClose();
-                                }}
+            <Show when={fetched()}>
+                <Show
+                    when={suggestions().length > 0}
+                    fallback={
+                        <div class="flex items-center justify-center min-h-[120px] p-4">
+                            <Show
+                                when={query() !== ""}
+                                fallback={<SuggestionControlNoData />}
                             >
-                                <SuggestionIcon suggestion={suggestion} />
-                                <SuggestionContent suggestion={suggestion} />
-                            </div>
-                        ))}
+                                <SuggestionControlNoResults />
+                            </Show>
+                        </div>
+                    }
+                >
+                    <div ref={dropdownRef!} class="max-h-96 overflow-y-auto divide-y divide-gray-700">
+                        <For each={suggestions()}>
+                            {(suggestion, index) => (
+                                <div
+                                    class={clsx(
+                                        "flex items-center gap-3 px-4 py-2 cursor-pointer",
+                                        index() === selectedIndex() ? "bg-accentbg" : "hover:bg-hoverbg",
+                                        "text-gray-100"
+                                    )}
+                                    onClick={() => {
+                                        props.onSelect(suggestion, query());
+                                        props.onClose();
+                                    }}
+                                >
+                                    <SuggestionIcon suggestion={suggestion} />
+                                    <SuggestionContent suggestion={suggestion} />
+                                </div>
+                            )}
+                        </For>
                     </div>
-                ) : (
-                    // Render the empty state (either a provided child or the default)
-                    <div key="empty" className="flex items-center justify-center min-h-[120px] p-4">
-                        {query === ""
-                            ? (noDataChild ?? <SuggestionControlNoData />)
-                            : (emptyStateChild ?? <SuggestionControlNoResults />)}
-                    </div>
-                ))}
+                </Show>
+            </Show>
         </div>
     );
-};
+}
 
 export { BlockHeaderSuggestionControl, SuggestionControl, SuggestionControlNoData, SuggestionControlNoResults };

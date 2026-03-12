@@ -1,16 +1,22 @@
 // Copyright 2025, Command Line Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-import { autoUpdate, FloatingPortal, Middleware, offset, useFloating } from "@floating-ui/react";
+import { createSignalAtom, type SignalAtom } from "@/util/util";
+import {
+    autoUpdate,
+    computePosition,
+    offset,
+    type Middleware,
+} from "@floating-ui/dom";
 import clsx from "clsx";
-import { atom, useAtom, WritableAtom } from "jotai";
-import { memo, useCallback, useEffect, useMemo, useRef } from "react";
+import { createEffect, createMemo, JSX, onCleanup, onMount, Show } from "solid-js";
+import { Portal } from "solid-js/web";
 import { IconButton, ToggleIconButton } from "./iconbutton";
 import { Input } from "./input";
 import "./search.scss";
 
 type SearchProps = SearchAtoms & {
-    anchorRef?: React.RefObject<HTMLElement>;
+    anchorRef?: { current: HTMLElement | null };
     offsetX?: number;
     offsetY?: number;
     onSearch?: (search: string) => void;
@@ -18,106 +24,118 @@ type SearchProps = SearchAtoms & {
     onPrev?: () => void;
 };
 
-const SearchComponent = ({
-    searchValue: searchAtom,
-    resultsIndex: indexAtom,
-    resultsCount: numResultsAtom,
-    regex: regexAtom,
-    caseSensitive: caseSensitiveAtom,
-    wholeWord: wholeWordAtom,
-    isOpen: isOpenAtom,
-    anchorRef,
-    offsetX = 10,
-    offsetY = 10,
-    onSearch,
-    onNext,
-    onPrev,
-}: SearchProps) => {
-    const [isOpen, setIsOpen] = useAtom<boolean>(isOpenAtom);
-    const [search, setSearch] = useAtom<string>(searchAtom);
-    const [index, setIndex] = useAtom<number>(indexAtom);
-    const [numResults, setNumResults] = useAtom<number>(numResultsAtom);
+const SearchComponent = (props: SearchProps): JSX.Element => {
+    const searchAtom = props.searchValue;
+    const indexAtom = props.resultsIndex;
+    const numResultsAtom = props.resultsCount;
+    const isOpenAtom = props.isOpen;
+    const regexAtom = props.regex;
+    const wholeWordAtom = props.wholeWord;
+    const caseSensitiveAtom = props.caseSensitive;
 
-    const handleOpenChange = useCallback((open: boolean) => {
-        setIsOpen(open);
-    }, []);
+    const offsetX = props.offsetX ?? 10;
+    const offsetY = props.offsetY ?? 10;
 
-    useEffect(() => {
-        if (!isOpen) {
-            setSearch("");
-            setIndex(0);
-            setNumResults(0);
+    const floatingStyleAtom = createSignalAtom("position:absolute;left:0px;top:0px");
+    let floatingEl: HTMLElement | null = null;
+    let cleanupAutoUpdate: (() => void) | null = null;
+
+    const offsetCallback = ({ rects }: { rects: any }) => {
+        const docRect = document.documentElement.getBoundingClientRect();
+        let yOffsetCalc = -rects.floating.height - offsetY;
+        let xOffsetCalc = -offsetX;
+        const floatingBottom = rects.reference.y + rects.floating.height + offsetY;
+        const floatingLeft = rects.reference.x + rects.reference.width - (rects.floating.width + offsetX);
+        if (floatingBottom > docRect.bottom) {
+            yOffsetCalc -= docRect.bottom - floatingBottom;
         }
-    }, [isOpen]);
+        if (floatingLeft < 5) {
+            xOffsetCalc += 5 - floatingLeft;
+        }
+        return {
+            mainAxis: yOffsetCalc,
+            crossAxis: xOffsetCalc,
+        };
+    };
 
-    useEffect(() => {
-        setIndex(0);
-        setNumResults(0);
-        onSearch?.(search);
-    }, [search]);
+    const middleware: Middleware[] = [offset(offsetCallback as any)];
 
-    const middleware: Middleware[] = [];
-    const offsetCallback = useCallback(
-        ({ rects }) => {
-            const docRect = document.documentElement.getBoundingClientRect();
-            let yOffsetCalc = -rects.floating.height - offsetY;
-            let xOffsetCalc = -offsetX;
-            const floatingBottom = rects.reference.y + rects.floating.height + offsetY;
-            const floatingLeft = rects.reference.x + rects.reference.width - (rects.floating.width + offsetX);
-            if (floatingBottom > docRect.bottom) {
-                yOffsetCalc -= docRect.bottom - floatingBottom;
-            }
-            if (floatingLeft < 5) {
-                xOffsetCalc += 5 - floatingLeft;
-            }
-            return {
-                mainAxis: yOffsetCalc,
-                crossAxis: xOffsetCalc,
-            };
-        },
-        [offsetX, offsetY]
-    );
-    middleware.push(offset(offsetCallback));
+    const updatePosition = async () => {
+        const referenceEl = props.anchorRef?.current;
+        if (!referenceEl || !floatingEl) return;
+        const pos = await computePosition(referenceEl, floatingEl, {
+            placement: "top-end",
+            middleware,
+        });
+        floatingStyleAtom._set(`position:absolute;left:${pos.x}px;top:${pos.y}px`);
+    };
 
-    const { refs, floatingStyles } = useFloating({
-        placement: "top-end",
-        open: isOpen,
-        onOpenChange: handleOpenChange,
-        whileElementsMounted: autoUpdate,
-        middleware,
-        elements: {
-            reference: anchorRef!.current,
-        },
+    const registerFloating = (el: HTMLElement) => {
+        floatingEl = el;
+        const referenceEl = props.anchorRef?.current;
+        if (referenceEl && floatingEl) {
+            cleanupAutoUpdate?.();
+            cleanupAutoUpdate = autoUpdate(referenceEl, floatingEl, updatePosition);
+        }
+    };
+
+    onCleanup(() => {
+        cleanupAutoUpdate?.();
     });
 
-    const onPrevWrapper = useCallback(
-        () => (onPrev ? onPrev() : setIndex((index - 1) % numResults)),
-        [onPrev, index, numResults]
-    );
-    const onNextWrapper = useCallback(
-        () => (onNext ? onNext() : setIndex((index + 1) % numResults)),
-        [onNext, index, numResults]
-    );
+    // When closed, reset search state
+    createEffect(() => {
+        if (!isOpenAtom()) {
+            searchAtom._set("");
+            indexAtom._set(0);
+            numResultsAtom._set(0);
+        }
+    });
 
-    const onKeyDown = useCallback(
-        (e: React.KeyboardEvent) => {
-            if (e.key === "Enter") {
-                if (e.shiftKey) {
-                    onPrevWrapper();
-                } else {
-                    onNextWrapper();
-                }
-                e.preventDefault();
+    // When search changes, reset index/count and call onSearch
+    createEffect(() => {
+        const search = searchAtom();
+        indexAtom._set(0);
+        numResultsAtom._set(0);
+        props.onSearch?.(search);
+    });
+
+    const onPrevWrapper = () => {
+        if (props.onPrev) {
+            props.onPrev();
+        } else {
+            const idx = indexAtom();
+            const num = numResultsAtom();
+            indexAtom._set((idx - 1 + num) % num);
+        }
+    };
+
+    const onNextWrapper = () => {
+        if (props.onNext) {
+            props.onNext();
+        } else {
+            const idx = indexAtom();
+            const num = numResultsAtom();
+            indexAtom._set((idx + 1) % num);
+        }
+    };
+
+    const onKeyDown = (e: KeyboardEvent) => {
+        if (e.key === "Enter") {
+            if (e.shiftKey) {
+                onPrevWrapper();
+            } else {
+                onNextWrapper();
             }
-        },
-        [onPrevWrapper, onNextWrapper, setIsOpen]
-    );
+            e.preventDefault();
+        }
+    };
 
     const prevDecl: IconButtonDecl = {
         elemtype: "iconbutton",
         icon: "chevron-up",
         title: "Previous Result (Shift+Enter)",
-        disabled: numResults === 0,
+        get disabled() { return numResultsAtom() === 0; },
         click: onPrevWrapper,
     };
 
@@ -125,7 +143,7 @@ const SearchComponent = ({
         elemtype: "iconbutton",
         icon: "chevron-down",
         title: "Next Result (Enter)",
-        disabled: numResults === 0,
+        get disabled() { return numResultsAtom() === 0; },
         click: onNextWrapper,
     };
 
@@ -133,7 +151,7 @@ const SearchComponent = ({
         elemtype: "iconbutton",
         icon: "xmark-large",
         title: "Close (Esc)",
-        click: () => setIsOpen(false),
+        click: () => isOpenAtom._set(false),
     };
 
     const regexDecl = createToggleButtonDecl(regexAtom, "custom@regex", "Regular Expression");
@@ -141,49 +159,53 @@ const SearchComponent = ({
     const caseSensitiveDecl = createToggleButtonDecl(caseSensitiveAtom, "custom@case-sensitive", "Case Sensitive");
 
     return (
-        <>
-            {isOpen && (
-                <FloatingPortal>
-                    <div className="search-container" style={{ ...floatingStyles }} ref={refs.setFloating}>
-                        <Input
-                            placeholder="Search"
-                            value={search}
-                            onChange={setSearch}
-                            onKeyDown={onKeyDown}
-                            autoFocus
-                        />
-                        <div
-                            className={clsx("search-results", { hidden: numResults === 0 })}
-                            aria-live="polite"
-                            aria-label="Search Results"
-                        >
-                            {index + 1}/{numResults}
-                        </div>
-
-                        {(caseSensitiveDecl || wholeWordDecl || regexDecl) && (
-                            <div className="additional-buttons">
-                                {caseSensitiveDecl && <ToggleIconButton decl={caseSensitiveDecl} />}
-                                {wholeWordDecl && <ToggleIconButton decl={wholeWordDecl} />}
-                                {regexDecl && <ToggleIconButton decl={regexDecl} />}
-                            </div>
-                        )}
-
-                        <div className="right-buttons">
-                            <IconButton decl={prevDecl} />
-                            <IconButton decl={nextDecl} />
-                            <IconButton decl={closeDecl} />
-                        </div>
+        <Show when={isOpenAtom()}>
+            <Portal>
+                <div class="search-container" style={floatingStyleAtom()} ref={registerFloating}>
+                    <Input
+                        placeholder="Search"
+                        value={searchAtom()}
+                        onChange={(v) => searchAtom._set(v)}
+                        onKeyDown={onKeyDown}
+                        autoFocus
+                    />
+                    <div
+                        class={clsx("search-results", { hidden: numResultsAtom() === 0 })}
+                        aria-live="polite"
+                        aria-label="Search Results"
+                    >
+                        {indexAtom() + 1}/{numResultsAtom()}
                     </div>
-                </FloatingPortal>
-            )}
-        </>
+
+                    <Show when={caseSensitiveDecl || wholeWordDecl || regexDecl}>
+                        <div class="additional-buttons">
+                            <Show when={caseSensitiveDecl}>
+                                <ToggleIconButton decl={caseSensitiveDecl} />
+                            </Show>
+                            <Show when={wholeWordDecl}>
+                                <ToggleIconButton decl={wholeWordDecl} />
+                            </Show>
+                            <Show when={regexDecl}>
+                                <ToggleIconButton decl={regexDecl} />
+                            </Show>
+                        </div>
+                    </Show>
+
+                    <div class="right-buttons">
+                        <IconButton decl={prevDecl} />
+                        <IconButton decl={nextDecl} />
+                        <IconButton decl={closeDecl} />
+                    </div>
+                </div>
+            </Portal>
+        </Show>
     );
 };
 
-export const Search = memo(SearchComponent) as typeof SearchComponent;
+export const Search = SearchComponent;
 
 type SearchOptions = {
-    anchorRef?: React.RefObject<HTMLElement>;
+    anchorRef?: { current: HTMLElement | null };
     viewModel?: ViewModel;
     regex?: boolean;
     caseSensitive?: boolean;
@@ -191,35 +213,30 @@ type SearchOptions = {
 };
 
 export function useSearch(options?: SearchOptions): SearchProps {
-    const searchAtoms: SearchAtoms = useMemo(
-        () => ({
-            searchValue: atom(""),
-            resultsIndex: atom(0),
-            resultsCount: atom(0),
-            isOpen: atom(false),
-            regex: options?.regex !== undefined ? atom(options.regex) : undefined,
-            caseSensitive: options?.caseSensitive !== undefined ? atom(options.caseSensitive) : undefined,
-            wholeWord: options?.wholeWord !== undefined ? atom(options.wholeWord) : undefined,
-        }),
-        []
-    );
-    const anchorRef = options?.anchorRef ?? useRef(null);
-    useEffect(() => {
-        if (options?.viewModel) {
-            options.viewModel.searchAtoms = searchAtoms;
-            return () => {
-                options.viewModel.searchAtoms = undefined;
-            };
-        }
-    }, [options?.viewModel]);
+    const searchAtoms: SearchAtoms = {
+        searchValue: createSignalAtom(""),
+        resultsIndex: createSignalAtom(0),
+        resultsCount: createSignalAtom(0),
+        isOpen: createSignalAtom(false),
+        regex: options?.regex !== undefined ? createSignalAtom(options.regex) : undefined,
+        caseSensitive: options?.caseSensitive !== undefined ? createSignalAtom(options.caseSensitive) : undefined,
+        wholeWord: options?.wholeWord !== undefined ? createSignalAtom(options.wholeWord) : undefined,
+    };
+
+    const anchorRef = options?.anchorRef ?? { current: null };
+
+    if (options?.viewModel) {
+        options.viewModel.searchAtoms = searchAtoms;
+    }
+
     return { ...searchAtoms, anchorRef };
 }
 
 const createToggleButtonDecl = (
-    atom: WritableAtom<boolean, [boolean], void> | undefined,
+    atom: SignalAtom<boolean> | undefined,
     icon: string,
     title: string
-): ToggleIconButtonDecl =>
+): ToggleIconButtonDecl | null =>
     atom
         ? {
               elemtype: "toggleiconbutton",

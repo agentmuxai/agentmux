@@ -4,16 +4,16 @@
 import { Modal } from "@/app/modals/modal";
 import { modalsModel } from "@/app/store/modalmodel";
 
-import { ReactNode } from "react";
+import type { JSX } from "solid-js";
 import "./messagemodal.scss";
 
-const MessageModal = ({ children }: { children: ReactNode }) => {
+const MessageModal = ({ children }: { children: JSX.Element }) => {
     function closeModal() {
         modalsModel.popModal();
     }
 
     return (
-        <Modal className="message-modal" onOk={() => closeModal()} onClose={() => closeModal()}>
+        <Modal class="message-modal" onOk={() => closeModal()} onClose={() => closeModal()}>
             {children}
         </Modal>
     );

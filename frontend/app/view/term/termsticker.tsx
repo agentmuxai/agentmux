@@ -7,8 +7,8 @@ import { createBlock } from "@/store/global";
 import { getWebServerEndpoint } from "@/util/endpoints";
 import { stringToBase64 } from "@/util/util";
 import clsx from "clsx";
-import * as jotai from "jotai";
-import * as React from "react";
+import { For, type JSX } from "solid-js";
+type CSSProperties = JSX.CSSProperties;
 import "./term.scss";
 
 type StickerType = {
@@ -40,24 +40,19 @@ type StickerTermConfig = {
     blockId: string;
 };
 
-function convertWidthDimToPx(dim: number, config: StickerTermConfig) {
-    if (dim == null) {
-        return null;
-    }
+function convertWidthDimToPx(dim: number, config: StickerTermConfig): number | undefined {
+    if (dim == null) return undefined;
     return dim * config.charWidth;
 }
 
-function convertHeightDimToPx(dim: number, config: StickerTermConfig) {
-    if (dim == null) {
-        return null;
-    }
+function convertHeightDimToPx(dim: number, config: StickerTermConfig): number | undefined {
+    if (dim == null) return undefined;
     return dim * config.charHeight;
 }
 
-var valueAtom = jotai.atom(Math.random() * 100);
-
-function TermSticker({ sticker, config }: { sticker: StickerType; config: StickerTermConfig }) {
-    let style: React.CSSProperties = {
+function TermSticker(props: { sticker: StickerType; config: StickerTermConfig }): JSX.Element {
+    const { sticker, config } = props;
+    const style: Record<string, any> = {
         position: sticker.position,
         top: convertHeightDimToPx(sticker.top, config),
         left: convertWidthDimToPx(sticker.left, config),
@@ -81,7 +76,7 @@ function TermSticker({ sticker, config }: { sticker: StickerType; config: Sticke
     if (style.height != null) {
         style.overflowY = "hidden";
     }
-    let clickHandler = null;
+    let clickHandler: (() => void) | null = null;
     if (sticker.pointerevents && (sticker.clickcmd || sticker.clickblockdef)) {
         style.cursor = "pointer";
         clickHandler = () => {
@@ -97,19 +92,17 @@ function TermSticker({ sticker, config }: { sticker: StickerType; config: Sticke
     }
     if (sticker.stickertype == "icon") {
         return (
-            <div className="term-sticker" style={style} onClick={clickHandler}>
-                <i className={clsx("fa", "fa-" + sticker.icon)} />
+            <div class="term-sticker" style={style as any} onClick={clickHandler}>
+                <i class={clsx("fa", "fa-" + sticker.icon)} />
             </div>
         );
     }
     if (sticker.stickertype == "image") {
-        if (sticker.imgsrc == null) {
-            return null;
-        }
+        if (sticker.imgsrc == null) return null;
         const streamingUrl =
             getWebServerEndpoint() + "/wave/stream-local-file?path=" + encodeURIComponent(sticker.imgsrc);
         return (
-            <div className="term-sticker term-sticker-image" style={style} onClick={clickHandler}>
+            <div class="term-sticker term-sticker-image" style={style as any} onClick={clickHandler}>
                 <img src={streamingUrl} />
             </div>
         );
@@ -117,9 +110,9 @@ function TermSticker({ sticker, config }: { sticker: StickerType; config: Sticke
     return null;
 }
 
-export function TermStickers({ config }: { config: StickerTermConfig }) {
-    let stickers: StickerType[] = [];
-    if (config.blockId.startsWith("d1eaddcb")) {
+export function TermStickers(props: { config: StickerTermConfig }): JSX.Element {
+    const stickers: StickerType[] = [];
+    if (props.config.blockId.startsWith("d1eaddcb")) {
         stickers.push({
             position: "absolute",
             top: 5,
@@ -154,10 +147,10 @@ export function TermStickers({ config }: { config: StickerTermConfig }) {
         });
     }
     return (
-        <div className="term-stickers">
-            {stickers.map((sticker, i) => (
-                <TermSticker key={i} sticker={sticker} config={config} />
-            ))}
+        <div class="term-stickers">
+            <For each={stickers}>
+                {(sticker) => <TermSticker sticker={sticker} config={props.config} />}
+            </For>
         </div>
     );
 }

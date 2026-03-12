@@ -4,11 +4,11 @@
 // Per-pane zoom — modifies the focused block's term:zoom metadata.
 // Chrome zoom — scales title bar + status bar together via --zoomfactor CSS var.
 
-import { getBlockComponentModel, getFocusedBlockId, globalStore, WOS } from "@/app/store/global";
+import { getBlockComponentModel, getFocusedBlockId, WOS } from "@/app/store/global";
 import { RpcApi } from "@/app/store/wshclientapi";
 import { TabRpcClient } from "@/app/store/wshrpcutil";
 import { fireAndForget } from "@/util/util";
-import { atom } from "jotai";
+import { createSignal } from "solid-js";
 
 // Zoom constants
 export const MIN_ZOOM = 0.5;
@@ -18,12 +18,12 @@ export const KEYBOARD_STEP = 0.25; // 25% increments for keyboard
 export const WHEEL_STEP = 0.1; // 10% increments for scroll wheel
 
 // Zoom indicator visibility (auto-hide after 1.5s)
-export const zoomIndicatorVisibleAtom = atom<boolean>(false);
-export const zoomIndicatorTextAtom = atom<string>("");
+export const [zoomIndicatorVisibleAtom, setZoomIndicatorVisible] = createSignal<boolean>(false);
+export const [zoomIndicatorTextAtom, setZoomIndicatorText] = createSignal<string>("");
 let zoomIndicatorTimeout: NodeJS.Timeout | null = null;
 
 // Chrome zoom (title bar + status bar)
-export const chromeZoomAtom = atom<number>(DEFAULT_ZOOM);
+export const [chromeZoomAtom, setChromeZoomSignal] = createSignal<number>(DEFAULT_ZOOM);
 
 function clampZoom(factor: number): number {
     return Math.min(Math.max(factor, MIN_ZOOM), MAX_ZOOM);
@@ -121,13 +121,11 @@ function applyChromeZoomCSS(factor: number): void {
 }
 
 export function chromeZoomIn(step: number = WHEEL_STEP): void {
-    const current = globalStore.get(chromeZoomAtom);
-    setChromeZoom(current + step);
+    setChromeZoom(chromeZoomAtom() + step);
 }
 
 export function chromeZoomOut(step: number = WHEEL_STEP): void {
-    const current = globalStore.get(chromeZoomAtom);
-    setChromeZoom(current - step);
+    setChromeZoom(chromeZoomAtom() - step);
 }
 
 export function chromeZoomReset(): void {
@@ -136,7 +134,7 @@ export function chromeZoomReset(): void {
 
 function setChromeZoom(factor: number): void {
     const clamped = clampZoom(roundZoom(factor));
-    globalStore.set(chromeZoomAtom, clamped);
+    setChromeZoomSignal(clamped);
     applyChromeZoomCSS(clamped);
     showZoomIndicator(`Chrome ${Math.round(clamped * 100)}%`);
 }
@@ -158,11 +156,11 @@ function showZoomIndicator(text: string): void {
     if (zoomIndicatorTimeout) {
         clearTimeout(zoomIndicatorTimeout);
     }
-    globalStore.set(zoomIndicatorTextAtom, text);
-    globalStore.set(zoomIndicatorVisibleAtom, true);
+    setZoomIndicatorText(text);
+    setZoomIndicatorVisible(true);
 
     zoomIndicatorTimeout = setTimeout(() => {
-        globalStore.set(zoomIndicatorVisibleAtom, false);
+        setZoomIndicatorVisible(false);
         zoomIndicatorTimeout = null;
     }, 1500);
 }

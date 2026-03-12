@@ -8,33 +8,32 @@ import { StatusBar } from "@/app/statusbar/StatusBar";
 import { WindowHeader } from "@/app/window/window-header";
 import { TabContent } from "@/app/tab/tabcontent";
 import { atoms } from "@/store/global";
-import { useAtomValue } from "jotai";
-import { memo } from "react";
+import { Show } from "solid-js";
+import type { JSX } from "solid-js";
 
-const WorkspaceElem = memo(() => {
-    const tabId = useAtomValue(atoms.activeTabId);
-    const ws = useAtomValue(atoms.workspace);
+function WorkspaceElem(): JSX.Element {
+    const tabId = atoms.activeTabId;
+    const ws = atoms.workspace;
 
     return (
-        <div className="flex flex-col w-full flex-grow overflow-hidden">
-            <WindowHeader key={ws.oid} workspace={ws} />
-            <div className="flex flex-row flex-grow overflow-hidden" style={{ minHeight: 0 }}>
-                <ErrorBoundary key={tabId}>
-                    {tabId === "" ? (
-                        <CenteredDiv>No Active Tab</CenteredDiv>
-                    ) : (
-                        <div className="flex flex-row h-full w-full">
-                            <TabContent key={tabId} tabId={tabId} />
+        <div class="flex flex-col w-full flex-grow overflow-hidden">
+            <WindowHeader workspace={ws()} />
+            <div class="flex flex-row flex-grow overflow-hidden" style={{ "min-height": 0 }}>
+                <ErrorBoundary>
+                    <Show
+                        when={tabId() !== ""}
+                        fallback={<CenteredDiv>No Active Tab</CenteredDiv>}
+                    >
+                        <div class="flex flex-row h-full w-full">
+                            <TabContent tabId={tabId()} />
                         </div>
-                    )}
+                    </Show>
                     <ModalsRenderer />
                 </ErrorBoundary>
             </div>
             <StatusBar />
         </div>
     );
-});
-
-WorkspaceElem.displayName = "WorkspaceElem";
+}
 
 export { WorkspaceElem as Workspace };

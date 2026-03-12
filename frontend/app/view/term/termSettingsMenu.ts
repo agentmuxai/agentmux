@@ -7,13 +7,13 @@ import { atoms, getBlockMetaKeyAtom, getSettingsKeyAtom, globalStore, WOS } from
 import type { TermViewModel } from "./termViewModel";
 
 export function buildSettingsMenuItems(model: TermViewModel): ContextMenuItem[] {
-    const fullConfig = globalStore.get(atoms.fullConfigAtom);
+    const fullConfig = atoms.fullConfigAtom();
     const termThemes = fullConfig?.termthemes ?? {};
     const termThemeKeys = Object.keys(termThemes);
-    const curThemeName = globalStore.get(getBlockMetaKeyAtom(model.blockId, "term:theme"));
-    const defaultFontSize = globalStore.get(getSettingsKeyAtom("term:fontsize")) ?? 12;
-    const transparencyMeta = globalStore.get(getBlockMetaKeyAtom(model.blockId, "term:transparency"));
-    const blockData = globalStore.get(model.blockAtom);
+    const curThemeName = getBlockMetaKeyAtom(model.blockId, "term:theme")();
+    const defaultFontSize = getSettingsKeyAtom("term:fontsize")() ?? 12;
+    const transparencyMeta = getBlockMetaKeyAtom(model.blockId, "term:transparency")();
+    const blockData = model.blockAtom();
     const overrideFontSize = blockData?.meta?.["term:fontsize"];
 
     termThemeKeys.sort((a, b) => {

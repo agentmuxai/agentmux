@@ -3,9 +3,9 @@
 
 import { getApi } from "@/app/store/global";
 
-import { fireAndForget } from "@/util/util";
-import { Atom, atom } from "jotai";
-import { createRef, CSSProperties } from "react";
+import { createSignalAtom, fireAndForget } from "@/util/util";
+import type { Properties as CSSProperties } from "csstype";
+import { createMemo } from "solid-js";
 import { LayoutNode, LayoutNodeAdditionalProps, NodeModel } from "./types";
 import type { LayoutModel } from "./layoutModel";
 
@@ -22,10 +22,10 @@ export function getNodeModel(model: LayoutModel, node: LayoutNode): NodeModel {
     if (!model.nodeModels.has(nodeid)) {
         model.nodeModels.set(nodeid, {
             additionalProps: addlPropsAtom,
-            innerRect: atom((get) => {
-                const addlProps = get(addlPropsAtom);
-                const numLeafs = get(model.numLeafs);
-                const gapSizePx = get(model.gapSizePx);
+            innerRect: createMemo(() => {
+                const addlProps = addlPropsAtom();
+                const numLeafs = model.numLeafs();
+                const gapSizePx = model.gapSizePx();
                 if (numLeafs > 1 && addlProps?.rect) {
                     return {
                         width: `${addlProps.transform.width} - ${gapSizePx}px`,
@@ -37,19 +37,19 @@ export function getNodeModel(model: LayoutModel, node: LayoutNode): NodeModel {
             }),
             nodeId: nodeid,
             blockId,
-            blockNum: atom((get) => get(model.leafOrder).findIndex((leafEntry) => leafEntry.nodeid === nodeid) + 1),
-            isFocused: atom((get) => {
-                const treeState = get(model.localTreeStateAtom);
+            blockNum: createMemo(() => model.leafOrder().findIndex((leafEntry) => leafEntry.nodeid === nodeid) + 1),
+            isFocused: createMemo(() => {
+                const treeState = model.localTreeStateAtom();
                 return treeState.focusedNodeId === nodeid;
             }),
             numLeafs: model.numLeafs,
             isResizing: model.isResizing,
-            isMagnified: atom((get) => {
-                const treeState = get(model.localTreeStateAtom);
+            isMagnified: createMemo(() => {
+                const treeState = model.localTreeStateAtom();
                 return treeState.magnifiedNodeId === nodeid;
             }),
-            isEphemeral: atom((get) => {
-                const ephemeralNode = get(model.ephemeralNode);
+            isEphemeral: createMemo(() => {
+                const ephemeralNode = model.ephemeralNode();
                 return ephemeralNode?.id === nodeid;
             }),
             addEphemeralNodeToLayout: () => model.addEphemeralNodeToLayout(),
@@ -62,7 +62,7 @@ export function getNodeModel(model: LayoutModel, node: LayoutNode): NodeModel {
             },
             toggleMagnify: () => model.magnifyNodeToggle(nodeid),
             focusNode: () => model.focusNode(nodeid),
-            dragHandleRef: createRef(),
+            dragHandleRef: { current: null as HTMLDivElement | null },
             displayContainerRef: model.displayContainerRef,
         });
     }
@@ -91,7 +91,7 @@ export function cleanupNodeModels(model: LayoutModel, leafOrder: LeafOrderEntry[
  * @returns The node containing the specified blockId, null if not found.
  */
 export function getNodeByBlockId(model: LayoutModel, blockId: string): LayoutNode {
-    for (const leaf of model.getter(model.leafs)) {
+    for (const leaf of model.leafs()) {
         if (leaf.data.blockId === blockId) {
             return leaf;
         }
@@ -100,15 +100,16 @@ export function getNodeByBlockId(model: LayoutModel, blockId: string): LayoutNod
 }
 
 /**
- * Get a jotai atom containing the additional properties associated with a given node.
+ * Get a signal accessor containing the additional properties associated with a given node.
  * @param model The LayoutModel instance.
  * @param nodeId The ID of the node for which to retrieve the additional properties.
- * @returns An atom containing the additional properties associated with the given node.
+ * @returns A signal accessor containing the additional properties associated with the given node.
  */
-export function getNodeAdditionalPropertiesAtom(model: LayoutModel, nodeId: string): Atom<LayoutNodeAdditionalProps> {
-    return atom((get) => {
-        const addlProps = get(model.additionalProps);
+export function getNodeAdditionalPropertiesAtom(model: LayoutModel, nodeId: string): () => LayoutNodeAdditionalProps {
+    return createMemo(() => {
+        const addlProps = model.additionalProps();
         if (addlProps.hasOwnProperty(nodeId)) return addlProps[nodeId];
+        return undefined;
     });
 }
 
@@ -119,7 +120,7 @@ export function getNodeAdditionalPropertiesAtom(model: LayoutModel, nodeId: stri
  * @returns The additional properties associated with the given node.
  */
 export function getNodeAdditionalPropertiesById(model: LayoutModel, nodeId: string): LayoutNodeAdditionalProps {
-    const addlProps = model.getter(model.additionalProps);
+    const addlProps = model.additionalProps();
     if (addlProps.hasOwnProperty(nodeId)) return addlProps[nodeId];
 }
 

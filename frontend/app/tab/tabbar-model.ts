@@ -1,16 +1,19 @@
 // Copyright 2025, Command Line Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-import { atom, type PrimitiveAtom } from "jotai";
-import { globalStore } from "@/app/store/jotaiStore";
+import { createSignal } from "solid-js";
+import type { SignalAtom } from "@/util/util";
 
 export class TabBarModel {
     private static instance: TabBarModel | null = null;
 
-    jigglePinAtom: PrimitiveAtom<number> = atom(0);
+    jigglePinAtom: SignalAtom<number>;
 
     private constructor() {
-        // Empty for now
+        const [get, set] = createSignal(0);
+        const atom = () => get();
+        (atom as any)._set = set;
+        this.jigglePinAtom = atom as unknown as SignalAtom<number>;
     }
 
     static getInstance(): TabBarModel {
@@ -21,6 +24,6 @@ export class TabBarModel {
     }
 
     jiggleActivePinnedTab() {
-        globalStore.set(this.jigglePinAtom, (prev) => prev + 1);
+        this.jigglePinAtom._set((prev) => prev + 1);
     }
 }

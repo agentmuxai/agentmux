@@ -1,7 +1,7 @@
 // Copyright 2025, Command Line Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-import { useRef } from "react";
+import { JSX, Show } from "solid-js";
 import "./toggle.scss";
 
 interface ToggleProps {
@@ -11,34 +11,34 @@ interface ToggleProps {
     id?: string;
 }
 
-const Toggle = ({ checked, onChange, label, id }: ToggleProps) => {
-    const inputRef = useRef<HTMLInputElement>(null);
+const Toggle = ({ checked, onChange, label, id }: ToggleProps): JSX.Element => {
+    let inputRef!: HTMLInputElement;
 
-    const handleChange = (e: any) => {
+    const handleChange = (e: Event) => {
         if (onChange != null) {
-            onChange(e.target.checked);
+            onChange((e.target as HTMLInputElement).checked);
         }
     };
 
     const handleLabelClick = () => {
-        if (inputRef.current) {
-            inputRef.current.click();
+        if (inputRef) {
+            inputRef.click();
         }
     };
 
     const inputId = id || `toggle-${Math.random().toString(36).substr(2, 9)}`;
 
     return (
-        <div className="check-toggle-wrapper">
-            <label htmlFor={inputId} className="checkbox-toggle">
+        <div class="check-toggle-wrapper">
+            <label for={inputId} class="checkbox-toggle">
                 <input id={inputId} type="checkbox" checked={checked} onChange={handleChange} ref={inputRef} />
-                <span className="slider" />
+                <span class="slider" />
             </label>
-            {label && (
-                <span className="toggle-label" onClick={handleLabelClick}>
+            <Show when={label}>
+                <span class="toggle-label" onClick={handleLabelClick}>
                     {label}
                 </span>
-            )}
+            </Show>
         </div>
     );
 };

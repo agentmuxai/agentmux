@@ -45,12 +45,12 @@ class ContextMenuModelType {
         return nativeMenuItems;
     }
 
-    showContextMenu(menu: ContextMenuItem[], ev: React.MouseEvent<any>): void {
+    showContextMenu(menu: ContextMenuItem[], ev: MouseEvent | { stopPropagation(): void }): void {
         ev.stopPropagation();
         this.handlers.clear();
         const nativeMenuItems = this._convertAndRegisterMenu(menu);
-        const position = { x: Math.round(ev.clientX), y: Math.round(ev.clientY) };
-        getApi().showContextMenu(globalStore.get(atoms.workspace).oid, nativeMenuItems, position);
+        const position = { x: Math.round((ev as MouseEvent).clientX), y: Math.round((ev as MouseEvent).clientY) };
+        getApi().showContextMenu(atoms.workspace()?.oid, nativeMenuItems, position);
     }
 }
 

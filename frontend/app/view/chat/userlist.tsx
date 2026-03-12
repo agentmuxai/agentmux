@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import clsx from "clsx";
-import { memo } from "react";
+import { For } from "solid-js";
+import type { JSX } from "solid-js";
 import { Avatar } from "../../element/avatar";
 import "./userlist.scss";
 
@@ -15,24 +16,24 @@ export interface UserStatus {
 
 interface UserListProps {
     users: UserStatus[];
-    className?: string;
+    class?: string;
 }
 
-const UserList = memo(({ users, className }: UserListProps) => {
+function UserList(props: UserListProps): JSX.Element {
     return (
-        <div className={clsx("user-list", className)}>
-            {users.map(({ label, status, onClick, avatarUrl }, index) => (
-                <div key={index} className={clsx("user-status-item", status)} onClick={onClick}>
-                    <div className="user-status-icon">
-                        <Avatar name={label} status={status} className="size-sm" imageUrl={avatarUrl} />
+        <div class={clsx("user-list", props.class)}>
+            <For each={props.users}>
+                {({ label, status, onClick, avatarUrl }) => (
+                    <div class={clsx("user-status-item", status)} onClick={onClick}>
+                        <div class="user-status-icon">
+                            <Avatar name={label} status={status} className="size-sm" imageUrl={avatarUrl} />
+                        </div>
+                        <div class="user-status-text">{label}</div>
                     </div>
-                    <div className="user-status-text">{label}</div>
-                </div>
-            ))}
+                )}
+            </For>
         </div>
     );
-});
-
-UserList.displayName = "UserList";
+}
 
 export { UserList };

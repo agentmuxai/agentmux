@@ -4,38 +4,39 @@
 import { Button } from "@/app/element/button";
 import { cn } from "@/util/util";
 import clsx from "clsx";
-import { forwardRef } from "react";
-import ReactDOM from "react-dom";
+import { type JSX } from "solid-js";
+import { Portal } from "solid-js/web";
 
 import "./modal.scss";
 
 interface ModalProps {
-    children?: React.ReactNode;
+    children?: JSX.Element;
     okLabel?: string;
     cancelLabel?: string;
-    className?: string;
+    class?: string;
     onClickBackdrop?: () => void;
     onOk?: () => void;
     onCancel?: () => void;
     onClose?: () => void;
 }
 
-const Modal = forwardRef<HTMLDivElement, ModalProps>(
-    ({ children, className, cancelLabel, okLabel, onCancel, onOk, onClose, onClickBackdrop }: ModalProps, ref) => {
-        const renderBackdrop = (onClick) => <div className="modal-backdrop" onClick={onClick}></div>;
+const Modal = ({ children, class: className, cancelLabel, okLabel, onCancel, onOk, onClose, onClickBackdrop }: ModalProps) => {
+    let divRef!: HTMLDivElement;
+    const renderBackdrop = (onClick: () => void) => <div class="modal-backdrop" onClick={onClick}></div>;
 
-        const renderFooter = () => {
-            return onOk || onCancel;
-        };
+    const renderFooter = () => {
+        return onOk || onCancel;
+    };
 
-        const renderModal = () => (
-            <div className="modal-wrapper">
+    return (
+        <Portal mount={document.getElementById("main")}>
+            <div class="modal-wrapper">
                 {renderBackdrop(onClickBackdrop)}
-                <div ref={ref} className={clsx(`modal`, className)}>
+                <div ref={divRef} class={clsx(`modal`, className)}>
                     <Button className="grey ghost modal-close-btn" onClick={onClose} title="Close (ESC)">
-                        <i className="fa-sharp fa-solid fa-xmark"></i>
+                        <i class="fa-sharp fa-solid fa-xmark"></i>
                     </Button>
-                    <div className="content-wrapper">
+                    <div class="content-wrapper">
                         <ModalContent>{children}</ModalContent>
                     </div>
                     {renderFooter() && (
@@ -43,18 +44,16 @@ const Modal = forwardRef<HTMLDivElement, ModalProps>(
                     )}
                 </div>
             </div>
-        );
-
-        return ReactDOM.createPortal(renderModal(), document.getElementById("main"));
-    }
-);
+        </Portal>
+    );
+};
 
 interface ModalContentProps {
-    children: React.ReactNode;
+    children: JSX.Element;
 }
 
 function ModalContent({ children }: ModalContentProps) {
-    return <div className="modal-content">{children}</div>;
+    return <div class="modal-content">{children}</div>;
 }
 
 interface ModalFooterProps {
@@ -66,7 +65,7 @@ interface ModalFooterProps {
 
 const ModalFooter = ({ onCancel, onOk, cancelLabel = "Cancel", okLabel = "Ok" }: ModalFooterProps) => {
     return (
-        <footer className="modal-footer">
+        <footer class="modal-footer">
             {onCancel && (
                 <Button className="grey ghost" onClick={onCancel}>
                     {cancelLabel}
@@ -78,35 +77,28 @@ const ModalFooter = ({ onCancel, onOk, cancelLabel = "Cancel", okLabel = "Ok" }:
 };
 
 interface FlexiModalProps {
-    children?: React.ReactNode;
-    className?: string;
+    children?: JSX.Element;
+    class?: string;
     onClickBackdrop?: () => void;
 }
 
-interface FlexiModalComponent
-    extends React.ForwardRefExoticComponent<FlexiModalProps & React.RefAttributes<HTMLDivElement>> {
-    Content: typeof ModalContent;
-    Footer: typeof ModalFooter;
-}
+const FlexiModal = ({ children, class: className, onClickBackdrop }: FlexiModalProps) => {
+    let divRef!: HTMLDivElement;
+    const renderBackdrop = (onClick: () => void) => <div class="modal-backdrop" onClick={onClick}></div>;
 
-const FlexiModal = forwardRef<HTMLDivElement, FlexiModalProps>(
-    ({ children, className, onClickBackdrop }: FlexiModalProps, ref) => {
-        const renderBackdrop = (onClick: () => void) => <div className="modal-backdrop" onClick={onClick}></div>;
-
-        const renderModal = () => (
-            <div className="modal-wrapper">
+    return (
+        <Portal mount={document.getElementById("main")}>
+            <div class="modal-wrapper">
                 {renderBackdrop(onClickBackdrop)}
-                <div className={cn("modal pt-6 px-4 pb-4", className)} ref={ref}>
+                <div class={cn("modal pt-6 px-4 pb-4", className)} ref={divRef}>
                     {children}
                 </div>
             </div>
-        );
+        </Portal>
+    );
+};
 
-        return ReactDOM.createPortal(renderModal(), document.getElementById("main")!);
-    }
-);
-
-(FlexiModal as FlexiModalComponent).Content = ModalContent;
-(FlexiModal as FlexiModalComponent).Footer = ModalFooter;
+(FlexiModal as any).Content = ModalContent;
+(FlexiModal as any).Footer = ModalFooter;
 
 export { FlexiModal, Modal };

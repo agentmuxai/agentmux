@@ -1,8 +1,7 @@
 // Copyright 2024, Command Line Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-import React, { memo, useCallback, useEffect, useMemo, useState } from "react";
-import { useAtomValue } from "jotai";
+import { createMemo, createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
 import type { AgentViewModel } from "./agent-model";
 import { getProvider } from "./providers";
 import { createAgentAtoms } from "./state";
@@ -17,10 +16,10 @@ import "./agent-view.scss";
 
 // ── useForgeAgents hook ───────────────────────────────────────────────────────
 
-function useForgeAgents(): ForgeAgent[] {
-    const [agents, setAgents] = useState<ForgeAgent[]>([]);
+function useForgeAgents(): () => ForgeAgent[] {
+    const [agents, setAgents] = createSignal<ForgeAgent[]>([]);
 
-    useEffect(() => {
+    onMount(() => {
         let cancelled = false;
 
         async function load() {
@@ -39,11 +38,11 @@ function useForgeAgents(): ForgeAgent[] {
             handler: () => load(),
         });
 
-        return () => {
+        onCleanup(() => {
             cancelled = true;
             unsub();
-        };
-    }, []);
+        });
+    });
 
     return agents;
 }
@@ -51,165 +50,167 @@ function useForgeAgents(): ForgeAgent[] {
 /**
  * Top-level wrapper — switches between agent picker and presentation view.
  */
-export const AgentViewWrapper: React.FC<ViewComponentProps<AgentViewModel>> = memo(({ model }) => {
-    const block = useAtomValue(model.blockAtom);
-    const agentId = block?.meta?.["agentId"];
+export const AgentViewWrapper = ({ model }: { model: AgentViewModel }): JSX.Element => {
+    const block = model.blockAtom;
+    const agentId = () => block()?.meta?.["agentId"];
 
-    if (agentId) {
-        return <AgentPresentationView model={model} agentId={agentId} />;
-    }
-
-    return <AgentPicker model={model} />;
-});
+    return (
+        <Show
+            when={agentId()}
+            fallback={<AgentPicker model={model} />}
+        >
+            <AgentPresentationView model={model} agentId={agentId()} />
+        </Show>
+    );
+};
 
 AgentViewWrapper.displayName = "AgentViewWrapper";
 
 // ── Agent Picker ────────────────────────────────────────────────────────────────
 
-const AgentPicker: React.FC<{ model: AgentViewModel }> = memo(({ model }) => {
-    const [launching, setLaunching] = useState<string | null>(null);
+const AgentPicker = ({ model }: { model: AgentViewModel }): JSX.Element => {
+    const [launching, setLaunching] = createSignal<string | null>(null);
     const agents = useForgeAgents();
 
-    const handleSelect = useCallback(
-        async (agent: ForgeAgent) => {
-            setLaunching(agent.id);
-            try {
-                await model.launchForgeAgent(agent);
-            } catch {
-                // model logs internally
-            } finally {
-                setLaunching(null);
-            }
-        },
-        [model]
-    );
+    const handleSelect = async (agent: ForgeAgent) => {
+        setLaunching(agent.id);
+        try {
+            await model.launchForgeAgent(agent);
+        } catch {
+            // model logs internally
+        } finally {
+            setLaunching(null);
+        }
+    };
 
-    const busy = launching !== null;
-
-    if (agents.length === 0) {
-        return (
-            <div className="agent-view">
-                <div className="agent-picker-empty">
-                    <div className="agent-picker-empty-icon">✦</div>
-                    <div className="agent-picker-empty-title">No agents configured</div>
-                    <div className="agent-picker-empty-desc">Create an agent in the Forge to get started.</div>
-                    <button className="agent-picker-forge-btn" disabled>
-                        + Create an agent in the Forge
-                    </button>
-                </div>
-            </div>
-        );
-    }
+    const busy = () => launching() !== null;
 
     return (
-        <div className="agent-view">
-            <div className="agent-picker">
-                <div className="agent-picker-list">
-                    {agents.map((agent) => (
-                        <button
-                            key={agent.id}
-                            className={`agent-card${launching === agent.id ? " agent-card--launching" : ""}`}
-                            onClick={() => handleSelect(agent)}
-                            disabled={busy}
-                        >
-                            <span className="agent-card-icon">{agent.icon}</span>
-                            <span className="agent-card-info">
-                                <span className="agent-card-name">{agent.name}</span>
-                                {agent.description && (
-                                    <span className="agent-card-desc">{agent.description}</span>
-                                )}
-                            </span>
-                            {launching === agent.id && <span className="agent-card-spinner" />}
+        <Show
+            when={agents().length > 0}
+            fallback={
+                <div class="agent-view">
+                    <div class="agent-picker-empty">
+                        <div class="agent-picker-empty-icon">{"\u2726"}</div>
+                        <div class="agent-picker-empty-title">No agents configured</div>
+                        <div class="agent-picker-empty-desc">Create an agent in the Forge to get started.</div>
+                        <button class="agent-picker-forge-btn" disabled>
+                            + Create an agent in the Forge
                         </button>
-                    ))}
+                    </div>
                 </div>
-                <div className="agent-picker-footer">
-                    <button className="agent-picker-forge-btn" disabled>
-                        + New agent in Forge
-                    </button>
+            }
+        >
+            <div class="agent-view">
+                <div class="agent-picker">
+                    <div class="agent-picker-list">
+                        <For each={agents()}>
+                            {(agent) => (
+                                <button
+                                    class={`agent-card${launching() === agent.id ? " agent-card--launching" : ""}`}
+                                    onClick={() => handleSelect(agent)}
+                                    disabled={busy()}
+                                >
+                                    <span class="agent-card-icon">{agent.icon}</span>
+                                    <span class="agent-card-info">
+                                        <span class="agent-card-name">{agent.name}</span>
+                                        <Show when={agent.description}>
+                                            <span class="agent-card-desc">{agent.description}</span>
+                                        </Show>
+                                    </span>
+                                    <Show when={launching() === agent.id}>
+                                        <span class="agent-card-spinner" />
+                                    </Show>
+                                </button>
+                            )}
+                        </For>
+                    </div>
+                    <div class="agent-picker-footer">
+                        <button class="agent-picker-forge-btn" disabled>
+                            + New agent in Forge
+                        </button>
+                    </div>
                 </div>
             </div>
-        </div>
+        </Show>
     );
-});
+};
 
 AgentPicker.displayName = "AgentPicker";
 
 // ── Presentation View ───────────────────────────────────────────────────────────
 
-const AgentPresentationView: React.FC<{ model: AgentViewModel; agentId: string }> = memo(
-    ({ model, agentId }) => {
-        const block = useAtomValue(model.blockAtom);
-        // agentProvider stores the provider id (claude/codex/gemini) — set when launching
-        const providerKey: string = block?.meta?.["agentProvider"] ?? agentId;
-        const provider = getProvider(providerKey);
-        const outputFormat: string = block?.meta?.["agentOutputFormat"] ?? "claude-stream-json";
+const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agentId: string }): JSX.Element => {
+    const block = model.blockAtom;
+    // agentProvider stores the provider id (claude/codex/gemini) — set when launching
+    const providerKey = (): string => block()?.meta?.["agentProvider"] ?? agentId;
+    const provider = () => getProvider(providerKey());
+    const outputFormat = (): string => block()?.meta?.["agentOutputFormat"] ?? "claude-stream-json";
 
-        const agentAtoms = useMemo(() => createAgentAtoms(model.blockId), [model.blockId]);
+    // Create per-instance signals (stable across re-renders via createMemo keyed on blockId)
+    const agentAtoms = createMemo(() => createAgentAtoms(model.blockId));
 
-        useAgentStream({
-            blockId: model.blockId,
-            outputFormat,
-            documentAtom: agentAtoms.documentAtom,
-            streamingStateAtom: agentAtoms.streamingStateAtom,
-            enabled: true,
+    // Subscribe to PTY output and parse into DocumentNodes
+    useAgentStream({
+        blockId: model.blockId,
+        outputFormat: outputFormat(),
+        documentAtom: agentAtoms().documentAtom,
+        streamingStateAtom: agentAtoms().streamingStateAtom,
+        enabled: true,
+    });
+
+    // Send user message to the PTY via ControllerInputCommand
+    const handleSendMessage = (message: string) => {
+        const b64data = stringToBase64(message + "\n");
+        RpcApi.ControllerInputCommand(TabRpcClient, {
+            blockid: model.blockId,
+            inputdata64: b64data,
+        }).catch(() => {
+            // logged by RPC layer
         });
+    };
 
-        const handleSendMessage = useCallback(
-            (message: string) => {
-                const b64data = stringToBase64(message + "\n");
-                RpcApi.ControllerInputCommand(TabRpcClient, {
-                    blockid: model.blockId,
-                    inputdata64: b64data,
-                }).catch(() => {
-                    // logged by RPC layer
-                });
-            },
-            [model.blockId]
-        );
+    const handleBack = async () => {
+        const { WOS } = await import("@/app/store/global");
+        const oref = WOS.makeORef("block", model.blockId);
+        try {
+            await RpcApi.SetMetaCommand(TabRpcClient, {
+                oref,
+                meta: {
+                    agentId: null,
+                    agentProvider: null,
+                    agentOutputFormat: null,
+                    agentName: null,
+                    agentIcon: null,
+                    agentCliPath: null,
+                    agentCliArgs: null,
+                    agentBinDir: null,
+                    controller: null,
+                },
+            });
+        } catch {
+            // model logs internally
+        }
+    };
 
-        const handleBack = useCallback(async () => {
-            const { WOS } = await import("@/app/store/global");
-            const oref = WOS.makeORef("block", model.blockId);
-            try {
-                await RpcApi.SetMetaCommand(TabRpcClient, {
-                    oref,
-                    meta: {
-                        agentId: null,
-                        agentProvider: null,
-                        agentOutputFormat: null,
-                        agentName: null,
-                        agentIcon: null,
-                        agentCliPath: null,
-                        agentCliArgs: null,
-                        agentBinDir: null,
-                        controller: null,
-                    },
-                });
-            } catch {
-                // model logs internally
-            }
-        }, [model.blockId]);
-
-        return (
-            <div className="agent-view agent-view--presentation">
-                <div className="agent-pres-header">
-                    <span className="agent-pres-icon">{block?.meta?.["agentIcon"] ?? "\u26A1"}</span>
-                    <span className="agent-pres-name">{block?.meta?.["agentName"] ?? provider?.displayName ?? agentId}</span>
-                    <button className="agent-pres-back" onClick={handleBack} title="Back to agents">
-                        ✕
-                    </button>
-                </div>
-
-                <AgentDocumentView
-                    documentAtom={agentAtoms.documentAtom}
-                    documentStateAtom={agentAtoms.documentStateAtom}
-                />
-
-                <AgentFooter agentId={agentId} onSendMessage={handleSendMessage} />
+    return (
+        <div class="agent-view agent-view--presentation">
+            <div class="agent-pres-header">
+                <span class="agent-pres-icon">{block()?.meta?.["agentIcon"] ?? "\u26A1"}</span>
+                <span class="agent-pres-name">{block()?.meta?.["agentName"] ?? provider()?.displayName ?? agentId}</span>
+                <button class="agent-pres-back" onClick={handleBack} title="Back to agents">
+                    {"\u2715"}
+                </button>
             </div>
-        );
-    }
-);
+
+            <AgentDocumentView
+                documentAtom={agentAtoms().documentAtom}
+                documentStateAtom={agentAtoms().documentStateAtom}
+            />
+
+            <AgentFooter agentId={agentId} onSendMessage={handleSendMessage} />
+        </div>
+    );
+};
 
 AgentPresentationView.displayName = "AgentPresentationView";

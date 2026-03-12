@@ -2,41 +2,34 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { QuickTips } from "@/app/element/quicktips";
-import { atom, PrimitiveAtom } from "jotai";
+import { createSignalAtom } from "@/util/util";
+import type { SignalAtom } from "@/util/util";
+import type { JSX } from "solid-js";
 
 /**
  * HelpViewModel - Simplified help widget that shows QuickTips content
- *
- * Previously extended WebViewModel to show embedded docsite in a browser.
- * Now simplified to directly render QuickTips component (same as old tips widget).
- *
- * Rationale:
- * - No need for heavy WebViewModel + WebView infrastructure
- * - Tips content is more useful than embedded browser
- * - Faster, simpler, cleaner UX
  */
 class HelpViewModel implements ViewModel {
     viewType: string;
-    showTocAtom: PrimitiveAtom<boolean>;
+    showTocAtom: SignalAtom<boolean>;
 
     constructor() {
         this.viewType = "help";
-        this.showTocAtom = atom(false);
+        this.showTocAtom = createSignalAtom(false);
     }
 
     get viewComponent(): ViewComponent {
-        return HelpView;
+        return HelpView as unknown as ViewComponent;
     }
 
     showTocToggle() {
         // Optional: toggle table of contents if QuickTips supports it
-        // (Currently unused, but kept for future enhancement)
     }
 }
 
-function HelpView({ model }: { model: HelpViewModel }) {
+function HelpView({ model }: { model: HelpViewModel }): JSX.Element {
     return (
-        <div className="px-[5px] py-[10px] overflow-auto w-full">
+        <div class="px-[5px] py-[10px] overflow-auto w-full">
             <QuickTips />
         </div>
     );

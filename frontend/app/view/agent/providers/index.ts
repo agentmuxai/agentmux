@@ -15,6 +15,7 @@ export interface ProviderDefinition {
     npmPackage: string;          // npm package name for local install
     pinnedVersion: string;       // version to install ("latest" or specific)
     docsUrl: string;
+    installCommand?: string;
     icon: string;
     unsetEnv?: string[];         // env vars to unset before launching (e.g. nested-session guards)
 }
