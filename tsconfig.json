@@ -4,6 +4,7 @@
         "target": "es6",
         "module": "es2020",
         "jsx": "preserve",
+        "jsxImportSource": "solid-js",
         "esModuleInterop": true,
         "skipLibCheck": true,
         "forceConsistentCasingInFileNames": true,
@@ -24,6 +25,7 @@
             "@/shadcn/*": ["frontend/app/shadcn/*"]
         },
         "lib": ["dom", "dom.iterable", "es6"],
+        "types": ["vite/client"],
         "allowJs": true,
         "strict": false,
         "noEmit": true

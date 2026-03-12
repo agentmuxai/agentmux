@@ -2,31 +2,31 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import clsx from "clsx";
-import { useEffect, useRef, useState } from "react";
+import { createSignal, JSX, onCleanup } from "solid-js";
 import "./copybutton.scss";
 import { IconButton } from "./iconbutton";
 
 type CopyButtonProps = {
     title: string;
     className?: string;
-    onClick: (e: React.MouseEvent<HTMLButtonElement>) => void;
+    onClick: (e: MouseEvent) => void;
 };
 
-const CopyButton = ({ title, className, onClick }: CopyButtonProps) => {
-    const [isCopied, setIsCopied] = useState(false);
-    const timeoutRef = useRef<NodeJS.Timeout | null>(null);
+const CopyButton = ({ title, className, onClick }: CopyButtonProps): JSX.Element => {
+    const [isCopied, setIsCopied] = createSignal(false);
+    let timeoutRef: ReturnType<typeof setTimeout> | null = null;
 
-    const handleOnClick = (e: React.MouseEvent<HTMLButtonElement>) => {
-        if (isCopied) {
+    const handleOnClick = (e: MouseEvent) => {
+        if (isCopied()) {
             return;
         }
         setIsCopied(true);
-        if (timeoutRef.current) {
-            clearTimeout(timeoutRef.current);
+        if (timeoutRef) {
+            clearTimeout(timeoutRef);
         }
-        timeoutRef.current = setTimeout(() => {
+        timeoutRef = setTimeout(() => {
             setIsCopied(false);
-            timeoutRef.current = null;
+            timeoutRef = null;
         }, 2000);
 
         if (onClick) {
@@ -34,25 +34,23 @@ const CopyButton = ({ title, className, onClick }: CopyButtonProps) => {
         }
     };
 
-    useEffect(() => {
-        return () => {
-            if (timeoutRef.current) {
-                clearTimeout(timeoutRef.current);
-            }
-        };
-    }, []);
+    onCleanup(() => {
+        if (timeoutRef) {
+            clearTimeout(timeoutRef);
+        }
+    });
 
     return (
         <IconButton
             decl={{
                 elemtype: "iconbutton",
-                icon: isCopied ? "check" : "copy",
+                icon: isCopied() ? "check" : "copy",
                 title,
-                className: clsx("copy-button", { copied: isCopied }),
+                className: clsx("copy-button", { copied: isCopied() }),
                 click: handleOnClick,
             }}
             className={className}
-        ></IconButton>
+        />
     );
 };
 

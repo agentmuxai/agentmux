@@ -13,16 +13,20 @@ import {
 import remarkMermaidToTag from "@/app/element/remark-mermaid-to-tag";
 import { boundNumber, useAtomValueSafe, cn } from "@/util/util";
 import clsx from "clsx";
-import { Atom } from "jotai";
-import { OverlayScrollbarsComponent, OverlayScrollbarsComponentRef } from "overlayscrollbars-react";
-import { useEffect, useMemo, useRef, useState } from "react";
-import ReactMarkdown, { Components } from "react-markdown";
+import { toJsxRuntime } from "hast-util-to-jsx-runtime";
+import { OverlayScrollbars } from "overlayscrollbars";
+import { createEffect, createMemo, createSignal, onCleanup, onMount, Show } from "solid-js";
+import type { JSX } from "solid-js";
+import { Fragment, jsx, jsxs } from "solid-js/h/jsx-runtime";
+import { unified } from "unified";
 import rehypeHighlight from "rehype-highlight";
 import rehypeRaw from "rehype-raw";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import rehypeSlug from "rehype-slug";
 import RemarkFlexibleToc, { TocItem } from "remark-flexible-toc";
 import remarkGfm from "remark-gfm";
+import remarkParse from "remark-parse";
+import remarkRehype from "remark-rehype";
 import { openLink } from "../store/global";
 import { IconButton } from "./iconbutton";
 import "./markdown.scss";
@@ -47,28 +51,30 @@ const Link = ({
     setFocusedHeading,
     props,
 }: {
-    props: React.AnchorHTMLAttributes<HTMLAnchorElement>;
+    props: JSX.AnchorHTMLAttributes<HTMLAnchorElement>;
     setFocusedHeading: (href: string) => void;
 }) => {
-    const onClick = (e: React.MouseEvent) => {
+    const onClick = (e: MouseEvent) => {
         e.preventDefault();
-        if (props.href.startsWith("#")) {
-            setFocusedHeading(props.href);
+        const href = (props as any).href as string;
+        if (!href) return;
+        if (href.startsWith("#")) {
+            setFocusedHeading(href);
         } else {
-            openLink(props.href);
+            openLink(href);
         }
     };
     return (
-        <a href={props.href} onClick={onClick}>
-            {props.children}
+        <a href={(props as any).href} onClick={onClick}>
+            {(props as any).children}
         </a>
     );
 };
 
-const Heading = ({ props, hnum }: { props: React.HTMLAttributes<HTMLHeadingElement>; hnum: number }) => {
+const Heading = ({ props, hnum }: { props: JSX.HTMLAttributes<HTMLHeadingElement>; hnum: number }) => {
     return (
-        <div id={props.id} className={clsx("heading", `is-${hnum}`)}>
-            {props.children}
+        <div id={(props as any).id} class={clsx("heading", `is-${hnum}`)}>
+            {(props as any).children}
         </div>
     );
 };
@@ -76,11 +82,11 @@ const Heading = ({ props, hnum }: { props: React.HTMLAttributes<HTMLHeadingEleme
 let mermaidRenderCount = 0;
 
 const Mermaid = ({ chart }: { chart: string }) => {
-    const ref = useRef<HTMLDivElement>(null);
-    const [svgContent, setSvgContent] = useState<string | null>(null);
-    const [error, setError] = useState<string | null>(null);
+    let ref!: HTMLDivElement;
+    const [svgContent, setSvgContent] = createSignal<string | null>(null);
+    const [error, setError] = createSignal<string | null>(null);
 
-    useEffect(() => {
+    onMount(() => {
         let cancelled = false;
         const renderMermaid = async () => {
             try {
@@ -98,14 +104,12 @@ const Mermaid = ({ chart }: { chart: string }) => {
                     .replace(/\r\n?/g, "\n")
                     .replace(/\n+$/, "");
 
-                // Use render() instead of run() to avoid async MessagePort/ELK errors.
-                // render() returns SVG directly without the async scheduler.
                 const id = `mermaid-${++mermaidRenderCount}`;
                 const { svg } = await mermaidInstance.render(id, normalizedChart);
                 if (!cancelled) {
                     setSvgContent(svg);
                 }
-            } catch (err) {
+            } catch (err: any) {
                 console.error("Error rendering mermaid diagram:", err);
                 if (!cancelled) {
                     setError(err.message || String(err));
@@ -114,35 +118,41 @@ const Mermaid = ({ chart }: { chart: string }) => {
         };
 
         renderMermaid();
-        return () => {
+        onCleanup(() => {
             cancelled = true;
-        };
-    }, [chart]);
+        });
+    });
 
-    if (error) {
-        return (
-            <div className="mermaid error">
-                <div style={{ color: "var(--error-color, #f44)", marginBottom: 8 }}>Failed to render diagram</div>
-                <pre style={{ whiteSpace: "pre-wrap", opacity: 0.7, fontSize: "0.85em" }}>{chart}</pre>
-            </div>
-        );
-    }
-
-    if (!svgContent) {
-        return <div className="mermaid">Loading diagram...</div>;
-    }
-
-    return <div className="mermaid" ref={ref} dangerouslySetInnerHTML={{ __html: svgContent }} />;
+    return (
+        <Show
+            when={!error()}
+            fallback={
+                <div class="mermaid error">
+                    <div style={{ color: "var(--error-color, #f44)", "margin-bottom": "8px" }}>
+                        Failed to render diagram
+                    </div>
+                    <pre style={{ "white-space": "pre-wrap", opacity: 0.7, "font-size": "0.85em" }}>{chart}</pre>
+                </div>
+            }
+        >
+            <Show
+                when={svgContent()}
+                fallback={<div class="mermaid">Loading diagram...</div>}
+            >
+                <div class="mermaid" ref={ref} innerHTML={svgContent()} />
+            </Show>
+        </Show>
+    );
 };
 
 const MermaidErrorFallback = ({ error, chart }: { error?: Error; chart: string }) => (
-    <div className="mermaid error">
-        <div style={{ color: "var(--error-color, #f44)", marginBottom: 8 }}>Failed to render diagram</div>
-        <pre style={{ whiteSpace: "pre-wrap", opacity: 0.7, fontSize: "0.85em" }}>{chart}</pre>
+    <div class="mermaid error">
+        <div style={{ color: "var(--error-color, #f44)", "margin-bottom": "8px" }}>Failed to render diagram</div>
+        <pre style={{ "white-space": "pre-wrap", opacity: 0.7, "font-size": "0.85em" }}>{chart}</pre>
     </div>
 );
 
-const Code = ({ className = "", children }: { className?: string; children: React.ReactNode }) => {
+const Code = ({ className = "", children }: { className?: string; children: any }) => {
     if (/\blanguage-mermaid\b/.test(className)) {
         const text = Array.isArray(children) ? children.join("") : String(children ?? "");
         return (
@@ -151,11 +161,11 @@ const Code = ({ className = "", children }: { className?: string; children: Reac
             </ErrorBoundary>
         );
     }
-    return <code className={className}>{children}</code>;
+    return <code class={className}>{children}</code>;
 };
 
 type CodeBlockProps = {
-    children: React.ReactNode;
+    children: any;
     onClickExecute?: (cmd: string) => void;
 };
 
@@ -165,31 +175,30 @@ const CodeBlock = ({ children, onClickExecute }: CodeBlockProps) => {
             return children;
         } else if (Array.isArray(children)) {
             return children.map(getTextContent).join("");
-        } else if (children.props && children.props.children) {
+        } else if (children && children.props && children.props.children) {
             return getTextContent(children.props.children);
         }
         return "";
     };
 
-    const handleCopy = async (e: React.MouseEvent) => {
+    const handleCopy = async (e: MouseEvent) => {
         let textToCopy = getTextContent(children);
-        textToCopy = textToCopy.replace(/\n$/, ""); // remove trailing newline
+        textToCopy = textToCopy.replace(/\n$/, "");
         await navigator.clipboard.writeText(textToCopy);
     };
 
-    const handleExecute = (e: React.MouseEvent) => {
+    const handleExecute = (e: MouseEvent) => {
         let textToCopy = getTextContent(children);
-        textToCopy = textToCopy.replace(/\n$/, ""); // remove trailing newline
+        textToCopy = textToCopy.replace(/\n$/, "");
         if (onClickExecute) {
             onClickExecute(textToCopy);
-            return;
         }
     };
 
     return (
-        <pre className="codeblock">
+        <pre class="codeblock">
             {children}
-            <div className="codeblock-actions">
+            <div class="codeblock-actions">
                 <CopyButton onClick={handleCopy} title="Copy" />
                 {onClickExecute && (
                     <IconButton
@@ -209,30 +218,29 @@ const MarkdownSource = ({
     props,
     resolveOpts,
 }: {
-    props: React.HTMLAttributes<HTMLSourceElement> & {
+    props: JSX.SourceHTMLAttributes<HTMLSourceElement> & {
         srcSet?: string;
         media?: string;
     };
     resolveOpts: MarkdownResolveOpts;
 }) => {
-    const [resolvedSrcSet, setResolvedSrcSet] = useState<string>(props.srcSet);
-    const [resolving, setResolving] = useState<boolean>(true);
+    const [resolvedSrcSet, setResolvedSrcSet] = createSignal<string>((props as any).srcSet ?? "");
+    const [resolving, setResolving] = createSignal<boolean>(true);
 
-    useEffect(() => {
+    onMount(() => {
         const resolvePath = async () => {
-            const resolved = await resolveSrcSet(props.srcSet, resolveOpts);
+            const resolved = await resolveSrcSet((props as any).srcSet, resolveOpts);
             setResolvedSrcSet(resolved);
             setResolving(false);
         };
-
         resolvePath();
-    }, [props.srcSet]);
+    });
 
-    if (resolving) {
-        return null;
-    }
-
-    return <source srcSet={resolvedSrcSet} media={props.media} />;
+    return (
+        <Show when={!resolving()}>
+            <source srcset={resolvedSrcSet()} media={(props as any).media} />
+        </Show>
+    );
 };
 
 interface WaveBlockProps {
@@ -240,7 +248,7 @@ interface WaveBlockProps {
     blockmap: Map<string, MarkdownContentBlockType>;
 }
 
-const WaveBlock: React.FC<WaveBlockProps> = (props) => {
+const WaveBlock = (props: WaveBlockProps) => {
     const { blockkey, blockmap } = props;
     const block = blockmap.get(blockkey);
     if (block == null) {
@@ -249,14 +257,14 @@ const WaveBlock: React.FC<WaveBlockProps> = (props) => {
     const sizeInKB = Math.round((block.content.length / 1024) * 10) / 10;
     const displayName = block.id.replace(/^"|"$/g, "");
     return (
-        <div className="waveblock">
-            <div className="wave-block-content">
-                <div className="wave-block-icon">
-                    <i className="fas fa-file-code"></i>
+        <div class="waveblock">
+            <div class="wave-block-content">
+                <div class="wave-block-icon">
+                    <i class="fas fa-file-code"></i>
                 </div>
-                <div className="wave-block-info">
-                    <span className="wave-block-filename">{displayName}</span>
-                    <span className="wave-block-size">{sizeInKB} KB</span>
+                <div class="wave-block-info">
+                    <span class="wave-block-filename">{displayName}</span>
+                    <span class="wave-block-size">{sizeInKB} KB</span>
                 </div>
             </div>
         </div>
@@ -267,61 +275,65 @@ const MarkdownImg = ({
     props,
     resolveOpts,
 }: {
-    props: React.ImgHTMLAttributes<HTMLImageElement>;
+    props: JSX.ImgHTMLAttributes<HTMLImageElement>;
     resolveOpts: MarkdownResolveOpts;
 }) => {
-    const [resolvedSrc, setResolvedSrc] = useState<string>(props.src);
-    const [resolvedSrcSet, setResolvedSrcSet] = useState<string>(props.srcSet);
-    const [resolvedStr, setResolvedStr] = useState<string>(null);
-    const [resolving, setResolving] = useState<boolean>(true);
+    const src = (props as any).src as string;
+    const srcSet = (props as any).srcSet as string;
 
-    useEffect(() => {
-        if (props.src.startsWith("data:image/")) {
+    const [resolvedSrc, setResolvedSrc] = createSignal<string | null>(src);
+    const [resolvedSrcSet, setResolvedSrcSet] = createSignal<string | null>(srcSet ?? null);
+    const [resolvedStr, setResolvedStr] = createSignal<string | null>(null);
+    const [resolving, setResolving] = createSignal<boolean>(true);
+
+    onMount(() => {
+        if (src?.startsWith("data:image/")) {
             setResolving(false);
-            setResolvedSrc(props.src);
+            setResolvedSrc(src);
             setResolvedStr(null);
             return;
         }
         if (resolveOpts == null) {
             setResolving(false);
             setResolvedSrc(null);
-            setResolvedStr(`[img:${props.src}]`);
+            setResolvedStr(`[img:${src}]`);
             return;
         }
 
         const resolveFn = async () => {
-            const [resolvedSrc, resolvedSrcSet] = await Promise.all([
-                resolveRemoteFile(props.src, resolveOpts),
-                resolveSrcSet(props.srcSet, resolveOpts),
+            const [rSrc, rSrcSet] = await Promise.all([
+                resolveRemoteFile(src, resolveOpts),
+                resolveSrcSet(srcSet, resolveOpts),
             ]);
 
-            setResolvedSrc(resolvedSrc);
-            setResolvedSrcSet(resolvedSrcSet);
+            setResolvedSrc(rSrc);
+            setResolvedSrcSet(rSrcSet);
             setResolvedStr(null);
             setResolving(false);
         };
         resolveFn();
-    }, [props.src, props.srcSet]);
+    });
 
-    if (resolving) {
-        return null;
-    }
-    if (resolvedStr != null) {
-        return <span>{resolvedStr}</span>;
-    }
-    if (resolvedSrc != null) {
-        return <img {...props} src={resolvedSrc} srcSet={resolvedSrcSet} />;
-    }
-    return <span>[img]</span>;
+    return (
+        <Show when={!resolving()}>
+            <Show when={resolvedStr() != null} fallback={
+                <Show when={resolvedSrc() != null} fallback={<span>[img]</span>}>
+                    <img {...(props as any)} src={resolvedSrc()} srcset={resolvedSrcSet()} />
+                </Show>
+            }>
+                <span>{resolvedStr()}</span>
+            </Show>
+        </Show>
+    );
 };
 
 type MarkdownProps = {
     text?: string;
-    textAtom?: Atom<string> | Atom<Promise<string>>;
-    showTocAtom?: Atom<boolean>;
-    style?: React.CSSProperties;
-    className?: string;
-    contentClassName?: string;
+    textAtom?: (() => string) | (() => Promise<string>);
+    showTocAtom?: () => boolean;
+    style?: JSX.CSSProperties;
+    class?: string;
+    contentClass?: string;
     onClickExecute?: (cmd: string) => void;
     resolveOpts?: MarkdownResolveOpts;
     scrollable?: boolean;
@@ -335,8 +347,8 @@ const Markdown = ({
     textAtom,
     showTocAtom,
     style,
-    className,
-    contentClassName,
+    class: className,
+    contentClass: contentClassName,
     resolveOpts,
     fontSizeOverride,
     fixedFontSizeOverride,
@@ -344,193 +356,193 @@ const Markdown = ({
     rehype = true,
     onClickExecute,
 }: MarkdownProps) => {
-    const textAtomValue = useAtomValueSafe<string>(textAtom);
-    const tocRef = useRef<TocItem[]>([]);
+    const textAtomValue = useAtomValueSafe<string>(textAtom as any);
+    const tocItems: TocItem[] = [];
     const showToc = useAtomValueSafe(showTocAtom) ?? false;
-    const contentsOsRef = useRef<OverlayScrollbarsComponentRef>(null);
-    const [focusedHeading, setFocusedHeading] = useState<string>(null);
+    const [focusedHeading, setFocusedHeading] = createSignal<string | null>(null);
 
-    // Ensure uniqueness of ids between MD preview instances.
-    const [idPrefix] = useState<string>(crypto.randomUUID());
+    let contentsEl!: HTMLDivElement;
+    let tocEl!: HTMLDivElement;
+    let contentsOs: OverlayScrollbars | null = null;
+    let tocOs: OverlayScrollbars | null = null;
 
-    text = textAtomValue ?? text ?? "";
-    const transformedOutput = transformBlocks(text);
-    const transformedText = transformedOutput.content;
-    const contentBlocksMap = transformedOutput.blocks;
+    const [idPrefix] = createSignal<string>(crypto.randomUUID());
 
-    useEffect(() => {
-        if (focusedHeading && contentsOsRef.current && contentsOsRef.current.osInstance()) {
-            const { viewport } = contentsOsRef.current.osInstance().elements();
-            const heading = document.getElementById(idPrefix + focusedHeading.slice(1));
-            if (heading) {
-                const headingBoundingRect = heading.getBoundingClientRect();
-                const viewportBoundingRect = viewport.getBoundingClientRect();
-                const headingTop = headingBoundingRect.top - viewportBoundingRect.top;
-                viewport.scrollBy({ top: headingTop });
+    const resolvedText = createMemo(() => textAtomValue ?? text ?? "");
+
+    const transformedOutput = createMemo(() => transformBlocks(resolvedText()));
+    const transformedText = createMemo(() => transformedOutput().content);
+    const contentBlocksMap = createMemo(() => transformedOutput().blocks);
+
+    createEffect(() => {
+        const heading = focusedHeading();
+        if (heading && contentsOs) {
+            const { viewport } = contentsOs.elements();
+            const el = document.getElementById(idPrefix() + heading.slice(1));
+            if (el) {
+                const headingRect = el.getBoundingClientRect();
+                const viewportRect = viewport.getBoundingClientRect();
+                viewport.scrollBy({ top: headingRect.top - viewportRect.top });
             }
         }
-    }, [focusedHeading]);
+    });
 
-    const markdownComponents: Partial<Components> = {
-        a: (props: React.HTMLAttributes<HTMLAnchorElement>) => (
-            <Link props={props} setFocusedHeading={setFocusedHeading} />
-        ),
-        p: (props: React.HTMLAttributes<HTMLParagraphElement>) => <div className="paragraph" {...props} />,
-        h1: (props: React.HTMLAttributes<HTMLHeadingElement>) => <Heading props={props} hnum={1} />,
-        h2: (props: React.HTMLAttributes<HTMLHeadingElement>) => <Heading props={props} hnum={2} />,
-        h3: (props: React.HTMLAttributes<HTMLHeadingElement>) => <Heading props={props} hnum={3} />,
-        h4: (props: React.HTMLAttributes<HTMLHeadingElement>) => <Heading props={props} hnum={4} />,
-        h5: (props: React.HTMLAttributes<HTMLHeadingElement>) => <Heading props={props} hnum={5} />,
-        h6: (props: React.HTMLAttributes<HTMLHeadingElement>) => <Heading props={props} hnum={6} />,
-        img: (props: React.HTMLAttributes<HTMLImageElement>) => <MarkdownImg props={props} resolveOpts={resolveOpts} />,
-        source: (props: React.HTMLAttributes<HTMLSourceElement>) => (
-            <MarkdownSource props={props} resolveOpts={resolveOpts} />
-        ),
+    const markdownComponents: Record<string, any> = {
+        a: (props: any) => <Link props={props} setFocusedHeading={setFocusedHeading} />,
+        p: (props: any) => <div class="paragraph" {...props} />,
+        h1: (props: any) => <Heading props={props} hnum={1} />,
+        h2: (props: any) => <Heading props={props} hnum={2} />,
+        h3: (props: any) => <Heading props={props} hnum={3} />,
+        h4: (props: any) => <Heading props={props} hnum={4} />,
+        h5: (props: any) => <Heading props={props} hnum={5} />,
+        h6: (props: any) => <Heading props={props} hnum={6} />,
+        img: (props: any) => <MarkdownImg props={props} resolveOpts={resolveOpts} />,
+        source: (props: any) => <MarkdownSource props={props} resolveOpts={resolveOpts} />,
         code: Code,
-        pre: (props: React.HTMLAttributes<HTMLPreElement>) => (
-            <CodeBlock children={props.children} onClickExecute={onClickExecute} />
-        ),
-    };
-    markdownComponents["waveblock"] = (props: any) => <WaveBlock {...props} blockmap={contentBlocksMap} />;
-    markdownComponents["mermaidblock"] = (props: any) => {
-        const getTextContent = (children: any): string => {
-            if (typeof children === "string") {
-                return children;
-            } else if (Array.isArray(children)) {
-                return children.map(getTextContent).join("");
-            } else if (children && typeof children === "object" && children.props && children.props.children) {
-                return getTextContent(children.props.children);
-            }
-            return String(children || "");
-        };
-
-        const chartText = getTextContent(props.children);
-        return (
-            <ErrorBoundary fallback={<MermaidErrorFallback chart={chartText} />}>
-                <Mermaid chart={chartText} />
-            </ErrorBoundary>
-        );
+        pre: (props: any) => <CodeBlock children={props.children} onClickExecute={onClickExecute} />,
+        waveblock: (props: any) => <WaveBlock {...props} blockmap={contentBlocksMap()} />,
+        mermaidblock: (props: any) => {
+            const getTextContent = (children: any): string => {
+                if (typeof children === "string") return children;
+                if (Array.isArray(children)) return children.map(getTextContent).join("");
+                if (children && typeof children === "object" && children.props?.children)
+                    return getTextContent(children.props.children);
+                return String(children || "");
+            };
+            const chartText = getTextContent(props.children);
+            return (
+                <ErrorBoundary fallback={<MermaidErrorFallback chart={chartText} />}>
+                    <Mermaid chart={chartText} />
+                </ErrorBoundary>
+            );
+        },
     };
 
-    const toc = useMemo(() => {
-        if (showToc) {
-            if (tocRef.current.length > 0) {
-                return tocRef.current.map((item) => {
-                    return (
-                        <a
-                            key={item.href}
-                            className="toc-item"
-                            style={{ "--indent-factor": item.depth } as React.CSSProperties}
-                            onClick={() => setFocusedHeading(item.href)}
-                        >
-                            {item.value}
-                        </a>
-                    );
-                });
-            } else {
-                return (
-                    <div
-                        className="toc-item toc-empty text-secondary"
-                        style={{ "--indent-factor": 2 } as React.CSSProperties}
-                    >
-                        No sub-headings found
-                    </div>
-                );
-            }
-        }
-    }, [showToc, tocRef]);
+    const renderedMarkdown = createMemo(() => {
+        const txt = transformedText();
+        const tocRef: TocItem[] = [];
+        const tocRefObj = { current: tocRef };
 
-    let rehypePlugins = null;
-    if (rehype) {
-        rehypePlugins = [
-            rehypeRaw,
-            rehypeHighlight,
-            () =>
-                rehypeSanitize({
-                    ...defaultSchema,
-                    attributes: {
-                        ...defaultSchema.attributes,
-                        span: [
-                            ...(defaultSchema.attributes?.span || []),
-                            // Allow all class names starting with `hljs-`.
-                            ["className", /^hljs-./],
-                            ["srcset"],
-                            ["media"],
-                            ["type"],
-                            // Alternatively, to allow only certain class names:
-                            // ['className', 'hljs-number', 'hljs-title', 'hljs-variable']
-                        ],
-                        waveblock: [["blockkey"]],
-                    },
-                    tagNames: [
-                        ...(defaultSchema.tagNames || []),
-                        "span",
-                        "waveblock",
-                        "picture",
-                        "source",
-                        "mermaidblock",
-                    ],
-                }),
-            () => rehypeSlug({ prefix: idPrefix }),
+        const rehypePlugins: any[] = rehype
+            ? [
+                  rehypeRaw,
+                  rehypeHighlight,
+                  () =>
+                      rehypeSanitize({
+                          ...defaultSchema,
+                          attributes: {
+                              ...defaultSchema.attributes,
+                              span: [
+                                  ...(defaultSchema.attributes?.span || []),
+                                  ["className", /^hljs-./],
+                                  ["srcset"],
+                                  ["media"],
+                                  ["type"],
+                              ],
+                              waveblock: [["blockkey"]],
+                          },
+                          tagNames: [
+                              ...(defaultSchema.tagNames || []),
+                              "span",
+                              "waveblock",
+                              "picture",
+                              "source",
+                              "mermaidblock",
+                          ],
+                      }),
+                  () => rehypeSlug({ prefix: idPrefix() }),
+              ]
+            : [];
+
+        const remarkPlugins: any[] = [
+            remarkMermaidToTag,
+            remarkGfm,
+            [RemarkFlexibleToc, { tocRef: tocRefObj.current }],
+            [createContentBlockPlugin, { blocks: contentBlocksMap() }],
         ];
-    }
-    const remarkPlugins: any = [
-        remarkMermaidToTag,
-        remarkGfm,
-        [RemarkFlexibleToc, { tocRef: tocRef.current }],
-        [createContentBlockPlugin, { blocks: contentBlocksMap }],
-    ];
 
-    const ScrollableMarkdown = () => {
-        return (
-            <OverlayScrollbarsComponent
-                ref={contentsOsRef}
-                className={cn("content", contentClassName)}
-                options={{ scrollbars: { autoHide: "leave" } }}
-            >
-                <ReactMarkdown
-                    remarkPlugins={remarkPlugins}
-                    rehypePlugins={rehypePlugins}
-                    components={markdownComponents}
-                >
-                    {transformedText}
-                </ReactMarkdown>
-            </OverlayScrollbarsComponent>
-        );
-    };
+        const processor = unified()
+            .use(remarkParse)
+            .use(remarkPlugins as any)
+            .use(remarkRehype as any, { allowDangerousHtml: true })
+            .use(rehypePlugins as any);
 
-    const NonScrollableMarkdown = () => {
-        return (
-            <div className={cn("content non-scrollable", contentClassName)}>
-                <ReactMarkdown
-                    remarkPlugins={remarkPlugins}
-                    rehypePlugins={rehypePlugins}
-                    components={markdownComponents}
-                >
-                    {transformedText}
-                </ReactMarkdown>
-            </div>
-        );
-    };
+        try {
+            const mdast = processor.parse(txt);
+            const hast = processor.runSync(mdast);
+            // Update tocItems after processing
+            tocRefObj.current.forEach((item) => tocItems.push(item));
+            return toJsxRuntime(hast as any, {
+                jsx: jsx as any,
+                jsxs: jsxs as any,
+                Fragment: Fragment as any,
+                passKeys: false,
+                components: markdownComponents as any,
+            }) as JSX.Element;
+        } catch (e) {
+            console.error("Markdown render error:", e);
+            return <pre>{txt}</pre>;
+        }
+    });
 
-    const mergedStyle = { ...style };
-    if (fontSizeOverride != null) {
-        mergedStyle["--markdown-font-size"] = `${boundNumber(fontSizeOverride, 6, 64)}px`;
-    }
-    if (fixedFontSizeOverride != null) {
-        mergedStyle["--markdown-fixed-font-size"] = `${boundNumber(fixedFontSizeOverride, 6, 64)}px`;
-    }
+    onMount(() => {
+        if (scrollable && contentsEl) {
+            contentsOs = OverlayScrollbars(contentsEl, { scrollbars: { autoHide: "leave" } });
+            onCleanup(() => contentsOs?.destroy());
+        }
+    });
+
+    const mergedStyle = createMemo((): JSX.CSSProperties => {
+        const s: Record<string, any> = { ...(style ?? {}) };
+        if (fontSizeOverride != null) {
+            s["--markdown-font-size"] = `${boundNumber(fontSizeOverride, 6, 64)}px`;
+        }
+        if (fixedFontSizeOverride != null) {
+            s["--markdown-fixed-font-size"] = `${boundNumber(fixedFontSizeOverride, 6, 64)}px`;
+        }
+        return s;
+    });
+
     return (
-        <div className={clsx("markdown", className)} style={mergedStyle}>
-            {scrollable ? <ScrollableMarkdown /> : <NonScrollableMarkdown />}
-            {toc && (
-                <OverlayScrollbarsComponent className="toc mt-1" options={{ scrollbars: { autoHide: "leave" } }}>
-                    <div className="toc-inner">
-                        <h4 className="font-bold">Table of Contents</h4>
-                        {toc}
+        <div class={clsx("markdown", className)} style={mergedStyle() as any}>
+            <Show
+                when={scrollable}
+                fallback={
+                    <div class={cn("content non-scrollable", contentClassName)}>
+                        {renderedMarkdown()}
                     </div>
-                </OverlayScrollbarsComponent>
-            )}
+                }
+            >
+                <div class={cn("content", contentClassName)} ref={contentsEl}>
+                    {renderedMarkdown()}
+                </div>
+            </Show>
+            <Show when={showToc && tocItems.length > 0}>
+                <div class="toc mt-1" ref={tocEl}>
+                    <div class="toc-inner">
+                        <h4 class="font-bold">Table of Contents</h4>
+                        {tocItems.map((item) => (
+                            <a
+                                class="toc-item"
+                                style={{ "--indent-factor": item.depth } as any}
+                                onClick={() => setFocusedHeading(item.href)}
+                            >
+                                {item.value}
+                            </a>
+                        ))}
+                    </div>
+                </div>
+            </Show>
+            <Show when={showToc && tocItems.length === 0}>
+                <div class="toc mt-1">
+                    <div class="toc-inner">
+                        <h4 class="font-bold">Table of Contents</h4>
+                        <div class="toc-item toc-empty text-secondary" style={{ "--indent-factor": 2 } as any}>
+                            No sub-headings found
+                        </div>
+                    </div>
+                </div>
+            </Show>
         </div>
     );
 };

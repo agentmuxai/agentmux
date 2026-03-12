@@ -11,7 +11,7 @@
  * When detected, updates initStateAtom to trigger UI prompt display.
  */
 
-import type { PrimitiveAtom } from "jotai";
+import type { Setter } from "solid-js";
 import { globalStore, getApi } from "@/app/store/global";
 import type { InitQuestion, InitState } from "./types";
 
@@ -32,11 +32,11 @@ const COMPLETION_TIMEOUT = 3000;
 
 export class InitializationMonitor {
     private buffer: string = "";
-    private initStateAtom: PrimitiveAtom<InitState>;
+    private initStateAtom: Setter<InitState>;
     private completionTimer: NodeJS.Timeout | null = null;
     private active: boolean = false;
 
-    constructor(initStateAtom: PrimitiveAtom<InitState>) {
+    constructor(initStateAtom: Setter<InitState>) {
         this.initStateAtom = initStateAtom;
     }
 
@@ -59,8 +59,8 @@ export class InitializationMonitor {
             message: "Starting Claude Code...",
         };
         log(`[InitMonitor] Setting initial state: ${JSON.stringify(newState)}`);
-        globalStore.set(this.initStateAtom, newState);
-        log(`[InitMonitor] Current state after set: ${JSON.stringify(globalStore.get(this.initStateAtom))}`);
+        this.initStateAtom(newState);
+        log(`[InitMonitor] Current state after set: ${JSON.stringify(newState)}`);
     }
 
     /**
@@ -166,7 +166,7 @@ export class InitializationMonitor {
             phase: "awaiting_response" as const,
             question: question,
         };
-        globalStore.set(this.initStateAtom, newState);
+        this.initStateAtom(newState);
         log(`[InitMonitor] State updated to: ${JSON.stringify(newState)}`);
     }
 
@@ -177,7 +177,7 @@ export class InitializationMonitor {
     responseProcessed(): void {
         console.log("[InitMonitor] Response processed, waiting for next question or completion");
 
-        globalStore.set(this.initStateAtom, {
+        this.initStateAtom({
             phase: "processing",
             message: "Processing response...",
         });
@@ -241,7 +241,7 @@ export class InitializationMonitor {
 
         console.log("[InitMonitor] Initialization complete");
 
-        globalStore.set(this.initStateAtom, {
+        this.initStateAtom({
             phase: "ready",
             message: "Connected to Claude Code",
         });
@@ -255,10 +255,7 @@ export class InitializationMonitor {
     handleError(error: string): void {
         console.error("[InitMonitor] Initialization error:", error);
 
-        globalStore.set(this.initStateAtom, {
-            phase: "error",
-            error: error,
-        });
+        this.initStateAtom({ phase: "error", error } as InitState);
 
         this.stop();
     }

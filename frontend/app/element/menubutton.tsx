@@ -1,25 +1,25 @@
 import clsx from "clsx";
-import { memo, useState } from "react";
+import { createSignal, JSX } from "solid-js";
 import { Button } from "./button";
 import { FlyoutMenu } from "./flyoutmenu";
 import "./menubutton.scss";
 
-const MenuButtonComponent = ({ items, className, text, title }: MenuButtonProps) => {
-    const [isOpen, setIsOpen] = useState(false);
+const MenuButton = (props: MenuButtonProps): JSX.Element => {
+    const [isOpen, setIsOpen] = createSignal(false);
     return (
-        <div className={clsx("menubutton", className)}>
-            <FlyoutMenu items={items} onOpenChange={setIsOpen}>
+        <div class={clsx("menubutton", props.className)}>
+            <FlyoutMenu items={props.items} onOpenChange={setIsOpen}>
                 <Button
                     className="grey rounded-[3px] py-[2px] px-[2px]"
-                    style={{ borderColor: isOpen ? "var(--accent-color)" : "transparent" }}
-                    title={title}
+                    style={{ "border-color": isOpen() ? "var(--accent-color)" : "transparent" }}
+                    title={props.title}
                 >
-                    <div>{text}</div>
-                    <i className="fa-sharp fa-solid fa-angle-down"></i>
+                    <div>{props.text}</div>
+                    <i class="fa-sharp fa-solid fa-angle-down" />
                 </Button>
             </FlyoutMenu>
         </div>
     );
 };
 
-export const MenuButton = memo(MenuButtonComponent) as typeof MenuButtonComponent;
+export { MenuButton };

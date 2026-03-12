@@ -5,7 +5,7 @@
  * DiffViewer - Displays unified diff format with syntax highlighting
  */
 
-import React, { memo } from "react";
+import { For, Show, type JSX } from "solid-js";
 import type { EditParams, EditResult } from "../types";
 
 interface DiffViewerProps {
@@ -13,11 +13,12 @@ interface DiffViewerProps {
     result?: EditResult;
 }
 
-export const DiffViewer: React.FC<DiffViewerProps> = memo(({ params, result }) => {
+export const DiffViewer = ({ params, result }: DiffViewerProps): JSX.Element => {
     const diff = result?.diff;
+
     if (!diff) {
         return (
-            <pre className="agent-diff-empty">
+            <pre class="agent-diff-empty">
                 No diff available
                 {"\n"}
                 File: {params.file_path}
@@ -28,24 +29,22 @@ export const DiffViewer: React.FC<DiffViewerProps> = memo(({ params, result }) =
     const lines = diff.split("\n");
 
     return (
-        <pre className="agent-diff">
-            <div className="agent-diff-header">{params.file_path}</div>
-            {lines.map((line, i) => {
-                const cls = line.startsWith("+")
-                    ? "agent-diff-add"
-                    : line.startsWith("-")
-                      ? "agent-diff-del"
-                      : line.startsWith("@")
-                        ? "agent-diff-hunk"
-                        : "agent-diff-ctx";
-                return (
-                    <div key={i} className={cls}>
-                        {line}
-                    </div>
-                );
-            })}
+        <pre class="agent-diff">
+            <div class="agent-diff-header">{params.file_path}</div>
+            <For each={lines}>
+                {(line) => {
+                    const cls = line.startsWith("+")
+                        ? "agent-diff-add"
+                        : line.startsWith("-")
+                          ? "agent-diff-del"
+                          : line.startsWith("@")
+                            ? "agent-diff-hunk"
+                            : "agent-diff-ctx";
+                    return <div class={cls}>{line}</div>;
+                }}
+            </For>
         </pre>
     );
-});
+};
 
 DiffViewer.displayName = "DiffViewer";

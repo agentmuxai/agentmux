@@ -366,7 +366,7 @@ export class TermWrap {
 
     async resyncController(reason: string) {
         dlog("resync controller", this.blockId, reason);
-        const tabId = globalStore.get(atoms.staticTabId);
+        const tabId = atoms.staticTabId();
         const rtOpts: RuntimeOpts = { termsize: { rows: this.terminal.rows, cols: this.terminal.cols } };
         console.log("[dnd-debug] ControllerResyncCommand →", this.blockId, "tab:", tabId, "reason:", reason);
         try {

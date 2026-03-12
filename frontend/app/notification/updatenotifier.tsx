@@ -2,16 +2,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { atoms, isDev, pushNotification } from "@/store/global";
-import { useAtomValue } from "jotai";
-import { useEffect } from "react";
+import { createEffect } from "solid-js";
 
 export const useUpdateNotifier = () => {
-    const appUpdateStatus = useAtomValue(atoms.updaterStatusAtom);
+    const appUpdateStatus = atoms.updaterStatusAtom;
 
-    useEffect(() => {
+    createEffect(() => {
         let notification: NotificationType | null = null;
 
-        switch (appUpdateStatus) {
+        switch (appUpdateStatus()) {
             case "ready":
                 notification = {
                     id: "update-notification",
@@ -94,5 +93,5 @@ export const useUpdateNotifier = () => {
         if (notification) {
             pushNotification(notification);
         }
-    }, [appUpdateStatus]);
+    });
 };

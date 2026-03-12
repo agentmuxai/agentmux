@@ -447,26 +447,6 @@ class RpcApiType {
         return client.wshRpcCall("test", data, opts);
     }
 
-    // command "vdomasyncinitiation" [call]
-    VDomAsyncInitiationCommand(client: WshClient, data: VDomAsyncInitiationRequest, opts?: RpcOpts): Promise<void> {
-        return client.wshRpcCall("vdomasyncinitiation", data, opts);
-    }
-
-    // command "vdomcreatecontext" [call]
-    VDomCreateContextCommand(client: WshClient, data: VDomCreateContext, opts?: RpcOpts): Promise<ORef> {
-        return client.wshRpcCall("vdomcreatecontext", data, opts);
-    }
-
-    // command "vdomrender" [responsestream]
-	VDomRenderCommand(client: WshClient, data: VDomFrontendUpdate, opts?: RpcOpts): AsyncGenerator<VDomBackendUpdate, void, boolean> {
-        return client.wshRpcStream("vdomrender", data, opts);
-    }
-
-    // command "vdomurlrequest" [responsestream]
-	VDomUrlRequestCommand(client: WshClient, data: VDomUrlRequestData, opts?: RpcOpts): AsyncGenerator<VDomUrlRequestResponse, void, boolean> {
-        return client.wshRpcStream("vdomurlrequest", data, opts);
-    }
-
     // command "waitforroute" [call]
     WaitForRouteCommand(client: WshClient, data: CommandWaitForRouteData, opts?: RpcOpts): Promise<boolean> {
         return client.wshRpcCall("waitforroute", data, opts);

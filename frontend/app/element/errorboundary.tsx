@@ -1,33 +1,28 @@
 // Copyright 2025, Command Line Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-import React, { ReactNode } from "react";
+import { ErrorBoundary as SolidErrorBoundary, JSX } from "solid-js";
 
-export class ErrorBoundary extends React.Component<
-    { children: ReactNode; fallback?: React.ReactElement & { error?: Error } },
-    { error: Error }
-> {
-    constructor(props) {
-        super(props);
-        this.state = { error: null };
-    }
+interface ErrorBoundaryProps {
+    children?: JSX.Element;
+    fallback?: JSX.Element | ((err: Error) => JSX.Element);
+}
 
-    componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
-        console.log("ErrorBoundary caught an error:", error, errorInfo);
-        this.setState({ error: error });
-    }
-
-    render() {
-        const { fallback } = this.props;
-        const { error } = this.state;
-        if (error) {
-            if (fallback != null) {
-                return React.cloneElement(fallback as any, { error });
-            }
-            const errorMsg = `Error: ${error?.message}\n\n${error?.stack}`;
-            return <pre className="error-boundary">{errorMsg}</pre>;
-        } else {
-            return <>{this.props.children}</>;
-        }
-    }
+export function ErrorBoundary(props: ErrorBoundaryProps): JSX.Element {
+    return (
+        <SolidErrorBoundary
+            fallback={(err) => {
+                if (props.fallback != null) {
+                    if (typeof props.fallback === "function") {
+                        return (props.fallback as (err: Error) => JSX.Element)(err);
+                    }
+                    return props.fallback as JSX.Element;
+                }
+                const errorMsg = `Error: ${err?.message}\n\n${err?.stack}`;
+                return <pre class="error-boundary">{errorMsg}</pre>;
+            }}
+        >
+            {props.children}
+        </SolidErrorBoundary>
+    );
 }

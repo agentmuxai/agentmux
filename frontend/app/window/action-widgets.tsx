@@ -12,8 +12,7 @@ import { TabRpcClient } from "@/app/store/wshrpcutil";
 import { atoms, createBlock, getApi } from "@/store/global";
 import { fireAndForget, isBlank, makeIconClass } from "@/util/util";
 import { invoke } from "@tauri-apps/api/core";
-import { useAtomValue } from "jotai";
-import { memo } from "react";
+import { For, Show, type JSX } from "solid-js";
 import "./action-widgets.scss";
 
 function sortByDisplayOrder(wmap: { [key: string]: WidgetConfigType }): WidgetConfigType[] {
@@ -59,67 +58,67 @@ async function handleWidgetSelect(widget: WidgetConfigType) {
     createBlock(blockDef, widget.magnified);
 }
 
-const ActionWidget = memo(
-    ({
-        widget,
-        widgetKey,
-        iconOnly,
-        settings,
-    }: {
-        widget: WidgetConfigType;
-        widgetKey?: string;
-        iconOnly: boolean;
-        settings: Record<string, any>;
-    }) => {
-        if (widgetKey && isWidgetHidden(settings, widgetKey, widget)) {
-            return null;
-        }
-
-        return (
-            <div data-tauri-drag-region="false">
-                <Tooltip
-                    content={widget.description || widget.label}
-                    placement="bottom"
-                    divClassName="flex flex-row items-center gap-1 px-2 py-0.5 text-secondary hover:bg-hoverbg hover:text-white cursor-pointer rounded-sm h-full"
-                    divOnClick={() => handleWidgetSelect(widget)}
-                >
-                    <div style={{ color: widget.color }} className="text-sm">
-                        <i className={makeIconClass(widget.icon, true, { defaultIcon: "browser" })}></i>
-                    </div>
-                    {!iconOnly && !isBlank(widget.label) && (
-                        <div className="text-xs whitespace-nowrap">{widget.label}</div>
-                    )}
-                </Tooltip>
-            </div>
-        );
-    }
-);
-
-const ActionWidgets = memo(() => {
-    const fullConfig = useAtomValue(atoms.fullConfigAtom);
-    const settings: Record<string, any> = fullConfig?.settings ?? {};
-    const iconOnly = settings["widget:icononly"] ?? false;
-    const widgets = sortByDisplayOrder(fullConfig?.widgets);
-
-    // Build widget key lookup: widget objects don't carry their own map key,
-    // so we re-derive it from fullConfig.widgets.
-    const widgetKeyMap = new Map<WidgetConfigType, string>();
-    if (fullConfig?.widgets) {
-        for (const [key, w] of Object.entries(fullConfig.widgets)) {
-            widgetKeyMap.set(w as WidgetConfigType, key);
-        }
+const ActionWidget = ({
+    widget,
+    widgetKey,
+    iconOnly,
+    settings,
+}: {
+    widget: WidgetConfigType;
+    widgetKey?: string;
+    iconOnly: boolean;
+    settings: Record<string, any>;
+}): JSX.Element => {
+    if (widgetKey && isWidgetHidden(settings, widgetKey, widget)) {
+        return null;
     }
 
-    const handleWidgetsBarContextMenu = (e: React.MouseEvent) => {
+    return (
+        <div data-tauri-drag-region="false">
+            <Tooltip
+                content={widget.description || widget.label}
+                placement="bottom"
+                divClassName="flex flex-row items-center gap-1 px-2 py-0.5 text-secondary hover:bg-hoverbg hover:text-white cursor-pointer rounded-sm h-full"
+                divOnClick={() => handleWidgetSelect(widget)}
+            >
+                <div style={{ color: widget.color }} class="text-sm">
+                    <i class={makeIconClass(widget.icon, true, { defaultIcon: "browser" })}></i>
+                </div>
+                <Show when={!iconOnly && !isBlank(widget.label)}>
+                    <div class="text-xs whitespace-nowrap">{widget.label}</div>
+                </Show>
+            </Tooltip>
+        </div>
+    );
+};
+
+const ActionWidgets = (): JSX.Element => {
+    const fullConfig = atoms.fullConfigAtom;
+    const settings = (): Record<string, any> => fullConfig()?.settings ?? {};
+    const iconOnly = (): boolean => settings()["widget:icononly"] ?? false;
+    const widgets = (): WidgetConfigType[] => sortByDisplayOrder(fullConfig()?.widgets);
+
+    // Build widget key lookup
+    const widgetKeyMap = (): Map<WidgetConfigType, string> => {
+        const map = new Map<WidgetConfigType, string>();
+        if (fullConfig()?.widgets) {
+            for (const [key, w] of Object.entries(fullConfig().widgets)) {
+                map.set(w as WidgetConfigType, key);
+            }
+        }
+        return map;
+    };
+
+    const handleWidgetsBarContextMenu = (e: MouseEvent) => {
         e.preventDefault();
         const menu: ContextMenuItem[] = [
             {
                 label: "Icon Only",
                 type: "checkbox",
-                checked: iconOnly,
+                checked: iconOnly(),
                 click: () => {
                     fireAndForget(async () => {
-                        await RpcApi.SetConfigCommand(TabRpcClient, { "widget:icononly": !iconOnly } as any);
+                        await RpcApi.SetConfigCommand(TabRpcClient, { "widget:icononly": !iconOnly() } as any);
                     });
                 },
             },
@@ -129,21 +128,22 @@ const ActionWidgets = memo(() => {
 
     return (
         <div
-            className="action-widgets"
+            class="action-widgets"
             data-testid="action-widgets"
             onContextMenu={handleWidgetsBarContextMenu}
         >
-            {widgets?.map((data, idx) => (
-                <ActionWidget
-                    key={`widget-${idx}`}
-                    widget={data}
-                    widgetKey={widgetKeyMap.get(data)}
-                    iconOnly={iconOnly}
-                    settings={settings}
-                />
-            ))}
+            <For each={widgets()}>
+                {(data, idx) => (
+                    <ActionWidget
+                        widget={data}
+                        widgetKey={widgetKeyMap().get(data)}
+                        iconOnly={iconOnly()}
+                        settings={settings()}
+                    />
+                )}
+            </For>
         </div>
     );
-});
+};
 
 export { ActionWidgets };

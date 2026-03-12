@@ -6,16 +6,16 @@ import { Markdown } from "@/element/markdown";
 import { modalsModel } from "@/store/modalmodel";
 import * as keyutil from "@/util/keyutil";
 import { fireAndForget } from "@/util/util";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createSignal, Show, type JSX } from "solid-js";
 import { UserInputService } from "../store/services";
 import "./userinputmodal.scss";
 
 const UserInputModal = (userInputRequest: UserInputRequest) => {
-    const [responseText, setResponseText] = useState("");
-    const [countdown, setCountdown] = useState(Math.floor(userInputRequest.timeoutms / 1000));
-    const checkboxRef = useRef<HTMLInputElement>(null);
+    const [responseText, setResponseText] = createSignal("");
+    const [countdown, setCountdown] = createSignal(Math.floor(userInputRequest.timeoutms / 1000));
+    let checkboxRef!: HTMLInputElement;
 
-    const handleSendErrResponse = useCallback(() => {
+    const handleSendErrResponse = () => {
         fireAndForget(() =>
             UserInputService.SendUserInputResponse({
                 type: "userinputresp",
@@ -24,36 +24,33 @@ const UserInputModal = (userInputRequest: UserInputRequest) => {
             })
         );
         modalsModel.popModal();
-    }, [responseText, userInputRequest]);
+    };
 
-    const handleSendText = useCallback(() => {
+    const handleSendText = () => {
         fireAndForget(() =>
             UserInputService.SendUserInputResponse({
                 type: "userinputresp",
                 requestid: userInputRequest.requestid,
-                text: responseText,
-                checkboxstat: checkboxRef?.current?.checked ?? false,
+                text: responseText(),
+                checkboxstat: checkboxRef?.checked ?? false,
             })
         );
         modalsModel.popModal();
-    }, [responseText, userInputRequest]);
+    };
 
-    const handleSendConfirm = useCallback(
-        (response: boolean) => {
-            fireAndForget(() =>
-                UserInputService.SendUserInputResponse({
-                    type: "userinputresp",
-                    requestid: userInputRequest.requestid,
-                    confirm: response,
-                    checkboxstat: checkboxRef?.current?.checked ?? false,
-                })
-            );
-            modalsModel.popModal();
-        },
-        [userInputRequest]
-    );
+    const handleSendConfirm = (response: boolean) => {
+        fireAndForget(() =>
+            UserInputService.SendUserInputResponse({
+                type: "userinputresp",
+                requestid: userInputRequest.requestid,
+                confirm: response,
+                checkboxstat: checkboxRef?.checked ?? false,
+            })
+        );
+        modalsModel.popModal();
+    };
 
-    const handleSubmit = useCallback(() => {
+    const handleSubmit = () => {
         switch (userInputRequest.responsetype) {
             case "text":
                 handleSendText();
@@ -62,80 +59,79 @@ const UserInputModal = (userInputRequest: UserInputRequest) => {
                 handleSendConfirm(true);
                 break;
         }
-    }, [handleSendConfirm, handleSendText, userInputRequest.responsetype]);
+    };
 
-    const handleKeyDown = useCallback(
-        (waveEvent: WaveKeyboardEvent): boolean => {
-            if (keyutil.checkKeyPressed(waveEvent, "Escape")) {
-                handleSendErrResponse();
-                return;
-            }
-            if (keyutil.checkKeyPressed(waveEvent, "Enter")) {
-                handleSubmit();
-                return true;
-            }
-        },
-        [handleSendErrResponse, handleSubmit]
-    );
-
-    const queryText = useMemo(() => {
-        if (userInputRequest.markdown) {
-            return <Markdown text={userInputRequest.querytext} className="userinput-markdown" />;
+    const handleKeyDown = (waveEvent: WaveKeyboardEvent): boolean => {
+        if (keyutil.checkKeyPressed(waveEvent, "Escape")) {
+            handleSendErrResponse();
+            return;
         }
-        return <span className="userinput-text">{userInputRequest.querytext}</span>;
-    }, [userInputRequest.markdown, userInputRequest.querytext]);
+        if (keyutil.checkKeyPressed(waveEvent, "Enter")) {
+            handleSubmit();
+            return true;
+        }
+    };
 
-    const inputBox = useMemo(() => {
+    // Countdown timer using setInterval
+    let intervalId: ReturnType<typeof setInterval>;
+    const startCountdown = () => {
+        intervalId = setInterval(() => {
+            setCountdown((prev) => {
+                if (prev <= 1) {
+                    clearInterval(intervalId);
+                    setTimeout(() => handleSendErrResponse(), 300);
+                    return 0;
+                }
+                return prev - 1;
+            });
+        }, 1000);
+    };
+    startCountdown();
+
+    const queryText = (): JSX.Element => {
+        if (userInputRequest.markdown) {
+            return <Markdown text={userInputRequest.querytext} class="userinput-markdown" /> as JSX.Element;
+        }
+        return <span class="userinput-text">{userInputRequest.querytext}</span>;
+    };
+
+    const inputBox = (): JSX.Element => {
         if (userInputRequest.responsetype === "confirm") {
             return <></>;
         }
         return (
             <input
                 type={userInputRequest.publictext ? "text" : "password"}
-                onChange={(e) => setResponseText(e.target.value)}
-                value={responseText}
+                onInput={(e) => setResponseText((e.target as HTMLInputElement).value)}
+                value={responseText()}
                 maxLength={400}
-                className="userinput-inputbox"
-                autoFocus={true}
+                class="userinput-inputbox"
+                autofocus={true}
                 onKeyDown={(e) => keyutil.keydownWrapper(handleKeyDown)(e)}
             />
         );
-    }, [userInputRequest.responsetype, userInputRequest.publictext, responseText, handleKeyDown, setResponseText]);
+    };
 
-    const optionalCheckbox = useMemo(() => {
+    const optionalCheckbox = (): JSX.Element => {
         if (userInputRequest.checkboxmsg == "") {
             return <></>;
         }
         return (
-            <div className="userinput-checkbox-container">
-                <div className="userinput-checkbox-row">
+            <div class="userinput-checkbox-container">
+                <div class="userinput-checkbox-row">
                     <input
                         type="checkbox"
                         id={`uicheckbox-${userInputRequest.requestid}`}
-                        className="userinput-checkbox"
+                        class="userinput-checkbox"
                         ref={checkboxRef}
                     />
-                    <label htmlFor={`uicheckbox-${userInputRequest.requestid}`}>{userInputRequest.checkboxmsg}</label>
+                    <label for={`uicheckbox-${userInputRequest.requestid}`}>{userInputRequest.checkboxmsg}</label>
                 </div>
             </div>
         );
-    }, []);
+    };
 
-    useEffect(() => {
-        let timeout: ReturnType<typeof setTimeout>;
-        if (countdown <= 0) {
-            timeout = setTimeout(() => {
-                handleSendErrResponse();
-            }, 300);
-        } else {
-            timeout = setTimeout(() => {
-                setCountdown(countdown - 1);
-            }, 1000);
-        }
-        return () => clearTimeout(timeout);
-    }, [countdown]);
-
-    const handleNegativeResponse = useCallback(() => {
+    const handleNegativeResponse = () => {
         switch (userInputRequest.responsetype) {
             case "text":
                 handleSendErrResponse();
@@ -144,7 +140,7 @@ const UserInputModal = (userInputRequest: UserInputRequest) => {
                 handleSendConfirm(false);
                 break;
         }
-    }, [userInputRequest.responsetype, handleSendErrResponse, handleSendConfirm]);
+    };
 
     return (
         <Modal
@@ -154,11 +150,11 @@ const UserInputModal = (userInputRequest: UserInputRequest) => {
             okLabel={userInputRequest.oklabel}
             cancelLabel={userInputRequest.cancellabel}
         >
-            <div className="userinput-header">{userInputRequest.title + ` (${countdown}s)`}</div>
-            <div className="userinput-body">
-                {queryText}
-                {inputBox}
-                {optionalCheckbox}
+            <div class="userinput-header">{userInputRequest.title + ` (${countdown()}s)`}</div>
+            <div class="userinput-body">
+                {queryText()}
+                {inputBox()}
+                {optionalCheckbox()}
             </div>
         </Modal>
     );

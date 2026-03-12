@@ -5,8 +5,8 @@ import { BlockNodeModel } from "@/app/block/blocktypes";
 import { RpcApi } from "@/app/store/wshclientapi";
 import { TabRpcClient } from "@/app/store/wshrpcutil";
 import { atoms, getApi, globalStore, WOS } from "@/app/store/global";
-import { atom, Atom, PrimitiveAtom } from "jotai";
-import React from "react";
+import { createSignal } from "solid-js";
+import { SignalAtom } from "@/util/util";
 import { AgentViewWrapper } from "./agent-view";
 import { PROVIDERS } from "./providers";
 import { buildBootstrapScript, guessShellType } from "./bootstrap";
@@ -17,13 +17,13 @@ export class AgentViewModel implements ViewModel {
     viewType = "agent";
     blockId: string;
     nodeModel: BlockNodeModel;
-    blockAtom: Atom<Block>;
+    blockAtom: SignalAtom<Block>;
 
-    viewIcon: Atom<string>;
-    viewName: Atom<string>;
-    viewText: Atom<string | HeaderElem[]>;
+    viewIcon: () => string;
+    viewName: () => string;
+    viewText: () => string | HeaderElem[];
     viewComponent: ViewComponent;
-    noPadding = atom(true);
+    noPadding: () => boolean;
 
     constructor(blockId: string, nodeModel: BlockNodeModel) {
         this.blockId = blockId;
@@ -31,17 +31,14 @@ export class AgentViewModel implements ViewModel {
         this.blockAtom = WOS.getWaveObjectAtom<Block>(`block:${blockId}`);
         this.viewComponent = AgentViewWrapper as any;
 
-        this.viewIcon = atom("sparkles");
-        this.viewName = atom("Agent");
-        this.viewText = atom<string | HeaderElem[]>([]);
+        this.viewIcon = () => "sparkles";
+        this.viewName = () => "Agent";
+        this.viewText = () => [] as HeaderElem[];
+        this.noPadding = () => true;
     }
 
     /**
      * Called when user clicks a provider button (raw mode).
-     * Switches to terminal view, injects a bootstrap script that:
-     * 1. Checks for the CLI in a version-isolated directory
-     * 2. Installs via npm if missing (visible in terminal)
-     * 3. Launches the CLI
      */
     connectWithProvider = async (providerId: string, _cliPath: string): Promise<void> => {
         const provider = PROVIDERS[providerId];
@@ -95,9 +92,6 @@ export class AgentViewModel implements ViewModel {
 
     /**
      * Called when user clicks a styled provider button.
-     * Keeps view as "agent" but starts a shell controller underneath,
-     * then injects a bootstrap script with styled output flags.
-     * The PTY output is subscribed to by useAgentStream and rendered as styled blocks.
      */
     connectStyled = async (providerId: string, _cliPath: string): Promise<void> => {
         const provider = PROVIDERS[providerId];

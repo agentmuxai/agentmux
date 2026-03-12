@@ -2,12 +2,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { NodeModel } from "@/layout/index";
-import { Atom } from "jotai";
+import type { Accessor, JSX } from "solid-js";
 
+// BlockNodeModel is defined globally in types/custom.d.ts.
+// We redeclare a compatible local version here for use in sub-block components.
 export interface BlockNodeModel {
     blockId: string;
-    isFocused: Atom<boolean>;
-    onClose: () => void;
+    isFocused: Accessor<boolean>;
+    disablePointerEvents: Accessor<boolean>;
+    innerRect?: Accessor<{ width: string; height: string }>;
+    onClose?: () => void;
     focusNode: () => void;
 }
 
@@ -33,8 +37,8 @@ export interface SubBlockProps {
 
 export interface BlockComponentModel2 {
     onClick?: () => void;
-    onFocusCapture?: React.FocusEventHandler<HTMLDivElement>;
-    blockRef?: React.RefObject<HTMLDivElement>;
+    onFocusCapture?: (e: FocusEvent) => void;  // used as onFocusIn in SolidJS
+    blockRef?: { current: HTMLDivElement | null };
 }
 
 export interface BlockFrameProps {
@@ -43,6 +47,6 @@ export interface BlockFrameProps {
     viewModel?: ViewModel;
     preview: boolean;
     numBlocksInTab?: number;
-    children?: React.ReactNode;
-    connBtnRef?: React.RefObject<HTMLDivElement>;
+    children?: JSX.Element;
+    connBtnRef?: { current: HTMLDivElement | null };
 }

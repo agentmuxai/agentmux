@@ -3,79 +3,78 @@
 
 import { modalsModel } from "@/app/store/modalmodel";
 import { atoms } from "@/store/global";
-import { useAtomValue } from "jotai";
-import { memo } from "react";
+import { For, Show, type JSX } from "solid-js";
 
-const ConnectionStatusModal = ({ conns }: { conns: ConnStatus[] }) => (
-    <div className="config-error-message">
+const ConnectionStatusModal = ({ conns }: { conns: ConnStatus[] }): JSX.Element => (
+    <div class="config-error-message">
         <h3>Active Connections</h3>
-        <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
-            {conns.map((c) => (
-                <li key={c.connection} style={{ padding: "4px 0", display: "flex", gap: 8, alignItems: "center" }}>
-                    <span
-                        style={{
-                            color:
-                                c.status === "connected"
-                                    ? "var(--accent-color)"
-                                    : c.status === "error"
-                                      ? "var(--error-color)"
-                                      : "var(--warning-color)",
-                        }}
-                    >
-                        {c.status === "connected" ? "●" : c.status === "error" ? "✕" : "◌"}
-                    </span>
-                    <span>{c.connection || "local"}</span>
-                    <span style={{ opacity: 0.5, fontSize: "0.9em" }}>{c.status}</span>
-                </li>
-            ))}
+        <ul style={{ "list-style": "none", padding: "0", margin: "0" }}>
+            <For each={conns}>
+                {(c) => (
+                    <li style={{ padding: "4px 0", display: "flex", gap: "8px", "align-items": "center" }}>
+                        <span
+                            style={{
+                                color:
+                                    c.status === "connected"
+                                        ? "var(--accent-color)"
+                                        : c.status === "error"
+                                          ? "var(--error-color)"
+                                          : "var(--warning-color)",
+                            }}
+                        >
+                            {c.status === "connected" ? "●" : c.status === "error" ? "✕" : "◌"}
+                        </span>
+                        <span>{c.connection || "local"}</span>
+                        <span style={{ opacity: "0.5", "font-size": "0.9em" }}>{c.status}</span>
+                    </li>
+                )}
+            </For>
         </ul>
     </div>
 );
 
-const ConnectionStatus = memo(() => {
-    const allConnStatus = useAtomValue(atoms.allConnStatus);
+const ConnectionStatus = (): JSX.Element => {
+    const allConnStatus = atoms.allConnStatus;
 
-    if (allConnStatus.length === 0) {
-        return null;
-    }
+    const errorCount = () => allConnStatus().filter((c) => c.status === "error").length;
+    const connectingCount = () => allConnStatus().filter((c) => c.status === "connecting" || c.status === "init").length;
+    const total = () => allConnStatus().length;
 
-    const errorCount = allConnStatus.filter((c) => c.status === "error").length;
-    const connectingCount = allConnStatus.filter((c) => c.status === "connecting" || c.status === "init").length;
-    const total = allConnStatus.length;
+    const icon = () => {
+        if (errorCount() > 0) return "✕";
+        if (connectingCount() > 0) return "◌";
+        return "■";
+    };
 
-    let icon: string;
-    let color: string;
-    let label: string;
+    const color = () => {
+        if (errorCount() > 0) return "var(--error-color)";
+        if (connectingCount() > 0) return "var(--warning-color)";
+        return "var(--secondary-text-color)";
+    };
 
-    if (errorCount > 0) {
-        icon = "✕";
-        color = "var(--error-color)";
-        label = `${errorCount} error`;
-    } else if (connectingCount > 0) {
-        icon = "◌";
-        color = "var(--warning-color)";
-        label = `${connectingCount} connecting`;
-    } else {
-        icon = "■";
-        color = "var(--secondary-text-color)";
-        label = `${total} connection${total !== 1 ? "s" : ""}`;
-    }
+    const label = () => {
+        if (errorCount() > 0) return `${errorCount()} error`;
+        if (connectingCount() > 0) return `${connectingCount()} connecting`;
+        return `${total()} connection${total() !== 1 ? "s" : ""}`;
+    };
 
     const handleClick = () => {
         modalsModel.pushModal("MessageModal", {
-            children: <ConnectionStatusModal conns={allConnStatus} />,
+            children: <ConnectionStatusModal conns={allConnStatus()} />,
         });
     };
 
     return (
-        <div className="status-bar-item clickable" title="Click to view connections" onClick={handleClick}>
-            <span className="status-icon" style={{ color }}>
-                {icon}
-            </span>
-            <span style={{ color }}>{label}</span>
-        </div>
+        <Show when={allConnStatus().length > 0}>
+            <div class="status-bar-item clickable" title="Click to view connections" onClick={handleClick}>
+                <span class="status-icon" style={{ color: color() }}>
+                    {icon()}
+                </span>
+                <span style={{ color: color() }}>{label()}</span>
+            </div>
+        </Show>
     );
-});
+};
 
 ConnectionStatus.displayName = "ConnectionStatus";
 

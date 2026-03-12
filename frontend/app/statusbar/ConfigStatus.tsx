@@ -4,29 +4,26 @@
 import { modalsModel } from "@/app/store/modalmodel";
 import { ConfigErrorMessage } from "@/app/window/system-status";
 import { atoms } from "@/store/global";
-import { useAtomValue } from "jotai";
-import { memo } from "react";
+import { Show, type JSX } from "solid-js";
 
-const ConfigStatus = memo(() => {
-    const fullConfig = useAtomValue(atoms.fullConfigAtom);
+const ConfigStatus = (): JSX.Element => {
+    const fullConfig = atoms.fullConfigAtom;
 
-    if (fullConfig?.configerrors == null || fullConfig.configerrors.length === 0) {
-        return null;
-    }
-
-    function handleClick() {
+    const handleClick = () => {
         modalsModel.pushModal("MessageModal", { children: <ConfigErrorMessage /> });
-    }
+    };
 
     return (
-        <div className="status-bar-item clickable" onClick={handleClick} title="Click to view config errors">
-            <span className="status-icon" style={{ color: "var(--error-color)" }}>
-                ⚠
-            </span>
-            <span style={{ color: "var(--error-color)" }}>Config error</span>
-        </div>
+        <Show when={fullConfig()?.configerrors != null && fullConfig().configerrors.length > 0}>
+            <div class="status-bar-item clickable" onClick={handleClick} title="Click to view config errors">
+                <span class="status-icon" style={{ color: "var(--error-color)" }}>
+                    ⚠
+                </span>
+                <span style={{ color: "var(--error-color)" }}>Config error</span>
+            </div>
+        </Show>
     );
-});
+};
 
 ConfigStatus.displayName = "ConfigStatus";
 

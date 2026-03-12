@@ -69,14 +69,14 @@ export function processBackgroundUrls(cssText: string): string {
     return rtnStyle.replace(/^background:\s*/, "");
 }
 
-export function computeBgStyleFromMeta(meta: MetaType, defaultOpacity: number = null): React.CSSProperties {
+export function computeBgStyleFromMeta(meta: MetaType, defaultOpacity: number = null): Record<string, string | number> {
     const bgAttr = meta?.["bg"];
     if (isBlank(bgAttr)) {
         return null;
     }
     try {
         const processedBg = processBackgroundUrls(bgAttr);
-        const rtn: React.CSSProperties = {};
+        const rtn: Record<string, string | number> = {};
         rtn.background = processedBg;
         rtn.opacity = boundNumber(meta["bg:opacity"], 0, 1) ?? defaultOpacity;
         if (!isBlank(meta?.["bg:blendmode"])) {

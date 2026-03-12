@@ -6,7 +6,7 @@
  */
 
 import clsx from "clsx";
-import React, { memo } from "react";
+import { Show, type JSX } from "solid-js";
 import type { AgentMessageNode } from "../types";
 
 interface AgentMessageBlockProps {
@@ -15,13 +15,13 @@ interface AgentMessageBlockProps {
     onToggle: () => void;
 }
 
-export const AgentMessageBlock: React.FC<AgentMessageBlockProps> = memo(({ node, collapsed, onToggle }) => {
+export const AgentMessageBlock = ({ node, collapsed, onToggle }: AgentMessageBlockProps): JSX.Element => {
     const isIncoming = node.direction === "incoming";
     const timestamp = new Date(node.timestamp).toLocaleTimeString();
 
     return (
         <div
-            className={clsx("agent-message-block", {
+            class={clsx("agent-message-block", {
                 incoming: isIncoming,
                 outgoing: !isIncoming,
                 collapsed,
@@ -30,23 +30,23 @@ export const AgentMessageBlock: React.FC<AgentMessageBlockProps> = memo(({ node,
             })}
             onClick={onToggle}
         >
-            <div className="agent-message-summary">
-                <span className="agent-message-chevron">{collapsed ? "▸" : "▾"}</span>
-                <span className="agent-message-icon">{node.summary}</span>
-                <span className="agent-message-time">{timestamp}</span>
+            <div class="agent-message-summary">
+                <span class="agent-message-chevron">{collapsed ? "▸" : "▾"}</span>
+                <span class="agent-message-icon">{node.summary}</span>
+                <span class="agent-message-time">{timestamp}</span>
             </div>
-            {!collapsed && (
-                <div className="agent-message-content" onClick={(e) => e.stopPropagation()}>
-                    <div className="agent-message-meta">
-                        <span className="agent-message-from">From: {node.from}</span>
-                        <span className="agent-message-to">To: {node.to}</span>
-                        <span className="agent-message-method">Method: {node.method}</span>
+            <Show when={!collapsed}>
+                <div class="agent-message-content" onClick={(e) => e.stopPropagation()}>
+                    <div class="agent-message-meta">
+                        <span class="agent-message-from">From: {node.from}</span>
+                        <span class="agent-message-to">To: {node.to}</span>
+                        <span class="agent-message-method">Method: {node.method}</span>
                     </div>
-                    <pre className="agent-message-body">{node.message}</pre>
+                    <pre class="agent-message-body">{node.message}</pre>
                 </div>
-            )}
+            </Show>
         </div>
     );
-});
+};
 
 AgentMessageBlock.displayName = "AgentMessageBlock";

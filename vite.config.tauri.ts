@@ -7,9 +7,9 @@
 // Tauri handles the "main process" in Rust.
 
 import tailwindcss from "@tailwindcss/vite";
-import react from "@vitejs/plugin-react-swc";
 import * as fs from "fs";
 import * as path from "path";
+import solid from "vite-plugin-solid";
 import { defineConfig, type Plugin } from "vite";
 import { ViteImageOptimizer } from "vite-plugin-image-optimizer";
 import svgr from "vite-plugin-svgr";
@@ -85,7 +85,7 @@ export default defineConfig({
             svgrOptions: { exportType: "default", ref: true, svgo: false, titleProp: true },
             include: "**/*.svg",
         }),
-        react({}),
+        solid(),
         tailwindcss(),
         stripKatexLegacyFonts(),
     ],

@@ -1,56 +1,58 @@
 // Copyright 2025, Command Line Inc.
 // SPDX-License-Identifier: Apache-2.0
+//
+// SolidJS migration: all Jotai/React types replaced with SolidJS equivalents.
 
-import { type Placement } from "@floating-ui/react";
-import type * as jotai from "jotai";
+import type { Placement } from "@floating-ui/dom";
+import type { Accessor, JSX } from "solid-js";
+import type { SignalAtom } from "@/util/util";
 import type * as rxjs from "rxjs";
 
 declare global {
+    // All atoms are now SolidJS Accessors (call as function to read reactive value).
+    // For writable atoms use SignalAtom (also callable, plus ._set()).
     type GlobalAtomsType = {
-        clientId: jotai.Atom<string>; // readonly
-        client: jotai.Atom<Client>; // driven from WOS
-        uiContext: jotai.Atom<UIContext>; // driven from windowId, tabId
-        waveWindow: jotai.Atom<WaveWindow>; // driven from WOS
-        workspace: jotai.Atom<Workspace>; // driven from WOS
-        fullConfigAtom: jotai.PrimitiveAtom<FullConfigType>; // driven from WOS, settings -- updated via WebSocket
-        settingsAtom: jotai.Atom<SettingsType>; // derrived from fullConfig
-        hasCustomAIPresetsAtom: jotai.Atom<boolean>; // derived from fullConfig
-        tabAtom: jotai.Atom<Tab>; // driven from WOS
-        staticTabId: jotai.Atom<string>;
-        activeTabId: jotai.Atom<string>;
-        isFullScreen: jotai.PrimitiveAtom<boolean>;
-        controlShiftDelayAtom: jotai.PrimitiveAtom<boolean>;
-        prefersReducedMotionAtom: jotai.Atom<boolean>;
-        updaterStatusAtom: jotai.PrimitiveAtom<UpdaterStatus>;
-        typeAheadModalAtom: jotai.PrimitiveAtom<TypeAheadModalType>;
-        modalOpen: jotai.PrimitiveAtom<boolean>;
-        allConnStatus: jotai.Atom<ConnStatus[]>;
-        flashErrors: jotai.PrimitiveAtom<FlashErrorType[]>;
-        notifications: jotai.PrimitiveAtom<NotificationType[]>;
-        notificationPopoverMode: jotai.Atom<boolean>;
-        reinitVersion: jotai.PrimitiveAtom<number>;
-        isTermMultiInput: jotai.PrimitiveAtom<boolean>;
-        backendStatusAtom: jotai.PrimitiveAtom<"connecting" | "running" | "crashed">;
+        clientId: Accessor<string>;
+        client: Accessor<Client>;
+        uiContext: Accessor<UIContext>;
+        waveWindow: Accessor<WaveWindow>;
+        workspace: Accessor<Workspace>;
+        fullConfigAtom: Accessor<FullConfigType>;
+        settingsAtom: Accessor<SettingsType>;
+        hasCustomAIPresetsAtom: Accessor<boolean>;
+        tabAtom: Accessor<Tab>;
+        staticTabId: Accessor<string>;
+        activeTabId: Accessor<string>;
+        isFullScreen: Accessor<boolean>;
+        controlShiftDelayAtom: Accessor<boolean>;
+        prefersReducedMotionAtom: Accessor<boolean>;
+        updaterStatusAtom: Accessor<UpdaterStatus>;
+        typeAheadModalAtom: Accessor<TypeAheadModalType>;
+        modalOpen: Accessor<boolean>;
+        allConnStatus: Accessor<ConnStatus[]>;
+        flashErrors: Accessor<FlashErrorType[]>;
+        notifications: Accessor<NotificationType[]>;
+        notificationPopoverMode: Accessor<boolean>;
+        reinitVersion: Accessor<number>;
+        isTermMultiInput: Accessor<boolean>;
+        backendStatusAtom: Accessor<"connecting" | "running" | "crashed">;
     };
 
-    type WritableWaveObjectAtom<T extends WaveObj> = jotai.WritableAtom<T, [value: T], void>;
+    type WritableWaveObjectAtom<T extends WaveObj> = SignalAtom<T>;
 
-    type ThrottledValueAtom<T> = jotai.WritableAtom<T, [update: jotai.SetStateAction<T>], void>;
+    type ThrottledValueAtom<T> = SignalAtom<T>;
 
     type AtomWithThrottle<T> = {
-        currentValueAtom: jotai.Atom<T>;
+        currentValueAtom: Accessor<T>;
         throttledValueAtom: ThrottledValueAtom<T>;
     };
 
-    type DebouncedValueAtom<T> = jotai.WritableAtom<T, [update: jotai.SetStateAction<T>], void>;
+    type DebouncedValueAtom<T> = SignalAtom<T>;
 
     type AtomWithDebounce<T> = {
-        currentValueAtom: jotai.Atom<T>;
+        currentValueAtom: Accessor<T>;
         debouncedValueAtom: DebouncedValueAtom<T>;
     };
-
-    type SplitAtom<Item> = Atom<Atom<Item>[]>;
-    type WritableSplitAtom<Item> = WritableAtom<PrimitiveAtom<Item>[], [SplitAtomAction<Item>], void>;
 
     type TabLayoutData = {
         blockId: string;
@@ -65,69 +67,66 @@ declare global {
     };
 
     type AppApi = {
-        getAuthKey(): string; // get-auth-key
-        getIsDev(): boolean; // get-is-dev
-        getCursorPoint: () => { x: number; y: number }; // get-cursor-point
-        getPlatform: () => NodeJS.Platform; // get-platform
-        getEnv: (varName: string) => string; // get-env
-        getUserName: () => string; // get-user-name
-        getHostName: () => string; // get-host-name
-        getDataDir: () => string; // get-data-dir
-        getConfigDir: () => string; // get-config-dir
-        getAboutModalDetails: () => AboutModalDetails; // get-about-modal-details
-        getBackendInfo: () => Promise<{ pid?: number; started_at?: string; web_endpoint?: string; version: string }>; // get-backend-info
-        getDocsiteUrl: () => string; // get-docsite-url
-        getZoomFactor: () => number; // get-zoom-factor
-        showContextMenu: (workspaceId: string, menu?: NativeContextMenuItem[]) => void; // contextmenu-show
-        onContextMenuClick: (callback: (id: string) => void) => void; // contextmenu-click
+        getAuthKey(): string;
+        getIsDev(): boolean;
+        getCursorPoint: () => { x: number; y: number };
+        getPlatform: () => NodeJS.Platform;
+        getEnv: (varName: string) => string;
+        getUserName: () => string;
+        getHostName: () => string;
+        getDataDir: () => string;
+        getConfigDir: () => string;
+        getAboutModalDetails: () => AboutModalDetails;
+        getBackendInfo: () => Promise<{ pid?: number; started_at?: string; web_endpoint?: string; version: string }>;
+        getDocsiteUrl: () => string;
+        getZoomFactor: () => number;
+        showContextMenu: (workspaceId: string, menu?: NativeContextMenuItem[]) => void;
+        onContextMenuClick: (callback: (id: string) => void) => void;
         onNavigate: (callback: (url: string) => void) => void;
         onIframeNavigate: (callback: (url: string) => void) => void;
-        downloadFile: (path: string) => void; // download
-        openExternal: (url: string) => void; // open-external
-        onFullScreenChange: (callback: (isFullScreen: boolean) => void) => void; // fullscreen-change
-        onZoomFactorChange: (callback: (zoomFactor: number) => void) => void; // zoom-factor-change
-        setZoomFactor: (zoomFactor: number) => void; // set-zoom-factor
-        onUpdaterStatusChange: (callback: (status: UpdaterStatus) => void) => void; // app-update-status
-        getUpdaterStatus: () => UpdaterStatus; // get-app-update-status
-        getUpdaterChannel: () => string; // get-updater-channel
-        installAppUpdate: () => void; // install-app-update
-        onMenuItemAbout: (callback: () => void) => void; // menu-item-about
-        updateWindowControlsOverlay: (rect: Dimensions) => void; // update-window-controls-overlay
-        onReinjectKey: (callback: (waveEvent: WaveKeyboardEvent) => void) => void; // reinject-key
-        onControlShiftStateUpdate: (callback: (state: boolean) => void) => void; // control-shift-state-update
-        // Window management (multi-window support)
-        openNewWindow: () => Promise<string>; // open-new-window, returns window label
-        closeWindow: (label?: string) => Promise<void>; // close-window
-        minimizeWindow: () => void; // minimize-window
-        maximizeWindow: () => void; // maximize-window (toggles)
-        toggleDevtools: () => void; // toggle-devtools
-        setWindowTransparency: (transparent: boolean, blur: boolean, opacity: number) => void; // set-window-transparency
-        getWindowLabel: () => Promise<string>; // get-window-label
-        isMainWindow: () => Promise<boolean>; // is-main-window
-        listWindows: () => Promise<string[]>; // list-windows
-        focusWindow: (label: string) => Promise<void>; // focus-window
-        getInstanceNumber: () => Promise<number>; // get-instance-number
-        getWindowCount: () => Promise<number>; // get-window-count
-        createWorkspace: () => void; // create-workspace
-        switchWorkspace: (workspaceId: string) => void; // switch-workspace
-        deleteWorkspace: (workspaceId: string) => void; // delete-workspace
-        setActiveTab: (tabId: string) => void; // set-active-tab
-        createTab: () => void; // create-tab
-        closeTab: (workspaceId: string, tabId: string) => void; // close-tab
-        setWindowInitStatus: (status: "ready" | "wave-ready") => void; // set-window-init-status
-        onAgentMuxInit: (callback: (initOpts: AgentMuxInitOpts) => void) => void; // agentmux-init
-        sendLog: (log: string) => void; // fe-log
-        sendLogStructured: (level: string, module: string, message: string, data: Record<string, any> | null) => void; // fe-log-structured
-        onQuicklook: (filePath: string) => void; // quicklook
-        openNativePath(filePath: string): void; // open-native-path
-        revealInFileExplorer(filePath: string): void; // reveal-item-in-dir
-        captureScreenshot(rect: { x: number; y: number; width: number; height: number }): Promise<string>; // capture-screenshot
-        setKeyboardChordMode: () => void; // set-keyboard-chord-mode
-        // Claude Code auth commands
-        openClaudeCodeAuth: () => Promise<void>; // open-claude-code-auth
-        getClaudeCodeAuth: () => Promise<{ connected: boolean; email?: string; expires_at?: number }>; // get-claude-code-auth
-        disconnectClaudeCode: () => Promise<void>; // disconnect-claude-code
-        // Provider commands
+        downloadFile: (path: string) => void;
+        openExternal: (url: string) => void;
+        onFullScreenChange: (callback: (isFullScreen: boolean) => void) => void;
+        onZoomFactorChange: (callback: (zoomFactor: number) => void) => void;
+        setZoomFactor: (zoomFactor: number) => void;
+        onUpdaterStatusChange: (callback: (status: UpdaterStatus) => void) => void;
+        getUpdaterStatus: () => UpdaterStatus;
+        getUpdaterChannel: () => string;
+        installAppUpdate: () => void;
+        onMenuItemAbout: (callback: () => void) => void;
+        updateWindowControlsOverlay: (rect: Dimensions) => void;
+        onReinjectKey: (callback: (waveEvent: WaveKeyboardEvent) => void) => void;
+        onControlShiftStateUpdate: (callback: (state: boolean) => void) => void;
+        openNewWindow: () => Promise<string>;
+        closeWindow: (label?: string) => Promise<void>;
+        minimizeWindow: () => void;
+        maximizeWindow: () => void;
+        toggleDevtools: () => void;
+        setWindowTransparency: (transparent: boolean, blur: boolean, opacity: number) => void;
+        getWindowLabel: () => Promise<string>;
+        isMainWindow: () => Promise<boolean>;
+        listWindows: () => Promise<string[]>;
+        focusWindow: (label: string) => Promise<void>;
+        getInstanceNumber: () => Promise<number>;
+        getWindowCount: () => Promise<number>;
+        createWorkspace: () => void;
+        switchWorkspace: (workspaceId: string) => void;
+        deleteWorkspace: (workspaceId: string) => void;
+        setActiveTab: (tabId: string) => void;
+        createTab: () => void;
+        closeTab: (workspaceId: string, tabId: string) => void;
+        setWindowInitStatus: (status: "ready" | "wave-ready") => void;
+        onAgentMuxInit: (callback: (initOpts: AgentMuxInitOpts) => void) => void;
+        sendLog: (log: string) => void;
+        sendLogStructured: (level: string, module: string, message: string, data: Record<string, any> | null) => void;
+        onQuicklook: (filePath: string) => void;
+        openNativePath(filePath: string): void;
+        revealInFileExplorer(filePath: string): void;
+        captureScreenshot(rect: { x: number; y: number; width: number; height: number }): Promise<string>;
+        setKeyboardChordMode: () => void;
+        openClaudeCodeAuth: () => Promise<void>;
+        getClaudeCodeAuth: () => Promise<{ connected: boolean; email?: string; expires_at?: number }>;
+        disconnectClaudeCode: () => Promise<void>;
         detectInstalledClis: () => Promise<CliDetectionResult[]>;
         getProviderConfig: () => Promise<ProviderConfig>;
         saveProviderConfig: (config: ProviderConfig) => Promise<void>;
@@ -138,16 +137,15 @@ declare global {
         checkCliAuthStatus: (provider: string, cliPath?: string) => Promise<CliAuthStatus>;
         installCli: (provider: string) => Promise<CliInstallResult>;
         getCliPath: (provider: string) => Promise<string | null>;
-        listen: (event: string, callback: (event: any) => void) => Promise<() => void>; // listen to events
-        // Cross-window drag commands
+        listen: (event: string, callback: (event: any) => void) => Promise<() => void>;
         startCrossDrag: (
             dragType: "pane" | "tab",
             sourceWindow: string,
             sourceWorkspaceId: string,
             sourceTabId: string,
             payload: { blockId?: string; tabId?: string }
-        ) => Promise<string>; // returns dragId
-        updateCrossDrag: (dragId: string, screenX: number, screenY: number) => Promise<string | null>; // returns target window label
+        ) => Promise<string>;
+        updateCrossDrag: (dragId: string, screenX: number, screenY: number) => Promise<string | null>;
         completeCrossDrag: (
             dragId: string,
             targetWindow: string | null,
@@ -155,15 +153,15 @@ declare global {
             screenY: number
         ) => Promise<void>;
         cancelCrossDrag: (dragId: string) => Promise<void>;
-        openWindowAtPosition: (screenX: number, screenY: number) => Promise<string>; // returns window label
+        openWindowAtPosition: (screenX: number, screenY: number) => Promise<string>;
         setDragCursor: () => Promise<void>;
         restoreDragCursor: () => Promise<void>;
     };
 
     type NativeContextMenuItem = {
-        id: string; // unique id, used for communication
+        id: string;
         label: string;
-        role?: string; // menu role (optional)
+        role?: string;
         type?: "separator" | "normal" | "submenu" | "checkbox" | "radio";
         submenu?: NativeContextMenuItem[];
         checked?: boolean;
@@ -175,8 +173,8 @@ declare global {
     type ContextMenuItem = {
         label?: string;
         type?: "separator" | "normal" | "submenu" | "checkbox" | "radio";
-        role?: string; // menu role (optional)
-        click?: () => void; // not required if role is set
+        role?: string;
+        click?: () => void;
         submenu?: ContextMenuItem[];
         checked?: boolean;
         visible?: boolean;
@@ -210,7 +208,7 @@ declare global {
         | MenuButton;
 
     type IconButtonCommon = {
-        icon: string | React.ReactNode;
+        icon: string | JSX.Element;
         iconColor?: string;
         iconSpin?: boolean;
         className?: string;
@@ -221,13 +219,13 @@ declare global {
 
     type IconButtonDecl = IconButtonCommon & {
         elemtype: "iconbutton";
-        click?: (e: React.MouseEvent<any>) => void;
-        longClick?: (e: React.MouseEvent<any>) => void;
+        click?: (e: MouseEvent) => void;
+        longClick?: (e: MouseEvent) => void;
     };
 
     type ToggleIconButtonDecl = IconButtonCommon & {
         elemtype: "toggleiconbutton";
-        active: jotai.WritableAtom<boolean, [boolean], void>;
+        active: SignalAtom<boolean>;
     };
 
     type HeaderTextButton = {
@@ -235,16 +233,16 @@ declare global {
         text: string;
         className?: string;
         title?: string;
-        onClick?: (e: React.MouseEvent<any>) => void;
+        onClick?: (e: MouseEvent) => void;
     };
 
     type HeaderText = {
         elemtype: "text";
         text: string;
-        ref?: React.MutableRefObject<HTMLDivElement>;
+        ref?: { current: HTMLDivElement | null };
         className?: string;
         noGrow?: boolean;
-        onClick?: (e: React.MouseEvent<any>) => void;
+        onClick?: (e: MouseEvent) => void;
     };
 
     type HeaderInput = {
@@ -252,20 +250,20 @@ declare global {
         value: string;
         className?: string;
         isDisabled?: boolean;
-        ref?: React.MutableRefObject<HTMLInputElement>;
-        onChange?: (e: React.ChangeEvent<HTMLInputElement>) => void;
-        onKeyDown?: (e: React.KeyboardEvent<HTMLInputElement>) => void;
-        onFocus?: (e: React.FocusEvent<HTMLInputElement>) => void;
-        onBlur?: (e: React.FocusEvent<HTMLInputElement>) => void;
+        ref?: { current: HTMLInputElement | null };
+        onChange?: (e: Event) => void;
+        onKeyDown?: (e: KeyboardEvent) => void;
+        onFocus?: (e: FocusEvent) => void;
+        onBlur?: (e: FocusEvent) => void;
     };
 
     type HeaderDiv = {
         elemtype: "div";
         className?: string;
         children: HeaderElem[];
-        onMouseOver?: (e: React.MouseEvent<any>) => void;
-        onMouseOut?: (e: React.MouseEvent<any>) => void;
-        onClick?: (e: React.MouseEvent<any>) => void;
+        onMouseOver?: (e: MouseEvent) => void;
+        onMouseOut?: (e: MouseEvent) => void;
+        onClick?: (e: MouseEvent) => void;
     };
 
     type ConnectionButton = {
@@ -273,15 +271,15 @@ declare global {
         icon: string;
         text: string;
         iconColor: string;
-        onClick?: (e: React.MouseEvent<any>) => void;
+        onClick?: (e: MouseEvent) => void;
         connected: boolean;
     };
 
     type MenuItem = {
         label: string;
-        icon?: string | React.ReactNode;
+        icon?: string | JSX.Element;
         subItems?: MenuItem[];
-        onClick?: (e: React.MouseEvent<any>) => void;
+        onClick?: (e: MouseEvent) => void;
     };
 
     type MenuButtonProps = {
@@ -297,88 +295,51 @@ declare global {
     } & MenuButtonProps;
 
     type SearchAtoms = {
-        searchValue: PrimitiveAtom<string>;
-        resultsIndex: PrimitiveAtom<number>;
-        resultsCount: PrimitiveAtom<number>;
-        isOpen: PrimitiveAtom<boolean>;
-        regex?: PrimitiveAtom<boolean>;
-        caseSensitive?: PrimitiveAtom<boolean>;
-        wholeWord?: PrimitiveAtom<boolean>;
+        searchValue: SignalAtom<string>;
+        resultsIndex: SignalAtom<number>;
+        resultsCount: SignalAtom<number>;
+        isOpen: SignalAtom<boolean>;
+        regex?: SignalAtom<boolean>;
+        caseSensitive?: SignalAtom<boolean>;
+        wholeWord?: SignalAtom<boolean>;
     };
 
-    declare type ViewComponentProps<T extends ViewModel> = {
+    // SolidJS component props for block views
+    declare type ViewComponentProps<T extends ViewModel = ViewModel> = {
         blockId: string;
-        blockRef: React.RefObject<HTMLDivElement>;
-        contentRef: React.RefObject<HTMLDivElement>;
+        blockRef: { current: HTMLDivElement | null };
+        contentRef: { current: HTMLDivElement | null };
         model: T;
     };
 
-    declare type ViewComponent = React.FC<ViewComponentProps>;
+    // A SolidJS function component
+    declare type ViewComponent<T extends ViewModel = ViewModel> = (props: ViewComponentProps<T>) => JSX.Element;
 
     type ViewModelClass = new (blockId: string, nodeModel: BlockNodeModel) => ViewModel;
 
     interface ViewModel {
-        // The type of view, used for identifying and rendering the appropriate component.
         viewType: string;
-
-        // Icon representing the view, can be a string or an IconButton declaration.
-        viewIcon?: jotai.Atom<string | IconButtonDecl>;
-
-        // Display name for the view, used in UI headers.
-        viewName?: jotai.Atom<string>;
-
-        // Optional header text or elements for the view.
-        viewText?: jotai.Atom<string | HeaderElem[]>;
-
-        // Icon button displayed before the title in the header.
-        preIconButton?: jotai.Atom<IconButtonDecl>;
-
-        // Icon buttons displayed at the end of the block header.
-        endIconButtons?: jotai.Atom<IconButtonDecl[]>;
-
-        // Background styling metadata for the block.
-        blockBg?: jotai.Atom<MetaType>;
-
-        noHeader?: jotai.Atom<boolean>;
-
-        // Whether the block manages its own connection (e.g., for remote access).
-        manageConnection?: jotai.Atom<boolean>;
-
-        // If true, filters out 'nowsh' connections (when managing connections)
-        filterOutNowsh?: jotai.Atom<boolean>;
-
-        // if true, show s3 connections in picker
-        showS3?: jotai.Atom<boolean>;
-
-        // If true, removes padding inside the block content area.
-        noPadding?: jotai.Atom<boolean>;
-
-        // Atoms used for managing search functionality within the block.
+        viewIcon?: Accessor<string | IconButtonDecl>;
+        viewName?: Accessor<string>;
+        viewText?: Accessor<string | HeaderElem[]>;
+        preIconButton?: Accessor<IconButtonDecl>;
+        endIconButtons?: Accessor<IconButtonDecl[]>;
+        blockBg?: Accessor<MetaType>;
+        noHeader?: Accessor<boolean>;
+        manageConnection?: Accessor<boolean>;
+        filterOutNowsh?: Accessor<boolean>;
+        showS3?: Accessor<boolean>;
+        noPadding?: Accessor<boolean>;
         searchAtoms?: SearchAtoms;
-
-        // The main view component associated with this ViewModel.
-        viewComponent: ViewComponent<ViewModel>;
-
-        // Function to determine if this is a basic terminal block.
-        isBasicTerm?: (getFn: jotai.Getter) => boolean;
-
-        // Returns menu items for the settings dropdown.
+        viewComponent: ViewComponent<any>;
+        isBasicTerm?: () => boolean;
         getSettingsMenuItems?: () => ContextMenuItem[];
-
-        // Attempts to give focus to the block, returning true if successful.
         giveFocus?: () => boolean;
-
-        // Handles keydown events within the block.
         keyDownHandler?: (e: WaveKeyboardEvent) => boolean;
-
-        // Cleans up resources when the block is disposed.
         dispose?: () => void;
     }
 
     type UpdaterStatus = "up-to-date" | "checking" | "downloading" | "ready" | "error" | "installing";
-
-    // jotai doesn't export this type :/
-    type Loadable<T> = { state: "loading" } | { state: "hasData"; data: T } | { state: "hasError"; error: unknown };
 
     interface Dimensions {
         width: number;
@@ -404,7 +365,7 @@ declare global {
     interface SuggestionBaseItem {
         label: string;
         value: string;
-        icon?: string | React.ReactNode;
+        icon?: string | JSX.Element;
     }
 
     interface SuggestionConnectionItem extends SuggestionBaseItem {
@@ -483,8 +444,6 @@ declare global {
 
     type SuggestionsFnType = (query: string, reqContext: SuggestionRequestContext) => Promise<FetchSuggestionsResponse>;
 
-    // ---- Provider types ----
-
     type CliDetectionResult = {
         provider: string;
         installed: boolean;
@@ -501,7 +460,7 @@ declare global {
     type ProviderSettings = {
         cli_path: string | null;
         auth_token: string | null;
-        auth_status: string; // "none" | "authenticated" | "expired"
+        auth_status: string;
         output_format: string;
         extra_args: string[];
     };
@@ -514,16 +473,16 @@ declare global {
 
     type ProviderAuthStatus = {
         provider: string;
-        status: string; // "none" | "authenticated" | "expired"
+        status: string;
         error: string | null;
     };
 
     type CliAuthStatus = {
         logged_in: boolean;
-        auth_method: string | null;   // "claude.ai" | "api-key" | null
-        api_provider: string | null;  // "firstParty" | "anthropic" | null
+        auth_method: string | null;
+        api_provider: string | null;
         email: string | null;
-        subscription_type: string | null; // "max" | "pro" | "teams" | "enterprise" | null
+        subscription_type: string | null;
     };
 
     type CliInstallResult = {
@@ -566,13 +525,22 @@ declare global {
           }
         | {
               type: "file";
-              mimetype: string; // required
+              mimetype: string;
               filename?: string;
-              data?: string; // base64 encoded data
+              data?: string;
               url?: string;
               size?: number;
               previewurl?: string;
           };
+
+    // SolidJS Block node model (replaces React-specific BlockNodeModel references)
+    interface BlockNodeModel {
+        blockId: string;
+        isFocused: Accessor<boolean>;
+        focusNode: () => void;
+        disablePointerEvents: Accessor<boolean>;
+        innerRect?: Accessor<{ width: string; height: string }>;
+    }
 }
 
 export {};

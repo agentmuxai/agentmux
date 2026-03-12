@@ -1,29 +1,38 @@
 // Copyright 2025, Command Line Inc.
 // SPDX-License-Identifier: Apache-2.0
-
-// WaveObjectStore
+//
+// WaveObjectStore — migrated to SolidJS signals.
 
 import { waveEventSubscribe } from "@/app/store/wps";
 import { getWebServerEndpoint } from "@/util/endpoints";
 import { fetch } from "@/util/fetchutil";
-import { fireAndForget } from "@/util/util";
-import { atom, Atom, Getter, PrimitiveAtom, Setter, useAtomValue } from "jotai";
-import { useEffect } from "react";
-import { globalStore } from "./jotaiStore";
+import { type SignalAtom, fireAndForget } from "@/util/util";
+import { createSignal, onCleanup } from "solid-js";
 import { ObjectService } from "./services";
 import { getApi } from "./global";
+
+// ---------------------------------------------------------------------------
+// Internal types
+// ---------------------------------------------------------------------------
 
 type WaveObjectDataItemType<T extends WaveObj> = {
     value: T;
     loading: boolean;
 };
 
+// Each cached WaveObject holds a SolidJS signal instead of a Jotai atom.
 type WaveObjectValue<T extends WaveObj> = {
-    pendingPromise: Promise<T>;
-    dataAtom: PrimitiveAtom<WaveObjectDataItemType<T>>;
+    pendingPromise: Promise<T> | null;
+    // signal getter & setter pair
+    getData: () => WaveObjectDataItemType<T>;
+    setData: (v: WaveObjectDataItemType<T>) => void;
     refCount: number;
     holdTime: number;
 };
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
 
 function splitORef(oref: string): [string, string] {
     const parts = oref.split(":");
@@ -42,19 +51,12 @@ function isBlankNum(num: number): boolean {
 }
 
 function isValidWaveObj(val: WaveObj): boolean {
-    if (val == null) {
-        return false;
-    }
-    if (isBlank(val.otype) || isBlank(val.oid) || isBlankNum(val.version)) {
-        return false;
-    }
-    return true;
+    if (val == null) return false;
+    return !(isBlank(val.otype) || isBlank(val.oid) || isBlankNum(val.version));
 }
 
 function makeORef(otype: string, oid: string): string {
-    if (isBlank(otype) || isBlank(oid)) {
-        return null;
-    }
+    if (isBlank(otype) || isBlank(oid)) return null;
     return `${otype}:${oid}`;
 }
 
@@ -93,26 +95,24 @@ function callBackendService(service: string, method: string, args: any[], noUICo
     const startTs = Date.now();
     let uiContext: UIContext = null;
     if (!noUIContext && globalThis.window != null && (window as any).globalAtoms) {
-        uiContext = globalStore.get(((window as any).globalAtoms as GlobalAtomsType).uiContext);
+        // During migration, globalAtoms may expose a signal accessor
+        const ga = (window as any).globalAtoms as GlobalAtomsType;
+        uiContext = typeof ga?.uiContext === "function" ? (ga.uiContext as any)() : null;
     }
     const waveCall: WebCallType = {
-        service: service,
-        method: method,
-        args: args,
+        service,
+        method,
+        args,
         uicontext: uiContext,
     };
-    // usp is just for debugging (easier to filter URLs)
     const methodName = `${service}.${method}`;
     const usp = new URLSearchParams();
     usp.set("service", service);
     usp.set("method", method);
 
-    // Add auth key as query parameter for Tauri backend
     if (globalThis.window != null) {
         const authKey = getApi()?.getAuthKey?.();
-        if (authKey) {
-            usp.set("authkey", authKey);
-        }
+        if (authKey) usp.set("authkey", authKey);
     }
 
     const url = getWebServerEndpoint() + "/wave/service?" + usp.toString();
@@ -121,7 +121,7 @@ function callBackendService(service: string, method: string, args: any[], noUICo
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(waveCall),
     });
-    const prtn = fetchPromise
+    return fetchPromise
         .then((resp) => {
             if (!resp.ok) {
                 throw new Error(`call ${methodName} failed: ${resp.status} ${resp.statusText}`);
@@ -129,67 +129,39 @@ function callBackendService(service: string, method: string, args: any[], noUICo
             return resp.json();
         })
         .then((respData: WebReturnType) => {
-            if (respData == null) {
-                return null;
-            }
-            if (respData.updates != null) {
-                updateWaveObjects(respData.updates);
-            }
-            if (respData.error != null) {
-                throw new Error(`call ${methodName} error: ${respData.error}`);
-            }
+            if (respData == null) return null;
+            if (respData.updates != null) updateWaveObjects(respData.updates);
+            if (respData.error != null) throw new Error(`call ${methodName} error: ${respData.error}`);
             const durationStr = Date.now() - startTs + "ms";
             debugLogBackendCall(methodName, durationStr, args);
             return respData.data;
         });
-    return prtn;
 }
+
+// ---------------------------------------------------------------------------
+// WaveObject cache — signals replace Jotai atoms
+// ---------------------------------------------------------------------------
 
 const waveObjectValueCache = new Map<string, WaveObjectValue<any>>();
-
-function clearWaveObjectCache() {
-    waveObjectValueCache.clear();
-}
-
-const defaultHoldTime = 5000; // 5-seconds
-
-function reloadWaveObject<T extends WaveObj>(oref: string): Promise<T> {
-    let wov = waveObjectValueCache.get(oref);
-    if (wov === undefined) {
-        wov = getWaveObjectValue<T>(oref, true);
-        return wov.pendingPromise;
-    }
-    const prtn = GetObject<T>(oref);
-    prtn.then((val) => {
-        globalStore.set(wov.dataAtom, { value: val, loading: false });
-    });
-    return prtn;
-}
+const defaultHoldTime = 5000;
 
 function createWaveValueObject<T extends WaveObj>(oref: string, shouldFetch: boolean): WaveObjectValue<T> {
-    const wov = { pendingPromise: null, dataAtom: null, refCount: 0, holdTime: Date.now() + 5000 };
-    wov.dataAtom = atom({ value: null, loading: true });
-    if (!shouldFetch) {
-        return wov;
-    }
+    const [getData, setData] = createSignal<WaveObjectDataItemType<T>>({ value: null, loading: true });
+    const wov: WaveObjectValue<T> = { pendingPromise: null, getData, setData, refCount: 0, holdTime: Date.now() + 5000 };
+    if (!shouldFetch) return wov;
+
     const startTs = Date.now();
     const localPromise = GetObject<T>(oref);
     wov.pendingPromise = localPromise;
     localPromise.then((val) => {
-        if (wov.pendingPromise != localPromise) {
-            return;
-        }
+        if (wov.pendingPromise !== localPromise) return;
         const [otype, oid] = splitORef(oref);
         if (val != null) {
-            if (val["otype"] != otype) {
-                throw new Error("GetObject returned wrong type");
-            }
-            if (val["oid"] != oid) {
-                throw new Error("GetObject returned wrong id");
-            }
+            if ((val as any)["otype"] != otype) throw new Error("GetObject returned wrong type");
+            if ((val as any)["oid"] != oid) throw new Error("GetObject returned wrong id");
         }
         wov.pendingPromise = null;
-        globalStore.set(wov.dataAtom, { value: val, loading: false });
+        wov.setData({ value: val, loading: false });
         console.log("WaveObj resolved", oref, Date.now() - startTs + "ms");
     });
     return wov;
@@ -204,72 +176,99 @@ function getWaveObjectValue<T extends WaveObj>(oref: string, createIfMissing = t
     return wov;
 }
 
+function clearWaveObjectCache() {
+    waveObjectValueCache.clear();
+}
+
+function reloadWaveObject<T extends WaveObj>(oref: string): Promise<T> {
+    let wov = waveObjectValueCache.get(oref);
+    if (wov === undefined) {
+        wov = getWaveObjectValue<T>(oref, true);
+        return wov.pendingPromise!;
+    }
+    const prtn = GetObject<T>(oref);
+    prtn.then((val) => {
+        wov!.setData({ value: val, loading: false });
+    });
+    return prtn;
+}
+
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns a SignalAtom for a WaveObject — callable as a getter, writable via ._set().
+ * Calling the atom reads the current value (reactive in SolidJS components).
+ * Setting via ._set() updates the local cache and optionally pushes to the server.
+ */
+function getWaveObjectAtom<T extends WaveObj>(oref: string): SignalAtom<T> {
+    const wov = getWaveObjectValue<T>(oref);
+    const atom = () => wov.getData().value;
+    (atom as any)._set = (value: T | ((prev: T) => T)) => {
+        const nextValue =
+            typeof value === "function" ? (value as (prev: T) => T)(wov.getData().value) : value;
+        setObjectValue(nextValue, false);
+    };
+    return atom as unknown as SignalAtom<T>;
+}
+
+/** Returns a signal accessor for the loading state. */
+function getWaveObjectLoadingAtom(oref: string): () => boolean {
+    const wov = getWaveObjectValue(oref);
+    return () => {
+        const d = wov.getData();
+        return d.loading ? null : d.loading;
+    };
+}
+
+/**
+ * SolidJS hook: returns [valueAccessor, loadingAccessor].
+ * Must be called inside a component or reactive root.
+ * Manages refCount and cleanup automatically.
+ */
+function useWaveObjectValue<T extends WaveObj>(oref: string): [() => T, () => boolean] {
+    const wov = getWaveObjectValue<T>(oref);
+    wov.refCount++;
+    onCleanup(() => {
+        wov.refCount--;
+    });
+    return [
+        () => wov.getData().value,
+        () => wov.getData().loading,
+    ];
+}
+
 function loadAndPinWaveObject<T extends WaveObj>(oref: string): Promise<T> {
     const wov = getWaveObjectValue<T>(oref);
     wov.refCount++;
     if (wov.pendingPromise == null) {
-        const dataValue = globalStore.get(wov.dataAtom);
+        const dataValue = wov.getData();
         return Promise.resolve(dataValue.value);
     }
     return wov.pendingPromise;
 }
 
-function getWaveObjectAtom<T extends WaveObj>(oref: string): WritableWaveObjectAtom<T> {
-    const wov = getWaveObjectValue<T>(oref);
-    return atom(
-        (get) => get(wov.dataAtom).value,
-        (_get, set, value: T) => {
-            setObjectValue(value, set, true);
-        }
-    );
-}
-
-function getWaveObjectLoadingAtom(oref: string): Atom<boolean> {
-    const wov = getWaveObjectValue(oref);
-    return atom((get) => {
-        const dataValue = get(wov.dataAtom);
-        if (dataValue.loading) {
-            return null;
-        }
-        return dataValue.loading;
-    });
-}
-
-function useWaveObjectValue<T extends WaveObj>(oref: string): [T, boolean] {
-    const wov = getWaveObjectValue<T>(oref);
-    useEffect(() => {
-        wov.refCount++;
-        return () => {
-            wov.refCount--;
-        };
-    }, [oref]);
-    const atomVal = useAtomValue(wov.dataAtom);
-    return [atomVal.value, atomVal.loading];
-}
-
 function updateWaveObject(update: WaveObjUpdate) {
-    if (update == null) {
-        return;
-    }
+    if (update == null) return;
     const oref = makeORef(update.otype, update.oid);
     const wov = getWaveObjectValue(oref);
     if (update.updatetype == "delete") {
         console.log("WaveObj deleted", oref);
-        globalStore.set(wov.dataAtom, { value: null, loading: false });
+        wov.setData({ value: null, loading: false });
     } else {
         if (!isValidWaveObj(update.obj)) {
             console.log("invalid wave object update", update);
             return;
         }
-        const curValue: WaveObjectDataItemType<WaveObj> = globalStore.get(wov.dataAtom);
+        const curValue = wov.getData();
         if (curValue.value != null && curValue.value.version >= update.obj.version) {
             return;
         }
         console.log("WaveObj updated", oref);
-        globalStore.set(wov.dataAtom, { value: update.obj, loading: false });
+        wov.setData({ value: update.obj, loading: false });
     }
     wov.holdTime = Date.now() + defaultHoldTime;
-    return;
 }
 
 function updateWaveObjects(vals: WaveObjUpdate[]) {
@@ -287,31 +286,17 @@ function cleanWaveObjectCache() {
     }
 }
 
-// gets the value of a WaveObject from the cache.
-// should provide getFn if it is available (e.g. inside of a jotai atom)
-// otherwise it will use the globalStore.get function
-function getObjectValue<T extends WaveObj>(oref: string, getFn?: Getter): T {
+/** Non-reactive read — returns the current value without tracking. */
+function getObjectValue<T extends WaveObj>(oref: string): T {
     const wov = getWaveObjectValue<T>(oref);
-    if (getFn == null) {
-        getFn = globalStore.get;
-    }
-    const atomVal = getFn(wov.dataAtom);
-    return atomVal.value;
+    return wov.getData().value;
 }
 
-// sets the value of a WaveObject in the cache.
-// should provide setFn if it is available (e.g. inside of a jotai atom)
-// otherwise it will use the globalStore.set function
-function setObjectValue<T extends WaveObj>(value: T, setFn?: Setter, pushToServer?: boolean) {
+function setObjectValue<T extends WaveObj>(value: T, pushToServer?: boolean) {
     const oref = makeORef(value.otype, value.oid);
     const wov = getWaveObjectValue(oref, false);
-    if (wov === undefined) {
-        return;
-    }
-    if (setFn === undefined) {
-        setFn = globalStore.set;
-    }
-    setFn(wov.dataAtom, { value: value, loading: false });
+    if (wov === undefined) return;
+    wov.setData({ value, loading: false });
     if (pushToServer) {
         fireAndForget(() => ObjectService.UpdateObject(value, false));
     }

@@ -2,31 +2,32 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import clsx from "clsx";
-import React, { forwardRef } from "react";
+import { JSX } from "solid-js";
 import { useWindowDrag } from "@/app/hook/useWindowDrag";
+import type { Properties as CSSProperties } from "csstype";
 
 import "./windowdrag.scss";
 
 interface WindowDragProps {
-    className?: string;
-    style?: React.CSSProperties;
-    children?: React.ReactNode;
+    class?: string;
+    style?: CSSProperties;
+    children?: JSX.Element;
+    ref?: HTMLDivElement | ((el: HTMLDivElement) => void);
 }
 
-const WindowDrag = forwardRef<HTMLDivElement, WindowDragProps>(({ children, className, style }, ref) => {
+const WindowDrag = (props: WindowDragProps): JSX.Element => {
     const { dragProps } = useWindowDrag();
 
     return (
         <div
-            ref={ref}
-            className={clsx(`window-drag`, className)}
-            style={style}
-            {...dragProps}
+            ref={props.ref as any}
+            class={clsx("window-drag", props.class)}
+            style={props.style as any}
+            {...(dragProps as any)}
         >
-            {children}
+            {props.children}
         </div>
     );
-});
-WindowDrag.displayName = "WindowDrag";
+};
 
 export { WindowDrag };

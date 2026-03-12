@@ -6,7 +6,7 @@
  */
 
 import clsx from "clsx";
-import React, { memo } from "react";
+import { Show, type JSX } from "solid-js";
 import type { BashParams, BashResult } from "../types";
 
 interface BashOutputViewerProps {
@@ -14,35 +14,35 @@ interface BashOutputViewerProps {
     result?: BashResult;
 }
 
-export const BashOutputViewer: React.FC<BashOutputViewerProps> = memo(({ params, result }) => {
+export const BashOutputViewer = ({ params, result }: BashOutputViewerProps): JSX.Element => {
     const hasOutput = result && (result.stdout || result.stderr);
     const hasError = result && result.exitCode !== 0;
 
     return (
-        <div className="agent-bash">
-            <div className="agent-bash-cmd">
-                <span className="agent-bash-dollar">$</span> {params.command}
+        <div class="agent-bash">
+            <div class="agent-bash-cmd">
+                <span class="agent-bash-dollar">$</span> {params.command}
             </div>
-            {hasOutput && (
-                <pre className={clsx("agent-bash-output", { "has-error": hasError })}>
+            <Show when={hasOutput}>
+                <pre class={clsx("agent-bash-output", { "has-error": hasError })}>
                     {result.stdout}
-                    {result.stderr && (
-                        <span className="agent-bash-stderr">{result.stderr}</span>
-                    )}
+                    <Show when={result.stderr}>
+                        <span class="agent-bash-stderr">{result.stderr}</span>
+                    </Show>
                 </pre>
-            )}
-            {result && (
+            </Show>
+            <Show when={result}>
                 <div
-                    className={clsx("agent-bash-exit", {
+                    class={clsx("agent-bash-exit", {
                         "exit-success": result.exitCode === 0,
                         "exit-error": result.exitCode !== 0,
                     })}
                 >
                     Exit code: {result.exitCode}
                 </div>
-            )}
+            </Show>
         </div>
     );
-});
+};
 
 BashOutputViewer.displayName = "BashOutputViewer";

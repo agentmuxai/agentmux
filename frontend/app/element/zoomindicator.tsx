@@ -2,20 +2,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { zoomIndicatorTextAtom, zoomIndicatorVisibleAtom } from "@/app/store/zoom";
-import { useAtomValue } from "jotai";
+import { JSX, Show } from "solid-js";
 import "./zoomindicator.scss";
 
-export function ZoomIndicator() {
-    const visible = useAtomValue(zoomIndicatorVisibleAtom);
-    const text = useAtomValue(zoomIndicatorTextAtom);
-
-    if (!visible) {
-        return null;
-    }
-
+export function ZoomIndicator(): JSX.Element {
     return (
-        <div className="zoom-indicator">
-            <div className="zoom-indicator-content">{text}</div>
-        </div>
+        <Show when={zoomIndicatorVisibleAtom()}>
+            <div class="zoom-indicator">
+                <div class="zoom-indicator-content">{zoomIndicatorTextAtom()}</div>
+            </div>
+        </Show>
     );
 }

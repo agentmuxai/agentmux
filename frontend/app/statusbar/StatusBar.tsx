@@ -1,19 +1,18 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { getApi, windowCountAtom, windowInstanceNumAtom } from "@/store/global";
-import { useAtomValue } from "jotai";
-import { memo } from "react";
+import { atoms, getApi, windowInstanceNumAtom, windowCountAtom } from "@/store/global";
+import { Show, type JSX } from "solid-js";
 import { BackendStatus } from "./BackendStatus";
 import { ConfigStatus } from "./ConfigStatus";
 import { ConnectionStatus } from "./ConnectionStatus";
 import { UpdateStatus } from "./UpdateStatus";
 import "./StatusBar.scss";
 
-const StatusBar = memo(() => {
+const StatusBar = (): JSX.Element => {
     const version = getApi().getAboutModalDetails()?.version ?? "";
-    const instanceNum = useAtomValue(windowInstanceNumAtom);
-    const windowCount = useAtomValue(windowCountAtom);
+    const instanceNum = windowInstanceNumAtom;
+    const windowCount = windowCountAtom;
 
     const handleNewWindow = async () => {
         try {
@@ -24,29 +23,31 @@ const StatusBar = memo(() => {
     };
 
     return (
-        <div className="status-bar">
-            <div className="status-bar-left">
+        <div class="status-bar">
+            <div class="status-bar-left">
                 <BackendStatus />
                 <ConnectionStatus />
             </div>
-            <div className="status-bar-center" />
-            <div className="status-bar-right">
+            <div class="status-bar-center" />
+            <div class="status-bar-right">
                 <ConfigStatus />
                 <UpdateStatus />
-                {version && (
+                <Show when={version}>
                     <span
-                        className="status-version clickable"
+                        class="status-version clickable"
                         onClick={handleNewWindow}
                         title="Open New AgentMux Window"
                     >
                         v{version}
-                        {windowCount > 1 && <span className="instance-num"> ({instanceNum})</span>}
+                        <Show when={windowCount() > 1}>
+                            <span class="instance-num"> ({instanceNum()})</span>
+                        </Show>
                     </span>
-                )}
+                </Show>
             </div>
         </div>
     );
-});
+};
 
 StatusBar.displayName = "StatusBar";
 

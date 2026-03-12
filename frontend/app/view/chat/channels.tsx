@@ -2,12 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { CollapsibleMenu } from "@/app/element/collapsiblemenu";
-import { memo } from "react";
+import type { JSX } from "solid-js";
 
 import "./channels.scss";
 
-const Channels = memo(({ channels }: { channels: MenuItem[] }) => {
-    return <CollapsibleMenu className="channel-list" items={channels}></CollapsibleMenu>;
-});
+function Channels(props: { channels: MenuItem[] }): JSX.Element {
+    return <CollapsibleMenu className="channel-list" items={props.channels} />;
+}
 
 export { Channels };

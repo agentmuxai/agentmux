@@ -1,38 +1,43 @@
 // Copyright 2025, Command Line Inc.
 // SPDX-License-Identifier: Apache-2.0
+//
+// SolidJS migration: Jotai PrimitiveAtom → createSignal
 
-import * as jotai from "jotai";
-import { globalStore } from "./global";
+import { createSignal } from "solid-js";
 
 class ModalsModel {
-    modalsAtom: jotai.PrimitiveAtom<Array<{ displayName: string; props?: any }>>;
+    private _modals: () => Array<{ displayName: string; props?: any }>;
+    private _setModals: (v: Array<{ displayName: string; props?: any }>) => void;
 
     constructor() {
-        this.modalsAtom = jotai.atom([]);
+        const [get, set] = createSignal<Array<{ displayName: string; props?: any }>>([]);
+        this._modals = get;
+        this._setModals = set;
+    }
+
+    /** Reactive accessor — call in a SolidJS component to get live modal list. */
+    get modalsAtom() {
+        return this._modals;
     }
 
     pushModal = (displayName: string, props?: any) => {
-        const modals = globalStore.get(this.modalsAtom);
-        globalStore.set(this.modalsAtom, [...modals, { displayName, props }]);
+        this._setModals([...this._modals(), { displayName, props }]);
     };
 
     popModal = (callback?: () => void) => {
-        const modals = globalStore.get(this.modalsAtom);
+        const modals = this._modals();
         if (modals.length > 0) {
-            const updatedModals = modals.slice(0, -1);
-            globalStore.set(this.modalsAtom, updatedModals);
+            this._setModals(modals.slice(0, -1));
             if (callback) callback();
         }
     };
 
     hasOpenModals(): boolean {
-        const modals = globalStore.get(this.modalsAtom);
-        return modals.length > 0;
+        return this._modals().length > 0;
     }
 
     isModalOpen(displayName: string): boolean {
-        const modals = globalStore.get(this.modalsAtom);
-        return modals.some((modal) => modal.displayName === displayName);
+        return this._modals().some((modal) => modal.displayName === displayName);
     }
 }
 

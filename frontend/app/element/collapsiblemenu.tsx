@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import clsx from "clsx";
-import React, { memo, useState } from "react";
+import { createSignal, For, JSX, Show } from "solid-js";
 import "./collapsiblemenu.scss";
 
 interface VerticalNavProps {
@@ -11,66 +11,74 @@ interface VerticalNavProps {
     renderItem?: (
         item: MenuItem,
         isOpen: boolean,
-        handleClick: (e: React.MouseEvent<any>, item: MenuItem, itemKey: string) => void
-    ) => React.ReactNode;
+        handleClick: (e: MouseEvent, item: MenuItem, itemKey: string) => void
+    ) => JSX.Element;
 }
 
-const CollapsibleMenu = memo(({ items, className, renderItem }: VerticalNavProps) => {
-    const [open, setOpen] = useState<{ [key: string]: boolean }>({});
+const CollapsibleMenu = ({ items, className, renderItem }: VerticalNavProps): JSX.Element => {
+    const [open, setOpen] = createSignal<{ [key: string]: boolean }>({});
 
     // Helper function to generate a unique key for each item based on its path in the hierarchy
     const getItemKey = (item: MenuItem, path: string) => `${path}-${item.label}`;
 
-    const handleClick = (e: React.MouseEvent<any>, item: MenuItem, itemKey: string) => {
+    const handleClick = (e: MouseEvent, item: MenuItem, itemKey: string) => {
         setOpen((prevState) => ({ ...prevState, [itemKey]: !prevState[itemKey] }));
         if (item.onClick) {
             item.onClick(e);
         }
     };
 
-    const renderListItem = (item: MenuItem, index: number, path: string) => {
+    const renderListItem = (item: MenuItem, index: number, path: string): JSX.Element => {
         const itemKey = getItemKey(item, path);
-        const isOpen = open[itemKey] === true;
+        const isItemOpen = () => open()[itemKey] === true;
         const hasChildren = item.subItems && item.subItems.length > 0;
 
         return (
-            <li key={itemKey} className="collapsible-menu-item">
-                {renderItem ? (
-                    renderItem(item, isOpen, (e) => handleClick(e, item, itemKey))
-                ) : (
-                    <div className="collapsible-menu-item-button" onClick={(e) => handleClick(e, item, itemKey)}>
+            <li class="collapsible-menu-item">
+                <Show
+                    when={renderItem}
+                    fallback={
                         <div
-                            className={clsx("collapsible-menu-item-content", {
-                                "has-children": hasChildren,
-                                "is-open": isOpen && hasChildren,
-                            })}
+                            class="collapsible-menu-item-button"
+                            onClick={(e) => handleClick(e, item, itemKey)}
                         >
-                            {item.icon && <div className="collapsible-menu-item-icon">{item.icon}</div>}
-                            <div className="collapsible-menu-item-text ellipsis">{item.label}</div>
+                            <div
+                                class={clsx("collapsible-menu-item-content", {
+                                    "has-children": hasChildren,
+                                    "is-open": isItemOpen() && hasChildren,
+                                })}
+                            >
+                                <Show when={item.icon}>
+                                    <div class="collapsible-menu-item-icon">{item.icon}</div>
+                                </Show>
+                                <div class="collapsible-menu-item-text ellipsis">{item.label}</div>
+                            </div>
+                            <Show when={hasChildren}>
+                                <i class={`fa-sharp fa-solid ${isItemOpen() ? "fa-angle-up" : "fa-angle-down"}`} />
+                            </Show>
                         </div>
-                        {hasChildren && (
-                            <i className={`fa-sharp fa-solid ${isOpen ? "fa-angle-up" : "fa-angle-down"}`}></i>
-                        )}
-                    </div>
-                )}
-                {hasChildren && (
-                    <ul className={`nested-list ${isOpen ? "open" : "closed"}`}>
-                        {item.subItems.map((child, childIndex) =>
-                            renderListItem(child, childIndex, `${path}-${index}`)
-                        )}
+                    }
+                >
+                    {renderItem!(item, isItemOpen(), (e) => handleClick(e, item, itemKey))}
+                </Show>
+                <Show when={hasChildren}>
+                    <ul class={`nested-list ${isItemOpen() ? "open" : "closed"}`}>
+                        <For each={item.subItems}>
+                            {(child, childIndex) => renderListItem(child, childIndex(), `${path}-${index}`)}
+                        </For>
                     </ul>
-                )}
+                </Show>
             </li>
         );
     };
 
     return (
-        <ul className={clsx("collapsible-menu", className)} role="navigation">
-            {items.map((item, index) => renderListItem(item, index, "root"))}
+        <ul class={clsx("collapsible-menu", className)} role="navigation">
+            <For each={items}>
+                {(item, index) => renderListItem(item, index(), "root")}
+            </For>
         </ul>
     );
-});
-
-CollapsibleMenu.displayName = "CollapsibleMenu";
+};
 
 export { CollapsibleMenu };

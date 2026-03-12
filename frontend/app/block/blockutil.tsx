@@ -5,9 +5,9 @@ import { NumActiveConnColors } from "@/app/block/blockframe";
 import { getConnStatusAtom } from "@/app/store/global";
 import * as util from "@/util/util";
 import clsx from "clsx";
-import * as jotai from "jotai";
-import * as React from "react";
-import DotsSvg from "../asset/dots-anim-4.svg";
+import type { JSX } from "solid-js";
+import { createMemo, createSignal } from "solid-js";
+import dotsUrl from "../asset/dots-anim-4.svg?url";
 
 export const colorRegex = /^((#[0-9a-f]{6,8})|([a-z]+))$/;
 
@@ -34,14 +34,14 @@ export function blockViewToName(view: string): string {
     return view;
 }
 
-export function processTitleString(titleString: string): React.ReactNode[] {
+export function processTitleString(titleString: string): JSX.Element[] {
     if (titleString == null) {
         return null;
     }
     const tagRegex = /<(\/)?([a-z]+)(?::([#a-z0-9@-]+))?>/g;
     let lastIdx = 0;
     let match;
-    let partsStack = [[]];
+    let partsStack: any[][] = [[]];
     while ((match = tagRegex.exec(titleString)) != null) {
         const lastPart = partsStack[partsStack.length - 1];
         const before = titleString.substring(lastIdx, match.index);
@@ -56,7 +56,7 @@ export function processTitleString(titleString: string): React.ReactNode[] {
             if (iconClass == null) {
                 continue;
             }
-            lastPart.push(<i key={match.index} className={iconClass} />);
+            lastPart.push(<i class={iconClass} />);
             continue;
         }
         if (tagName == "c" || tagName == "color") {
@@ -73,8 +73,8 @@ export function processTitleString(titleString: string): React.ReactNode[] {
             if (!tagParam.match(colorRegex)) {
                 continue;
             }
-            let children = [];
-            const rtag = React.createElement("span", { key: match.index, style: { color: tagParam } }, children);
+            let children: any[] = [];
+            const rtag = <span style={{ color: tagParam }}>{children}</span>;
             lastPart.push(rtag);
             partsStack.push(children);
             continue;
@@ -87,8 +87,9 @@ export function processTitleString(titleString: string): React.ReactNode[] {
                 partsStack.pop();
                 continue;
             }
-            let children = [];
-            const rtag = React.createElement(tagName, { key: match.index }, children);
+            let children: any[] = [];
+            // Use dynamic tag name via createElement equivalent — just use intrinsic elements
+            const rtag = tagName === "i" ? <i>{children}</i> : <b>{children}</b>;
             lastPart.push(rtag);
             partsStack.push(children);
             continue;
@@ -98,8 +99,7 @@ export function processTitleString(titleString: string): React.ReactNode[] {
     return partsStack[0];
 }
 
-export function getBlockHeaderIcon(blockIcon: string, blockData: Block): React.ReactNode {
-    let blockIconElem: React.ReactNode = null;
+export function getBlockHeaderIcon(blockIcon: string, blockData: Block): JSX.Element {
     if (util.isBlank(blockIcon)) {
         blockIcon = "square";
     }
@@ -107,20 +107,21 @@ export function getBlockHeaderIcon(blockIcon: string, blockData: Block): React.R
     if (iconColor && !iconColor.match(colorRegex)) {
         iconColor = null;
     }
-    let iconStyle = null;
+    let iconStyle: JSX.CSSProperties = null;
     if (!util.isBlank(iconColor)) {
         iconStyle = { color: iconColor };
     }
     const iconClass = util.makeIconClass(blockIcon, true);
     if (iconClass != null) {
-        blockIconElem = <i key="icon" style={iconStyle} className={clsx(`block-frame-icon`, iconClass)} />;
+        return <i style={iconStyle} class={clsx(`block-frame-icon`, iconClass)} />;
     }
-    return blockIconElem;
+    return null;
 }
 
 interface ConnectionButtonProps {
     connection: string;
-    changeConnModalAtom: jotai.PrimitiveAtom<boolean>;
+    changeConnModalAtom: { (): boolean; _set(v: boolean | ((prev: boolean) => boolean)): void };
+    ref?: { current: HTMLDivElement | null };
 }
 
 export function computeConnColorNum(connStatus: ConnStatus): number {
@@ -132,110 +133,100 @@ export function computeConnColorNum(connStatus: ConnStatus): number {
     return connColorNum;
 }
 
-export const ConnectionButton = React.memo(
-    React.forwardRef<HTMLDivElement, ConnectionButtonProps>(
-        ({ connection, changeConnModalAtom }: ConnectionButtonProps, ref) => {
-            const [connModalOpen, setConnModalOpen] = jotai.useAtom(changeConnModalAtom);
-            const isLocal = util.isBlank(connection);
-            const connStatusAtom = getConnStatusAtom(connection);
-            const connStatus = jotai.useAtomValue(connStatusAtom);
-            let showDisconnectedSlash = false;
-            let connIconElem: React.ReactNode = null;
-            const connColorNum = computeConnColorNum(connStatus);
-            let color = `var(--conn-icon-color-${connColorNum})`;
-            const clickHandler = function () {
-                setConnModalOpen(true);
-            };
-            let titleText = null;
-            let shouldSpin = false;
-            if (isLocal) {
-                color = "var(--grey-text-color)";
-                titleText = "Connected to Local Machine";
-                connIconElem = (
-                    <i
-                        className={clsx(util.makeIconClass("laptop", false), "fa-stack-1x")}
-                        style={{ color: color, marginRight: 2 }}
-                    />
-                );
-            } else {
-                titleText = "Connected to " + connection;
-                let iconName = "arrow-right-arrow-left";
-                let iconSvg = null;
-                if (connStatus?.status == "connecting") {
-                    color = "var(--warning-color)";
-                    titleText = "Connecting to " + connection;
-                    shouldSpin = false;
-                    iconSvg = (
-                        <div className="connecting-svg">
-                            <DotsSvg />
-                        </div>
-                    );
-                } else if (connStatus?.status == "error") {
-                    color = "var(--error-color)";
-                    titleText = "Error connecting to " + connection;
-                    if (connStatus?.error != null) {
-                        titleText += " (" + connStatus.error + ")";
-                    }
-                    showDisconnectedSlash = true;
-                } else if (!connStatus?.connected) {
-                    color = "var(--grey-text-color)";
-                    titleText = "Disconnected from " + connection;
-                    showDisconnectedSlash = true;
-                }
-                if (iconSvg != null) {
-                    connIconElem = iconSvg;
-                } else {
-                    connIconElem = (
-                        <i
-                            className={clsx(util.makeIconClass(iconName, false), "fa-stack-1x")}
-                            style={{ color: color, marginRight: 2 }}
-                        />
-                    );
-                }
-            }
+export function ConnectionButton({ connection, changeConnModalAtom, ref }: ConnectionButtonProps): JSX.Element {
+    const [connModalOpen, setConnModalOpen] = createSignal(changeConnModalAtom());
+    const isLocal = util.isBlank(connection);
+    const connStatusAtom = getConnStatusAtom(connection);
+    const connStatus = createMemo(() => connStatusAtom());
+    let showDisconnectedSlash = false;
+    const connColorNum = createMemo(() => computeConnColorNum(connStatus()));
+    const color = createMemo(() => `var(--conn-icon-color-${connColorNum()})`);
+    const clickHandler = function () {
+        changeConnModalAtom._set(true);
+        setConnModalOpen(true);
+    };
+    let titleText = null;
+    let shouldSpin = false;
 
+    const getConnIcon = (): JSX.Element => {
+        const cs = connStatus();
+        if (isLocal) {
             return (
-                <div ref={ref} className={clsx("connection-button")} onClick={clickHandler} title={titleText}>
-                    <span className={clsx("fa-stack connection-icon-box", shouldSpin ? "fa-spin" : null)}>
-                        {connIconElem}
-                        <i
-                            className="fa-slash fa-solid fa-stack-1x"
-                            style={{
-                                color: color,
-                                marginRight: "2px",
-                                textShadow: "0 1px black, 0 1.5px black",
-                                opacity: showDisconnectedSlash ? 1 : 0,
-                            }}
-                        />
-                    </span>
-                    {isLocal ? null : <div className="connection-name ellipsis">{connection}</div>}
+                <i
+                    class={clsx(util.makeIconClass("laptop", false), "fa-stack-1x")}
+                    style={{ color: "var(--grey-text-color)", "margin-right": "2px" }}
+                />
+            );
+        }
+        if (cs?.status == "connecting") {
+            return (
+                <div class="connecting-svg">
+                    <img src={dotsUrl} />
                 </div>
             );
         }
-    )
-);
-
-export const Input = React.memo(
-    ({ decl, className, preview }: { decl: HeaderInput; className: string; preview: boolean }) => {
-        const { value, ref, isDisabled, onChange, onKeyDown, onFocus, onBlur } = decl;
+        const iconName = "arrow-right-arrow-left";
         return (
-            <div className="input-wrapper">
-                <input
-                    ref={
-                        !preview
-                            ? ref
-                            : undefined /* don't wire up the input field if the preview block is being rendered */
-                    }
-                    disabled={isDisabled}
-                    className={className}
-                    value={value}
-                    onChange={(e) => onChange(e)}
-                    onKeyDown={(e) => onKeyDown(e)}
-                    onFocus={(e) => onFocus(e)}
-                    onBlur={(e) => onBlur(e)}
-                    onDragStart={(e) => e.preventDefault()}
-                />
-            </div>
+            <i
+                class={clsx(util.makeIconClass(iconName, false), "fa-stack-1x")}
+                style={{ color: color(), "margin-right": "2px" }}
+            />
         );
-    }
-);
+    };
+
+    const getTitleText = (): string => {
+        const cs = connStatus();
+        if (isLocal) return "Connected to Local Machine";
+        if (cs?.status == "connecting") return "Connecting to " + connection;
+        if (cs?.status == "error") {
+            let t = "Error connecting to " + connection;
+            if (cs?.error != null) t += " (" + cs.error + ")";
+            return t;
+        }
+        if (!cs?.connected) return "Disconnected from " + connection;
+        return "Connected to " + connection;
+    };
+
+    const getShowDisconnectedSlash = (): boolean => {
+        const cs = connStatus();
+        if (isLocal) return false;
+        return cs?.status == "error" || !cs?.connected;
+    };
+
+    return (
+        <div ref={(el) => { if (ref) ref.current = el; }} class={clsx("connection-button")} onClick={clickHandler} title={getTitleText()}>
+            <span class={clsx("fa-stack connection-icon-box", shouldSpin ? "fa-spin" : null)}>
+                {getConnIcon()}
+                <i
+                    class="fa-slash fa-solid fa-stack-1x"
+                    style={{
+                        color: color(),
+                        "margin-right": "2px",
+                        "text-shadow": "0 1px black, 0 1.5px black",
+                        opacity: getShowDisconnectedSlash() ? 1 : 0,
+                    }}
+                />
+            </span>
+            {isLocal ? null : <div class="connection-name ellipsis">{connection}</div>}
+        </div>
+    );
+}
+
+export function Input({ decl, className, preview }: { decl: HeaderInput; className: string; preview: boolean }): JSX.Element {
+    const { value, ref, isDisabled, onChange, onKeyDown, onFocus, onBlur } = decl;
+    return (
+        <div class="input-wrapper">
+            <input
+                ref={!preview && ref ? (el) => { ref.current = el; } : undefined}
+                disabled={isDisabled}
+                class={className}
+                value={value}
+                onChange={(e) => onChange?.(e as any)}
+                onKeyDown={(e) => onKeyDown?.(e as any)}
+                onFocus={(e) => onFocus?.(e as any)}
+                onBlur={(e) => onBlur?.(e as any)}
+                onDragStart={(e) => e.preventDefault()}
+            />
+        </div>
+    );
+}

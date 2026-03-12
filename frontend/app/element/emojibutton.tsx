@@ -2,61 +2,56 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { cn, makeIconClass } from "@/util/util";
-import { useLayoutEffect, useRef, useState } from "react";
+import { createEffect, createSignal, JSX, Show } from "solid-js";
 
-export const EmojiButton = ({
-    emoji,
-    icon,
-    isClicked,
-    onClick,
-    className,
-    suppressFlyUp,
-}: {
+export const EmojiButton = (props: {
     emoji?: string;
     icon?: string;
     isClicked: boolean;
     onClick: () => void;
     className?: string;
     suppressFlyUp?: boolean;
-}) => {
-    const [showFloating, setShowFloating] = useState(false);
-    const prevClickedRef = useRef(isClicked);
+}): JSX.Element => {
+    const [showFloating, setShowFloating] = createSignal(false);
+    let prevClicked = false;
 
-    useLayoutEffect(() => {
-        if (isClicked && !prevClickedRef.current && !suppressFlyUp) {
+    // Track isClicked changes to trigger float-up animation
+    createEffect(() => {
+        const current = props.isClicked;
+        if (current && !prevClicked && !props.suppressFlyUp) {
             setShowFloating(true);
             setTimeout(() => setShowFloating(false), 600);
         }
-        prevClickedRef.current = isClicked;
-    }, [isClicked, suppressFlyUp]);
+        prevClicked = current;
+    });
 
-    const content = icon ? <i className={makeIconClass(icon, false)} /> : emoji;
+    const content = () => props.icon ? <i class={makeIconClass(props.icon, false)} /> : props.emoji;
 
     return (
-        <div className="relative inline-block">
+        <div class="relative inline-block">
             <button
-                onClick={onClick}
-                className={cn(
+                onClick={props.onClick}
+                class={cn(
                     "px-2 py-1 rounded border cursor-pointer transition-colors",
-                    isClicked
+                    props.isClicked
                         ? "bg-accent/20 border-accent text-accent"
                         : "bg-transparent border-border/50 text-foreground/70 hover:border-border",
-                    className
+                    props.className
                 )}
             >
-                {content}
+                {content()}
             </button>
-            {showFloating && (
+            <Show when={showFloating()}>
                 <span
-                    className="absolute pointer-events-none animate-[float-up_0.6s_ease-out_forwards]"
+                    class="absolute pointer-events-none animate-[float-up_0.6s_ease-out_forwards]"
                     style={{
                         left: "50%",
                         bottom: "100%",
                     }}
                 >
-                    {content}
+                    {content()}
                 </span>
-            )}
+            </Show>
         </div>
     );
 };

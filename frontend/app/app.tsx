@@ -3,7 +3,7 @@
 
 import { Workspace } from "@/app/workspace/workspace";
 import { ContextMenuModel } from "@/store/contextmenu";
-import { atoms, createBlock, getApi, getSettingsPrefixAtom, globalStore, isDev, openLink, removeFlashError } from "@/store/global";
+import { atoms, getApi, getSettingsPrefixAtom, isDev, openLink, removeFlashError, flashErrors } from "@/store/global";
 import { appHandleKeyDown, keyboardMouseDownHandler } from "@/store/keymodel";
 import { chromeZoomIn, chromeZoomOut, zoomBlockIn, zoomBlockOut, WHEEL_STEP } from "@/store/zoom";
 import { getElemAsStr } from "@/util/focusutil";
@@ -12,11 +12,8 @@ import { PLATFORM } from "@/util/platformutil";
 import * as util from "@/util/util";
 import clsx from "clsx";
 import debug from "debug";
-import { Provider, useAtomValue } from "jotai";
 import "overlayscrollbars/overlayscrollbars.css";
-import { Fragment, useEffect, useState } from "react";
-import { DndProvider } from "react-dnd";
-import { HTML5Backend } from "react-dnd-html5-backend";
+import { createEffect, createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import { AppBackground } from "./app-bg";
 import { CrossWindowDragMonitor } from "./drag/CrossWindowDragMonitor";
 import { DragOverlay } from "./drag/DragOverlay";
@@ -32,15 +29,8 @@ import "../tailwindsetup.css";
 const dlog = debug("wave:app");
 const focusLog = debug("wave:focus");
 
-const App = ({ onFirstRender }: { onFirstRender: () => void }) => {
-    useEffect(() => {
-        onFirstRender();
-    }, []);
-    return (
-        <Provider store={globalStore}>
-            <AppInner />
-        </Provider>
-    );
+const App = () => {
+    return <AppInner />;
 };
 
 function isContentEditableBeingEdited(): boolean {
@@ -86,7 +76,7 @@ async function getClipboardURL(): Promise<URL> {
     }
 }
 
-async function handleContextMenu(e: React.MouseEvent<HTMLDivElement>) {
+async function handleContextMenu(e: MouseEvent) {
     e.preventDefault();
     const canPaste = canEnablePaste();
     const canCopy = canEnableCopy();
@@ -119,8 +109,8 @@ async function handleContextMenu(e: React.MouseEvent<HTMLDivElement>) {
 
 function AppSettingsUpdater() {
     const windowSettingsAtom = getSettingsPrefixAtom("window");
-    const windowSettings = useAtomValue(windowSettingsAtom);
-    useEffect(() => {
+    createEffect(() => {
+        const windowSettings = windowSettingsAtom();
         const isTransparentOrBlur =
             (windowSettings?.["window:transparent"] || windowSettings?.["window:blur"]) ?? false;
         const opacity = util.boundNumber(windowSettings?.["window:opacity"] ?? 0.8, 0, 1);
@@ -148,7 +138,7 @@ function AppSettingsUpdater() {
         // Apply Tauri-level window transparency and platform blur effects
         const isBlur = windowSettings?.["window:blur"] ?? false;
         getApi().setWindowTransparency(isTransparentOrBlur, isBlur, opacity);
-    }, [windowSettings]);
+    });
     return null;
 }
 
@@ -169,7 +159,7 @@ function AppFocusHandler() {
     return null;
 
     // for debugging
-    useEffect(() => {
+    onMount(() => {
         document.addEventListener("focusin", appFocusIn);
         document.addEventListener("focusout", appFocusOut);
         document.addEventListener("selectionchange", appSelectionChange);
@@ -179,32 +169,32 @@ function AppFocusHandler() {
                 focusLog("activeElement", getElemAsStr(activeElement));
             }
         }, 2000);
-        return () => {
+        onCleanup(() => {
             document.removeEventListener("focusin", appFocusIn);
             document.removeEventListener("focusout", appFocusOut);
             document.removeEventListener("selectionchange", appSelectionChange);
             clearInterval(ivId);
-        };
+        });
     });
     return null;
 }
 
 const AppKeyHandlers = () => {
-    useEffect(() => {
+    onMount(() => {
         const staticKeyDownHandler = keyutil.keydownWrapper(appHandleKeyDown);
         document.addEventListener("keydown", staticKeyDownHandler);
         document.addEventListener("mousedown", keyboardMouseDownHandler);
 
-        return () => {
+        onCleanup(() => {
             document.removeEventListener("keydown", staticKeyDownHandler);
             document.removeEventListener("mousedown", keyboardMouseDownHandler);
-        };
-    }, []);
+        });
+    });
     return null;
 };
 
 const AppZoomHandler = () => {
-    useEffect(() => {
+    onMount(() => {
         const handleWheel = (e: WheelEvent) => {
             // Only zoom if Ctrl/Cmd is held
             if (!e.ctrlKey && !e.metaKey) {
@@ -236,37 +226,38 @@ const AppZoomHandler = () => {
         // Add with passive: false to allow preventDefault
         window.addEventListener("wheel", handleWheel, { passive: false });
 
-        return () => {
+        onCleanup(() => {
             window.removeEventListener("wheel", handleWheel);
-        };
-    }, []);
+        });
+    });
     return null;
 };
 
 const FlashError = () => {
-    const flashErrors = useAtomValue(atoms.flashErrors);
-    const [hoveredId, setHoveredId] = useState<string>(null);
-    const [ticker, setTicker] = useState<number>(0);
+    const errors = flashErrors;
+    const [hoveredId, setHoveredId] = createSignal<string>(null);
+    const [ticker, setTicker] = createSignal<number>(0);
 
-    useEffect(() => {
-        if (flashErrors.length == 0 || hoveredId != null) {
+    createEffect(() => {
+        const errs = errors();
+        const hovered = hoveredId();
+        // Track ticker to re-run on tick
+        ticker();
+        if (errs.length == 0 || hovered != null) {
             return;
         }
         const now = Date.now();
-        for (let ferr of flashErrors) {
+        for (let ferr of errs) {
             if (ferr.expiration == null || ferr.expiration < now) {
                 removeFlashError(ferr.id);
             }
         }
-        setTimeout(() => setTicker(ticker + 1), 1000);
-    }, [flashErrors, ticker, hoveredId]);
-
-    if (flashErrors.length == 0) {
-        return null;
-    }
+        setTimeout(() => setTicker((t) => t + 1), 1000);
+    });
 
     function copyError(id: string) {
-        const ferr = flashErrors.find((f) => f.id === id);
+        const errs = errors();
+        const ferr = errs.find((f) => f.id === id);
         if (ferr == null) {
             return;
         }
@@ -283,75 +274,81 @@ const FlashError = () => {
         navigator.clipboard.writeText(text);
     }
 
-    function convertNewlinesToBreaks(text) {
-        return text.split("\n").map((part, index) => (
-            <Fragment key={index}>
+    function convertNewlinesToBreaks(text: string) {
+        return text.split("\n").map((part) => (
+            <>
                 {part}
                 <br />
-            </Fragment>
+            </>
         ));
     }
 
     return (
-        <div className="flash-error-container">
-            {flashErrors.map((err, idx) => (
-                <div
-                    key={idx}
-                    className={clsx("flash-error", { hovered: hoveredId === err.id })}
-                    onClick={() => copyError(err.id)}
-                    onMouseEnter={() => setHoveredId(err.id)}
-                    onMouseLeave={() => setHoveredId(null)}
-                    title="Click to Copy Error Message"
-                >
-                    <div className="flash-error-scroll">
-                        {err.title != null ? <div className="flash-error-title">{err.title}</div> : null}
-                        {err.message != null ? (
-                            <div className="flash-error-message">{convertNewlinesToBreaks(err.message)}</div>
-                        ) : null}
-                    </div>
-                </div>
-            ))}
-        </div>
+        <Show when={errors().length > 0}>
+            <div class="flash-error-container">
+                <For each={errors()}>
+                    {(err, idx) => (
+                        <div
+                            class={clsx("flash-error", { hovered: hoveredId() === err.id })}
+                            onClick={() => copyError(err.id)}
+                            onMouseEnter={() => setHoveredId(err.id)}
+                            onMouseLeave={() => setHoveredId(null)}
+                            title="Click to Copy Error Message"
+                        >
+                            <div class="flash-error-scroll">
+                                <Show when={err.title != null}>
+                                    <div class="flash-error-title">{err.title}</div>
+                                </Show>
+                                <Show when={err.message != null}>
+                                    <div class="flash-error-message">{convertNewlinesToBreaks(err.message)}</div>
+                                </Show>
+                            </div>
+                        </div>
+                    )}
+                </For>
+            </div>
+        </Show>
     );
 };
 
 const AppInner = () => {
-    const prefersReducedMotion = useAtomValue(atoms.prefersReducedMotionAtom);
-    const client = useAtomValue(atoms.client);
-    const windowData = useAtomValue(atoms.waveWindow);
-    const isFullScreen = useAtomValue(atoms.isFullScreen);
-
-    if (client == null || windowData == null) {
-        return (
-            <div className="flex flex-col w-full h-full">
-                <AppBackground />
-                <CenteredDiv>invalid configuration, client or window was not loaded</CenteredDiv>
-            </div>
-        );
-    }
+    const prefersReducedMotion = atoms.prefersReducedMotionAtom;
+    const client = atoms.client;
+    const windowData = atoms.waveWindow;
+    const isFullScreen = atoms.isFullScreen;
 
     return (
-        <div
-            className={clsx("flex flex-col w-full h-full", PLATFORM, {
-                fullscreen: isFullScreen,
-                "prefers-reduced-motion": prefersReducedMotion,
-            })}
-            onContextMenu={handleContextMenu}
+        <Show
+            when={client() != null && windowData() != null}
+            fallback={
+                <div class="flex flex-col w-full h-full">
+                    <AppBackground />
+                    <CenteredDiv>invalid configuration, client or window was not loaded</CenteredDiv>
+                </div>
+            }
         >
-            <AppBackground />
-            <AppKeyHandlers />
-            <AppZoomHandler />
-            <AppFocusHandler />
-            <AppSettingsUpdater />
-            <DndProvider backend={HTML5Backend}>
+            <div
+                class={clsx("flex flex-col w-full h-full", PLATFORM, {
+                    fullscreen: isFullScreen(),
+                    "prefers-reduced-motion": prefersReducedMotion(),
+                })}
+                onContextMenu={handleContextMenu}
+            >
+                <AppBackground />
+                <AppKeyHandlers />
+                <AppZoomHandler />
+                <AppFocusHandler />
+                <AppSettingsUpdater />
                 <Workspace />
                 <CrossWindowDragMonitor />
-            </DndProvider>
-            <DragOverlay />
-            <FlashError />
-            {isDev() ? <NotificationBubbles></NotificationBubbles> : null}
-            <ZoomIndicator />
-        </div>
+                <DragOverlay />
+                <FlashError />
+                <Show when={isDev()}>
+                    <NotificationBubbles />
+                </Show>
+                <ZoomIndicator />
+            </div>
+        </Show>
     );
 };
 
