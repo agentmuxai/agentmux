@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 
 use super::sanitize::{format_injected_message, sanitize_message, validate_agent_id};
 use super::types::*;
-use super::{now_unix_millis, sha256_hex, AUDIT_LOG_MAX, INJECT_ENTER_DELAY_MS, RATE_LIMIT_MAX};
+use super::{now_unix_millis, sha256_hex, AUDIT_LOG_MAX, RATE_LIMIT_MAX};
 
 // ---- Rate Limiter ----
 
@@ -260,30 +260,10 @@ impl Handler {
             }
         };
 
-        // Step 1: Send message
-        if let Err(e) = sender(&block_id, final_msg.as_bytes()) {
-            self.log_audit(
-                req.source_agent.as_deref(),
-                &req.target_agent,
-                &block_id,
-                &sanitized,
-                false,
-                Some(&e),
-                &request_id,
-            );
-            return InjectionResponse {
-                success: false,
-                request_id,
-                block_id: Some(block_id),
-                error: Some(e),
-                timestamp: now,
-            };
-        }
-
-        // Step 2: Wait 150ms then send Enter
-        std::thread::sleep(Duration::from_millis(INJECT_ENTER_DELAY_MS));
-
-        if let Err(e) = sender(&block_id, b"\r") {
+        // Send message + Enter as a single payload. PTY handles it correctly
+        // without needing a delay between them.
+        let payload = format!("{}\r", final_msg);
+        if let Err(e) = sender(&block_id, payload.as_bytes()) {
             self.log_audit(
                 req.source_agent.as_deref(),
                 &req.target_agent,
