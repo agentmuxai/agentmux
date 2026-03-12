@@ -7,7 +7,7 @@ import { RpcApi } from "@/app/store/wshclientapi";
 import { TabRpcClient } from "@/app/store/wshrpcutil";
 import { WOS, atoms, fetchWaveFile, getSettingsKeyAtom, globalStore, openLink } from "@/app/store/global";
 import * as services from "@/app/store/services";
-import { PLATFORM, PlatformMacOS } from "@/util/platformutil";
+import { PLATFORM, PlatformMacOS, PlatformWindows } from "@/util/platformutil";
 import { base64ToArray, fireAndForget } from "@/util/util";
 import { SearchAddon } from "@xterm/addon-search";
 import { SerializeAddon } from "@xterm/addon-serialize";
@@ -304,7 +304,7 @@ export class TermWrap {
         // WebGL is disabled on Linux/WebKitGTK — it causes a bug where backspace
         // and other control sequences are not rendered correctly.
         // Use Canvas renderer instead (full color support, no WebGL issues).
-        if (PLATFORM !== PlatformMacOS && PLATFORM !== "windows") {
+        if (PLATFORM !== PlatformMacOS && PLATFORM !== PlatformWindows) {
             try {
                 const canvasAddon = new CanvasAddon();
                 this.toDispose.push(canvasAddon);
