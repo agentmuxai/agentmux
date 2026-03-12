@@ -18,6 +18,7 @@
     "core:window:allow-unmaximize",
     "core:window:allow-show",
     "core:window:allow-hide",
+    "core:window:allow-center",
     "core:window:allow-start-dragging",
     "core:webview:default",
     "core:webview:allow-create-webview-window",

@@ -301,6 +301,23 @@ export class TermWrap {
     // ── Private helpers ────────────────────────────────────────────────
 
     private loadRendererAddon(useWebGl: boolean) {
+        // WebGL is disabled on Linux/WebKitGTK — it causes a bug where backspace
+        // and other control sequences are not rendered correctly.
+        // Use Canvas renderer instead (full color support, no WebGL issues).
+        if (PLATFORM !== PlatformMacOS && PLATFORM !== "windows") {
+            try {
+                const canvasAddon = new CanvasAddon();
+                this.toDispose.push(canvasAddon);
+                this.terminal.loadAddon(canvasAddon);
+                if (!loggedWebGL) {
+                    console.log("loaded canvas renderer (Linux/WebKitGTK)");
+                    loggedWebGL = true;
+                }
+            } catch (e) {
+                console.warn("Canvas renderer failed, using DOM renderer:", e);
+            }
+            return;
+        }
         if (WebGLSupported && useWebGl) {
             try {
                 const webglAddon = new WebglAddon();

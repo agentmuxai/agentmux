@@ -254,6 +254,9 @@ async function initTauriWave(): Promise<void> {
             const { getCurrentWindow } = await import("@tauri-apps/api/window");
             const currentWindow = getCurrentWindow();
             await currentWindow.show();
+            if (platform === "linux") {
+                await currentWindow.center();
+            }
             await currentWindow.setFocus();
         } catch (showError) {
             console.warn("[initTauriWave] Failed to show window:", showError);
