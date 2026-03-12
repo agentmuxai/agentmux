@@ -182,19 +182,87 @@ tasks:
                 # Bundling them bloats the image from ~15MB to ~90MB.
                 rm -rf "$APPDIR/usr/lib"
                 echo "✓ Stripped bundled system libraries from AppDir"
+
+                # Remove linuxdeploy GTK hook — it sets GDK_BACKEND=x11 which forces
+                # XWayland and triggers the IBus backspace bug.
+                rm -rf "$APPDIR/apprun-hooks"
+                echo "✓ Removed linuxdeploy hooks (GDK_BACKEND=x11)"
+
+                # Replace AppRun with custom script that sets required env vars
+                # and self-registers icon/desktop for GNOME taskbar icon matching.
+                printf '%s\n' '#!/usr/bin/env bash' \
+                  'set -e' \
+                  'this_dir="$(readlink -f "$(dirname "$0")")"' \
+                  'export APPDIR="$this_dir"' \
+                  'export WEBKIT_DISABLE_DMABUF_RENDERER=1' \
+                  '# Force native Wayland — XWayland + IBus XIM causes Backspace bugs.' \
+                  'export GDK_BACKEND=wayland' \
+                  'export XMODIFIERS=""' \
+                  'export GTK_IM_MODULE=gtk-im-context-simple' \
+                  '# Self-register icon and .desktop for GNOME Shell taskbar icon matching.' \
+                  'if [ -n "$APPIMAGE" ]; then' \
+                  '  _icon_dir="$HOME/.local/share/icons/hicolor/256x256/apps"' \
+                  '  _apps_dir="$HOME/.local/share/applications"' \
+                  '  _desktop="$_apps_dir/agentmux.desktop"' \
+                  '  mkdir -p "$_icon_dir" "$_apps_dir"' \
+                  '  cp -f "$this_dir/AgentMux.png" "$_icon_dir/agentmux.png"' \
+                  '  _cur=$(grep -m1 "^Exec=" "$_desktop" 2>/dev/null | cut -d= -f2- || true)' \
+                  '  if [ "$_cur" != "$APPIMAGE" ]; then' \
+                  '    sed "s|^Exec=.*|Exec=$APPIMAGE|" "$this_dir/AgentMux.desktop" > "$_desktop"' \
+                  '    update-desktop-database "$_apps_dir" 2>/dev/null || true' \
+                  '    gtk-update-icon-cache -f "$HOME/.local/share/icons/hicolor" 2>/dev/null || true' \
+                  '  fi' \
+                  'fi' \
+                  'exec "$this_dir/usr/bin/agentmux" "$@"' \
+                  > "$APPDIR/AppRun"
+                chmod +x "$APPDIR/AppRun"
+                echo "✓ Replaced AppRun with custom script"
+
                 # Ensure lowercase icon exists (desktop file references 'agentmux')
                 [ -f "$APPDIR/agentmux.png" ] || cp "$APPDIR/AgentMux.png" "$APPDIR/agentmux.png"
+
+                # Fix .DirIcon symlink (must point to existing file)
+                rm -f "$APPDIR/.DirIcon"
+                ln -s AgentMux.png "$APPDIR/.DirIcon"
+
                 VERSION=$(node version.cjs)
                 OUTPUT="target/release/bundle/appimage/AgentMux_${VERSION}_amd64.AppImage"
                 ARCH=x86_64 appimagetool "$APPDIR" "$OUTPUT"
-                if [ -d "$HOME/Desktop" ]; then
-                  cp "$OUTPUT" "$HOME/Desktop/"
-                  echo "✅ Copied to Desktop: $OUTPUT"
-                fi
                 echo "✅ AppImage created: $OUTPUT"
         deps:
             - clean
             - npm:install
+
+    desktop:
+        desc: Clear desktop and deploy latest AppImage with trusted .desktop launcher.
+        platforms: [linux]
+        cmds:
+            - cmd: |
+                rm -f "$HOME/Desktop"/AgentMux_*
+                echo "✓ Cleared old AppImage files from Desktop"
+                VERSION=$(node version.cjs)
+                SRC="target/release/bundle/appimage/AgentMux_${VERSION}_amd64.AppImage"
+                if [ ! -f "$SRC" ]; then
+                  echo "❌ AppImage not found: $SRC"
+                  exit 1
+                fi
+                cp "$SRC" "$HOME/Desktop/"
+                chmod +x "$HOME/Desktop/AgentMux_${VERSION}_amd64.AppImage"
+                echo "✅ Deployed to Desktop: AgentMux_${VERSION}_amd64.AppImage"
+                # Create trusted .desktop launcher for double-click support
+                DESKTOP_FILE="$HOME/Desktop/AgentMux.desktop"
+                cat > "$DESKTOP_FILE" <<DEOF
+                [Desktop Entry]
+                Name=AgentMux
+                Exec=$HOME/Desktop/AgentMux_${VERSION}_amd64.AppImage
+                Icon=agentmux
+                Type=Application
+                Categories=Development;
+                DEOF
+                chmod +x "$DESKTOP_FILE"
+                # Trust the .desktop file for GNOME
+                gio set "$DESKTOP_FILE" metadata::trusted true 2>/dev/null || true
+                echo "✅ Created trusted .desktop launcher"
 
 
     build:frontend:
