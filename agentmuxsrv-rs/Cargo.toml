@@ -1,6 +1,6 @@
 [package]
 name = "agentmuxsrv-rs"
-version = "0.31.129"
+version = "0.31.120"
 edition = "2021"
 description = "AgentMux Rust backend (drop-in replacement for Go agentmuxsrv)"
 
@@ -35,7 +35,6 @@ portable-pty = "0.9"
 sysinfo = "0.34"
 parking_lot = "0.12"
 notify = "7"
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 
 [dev-dependencies]
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "blocking", "json"] }
