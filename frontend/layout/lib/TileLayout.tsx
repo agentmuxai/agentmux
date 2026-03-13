@@ -6,6 +6,7 @@ import clsx from "clsx";
 import { toPng } from "html-to-image";
 import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js";
 import type { JSX } from "solid-js";
+import { Key } from "@solid-primitives/keyed";
 import { debounce, throttle } from "throttle-debounce";
 import { LayoutModel } from "./layoutModel";
 import { useNodeModel, useTileLayout } from "./layoutModelHooks";
@@ -187,9 +188,9 @@ const DisplayNodesWrapper = (props: DisplayNodesWrapperProps) => {
     const leafs = () => props.layoutModel.leafs();
 
     return (
-        <For each={leafs()}>
-            {(node) => <DisplayNode layoutModel={props.layoutModel} node={node} />}
-        </For>
+        <Key each={leafs()} by={(node) => node.id}>
+            {(node) => <DisplayNode layoutModel={props.layoutModel} node={node()} />}
+        </Key>
     );
 };
 
@@ -319,9 +320,9 @@ const OverlayNodeWrapper = (props: OverlayNodeWrapperProps) => {
 
     return (
         <div class="overlay-container" style={{ top: "10000px", ...overlayTransform() }}>
-            <For each={leafs()}>
-                {(node) => <OverlayNode layoutModel={props.layoutModel} node={node} />}
-            </For>
+            <Key each={leafs()} by={(node) => node.id}>
+                {(node) => <OverlayNode layoutModel={props.layoutModel} node={node()} />}
+            </Key>
         </div>
     );
 };

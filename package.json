@@ -87,6 +87,7 @@
     "@radix-ui/react-label": "^2.1.8",
     "@radix-ui/react-slot": "^1.2.3",
     "@react-hook/resize-observer": "^2.0.2",
+    "@solid-primitives/keyed": "^1.5.3",
     "@table-nav/core": "^0.0.9",
     "@table-nav/react": "^0.0.9",
     "@tanstack/react-table": "^8.21.3",
