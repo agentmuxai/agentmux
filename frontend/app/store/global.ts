@@ -20,7 +20,7 @@ import { getWebServerEndpoint } from "@/util/endpoints";
 import { fetch } from "@/util/fetchutil";
 import { setPlatform } from "@/util/platformutil";
 import { deepCompareReturnPrev, fireAndForget, getPrefixedSettings, isBlank } from "@/util/util";
-import { createMemo, createSignal } from "solid-js";
+import { createMemo, createRoot, createSignal } from "solid-js";
 import { modalsModel } from "./modalmodel";
 import { ClientService, ObjectService, WorkspaceService } from "./services";
 import * as WOS from "./wos";
@@ -310,11 +310,11 @@ export function getBlockMetaKeyAtom<T extends keyof MetaType>(blockId: string, k
     const name = "#meta-" + key;
     let memo = bc.get(name);
     if (memo == null) {
-        memo = createMemo(() => {
+        memo = createRoot(() => createMemo(() => {
             const blockAccessor = WOS.getWaveObjectAtom(WOS.makeORef("block", blockId));
             const blockData = blockAccessor();
             return blockData?.meta?.[key];
-        });
+        }));
         bc.set(name, memo);
     }
     return memo as () => MetaType[T];
@@ -329,11 +329,11 @@ export function getTabMetaKeyAtom<T extends keyof MetaType>(tabId: string, key: 
     const name = "#meta-" + key;
     let memo = tc.get(name);
     if (memo == null) {
-        memo = createMemo(() => {
+        memo = createRoot(() => createMemo(() => {
             const tabAccessor = WOS.getWaveObjectAtom(WOS.makeORef("tab", tabId));
             const tabData = tabAccessor();
             return tabData?.meta?.[key];
-        });
+        }));
         tc.set(name, memo);
     }
     return memo as () => MetaType[T];
@@ -352,7 +352,7 @@ function getConnConfigKeyAtom<T extends keyof ConnKeywords>(connName: string, ke
     const name = "#conn-" + key;
     let memo = cc.get(name);
     if (memo == null) {
-        memo = createMemo(() => fullConfigAtom()?.connections?.[connName]?.[key]);
+        memo = createRoot(() => createMemo(() => fullConfigAtom()?.connections?.[connName]?.[key]));
         cc.set(name, memo);
     }
     return memo as () => ConnKeywords[T];
@@ -367,11 +367,11 @@ const settingsAtomCache = new Map<string, () => any>();
 export function getSettingsKeyAtom<T extends keyof SettingsType>(key: T): () => SettingsType[T] {
     let memo = settingsAtomCache.get(key) as () => SettingsType[T];
     if (memo == null) {
-        memo = createMemo(() => {
+        memo = createRoot(() => createMemo(() => {
             const settings = settingsAtom();
             if (settings == null) return null;
             return settings[key];
-        });
+        }));
         settingsAtomCache.set(key, memo);
     }
     return memo;
@@ -386,7 +386,7 @@ export function getOverrideConfigAtom<T extends keyof SettingsType>(blockId: str
     const name = "#settingsoverride-" + key;
     let memo = bc.get(name);
     if (memo == null) {
-        memo = createMemo(() => {
+        memo = createRoot(() => createMemo(() => {
             const metaKeyMemo = getBlockMetaKeyAtom(blockId, key as any);
             const metaKeyVal = metaKeyMemo();
             if (metaKeyVal != null) return metaKeyVal as SettingsType[T];
@@ -402,7 +402,7 @@ export function getOverrideConfigAtom<T extends keyof SettingsType>(blockId: str
             if (settingsVal != null) return settingsVal;
 
             return null;
-        });
+        }));
         bc.set(name, memo);
     }
     return memo as () => SettingsType[T];
@@ -418,11 +418,11 @@ export function getSettingsPrefixAtom(prefix: string): () => SettingsType {
     let memo = settingsPrefixCache.get(prefix + ":");
     if (memo == null) {
         const cacheKey = {};
-        memo = createMemo(() => {
+        memo = createRoot(() => createMemo(() => {
             const settings = settingsAtom();
             const newValue = getPrefixedSettings(settings, prefix);
             return deepCompareReturnPrev(cacheKey, newValue);
-        });
+        }));
         settingsPrefixCache.set(prefix + ":", memo);
     }
     return memo;
@@ -436,7 +436,7 @@ export function useBlockAtom<T>(blockId: string, name: string, makeFn: () => () 
     const bc = getSingleBlockAtomCache(blockId);
     let memo = bc.get(name);
     if (memo == null) {
-        memo = makeFn();
+        memo = createRoot(makeFn);
         bc.set(name, memo);
         console.log("New BlockAtom", blockId, name);
     }

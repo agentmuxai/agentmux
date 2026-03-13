@@ -113,10 +113,10 @@ pub async fn spawn_backend(app: &tauri::AppHandle) -> Result<BackendSpawnResult,
 
     let backend_name = "agentmuxsrv-rs";
 
-    // Try to find backend in portable mode first (same dir as exe)
+    // Try to find backend in portable mode first (bin/ subdir next to exe)
     let portable_path = std::env::current_exe().ok().and_then(|exe_path| {
         let exe_dir = exe_path.parent()?;
-        let portable_binary = exe_dir.join(format!("{}.x64.exe", backend_name));
+        let portable_binary = exe_dir.join("bin").join(format!("{}.x64.exe", backend_name));
         if portable_binary.exists() {
             tracing::info!("Using portable {} at: {:?}", backend_name, portable_binary);
             Some(portable_binary)

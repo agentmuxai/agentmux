@@ -301,24 +301,9 @@ export class TermWrap {
     // ── Private helpers ────────────────────────────────────────────────
 
     private loadRendererAddon(useWebGl: boolean) {
-        // WebGL is disabled on Linux/WebKitGTK — it causes a bug where backspace
-        // and other control sequences are not rendered correctly.
-        // Use Canvas renderer instead (full color support, no WebGL issues).
-        if (PLATFORM !== PlatformMacOS && PLATFORM !== PlatformWindows) {
-            try {
-                const canvasAddon = new CanvasAddon();
-                this.toDispose.push(canvasAddon);
-                this.terminal.loadAddon(canvasAddon);
-                if (!loggedWebGL) {
-                    console.log("loaded canvas renderer (Linux/WebKitGTK)");
-                    loggedWebGL = true;
-                }
-            } catch (e) {
-                console.warn("Canvas renderer failed, using DOM renderer:", e);
-            }
-            return;
-        }
-        if (WebGLSupported && useWebGl) {
+        // WebGL disabled: silently fails in WebView2, producing blank terminal canvases.
+        // Canvas renderer is reliable and performant enough.
+        if (false) {
             try {
                 const webglAddon = new WebglAddon();
                 this.toDispose.push(
@@ -385,7 +370,6 @@ export class TermWrap {
         dlog("resync controller", this.blockId, reason);
         const tabId = atoms.staticTabId();
         const rtOpts: RuntimeOpts = { termsize: { rows: this.terminal.rows, cols: this.terminal.cols } };
-        console.log("[dnd-debug] ControllerResyncCommand →", this.blockId, "tab:", tabId, "reason:", reason);
         try {
             await RpcApi.ControllerResyncCommand(TabRpcClient, {
                 tabid: tabId,

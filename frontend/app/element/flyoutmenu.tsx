@@ -51,10 +51,12 @@ const FlyoutMenu = (props: MenuProps): JSX.Element => {
 
     const registerFloating = (el: HTMLElement) => {
         floatingEl = el;
-        if (referenceEl && floatingEl) {
-            cleanupAutoUpdate?.();
-            cleanupAutoUpdate = autoUpdate(referenceEl, floatingEl, updatePosition);
-        }
+        requestAnimationFrame(() => {
+            if (referenceEl instanceof Element && floatingEl instanceof Element) {
+                cleanupAutoUpdate?.();
+                cleanupAutoUpdate = autoUpdate(referenceEl, floatingEl, updatePosition);
+            }
+        });
     };
 
     const handleClickOutside = (e: MouseEvent) => {

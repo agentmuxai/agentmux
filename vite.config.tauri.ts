@@ -73,9 +73,7 @@ export default defineConfig({
     },
     css: {
         preprocessorOptions: {
-            scss: {
-                silenceDeprecations: ["mixed-decls"],
-            },
+            scss: {},
         },
     },
     plugins: [

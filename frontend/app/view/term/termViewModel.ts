@@ -387,7 +387,7 @@ class TermViewModel implements ViewModel {
             return false;
         }
         const shellProcStatus = this.shellProcStatus();
-        if ((shellProcStatus == "done" || shellProcStatus == "init") && keyutil.checkKeyPressed(waveEvent, "Enter")) {
+        if (shellProcStatus == "done" && keyutil.checkKeyPressed(waveEvent, "Enter")) {
             this.forceRestartController();
             return false;
         }

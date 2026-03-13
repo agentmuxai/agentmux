@@ -147,6 +147,11 @@
     }
 
     .terminal {
+        .xterm-helper-textarea {
+            opacity: 0 !important;
+            pointer-events: none;
+        }
+
         .xterm-viewport {
             &::-webkit-scrollbar {
                 width: 6px;

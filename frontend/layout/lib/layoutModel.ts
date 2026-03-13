@@ -106,7 +106,7 @@ function debugLog(message: string, data?: unknown): void {
     getApi().sendLog(logLine);
 }
 
-const DefaultAnimationTimeS = 0.15;
+const DefaultAnimationTimeS = 0;
 
 export class LayoutModel {
     /**
@@ -340,15 +340,16 @@ export class LayoutModel {
 
         this.leafs = createSignalAtom<LayoutNode[]>([]);
         this.leafOrder = createSignalAtom<LeafOrderEntry[]>([]);
+        this.numLeafs = createMemo(() => this.leafOrder().length);
+
+        this.nodeModels = new Map();
+        this.additionalProps = createSignalAtom<Record<string, LayoutNodeAdditionalProps>>({});
+
         this.spiralLeafOrder = createMemo(() => {
             const leafOrd = this.leafOrder();
             const addlProps = this.additionalProps();
             return computeSpiralOrder(leafOrd, addlProps);
         });
-        this.numLeafs = createMemo(() => this.leafOrder().length);
-
-        this.nodeModels = new Map();
-        this.additionalProps = createSignalAtom<Record<string, LayoutNodeAdditionalProps>>({});
 
         this.resizeHandles = createMemo(() => {
             const addlProps = this.additionalProps();
@@ -356,6 +357,8 @@ export class LayoutModel {
                 .flatMap((props) => props.resizeHandles)
                 .filter((v) => v);
         });
+
+        this.pendingTreeAction = atomWithThrottle<LayoutTreeAction>(null, 10);
 
         this.isContainerResizing = createSignalAtom(false);
         this.isResizing = createMemo(() => {
@@ -409,7 +412,6 @@ export class LayoutModel {
         });
         this.focusedNodeIdStack = [];
 
-        this.pendingTreeAction = atomWithThrottle<LayoutTreeAction>(null, 10);
         this.placeholderTransform = createMemo<CSSProperties>(() => {
             const pendingAction = this.pendingTreeAction.throttledValueAtom();
             return this.getPlaceholderTransform(pendingAction);

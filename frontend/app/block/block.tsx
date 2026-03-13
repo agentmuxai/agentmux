@@ -30,7 +30,7 @@ import { HelpViewModel } from "@/view/helpview/helpview";
 import { TermViewModel } from "@/view/term/term";
 import clsx from "clsx";
 import type { JSX } from "solid-js";
-import { createMemo, createSignal, onCleanup, onMount, Suspense } from "solid-js";
+import { createEffect, createMemo, createSignal, onCleanup, onMount, Show, Suspense } from "solid-js";
 import "./block.scss";
 import { BlockFrame } from "./blockframe";
 import { blockViewToIcon, blockViewToName } from "./blockutil";
@@ -108,19 +108,19 @@ function BlockSubBlock({ nodeModel, viewModel }: FullSubBlockProps): JSX.Element
     const [blockData] = useWaveObjectValue<Block>(makeORef("block", nodeModel.blockId));
     let blockRef: { current: HTMLDivElement | null } = { current: null };
     let contentRef: { current: HTMLDivElement | null } = { current: null };
+    const blockViewType = createMemo(() => blockData()?.meta?.view);
     const viewElem = createMemo(
-        () => getViewElem(nodeModel.blockId, blockRef, contentRef, blockData()?.meta?.view, viewModel)
+        () => getViewElem(nodeModel.blockId, blockRef, contentRef, blockViewType(), viewModel)
     );
     const noPadding = useAtomValueSafe(viewModel.noPadding);
-    if (!blockData()) {
-        return null;
-    }
     return (
-        <div class={clsx("block-content", { "block-no-padding": noPadding })} ref={(el) => { contentRef.current = el; }}>
-            <ErrorBoundary>
-                <Suspense fallback={<CenteredDiv>Loading...</CenteredDiv>}>{viewElem()}</Suspense>
-            </ErrorBoundary>
-        </div>
+        <Show when={blockData()}>
+            <div class={clsx("block-content", { "block-no-padding": noPadding })} ref={(el) => { contentRef.current = el; }}>
+                <ErrorBoundary>
+                    <Suspense fallback={<CenteredDiv>Loading...</CenteredDiv>}>{viewElem()}</Suspense>
+                </ErrorBoundary>
+            </div>
+        </Show>
     );
 }
 
@@ -152,8 +152,9 @@ function BlockFull({ nodeModel, viewModel }: FullBlockProps): JSX.Element {
         return retVal;
     });
 
+    const blockViewType = createMemo(() => blockData()?.meta?.view);
     const viewElem = createMemo(
-        () => getViewElem(nodeModel.blockId, blockRef, contentRef, blockData()?.meta?.view, viewModel)
+        () => getViewElem(nodeModel.blockId, blockRef, contentRef, blockViewType(), viewModel)
     );
 
     const handleChildFocus = (event: FocusEvent) => {
@@ -245,43 +246,71 @@ function Block(props: BlockProps): JSX.Element {
     counterInc("render-Block");
     counterInc("render-Block-" + props.nodeModel?.blockId?.substring(0, 8));
     const [blockData, loading] = useWaveObjectValue<Block>(makeORef("block", props.nodeModel.blockId));
-    const bcm = getBlockComponentModel(props.nodeModel.blockId);
-    let viewModel = bcm?.viewModel;
-    if (viewModel == null || viewModel.viewType != blockData()?.meta?.view) {
-        viewModel = makeViewModel(props.nodeModel.blockId, blockData()?.meta?.view, props.nodeModel);
-        registerBlockComponentModel(props.nodeModel.blockId, { viewModel });
-    }
+
+    // Reactively create/update the viewModel when blockData loads or view type changes.
+    // In SolidJS the component body runs once, so we use createEffect to handle async data.
+    const [viewModel, setViewModel] = createSignal<ViewModel>(null);
+
+    createEffect(() => {
+        const bd = blockData();
+        const view = bd?.meta?.view;
+        if (!bd || !view) return;
+        const bcm = getBlockComponentModel(props.nodeModel.blockId);
+        let vm = bcm?.viewModel;
+        if (vm == null || vm.viewType !== view) {
+            vm = makeViewModel(props.nodeModel.blockId, view, props.nodeModel);
+            registerBlockComponentModel(props.nodeModel.blockId, { viewModel: vm });
+        }
+        setViewModel(vm);
+    });
+
     onCleanup(() => {
         unregisterBlockComponentModel(props.nodeModel.blockId);
-        viewModel?.dispose?.();
+        viewModel()?.dispose?.();
     });
-    if (loading() || isBlank(props.nodeModel.blockId) || blockData() == null) {
-        return null;
-    }
-    if (props.preview) {
-        return <BlockPreview nodeModel={props.nodeModel} viewModel={viewModel} preview={props.preview} />;
-    }
-    return <BlockFull nodeModel={props.nodeModel} viewModel={viewModel} preview={props.preview} />;
+
+    const ready = createMemo(() => !loading() && !isBlank(props.nodeModel.blockId) && blockData() != null && viewModel() != null);
+
+    return (
+        <Show when={ready()}>
+            {props.preview
+                ? <BlockPreview nodeModel={props.nodeModel} viewModel={viewModel()} preview={props.preview} />
+                : <BlockFull nodeModel={props.nodeModel} viewModel={viewModel()} preview={props.preview} />
+            }
+        </Show>
+    );
 }
 
 function SubBlock(props: SubBlockProps): JSX.Element {
     counterInc("render-Block");
     counterInc("render-Block-" + props.nodeModel?.blockId?.substring(0, 8));
     const [blockData, loading] = useWaveObjectValue<Block>(makeORef("block", props.nodeModel.blockId));
-    const bcm = getBlockComponentModel(props.nodeModel.blockId);
-    let viewModel = bcm?.viewModel;
-    if (viewModel == null || viewModel.viewType != blockData()?.meta?.view) {
-        viewModel = makeViewModel(props.nodeModel.blockId, blockData()?.meta?.view, props.nodeModel as any);
-        registerBlockComponentModel(props.nodeModel.blockId, { viewModel });
-    }
+
+    const [viewModel, setViewModel] = createSignal<ViewModel>(null);
+
+    createEffect(() => {
+        const bd = blockData();
+        const view = bd?.meta?.view;
+        if (!bd || !view) return;
+        const bcm = getBlockComponentModel(props.nodeModel.blockId);
+        let vm = bcm?.viewModel;
+        if (vm == null || vm.viewType !== view) {
+            vm = makeViewModel(props.nodeModel.blockId, view, props.nodeModel as any);
+            registerBlockComponentModel(props.nodeModel.blockId, { viewModel: vm });
+        }
+        setViewModel(vm);
+    });
+
     onCleanup(() => {
         unregisterBlockComponentModel(props.nodeModel.blockId);
-        viewModel?.dispose?.();
+        viewModel()?.dispose?.();
     });
-    if (loading() || isBlank(props.nodeModel.blockId) || blockData() == null) {
-        return null;
-    }
-    return <BlockSubBlock nodeModel={props.nodeModel} viewModel={viewModel} />;
+
+    return (
+        <Show when={!loading() && !isBlank(props.nodeModel.blockId) && blockData() != null && viewModel()}>
+            <BlockSubBlock nodeModel={props.nodeModel} viewModel={viewModel()} />
+        </Show>
+    );
 }
 
 export { Block, SubBlock };

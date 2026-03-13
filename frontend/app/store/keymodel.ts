@@ -555,7 +555,7 @@ function registerGlobalKeys() {
             return true;
         }
     });
-    globalKeyMap.set("Ctrl:Shift:i", () => {
+    globalKeyMap.set("Ctrl:Shift:m", () => {
         const curMI = atoms.isTermMultiInput();
         if (!curMI && countTermBlocks() <= 1) {
             // don't turn on multi-input unless there are 2 or more basic term blocks

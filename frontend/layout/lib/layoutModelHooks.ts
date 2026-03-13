@@ -5,7 +5,7 @@ import { useOnResize } from "@/app/hook/useDimensions";
 import { atoms, globalStore, WOS } from "@/app/store/global";
 import { fireAndForget } from "@/util/util";
 import type { Properties as CSSProperties } from "csstype";
-import { createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js";
+import { createEffect, createMemo, createSignal, onCleanup, onMount, untrack } from "solid-js";
 import { getLayoutStateAtomFromTab } from "./layoutAtom";
 import { LayoutModel } from "./layoutModel";
 import { LayoutNode, NodeModel, TileLayoutContents } from "./types";
@@ -87,7 +87,7 @@ export function useDebouncedNodeInnerRect(nodeModel: NodeModel): () => CSSProper
     const [innerRectDebounceTimeout, setInnerRectDebounceTimeout] = createSignal<NodeJS.Timeout>(undefined);
 
     const clearInnerRectDebounce = () => {
-        const t = innerRectDebounceTimeout();
+        const t = untrack(innerRectDebounceTimeout);
         if (t) {
             clearTimeout(t);
             setInnerRectDebounceTimeout(undefined);

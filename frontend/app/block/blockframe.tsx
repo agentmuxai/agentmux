@@ -556,16 +556,16 @@ function ConnStatusOverlay({
 }
 
 function BlockMask({ nodeModel }: { nodeModel: NodeModel }): JSX.Element {
-    const isFocused = nodeModel.isFocused();
-    const blockNum = nodeModel.blockNum();
-    const isLayoutMode = atoms.controlShiftDelayAtom();
-    const showOverlayBlockNums = getSettingsKeyAtom("app:showoverlayblocknums")() ?? true;
+    const isFocused = () => nodeModel.isFocused();
+    const blockNum = () => nodeModel.blockNum();
+    const isLayoutMode = () => atoms.controlShiftDelayAtom();
+    const showOverlayBlockNums = () => getSettingsKeyAtom("app:showoverlayblocknums")() ?? true;
     const [blockData] = WOS.useWaveObjectValue<Block>(WOS.makeORef("block", nodeModel.blockId));
 
     const style = createMemo<JSX.CSSProperties>(() => {
         const style: JSX.CSSProperties = {};
         const bd = blockData();
-        if (isFocused) {
+        if (isFocused()) {
             const tabData = atoms.tabAtom();
             const tabActiveBorderColor = tabData?.meta?.["bg:activebordercolor"];
             if (tabActiveBorderColor) {
@@ -587,13 +587,13 @@ function BlockMask({ nodeModel }: { nodeModel: NodeModel }): JSX.Element {
         return style;
     });
 
-    const showBlockMask = isLayoutMode && showOverlayBlockNums;
+    const showBlockMask = () => isLayoutMode() && showOverlayBlockNums();
 
     return (
-        <div class={clsx("block-mask", { "show-block-mask": showBlockMask })} style={style()}>
-            <Show when={showBlockMask}>
+        <div class={clsx("block-mask", { "show-block-mask": showBlockMask() })} style={style()}>
+            <Show when={showBlockMask()}>
                 <div class="block-mask-inner">
-                    <div class="bignum">{blockNum}</div>
+                    <div class="bignum">{blockNum()}</div>
                 </div>
             </Show>
         </div>
@@ -603,19 +603,19 @@ function BlockMask({ nodeModel }: { nodeModel: NodeModel }): JSX.Element {
 function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
     const { nodeModel, viewModel, blockModel, preview, numBlocksInTab, children } = props;
     const [blockData] = WOS.useWaveObjectValue<Block>(WOS.makeORef("block", nodeModel.blockId));
-    const isFocused = nodeModel.isFocused();
+    const isFocused = () => nodeModel.isFocused();
     const customBg = util.useAtomValueSafe(viewModel?.blockBg);
     const manageConnection = util.useAtomValueSafe(viewModel?.manageConnection);
     const changeConnModalAtom = useBlockAtom(nodeModel.blockId, "changeConn", () => {
         return util.createSignalAtom(false);
     }) as util.SignalAtom<boolean>;
-    const connModalOpen = changeConnModalAtom();
-    const isMagnified = nodeModel.isMagnified();
-    const isEphemeral = nodeModel.isEphemeral();
+    const connModalOpen = () => changeConnModalAtom();
+    const isMagnified = () => nodeModel.isMagnified();
+    const isEphemeral = () => nodeModel.isEphemeral();
     const magnifiedBlockBlurAtom = getSettingsKeyAtom("window:magnifiedblockblurprimarypx");
-    const magnifiedBlockBlur = magnifiedBlockBlurAtom();
+    const magnifiedBlockBlur = () => magnifiedBlockBlurAtom();
     const magnifiedBlockOpacityAtom = getSettingsKeyAtom("window:magnifiedblockopacity");
-    const magnifiedBlockOpacity = magnifiedBlockOpacityAtom();
+    const magnifiedBlockOpacity = () => magnifiedBlockOpacityAtom();
     let connBtnRef: { current: HTMLDivElement | null } = { current: null };
     const noHeader = util.useAtomValueSafe(viewModel?.noHeader);
 
@@ -687,7 +687,7 @@ function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
         e.preventDefault();
         e.stopPropagation();
         const menu = buildPaneContextMenu(blockData(), {
-            magnified: isMagnified,
+            magnified: isMagnified(),
             onMagnifyToggle: nodeModel.toggleMagnify,
             onClose: nodeModel.onClose,
         }, viewModel);
@@ -697,12 +697,12 @@ function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
     return (
         <div
             class={clsx("block", "block-frame-default", "block-" + nodeModel.blockId, {
-                "block-focused": isFocused || preview,
+                "block-focused": isFocused() || preview,
                 "block-preview": preview,
                 "block-no-highlight": numBlocksInTab === 1,
                 "has-agent-color": !!blockAgentColor(),
-                ephemeral: isEphemeral,
-                magnified: isMagnified,
+                ephemeral: isEphemeral(),
+                magnified: isMagnified(),
             })}
             data-blockid={nodeModel.blockId}
             onClick={blockModel?.onClick}
@@ -711,8 +711,8 @@ function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
             ref={blockModel?.blockRef ? (el) => { blockModel.blockRef.current = el; } : undefined}
             style={
                 {
-                    "--magnified-block-opacity": magnifiedBlockOpacity,
-                    "--magnified-block-blur": `${magnifiedBlockBlur}px`,
+                    "--magnified-block-opacity": magnifiedBlockOpacity(),
+                    "--magnified-block-blur": `${magnifiedBlockBlur()}px`,
                     "--block-agent-color": blockAgentColor() ?? "transparent",
                 } as JSX.CSSProperties
             }
@@ -737,7 +737,7 @@ function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
                 </Show>
                 {preview ? previewElem : children}
             </div>
-            <Show when={!preview && viewModel != null && connModalOpen}>
+            <Show when={!preview && viewModel != null && connModalOpen()}>
                 <ChangeConnectionBlockModal
                     blockId={nodeModel.blockId}
                     nodeModel={nodeModel}
@@ -760,11 +760,12 @@ function BlockFrame(props: BlockFrameProps): JSX.Element {
     const blockId = props.nodeModel.blockId;
     const [blockData] = WOS.useWaveObjectValue<Block>(WOS.makeORef("block", blockId));
     const tabData = atoms.tabAtom();
-    if (!blockId || !blockData()) {
-        return null;
-    }
-    const numBlocks = tabData?.blockids?.length ?? 0;
-    return <BlockFrame_Default {...props} numBlocksInTab={numBlocks} />;
+    const numBlocks = () => tabData?.blockids?.length ?? 0;
+    return (
+        <Show when={blockId && blockData()}>
+            <BlockFrame_Default {...props} numBlocksInTab={numBlocks()} />
+        </Show>
+    );
 }
 
 export { BlockFrame, NumActiveConnColors };

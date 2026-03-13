@@ -55,10 +55,14 @@ function TooltipInner(props: Omit<TooltipProps, "disable">): JSX.Element {
 
     const registerFloating = (el: HTMLElement) => {
         floatingEl = el;
-        if (referenceEl && floatingEl) {
-            cleanupAutoUpdate?.();
-            cleanupAutoUpdate = autoUpdate(referenceEl, floatingEl, updatePosition);
-        }
+        // Defer autoUpdate to next frame so the Portal has time to insert the
+        // floating element into the DOM before floating-ui traverses ancestors.
+        requestAnimationFrame(() => {
+            if (referenceEl instanceof Element && floatingEl instanceof Element) {
+                cleanupAutoUpdate?.();
+                cleanupAutoUpdate = autoUpdate(referenceEl, floatingEl, updatePosition);
+            }
+        });
     };
 
     const handleMouseEnter = () => {

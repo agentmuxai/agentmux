@@ -72,11 +72,13 @@ const SearchComponent = (props: SearchProps): JSX.Element => {
 
     const registerFloating = (el: HTMLElement) => {
         floatingEl = el;
-        const referenceEl = props.anchorRef?.current;
-        if (referenceEl && floatingEl) {
-            cleanupAutoUpdate?.();
-            cleanupAutoUpdate = autoUpdate(referenceEl, floatingEl, updatePosition);
-        }
+        requestAnimationFrame(() => {
+            const referenceEl = props.anchorRef?.current;
+            if (referenceEl instanceof Element && floatingEl instanceof Element) {
+                cleanupAutoUpdate?.();
+                cleanupAutoUpdate = autoUpdate(referenceEl, floatingEl, updatePosition);
+            }
+        });
     };
 
     onCleanup(() => {
