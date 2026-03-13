@@ -186,18 +186,6 @@ interface DisplayNodesWrapperProps {
 const DisplayNodesWrapper = (props: DisplayNodesWrapperProps) => {
     const leafs = () => props.layoutModel.leafs();
 
-    createEffect(() => {
-        const currentLeafs = leafs();
-        const logData = {
-            leafCount: currentLeafs?.length ?? 0,
-            leafIds: currentLeafs?.map((l) => l.id) ?? [],
-        };
-        console.log("[RENDER] DisplayNodesWrapper leafs changed:", logData);
-        if (typeof window !== "undefined" && (window as any).getApi) {
-            (window as any).getApi().sendLog(`[RENDER] DisplayNodesWrapper leafs: ${JSON.stringify(logData)}`);
-        }
-    });
-
     return (
         <For each={leafs()}>
             {(node) => <DisplayNode layoutModel={props.layoutModel} node={node} />}
@@ -222,20 +210,6 @@ const DisplayNode = (props: DisplayNodeProps) => {
     const isMagnified = () => nodeModel.isMagnified();
     const [isDragging, setIsDragging] = createSignal(false);
 
-    // Debug logging
-    createEffect(() => {
-        const logData = {
-            nodeId: props.node.id,
-            blockId: props.node.data?.blockId,
-            hasAddlProps: !!addlProps(),
-            hasTransform: !!addlProps()?.transform,
-            rect: addlProps()?.rect,
-        };
-        console.log("[RENDER] DisplayNode props:", logData);
-        if (typeof window !== "undefined" && (window as any).getApi) {
-            (window as any).getApi().sendLog(`[RENDER] DisplayNode: ${JSON.stringify(logData)}`);
-        }
-    });
 
     // Drag preview image state
     const [previewImage, setPreviewImage] = createSignal<HTMLImageElement | null>(null);

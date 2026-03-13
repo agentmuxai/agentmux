@@ -1,7 +1,7 @@
 // Copyright 2025, Command Line Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-import { atoms, getApi, getSettingsKeyAtom } from "@/app/store/global";
+import { atoms, getSettingsKeyAtom } from "@/app/store/global";
 import { focusManager } from "@/app/store/focusManager";
 import { RpcApi } from "@/app/store/wshclientapi";
 import { TabRpcClient } from "@/app/store/wshrpcutil";
@@ -99,12 +99,6 @@ import {
     getBoundingRect as getBoundingRectImpl,
     computeSpiralOrder,
 } from "./layoutGeometry";
-
-// Debug logging function - uses getApi().sendLog() which writes to task dev output
-function debugLog(message: string, data?: unknown): void {
-    const logLine = `[LAYOUT] ${message}${data !== undefined ? ": " + JSON.stringify(data) : ""}`;
-    getApi().sendLog(logLine);
-}
 
 const DefaultAnimationTimeS = 0;
 
@@ -474,16 +468,7 @@ export class LayoutModel {
                 break;
             case LayoutTreeActionType.DeleteNode: {
                 const delAction = action as LayoutTreeDeleteNodeAction;
-                debugLog("treeReducer DeleteNode BEFORE", {
-                    actionNodeId: delAction.nodeId,
-                    rootNodeId: this.treeState.rootNode?.id,
-                    willClearTree: delAction.nodeId === this.treeState.rootNode?.id,
-                });
                 deleteNode(this.treeState, delAction);
-                debugLog("treeReducer DeleteNode AFTER", {
-                    rootNodeExists: !!this.treeState.rootNode,
-                    rootNodeId: this.treeState.rootNode?.id,
-                });
                 break;
             }
             case LayoutTreeActionType.Swap:

@@ -1,8 +1,6 @@
 // Copyright 2025, Command Line Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-import { getApi } from "@/app/store/global";
-
 import { createSignalAtom, fireAndForget } from "@/util/util";
 import type { Properties as CSSProperties } from "csstype";
 import { createMemo } from "solid-js";
@@ -57,7 +55,6 @@ export function getNodeModel(model: LayoutModel, node: LayoutNode): NodeModel {
             ready: model.ready,
             disablePointerEvents: model.activeDrag,
             onClose: () => {
-                getApi().sendLog(`[BUG-TRACE] onClose clicked for nodeId: ${nodeid}`);
                 fireAndForget(() => model.closeNode(nodeid));
             },
             toggleMagnify: () => model.magnifyNodeToggle(nodeid),

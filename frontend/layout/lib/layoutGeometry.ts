@@ -1,7 +1,6 @@
 // Copyright 2025, Command Line Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-import { getApi } from "@/app/store/global";
 import { balanceNode, walkNodes } from "./layoutNode";
 import {
     FlexDirection,
@@ -14,25 +13,12 @@ import {
 import { setTransform } from "./utils";
 import type { LayoutModel } from "./layoutModel";
 
-// Debug logging function - uses getApi().sendLog() which writes to task dev output
-function debugLog(message: string, data?: unknown): void {
-    const logLine = `[LAYOUT] ${message}${data !== undefined ? ": " + JSON.stringify(data) : ""}`;
-    getApi().sendLog(logLine);
-}
-
 /**
  * Recursively walks the tree to find leaf nodes, update the resize handles, and compute additional properties for each node.
  * @param model The LayoutModel instance.
  * @param balanceTree Whether the tree should also be balanced as it is walked. Defaults to true.
  */
 export function updateTree(model: LayoutModel, balanceTree = true) {
-    debugLog("updateTree ENTER", {
-        balanceTree,
-        hasDisplayContainer: !!model.displayContainerRef.current,
-        rootNodeId: model.treeState.rootNode?.id,
-        rootNodeChildren: model.treeState.rootNode?.children?.length ?? 0,
-    });
-
     if (model.displayContainerRef.current) {
         const newLeafs: LayoutNode[] = [];
         const newAdditionalProps = {};
@@ -62,18 +48,9 @@ export function updateTree(model: LayoutModel, balanceTree = true) {
         if (balanceTree) model.treeState.rootNode = balanceNode(model.treeState.rootNode, callback);
         else walkNodes(model.treeState.rootNode, callback);
 
-        debugLog("updateTree AFTER balanceNode", {
-            rootNodeId: model.treeState.rootNode?.id,
-            rootNodeExists: !!model.treeState.rootNode,
-            rootNodeChildren: model.treeState.rootNode?.children?.length ?? 0,
-            newLeafsCount: newLeafs.length,
-            newLeafIds: newLeafs.map((l) => l.id),
-        });
-
         // Process ephemeral node, if present.
         const ephemeralNode = model.getter(model.ephemeralNode);
         if (ephemeralNode) {
-            console.log("updateTree ephemeralNode", ephemeralNode);
             model.updateEphemeralNodeProps(
                 ephemeralNode,
                 newAdditionalProps,
@@ -88,25 +65,9 @@ export function updateTree(model: LayoutModel, balanceTree = true) {
         model.validateMagnifiedNode(model.treeState.leafOrder, newAdditionalProps);
         model.cleanupNodeModels(model.treeState.leafOrder);
         const sortedLeafs = newLeafs.sort((a, b) => a.id.localeCompare(b.id));
-        debugLog("updateTree setting leafs", {
-            leafCount: sortedLeafs.length,
-            leafOrderCount: model.treeState.leafOrder.length,
-            leafIds: sortedLeafs.map((l) => l.id),
-            additionalPropsKeys: Object.keys(newAdditionalProps),
-        });
-        // DEBUG: Log before and after setter calls
-        debugLog("updateTree SETTER START", {
-            currentLeafsCount: model.getter(model.leafs)?.length,
-        });
         model.setter(model.leafs, sortedLeafs);
         model.setter(model.leafOrder, model.treeState.leafOrder);
         model.setter(model.additionalProps, newAdditionalProps);
-        debugLog("updateTree SETTER DONE", {
-            newLeafsCount: model.getter(model.leafs)?.length,
-        });
-        debugLog("updateTree EXIT - success");
-    } else {
-        debugLog("updateTree EXIT - no displayContainerRef");
     }
 }
 
@@ -139,10 +100,6 @@ function updateTreeHelper(
         // because those are normally set by the parent node processing its children.
         // We need to create additionalProps for the root leaf using the full boundingRect.
         if (!addlProps && node.id === model.treeState.rootNode?.id) {
-            debugLog("updateTreeHelper creating additionalProps for root leaf", {
-                nodeId: node.id,
-                boundingRect,
-            });
             const transform = setTransform(boundingRect);
             addlProps = {
                 rect: boundingRect,
@@ -193,13 +150,6 @@ function updateTreeHelper(
 
     let lastChildRect: Dimensions;
     const resizeHandles: ResizeHandleProps[] = [];
-    debugLog("updateTreeHelper processing parent node", {
-        nodeId: node.id,
-        isRoot: node.id === model.treeState.rootNode?.id,
-        childCount: node.children.length,
-        nodeRect,
-        nodeIsRow,
-    });
 
     node.children.forEach((child, i) => {
         const childSize = getNodeSize(child);
@@ -215,12 +165,6 @@ function updateTreeHelper(
             transform,
             treeKey: additionalProps.treeKey + i,
         };
-        debugLog("updateTreeHelper set child additionalProps", {
-            childId: child.id,
-            childBlockId: child.data?.blockId,
-            rect,
-            hasTransform: !!transform,
-        });
 
         // We only want the resize handles in between nodes, this ensures we have n-1 handles.
         if (lastChildRect) {
