@@ -14,6 +14,7 @@ import { TermThemeUpdater } from "./termtheme";
 import { computeTheme } from "./termutil";
 import { makeTerminalModel, setTerminalViewComponent, TermViewModel } from "./termViewModel";
 import { TermWrap } from "./termwrap";
+import "./xterm.css";
 import { DragOverlay } from "@/app/element/dragoverlay";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWebview } from "@tauri-apps/api/webview";

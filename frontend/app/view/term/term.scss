@@ -147,9 +147,10 @@
     }
 
     .terminal {
+        // WebView2 renders the native textarea caret even at opacity:0
+        // when the terminal background is transparent.
         .xterm-helper-textarea {
-            opacity: 0 !important;
-            pointer-events: none;
+            caret-color: transparent !important;
         }
 
         .xterm-viewport {
