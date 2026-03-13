@@ -2,7 +2,7 @@
 
 This document tracks the version history of AgentMux (forked from waveterm).
 
-## Latest Version: 0.31.42
+## Latest Version: 0.31.119
 
 **Base:** Upstream waveterm v0.12.0 + extensive custom features
 
@@ -460,64 +460,18 @@ This document tracks the version history of AgentMux (forked from waveterm).
 
 ---
 
-## Development Setup
+## Upstream
 
-### Branch Naming
+- **Upstream:** https://github.com/wavetermdev/waveterm (base v0.12.0)
+- **Fork:** https://github.com/agentmuxai/agentmux
 
-Feature branches follow the pattern: `feature/description` or `agent/feature-name`.
+## Version Bumps
 
----
-
-## Upstream Version Tracking
-
-- **Upstream repository:** https://github.com/wavetermdev/waveterm
-- **Base Upstream Version:** v0.12.0
-- **Fork repository:** https://github.com/agentmuxai/agentmux
-- **Latest Fork:** v0.31.4
-- **Commits Ahead of Upstream:** 100+ commits with custom features
-
----
-
-## Key Fork Features
-
-1. **Per-pane agent identification** - Terminal panes show agent identity (AgentA, AgentX, etc.)
-2. **Agent color borders** - Colored borders indicate which agent owns a pane
-3. **Claude activity display** - Shows Claude Code activity summaries in title bar
-4. **Environment-based agent detection** - WAVEMUX_AGENT_ID env var
-5. **OSC 16162 shell integration** - Shell can send agent identity via escape sequences
-6. **Multi-instance support** - Multiple AgentMux instances can run simultaneously
-7. **Portable mode** - Persistent settings across instances
-8. **High-contrast borders** - Visual improvements for terminal blocks
-9. **Version management** - Automated version bump scripts
-
----
-
-## Version Bump Instructions
+Always use [`@a5af/bump-cli`](https://github.com/a5af/bump-cli) — never edit version numbers manually.
 
 ```bash
-# Bump patch version (0.15.8 -> 0.15.9)
-./bump-version.sh patch --message "Fix description"
-
-# Bump minor version (0.15.8 -> 0.16.0)
-./bump-version.sh minor --message "New feature"
+bump patch -m "Description" --commit
+bump verify
 ```
 
-The bump scripts automatically:
-- ✅ Update `package.json` and `package-lock.json`
-- ✅ Create git commit with version message
-- ✅ Create git tag (e.g., `v0.15.9-fork`)
-
----
-
-## Notes for Agents
-
-- Always check this file first to understand current version state
-- Create feature branches from `main`: `git checkout -b agentX/feature-name`
-- Open PRs against `main` branch (it's protected, requires PR)
-- Run `task build:backend` after Go changes
-- Run `task dev` for development with hot reload
-- Run `task package` only for final release builds
-
-| 0.31.87-fork | v0.12.0 | 2026-03-08 | AgentO-asaf | remove legacy AI panel sidebar |
-
-| 0.31.91-fork | v0.12.0 | 2026-03-09 | AgentO-asaf | open settings in code editor |
+See `.bump.json` for config and [BUILD.md](./BUILD.md) for the full workflow.
