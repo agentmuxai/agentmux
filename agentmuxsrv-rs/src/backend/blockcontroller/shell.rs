@@ -369,6 +369,22 @@ impl Controller for ShellController {
         let cmd_args = Self::get_cmd_args(&block_meta);
         let interactive = Self::is_interactive(&block_meta);
 
+        // Resolve effective AGENTMUX_AGENT_ID for jekt auto-registration.
+        // Priority: block metadata > global settings > WAVEMUX_AGENT_ID env compat.
+        let agent_id_for_jekt: Option<String> = block_meta
+            .get(META_KEY_CMD_ENV)
+            .and_then(|m| m.as_object())
+            .and_then(|obj| obj.get("AGENTMUX_AGENT_ID"))
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
+            .or_else(|| {
+                let cfg = crate::backend::wconfig::ConfigWatcher::with_config(
+                    crate::backend::wconfig::build_default_config(),
+                );
+                cfg.get_settings().cmd_env.get("AGENTMUX_AGENT_ID").cloned()
+            })
+            .or_else(|| std::env::var("WAVEMUX_AGENT_ID").ok());
+
         let mut cmd = if !cmd_str.is_empty() && (!cmd_args.is_empty() || interactive) {
             // Direct spawn: cmd:args provided or cmd:interactive set.
             // Spawn the CLI directly (no sh -c wrapper) so args are passed correctly.
@@ -430,6 +446,12 @@ impl Controller for ShellController {
             c.env("AGENTMUX_BLOCKID", &self.block_id);
             c.env("AGENTMUX_TABID", &self.tab_id);
             c.env("AGENTMUX_VERSION", env!("CARGO_PKG_VERSION"));
+
+            // Propagate local backend URL so agentbus-client prefers local PTY delivery.
+            // Set by main.rs after binding; absent in test/mock contexts (graceful no-op).
+            if let Ok(local_url) = std::env::var("AGENTMUX_LOCAL_URL") {
+                c.env("AGENTMUX_LOCAL_URL", &local_url);
+            }
 
             // Set AGENTMUX to the wsh binary path for portable mode detection in scripts
             if let Some(wsh_path) = crate::backend::shellintegration::find_wsh_binary() {
@@ -499,6 +521,39 @@ impl Controller for ShellController {
             format!("failed to spawn command: {e}")
         })?;
         tracing::info!(block_id = %self.block_id, "process spawned successfully");
+
+        // Auto-register with jekt if AGENTMUX_AGENT_ID was set in the block env.
+        // This maps agent_id → block_id in the ReactiveHandler so jekt can deliver
+        // messages directly to this PTY without a separate /wave/reactive/register call.
+        if let Some(ref agent_id) = agent_id_for_jekt {
+            match crate::backend::reactive::get_global_handler()
+                .register_agent(agent_id, &self.block_id, Some(&self.tab_id))
+            {
+                Ok(()) => {
+                    tracing::info!(
+                        block_id = %self.block_id,
+                        agent_id = %agent_id,
+                        "jekt: auto-registered"
+                    );
+                    // Also write to cross-instance file registry.
+                    if let Ok(local_url) = std::env::var("AGENTMUX_LOCAL_URL") {
+                        let data_dir = crate::backend::wavebase::get_wave_data_dir();
+                        crate::backend::reactive::registry::write(
+                            &data_dir,
+                            agent_id,
+                            &local_url,
+                            &self.block_id,
+                        );
+                    }
+                }
+                Err(e) => tracing::warn!(
+                    block_id = %self.block_id,
+                    agent_id = %agent_id,
+                    error = %e,
+                    "jekt: auto-register failed"
+                ),
+            }
+        }
         tracing::info!(
             block_id = %self.block_id,
             wstore_present = self.wstore.is_some(),
@@ -650,6 +705,7 @@ impl Controller for ShellController {
         // Spawn wait task (monitors process exit)
         let inner_wait = Arc::clone(&self.inner);
         let block_id_wait = self.block_id.clone();
+        let agent_id_wait = agent_id_for_jekt.clone();
         let broker_wait = self.broker.clone();
         let run_lock = Arc::clone(&self.run_lock);
         tokio::task::spawn_blocking(move || {
@@ -673,6 +729,16 @@ impl Controller for ShellController {
             };
 
             tracing::info!(block_id = %block_id_wait, exit_code = exit_code, "process exited");
+
+            // Deregister from jekt — removes the agent_id → block_id mapping so
+            // subsequent jekt attempts fall back to MessageBus rather than a dead PTY.
+            crate::backend::reactive::get_global_handler().unregister_block(&block_id_wait);
+
+            // Also remove from cross-instance file registry.
+            if let Some(ref agent_id) = agent_id_wait {
+                let data_dir = crate::backend::wavebase::get_wave_data_dir();
+                crate::backend::reactive::registry::remove(&data_dir, agent_id);
+            }
 
             // Update inner state
             {

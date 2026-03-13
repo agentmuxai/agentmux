@@ -172,6 +172,29 @@ async fn main() {
     // Local MessageBus for inter-agent communication
     let messagebus = Arc::new(backend::messagebus::MessageBus::new());
 
+    // 5. Bind 2 TCP listeners on 127.0.0.1:0 (web + ws — separate ports matching Go)
+    let web_listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("failed to bind web listener");
+    let ws_listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("failed to bind ws listener");
+
+    let web_addr = web_listener.local_addr().unwrap();
+    let ws_addr = ws_listener.local_addr().unwrap();
+    let local_web_url = format!("http://{}", web_addr);
+
+    // Make local backend URL available to child processes (PTY shells).
+    // agentbus-client reads AGENTMUX_LOCAL_URL and uses it for local PTY delivery
+    // instead of routing through the cloud agentbus.
+    std::env::set_var("AGENTMUX_LOCAL_URL", &local_web_url);
+
+    // Clean up stale cross-instance agent registry entries (entries older than 4h).
+    backend::reactive::registry::cleanup_stale(
+        &wavebase::get_wave_data_dir(),
+        4 * 60 * 60 * 1000,
+    );
+
     let state = AppState {
         auth_key: config.auth_key.clone(),
         version: version.clone(),
@@ -184,18 +207,9 @@ async fn main() {
         poller,
         config_watcher,
         messagebus,
+        local_web_url: local_web_url.clone(),
+        http_client: reqwest::Client::new(),
     };
-
-    // 5. Bind 2 TCP listeners on 127.0.0.1:0 (web + ws — separate ports matching Go)
-    let web_listener = TcpListener::bind("127.0.0.1:0")
-        .await
-        .expect("failed to bind web listener");
-    let ws_listener = TcpListener::bind("127.0.0.1:0")
-        .await
-        .expect("failed to bind ws listener");
-
-    let web_addr = web_listener.local_addr().unwrap();
-    let ws_addr = ws_listener.local_addr().unwrap();
 
     // 6. Emit WAVESRV-ESTART on stderr (exact format from cmd/server/main-server.go:617)
     eprintln!(

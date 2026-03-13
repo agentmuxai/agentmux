@@ -6,6 +6,8 @@ use axum::{
 use serde_json::json;
 
 use crate::backend::reactive::InjectionRequest;
+use crate::backend::reactive::registry as agent_registry;
+use crate::backend::wavebase;
 
 use super::AppState;
 
@@ -13,7 +15,67 @@ pub(super) async fn handle_reactive_inject(
     State(state): State<AppState>,
     Json(req): Json<InjectionRequest>,
 ) -> Json<serde_json::Value> {
-    let resp = state.reactive_handler.inject_message(req);
+    tracing::info!(
+        target_agent = %req.target_agent,
+        source_agent = ?req.source_agent,
+        msg_len = req.message.len(),
+        "reactive inject request received"
+    );
+
+    // 1. Try local ReactiveHandler first (fast path — same instance).
+    let resp = state.reactive_handler.inject_message(req.clone());
+    if resp.success {
+        return Json(serde_json::to_value(&resp).unwrap_or_default());
+    }
+
+    // 2. On "agent not found", check cross-instance file registry and forward.
+    let is_not_found = resp
+        .error
+        .as_deref()
+        .map(|e| e.starts_with("agent not found"))
+        .unwrap_or(false);
+
+    if is_not_found {
+        let data_dir = wavebase::get_wave_data_dir();
+        if let Some(entry) = agent_registry::lookup(&data_dir, &req.target_agent) {
+            // Guard against self-forwarding loops.
+            if entry.local_url != state.local_web_url {
+                let forward_url = format!("{}/wave/reactive/inject", entry.local_url);
+                tracing::debug!(
+                    target = %req.target_agent,
+                    url = %forward_url,
+                    "cross-instance inject forward"
+                );
+                match state.http_client.post(&forward_url).json(&req).send().await {
+                    Ok(r) if r.status().is_success() => {
+                        if let Ok(body) = r.json::<serde_json::Value>().await {
+                            return Json(body);
+                        }
+                    }
+                    Ok(r) => {
+                        tracing::warn!(
+                            target = %req.target_agent,
+                            status = %r.status(),
+                            url = %forward_url,
+                            "cross-instance forward: non-success status"
+                        );
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            target = %req.target_agent,
+                            error = %e,
+                            url = %forward_url,
+                            "cross-instance forward failed — removing stale registry entry"
+                        );
+                        // Remove stale entry so next call doesn't retry a dead instance.
+                        agent_registry::remove(&data_dir, &req.target_agent);
+                    }
+                }
+            }
+        }
+    }
+
+    // 3. Return original error (agentbus-client will fall back to cloud).
     Json(serde_json::to_value(&resp).unwrap_or_default())
 }
 
@@ -81,11 +143,22 @@ pub(super) async fn handle_reactive_register(
     State(state): State<AppState>,
     Json(req): Json<RegisterRequest>,
 ) -> Response {
+    tracing::info!(
+        agent_id = %req.agent_id,
+        block_id = %req.block_id,
+        "reactive register request"
+    );
     match state
         .reactive_handler
         .register_agent(&req.agent_id, &req.block_id, req.tab_id.as_deref())
     {
-        Ok(()) => Json(json!({"success": true})).into_response(),
+        Ok(()) => {
+            // Also write to cross-instance file registry so other AgentMux
+            // instances can forward inject requests to this one.
+            let data_dir = wavebase::get_wave_data_dir();
+            agent_registry::write(&data_dir, &req.agent_id, &state.local_web_url, &req.block_id);
+            Json(json!({"success": true})).into_response()
+        }
         Err(e) => (
             StatusCode::BAD_REQUEST,
             Json(json!({"error": e})),
@@ -104,6 +177,9 @@ pub(super) async fn handle_reactive_unregister(
     Json(req): Json<UnregisterRequest>,
 ) -> Json<serde_json::Value> {
     state.reactive_handler.unregister_agent(&req.agent_id);
+    // Also remove from cross-instance file registry.
+    let data_dir = wavebase::get_wave_data_dir();
+    agent_registry::remove(&data_dir, &req.agent_id);
     Json(json!({"success": true}))
 }
 
