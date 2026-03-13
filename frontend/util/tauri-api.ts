@@ -142,8 +142,8 @@ export function buildTauriApi(): AppApi {
         },
 
         // --- Context menu ---
-        showContextMenu: (workspaceId: string, menu?: NativeContextMenuItem[]) => {
-            invoke("show_context_menu", { workspaceId, menu }).catch(console.error);
+        showContextMenu: (workspaceId: string, menu?: NativeContextMenuItem[], position?: { x: number; y: number }) => {
+            invoke("show_context_menu", { workspaceId, menu, position }).catch(console.error);
         },
         onContextMenuClick: (callback: (id: string) => void) => {
             listen<string>("context-menu-click", (event) => {

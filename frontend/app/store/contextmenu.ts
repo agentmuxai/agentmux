@@ -49,7 +49,8 @@ class ContextMenuModelType {
         ev.stopPropagation();
         this.handlers.clear();
         const nativeMenuItems = this._convertAndRegisterMenu(menu);
-        getApi().showContextMenu(globalStore.get(atoms.workspace).oid, nativeMenuItems);
+        const position = { x: Math.round(ev.clientX), y: Math.round(ev.clientY) };
+        getApi().showContextMenu(globalStore.get(atoms.workspace).oid, nativeMenuItems, position);
     }
 }
 
