@@ -1,6 +1,7 @@
 // Copyright 2025, Command Line Inc.
 // SPDX-License-Identifier: Apache-2.0
 
+import { batch } from "solid-js";
 import { balanceNode, walkNodes } from "./layoutNode";
 import {
     FlexDirection,
@@ -65,9 +66,11 @@ export function updateTree(model: LayoutModel, balanceTree = true) {
         model.validateMagnifiedNode(model.treeState.leafOrder, newAdditionalProps);
         model.cleanupNodeModels(model.treeState.leafOrder);
         const sortedLeafs = newLeafs.sort((a, b) => a.id.localeCompare(b.id));
-        model.setter(model.leafs, sortedLeafs);
-        model.setter(model.leafOrder, model.treeState.leafOrder);
-        model.setter(model.additionalProps, newAdditionalProps);
+        batch(() => {
+            model.setter(model.leafs, sortedLeafs);
+            model.setter(model.leafOrder, model.treeState.leafOrder);
+            model.setter(model.additionalProps, newAdditionalProps);
+        });
     }
 }
 

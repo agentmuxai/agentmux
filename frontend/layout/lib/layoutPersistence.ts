@@ -1,6 +1,7 @@
 // Copyright 2025, Command Line Inc.
 // SPDX-License-Identifier: Apache-2.0
 
+import { batch } from "solid-js";
 import { fireAndForget } from "@/util/util";
 import { findNodeByBlockId, newLayoutNode } from "./layoutNode";
 import {
@@ -77,8 +78,10 @@ export async function processPendingBackendActions(model: LayoutModel) {
         await handleBackendAction(model, action);
     }
 
-    model.updateTree();
-    model.setter(model.localTreeStateAtom, { ...model.treeState });
+    batch(() => {
+        model.updateTree();
+        model.setter(model.localTreeStateAtom, { ...model.treeState });
+    });
     model.persistToBackend();
 }
 
