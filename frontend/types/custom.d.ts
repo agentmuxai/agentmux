@@ -78,7 +78,7 @@ declare global {
         getBackendInfo: () => Promise<{ pid?: number; started_at?: string; web_endpoint?: string; version: string }>; // get-backend-info
         getDocsiteUrl: () => string; // get-docsite-url
         getZoomFactor: () => number; // get-zoom-factor
-        showContextMenu: (workspaceId: string, menu?: NativeContextMenuItem[]) => void; // contextmenu-show
+        showContextMenu: (workspaceId: string, menu?: NativeContextMenuItem[], position?: { x: number; y: number }) => void; // contextmenu-show
         onContextMenuClick: (callback: (id: string) => void) => void; // contextmenu-click
         onNavigate: (callback: (url: string) => void) => void;
         onIframeNavigate: (callback: (url: string) => void) => void;
