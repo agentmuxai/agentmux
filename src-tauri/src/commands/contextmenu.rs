@@ -59,12 +59,24 @@ pub fn show_context_menu<R: Runtime>(
     let context_menu = build_menu_items(&menu_items, &app)
         .map_err(|e| format!("Failed to build menu: {}", e))?;
 
-    // Show at the provided logical coordinates (from mouse event clientX/clientY).
-    // Falls back to OS cursor position if no coordinates provided.
-    if let Some(pos) = position {
-        context_menu.popup_at(window.clone(), LogicalPosition::new(pos.x, pos.y))
-            .map_err(|e| format!("Failed to show context menu: {}", e))?;
-    } else {
+    // On Linux/Wayland, popup() defaults to position (0,0) because the compositor
+    // does not expose the cursor position to apps. Use popup_at() with the logical
+    // coordinates from the mouse event instead.
+    // On macOS and Windows, popup() already tracks the cursor correctly — leave
+    // that path unchanged to avoid any platform-specific regressions.
+    #[cfg(target_os = "linux")]
+    {
+        if let Some(pos) = position {
+            context_menu.popup_at(window.clone(), LogicalPosition::new(pos.x, pos.y))
+                .map_err(|e| format!("Failed to show context menu: {}", e))?;
+        } else {
+            context_menu.popup(window.clone())
+                .map_err(|e| format!("Failed to show context menu: {}", e))?;
+        }
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = position; // unused on macOS/Windows
         context_menu.popup(window.clone())
             .map_err(|e| format!("Failed to show context menu: {}", e))?;
     }
