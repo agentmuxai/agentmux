@@ -4,8 +4,8 @@
 // Context menu command handler
 
 use serde::{Deserialize, Serialize};
-use tauri::menu::ContextMenu; // Trait providing .popup() method
-use tauri::{AppHandle, Manager, Runtime};
+use tauri::menu::ContextMenu; // Trait providing .popup() / .popup_at() methods
+use tauri::{AppHandle, LogicalPosition, Manager, Runtime};
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -29,11 +29,18 @@ pub struct MenuItem {
     submenu: Option<Vec<MenuItem>>,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct MenuPosition {
+    x: f64,
+    y: f64,
+}
+
 #[tauri::command(rename_all = "camelCase")]
 pub fn show_context_menu<R: Runtime>(
     app: AppHandle<R>,
     workspace_id: String,
     menu: Option<Vec<MenuItem>>,
+    position: Option<MenuPosition>,
 ) -> Result<(), String> {
     tracing::debug!("show_context_menu workspace={} menu={:?}", workspace_id, menu.is_some());
 
@@ -52,9 +59,15 @@ pub fn show_context_menu<R: Runtime>(
     let context_menu = build_menu_items(&menu_items, &app)
         .map_err(|e| format!("Failed to build menu: {}", e))?;
 
-    // Show as popup at cursor position
-    context_menu.popup(window.clone())
-        .map_err(|e| format!("Failed to show context menu: {}", e))?;
+    // Show at the provided logical coordinates (from mouse event clientX/clientY).
+    // Falls back to OS cursor position if no coordinates provided.
+    if let Some(pos) = position {
+        context_menu.popup_at(window.clone(), LogicalPosition::new(pos.x, pos.y))
+            .map_err(|e| format!("Failed to show context menu: {}", e))?;
+    } else {
+        context_menu.popup(window.clone())
+            .map_err(|e| format!("Failed to show context menu: {}", e))?;
+    }
 
     Ok(())
 }
