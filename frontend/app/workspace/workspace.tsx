@@ -21,12 +21,15 @@ function WorkspaceElem(): JSX.Element {
             <div class="flex flex-row flex-grow overflow-hidden" style={{ "min-height": 0 }}>
                 <ErrorBoundary>
                     <Show
-                        when={tabId() !== ""}
+                        when={tabId()}
+                        keyed
                         fallback={<CenteredDiv>No Active Tab</CenteredDiv>}
                     >
-                        <div class="flex flex-row h-full w-full">
-                            <TabContent tabId={tabId()} />
-                        </div>
+                        {(currentTabId) => (
+                            <div class="flex flex-row h-full w-full">
+                                <TabContent tabId={currentTabId} />
+                            </div>
+                        )}
                     </Show>
                     <ModalsRenderer />
                 </ErrorBoundary>

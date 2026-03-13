@@ -16,7 +16,7 @@ interface WindowHeaderProps {
     workspace: Workspace;
 }
 
-const WindowHeader = ({ workspace }: WindowHeaderProps): JSX.Element => {
+const WindowHeader = (props: WindowHeaderProps): JSX.Element => {
     let windowHeaderRef!: HTMLDivElement;
     let draggerLeftRef!: HTMLDivElement;
 
@@ -40,7 +40,7 @@ const WindowHeader = ({ workspace }: WindowHeaderProps): JSX.Element => {
         >
             <WindowDrag ref={draggerLeftRef} class="left" />
 
-            <TabBar workspace={workspace} />
+            <TabBar workspace={props.workspace} />
 
             <SystemStatus />
         </div>

@@ -36,11 +36,6 @@ export const [clientId, setClientId] = createSignal("");
 export const [staticTabId, setStaticTabId] = createSignal("");
 
 // Derived objects from WOS
-export const uiContext = createMemo<UIContext>(() => ({
-    windowid: windowId(),
-    activetabid: staticTabId(),
-}));
-
 export const client = createMemo<Client>(() => {
     const cid = clientId();
     if (!cid) return null;
@@ -69,6 +64,14 @@ export const activeTabId = createMemo<string>(() => {
     if (!ws) return tabId;
     return ws.activetabid || ws.pinnedtabids?.[0] || ws.tabids?.[0] || tabId;
 });
+
+// NOTE: uiContext must use activeTabId (derived from workspace), NOT staticTabId.
+// staticTabId is set once at init and never changes. activeTabId tracks the
+// workspace's current active tab so backend service calls get the correct tab.
+export const uiContext = createMemo<UIContext>(() => ({
+    windowid: windowId(),
+    activetabid: activeTabId(),
+}));
 
 export const [fullConfigAtom, setFullConfigAtom] = createSignal<FullConfigType>(null);
 
