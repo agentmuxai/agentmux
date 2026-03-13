@@ -7,7 +7,7 @@ import { RpcApi } from "@/app/store/wshclientapi";
 import { TabRpcClient } from "@/app/store/wshrpcutil";
 import { atomWithThrottle, boundNumber, createSignalAtom, SignalAtom } from "@/util/util";
 import type { Properties as CSSProperties } from "csstype";
-import { createMemo } from "solid-js";
+import { batch, createMemo } from "solid-js";
 import { getLayoutStateAtomFromTab } from "./layoutAtom";
 import { findNode } from "./layoutNode";
 import {
@@ -528,8 +528,10 @@ export class LayoutModel {
             this.magnifiedNodeId = this.treeState.magnifiedNodeId;
         }
         if (setState) {
-            this.updateTree();
-            this.localTreeStateAtom._set({ ...this.treeState });
+            batch(() => {
+                this.updateTree();
+                this.localTreeStateAtom._set({ ...this.treeState });
+            });
             this.persistToBackend();
         }
     }
@@ -540,8 +542,10 @@ export class LayoutModel {
      */
     async onTreeStateAtomUpdated(force = false) {
         if (force) {
-            this.updateTree();
-            this.localTreeStateAtom._set({ ...this.treeState });
+            batch(() => {
+                this.updateTree();
+                this.localTreeStateAtom._set({ ...this.treeState });
+            });
         }
     }
 
