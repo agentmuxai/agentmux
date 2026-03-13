@@ -303,6 +303,37 @@ async fn handle_incoming_text(
                 if let (Some(ref target), Some(ref message)) =
                     (&incoming.target, &incoming.bus_message_text)
                 {
+                    // Try direct PTY injection via ReactiveHandler first
+                    let reactive_req = crate::backend::reactive::InjectionRequest {
+                        target_agent: target.clone(),
+                        message: message.clone(),
+                        source_agent: Some(from.to_string()),
+                        request_id: None,
+                        priority: incoming.priority.clone(),
+                        wait_for_idle: false,
+                    };
+                    let resp = state.reactive_handler.inject_message(reactive_req);
+                    if resp.success {
+                        let ack = json!({ "type": "bus:injected", "via": "pty", "block_id": resp.block_id });
+                        let msg = serde_json::to_string(&ack).unwrap_or_default();
+                        if socket.send(Message::Text(msg.into())).await.is_err() {
+                            return Err(true);
+                        }
+                        return Ok(None);
+                    }
+
+                    // Non-"agent not found" error — report it
+                    let is_not_found = resp.error.as_deref().map(|e| e.contains("not found")).unwrap_or(false);
+                    if !is_not_found {
+                        let err = json!({ "type": "bus:error", "error": resp.error });
+                        let msg = serde_json::to_string(&err).unwrap_or_default();
+                        if socket.send(Message::Text(msg.into())).await.is_err() {
+                            return Err(true);
+                        }
+                        return Ok(None);
+                    }
+
+                    // Fall back to MessageBus WebSocket push
                     let priority = match incoming.priority.as_deref() {
                         Some("high") => crate::backend::messagebus::Priority::High,
                         Some("urgent") => crate::backend::messagebus::Priority::Urgent,
@@ -310,7 +341,7 @@ async fn handle_incoming_text(
                     };
                     match state.messagebus.inject(from, target, message, priority) {
                         Ok(msg_id) => {
-                            let ack = json!({ "type": "bus:injected", "message_id": msg_id });
+                            let ack = json!({ "type": "bus:injected", "via": "messagebus", "message_id": msg_id });
                             let msg = serde_json::to_string(&ack).unwrap_or_default();
                             if socket.send(Message::Text(msg.into())).await.is_err() {
                                 return Err(true);

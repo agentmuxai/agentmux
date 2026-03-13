@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 
 use super::sanitize::{format_injected_message, sanitize_message, validate_agent_id};
 use super::types::*;
-use super::{now_unix_millis, sha256_hex, AUDIT_LOG_MAX, INJECT_ENTER_DELAY_MS, RATE_LIMIT_MAX};
+use super::{now_unix_millis, sha256_hex, AUDIT_LOG_MAX, RATE_LIMIT_MAX};
 
 // ---- Rate Limiter ----
 
@@ -168,9 +168,9 @@ impl Handler {
 
     /// Inject a message into an agent's terminal.
     ///
-    /// CRITICAL: Message and Enter are sent separately with a 150ms delay.
-    /// This is required because the PTY needs to see the message first,
-    /// then Enter as a distinct event.
+    /// Sends `message\r` as a single payload (required for text display),
+    /// then spawns 3 delayed `\r` sends at 200ms intervals as separate
+    /// PTY writes to ensure submission. See `specs/jekt-inject-timing.md`.
     pub fn inject_message(&mut self, mut req: InjectionRequest) -> InjectionResponse {
         let now = now_unix_millis();
 
@@ -260,8 +260,25 @@ impl Handler {
             }
         };
 
-        // Step 1: Send message
-        if let Err(e) = sender(&block_id, final_msg.as_bytes()) {
+        // Jekt inject sequence (see specs/jekt-inject-timing.md):
+        // 1. \r to clear any partial input on the line
+        // 2. message\r as single payload (proven to display text — v0.31.122/125)
+        // 3. Three delayed \r at 200ms intervals as separate PTY writes to submit
+        let _ = sender(&block_id, b"\r");
+        let payload = format!("{}\r", final_msg);
+        tracing::info!(
+            target_agent = %req.target_agent,
+            block_id = %block_id,
+            msg_len = payload.len(),
+            "inject: sending payload to PTY"
+        );
+        if let Err(e) = sender(&block_id, payload.as_bytes()) {
+            tracing::error!(
+                target_agent = %req.target_agent,
+                block_id = %block_id,
+                error = %e,
+                "inject: sender failed"
+            );
             self.log_audit(
                 req.source_agent.as_deref(),
                 &req.target_agent,
@@ -280,27 +297,17 @@ impl Handler {
             };
         }
 
-        // Step 2: Wait 150ms then send Enter
-        std::thread::sleep(Duration::from_millis(INJECT_ENTER_DELAY_MS));
-
-        if let Err(e) = sender(&block_id, b"\r") {
-            self.log_audit(
-                req.source_agent.as_deref(),
-                &req.target_agent,
-                &block_id,
-                &sanitized,
-                false,
-                Some(&e),
-                &request_id,
-            );
-            return InjectionResponse {
-                success: false,
-                request_id,
-                block_id: Some(block_id),
-                error: Some(e),
-                timestamp: now,
-            };
-        }
+        // Spawn 3 delayed \r sends as separate PTY events to ensure submission.
+        let sender_enter = sender.clone();
+        let block_id_enter = block_id.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+            let _ = sender_enter(&block_id_enter, b"\r");
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+            let _ = sender_enter(&block_id_enter, b"\r");
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+            let _ = sender_enter(&block_id_enter, b"\r");
+        });
 
         // Success
         self.log_audit(

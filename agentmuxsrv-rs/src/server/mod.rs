@@ -45,6 +45,11 @@ pub struct AppState {
     pub poller: Arc<Poller>,
     pub config_watcher: Arc<wconfig::ConfigWatcher>,
     pub messagebus: Arc<MessageBus>,
+    /// Local HTTP URL of this instance (e.g. "http://127.0.0.1:PORT").
+    /// Used for cross-instance inject forwarding and file registry entries.
+    pub local_web_url: String,
+    /// Shared HTTP client for cross-instance inject forwarding.
+    pub http_client: reqwest::Client,
 }
 
 /// Build the Axum router with all routes, auth middleware, and CORS.

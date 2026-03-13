@@ -17,6 +17,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::backend::messagebus::{BusMessage, MessageType, Priority};
+use crate::backend::reactive::InjectionRequest;
 use super::AppState;
 
 // ---- Request types ----
@@ -118,15 +119,47 @@ pub(super) async fn handle_send(
 }
 
 /// POST /api/bus/inject
+///
+/// Tries ReactiveHandler first (direct PTY write via blockcontroller).
+/// Falls back to MessageBus WebSocket push if agent has no block_id registered.
 pub(super) async fn handle_inject(
     State(state): State<AppState>,
     Json(req): Json<InjectRequest>,
 ) -> Json<Value> {
-    let priority = parse_priority(&req.priority);
+    // Try direct PTY injection via ReactiveHandler (agent has registered block_id)
+    let reactive_req = InjectionRequest {
+        target_agent: req.target.clone(),
+        message: req.message.clone(),
+        source_agent: Some(req.from.clone()),
+        request_id: None,
+        priority: req.priority.clone(),
+        wait_for_idle: false,
+    };
+    let resp = state.reactive_handler.inject_message(reactive_req);
+    if resp.success {
+        return Json(json!({
+            "status": "injected",
+            "via": "pty",
+            "block_id": resp.block_id,
+            "target": req.target,
+        }));
+    }
 
+    // Agent not registered with a block_id — fall back to MessageBus WS push
+    // (only fall back on "agent not found", propagate other errors)
+    let is_not_found = resp.error.as_deref().map(|e| e.contains("not found")).unwrap_or(false);
+    if !is_not_found {
+        return Json(json!({
+            "status": "error",
+            "error": resp.error,
+        }));
+    }
+
+    let priority = parse_priority(&req.priority);
     match state.messagebus.inject(&req.from, &req.target, &req.message, priority) {
         Ok(msg_id) => Json(json!({
             "status": "injected",
+            "via": "messagebus",
             "message_id": msg_id,
             "target": req.target,
         })),

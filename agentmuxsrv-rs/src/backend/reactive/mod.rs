@@ -10,6 +10,7 @@
 
 pub mod handler;
 pub mod poller;
+pub mod registry;
 pub mod sanitize;
 pub mod types;
 #[cfg(test)]
@@ -30,9 +31,6 @@ const AUDIT_LOG_MAX: usize = 100;
 
 /// Rate limit: max tokens (requests per second).
 const RATE_LIMIT_MAX: u32 = 10;
-
-/// Delay between message injection and Enter key (milliseconds).
-const INJECT_ENTER_DELAY_MS: u64 = 150;
 
 /// Default poll interval for AgentMux poller (seconds).
 pub const DEFAULT_POLL_INTERVAL_SECS: u64 = 30;

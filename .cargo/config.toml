@@ -1,0 +1,5 @@
+# Static CRT linking for Windows MSVC targets.
+# Embeds VCRUNTIME140.dll into the binary so it runs on bare Windows
+# installs without the Visual C++ Redistributable package.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]
