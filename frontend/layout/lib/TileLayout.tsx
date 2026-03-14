@@ -262,6 +262,7 @@ const DisplayNode = (props: DisplayNodeProps) => {
         globalDragLayoutModel = null;
         props.layoutModel.activeDrag._set(false);
         setIsDragging(false);
+        nodeModel.dragReady._set(false);
     };
 
     // Attach drag handle ref to the drag handle element
@@ -298,7 +299,7 @@ const DisplayNode = (props: DisplayNodeProps) => {
             ref={tileNodeRef}
             id={props.node.id}
             style={addlProps()?.transform as JSX.CSSProperties}
-            draggable={!isEphemeral() && !isMagnified()}
+            draggable={nodeModel.dragReady() && !isEphemeral() && !isMagnified()}
             onDragStart={onDragStart}
             onDragEnd={onDragEnd}
             onPointerEnter={generatePreviewImage}
