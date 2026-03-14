@@ -333,124 +333,124 @@ export class LayoutModel {
         animationTimeS?: number
     ) {
         // Create a long-lived reactive root for this model.
-        // All memos created here (and via runInModelRoot) survive component
-        // mount/unmount cycles during tab switches.
+        // All signals and memos must be created inside this root so they
+        // survive component mount/unmount cycles during tab switches.
         createRoot((dispose) => {
             this._disposeRoot = dispose;
             this._modelOwner = getOwner();
+
+            this.tabAtom = tabAtom;
+            this.renderContent = renderContent;
+            this.renderPreview = renderPreview;
+            this.onNodeDelete = onNodeDelete;
+            this.gapSizePx = createSignalAtom(gapSizePx ?? DefaultGapSizePx);
+            this.resizeHandleSizePx = createMemo(() => {
+                const gap = this.gapSizePx();
+                return 2 * (gap > 5 ? gap : DefaultGapSizePx);
+            });
+            this.animationTimeS = createSignalAtom(animationTimeS ?? DefaultAnimationTimeS);
+            this.persistDebounceTimer = null;
+            this.processedActionIds = new Set();
+
+            this.waveObjectAtom = getLayoutStateAtomFromTab(tabAtom);
+
+            this.localTreeStateAtom = createSignalAtom<LayoutTreeState>({
+                rootNode: undefined,
+                focusedNodeId: undefined,
+                magnifiedNodeId: undefined,
+                leafOrder: undefined,
+                pendingBackendActions: undefined,
+            });
+
+            this.treeState = {
+                rootNode: undefined,
+                focusedNodeId: undefined,
+                magnifiedNodeId: undefined,
+                leafOrder: undefined,
+                pendingBackendActions: undefined,
+            };
+
+            this.leafs = createSignalAtom<LayoutNode[]>([]);
+            this.leafOrder = createSignalAtom<LeafOrderEntry[]>([]);
+            this.numLeafs = createMemo(() => this.leafOrder().length);
+
+            this.nodeModels = new Map();
+            this.additionalProps = createSignalAtom<Record<string, LayoutNodeAdditionalProps>>({});
+
+            this.spiralLeafOrder = createMemo(() => {
+                const leafOrd = this.leafOrder();
+                const addlProps = this.additionalProps();
+                return computeSpiralOrder(leafOrd, addlProps);
+            });
+
+            this.resizeHandles = createMemo(() => {
+                const addlProps = this.additionalProps();
+                return Object.values(addlProps)
+                    .flatMap((props) => props.resizeHandles)
+                    .filter((v) => v);
+            });
+
+            this.pendingTreeAction = atomWithThrottle<LayoutTreeAction>(null, 10);
+
+            this.isContainerResizing = createSignalAtom(false);
+            this.isResizing = createMemo(() => {
+                const pendingAction = this.pendingTreeAction.throttledValueAtom();
+                const isWindowResizing = this.isContainerResizing();
+                return isWindowResizing || pendingAction?.type === LayoutTreeActionType.ResizeNode;
+            });
+
+            this.displayContainerRef = { current: null };
+            this.activeDrag = createSignalAtom(false);
+            this.showOverlay = createSignalAtom(false);
+            this.ready = createSignalAtom(false);
+            this.overlayTransform = createMemo<CSSProperties>(() => {
+                const activeDrag = this.activeDrag();
+                const showOverlay = this.showOverlay();
+                if (this.displayContainerRef.current) {
+                    const displayBoundingRect = this.displayContainerRef.current.getBoundingClientRect();
+                    const newOverlayOffset = displayBoundingRect.top + 2 * displayBoundingRect.height;
+                    const newTransform = setTransform(
+                        {
+                            top: activeDrag || showOverlay ? 0 : newOverlayOffset,
+                            left: 0,
+                            width: displayBoundingRect.width,
+                            height: displayBoundingRect.height,
+                        },
+                        false
+                    );
+                    return newTransform;
+                }
+                return undefined;
+            });
+
+            this.ephemeralNode = createSignalAtom<LayoutNode>(undefined);
+            this.magnifiedNodeSizeAtom = getSettingsKeyAtom("window:magnifiedblocksize");
+
+            this.magnifiedNodeIdAtom = createMemo(() => {
+                const treeState = this.localTreeStateAtom();
+                return treeState.magnifiedNodeId;
+            });
+
+            this.focusedNode = createMemo(() => {
+                const ephemeralNode = this.ephemeralNode();
+                const treeState = this.localTreeStateAtom();
+                if (ephemeralNode) {
+                    return ephemeralNode;
+                }
+                if (treeState.focusedNodeId == null) {
+                    return null;
+                }
+                return findNode(treeState.rootNode, treeState.focusedNodeId);
+            });
+            this.focusedNodeIdStack = [];
+
+            this.placeholderTransform = createMemo<CSSProperties>(() => {
+                const pendingAction = this.pendingTreeAction.throttledValueAtom();
+                return this.getPlaceholderTransform(pendingAction);
+            });
+
+            this.initializeFromWaveObject();
         });
-
-        this.tabAtom = tabAtom;
-        this.renderContent = renderContent;
-        this.renderPreview = renderPreview;
-        this.onNodeDelete = onNodeDelete;
-        this.gapSizePx = createSignalAtom(gapSizePx ?? DefaultGapSizePx);
-        this.resizeHandleSizePx = createMemo(() => {
-            const gap = this.gapSizePx();
-            return 2 * (gap > 5 ? gap : DefaultGapSizePx);
-        });
-        this.animationTimeS = createSignalAtom(animationTimeS ?? DefaultAnimationTimeS);
-        this.persistDebounceTimer = null;
-        this.processedActionIds = new Set();
-
-        this.waveObjectAtom = getLayoutStateAtomFromTab(tabAtom);
-
-        this.localTreeStateAtom = createSignalAtom<LayoutTreeState>({
-            rootNode: undefined,
-            focusedNodeId: undefined,
-            magnifiedNodeId: undefined,
-            leafOrder: undefined,
-            pendingBackendActions: undefined,
-        });
-
-        this.treeState = {
-            rootNode: undefined,
-            focusedNodeId: undefined,
-            magnifiedNodeId: undefined,
-            leafOrder: undefined,
-            pendingBackendActions: undefined,
-        };
-
-        this.leafs = createSignalAtom<LayoutNode[]>([]);
-        this.leafOrder = createSignalAtom<LeafOrderEntry[]>([]);
-        this.numLeafs = createMemo(() => this.leafOrder().length);
-
-        this.nodeModels = new Map();
-        this.additionalProps = createSignalAtom<Record<string, LayoutNodeAdditionalProps>>({});
-
-        this.spiralLeafOrder = createMemo(() => {
-            const leafOrd = this.leafOrder();
-            const addlProps = this.additionalProps();
-            return computeSpiralOrder(leafOrd, addlProps);
-        });
-
-        this.resizeHandles = createMemo(() => {
-            const addlProps = this.additionalProps();
-            return Object.values(addlProps)
-                .flatMap((props) => props.resizeHandles)
-                .filter((v) => v);
-        });
-
-        this.pendingTreeAction = atomWithThrottle<LayoutTreeAction>(null, 10);
-
-        this.isContainerResizing = createSignalAtom(false);
-        this.isResizing = createMemo(() => {
-            const pendingAction = this.pendingTreeAction.throttledValueAtom();
-            const isWindowResizing = this.isContainerResizing();
-            return isWindowResizing || pendingAction?.type === LayoutTreeActionType.ResizeNode;
-        });
-
-        this.displayContainerRef = { current: null };
-        this.activeDrag = createSignalAtom(false);
-        this.showOverlay = createSignalAtom(false);
-        this.ready = createSignalAtom(false);
-        this.overlayTransform = createMemo<CSSProperties>(() => {
-            const activeDrag = this.activeDrag();
-            const showOverlay = this.showOverlay();
-            if (this.displayContainerRef.current) {
-                const displayBoundingRect = this.displayContainerRef.current.getBoundingClientRect();
-                const newOverlayOffset = displayBoundingRect.top + 2 * displayBoundingRect.height;
-                const newTransform = setTransform(
-                    {
-                        top: activeDrag || showOverlay ? 0 : newOverlayOffset,
-                        left: 0,
-                        width: displayBoundingRect.width,
-                        height: displayBoundingRect.height,
-                    },
-                    false
-                );
-                return newTransform;
-            }
-            return undefined;
-        });
-
-        this.ephemeralNode = createSignalAtom<LayoutNode>(undefined);
-        this.magnifiedNodeSizeAtom = getSettingsKeyAtom("window:magnifiedblocksize");
-
-        this.magnifiedNodeIdAtom = createMemo(() => {
-            const treeState = this.localTreeStateAtom();
-            return treeState.magnifiedNodeId;
-        });
-
-        this.focusedNode = createMemo(() => {
-            const ephemeralNode = this.ephemeralNode();
-            const treeState = this.localTreeStateAtom();
-            if (ephemeralNode) {
-                return ephemeralNode;
-            }
-            if (treeState.focusedNodeId == null) {
-                return null;
-            }
-            return findNode(treeState.rootNode, treeState.focusedNodeId);
-        });
-        this.focusedNodeIdStack = [];
-
-        this.placeholderTransform = createMemo<CSSProperties>(() => {
-            const pendingAction = this.pendingTreeAction.throttledValueAtom();
-            return this.getPlaceholderTransform(pendingAction);
-        });
-
-        this.initializeFromWaveObject();
     }
 
     private initializeFromWaveObject() {
