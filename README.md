@@ -11,8 +11,6 @@ A rich monitoring and orchestration UI for AI agents. See every tool call, catch
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Website](https://img.shields.io/badge/Website-agentmux.ai-blue)](https://agentmux.ai)
 
-> Developed by **[AgentMux Corp.](https://agentmux.ai)** - Delaware corporation, California registered.
-
 ## The Problem
 
 Knowledge workers running AI agents across long-horizon tasks are blind while it happens. You can't see which agent found something important. You can't see which one went off-track. You can't redirect mid-task. You find out when it's done, or when something is wrong.
@@ -130,5 +128,7 @@ bump show                              # display current version state
 Config lives in `.bump.json`. See [BUILD.md](./BUILD.md) for the full workflow.
 
 ## License
+
+Developed by **[AgentMux Corp.](https://agentmux.ai)** — Delaware corporation.
 
 Apache-2.0 — Originally forked from [Wave Terminal](https://github.com/wavetermdev/waveterm)
