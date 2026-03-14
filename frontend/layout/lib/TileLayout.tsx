@@ -10,6 +10,7 @@ import { Key } from "@solid-primitives/keyed";
 import { debounce, throttle } from "throttle-debounce";
 import { LayoutModel } from "./layoutModel";
 import { useNodeModel, useTileLayout } from "./layoutModelHooks";
+import { getNodeModel } from "./layoutNodeModels";
 import "./tilelayout.scss";
 import {
     LayoutNode,
@@ -117,8 +118,12 @@ function TileLayoutComponent(props: TileLayoutProps) {
             >
                 <ResizeHandleWrapper layoutModel={layoutModel} />
                 <DisplayNodesWrapper layoutModel={layoutModel} />
-                <NodeBackdrops layoutModel={layoutModel} />
             </div>
+
+            {/* Magnify layer — outside display-container to avoid stacking context issues */}
+            <NodeBackdrops layoutModel={layoutModel} />
+            <MagnifiedPaneOverlay layoutModel={layoutModel} />
+
             <Placeholder layoutModel={layoutModel} style={{ top: "10000px", ...overlayTransform() }} />
             <OverlayNodeWrapper layoutModel={layoutModel} />
         </div>
@@ -179,6 +184,59 @@ function NodeBackdrops(props: { layoutModel: LayoutModel }) {
         </>
     );
 }
+
+/**
+ * Renders the magnified pane in a dedicated overlay container outside the display-container,
+ * bypassing CSS stacking context issues that prevent z-index from working on tile-nodes.
+ */
+const MagnifiedPaneOverlay = (props: { layoutModel: LayoutModel }) => {
+    const magnifiedNodeId = () => props.layoutModel.magnifiedNodeIdAtom();
+    const magnifiedBlockSizeAtom = getSettingsKeyAtom("window:magnifiedblocksize");
+    const magnifiedNodeSize = () => magnifiedBlockSizeAtom() ?? 0.9;
+
+    // Find the leaf node matching the magnified node ID
+    const magnifiedNode = createMemo(() => {
+        const nodeId = magnifiedNodeId();
+        if (!nodeId) return null;
+        return props.layoutModel.leafs().find((leaf) => leaf.id === nodeId) ?? null;
+    });
+
+    // Escape key handler to unmagnify
+    const onKeyDown = (e: KeyboardEvent) => {
+        if (e.key === "Escape" && magnifiedNodeId()) {
+            props.layoutModel.magnifyNodeToggle(magnifiedNodeId());
+        }
+    };
+
+    onMount(() => window.addEventListener("keydown", onKeyDown));
+    onCleanup(() => window.removeEventListener("keydown", onKeyDown));
+
+    const containerStyle = createMemo(() => {
+        const size = magnifiedNodeSize();
+        const margin = ((1 - size) / 2) * 100;
+        return {
+            top: `${margin}%`,
+            left: `${margin}%`,
+            width: `${size * 100}%`,
+            height: `${size * 100}%`,
+        } as JSX.CSSProperties;
+    });
+
+    return (
+        <Show when={magnifiedNode()}>
+            {(node) => {
+                const nodeModel = getNodeModel(props.layoutModel, node());
+                return (
+                    <div class="magnify-container" style={containerStyle()}>
+                        <div class="magnify-pane">
+                            {props.layoutModel.renderContent(nodeModel)}
+                        </div>
+                    </div>
+                );
+            }}
+        </Show>
+    );
+};
 
 interface DisplayNodesWrapperProps {
     layoutModel: LayoutModel;
@@ -292,12 +350,14 @@ const DisplayNode = (props: DisplayNodeProps) => {
         );
     };
 
+    const tileTransform = () => addlProps()?.transform;
+
     return (
         <div
-            class={clsx("tile-node", { dragging: isDragging() })}
+            class={clsx("tile-node", { dragging: isDragging(), "tile-hidden": isMagnified() })}
             ref={tileNodeRef}
             id={props.node.id}
-            style={addlProps()?.transform as JSX.CSSProperties}
+            style={tileTransform() as JSX.CSSProperties}
             draggable={!isEphemeral() && !isMagnified()}
             onDragStart={onDragStart}
             onDragEnd={onDragEnd}
