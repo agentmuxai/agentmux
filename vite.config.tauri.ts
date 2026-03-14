@@ -47,6 +47,7 @@ export default defineConfig({
     build: {
         target: ["es2021", "chrome97", "safari13"],
         sourcemap: process.env.NODE_ENV === "development",
+        cssCodeSplit: false,
         outDir: "dist/frontend",
         rollupOptions: {
             input: {

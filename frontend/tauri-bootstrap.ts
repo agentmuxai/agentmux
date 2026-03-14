@@ -9,6 +9,13 @@ import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { readTextFile, exists } from "@tauri-apps/plugin-fs";
 
+// Static CSS imports so Vite includes them in the HTML <link> tags.
+// wave.ts is dynamically imported (for error handling), but its CSS must
+// be loaded eagerly — Tauri's webview doesn't process Vite's dynamic CSS injection.
+import "overlayscrollbars/overlayscrollbars.css";
+import "./app/app.scss";
+import "./tailwindsetup.css";
+
 // Deep verbose logging
 const log = (level: string, ...args: any[]) => {
     const timestamp = new Date().toISOString();

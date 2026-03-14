@@ -301,35 +301,17 @@ export class TermWrap {
     // ── Private helpers ────────────────────────────────────────────────
 
     private loadRendererAddon(useWebGl: boolean) {
-        // WebGL disabled: silently fails in WebView2, producing blank terminal canvases.
-        // Canvas renderer is reliable and performant enough.
-        if (false) {
-            try {
-                const webglAddon = new WebglAddon();
-                this.toDispose.push(
-                    webglAddon.onContextLoss(() => {
-                        webglAddon.dispose();
-                        console.warn("WebGL context lost, falling back to Canvas renderer");
-                        const canvasAddon = new CanvasAddon();
-                        this.toDispose.push(canvasAddon);
-                        this.terminal.loadAddon(canvasAddon);
-                    })
-                );
-                this.terminal.loadAddon(webglAddon);
-                if (!loggedWebGL) {
-                    console.log("loaded webgl renderer!");
-                    loggedWebGL = true;
-                }
-            } catch (e) {
-                console.warn("WebGL renderer unavailable, using Canvas renderer:", e);
-                const canvasAddon = new CanvasAddon();
-                this.toDispose.push(canvasAddon);
-                this.terminal.loadAddon(canvasAddon);
-                if (!loggedWebGL) {
-                    console.log("loaded canvas renderer (webgl fallback)!");
-                    loggedWebGL = true;
-                }
+        // Use Canvas renderer — WebGL silently fails in WebView2, producing blank canvases.
+        try {
+            const canvasAddon = new CanvasAddon();
+            this.toDispose.push(canvasAddon);
+            this.terminal.loadAddon(canvasAddon);
+            if (!loggedWebGL) {
+                console.log("loaded canvas renderer");
+                loggedWebGL = true;
             }
+        } catch (e) {
+            console.warn("Canvas renderer failed to load, using DOM fallback:", e);
         }
     }
 
