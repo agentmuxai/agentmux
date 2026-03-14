@@ -29,6 +29,7 @@ use crate::backend::rpc_types::{
     COMMAND_DELETE_FORGE_SKILL,
     COMMAND_APPEND_FORGE_HISTORY, COMMAND_LIST_FORGE_HISTORY, COMMAND_SEARCH_FORGE_HISTORY,
     COMMAND_IMPORT_FORGE_FROM_CLAW,
+    COMMAND_RESEED_FORGE_AGENTS,
     CommandCreateForgeAgentData, CommandUpdateForgeAgentData, CommandDeleteForgeAgentData,
     CommandGetForgeContentData, CommandSetForgeContentData, CommandGetAllForgeContentData,
     CommandListForgeSkillsData, CommandCreateForgeSkillData, CommandUpdateForgeSkillData,
@@ -782,6 +783,10 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                     restart_on_crash: cmd.restart_on_crash,
                     idle_timeout_minutes: cmd.idle_timeout_minutes,
                     created_at: now,
+                    agent_type: cmd.agent_type,
+                    environment: cmd.environment,
+                    agent_bus_id: cmd.agent_bus_id,
+                    is_seeded: 0,
                 };
                 wstore.forge_insert(&agent).map_err(|e| format!("createforgeagent: {e}"))?;
                 broker.publish(crate::backend::wps::WaveEvent {
@@ -824,6 +829,10 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                     restart_on_crash: cmd.restart_on_crash,
                     idle_timeout_minutes: cmd.idle_timeout_minutes,
                     created_at: old.created_at,
+                    agent_type: cmd.agent_type,
+                    environment: cmd.environment,
+                    agent_bus_id: cmd.agent_bus_id,
+                    is_seeded: old.is_seeded,
                 };
                 let found = wstore.forge_update(&agent).map_err(|e| format!("updateforgeagent: {e}"))?;
                 if !found {
@@ -1165,6 +1174,10 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                     restart_on_crash: 0,
                     idle_timeout_minutes: 0,
                     created_at: now,
+                    agent_type: "standalone".to_string(),
+                    environment: String::new(),
+                    agent_bus_id: String::new(),
+                    is_seeded: 0,
                 };
                 wstore.forge_insert(&agent).map_err(|e| format!("importforgefromclaw: {e}"))?;
 
@@ -1204,6 +1217,39 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                     data: None,
                 });
                 Ok(Some(serde_json::to_value(&agent).unwrap_or_default()))
+            })
+        }),
+    );
+
+    // reseedforgeagents → delete all seeded agents and re-run seed from manifest
+    let wstore_rsfa = state.wstore.clone();
+    let broker_rsfa = state.broker.clone();
+    engine.register_handler(
+        COMMAND_RESEED_FORGE_AGENTS,
+        Box::new(move |_data, _ctx| {
+            let wstore = wstore_rsfa.clone();
+            let broker = broker_rsfa.clone();
+            Box::pin(async move {
+                // Delete all previously seeded agents (cascade deletes content, skills, history)
+                let deleted = wstore.forge_delete_seeded()
+                    .map_err(|e| format!("reseedforgeagents: delete seeded: {e}"))?;
+
+                // Re-run seed
+                let report = crate::backend::forge_seed::seed_forge_agents(&wstore)
+                    .map_err(|e| format!("reseedforgeagents: seed: {e}"))?;
+
+                broker.publish(crate::backend::wps::WaveEvent {
+                    event: "forgeagents:changed".to_string(),
+                    scopes: vec![],
+                    sender: String::new(),
+                    persist: 0,
+                    data: None,
+                });
+                Ok(Some(json!({
+                    "deleted": deleted,
+                    "created": report.created,
+                    "skipped": report.skipped,
+                })))
             })
         }),
     );

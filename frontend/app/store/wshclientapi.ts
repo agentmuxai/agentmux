@@ -563,6 +563,11 @@ class RpcApiType {
         return client.wshRpcCall("importforgefromclaw", data, opts);
     }
 
+    // command "reseedforgeagents" [call]
+    ReseedForgeAgentsCommand(client: WshClient, opts?: RpcOpts): Promise<void> {
+        return client.wshRpcCall("reseedforgeagents", {}, opts);
+    }
+
 }
 
 export const RpcApi = new RpcApiType();
