@@ -284,7 +284,9 @@ export function useBlockCache<T>(blockId: string, name: string, makeFn: () => T)
 }
 
 const blockAtomCache = new Map<string, Map<string, () => any>>();
+const blockAtomDisposers = new Map<string, (() => void)[]>();
 const tabAtomCache = new Map<string, Map<string, () => any>>();
+const tabAtomDisposers = new Map<string, (() => void)[]>();
 
 function getSingleBlockAtomCache(blockId: string): Map<string, () => any> {
     let bc = blockAtomCache.get(blockId);
@@ -293,6 +295,46 @@ function getSingleBlockAtomCache(blockId: string): Map<string, () => any> {
         blockAtomCache.set(blockId, bc);
     }
     return bc;
+}
+
+function addBlockAtomDisposer(blockId: string, dispose: () => void) {
+    let disposers = blockAtomDisposers.get(blockId);
+    if (disposers == null) {
+        disposers = [];
+        blockAtomDisposers.set(blockId, disposers);
+    }
+    disposers.push(dispose);
+}
+
+function addTabAtomDisposer(tabId: string, dispose: () => void) {
+    let disposers = tabAtomDisposers.get(tabId);
+    if (disposers == null) {
+        disposers = [];
+        tabAtomDisposers.set(tabId, disposers);
+    }
+    disposers.push(dispose);
+}
+
+export function cleanupBlockAtomCache(blockId: string) {
+    blockAtomCache.delete(blockId);
+    const disposers = blockAtomDisposers.get(blockId);
+    if (disposers) {
+        for (const dispose of disposers) {
+            try { dispose(); } catch (_) {}
+        }
+        blockAtomDisposers.delete(blockId);
+    }
+}
+
+export function cleanupTabAtomCache(tabId: string) {
+    tabAtomCache.delete(tabId);
+    const disposers = tabAtomDisposers.get(tabId);
+    if (disposers) {
+        for (const dispose of disposers) {
+            try { dispose(); } catch (_) {}
+        }
+        tabAtomDisposers.delete(tabId);
+    }
 }
 
 function getSingleConnAtomCache(connName: string): Map<string, () => any> {
@@ -313,11 +355,14 @@ export function getBlockMetaKeyAtom<T extends keyof MetaType>(blockId: string, k
     const name = "#meta-" + key;
     let memo = bc.get(name);
     if (memo == null) {
-        memo = createRoot(() => createMemo(() => {
-            const blockAccessor = WOS.getWaveObjectAtom(WOS.makeORef("block", blockId));
-            const blockData = blockAccessor();
-            return blockData?.meta?.[key];
-        }));
+        memo = createRoot((dispose) => {
+            addBlockAtomDisposer(blockId, dispose);
+            return createMemo(() => {
+                const blockAccessor = WOS.getWaveObjectAtom(WOS.makeORef("block", blockId));
+                const blockData = blockAccessor();
+                return blockData?.meta?.[key];
+            });
+        });
         bc.set(name, memo);
     }
     return memo as () => MetaType[T];
@@ -332,11 +377,14 @@ export function getTabMetaKeyAtom<T extends keyof MetaType>(tabId: string, key: 
     const name = "#meta-" + key;
     let memo = tc.get(name);
     if (memo == null) {
-        memo = createRoot(() => createMemo(() => {
-            const tabAccessor = WOS.getWaveObjectAtom(WOS.makeORef("tab", tabId));
-            const tabData = tabAccessor();
-            return tabData?.meta?.[key];
-        }));
+        memo = createRoot((dispose) => {
+            addTabAtomDisposer(tabId, dispose);
+            return createMemo(() => {
+                const tabAccessor = WOS.getWaveObjectAtom(WOS.makeORef("tab", tabId));
+                const tabData = tabAccessor();
+                return tabData?.meta?.[key];
+            });
+        });
         tc.set(name, memo);
     }
     return memo as () => MetaType[T];
@@ -355,7 +403,10 @@ function getConnConfigKeyAtom<T extends keyof ConnKeywords>(connName: string, ke
     const name = "#conn-" + key;
     let memo = cc.get(name);
     if (memo == null) {
-        memo = createRoot(() => createMemo(() => fullConfigAtom()?.connections?.[connName]?.[key]));
+        memo = createRoot((dispose) => {
+            addBlockAtomDisposer(connName, dispose);
+            return createMemo(() => fullConfigAtom()?.connections?.[connName]?.[key]);
+        });
         cc.set(name, memo);
     }
     return memo as () => ConnKeywords[T];
@@ -389,23 +440,26 @@ export function getOverrideConfigAtom<T extends keyof SettingsType>(blockId: str
     const name = "#settingsoverride-" + key;
     let memo = bc.get(name);
     if (memo == null) {
-        memo = createRoot(() => createMemo(() => {
-            const metaKeyMemo = getBlockMetaKeyAtom(blockId, key as any);
-            const metaKeyVal = metaKeyMemo();
-            if (metaKeyVal != null) return metaKeyVal as SettingsType[T];
+        memo = createRoot((dispose) => {
+            addBlockAtomDisposer(blockId, dispose);
+            return createMemo(() => {
+                const metaKeyMemo = getBlockMetaKeyAtom(blockId, key as any);
+                const metaKeyVal = metaKeyMemo();
+                if (metaKeyVal != null) return metaKeyVal as SettingsType[T];
 
-            const connNameMemo = getBlockMetaKeyAtom(blockId, "connection");
-            const connName = connNameMemo();
-            const connConfigKeyMemo = getConnConfigKeyAtom(connName, key as any);
-            const connConfigKeyVal = connConfigKeyMemo();
-            if (connConfigKeyVal != null) return connConfigKeyVal as SettingsType[T];
+                const connNameMemo = getBlockMetaKeyAtom(blockId, "connection");
+                const connName = connNameMemo();
+                const connConfigKeyMemo = getConnConfigKeyAtom(connName, key as any);
+                const connConfigKeyVal = connConfigKeyMemo();
+                if (connConfigKeyVal != null) return connConfigKeyVal as SettingsType[T];
 
-            const settingsKeyMemo = getSettingsKeyAtom(key);
-            const settingsVal = settingsKeyMemo();
-            if (settingsVal != null) return settingsVal;
+                const settingsKeyMemo = getSettingsKeyAtom(key);
+                const settingsVal = settingsKeyMemo();
+                if (settingsVal != null) return settingsVal;
 
-            return null;
-        }));
+                return null;
+            });
+        });
         bc.set(name, memo);
     }
     return memo as () => SettingsType[T];
@@ -594,6 +648,7 @@ export function registerBlockComponentModel(blockId: string, bcm: BlockComponent
 
 export function unregisterBlockComponentModel(blockId: string) {
     blockComponentModelMap.delete(blockId);
+    cleanupBlockAtomCache(blockId);
 }
 
 export function getBlockComponentModel(blockId: string): BlockComponentModel {
