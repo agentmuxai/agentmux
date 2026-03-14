@@ -286,6 +286,9 @@ function cleanWaveObjectCache() {
     }
 }
 
+// Periodically clean up stale WaveObject cache entries
+setInterval(cleanWaveObjectCache, 30000);
+
 /** Non-reactive read — returns the current value without tracking. */
 function getObjectValue<T extends WaveObj>(oref: string): T {
     const wov = getWaveObjectValue<T>(oref);
