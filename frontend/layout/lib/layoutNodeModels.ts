@@ -18,49 +18,53 @@ export function getNodeModel(model: LayoutModel, node: LayoutNode): NodeModel {
     const blockId = node.data.blockId;
     const addlPropsAtom = getNodeAdditionalPropertiesAtom(model, nodeid);
     if (!model.nodeModels.has(nodeid)) {
-        model.nodeModels.set(nodeid, {
-            additionalProps: addlPropsAtom,
-            innerRect: createMemo(() => {
-                const addlProps = addlPropsAtom();
-                const numLeafs = model.numLeafs();
-                const gapSizePx = model.gapSizePx();
-                if (numLeafs > 1 && addlProps?.rect) {
-                    return {
-                        width: `${addlProps.transform.width} - ${gapSizePx}px`,
-                        height: `${addlProps.transform.height} - ${gapSizePx}px`,
-                    } as CSSProperties;
-                } else {
-                    return null;
-                }
-            }),
-            nodeId: nodeid,
-            blockId,
-            blockNum: createMemo(() => model.leafOrder().findIndex((leafEntry) => leafEntry.nodeid === nodeid) + 1),
-            isFocused: createMemo(() => {
-                const treeState = model.localTreeStateAtom();
-                return treeState.focusedNodeId === nodeid;
-            }),
-            numLeafs: model.numLeafs,
-            isResizing: model.isResizing,
-            isMagnified: createMemo(() => {
-                const treeState = model.localTreeStateAtom();
-                return treeState.magnifiedNodeId === nodeid;
-            }),
-            isEphemeral: createMemo(() => {
-                const ephemeralNode = model.ephemeralNode();
-                return ephemeralNode?.id === nodeid;
-            }),
-            addEphemeralNodeToLayout: () => model.addEphemeralNodeToLayout(),
-            animationTimeS: model.animationTimeS,
-            ready: model.ready,
-            disablePointerEvents: model.activeDrag,
-            onClose: () => {
-                fireAndForget(() => model.closeNode(nodeid));
-            },
-            toggleMagnify: () => model.magnifyNodeToggle(nodeid),
-            focusNode: () => model.focusNode(nodeid),
-            dragHandleRef: { current: null as HTMLDivElement | null },
-            displayContainerRef: model.displayContainerRef,
+        // Create memos inside the model's own reactive root so they survive
+        // component mount/unmount cycles during tab switches.
+        model.runInModelRoot(() => {
+            model.nodeModels.set(nodeid, {
+                additionalProps: addlPropsAtom,
+                innerRect: createMemo(() => {
+                    const addlProps = addlPropsAtom();
+                    const numLeafs = model.numLeafs();
+                    const gapSizePx = model.gapSizePx();
+                    if (numLeafs > 1 && addlProps?.rect && addlProps?.transform) {
+                        return {
+                            width: `${addlProps.transform.width} - ${gapSizePx}px`,
+                            height: `${addlProps.transform.height} - ${gapSizePx}px`,
+                        } as CSSProperties;
+                    } else {
+                        return null;
+                    }
+                }),
+                nodeId: nodeid,
+                blockId,
+                blockNum: createMemo(() => model.leafOrder().findIndex((leafEntry) => leafEntry.nodeid === nodeid) + 1),
+                isFocused: createMemo(() => {
+                    const treeState = model.localTreeStateAtom();
+                    return treeState.focusedNodeId === nodeid;
+                }),
+                numLeafs: model.numLeafs,
+                isResizing: model.isResizing,
+                isMagnified: createMemo(() => {
+                    const treeState = model.localTreeStateAtom();
+                    return treeState.magnifiedNodeId === nodeid;
+                }),
+                isEphemeral: createMemo(() => {
+                    const ephemeralNode = model.ephemeralNode();
+                    return ephemeralNode?.id === nodeid;
+                }),
+                addEphemeralNodeToLayout: () => model.addEphemeralNodeToLayout(),
+                animationTimeS: model.animationTimeS,
+                ready: model.ready,
+                disablePointerEvents: model.activeDrag,
+                onClose: () => {
+                    fireAndForget(() => model.closeNode(nodeid));
+                },
+                toggleMagnify: () => model.magnifyNodeToggle(nodeid),
+                focusNode: () => model.focusNode(nodeid),
+                dragHandleRef: { current: null as HTMLDivElement | null },
+                displayContainerRef: model.displayContainerRef,
+            });
         });
     }
     const nodeModel = model.nodeModels.get(nodeid);
@@ -103,11 +107,13 @@ export function getNodeByBlockId(model: LayoutModel, blockId: string): LayoutNod
  * @returns A signal accessor containing the additional properties associated with the given node.
  */
 export function getNodeAdditionalPropertiesAtom(model: LayoutModel, nodeId: string): () => LayoutNodeAdditionalProps {
-    return createMemo(() => {
-        const addlProps = model.additionalProps();
-        if (addlProps.hasOwnProperty(nodeId)) return addlProps[nodeId];
-        return undefined;
-    });
+    return model.runInModelRoot(() =>
+        createMemo(() => {
+            const addlProps = model.additionalProps();
+            if (addlProps.hasOwnProperty(nodeId)) return addlProps[nodeId];
+            return undefined;
+        })
+    );
 }
 
 /**

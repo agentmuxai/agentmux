@@ -53,7 +53,11 @@ export function getLayoutModelForStaticTab() {
 }
 
 export function deleteLayoutModelForTab(tabId: string) {
-    if (layoutModelMap.has(tabId)) layoutModelMap.delete(tabId);
+    const model = layoutModelMap.get(tabId);
+    if (model) {
+        model.dispose();
+        layoutModelMap.delete(tabId);
+    }
 }
 
 function useLayoutModel(tabAtom: () => Tab): LayoutModel {

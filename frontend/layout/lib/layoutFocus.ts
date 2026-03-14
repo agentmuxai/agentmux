@@ -14,6 +14,7 @@ import type { LayoutModel } from "./layoutModel";
  */
 export function validateFocusedNode(model: LayoutModel, leafOrder: LeafOrderEntry[]) {
     if (model.treeState.focusedNodeId !== model.focusedNodeId) {
+        console.log("[focus:validate] mismatch treeState.focusedNodeId=", model.treeState.focusedNodeId, "model.focusedNodeId=", model.focusedNodeId, "stack=", [...model.focusedNodeIdStack], "leafOrder=", leafOrder.map(l => l.nodeid));
         // Remove duplicates and stale entries from focus stack.
         const newFocusedNodeIdStack: string[] = [];
         for (const id of model.focusedNodeIdStack) {
@@ -21,17 +22,21 @@ export function validateFocusedNode(model: LayoutModel, leafOrder: LeafOrderEntr
                 newFocusedNodeIdStack.push(id);
         }
         model.focusedNodeIdStack = newFocusedNodeIdStack;
+        console.log("[focus:validate] cleaned stack=", [...newFocusedNodeIdStack]);
 
         // Update the focused node and stack based on the changes in the tree state.
         if (!model.treeState.focusedNodeId) {
             if (model.focusedNodeIdStack.length > 0) {
                 model.treeState.focusedNodeId = model.focusedNodeIdStack.shift();
+                console.log("[focus:validate] restored from stack:", model.treeState.focusedNodeId);
             } else if (leafOrder.length > 0) {
                 // If no nodes are in the stack, use the top left node in the layout.
                 model.treeState.focusedNodeId = leafOrder[0].nodeid;
+                console.log("[focus:validate] fallback to first leaf:", model.treeState.focusedNodeId);
             }
         }
         model.focusedNodeIdStack.unshift(model.treeState.focusedNodeId);
+        console.log("[focus:validate] final focusedNodeId=", model.treeState.focusedNodeId, "stack=", [...model.focusedNodeIdStack]);
     }
 }
 
@@ -140,13 +145,14 @@ export function switchNodeFocusByBlockNum(model: LayoutModel, newBlockNum: numbe
  */
 export function focusNode(model: LayoutModel, nodeId: string) {
     if (model.focusedNodeId === nodeId) return;
+    console.log("[focus:focusNode] changing focus from", model.focusedNodeId, "to", nodeId);
     let layoutNode = findNode(model.treeState?.rootNode, nodeId);
     if (!layoutNode) {
         const ephemeralNode = model.getter(model.ephemeralNode);
         if (ephemeralNode?.id === nodeId) {
             layoutNode = ephemeralNode;
         } else {
-            console.error("unable to focus node, cannot find it in tree", nodeId);
+            console.error("[focus:focusNode] unable to focus node, cannot find it in tree", nodeId);
             return;
         }
     }

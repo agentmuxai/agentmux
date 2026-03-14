@@ -4,10 +4,15 @@
 // Tauri bootstrap with verbose logging.
 // This is the true entry point for Tauri builds.
 
+import { initLogPipe } from "./log/log-pipe";
 import { setupTauriApi } from "./tauri-init";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { readTextFile, exists } from "@tauri-apps/plugin-fs";
+
+// Pipe all console.log/warn/error to the Rust host log file.
+// Must run before any other code so early messages are captured.
+initLogPipe();
 
 // Static CSS imports so Vite includes them in the HTML <link> tags.
 // wave.ts is dynamically imported (for error handling), but its CSS must

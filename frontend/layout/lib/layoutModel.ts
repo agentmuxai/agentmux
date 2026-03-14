@@ -7,7 +7,7 @@ import { RpcApi } from "@/app/store/wshclientapi";
 import { TabRpcClient } from "@/app/store/wshrpcutil";
 import { atomWithThrottle, boundNumber, createSignalAtom, SignalAtom } from "@/util/util";
 import type { Properties as CSSProperties } from "csstype";
-import { createMemo } from "solid-js";
+import { createMemo, createRoot, getOwner, runWithOwner, Owner } from "solid-js";
 import { getLayoutStateAtomFromTab } from "./layoutAtom";
 import { findNode } from "./layoutNode";
 import {
@@ -293,6 +293,37 @@ export class LayoutModel {
      */
     isContainerResizing: SignalAtom<boolean>;
 
+    /**
+     * Dispose function for the model's reactive root.
+     * @internal
+     */
+    private _disposeRoot: () => void;
+    /**
+     * The reactive owner for this model's long-lived memos.
+     * Memos created under this owner survive component mount/unmount cycles.
+     * @internal
+     */
+    private _modelOwner: Owner;
+
+    /**
+     * Run a function inside this model's reactive root.
+     * Use this for creating memos that must survive tab switches.
+     */
+    runInModelRoot<T>(fn: () => T): T {
+        return runWithOwner(this._modelOwner, fn);
+    }
+
+    /**
+     * Dispose the model's reactive root and all memos created under it.
+     */
+    dispose() {
+        if (this._disposeRoot) {
+            this._disposeRoot();
+            this._disposeRoot = null;
+            this._modelOwner = null;
+        }
+    }
+
     constructor(
         tabAtom: () => Tab,
         renderContent?: ContentRenderer,
@@ -301,6 +332,14 @@ export class LayoutModel {
         gapSizePx?: number,
         animationTimeS?: number
     ) {
+        // Create a long-lived reactive root for this model.
+        // All memos created here (and via runInModelRoot) survive component
+        // mount/unmount cycles during tab switches.
+        createRoot((dispose) => {
+            this._disposeRoot = dispose;
+            this._modelOwner = getOwner();
+        });
+
         this.tabAtom = tabAtom;
         this.renderContent = renderContent;
         this.renderPreview = renderPreview;
