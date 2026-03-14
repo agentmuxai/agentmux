@@ -514,3 +514,232 @@
         accent-color: var(--accent-color, #a78bfa);
     }
 }
+
+// ── Section tabs (Content / Skills / History) ──────────────────────────────
+
+.forge-section-tabs {
+    display: flex;
+    gap: 2px;
+    margin-bottom: 8px;
+}
+
+.forge-section-tab {
+    padding: 5px 14px;
+    background: transparent;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    color: var(--secondary-text-color);
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+
+    &:hover {
+        background: var(--highlight-bg-color);
+        color: var(--main-text-color);
+    }
+
+    &.active {
+        background: var(--accent-color, #a78bfa);
+        border-color: var(--accent-color, #a78bfa);
+        color: #fff;
+    }
+}
+
+.forge-section-body {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+// ── Skills panel ─────────────────────────────────────────────────────────────
+
+.forge-skills-panel {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    overflow: hidden;
+}
+
+.forge-skills-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    flex: 1;
+    overflow-y: auto;
+}
+
+.forge-skills-footer {
+    margin-top: 10px;
+    display: flex;
+    justify-content: flex-start;
+}
+
+// ── Skill card ──────────────────────────────────────────────────────────────
+
+.forge-skill-card {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    background: var(--block-bg-color);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+}
+
+.forge-skill-card-info {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    overflow: hidden;
+    gap: 2px;
+}
+
+.forge-skill-card-top {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.forge-skill-card-name {
+    font-weight: 500;
+    color: var(--main-text-color);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.forge-skill-type-badge {
+    font-size: 10px;
+    padding: 1px 6px;
+    background: var(--highlight-bg-color);
+    border-radius: 3px;
+    color: var(--secondary-text-color);
+    white-space: nowrap;
+}
+
+.forge-skill-card-trigger {
+    font-size: 11px;
+    color: var(--accent-color, #a78bfa);
+    font-family: var(--termfontfamily, monospace);
+}
+
+.forge-skill-card-desc {
+    font-size: 11px;
+    color: var(--secondary-text-color);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+// ── Skill form ──────────────────────────────────────────────────────────────
+
+.forge-skill-form {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    flex: 1;
+    overflow-y: auto;
+
+    form {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+    }
+}
+
+.forge-skill-form-header {
+    margin-bottom: 4px;
+}
+
+.forge-skill-content {
+    min-height: 100px;
+    max-height: 200px;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+// ── History panel ─────────────────────────────────────────────────────────────
+
+.forge-history-panel {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    overflow: hidden;
+}
+
+.forge-history-search {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 8px;
+}
+
+.forge-history-list {
+    flex: 1;
+    overflow-y: auto;
+}
+
+.forge-history-group {
+    margin-bottom: 12px;
+}
+
+.forge-history-date {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--accent-color, #a78bfa);
+    margin-bottom: 4px;
+    padding: 2px 0;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.forge-history-entry {
+    display: flex;
+    gap: 8px;
+    padding: 4px 0;
+    font-size: 12px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.forge-history-time {
+    flex-shrink: 0;
+    color: var(--secondary-text-color);
+    font-family: var(--termfontfamily, monospace);
+    font-size: 11px;
+    min-width: 70px;
+}
+
+.forge-history-text {
+    color: var(--main-text-color);
+    word-break: break-word;
+}
+
+// ── Import overlay ──────────────────────────────────────────────────────────
+
+.forge-import-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+}
+
+.forge-import-dialog {
+    background: var(--block-bg-color);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 16px;
+    min-width: 400px;
+    max-width: 500px;
+
+    form {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+    }
+}
+
+.forge-import-btn {
+    margin-left: 6px;
+}

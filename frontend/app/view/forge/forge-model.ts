@@ -12,12 +12,17 @@ export type ForgeView = "list" | "create" | "edit" | "detail";
 export const CONTENT_TABS = ["soul", "agentmd", "mcp", "env"] as const;
 export type ContentTabId = (typeof CONTENT_TABS)[number];
 
+export type DetailSection = "content" | "skills" | "history";
+
 export const CONTENT_TAB_LABELS: Record<ContentTabId, string> = {
     soul: "Soul",
     agentmd: "Instructions",
     mcp: "MCP",
     env: "Env",
 };
+
+export const SKILL_TYPES = ["prompt", "command", "workflow", "mcp-tool"] as const;
+export type SkillType = (typeof SKILL_TYPES)[number];
 
 export class ForgeViewModel implements ViewModel {
     viewType = "forge";
@@ -44,11 +49,27 @@ export class ForgeViewModel implements ViewModel {
     detailAgentAtom: PrimitiveAtom<ForgeAgent | null> = atom<ForgeAgent | null>(null);
     contentAtom: PrimitiveAtom<Record<string, ForgeContent>> = atom<Record<string, ForgeContent>>({});
     activeTabAtom: PrimitiveAtom<ContentTabId> = atom<ContentTabId>("soul");
+    activeSectionAtom: PrimitiveAtom<DetailSection> = atom<DetailSection>("content");
     contentLoadingAtom: PrimitiveAtom<boolean> = atom(false);
     contentSavingAtom: PrimitiveAtom<boolean> = atom(false);
 
+    // Skills state
+    skillsAtom: PrimitiveAtom<ForgeSkill[]> = atom<ForgeSkill[]>([]);
+    editingSkillAtom: PrimitiveAtom<ForgeSkill | null> = atom<ForgeSkill | null>(null);
+    skillsLoadingAtom: PrimitiveAtom<boolean> = atom(false);
+
+    // History state
+    historyAtom: PrimitiveAtom<ForgeHistory[]> = atom<ForgeHistory[]>([]);
+    historyLoadingAtom: PrimitiveAtom<boolean> = atom(false);
+    historySearchAtom: PrimitiveAtom<string> = atom("");
+
+    // Import state
+    importingAtom: PrimitiveAtom<boolean> = atom(false);
+
     private unsubForgeChanged: (() => void) | null = null;
     private unsubContentChanged: (() => void) | null = null;
+    private unsubSkillsChanged: (() => void) | null = null;
+    private unsubHistoryChanged: (() => void) | null = null;
 
     constructor(blockId: string, nodeModel: BlockNodeModel) {
         this.blockId = blockId;
@@ -61,6 +82,14 @@ export class ForgeViewModel implements ViewModel {
         this.unsubContentChanged = waveEventSubscribe({
             eventType: "forgecontent:changed",
             handler: () => this.reloadContentIfDetail(),
+        });
+        this.unsubSkillsChanged = waveEventSubscribe({
+            eventType: "forgeskills:changed",
+            handler: () => this.reloadSkillsIfDetail(),
+        });
+        this.unsubHistoryChanged = waveEventSubscribe({
+            eventType: "forgehistory:changed",
+            handler: () => this.reloadHistoryIfDetail(),
         });
     }
 
@@ -139,7 +168,10 @@ export class ForgeViewModel implements ViewModel {
         const { globalStore } = await import("@/app/store/global");
         globalStore.set(this.detailAgentAtom, agent);
         globalStore.set(this.activeTabAtom, "soul");
+        globalStore.set(this.activeSectionAtom, "content");
         globalStore.set(this.contentAtom, {});
+        globalStore.set(this.skillsAtom, []);
+        globalStore.set(this.historyAtom, []);
         globalStore.set(this.viewAtom, "detail");
         await this.loadContent(agent.id);
     };
@@ -148,6 +180,8 @@ export class ForgeViewModel implements ViewModel {
         const { globalStore } = await import("@/app/store/global");
         globalStore.set(this.detailAgentAtom, null);
         globalStore.set(this.contentAtom, {});
+        globalStore.set(this.skillsAtom, []);
+        globalStore.set(this.historyAtom, []);
         globalStore.set(this.viewAtom, "list");
     };
 
@@ -199,6 +233,124 @@ export class ForgeViewModel implements ViewModel {
         }
     };
 
+    // ── Skills methods ──────────────────────────────────────────────────
+
+    loadSkills = async (agentId: string): Promise<void> => {
+        const { globalStore } = await import("@/app/store/global");
+        globalStore.set(this.skillsLoadingAtom, true);
+        try {
+            const skills = await RpcApi.ListForgeSkillsCommand(TabRpcClient, { agent_id: agentId });
+            globalStore.set(this.skillsAtom, skills ?? []);
+        } catch {
+            // silently ignore
+        } finally {
+            globalStore.set(this.skillsLoadingAtom, false);
+        }
+    };
+
+    createSkill = async (data: CommandCreateForgeSkillData): Promise<void> => {
+        const { globalStore } = await import("@/app/store/global");
+        globalStore.set(this.errorAtom, null);
+        try {
+            await RpcApi.CreateForgeSkillCommand(TabRpcClient, data);
+            globalStore.set(this.editingSkillAtom, null);
+        } catch (e: any) {
+            globalStore.set(this.errorAtom, String(e?.message ?? e));
+        }
+    };
+
+    updateSkill = async (data: CommandUpdateForgeSkillData): Promise<void> => {
+        const { globalStore } = await import("@/app/store/global");
+        globalStore.set(this.errorAtom, null);
+        try {
+            await RpcApi.UpdateForgeSkillCommand(TabRpcClient, data);
+            globalStore.set(this.editingSkillAtom, null);
+        } catch (e: any) {
+            globalStore.set(this.errorAtom, String(e?.message ?? e));
+        }
+    };
+
+    deleteSkill = async (id: string): Promise<void> => {
+        try {
+            await RpcApi.DeleteForgeSkillCommand(TabRpcClient, { id });
+        } catch {
+            // silently ignore
+        }
+    };
+
+    private reloadSkillsIfDetail = async (): Promise<void> => {
+        const { globalStore } = await import("@/app/store/global");
+        const view = globalStore.get(this.viewAtom);
+        const agent = globalStore.get(this.detailAgentAtom);
+        if (view === "detail" && agent) {
+            await this.loadSkills(agent.id);
+        }
+    };
+
+    // ── History methods ──────────────────────────────────────────────────
+
+    loadHistory = async (agentId: string, sessionDate?: string): Promise<void> => {
+        const { globalStore } = await import("@/app/store/global");
+        globalStore.set(this.historyLoadingAtom, true);
+        try {
+            const entries = await RpcApi.ListForgeHistoryCommand(TabRpcClient, {
+                agent_id: agentId,
+                session_date: sessionDate,
+                limit: 100,
+            });
+            globalStore.set(this.historyAtom, entries ?? []);
+        } catch {
+            // silently ignore
+        } finally {
+            globalStore.set(this.historyLoadingAtom, false);
+        }
+    };
+
+    searchHistory = async (agentId: string, query: string): Promise<void> => {
+        const { globalStore } = await import("@/app/store/global");
+        globalStore.set(this.historyLoadingAtom, true);
+        try {
+            const entries = await RpcApi.SearchForgeHistoryCommand(TabRpcClient, {
+                agent_id: agentId,
+                query,
+                limit: 100,
+            });
+            globalStore.set(this.historyAtom, entries ?? []);
+        } catch {
+            // silently ignore
+        } finally {
+            globalStore.set(this.historyLoadingAtom, false);
+        }
+    };
+
+    private reloadHistoryIfDetail = async (): Promise<void> => {
+        const { globalStore } = await import("@/app/store/global");
+        const view = globalStore.get(this.viewAtom);
+        const agent = globalStore.get(this.detailAgentAtom);
+        const section = globalStore.get(this.activeSectionAtom);
+        if (view === "detail" && agent && section === "history") {
+            await this.loadHistory(agent.id);
+        }
+    };
+
+    // ── Import from Claw ──────────────────────────────────────────────────
+
+    importFromClaw = async (workspacePath: string, agentName: string): Promise<void> => {
+        const { globalStore } = await import("@/app/store/global");
+        globalStore.set(this.importingAtom, true);
+        globalStore.set(this.errorAtom, null);
+        try {
+            await RpcApi.ImportForgeFromClawCommand(TabRpcClient, {
+                workspace_path: workspacePath,
+                agent_name: agentName,
+            });
+        } catch (e: any) {
+            globalStore.set(this.errorAtom, String(e?.message ?? e));
+        } finally {
+            globalStore.set(this.importingAtom, false);
+        }
+    };
+
     // ── Edit from detail ──────────────────────────────────────────────────
 
     startEditFromDetail = async (): Promise<void> => {
@@ -218,5 +370,7 @@ export class ForgeViewModel implements ViewModel {
     dispose(): void {
         this.unsubForgeChanged?.();
         this.unsubContentChanged?.();
+        this.unsubSkillsChanged?.();
+        this.unsubHistoryChanged?.();
     }
 }

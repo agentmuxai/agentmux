@@ -12,3 +12,6 @@ pub mod wstore;
 pub use error::StoreError;
 pub use wstore::ForgeAgent;
 pub use wstore::ForgeContent;
+#[allow(unused_imports)]
+pub use wstore::ForgeHistory;
+pub use wstore::ForgeSkill;
