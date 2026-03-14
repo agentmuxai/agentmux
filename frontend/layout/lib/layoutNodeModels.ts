@@ -24,6 +24,11 @@ export function getNodeModel(model: LayoutModel, node: LayoutNode): NodeModel {
             model.nodeModels.set(nodeid, {
                 additionalProps: addlPropsAtom,
                 innerRect: createMemo(() => {
+                    const treeState = model.localTreeStateAtom();
+                    // When magnified, return null so content fills the overlay container naturally
+                    if (treeState.magnifiedNodeId === nodeid) {
+                        return null;
+                    }
                     const addlProps = addlPropsAtom();
                     const numLeafs = model.numLeafs();
                     const gapSizePx = model.gapSizePx();

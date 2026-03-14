@@ -113,21 +113,9 @@ function updateTreeHelper(
         }
 
         if (addlProps) {
-            if (model.magnifiedNodeId === node.id) {
-                const magnifiedNodeMarginPct = (1 - magnifiedNodeSizePct) / 2;
-                const transform = setTransform(
-                    {
-                        top: boundingRect.height * magnifiedNodeMarginPct,
-                        left: boundingRect.width * magnifiedNodeMarginPct,
-                        width: boundingRect.width * magnifiedNodeSizePct,
-                        height: boundingRect.height * magnifiedNodeSizePct,
-                    },
-                    true,
-                    true,
-                    "var(--zindex-layout-magnified-node)"
-                );
-                addlProps.transform = transform;
-            }
+            // Magnified pane is now rendered in a separate overlay container (MagnifiedPaneOverlay),
+            // so we no longer override its transform/z-index here. The tile-node slot stays at its
+            // original position but is hidden via CSS (tile-hidden class).
             if (model.lastMagnifiedNodeId === node.id) {
                 addlProps.transform.zIndex = "var(--zindex-layout-last-magnified-node)";
             } else if (model.lastEphemeralNodeId === node.id) {
