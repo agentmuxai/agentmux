@@ -528,6 +528,21 @@ class RpcApiType {
         return client.wshRpcCall("deleteforgeagent", data, opts);
     }
 
+    // command "getforgecontent" [call]
+    GetForgeContentCommand(client: WshClient, data: CommandGetForgeContentData, opts?: RpcOpts): Promise<ForgeContent | null> {
+        return client.wshRpcCall("getforgecontent", data, opts);
+    }
+
+    // command "setforgecontent" [call]
+    SetForgeContentCommand(client: WshClient, data: CommandSetForgeContentData, opts?: RpcOpts): Promise<ForgeContent> {
+        return client.wshRpcCall("setforgecontent", data, opts);
+    }
+
+    // command "getallforgecontent" [call]
+    GetAllForgeContentCommand(client: WshClient, data: CommandGetAllForgeContentData, opts?: RpcOpts): Promise<ForgeContent[]> {
+        return client.wshRpcCall("getallforgecontent", data, opts);
+    }
+
 }
 
 export const RpcApi = new RpcApiType();

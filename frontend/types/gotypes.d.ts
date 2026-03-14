@@ -201,7 +201,21 @@ declare global {
         icon: string;
         provider: string;
         description: string;
+        working_directory: string;
+        shell: string;
+        provider_flags: string;
+        auto_start: number;
+        restart_on_crash: number;
+        idle_timeout_minutes: number;
         created_at: number;
+    };
+
+    // ForgeContent
+    type ForgeContent = {
+        agent_id: string;
+        content_type: string;
+        content: string;
+        updated_at: number;
     };
 
     // CommandCreateForgeAgentData
@@ -210,6 +224,12 @@ declare global {
         icon: string;
         provider: string;
         description: string;
+        working_directory?: string;
+        shell?: string;
+        provider_flags?: string;
+        auto_start?: number;
+        restart_on_crash?: number;
+        idle_timeout_minutes?: number;
     };
 
     // CommandUpdateForgeAgentData
@@ -219,11 +239,35 @@ declare global {
         icon: string;
         provider: string;
         description: string;
+        working_directory?: string;
+        shell?: string;
+        provider_flags?: string;
+        auto_start?: number;
+        restart_on_crash?: number;
+        idle_timeout_minutes?: number;
     };
 
     // CommandDeleteForgeAgentData
     type CommandDeleteForgeAgentData = {
         id: string;
+    };
+
+    // CommandGetForgeContentData
+    type CommandGetForgeContentData = {
+        agent_id: string;
+        content_type: string;
+    };
+
+    // CommandSetForgeContentData
+    type CommandSetForgeContentData = {
+        agent_id: string;
+        content_type: string;
+        content: string;
+    };
+
+    // CommandGetAllForgeContentData
+    type CommandGetAllForgeContentData = {
+        agent_id: string;
     };
 
     // wshrpc.CommandDeleteBlockData
