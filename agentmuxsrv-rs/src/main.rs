@@ -119,6 +119,9 @@ async fn main() {
         tracing::info!("First launch: created initial data");
     }
 
+    // Auto-seed Forge agents on first launch (or empty DB)
+    backend::forge_seed::auto_seed_on_startup(&wstore);
+
     // Event infrastructure
     let event_bus = Arc::new(EventBus::new());
     let broker = Arc::new(Broker::new());

@@ -76,6 +76,7 @@ pub fn run_forge_migrations(conn: &Connection) -> Result<(), StoreError> {
         );",
     )?;
     run_forge_v2_migrations(conn)?;
+    run_forge_v3_migrations(conn)?;
     Ok(())
 }
 
@@ -154,6 +155,38 @@ pub fn run_forge_v2_migrations(conn: &Connection) -> Result<(), StoreError> {
             ON db_forge_history(agent_id, session_date);",
     )?;
 
+    Ok(())
+}
+
+/// Forge v3 migrations: add agent_type, environment, agent_bus_id, and is_seeded
+/// to support host/container agent classification and seed-based preloading.
+pub fn run_forge_v3_migrations(conn: &Connection) -> Result<(), StoreError> {
+    let alter_statements = [
+        "ALTER TABLE db_forge_agents ADD COLUMN agent_type TEXT NOT NULL DEFAULT 'standalone'",
+        "ALTER TABLE db_forge_agents ADD COLUMN environment TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE db_forge_agents ADD COLUMN agent_bus_id TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE db_forge_agents ADD COLUMN is_seeded INTEGER NOT NULL DEFAULT 0",
+    ];
+    for stmt in &alter_statements {
+        match conn.execute_batch(stmt) {
+            Ok(_) => {}
+            Err(e) => {
+                let msg = e.to_string();
+                if msg.contains("duplicate column") {
+                    // Column already exists, skip
+                } else {
+                    return Err(StoreError::Sqlite(
+                        match e {
+                            rusqlite::Error::SqliteFailure(code, _) => {
+                                rusqlite::Error::SqliteFailure(code, Some(msg))
+                            }
+                            other => other,
+                        },
+                    ));
+                }
+            }
+        }
+    }
     Ok(())
 }
 
