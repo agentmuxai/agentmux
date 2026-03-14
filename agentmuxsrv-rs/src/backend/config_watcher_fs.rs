@@ -172,16 +172,14 @@ pub fn merge_settings_to_disk(new_keys: serde_json::Map<String, serde_json::Valu
     let settings_dir = resolve_settings_dir();
     let settings_path = settings_dir.join(wconfig::SETTINGS_FILE);
 
-    let mut current = wconfig::read_settings_raw(&settings_path);
+    let mut current = wconfig::read_settings_raw_jsonc(&settings_path);
     current.extend(new_keys);
 
     // Remove keys explicitly set to null (deletion semantics)
     current.retain(|_, v| !v.is_null());
 
-    let output = serde_json::to_string_pretty(&serde_json::Value::Object(current))
-        .map_err(|e| format!("serialize settings: {e}"))?;
-
-    std::fs::write(&settings_path, output)
+    let merged = wconfig::merge_into_template(wconfig::SETTINGS_TEMPLATE, &current);
+    std::fs::write(&settings_path, &merged)
         .map_err(|e| format!("write settings.json: {e}"))?;
 
     tracing::info!(path = %settings_path.display(), "settings.json updated via setconfig");

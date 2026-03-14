@@ -22,6 +22,7 @@ use super::waveobj::MetaMapType;
 // ---- Config file constants ----
 
 pub const SETTINGS_FILE: &str = "settings.json";
+pub const SETTINGS_TEMPLATE: &str = include_str!("../../../settings-template.jsonc");
 pub const CONNECTIONS_FILE: &str = "connections.json";
 pub const PROFILES_FILE: &str = "profiles.json";
 
@@ -771,23 +772,102 @@ pub fn read_config_file<T: serde::de::DeserializeOwned + Default>(
 /// Remove trailing commas before `}` or `]` in JSON text.
 /// This handles the common JSONC pattern where commented-out lines follow a value,
 /// leaving a trailing comma that strict JSON parsers reject.
-/// Read `settings.json` as a raw `serde_json::Value::Object`, stripping comments/trailing commas.
-/// Returns an empty object if the file doesn't exist or can't be parsed.
-/// Used by the `setconfig` handler to merge individual keys without losing unknown fields.
-pub fn read_settings_raw(path: &PathBuf) -> serde_json::Map<String, serde_json::Value> {
+/// Read `settings.json` as a raw `serde_json::Value::Object`, stripping JSONC comments
+/// and trailing commas. Returns an empty object if the file doesn't exist or can't be parsed.
+pub fn read_settings_raw_jsonc(path: &std::path::Path) -> serde_json::Map<String, serde_json::Value> {
     if !path.exists() {
         return serde_json::Map::new();
     }
     match std::fs::read_to_string(path) {
-        Ok(content) => {
-            let stripped = strip_trailing_commas(&content);
-            match serde_json::from_str::<serde_json::Value>(&stripped) {
-                Ok(serde_json::Value::Object(map)) => map,
-                _ => serde_json::Map::new(),
-            }
-        }
+        Ok(content) => parse_jsonc_to_map(&content),
         Err(_) => serde_json::Map::new(),
     }
+}
+
+/// Parse a JSONC string (with // comments and trailing commas) into a flat JSON map.
+pub fn parse_jsonc_to_map(content: &str) -> serde_json::Map<String, serde_json::Value> {
+    let stripped_comments = json_comments::StripComments::new(content.as_bytes());
+    let mut json_bytes = Vec::new();
+    std::io::Read::read_to_end(&mut std::io::BufReader::new(stripped_comments), &mut json_bytes)
+        .unwrap_or_default();
+    let json_str = strip_trailing_commas(&String::from_utf8_lossy(&json_bytes));
+    match serde_json::from_str::<serde_json::Value>(&json_str) {
+        Ok(serde_json::Value::Object(map)) => map,
+        _ => serde_json::Map::new(),
+    }
+}
+
+/// Merge user settings into a JSONC template string.
+///
+/// For each user key:
+/// - If the key exists as a commented-out line in the template (`// "key": ...`),
+///   that line is replaced with the uncommented user value.
+/// - If the key is NOT in the template, it is appended before the closing `}`.
+///
+/// The result is always a valid JSONC file with the full template structure intact.
+pub fn merge_into_template(
+    template: &str,
+    user_settings: &serde_json::Map<String, serde_json::Value>,
+) -> String {
+    if user_settings.is_empty() {
+        return template.to_string();
+    }
+
+    let mut remaining: std::collections::HashMap<&str, &serde_json::Value> =
+        user_settings.iter().map(|(k, v)| (k.as_str(), v)).collect();
+    let mut lines: Vec<String> = Vec::new();
+
+    for line in template.lines() {
+        if let Some(key) = extract_commented_setting_key(line) {
+            if let Some(value) = remaining.remove(key) {
+                // Preserve the original indentation
+                let indent: String = line.chars().take_while(|c| c.is_whitespace()).collect();
+                let val_str = serde_json::to_string(value).unwrap_or_default();
+                lines.push(format!("{}\"{}\": {},", indent, key, val_str));
+                continue;
+            }
+        }
+        lines.push(line.to_string());
+    }
+
+    // Append any remaining user settings not found in the template
+    if !remaining.is_empty() {
+        // Find the last `}` and insert before it
+        if let Some(brace_pos) = lines.iter().rposition(|l| l.trim() == "}") {
+            let mut extra: Vec<String> = Vec::new();
+            extra.push(String::new());
+            extra.push("    // -- User Overrides --".to_string());
+            let mut sorted_keys: Vec<&&str> = remaining.keys().collect();
+            sorted_keys.sort();
+            for key in sorted_keys {
+                let value = remaining[*key];
+                let val_str = serde_json::to_string(value).unwrap_or_default();
+                extra.push(format!("    \"{}\": {},", key, val_str));
+            }
+            for (i, line) in extra.into_iter().enumerate() {
+                lines.insert(brace_pos + i, line);
+            }
+        }
+    }
+
+    let mut result = lines.join("\n");
+    // Ensure file ends with newline
+    if !result.ends_with('\n') {
+        result.push('\n');
+    }
+    result
+}
+
+/// Extract the settings key from a commented-out template line.
+/// Matches lines like: `    // "some:key":   value,`
+/// Returns `Some("some:key")` or `None`.
+fn extract_commented_setting_key(line: &str) -> Option<&str> {
+    let trimmed = line.trim_start();
+    let rest = trimmed.strip_prefix("//")?;
+    let rest = rest.trim_start();
+    let rest = rest.strip_prefix('"')?;
+    let end = rest.find('"')?;
+    Some(&rest[..end])
 }
 
 fn strip_trailing_commas(input: &str) -> String {
@@ -1433,5 +1513,93 @@ mod tests {
         assert!(json.contains("\"ai:apitype\":\"anthropic\""));
         assert!(json.contains("\"display:name\":\"Claude Opus\""));
         assert!(json.contains("\"display:order\":1.0"));
+    }
+
+    // -- merge_into_template --
+
+    #[test]
+    fn test_merge_into_template_empty_settings() {
+        let template = "// header\n{\n    // \"foo:bar\": 1,\n}\n";
+        let settings = serde_json::Map::new();
+        let result = merge_into_template(template, &settings);
+        assert_eq!(result, template);
+    }
+
+    #[test]
+    fn test_merge_into_template_uncomments_known_key() {
+        let template = "{\n    // \"window:transparent\":       false,\n}\n";
+        let mut settings = serde_json::Map::new();
+        settings.insert("window:transparent".to_string(), serde_json::Value::Bool(true));
+        let result = merge_into_template(template, &settings);
+        assert!(result.contains("    \"window:transparent\": true,"));
+        assert!(!result.contains("//"));
+    }
+
+    #[test]
+    fn test_merge_into_template_appends_unknown_key() {
+        let template = "{\n    // \"term:fontsize\":            12,\n}\n";
+        let mut settings = serde_json::Map::new();
+        settings.insert(
+            "widget:order".to_string(),
+            serde_json::json!(["agent", "settings"]),
+        );
+        let result = merge_into_template(template, &settings);
+        assert!(result.contains("// -- User Overrides --"));
+        assert!(result.contains("\"widget:order\": [\"agent\",\"settings\"]"));
+        // Template line should still be commented
+        assert!(result.contains("// \"term:fontsize\""));
+    }
+
+    #[test]
+    fn test_merge_into_template_mixed() {
+        let template = "{\n    // \"window:blur\":              false,\n    // \"term:fontsize\":            12,\n}\n";
+        let mut settings = serde_json::Map::new();
+        settings.insert("window:blur".to_string(), serde_json::Value::Bool(true));
+        settings.insert("custom:key".to_string(), serde_json::json!("hello"));
+        let result = merge_into_template(template, &settings);
+        // Known key uncommented
+        assert!(result.contains("    \"window:blur\": true,"));
+        // Other known key still commented
+        assert!(result.contains("// \"term:fontsize\""));
+        // Unknown key appended
+        assert!(result.contains("\"custom:key\": \"hello\""));
+    }
+
+    #[test]
+    fn test_merge_into_template_idempotent() {
+        let template = SETTINGS_TEMPLATE;
+        let mut settings = serde_json::Map::new();
+        settings.insert("window:transparent".to_string(), serde_json::Value::Bool(true));
+        settings.insert("widget:order".to_string(), serde_json::json!(["a", "b"]));
+
+        let first = merge_into_template(template, &settings);
+        // Parse the result back and merge again
+        let parsed = parse_jsonc_to_map(&first);
+        let second = merge_into_template(template, &parsed);
+        assert_eq!(first, second, "merge_into_template should be idempotent");
+    }
+
+    #[test]
+    fn test_merge_into_template_preserves_indentation() {
+        let template = "{\n        // \"deep:key\":   42,\n}\n";
+        let mut settings = serde_json::Map::new();
+        settings.insert("deep:key".to_string(), serde_json::json!(99));
+        let result = merge_into_template(template, &settings);
+        assert!(result.contains("        \"deep:key\": 99,"));
+    }
+
+    #[test]
+    fn test_parse_jsonc_to_map() {
+        let content = r#"// comment
+{
+    // "commented": true,
+    "active": 42,
+    "name": "test",
+}
+"#;
+        let map = parse_jsonc_to_map(content);
+        assert_eq!(map.get("active"), Some(&serde_json::json!(42)));
+        assert_eq!(map.get("name"), Some(&serde_json::json!("test")));
+        assert!(map.get("commented").is_none());
     }
 }

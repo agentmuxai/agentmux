@@ -1,92 +1,10 @@
+use std::io::Read;
+
 use tauri::Manager;
 
 use crate::state::AppState;
 
-const DEFAULT_SETTINGS_TEMPLATE: &str = r#"// AgentMux Settings
-// Save this file to apply changes immediately.
-// Uncomment a line to override its default value.
-//
-// Docs: https://docs.agentmux.ai/settings
-{
-    // -- Terminal --
-    // "term:fontsize":            12,
-    // "term:fontfamily":          "JetBrains Mono",
-    // "term:theme":               "default-dark",
-    // "term:scrollback":          1000,
-    // "term:copyonselect":        true,
-    // "term:transparency":        0.5,
-    // "term:localshellpath":      "/bin/bash",
-    // "term:localshellopts":      [],
-    // "term:disablewebgl":        false,
-    // "term:allowbracketedpaste": true,
-    // "term:shiftenternewline":   false,
-
-    // -- AI --
-    // "ai:preset":     "",
-    // "ai:apitype":    "anthropic",
-    // "ai:baseurl":    "",
-    // "ai:apitoken":   "",
-    // "ai:model":      "claude-sonnet-4-6",
-    // "ai:maxtokens":  4096,
-    // "ai:timeoutms":  60000,
-    // "ai:fontsize":   14,
-    // "ai:fixedfontsize": 14,
-
-    // -- Editor --
-    // "editor:fontsize":          14,
-    // "editor:minimapenabled":    false,
-    // "editor:stickyscrollenabled": false,
-    // "editor:wordwrap":          true,
-
-    // -- Window --
-    // "window:transparent":       false,
-    // "window:blur":              false,
-    // "window:opacity":           1.0,
-    // "window:bgcolor":           "",
-    // "window:zoom":              1.0,
-    // "window:tilegapsize":       3,
-    // "window:showmenubar":       false,
-    // "window:nativetitlebar":    false,
-    // "window:confirmclose":      false,
-    // "window:savelastwindow":    true,
-    // "window:dimensions":        "",
-    // "window:reducedmotion":     false,
-    // "window:magnifiedblockopacity": 0.6,
-    // "window:magnifiedblocksize":    0.9,
-    // "window:maxtabcachesize":   10,
-    // "window:disablehardwareacceleration": false,
-
-    // -- App --
-    // "app:globalhotkey":         "",
-    // "app:defaultnewblock":      "",
-    // "app:showoverlayblocknums": false,
-
-    // -- Shell Environment --
-    // "cmd:env":                  {},
-
-    // -- Auto Update --
-    // "autoupdate:enabled":       true,
-    // "autoupdate:installonquit": true,
-    // "autoupdate:channel":       "latest",
-
-    // -- Telemetry --
-    // "telemetry:enabled":        true,
-    // "telemetry:interval":       1.0,
-    // "telemetry:numpoints":      120,
-
-    // -- Connections --
-    // "conn:wshenabled":          true,
-    // "conn:askbeforewshinstall": true,
-
-    // -- Other --
-    // "widget:showhelp":          true,
-    // "widget:icononly":           false,
-    // "blockheader:showblockids": false,
-    // "markdown:fontsize":        14,
-    // "preview:showhiddenfiles":  false,
-    // "tab:preset":               ""
-}
-"#;
+const SETTINGS_TEMPLATE: &str = include_str!("../../../settings-template.jsonc");
 
 /// Get the current OS platform name.
 /// Replaces: ipcMain.on("get-platform") in emain/platform.ts
@@ -140,8 +58,10 @@ pub fn get_config_dir(app: tauri::AppHandle) -> Result<String, String> {
         .map_err(|e| format!("Failed to get config dir: {}", e))
 }
 
-/// Ensure settings.json exists in the config directory, creating the directory
-/// and a default file if needed. Returns the absolute path to settings.json.
+/// Ensure settings.json exists in the config directory with the latest template.
+/// Reads any existing user settings and merges them into the fresh template,
+/// so the file always has the full commented reference plus user overrides.
+/// Returns the absolute path to settings.json.
 #[tauri::command]
 pub fn ensure_settings_file(app: tauri::AppHandle) -> Result<String, String> {
     let config_dir = app
@@ -153,12 +73,152 @@ pub fn ensure_settings_file(app: tauri::AppHandle) -> Result<String, String> {
         .map_err(|e| format!("Failed to create config dir: {}", e))?;
 
     let settings_path = config_dir.join("settings.json");
-    if !settings_path.exists() {
-        std::fs::write(&settings_path, DEFAULT_SETTINGS_TEMPLATE)
-            .map_err(|e| format!("Failed to create settings.json: {}", e))?;
-    }
+
+    // Read existing user values (strips JSONC comments, parses JSON)
+    let existing = read_settings_jsonc(&settings_path);
+
+    // Merge user values into fresh template
+    let merged = merge_into_template(SETTINGS_TEMPLATE, &existing);
+    std::fs::write(&settings_path, &merged)
+        .map_err(|e| format!("Failed to write settings.json: {}", e))?;
 
     Ok(settings_path.to_string_lossy().to_string())
+}
+
+/// Read a JSONC settings file, stripping comments and trailing commas.
+fn read_settings_jsonc(path: &std::path::Path) -> serde_json::Map<String, serde_json::Value> {
+    if !path.exists() {
+        return serde_json::Map::new();
+    }
+    match std::fs::read_to_string(path) {
+        Ok(content) => {
+            let stripped = json_comments::StripComments::new(content.as_bytes());
+            let mut json_bytes = Vec::new();
+            std::io::BufReader::new(stripped)
+                .read_to_end(&mut json_bytes)
+                .unwrap_or_default();
+            let json_str = strip_trailing_commas(&String::from_utf8_lossy(&json_bytes));
+            match serde_json::from_str::<serde_json::Value>(&json_str) {
+                Ok(serde_json::Value::Object(map)) => map,
+                _ => serde_json::Map::new(),
+            }
+        }
+        Err(_) => serde_json::Map::new(),
+    }
+}
+
+/// Remove trailing commas before `}` or `]` in JSON text.
+fn strip_trailing_commas(input: &str) -> String {
+    let mut result = String::with_capacity(input.len());
+    let mut in_string = false;
+    let mut last_comma_pos: Option<usize> = None;
+
+    for ch in input.chars() {
+        if in_string {
+            result.push(ch);
+            if ch == '"' {
+                // Check if this quote is escaped (count preceding backslashes)
+                let backslashes = result[..result.len() - 1]
+                    .chars()
+                    .rev()
+                    .take_while(|&c| c == '\\')
+                    .count();
+                if backslashes % 2 == 0 {
+                    in_string = false;
+                }
+            }
+            continue;
+        }
+        match ch {
+            '"' => {
+                in_string = true;
+                last_comma_pos = None;
+                result.push(ch);
+            }
+            ',' => {
+                last_comma_pos = Some(result.len());
+                result.push(ch);
+            }
+            '}' | ']' => {
+                if let Some(pos) = last_comma_pos {
+                    result.replace_range(pos..pos + 1, " ");
+                }
+                last_comma_pos = None;
+                result.push(ch);
+            }
+            _ if ch.is_whitespace() => {
+                result.push(ch);
+            }
+            _ => {
+                last_comma_pos = None;
+                result.push(ch);
+            }
+        }
+    }
+    result
+}
+
+/// Merge user settings into a JSONC template string.
+/// Commented template lines matching user keys get uncommented with the user value.
+/// Unknown keys are appended in a "User Overrides" section before the closing `}`.
+fn merge_into_template(
+    template: &str,
+    user_settings: &serde_json::Map<String, serde_json::Value>,
+) -> String {
+    if user_settings.is_empty() {
+        return template.to_string();
+    }
+
+    let mut remaining: std::collections::HashMap<&str, &serde_json::Value> =
+        user_settings.iter().map(|(k, v)| (k.as_str(), v)).collect();
+    let mut lines: Vec<String> = Vec::new();
+
+    for line in template.lines() {
+        if let Some(key) = extract_commented_setting_key(line) {
+            if let Some(value) = remaining.remove(key) {
+                let indent: String = line.chars().take_while(|c| c.is_whitespace()).collect();
+                let val_str = serde_json::to_string(value).unwrap_or_default();
+                lines.push(format!("{}\"{}\": {},", indent, key, val_str));
+                continue;
+            }
+        }
+        lines.push(line.to_string());
+    }
+
+    if !remaining.is_empty() {
+        if let Some(brace_pos) = lines.iter().rposition(|l| l.trim() == "}") {
+            let mut extra: Vec<String> = Vec::new();
+            extra.push(String::new());
+            extra.push("    // -- User Overrides --".to_string());
+            let mut sorted_keys: Vec<&&str> = remaining.keys().collect();
+            sorted_keys.sort();
+            for key in sorted_keys {
+                let value = remaining[*key];
+                let val_str = serde_json::to_string(value).unwrap_or_default();
+                extra.push(format!("    \"{}\": {},", key, val_str));
+            }
+            for (i, line) in extra.into_iter().enumerate() {
+                lines.insert(brace_pos + i, line);
+            }
+        }
+    }
+
+    let mut result = lines.join("\n");
+    if !result.ends_with('\n') {
+        result.push('\n');
+    }
+    result
+}
+
+/// Extract the settings key from a commented-out template line.
+/// Matches lines like: `    // "some:key":   value,`
+fn extract_commented_setting_key(line: &str) -> Option<&str> {
+    let trimmed = line.trim_start();
+    let rest = trimmed.strip_prefix("//")?;
+    let rest = rest.trim_start();
+    let rest = rest.strip_prefix('"')?;
+    let end = rest.find('"')?;
+    Some(&rest[..end])
 }
 
 /// Open a file in the best available code editor.

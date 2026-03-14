@@ -900,6 +900,7 @@ mod tests {
             "block-1".to_string(),
             None,
             None,
+            None,
         );
         assert_eq!(ctrl.controller_type(), "shell");
         assert_eq!(ctrl.block_id(), "block-1");
@@ -916,6 +917,7 @@ mod tests {
             "shell".to_string(),
             "tab-1".to_string(),
             "block-1".to_string(),
+            None,
             None,
             None,
         );
@@ -946,6 +948,7 @@ mod tests {
             "block-1".to_string(),
             None,
             None,
+            None,
         );
 
         let mut meta = make_shell_meta();
@@ -968,6 +971,7 @@ mod tests {
             "shell".to_string(),
             "tab-1".to_string(),
             "block-1".to_string(),
+            None,
             None,
             None,
         );
@@ -999,6 +1003,7 @@ mod tests {
             "block-1".to_string(),
             None,
             None,
+            None,
         );
 
         // Set a custom factory that returns a mock with exit code 42
@@ -1021,6 +1026,7 @@ mod tests {
             "shell".to_string(),
             "tab-1".to_string(),
             "block-1".to_string(),
+            None,
             None,
             None,
         );
@@ -1047,6 +1053,7 @@ mod tests {
             "block-1".to_string(),
             None,
             None,
+            None,
         );
 
         let result = ctrl.send_input(BlockInputUnion::data(b"hello".to_vec()));
@@ -1060,6 +1067,7 @@ mod tests {
             "shell".to_string(),
             "tab-1".to_string(),
             "block-1".to_string(),
+            None,
             None,
             None,
         );
@@ -1084,6 +1092,7 @@ mod tests {
             "shell".to_string(),
             "tab-1".to_string(),
             "block-1".to_string(),
+            None,
             None,
             None,
         ));
@@ -1180,6 +1189,7 @@ mod tests {
             "shell".to_string(),
             "tab-1".to_string(),
             "test-register-block".to_string(),
+            None,
             None,
             None,
         ));
