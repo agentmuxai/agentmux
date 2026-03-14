@@ -39,6 +39,8 @@ fn test_state() -> AppState {
         poller,
         config_watcher,
         messagebus: Arc::new(crate::backend::messagebus::MessageBus::new()),
+        http_client: reqwest::Client::new(),
+        local_web_url: String::new(),
     }
 }
 

@@ -1,6 +1,6 @@
 [package]
 name = "agentmuxsrv-rs"
-version = "0.31.131"
+version = "0.31.132"
 edition = "2021"
 description = "AgentMux Rust backend (drop-in replacement for Go agentmuxsrv)"
 
