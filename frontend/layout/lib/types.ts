@@ -258,6 +258,7 @@ export interface NodeModel {
     toggleMagnify: () => void;
     focusNode: () => void;
     onClose: () => void;
+    dragReady: import("@/util/util").SignalAtom<boolean>;
     // DOM refs in SolidJS are plain { current: T | null } objects
     dragHandleRef?: { current: HTMLDivElement | null };
     displayContainerRef: { current: HTMLDivElement | null };

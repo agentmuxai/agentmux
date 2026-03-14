@@ -1,7 +1,7 @@
 // Copyright 2025, Command Line Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-import { createSignalAtom, fireAndForget } from "@/util/util";
+import { createSignalAtom, fireAndForget, type SignalAtom } from "@/util/util";
 import type { Properties as CSSProperties } from "csstype";
 import { createMemo } from "solid-js";
 import { LayoutNode, LayoutNodeAdditionalProps, NodeModel } from "./types";
@@ -62,6 +62,7 @@ export function getNodeModel(model: LayoutModel, node: LayoutNode): NodeModel {
                 },
                 toggleMagnify: () => model.magnifyNodeToggle(nodeid),
                 focusNode: () => model.focusNode(nodeid),
+                dragReady: createSignalAtom(false),
                 dragHandleRef: { current: null as HTMLDivElement | null },
                 displayContainerRef: model.displayContainerRef,
             });
