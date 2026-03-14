@@ -132,7 +132,7 @@ function EndIcons(props: {
     const endIconButtons = util.useAtomValueSafe(props.viewModel?.endIconButtons);
     const magnified = () => props.nodeModel.isMagnified();
     const ephemeral = () => props.nodeModel.isEphemeral();
-    const magnifyDisabled = () => props.nodeModel.numLeafs() <= 1;
+    const magnifyDisabled = () => false;
 
     const settingsDecl: IconButtonDecl = {
         elemtype: "iconbutton",
