@@ -397,14 +397,14 @@ const ResizeHandleWrapper = (props: ResizeHandleWrapperProps) => {
     const resizeHandles = () => props.layoutModel.resizeHandles();
 
     return (
-        <For each={resizeHandles()}>
-            {(resizeHandleProps, i) => (
+        <Key each={resizeHandles()} by={(h) => h.id}>
+            {(resizeHandleProps) => (
                 <ResizeHandle
                     layoutModel={props.layoutModel}
-                    resizeHandleProps={resizeHandleProps}
+                    resizeHandleProps={resizeHandleProps()}
                 />
             )}
-        </For>
+        </Key>
     );
 };
 

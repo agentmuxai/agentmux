@@ -596,11 +596,11 @@ function BlockMask({ nodeModel }: { nodeModel: NodeModel }): JSX.Element {
 }
 
 function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
-    const { nodeModel, viewModel, blockModel, preview, numBlocksInTab, children } = props;
+    const nodeModel = props.nodeModel;
     const [blockData] = WOS.useWaveObjectValue<Block>(WOS.makeORef("block", nodeModel.blockId));
     const isFocused = () => nodeModel.isFocused();
-    const customBg = util.useAtomValueSafe(viewModel?.blockBg);
-    const manageConnection = util.useAtomValueSafe(viewModel?.manageConnection);
+    const customBg = util.useAtomValueSafe(props.viewModel?.blockBg);
+    const manageConnection = util.useAtomValueSafe(props.viewModel?.manageConnection);
     const changeConnModalAtom = useBlockAtom(nodeModel.blockId, "changeConn", () => {
         return util.createSignalAtom(false);
     }) as util.SignalAtom<boolean>;
@@ -612,11 +612,11 @@ function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
     const magnifiedBlockOpacityAtom = getSettingsKeyAtom("window:magnifiedblockopacity");
     const magnifiedBlockOpacity = () => magnifiedBlockOpacityAtom();
     let connBtnRef: { current: HTMLDivElement | null } = { current: null };
-    const noHeader = util.useAtomValueSafe(viewModel?.noHeader);
+    const noHeader = util.useAtomValueSafe(props.viewModel?.noHeader);
 
     // Compute agent color for border styling (matches header color)
     const blockAgentColor = createMemo(() => {
-        if (!preview && blockData()?.meta?.view === "term") {
+        if (!props.preview && blockData()?.meta?.view === "term") {
             const blockEnv = blockData()?.meta?.["cmd:env"] as Record<string, string> | undefined;
             const agentId = detectAgentFromEnv(blockEnv);
             if (agentId) {
@@ -646,7 +646,7 @@ function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
 
     createEffect(() => {
         // on mount, if manageConnection, call ConnEnsure
-        if (!manageConnection || blockData() == null || preview) {
+        if (!manageConnection || blockData() == null || props.preview) {
             return;
         }
         const connName = blockData()?.meta?.connection;
@@ -662,10 +662,10 @@ function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
         }
     });
 
-    const viewIconUnion = util.useAtomValueSafe(viewModel?.viewIcon) ?? blockViewToIcon(blockData()?.meta?.view);
+    const viewIconUnion = util.useAtomValueSafe(props.viewModel?.viewIcon) ?? blockViewToIcon(blockData()?.meta?.view);
     const viewIconElem = getViewIconElem(viewIconUnion, blockData());
     let innerStyle: JSX.CSSProperties = {};
-    if (!preview) {
+    if (!props.preview) {
         innerStyle = computeBgStyleFromMeta(customBg);
     }
     const previewElem = <div class="block-frame-preview">{viewIconElem}</div>;
@@ -678,32 +678,32 @@ function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
 
     // Body right-click handler
     const onBodyContextMenu = (e: MouseEvent) => {
-        if (!blockData() || preview) return;
+        if (!blockData() || props.preview) return;
         e.preventDefault();
         e.stopPropagation();
         const menu = buildPaneContextMenu(blockData(), {
             magnified: isMagnified(),
             onMagnifyToggle: nodeModel.toggleMagnify,
             onClose: nodeModel.onClose,
-        }, viewModel);
+        }, props.viewModel);
         ContextMenuModel.showContextMenu(menu, e);
     };
 
     return (
         <div
             class={clsx("block", "block-frame-default", "block-" + nodeModel.blockId, {
-                "block-focused": isFocused() || preview,
-                "block-preview": preview,
-                "block-no-highlight": numBlocksInTab === 1,
+                "block-focused": isFocused() || props.preview,
+                "block-preview": props.preview,
+                "block-no-highlight": props.numBlocksInTab === 1,
                 "has-agent-color": !!blockAgentColor(),
                 ephemeral: isEphemeral(),
                 magnified: isMagnified(),
             })}
             data-blockid={nodeModel.blockId}
-            onClick={blockModel?.onClick}
-            onFocusIn={blockModel?.onFocusCapture}
+            onClick={props.blockModel?.onClick}
+            onFocusIn={props.blockModel?.onFocusCapture}
             onContextMenu={onBodyContextMenu}
-            ref={blockModel?.blockRef ? (el) => { blockModel.blockRef.current = el; } : undefined}
+            ref={props.blockModel?.blockRef ? (el) => { props.blockModel.blockRef.current = el; } : undefined}
             style={
                 {
                     "--magnified-block-opacity": magnifiedBlockOpacity(),
@@ -711,33 +711,33 @@ function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
                     "--block-agent-color": blockAgentColor() ?? "transparent",
                 } as JSX.CSSProperties
             }
-            inert={preview || undefined}
+            inert={props.preview || undefined}
         >
             <BlockMask nodeModel={nodeModel} />
-            <Show when={!preview && viewModel != null}>
+            <Show when={!props.preview && props.viewModel != null}>
                 <ConnStatusOverlay
                     nodeModel={nodeModel}
-                    viewModel={viewModel}
+                    viewModel={props.viewModel}
                     changeConnModalAtom={changeConnModalAtom}
                 />
             </Show>
             <div class="block-frame-default-inner" style={innerStyle}>
                 {noHeader || <ErrorBoundary fallback={headerElemNoView}>{headerElem}</ErrorBoundary>}
-                <Show when={!preview && blockData()}>
+                <Show when={!props.preview && blockData()}>
                     <TitleBar
                         blockId={nodeModel.blockId}
                         blockMeta={blockData()?.meta}
                         title={getEffectiveTitle(blockData(), false, atoms.fullConfigAtom()?.settings?.["cmd:env"] as Record<string, string> | undefined)}
                     />
                 </Show>
-                {preview ? previewElem : children}
+                {props.preview ? previewElem : props.children}
             </div>
-            <Show when={!preview && viewModel != null && connModalOpen()}>
+            <Show when={!props.preview && props.viewModel != null && connModalOpen()}>
                 <ChangeConnectionBlockModal
                     blockId={nodeModel.blockId}
                     nodeModel={nodeModel}
-                    viewModel={viewModel}
-                    blockRef={blockModel?.blockRef}
+                    viewModel={props.viewModel}
+                    blockRef={props.blockModel?.blockRef}
                     changeConnModalOpen={changeConnModalAtom}
                     setChangeConnModalOpen={(v) => changeConnModalAtom._set(v)}
                     connBtnRef={connBtnRef}
@@ -754,8 +754,7 @@ function BlockFrame_Default(props: BlockFrameProps): JSX.Element {
 function BlockFrame(props: BlockFrameProps): JSX.Element {
     const blockId = props.nodeModel.blockId;
     const [blockData] = WOS.useWaveObjectValue<Block>(WOS.makeORef("block", blockId));
-    const tabData = atoms.tabAtom();
-    const numBlocks = () => tabData?.blockids?.length ?? 0;
+    const numBlocks = () => atoms.tabAtom()?.blockids?.length ?? 0;
     return (
         <Show when={blockId && blockData()}>
             <BlockFrame_Default {...props} numBlocksInTab={numBlocks()} />
