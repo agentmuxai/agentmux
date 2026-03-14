@@ -333,9 +333,6 @@ export class LayoutModel {
         animationTimeS?: number
     ) {
         // Create a long-lived reactive root for this model.
-        // All memos created here (and via runInModelRoot) survive component
-        // mount/unmount cycles during tab switches.
-        // Create a long-lived reactive root for this model.
         // All signals and memos must be created inside this root so they
         // survive component mount/unmount cycles during tab switches.
         createRoot((dispose) => {
