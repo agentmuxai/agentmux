@@ -162,12 +162,31 @@ gh api repos/agentmuxai/agentmux-builder/dispatches \
 | Linux x64 (AppImage) | `AgentMux_*_amd64.AppImage` |
 | Linux x64 (deb) | `AgentMux_*_amd64.deb` |
 
-### Before releasing
+### Full release checklist
 
-1. Bump version: `bump patch -m "Description" --commit`
-2. Verify consistency: `bump verify`
-3. Tag: `git tag v0.X.Y && git push origin v0.X.Y`
-4. Trigger the builder workflow with the tag
+```bash
+# 1. Bump version and commit
+bump patch -m "Description" --commit
+bump verify
+
+# 2. Push and tag
+git push origin main
+git tag v0.X.Y && git push origin v0.X.Y
+
+# 3. Trigger the builder (builds all platforms, creates GitHub Release)
+gh workflow run tauri-build.yml -R agentmuxai/agentmux-builder -f ref=v0.X.Y
+
+# 4. Wait for build to complete (~15-20 min)
+gh run list -R agentmuxai/agentmux-builder --limit 1
+
+# 5. Deploy landing site (fetches new release, updates download links)
+cd /workspace/agentmux-landing
+deploy run --env prod
+
+# 6. Verify
+gh release view v0.X.Y --repo agentmuxai/agentmux    # release exists with assets
+curl -sf https://agentmux.ai/release.json | jq .version  # landing shows new version
+```
 
 ## License
 
