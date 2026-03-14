@@ -1,21 +1,24 @@
+// Copyright 2025, Command Line Inc.
+// SPDX-License-Identifier: Apache-2.0
+//
+// SolidJS migration: Jotai derived atom → plain function (reactive when called inside SolidJS tracking context)
+
 import { getBlockComponentModel } from "@/app/store/global";
-import { globalStore } from "@/app/store/jotaiStore";
 import { focusedBlockId } from "@/util/focusutil";
 import { getLayoutModelForStaticTab } from "@/layout/index";
-import { Atom, atom } from "jotai";
 
 class FocusManager {
-    blockFocusAtom: Atom<string | null>;
-
-    constructor() {
-        this.blockFocusAtom = atom((get) => {
+    /** Reactive accessor — returns the currently focused blockId (or null). */
+    get blockFocusAtom(): () => string | null {
+        return () => {
             const layoutModel = getLayoutModelForStaticTab();
-            const lnode = get(layoutModel.focusedNode);
-            return lnode?.data?.blockId;
-        });
+            if (!layoutModel) return null;
+            const lnode = layoutModel.focusedNode?.();
+            return lnode?.data?.blockId ?? null;
+        };
     }
 
-    setBlockFocus(force: boolean = false) {
+    setBlockFocus(_force = false) {
         this.refocusNode();
     }
 
@@ -24,7 +27,7 @@ class FocusManager {
     }
 
     requestNodeFocus(): void {
-        // no-op, node is the only focus target now
+        // no-op
     }
 
     getFocusType(): "node" {
@@ -33,10 +36,8 @@ class FocusManager {
 
     refocusNode() {
         const layoutModel = getLayoutModelForStaticTab();
-        const lnode = globalStore.get(layoutModel.focusedNode);
-        if (lnode == null || lnode.data?.blockId == null) {
-            return;
-        }
+        const lnode = layoutModel?.focusedNode?.();
+        if (lnode == null || lnode.data?.blockId == null) return;
         layoutModel.focusNode(lnode.id);
         const blockId = lnode.data.blockId;
         const bcm = getBlockComponentModel(blockId);

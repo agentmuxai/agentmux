@@ -1,8 +1,8 @@
 // Copyright 2025, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import React, { memo, useState, useCallback, useEffect } from "react";
 import { getApi } from "@/app/store/global";
+import { createSignal, For, onMount, Show, type JSX } from "solid-js";
 import { PROVIDERS, type ProviderDefinition } from "../providers";
 
 interface SetupWizardProps {
@@ -17,14 +17,14 @@ const PROVIDER_ICONS: Record<string, string> = {
     codex: "robot",
 };
 
-export const SetupWizard: React.FC<SetupWizardProps> = memo(({ onSetupComplete }) => {
-    const [step, setStep] = useState<WizardStep>("detect");
-    const [detectionResults, setDetectionResults] = useState<CliDetectionResult[]>([]);
-    const [detecting, setDetecting] = useState(false);
-    const [selectedProvider, setSelectedProvider] = useState<string>("");
-    const [error, setError] = useState<string | null>(null);
+export const SetupWizard = ({ onSetupComplete }: SetupWizardProps): JSX.Element => {
+    const [step, setStep] = createSignal<WizardStep>("detect");
+    const [detectionResults, setDetectionResults] = createSignal<CliDetectionResult[]>([]);
+    const [detecting, setDetecting] = createSignal(false);
+    const [selectedProvider, setSelectedProvider] = createSignal<string>("");
+    const [error, setError] = createSignal<string | null>(null);
 
-    const runDetection = useCallback(async () => {
+    const runDetection = async () => {
         setDetecting(true);
         setError(null);
         try {
@@ -41,24 +41,24 @@ export const SetupWizard: React.FC<SetupWizardProps> = memo(({ onSetupComplete }
         } finally {
             setDetecting(false);
         }
-    }, []);
+    };
 
     // Run detection on mount
-    useEffect(() => {
+    onMount(() => {
         void runDetection();
-    }, [runDetection]);
+    });
 
-    const handleConfirm = useCallback(async () => {
-        if (!selectedProvider) return;
+    const handleConfirm = async () => {
+        if (!selectedProvider()) return;
 
-        const providerDef = PROVIDERS[selectedProvider];
+        const providerDef = PROVIDERS[selectedProvider()];
         if (!providerDef) return;
 
         const config: ProviderConfig = {
-            default_provider: selectedProvider,
+            default_provider: selectedProvider(),
             providers: {
-                [selectedProvider]: {
-                    cli_path: detectionResults.find((r) => r.provider === selectedProvider)?.path ?? null,
+                [selectedProvider()]: {
+                    cli_path: detectionResults().find((r) => r.provider === selectedProvider())?.path ?? null,
                     auth_token: null,
                     auth_status: "none",
                     output_format: providerDef.outputFormat,
@@ -74,75 +74,79 @@ export const SetupWizard: React.FC<SetupWizardProps> = memo(({ onSetupComplete }
         } catch (err) {
             setError(`Failed to save config: ${String(err)}`);
         }
-    }, [selectedProvider, detectionResults, onSetupComplete]);
+    };
 
-    const installedCount = detectionResults.filter((r) => r.installed).length;
-    const hasInstalled = installedCount > 0;
+    const installedCount = () => detectionResults().filter((r) => r.installed).length;
+    const hasInstalled = () => installedCount() > 0;
 
     return (
-        <div className="setup-wizard">
-            <div className="setup-wizard-header">
-                <div className="setup-wizard-title">Agent Setup</div>
-                <div className="setup-wizard-subtitle">Configure your AI coding assistant</div>
-                <div className="setup-wizard-steps">
-                    <StepIndicator step="detect" label="Detect" currentStep={step} />
-                    <div className="setup-wizard-step-connector" />
-                    <StepIndicator step="select" label="Select" currentStep={step} />
-                    <div className="setup-wizard-step-connector" />
-                    <StepIndicator step="confirm" label="Start" currentStep={step} />
+        <div class="setup-wizard">
+            <div class="setup-wizard-header">
+                <div class="setup-wizard-title">Agent Setup</div>
+                <div class="setup-wizard-subtitle">Configure your AI coding assistant</div>
+                <div class="setup-wizard-steps">
+                    <StepIndicator step="detect" label="Detect" currentStep={step()} />
+                    <div class="setup-wizard-step-connector" />
+                    <StepIndicator step="select" label="Select" currentStep={step()} />
+                    <div class="setup-wizard-step-connector" />
+                    <StepIndicator step="confirm" label="Start" currentStep={step()} />
                 </div>
             </div>
 
-            <div className="setup-wizard-content">
-                {error && (
-                    <div className="setup-wizard-error">
-                        <span className="setup-wizard-error-icon">!</span>
-                        {error}
+            <div class="setup-wizard-content">
+                <Show when={error()}>
+                    <div class="setup-wizard-error">
+                        <span class="setup-wizard-error-icon">!</span>
+                        {error()}
                     </div>
-                )}
+                </Show>
 
-                {step === "detect" && (
+                <Show when={step() === "detect"}>
                     <DetectStep
-                        results={detectionResults}
-                        detecting={detecting}
+                        results={detectionResults()}
+                        detecting={detecting()}
                         onRefresh={runDetection}
                         onNext={() => setStep("select")}
-                        hasInstalled={hasInstalled}
+                        hasInstalled={hasInstalled()}
                     />
-                )}
+                </Show>
 
-                {step === "select" && (
+                <Show when={step() === "select"}>
                     <SelectStep
-                        results={detectionResults}
-                        selectedProvider={selectedProvider}
+                        results={detectionResults()}
+                        selectedProvider={selectedProvider()}
                         onSelect={setSelectedProvider}
                         onBack={() => setStep("detect")}
                         onNext={() => setStep("confirm")}
                     />
-                )}
+                </Show>
 
-                {step === "confirm" && (
+                <Show when={step() === "confirm"}>
                     <ConfirmStep
-                        selectedProvider={selectedProvider}
-                        detectionResult={detectionResults.find((r) => r.provider === selectedProvider)}
+                        selectedProvider={selectedProvider()}
+                        detectionResult={detectionResults().find((r) => r.provider === selectedProvider())}
                         onBack={() => setStep("select")}
                         onConfirm={handleConfirm}
                     />
-                )}
+                </Show>
             </div>
         </div>
     );
-});
+};
 
 SetupWizard.displayName = "SetupWizard";
 
 // --- Step Indicator ---
 
-const StepIndicator: React.FC<{
+const StepIndicator = ({
+    step,
+    label,
+    currentStep,
+}: {
     step: WizardStep;
     label: string;
     currentStep: WizardStep;
-}> = memo(({ step, label, currentStep }) => {
+}): JSX.Element => {
     const steps: WizardStep[] = ["detect", "select", "confirm"];
     const current = steps.indexOf(currentStep);
     const index = steps.indexOf(step);
@@ -151,53 +155,59 @@ const StepIndicator: React.FC<{
 
     return (
         <div
-            className={`setup-wizard-step-indicator ${isActive ? "active" : ""} ${isDone ? "done" : ""}`}
+            class={`setup-wizard-step-indicator ${isActive ? "active" : ""} ${isDone ? "done" : ""}`}
         >
-            <div className="setup-wizard-step-dot">
+            <div class="setup-wizard-step-dot">
                 {isDone ? "\u2713" : index + 1}
             </div>
-            <div className="setup-wizard-step-label">{label}</div>
+            <div class="setup-wizard-step-label">{label}</div>
         </div>
     );
-});
+};
 
 StepIndicator.displayName = "StepIndicator";
 
 // --- Detect Step ---
 
-const DetectStep: React.FC<{
+const DetectStep = ({
+    results,
+    detecting,
+    onRefresh,
+    onNext,
+    hasInstalled,
+}: {
     results: CliDetectionResult[];
     detecting: boolean;
     onRefresh: () => void;
     onNext: () => void;
     hasInstalled: boolean;
-}> = memo(({ results, detecting, onRefresh, onNext, hasInstalled }) => {
+}): JSX.Element => {
     return (
-        <div className="setup-wizard-detect">
-            <div className="setup-wizard-section-title">Detected CLI Tools</div>
-            <div className="setup-wizard-section-desc">
+        <div class="setup-wizard-detect">
+            <div class="setup-wizard-section-title">Detected CLI Tools</div>
+            <div class="setup-wizard-section-desc">
                 Scanning for installed AI coding assistants...
             </div>
 
-            <div className="setup-wizard-cli-list">
-                {results.map((result) => (
-                    <CliResultCard key={result.provider} result={result} />
-                ))}
-                {detecting && results.length === 0 && (
-                    <div className="setup-wizard-detecting">Scanning...</div>
-                )}
+            <div class="setup-wizard-cli-list">
+                <For each={results}>
+                    {(result) => <CliResultCard result={result} />}
+                </For>
+                <Show when={detecting && results.length === 0}>
+                    <div class="setup-wizard-detecting">Scanning...</div>
+                </Show>
             </div>
 
-            <div className="setup-wizard-actions">
+            <div class="setup-wizard-actions">
                 <button
-                    className="setup-wizard-btn secondary"
+                    class="setup-wizard-btn secondary"
                     onClick={onRefresh}
                     disabled={detecting}
                 >
                     {detecting ? "Scanning..." : "Refresh"}
                 </button>
                 <button
-                    className="setup-wizard-btn primary"
+                    class="setup-wizard-btn primary"
                     onClick={onNext}
                     disabled={!hasInstalled}
                 >
@@ -205,58 +215,59 @@ const DetectStep: React.FC<{
                 </button>
             </div>
 
-            {!hasInstalled && !detecting && (
-                <div className="setup-wizard-no-cli">
+            <Show when={!hasInstalled && !detecting}>
+                <div class="setup-wizard-no-cli">
                     No CLI tools detected. Install one to continue.
                 </div>
-            )}
+            </Show>
         </div>
     );
-});
+};
 
 DetectStep.displayName = "DetectStep";
 
 // --- CLI Result Card ---
 
-const CliResultCard: React.FC<{ result: CliDetectionResult }> = memo(({ result }) => {
+const CliResultCard = ({ result }: { result: CliDetectionResult }): JSX.Element => {
     const providerDef = PROVIDERS[result.provider];
-    const [showInstall, setShowInstall] = useState(false);
+    const [showInstall, setShowInstall] = createSignal(false);
 
     return (
-        <div className={`setup-wizard-cli-card ${result.installed ? "installed" : "missing"}`}>
-            <div className="setup-wizard-cli-info">
-                <div className="setup-wizard-cli-name">
+        <div class={`setup-wizard-cli-card ${result.installed ? "installed" : "missing"}`}>
+            <div class="setup-wizard-cli-info">
+                <div class="setup-wizard-cli-name">
                     {providerDef?.displayName || result.provider}
                 </div>
-                <div className="setup-wizard-cli-status">
-                    {result.installed ? (
-                        <>
-                            <span className="status-dot installed" />
-                            <span className="status-text">
-                                Installed{result.version ? ` (${result.version})` : ""}
-                            </span>
-                        </>
-                    ) : (
-                        <>
-                            <span className="status-dot missing" />
-                            <span className="status-text">Not installed</span>
-                        </>
-                    )}
-                </div>
-                {result.path && (
-                    <div className="setup-wizard-cli-path">{result.path}</div>
-                )}
-            </div>
-            {!result.installed && providerDef && (
-                <div className="setup-wizard-cli-install">
-                    <button
-                        className="setup-wizard-btn small"
-                        onClick={() => setShowInstall(!showInstall)}
+                <div class="setup-wizard-cli-status">
+                    <Show
+                        when={result.installed}
+                        fallback={
+                            <>
+                                <span class="status-dot missing" />
+                                <span class="status-text">Not installed</span>
+                            </>
+                        }
                     >
-                        {showInstall ? "Hide" : "Install"}
+                        <span class="status-dot installed" />
+                        <span class="status-text">
+                            Installed{result.version ? ` (${result.version})` : ""}
+                        </span>
+                    </Show>
+                </div>
+                <Show when={result.path}>
+                    <div class="setup-wizard-cli-path">{result.path}</div>
+                </Show>
+            </div>
+            <Show when={!result.installed && providerDef}>
+                <div class="setup-wizard-cli-install">
+                    <button
+                        class="setup-wizard-btn small"
+                        onClick={() => setShowInstall(!showInstall())}
+                    >
+                        {showInstall() ? "Hide" : "Install"}
                     </button>
-                    {showInstall && (
-                        <div className="setup-wizard-install-info">
+                    <Show when={showInstall()}>
+                        <div class="setup-wizard-install-info">
                             <code>{providerDef.installCommand}</code>
                             <a
                                 href="#"
@@ -268,69 +279,76 @@ const CliResultCard: React.FC<{ result: CliDetectionResult }> = memo(({ result }
                                 Docs
                             </a>
                         </div>
-                    )}
+                    </Show>
                 </div>
-            )}
+            </Show>
         </div>
     );
-});
+};
 
 CliResultCard.displayName = "CliResultCard";
 
 // --- Select Step ---
 
-const SelectStep: React.FC<{
+const SelectStep = ({
+    results,
+    selectedProvider,
+    onSelect,
+    onBack,
+    onNext,
+}: {
     results: CliDetectionResult[];
     selectedProvider: string;
     onSelect: (provider: string) => void;
     onBack: () => void;
     onNext: () => void;
-}> = memo(({ results, selectedProvider, onSelect, onBack, onNext }) => {
+}): JSX.Element => {
     const installedProviders = results.filter((r) => r.installed);
 
     return (
-        <div className="setup-wizard-select">
-            <div className="setup-wizard-section-title">Choose Your Provider</div>
-            <div className="setup-wizard-section-desc">
+        <div class="setup-wizard-select">
+            <div class="setup-wizard-section-title">Choose Your Provider</div>
+            <div class="setup-wizard-section-desc">
                 Select which AI assistant to use as your default.
             </div>
 
-            <div className="setup-wizard-provider-list">
-                {installedProviders.map((result) => {
-                    const providerDef = PROVIDERS[result.provider];
-                    const isSelected = selectedProvider === result.provider;
+            <div class="setup-wizard-provider-list">
+                <For each={installedProviders}>
+                    {(result) => {
+                        const providerDef = PROVIDERS[result.provider];
+                        const isSelected = selectedProvider === result.provider;
 
-                    return (
-                        <label
-                            key={result.provider}
-                            className={`setup-wizard-provider-card ${isSelected ? "selected" : ""}`}
-                        >
-                            <input
-                                type="radio"
-                                name="provider"
-                                value={result.provider}
-                                checked={isSelected}
-                                onChange={() => onSelect(result.provider)}
-                            />
-                            <div className="setup-wizard-provider-info">
-                                <div className="setup-wizard-provider-name">
-                                    {providerDef?.displayName || result.provider}
+                        return (
+                            <label
+                                class={`setup-wizard-provider-card ${isSelected ? "selected" : ""}`}
+                            >
+                                <input
+                                    type="radio"
+                                    name="provider"
+                                    value={result.provider}
+                                    checked={isSelected}
+                                    onChange={() => onSelect(result.provider)}
+                                />
+                                <div class="setup-wizard-provider-info">
+                                    <div class="setup-wizard-provider-name">
+                                        {providerDef?.displayName || result.provider}
+                                    </div>
+                                    <div class="setup-wizard-provider-detail">
+                                        {result.version || result.path || ""}
+                                    </div>
                                 </div>
-                                <div className="setup-wizard-provider-detail">
-                                    {result.version || result.path || ""}
-                                </div>
-                            </div>
-                        </label>
-                    );
-                })}
+                            </label>
+                        );
+                    }}
+                </For>
             </div>
 
-            <div className="setup-wizard-actions">
-                <button className="setup-wizard-btn secondary" onClick={onBack}>
+            <div class="setup-wizard-actions">
+                <button class="setup-wizard-btn secondary" onClick={onBack}>
                     Back
                 </button>
                 <button
-                    className="setup-wizard-btn primary"
+                    class="setup-wizard-btn primary"
                     onClick={onNext}
                     disabled={!selectedProvider}
                 >
@@ -339,75 +357,80 @@ const SelectStep: React.FC<{
             </div>
         </div>
     );
-});
+};
 
 SelectStep.displayName = "SelectStep";
 
 // --- Confirm Step ---
 
-const ConfirmStep: React.FC<{
+const ConfirmStep = ({
+    selectedProvider,
+    detectionResult,
+    onBack,
+    onConfirm,
+}: {
     selectedProvider: string;
     detectionResult?: CliDetectionResult;
     onBack: () => void;
     onConfirm: () => void;
-}> = memo(({ selectedProvider, detectionResult, onBack, onConfirm }) => {
+}): JSX.Element => {
     const providerDef = PROVIDERS[selectedProvider];
 
     return (
-        <div className="setup-wizard-confirm">
-            <div className="setup-wizard-section-title">Ready to Go</div>
-            <div className="setup-wizard-section-desc">Review your configuration and start.</div>
+        <div class="setup-wizard-confirm">
+            <div class="setup-wizard-section-title">Ready to Go</div>
+            <div class="setup-wizard-section-desc">Review your configuration and start.</div>
 
-            <div className="setup-wizard-summary">
-                <div className="setup-wizard-summary-row">
-                    <span className="setup-wizard-summary-label">Provider</span>
-                    <span className="setup-wizard-summary-value">
+            <div class="setup-wizard-summary">
+                <div class="setup-wizard-summary-row">
+                    <span class="setup-wizard-summary-label">Provider</span>
+                    <span class="setup-wizard-summary-value">
                         {providerDef?.displayName || selectedProvider}
                     </span>
                 </div>
-                <div className="setup-wizard-summary-row">
-                    <span className="setup-wizard-summary-label">Command</span>
-                    <span className="setup-wizard-summary-value">
+                <div class="setup-wizard-summary-row">
+                    <span class="setup-wizard-summary-label">Command</span>
+                    <span class="setup-wizard-summary-value">
                         <code>
                             {providerDef?.cliCommand}{" "}
                             {providerDef?.defaultArgs.join(" ")}
                         </code>
                     </span>
                 </div>
-                {detectionResult?.version && (
-                    <div className="setup-wizard-summary-row">
-                        <span className="setup-wizard-summary-label">Version</span>
-                        <span className="setup-wizard-summary-value">
+                <Show when={detectionResult?.version}>
+                    <div class="setup-wizard-summary-row">
+                        <span class="setup-wizard-summary-label">Version</span>
+                        <span class="setup-wizard-summary-value">
                             {detectionResult.version}
                         </span>
                     </div>
-                )}
-                {detectionResult?.path && (
-                    <div className="setup-wizard-summary-row">
-                        <span className="setup-wizard-summary-label">Path</span>
-                        <span className="setup-wizard-summary-value">
+                </Show>
+                <Show when={detectionResult?.path}>
+                    <div class="setup-wizard-summary-row">
+                        <span class="setup-wizard-summary-label">Path</span>
+                        <span class="setup-wizard-summary-value">
                             {detectionResult.path}
                         </span>
                     </div>
-                )}
-                <div className="setup-wizard-summary-row">
-                    <span className="setup-wizard-summary-label">Auth</span>
-                    <span className="setup-wizard-summary-value">
+                </Show>
+                <div class="setup-wizard-summary-row">
+                    <span class="setup-wizard-summary-label">Auth</span>
+                    <span class="setup-wizard-summary-value">
                         {providerDef?.authType === "oauth" ? "OAuth (browser)" : "API Key"}
                     </span>
                 </div>
             </div>
 
-            <div className="setup-wizard-actions">
-                <button className="setup-wizard-btn secondary" onClick={onBack}>
+            <div class="setup-wizard-actions">
+                <button class="setup-wizard-btn secondary" onClick={onBack}>
                     Back
                 </button>
-                <button className="setup-wizard-btn primary start" onClick={onConfirm}>
+                <button class="setup-wizard-btn primary start" onClick={onConfirm}>
                     Start
                 </button>
             </div>
         </div>
     );
-});
+};
 
 ConfirmStep.displayName = "ConfirmStep";

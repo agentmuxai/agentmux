@@ -6,8 +6,7 @@ import { TabBar } from "@/app/tab/tabbar";
 import { WindowDrag } from "@/element/windowdrag";
 import { useWindowDrag } from "@/app/hook/useWindowDrag";
 import { atoms } from "@/store/global";
-import { useAtomValue } from "jotai";
-import { memo, useCallback, useRef } from "react";
+import { type JSX } from "solid-js";
 import { createTabBarMenu } from "@/app/menu/base-menus";
 import { SystemStatus } from "@/app/window/system-status";
 import "./window-header.scss";
@@ -17,38 +16,35 @@ interface WindowHeaderProps {
     workspace: Workspace;
 }
 
-const WindowHeader = memo(({ workspace }: WindowHeaderProps) => {
-    const windowHeaderRef = useRef<HTMLDivElement>(null);
-    const draggerLeftRef = useRef<HTMLDivElement>(null);
+const WindowHeader = (props: WindowHeaderProps): JSX.Element => {
+    let windowHeaderRef!: HTMLDivElement;
+    let draggerLeftRef!: HTMLDivElement;
 
-    const fullConfig = useAtomValue(atoms.fullConfigAtom);
+    const fullConfig = atoms.fullConfigAtom;
     const { dragProps } = useWindowDrag();
 
     // Handle window header context menu
-    const handleContextMenu = useCallback(
-        (e: React.MouseEvent) => {
-            e.preventDefault();
-            const menu = createTabBarMenu(fullConfig);
-            ContextMenuModel.showContextMenu(menu.build(), e);
-        },
-        [fullConfig]
-    );
+    const handleContextMenu = (e: MouseEvent) => {
+        e.preventDefault();
+        const menu = createTabBarMenu(fullConfig());
+        ContextMenuModel.showContextMenu(menu.build(), e);
+    };
 
     return (
         <div
             ref={windowHeaderRef}
-            className="window-header"
+            class="window-header"
             data-testid="window-header"
             {...dragProps}
             onContextMenu={handleContextMenu}
         >
-            <WindowDrag ref={draggerLeftRef} className="left" />
+            <WindowDrag ref={draggerLeftRef} class="left" />
 
-            <TabBar workspace={workspace} />
+            <TabBar workspace={props.workspace} />
 
             <SystemStatus />
         </div>
     );
-});
+};
 
 export { WindowHeader };

@@ -4,193 +4,179 @@
 import { Button } from "@/element/button";
 import {
     autoUpdate,
-    FloatingPortal,
-    Middleware,
+    computePosition,
     offset as offsetMiddleware,
-    useClick,
-    useDismiss,
-    useFloating,
-    useInteractions,
+    type Middleware,
     type OffsetOptions,
     type Placement,
-} from "@floating-ui/react";
+} from "@floating-ui/dom";
 import clsx from "clsx";
 import {
-    Children,
-    cloneElement,
-    forwardRef,
-    isValidElement,
-    JSXElementConstructor,
-    memo,
-    ReactElement,
-    ReactNode,
-    useState,
-} from "react";
+    createContext,
+    createSignal,
+    JSX,
+    onCleanup,
+    onMount,
+    Show,
+    useContext,
+} from "solid-js";
+import { Portal } from "solid-js/web";
 
 import "./popover.scss";
 
+interface PopoverContextType {
+    isOpen: () => boolean;
+    togglePopover: () => void;
+    closePopover: () => void;
+    registerReference: (el: HTMLElement) => void;
+    registerFloating: (el: HTMLElement) => void;
+    floatingStyle: () => string;
+}
+
+const PopoverContext = createContext<PopoverContextType | null>(null);
+
 interface PopoverProps {
-    children: ReactNode;
-    className?: string;
+    children?: JSX.Element;
+    class?: string;
+    className?: string; // legacy compat
     placement?: Placement;
     offset?: OffsetOptions;
     onDismiss?: () => void;
     middleware?: Middleware[];
 }
 
-const isPopoverButton = (
-    element: ReactElement
-): element is ReactElement<PopoverButtonProps, JSXElementConstructor<PopoverButtonProps>> => {
-    return element.type === PopoverButton;
-};
+const Popover = (props: PopoverProps): JSX.Element => {
+    const placement = props.placement ?? "bottom-start";
+    const offsetVal = props.offset ?? 3;
 
-const isPopoverContent = (
-    element: ReactElement
-): element is ReactElement<PopoverContentProps, JSXElementConstructor<PopoverContentProps>> => {
-    return element.type === PopoverContent;
-};
+    const [isOpen, setIsOpen] = createSignal(false);
+    const [floatingStyle, setFloatingStyle] = createSignal("position:absolute;left:0px;top:0px");
 
-const Popover = memo(
-    forwardRef<HTMLDivElement, PopoverProps>(
-        ({ children, className, placement = "bottom-start", offset = 3, onDismiss, middleware }, ref) => {
-            const [isOpen, setIsOpen] = useState(false);
+    let referenceEl: HTMLElement | null = null;
+    let floatingEl: HTMLElement | null = null;
+    let cleanupAutoUpdate: (() => void) | null = null;
 
-            const handleOpenChange = (open: boolean) => {
-                setIsOpen(open);
-                if (!open && onDismiss) {
-                    onDismiss();
-                }
-            };
+    const middleware: Middleware[] = [...(props.middleware ?? []), offsetMiddleware(offsetVal as any)];
 
-            if (offset === undefined) {
-                offset = 3;
+    const updatePosition = async () => {
+        if (!referenceEl || !floatingEl) return;
+        const pos = await computePosition(referenceEl, floatingEl, { placement, middleware });
+        setFloatingStyle(`position:absolute;left:${pos.x}px;top:${pos.y}px`);
+    };
+
+    const openPopover = () => {
+        setIsOpen(true);
+        // updatePosition is called by autoUpdate once floatingEl is set
+    };
+
+    const closePopover = () => {
+        setIsOpen(false);
+        cleanupAutoUpdate?.();
+        cleanupAutoUpdate = null;
+        props.onDismiss?.();
+    };
+
+    const togglePopover = () => (isOpen() ? closePopover() : openPopover());
+
+    const registerReference = (el: HTMLElement) => {
+        referenceEl = el;
+    };
+
+    const registerFloating = (el: HTMLElement) => {
+        floatingEl = el;
+        requestAnimationFrame(() => {
+            if (referenceEl instanceof Element && floatingEl instanceof Element) {
+                cleanupAutoUpdate?.();
+                cleanupAutoUpdate = autoUpdate(referenceEl, floatingEl, updatePosition);
             }
+        });
+    };
 
-            middleware ??= [];
-            middleware.push(offsetMiddleware(offset));
+    const handleClickOutside = (e: MouseEvent) => {
+        if (!isOpen()) return;
+        const target = e.target as Node;
+        if (referenceEl?.contains(target) || floatingEl?.contains(target)) return;
+        closePopover();
+    };
 
-            const { refs, floatingStyles, context } = useFloating({
-                placement,
-                open: isOpen,
-                onOpenChange: handleOpenChange,
-                middleware: middleware,
-                whileElementsMounted: autoUpdate,
-            });
+    onMount(() => {
+        document.addEventListener("mousedown", handleClickOutside);
+    });
 
-            const click = useClick(context);
-            const dismiss = useDismiss(context);
-            const { getReferenceProps, getFloatingProps } = useInteractions([click, dismiss]);
+    onCleanup(() => {
+        document.removeEventListener("mousedown", handleClickOutside);
+        cleanupAutoUpdate?.();
+    });
 
-            const renderChildren = Children.map(children, (child) => {
-                if (isValidElement(child)) {
-                    if (isPopoverButton(child)) {
-                        return cloneElement(child as any, {
-                            isActive: isOpen,
-                            ref: refs.setReference,
-                            getReferenceProps,
-                            // Do not overwrite onClick
-                        });
-                    }
+    const ctx: PopoverContextType = {
+        isOpen,
+        togglePopover,
+        closePopover,
+        registerReference,
+        registerFloating,
+        floatingStyle,
+    };
 
-                    if (isPopoverContent(child)) {
-                        return isOpen
-                            ? cloneElement(child as any, {
-                                  ref: refs.setFloating,
-                                  style: floatingStyles,
-                                  getFloatingProps,
-                              })
-                            : null;
-                    }
-                }
-                return child;
-            });
+    return (
+        <PopoverContext.Provider value={ctx}>
+            <div class={clsx("popover", props.className)}>
+                {props.children}
+            </div>
+        </PopoverContext.Provider>
+    );
+};
 
-            return (
-                <div ref={ref} className={clsx("popover", className)}>
-                    {renderChildren}
-                </div>
-            );
-        }
-    )
-);
-
-Popover.displayName = "Popover";
-
-interface PopoverButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
+interface PopoverButtonProps extends JSX.ButtonHTMLAttributes<HTMLButtonElement> {
     isActive?: boolean;
-    children: React.ReactNode;
-    getReferenceProps?: () => any;
-    as?: keyof React.JSX.IntrinsicElements | React.ComponentType<any>;
+    children?: JSX.Element;
+    as?: string | ((props: any) => JSX.Element);
+    className?: string;
 }
 
-const PopoverButton = forwardRef<HTMLButtonElement | HTMLDivElement, PopoverButtonProps>(
-    (
-        {
-            isActive,
-            children,
-            onClick: userOnClick, // Destructured from props
-            getReferenceProps,
-            className,
-            as: Component = "button",
-            ...props // The rest of the props, without onClick
-        },
-        ref
-    ) => {
-        const referenceProps = getReferenceProps?.() || {};
-        const popoverOnClick = referenceProps.onClick;
+const PopoverButton = (props: PopoverButtonProps): JSX.Element => {
+    const ctx = useContext(PopoverContext);
 
-        // Remove onClick from referenceProps to prevent it from overwriting our combinedOnClick
-        const { onClick: refOnClick, ...restReferenceProps } = referenceProps;
+    const handleClick = (e: MouseEvent) => {
+        ctx?.togglePopover();
+        if (props.onClick) (props.onClick as any)(e);
+    };
 
-        const combinedOnClick = (event: React.MouseEvent) => {
-            if (userOnClick) {
-                userOnClick(event as any); // Our custom onClick logic
-            }
-            if (popoverOnClick) {
-                popoverOnClick(event); // Popover's onClick logic
-            }
-        };
+    return (
+        <Button
+            ref={(el: HTMLElement) => ctx?.registerReference(el)}
+            class={clsx("popover-button", props.className)}
+            classList={{ "is-active": ctx?.isOpen() }}
+            {...(props as any)}
+            onClick={handleClick}
+        >
+            {props.children}
+        </Button>
+    );
+};
 
-        return (
-            <Button
-                ref={ref}
-                className={clsx("popover-button", className, { "is-active": isActive })}
-                {...props} // Spread the rest of the props
-                {...restReferenceProps} // Spread referenceProps without onClick
-                onClick={combinedOnClick} // Assign combined onClick after spreading
-            >
-                {children}
-            </Button>
-        );
-    }
-);
-
-interface PopoverContentProps extends React.HTMLAttributes<HTMLDivElement> {
-    children: React.ReactNode;
-    getFloatingProps?: () => any;
+interface PopoverContentProps extends JSX.HTMLAttributes<HTMLDivElement> {
+    children?: JSX.Element;
+    className?: string;
 }
 
-const PopoverContent = forwardRef<HTMLDivElement, PopoverContentProps>(
-    ({ children, className, getFloatingProps, style, ...props }, ref) => {
-        return (
-            <FloatingPortal>
+const PopoverContent = (props: PopoverContentProps): JSX.Element => {
+    const ctx = useContext(PopoverContext);
+
+    return (
+        <Show when={ctx?.isOpen()}>
+            <Portal>
                 <div
-                    ref={ref}
-                    className={clsx("popover-content", className)}
-                    style={style}
-                    {...getFloatingProps?.()}
-                    {...props}
+                    ref={(el) => ctx?.registerFloating(el)}
+                    class={clsx("popover-content", props.className)}
+                    style={ctx?.floatingStyle()}
+                    {...(props as any)}
                 >
-                    {children}
+                    {props.children}
                 </div>
-            </FloatingPortal>
-        );
-    }
-);
-
-Popover.displayName = "Popover";
-PopoverButton.displayName = "PopoverButton";
-PopoverContent.displayName = "PopoverContent";
+            </Portal>
+        </Show>
+    );
+};
 
 export { Popover, PopoverButton, PopoverContent };
 export type { PopoverButtonProps, PopoverContentProps };

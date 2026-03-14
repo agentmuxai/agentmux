@@ -8,9 +8,9 @@ import { Button } from "@/element/button";
 import { ContextMenuModel } from "@/store/contextmenu";
 import { fireAndForget } from "@/util/util";
 import clsx from "clsx";
-import { useAtomValue } from "jotai";
-import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
-import ReactDOM from "react-dom";
+import { createEffect, createSignal, For, onCleanup, onMount, Show } from "solid-js";
+import { Portal } from "solid-js/web";
+import type { JSX } from "solid-js";
 import { ObjectService } from "../store/services";
 import { makeORef, useWaveObjectValue } from "../store/wos";
 import { TabBarModel } from "./tabbar-model";
@@ -43,51 +43,52 @@ interface TabColorPickerProps {
     onClose: () => void;
 }
 
-const TabColorPicker = memo(({ anchor, currentColor, onSelect, onClose }: TabColorPickerProps) => {
-    const pickerRef = useRef<HTMLDivElement>(null);
+const TabColorPicker = (props: TabColorPickerProps): JSX.Element => {
+    let pickerRef!: HTMLDivElement;
 
-    useEffect(() => {
+    onMount(() => {
         const handleClickOutside = (e: MouseEvent) => {
-            if (pickerRef.current && !pickerRef.current.contains(e.target as Node)) {
-                onClose();
+            if (pickerRef && !pickerRef.contains(e.target as Node)) {
+                props.onClose();
             }
         };
         const handleKeyDown = (e: KeyboardEvent) => {
-            if (e.key === "Escape") onClose();
+            if (e.key === "Escape") props.onClose();
         };
         document.addEventListener("mousedown", handleClickOutside);
         document.addEventListener("keydown", handleKeyDown);
-        return () => {
+        onCleanup(() => {
             document.removeEventListener("mousedown", handleClickOutside);
             document.removeEventListener("keydown", handleKeyDown);
-        };
-    }, [onClose]);
+        });
+    });
 
-    const style: React.CSSProperties = {
+    const style = (): JSX.CSSProperties => ({
         position: "fixed",
-        top: anchor.bottom + 4,
-        left: anchor.left,
-        zIndex: 9999,
-    };
+        top: `${props.anchor.bottom + 4}px`,
+        left: `${props.anchor.left}px`,
+        "z-index": 9999,
+    });
 
-    return ReactDOM.createPortal(
-        <div ref={pickerRef} className="tab-color-picker" style={style}>
-            {TAB_COLORS.map(({ name, hex }) => (
-                <div
-                    key={name}
-                    className={clsx("tab-color-swatch", { selected: (currentColor ?? null) === hex })}
-                    title={name}
-                    style={hex ? { backgroundColor: hex } : undefined}
-                    onClick={() => onSelect(hex)}
-                >
-                    {!hex && <i className="fa fa-xmark" />}
-                </div>
-            ))}
-        </div>,
-        document.body
+    return (
+        <Portal>
+            <div ref={pickerRef!} class="tab-color-picker" style={style()}>
+                <For each={TAB_COLORS}>
+                    {({ name, hex }) => (
+                        <div
+                            class={clsx("tab-color-swatch", { selected: (props.currentColor ?? null) === hex })}
+                            title={name}
+                            style={hex ? { "background-color": hex } : undefined}
+                            onClick={() => props.onSelect(hex)}
+                        >
+                            {!hex && <i class="fa fa-xmark" />}
+                        </div>
+                    )}
+                </For>
+            </div>
+        </Portal>
     );
-});
-TabColorPicker.displayName = "TabColorPicker";
+};
 
 interface TabProps {
     id: string;
@@ -99,282 +100,254 @@ interface TabProps {
     isNew: boolean;
     isPinned: boolean;
     onSelect: () => void;
-    onClose: (event: React.MouseEvent<HTMLButtonElement, MouseEvent> | null) => void;
-    onDragStart: (event: React.MouseEvent<HTMLDivElement, MouseEvent>) => void;
+    onClose: (event: MouseEvent | null) => void;
+    onDragStart: (event: MouseEvent) => void;
     onLoaded: () => void;
     onPinChange: () => void;
 }
 
-const Tab = memo(
-    forwardRef<HTMLDivElement, TabProps>(
-        (
-            {
-                id,
-                active,
-                isPinned,
-                isBeforeActive,
-                isDragging,
-                tabWidth,
-                isNew,
-                onLoaded,
-                onSelect,
-                onClose,
-                onDragStart,
-                onPinChange,
-            },
-            ref
-        ) => {
-            const [tabData, _] = useWaveObjectValue<Tab>(makeORef("tab", id));
-            const [originalName, setOriginalName] = useState("");
-            const [isEditable, setIsEditable] = useState(false);
-            const [isJiggling, setIsJiggling] = useState(false);
-            const [showColorPicker, setShowColorPicker] = useState(false);
-            const [colorPickerAnchor, setColorPickerAnchor] = useState<DOMRect | null>(null);
+function Tab(props: TabProps): JSX.Element {
+    const [tabData] = useWaveObjectValue<Tab>(makeORef("tab", props.id));
+    const [originalName, setOriginalName] = createSignal("");
+    const [isEditable, setIsEditable] = createSignal(false);
+    const [isJiggling, setIsJiggling] = createSignal(false);
+    const [showColorPicker, setShowColorPicker] = createSignal(false);
+    const [colorPickerAnchor, setColorPickerAnchor] = createSignal<DOMRect | null>(null);
 
-            const jiggleTrigger = useAtomValue(TabBarModel.getInstance().jigglePinAtom);
+    const jiggleTrigger = TabBarModel.getInstance().jigglePinAtom;
 
-            const editableRef = useRef<HTMLDivElement>(null);
-            const editableTimeoutRef = useRef<NodeJS.Timeout>(null);
-            const loadedRef = useRef(false);
-            const tabRef = useRef<HTMLDivElement>(null);
+    let editableRef!: HTMLDivElement;
+    let tabRef!: HTMLDivElement;
+    let editableTimeoutId: ReturnType<typeof setTimeout> | null = null;
+    let loadedRef = false;
 
-            useImperativeHandle(ref, () => tabRef.current as HTMLDivElement);
+    const tabColor = (): string | undefined | null => tabData()?.meta?.["tab:color"] as string | undefined | null;
 
-            const tabColor = tabData?.meta?.["tab:color"] as string | undefined | null;
-
-            useEffect(() => {
-                if (tabData?.name) {
-                    setOriginalName(tabData.name);
-                }
-            }, [tabData]);
-
-            useEffect(() => {
-                return () => {
-                    if (editableTimeoutRef.current) {
-                        clearTimeout(editableTimeoutRef.current);
-                    }
-                };
-            }, []);
-
-            const selectEditableText = useCallback(() => {
-                if (editableRef.current) {
-                    const range = document.createRange();
-                    const selection = window.getSelection();
-                    range.selectNodeContents(editableRef.current);
-                    selection.removeAllRanges();
-                    selection.addRange(range);
-                }
-            }, []);
-
-            const handleRenameTab: React.MouseEventHandler<HTMLDivElement> = (event) => {
-                event?.stopPropagation();
-                setIsEditable(true);
-                editableTimeoutRef.current = setTimeout(() => {
-                    selectEditableText();
-                }, 0);
-            };
-
-            const handleBlur = () => {
-                let newText = editableRef.current.innerText.trim();
-                newText = newText || originalName;
-                editableRef.current.innerText = newText;
-                setIsEditable(false);
-                fireAndForget(() => ObjectService.UpdateTabName(id, newText));
-                setTimeout(() => refocusNode(null), 10);
-            };
-
-            const handleKeyDown: React.KeyboardEventHandler<HTMLDivElement> = (event) => {
-                if ((event.metaKey || event.ctrlKey) && event.key === "a") {
-                    event.preventDefault();
-                    selectEditableText();
-                    return;
-                }
-                // this counts glyphs, not characters
-                const curLen = Array.from(editableRef.current.innerText).length;
-                if (event.key === "Enter") {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    if (editableRef.current.innerText.trim() === "") {
-                        editableRef.current.innerText = originalName;
-                    }
-                    editableRef.current.blur();
-                } else if (event.key === "Escape") {
-                    editableRef.current.innerText = originalName;
-                    editableRef.current.blur();
-                    event.preventDefault();
-                    event.stopPropagation();
-                } else if (curLen >= 14 && !["Backspace", "Delete", "ArrowLeft", "ArrowRight"].includes(event.key)) {
-                    event.preventDefault();
-                    event.stopPropagation();
-                }
-            };
-
-            useEffect(() => {
-                if (!loadedRef.current) {
-                    onLoaded();
-                    loadedRef.current = true;
-                }
-            }, [onLoaded]);
-
-            useEffect(() => {
-                if (tabRef.current && isNew) {
-                    const initialWidth = `${(tabWidth / 3) * 2}px`;
-                    tabRef.current.style.setProperty("--initial-tab-width", initialWidth);
-                    tabRef.current.style.setProperty("--final-tab-width", `${tabWidth}px`);
-                }
-            }, [isNew, tabWidth]);
-
-            useEffect(() => {
-                if (active && isPinned && jiggleTrigger > 0) {
-                    setIsJiggling(true);
-                    const timeout = setTimeout(() => {
-                        setIsJiggling(false);
-                    }, 500);
-                    return () => clearTimeout(timeout);
-                }
-            }, [jiggleTrigger, active, isPinned]);
-
-            // Prevent drag from being triggered on mousedown
-            const handleMouseDownOnClose = (event: React.MouseEvent<HTMLButtonElement, MouseEvent>) => {
-                event.stopPropagation();
-            };
-
-            const handleColorSelect = useCallback(
-                (hex: string | null) => {
-                    const oref = makeORef("tab", id);
-                    fireAndForget(async () => {
-                        await ObjectService.UpdateObjectMeta(oref, { "tab:color": hex });
-                    });
-                    setShowColorPicker(false);
-                },
-                [id]
-            );
-
-            const handleContextMenu = useCallback(
-                (e: React.MouseEvent<HTMLDivElement, MouseEvent>) => {
-                    e.preventDefault();
-                    let menu: ContextMenuItem[] = [
-                        { label: isPinned ? "Unpin Tab" : "Pin Tab", click: () => onPinChange() },
-                        { label: "Rename Tab", click: () => handleRenameTab(null) },
-                        {
-                            label: "Copy TabId",
-                            click: () => fireAndForget(() => navigator.clipboard.writeText(id)),
-                        },
-                        { type: "separator" },
-                        {
-                            label: "Color",
-                            click: () => {
-                                const rect = tabRef.current?.getBoundingClientRect();
-                                if (rect) {
-                                    setColorPickerAnchor(rect);
-                                    setShowColorPicker(true);
-                                }
-                            },
-                        },
-                        { type: "separator" },
-                    ];
-                    const fullConfig = globalStore.get(atoms.fullConfigAtom);
-                    const bgPresets: string[] = [];
-                    for (const key in fullConfig?.presets ?? {}) {
-                        if (key.startsWith("bg@")) {
-                            bgPresets.push(key);
-                        }
-                    }
-                    bgPresets.sort((a, b) => {
-                        const aOrder = fullConfig.presets[a]["display:order"] ?? 0;
-                        const bOrder = fullConfig.presets[b]["display:order"] ?? 0;
-                        return aOrder - bOrder;
-                    });
-                    if (bgPresets.length > 0) {
-                        const submenu: ContextMenuItem[] = [];
-                        const oref = makeORef("tab", id);
-                        for (const presetName of bgPresets) {
-                            const preset = fullConfig.presets[presetName];
-                            if (preset == null) {
-                                continue;
-                            }
-                            submenu.push({
-                                label: preset["display:name"] ?? presetName,
-                                click: () =>
-                                    fireAndForget(async () => {
-                                        await ObjectService.UpdateObjectMeta(oref, preset);
-                                        RpcApi.ActivityCommand(TabRpcClient, { settabtheme: 1 }, { noresponse: true });
-                                        recordTEvent("action:settabtheme");
-                                    }),
-                            });
-                        }
-                        menu.push({ label: "Backgrounds", type: "submenu", submenu }, { type: "separator" });
-                    }
-                    menu.push({ label: "Close Tab", click: () => onClose(null) });
-                    ContextMenuModel.showContextMenu(menu, e);
-                },
-                [onPinChange, handleRenameTab, id, onClose, isPinned]
-            );
-
-            return (
-                <>
-                    <div
-                        ref={tabRef}
-                        className={clsx("tab", {
-                            active,
-                            dragging: isDragging,
-                            "before-active": isBeforeActive,
-                            "new-tab": isNew,
-                            "tab-colored": !!tabColor,
-                        })}
-                        style={tabColor ? ({ "--tab-color": tabColor } as React.CSSProperties) : undefined}
-                        onMouseDown={onDragStart}
-                        onClick={onSelect}
-                        onContextMenu={handleContextMenu}
-                        data-tab-id={id}
-                    >
-                        <div className="tab-inner">
-                            <div
-                                ref={editableRef}
-                                className={clsx("name", { focused: isEditable })}
-                                contentEditable={isEditable}
-                                onDoubleClick={handleRenameTab}
-                                onBlur={handleBlur}
-                                onKeyDown={handleKeyDown}
-                                suppressContentEditableWarning={true}
-                            >
-                                {tabData?.name}
-                            </div>
-                            {isPinned ? (
-                                <Button
-                                    className={clsx("ghost grey pin", { jiggling: isJiggling })}
-                                    onClick={(e) => {
-                                        e.stopPropagation();
-                                        onPinChange();
-                                    }}
-                                    title="Unpin Tab"
-                                >
-                                    <i className="fa fa-solid fa-thumbtack" />
-                                </Button>
-                            ) : (
-                                <Button
-                                    className="ghost grey close"
-                                    onClick={onClose}
-                                    onMouseDown={handleMouseDownOnClose}
-                                    title="Close Tab"
-                                >
-                                    <i className="fa fa-solid fa-xmark" />
-                                </Button>
-                            )}
-                        </div>
-                    </div>
-                    {showColorPicker && colorPickerAnchor && (
-                        <TabColorPicker
-                            anchor={colorPickerAnchor}
-                            currentColor={tabColor}
-                            onSelect={handleColorSelect}
-                            onClose={() => setShowColorPicker(false)}
-                        />
-                    )}
-                </>
-            );
+    createEffect(() => {
+        const name = tabData()?.name;
+        if (name) {
+            setOriginalName(name);
         }
-    )
-);
+    });
+
+    onCleanup(() => {
+        if (editableTimeoutId) {
+            clearTimeout(editableTimeoutId);
+        }
+    });
+
+    const selectEditableText = () => {
+        if (editableRef) {
+            const range = document.createRange();
+            const selection = window.getSelection();
+            range.selectNodeContents(editableRef);
+            selection.removeAllRanges();
+            selection.addRange(range);
+        }
+    };
+
+    const handleRenameTab = (event?: MouseEvent) => {
+        event?.stopPropagation();
+        setIsEditable(true);
+        editableTimeoutId = setTimeout(() => {
+            selectEditableText();
+        }, 0);
+    };
+
+    const handleBlur = () => {
+        let newText = editableRef.innerText.trim();
+        newText = newText || originalName();
+        editableRef.innerText = newText;
+        setIsEditable(false);
+        fireAndForget(() => ObjectService.UpdateTabName(props.id, newText));
+        setTimeout(() => refocusNode(null), 10);
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+        if ((event.metaKey || event.ctrlKey) && event.key === "a") {
+            event.preventDefault();
+            selectEditableText();
+            return;
+        }
+        const curLen = Array.from(editableRef.innerText).length;
+        if (event.key === "Enter") {
+            event.preventDefault();
+            event.stopPropagation();
+            if (editableRef.innerText.trim() === "") {
+                editableRef.innerText = originalName();
+            }
+            editableRef.blur();
+        } else if (event.key === "Escape") {
+            editableRef.innerText = originalName();
+            editableRef.blur();
+            event.preventDefault();
+            event.stopPropagation();
+        } else if (curLen >= 14 && !["Backspace", "Delete", "ArrowLeft", "ArrowRight"].includes(event.key)) {
+            event.preventDefault();
+            event.stopPropagation();
+        }
+    };
+
+    createEffect(() => {
+        if (!loadedRef) {
+            props.onLoaded();
+            loadedRef = true;
+        }
+    });
+
+    createEffect(() => {
+        if (tabRef && props.isNew) {
+            const initialWidth = `${(props.tabWidth / 3) * 2}px`;
+            tabRef.style.setProperty("--initial-tab-width", initialWidth);
+            tabRef.style.setProperty("--final-tab-width", `${props.tabWidth}px`);
+        }
+    });
+
+    createEffect(() => {
+        const trigger = jiggleTrigger();
+        if (props.active && props.isPinned && trigger > 0) {
+            setIsJiggling(true);
+            const timeout = setTimeout(() => {
+                setIsJiggling(false);
+            }, 500);
+            onCleanup(() => clearTimeout(timeout));
+        }
+    });
+
+    const handleMouseDownOnClose = (event: MouseEvent) => {
+        event.stopPropagation();
+    };
+
+    const handleColorSelect = (hex: string | null) => {
+        const oref = makeORef("tab", props.id);
+        fireAndForget(async () => {
+            await ObjectService.UpdateObjectMeta(oref, { "tab:color": hex });
+        });
+        setShowColorPicker(false);
+    };
+
+    const handleContextMenu = (e: MouseEvent) => {
+        e.preventDefault();
+        let menu: ContextMenuItem[] = [
+            { label: props.isPinned ? "Unpin Tab" : "Pin Tab", click: () => props.onPinChange() },
+            { label: "Rename Tab", click: () => handleRenameTab() },
+            {
+                label: "Copy TabId",
+                click: () => fireAndForget(() => navigator.clipboard.writeText(props.id)),
+            },
+            { type: "separator" },
+            {
+                label: "Color",
+                click: () => {
+                    const rect = tabRef?.getBoundingClientRect();
+                    if (rect) {
+                        setColorPickerAnchor(rect);
+                        setShowColorPicker(true);
+                    }
+                },
+            },
+            { type: "separator" },
+        ];
+        const fullConfig = atoms.fullConfigAtom();
+        const bgPresets: string[] = [];
+        for (const key in fullConfig?.presets ?? {}) {
+            if (key.startsWith("bg@")) {
+                bgPresets.push(key);
+            }
+        }
+        bgPresets.sort((a, b) => {
+            const aOrder = fullConfig.presets[a]["display:order"] ?? 0;
+            const bOrder = fullConfig.presets[b]["display:order"] ?? 0;
+            return aOrder - bOrder;
+        });
+        if (bgPresets.length > 0) {
+            const submenu: ContextMenuItem[] = [];
+            const oref = makeORef("tab", props.id);
+            for (const presetName of bgPresets) {
+                const preset = fullConfig.presets[presetName];
+                if (preset == null) {
+                    continue;
+                }
+                submenu.push({
+                    label: preset["display:name"] ?? presetName,
+                    click: () =>
+                        fireAndForget(async () => {
+                            await ObjectService.UpdateObjectMeta(oref, preset);
+                            RpcApi.ActivityCommand(TabRpcClient, { settabtheme: 1 }, { noresponse: true });
+                            recordTEvent("action:settabtheme");
+                        }),
+                });
+            }
+            menu.push({ label: "Backgrounds", type: "submenu", submenu }, { type: "separator" });
+        }
+        menu.push({ label: "Close Tab", click: () => props.onClose(null) });
+        ContextMenuModel.showContextMenu(menu, e);
+    };
+
+    return (
+        <>
+            <div
+                ref={tabRef!}
+                class={clsx("tab", {
+                    active: props.active,
+                    dragging: props.isDragging,
+                    "before-active": props.isBeforeActive,
+                    "new-tab": props.isNew,
+                    "tab-colored": !!tabColor(),
+                })}
+                style={tabColor() ? ({ "--tab-color": tabColor() } as JSX.CSSProperties) : undefined}
+                onMouseDown={props.onDragStart}
+                onClick={props.onSelect}
+                onContextMenu={handleContextMenu}
+                data-tab-id={props.id}
+            >
+                <div class="tab-inner">
+                    <div
+                        ref={editableRef!}
+                        class={clsx("name", { focused: isEditable() })}
+                        contentEditable={isEditable()}
+                        onDblClick={() => handleRenameTab()}
+                        onBlur={handleBlur}
+                        onKeyDown={handleKeyDown}
+                    >
+                        {tabData()?.name}
+                    </div>
+                    <Show
+                        when={props.isPinned}
+                        fallback={
+                            <Button
+                                className="ghost grey close"
+                                onClick={props.onClose}
+                                onMouseDown={handleMouseDownOnClose}
+                                title="Close Tab"
+                            >
+                                <i class="fa fa-solid fa-xmark" />
+                            </Button>
+                        }
+                    >
+                        <Button
+                            className={clsx("ghost grey pin", { jiggling: isJiggling() })}
+                            onClick={(e: MouseEvent) => {
+                                e.stopPropagation();
+                                props.onPinChange();
+                            }}
+                            title="Unpin Tab"
+                        >
+                            <i class="fa fa-solid fa-thumbtack" />
+                        </Button>
+                    </Show>
+                </div>
+            </div>
+            <Show when={showColorPicker() && colorPickerAnchor()}>
+                <TabColorPicker
+                    anchor={colorPickerAnchor()}
+                    currentColor={tabColor()}
+                    onSelect={handleColorSelect}
+                    onClose={() => setShowColorPicker(false)}
+                />
+            </Show>
+        </>
+    );
+}
 
 export { Tab };

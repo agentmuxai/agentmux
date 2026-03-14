@@ -3,8 +3,8 @@
 
 import { ChatMessage, ChatMessages } from "@/app/view/chat/chatmessages";
 import { UserStatus } from "@/app/view/chat/userlist";
-import * as jotai from "jotai";
-import { memo } from "react";
+import { createSignal } from "solid-js";
+import type { JSX } from "solid-js";
 import { Channels } from "./channels";
 import { ChatBox } from "./chatbox";
 import { channels, messages, users } from "./data";
@@ -16,29 +16,34 @@ class ChatModel {
     viewType: string;
     channels: MenuItem[];
     users: UserStatus[];
-    messagesAtom: jotai.PrimitiveAtom<ChatMessage[]>;
+
+    private _messages: () => ChatMessage[];
+    private _setMessages: (v: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[])) => void;
 
     constructor(blockId: string) {
         this.viewType = "chat";
         this.channels = channels;
         this.users = users;
-        this.messagesAtom = jotai.atom(messages);
+        const [msgs, setMsgs] = createSignal<ChatMessage[]>(messages);
+        this._messages = msgs;
+        this._setMessages = setMsgs;
     }
 
-    addMessageAtom = jotai.atom(null, (get, set, newMessage: ChatMessage) => {
-        const currentMessages = get(this.messagesAtom);
-        set(this.messagesAtom, [...currentMessages, newMessage]);
-    });
+    getMessages(): ChatMessage[] {
+        return this._messages();
+    }
+
+    addMessage(newMessage: ChatMessage) {
+        this._setMessages((prev) => [...prev, newMessage]);
+    }
 }
 
 interface ChatProps {
     model: ChatModel;
 }
 
-const Chat = memo(({ model }: ChatProps) => {
-    const { channels, users } = model;
-    const messages = jotai.useAtomValue(model.messagesAtom);
-    const [, appendMessage] = jotai.useAtom(model.addMessageAtom);
+function Chat(props: ChatProps): JSX.Element {
+    const { channels, users } = props.model;
 
     const handleSendMessage = (message: string) => {
         const newMessage: ChatMessage = {
@@ -46,21 +51,21 @@ const Chat = memo(({ model }: ChatProps) => {
             username: "currentUser",
             message: message,
         };
-        appendMessage(newMessage);
+        props.model.addMessage(newMessage);
     };
 
     return (
-        <div className="chat-view">
-            <Channels channels={channels}></Channels>
-            <div className="chat-section">
-                <div className="message-wrapper">
-                    <ChatMessages messages={messages}></ChatMessages>
+        <div class="chat-view">
+            <Channels channels={channels} />
+            <div class="chat-section">
+                <div class="message-wrapper">
+                    <ChatMessages messages={props.model.getMessages()} />
                 </div>
                 <ChatBox onSendMessage={(message: string) => handleSendMessage(message)} />
             </div>
-            <UserList users={users}></UserList>
+            <UserList users={users} />
         </div>
     );
-});
+}
 
 export { Chat, ChatModel };

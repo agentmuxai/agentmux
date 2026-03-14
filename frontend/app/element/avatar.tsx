@@ -1,8 +1,8 @@
 // Copyright 2025, Command Line Inc.
 // SPDX-License-Identifier: Apache-2.0
-import { memo } from "react";
 
 import clsx from "clsx";
+import { JSX, Show } from "solid-js";
 import "./avatar.scss";
 
 interface AvatarProps {
@@ -12,7 +12,7 @@ interface AvatarProps {
     imageUrl?: string;
 }
 
-const Avatar = memo(({ name, status = "offline", className, imageUrl }: AvatarProps) => {
+const Avatar = ({ name, status = "offline", className, imageUrl }: AvatarProps): JSX.Element => {
     const getInitials = (name: string) => {
         const nameParts = name.split(" ");
         const initials = nameParts.map((part) => part[0]).join("");
@@ -20,17 +20,16 @@ const Avatar = memo(({ name, status = "offline", className, imageUrl }: AvatarPr
     };
 
     return (
-        <div className={clsx("avatar", status, className)} title="status">
-            {imageUrl ? (
-                <img src={imageUrl} alt={`${name}'s avatar`} className="avatar-image" />
-            ) : (
-                <div className="avatar-initials">{getInitials(name)}</div>
-            )}
-            <div className={`status-indicator ${status}`} />
+        <div class={clsx("avatar", status, className)} title="status">
+            <Show
+                when={imageUrl}
+                fallback={<div class="avatar-initials">{getInitials(name)}</div>}
+            >
+                <img src={imageUrl} alt={`${name}'s avatar`} class="avatar-image" />
+            </Show>
+            <div class={`status-indicator ${status}`} />
         </div>
     );
-});
-
-Avatar.displayName = "Avatar";
+};
 
 export { Avatar };

@@ -84,6 +84,7 @@ describe("detectAgentFromPath", () => {
 describe("generateAutoTitle", () => {
     test("generates terminal title from cwd", () => {
         const block: Block = {
+            otype: "block",
             oid: "test-123",
             version: 1,
             meta: {
@@ -97,6 +98,7 @@ describe("generateAutoTitle", () => {
 
     test("generates terminal title with agent identity from agent workspace", () => {
         const block: Block = {
+            otype: "block",
             oid: "test-123",
             version: 1,
             meta: {
@@ -112,6 +114,7 @@ describe("generateAutoTitle", () => {
         // Hostname-based detection has been removed entirely
         // Agent identity should ONLY come from explicit env vars
         const block: Block = {
+            otype: "block",
             oid: "test-123",
             version: 1,
             meta: {
@@ -128,6 +131,7 @@ describe("generateAutoTitle", () => {
         // Even SSH connections don't infer agent from hostname anymore
         // Agent identity must be set explicitly via env vars
         const block: Block = {
+            otype: "block",
             oid: "test-123",
             version: 1,
             meta: {
@@ -143,6 +147,7 @@ describe("generateAutoTitle", () => {
 
     test("block-level cmd:env IS used for agent identity (set via OSC 16162)", () => {
         const block: Block = {
+            otype: "block",
             oid: "test-123",
             version: 1,
             meta: {
@@ -158,6 +163,7 @@ describe("generateAutoTitle", () => {
 
     test("settings-level env var sets agent identity", () => {
         const block: Block = {
+            otype: "block",
             oid: "test-123",
             version: 1,
             meta: {
@@ -176,6 +182,7 @@ describe("generateAutoTitle", () => {
 
     test("generates preview title from filename", () => {
         const block: Block = {
+            otype: "block",
             oid: "test-123",
             version: 1,
             meta: {
@@ -189,6 +196,7 @@ describe("generateAutoTitle", () => {
 
     test("generates preview title from URL", () => {
         const block: Block = {
+            otype: "block",
             oid: "test-123",
             version: 1,
             meta: {
@@ -202,6 +210,7 @@ describe("generateAutoTitle", () => {
 
     test("generates editor title with parent directory", () => {
         const block: Block = {
+            otype: "block",
             oid: "test-123",
             version: 1,
             meta: {
@@ -215,6 +224,7 @@ describe("generateAutoTitle", () => {
 
     test("generates editor title for short path", () => {
         const block: Block = {
+            otype: "block",
             oid: "test-123",
             version: 1,
             meta: {
@@ -228,12 +238,13 @@ describe("generateAutoTitle", () => {
 
     test("generates chat title with channel", () => {
         const block: Block = {
+            otype: "block",
             oid: "test-123",
             version: 1,
             meta: {
                 view: "chat",
                 "chat:channel": "general",
-            },
+            } as MetaType,
         };
         const title = generateAutoTitle(block);
         assert.equal(title, "Chat: general");
@@ -241,6 +252,7 @@ describe("generateAutoTitle", () => {
 
     test("generates default title for help view", () => {
         const block: Block = {
+            otype: "block",
             oid: "test-123",
             version: 1,
             meta: {
@@ -253,6 +265,7 @@ describe("generateAutoTitle", () => {
 
     test("generates default title for unknown view", () => {
         const block: Block = {
+            otype: "block",
             oid: "test-abcd1234",
             version: 1,
             meta: {
@@ -265,6 +278,7 @@ describe("generateAutoTitle", () => {
 
     test("handles null or empty block gracefully", () => {
         const block: Block = {
+            otype: "block",
             oid: "test-123",
             version: 1,
             meta: {},
@@ -277,12 +291,13 @@ describe("generateAutoTitle", () => {
 describe("shouldAutoGenerateTitle", () => {
     test("returns false when block has custom title", () => {
         const block: Block = {
+            otype: "block",
             oid: "test-123",
             version: 1,
             meta: {
                 view: "term",
                 "pane-title": "My Custom Title",
-            },
+            } as MetaType,
         };
         const result = shouldAutoGenerateTitle(block);
         assert.equal(result, false);
@@ -290,6 +305,7 @@ describe("shouldAutoGenerateTitle", () => {
 
     test("returns true when block has no custom title", () => {
         const block: Block = {
+            otype: "block",
             oid: "test-123",
             version: 1,
             meta: {
@@ -302,13 +318,14 @@ describe("shouldAutoGenerateTitle", () => {
 
     test("respects explicit auto-generate flag (true)", () => {
         const block: Block = {
+            otype: "block",
             oid: "test-123",
             version: 1,
             meta: {
                 view: "term",
                 "pane-title": "Custom",
                 "pane-title:auto": true,
-            },
+            } as MetaType,
         };
         const result = shouldAutoGenerateTitle(block);
         assert.equal(result, true);
@@ -316,12 +333,13 @@ describe("shouldAutoGenerateTitle", () => {
 
     test("respects explicit auto-generate flag (false)", () => {
         const block: Block = {
+            otype: "block",
             oid: "test-123",
             version: 1,
             meta: {
                 view: "term",
                 "pane-title:auto": false,
-            },
+            } as MetaType,
         };
         const result = shouldAutoGenerateTitle(block);
         assert.equal(result, false);
@@ -337,13 +355,14 @@ describe("shouldAutoGenerateTitle", () => {
 describe("getEffectiveTitle", () => {
     test("returns custom title when set", () => {
         const block: Block = {
+            otype: "block",
             oid: "test-123",
             version: 1,
             meta: {
                 view: "term",
                 "pane-title": "My Terminal",
                 "cmd:cwd": "/home/user",
-            },
+            } as MetaType,
         };
         const title = getEffectiveTitle(block, true);
         assert.equal(title, "My Terminal");
@@ -351,6 +370,7 @@ describe("getEffectiveTitle", () => {
 
     test("returns auto-generated title when no custom title", () => {
         const block: Block = {
+            otype: "block",
             oid: "test-123",
             version: 1,
             meta: {
@@ -364,6 +384,7 @@ describe("getEffectiveTitle", () => {
 
     test("returns empty string when auto-generate disabled", () => {
         const block: Block = {
+            otype: "block",
             oid: "test-123",
             version: 1,
             meta: {
@@ -377,13 +398,14 @@ describe("getEffectiveTitle", () => {
 
     test("prefers custom title even when auto-generate enabled", () => {
         const block: Block = {
+            otype: "block",
             oid: "test-123",
             version: 1,
             meta: {
                 view: "term",
                 "pane-title": "Custom",
                 "cmd:cwd": "/home/user",
-            },
+            } as MetaType,
         };
         const title = getEffectiveTitle(block, true);
         assert.equal(title, "Custom");

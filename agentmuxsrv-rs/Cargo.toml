@@ -1,6 +1,6 @@
 [package]
 name = "agentmuxsrv-rs"
-version = "0.31.129"
+version = "0.31.130"
 edition = "2021"
 description = "AgentMux Rust backend (drop-in replacement for Go agentmuxsrv)"
 
@@ -38,7 +38,6 @@ notify = "7"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 
 [dev-dependencies]
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "blocking", "json"] }
 tower = { version = "0.5", features = ["util"] }
 serde_json = "1"
 libc = "0.2"

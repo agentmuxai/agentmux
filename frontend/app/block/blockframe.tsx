@@ -3,7 +3,6 @@
 
 import { blockViewToIcon, blockViewToName, ConnectionButton, getBlockHeaderIcon, Input } from "@/app/block/blockutil";
 import { Button } from "@/app/element/button";
-import { useDimensionsWithCallbackRef } from "@/app/hook/useDimensions";
 import { ChangeConnectionBlockModal } from "@/app/modals/conntypeahead";
 import { ContextMenuModel } from "@/app/store/contextmenu";
 import {
@@ -26,9 +25,8 @@ import { NodeModel } from "@/layout/index";
 import * as util from "@/util/util";
 import { computeBgStyleFromMeta } from "@/util/waveutil";
 import clsx from "clsx";
-import * as jotai from "jotai";
-import { OverlayScrollbarsComponent } from "overlayscrollbars-react";
-import * as React from "react";
+import type { JSX } from "solid-js";
+import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import { CopyButton } from "../element/copybutton";
 import { detectAgentColor, detectAgentFromEnv, detectAgentTextColor, getEffectiveTitle } from "./autotitle";
 import { buildPaneContextMenu } from "./pane-actions";
@@ -38,7 +36,7 @@ import { TitleBar } from "./titlebar";
 const NumActiveConnColors = 8;
 
 function handleHeaderContextMenu(
-    e: React.MouseEvent<HTMLDivElement>,
+    e: MouseEvent,
     blockData: Block,
     viewModel: ViewModel,
     magnified: boolean,
@@ -83,12 +81,12 @@ function handleHeaderContextMenu(
             label: "Auto-Generate Title",
             click: async () => {
                 const { generateAutoTitle } = await import("./autotitle");
-                const fullConfig = globalStore.get(atoms.fullConfigAtom);
+                const fullConfig = atoms.fullConfigAtom();
                 const settingsEnv = fullConfig?.settings?.["cmd:env"] as Record<string, string> | undefined;
                 const autoTitle = generateAutoTitle(blockData, settingsEnv);
                 await RpcApi.SetMetaCommand(TabRpcClient, {
                     oref: WOS.makeORef("block", blockData.oid),
-                    meta: { "pane-title": autoTitle },
+                    meta: { "pane-title": autoTitle } as any,
                 });
             },
         },
@@ -97,7 +95,7 @@ function handleHeaderContextMenu(
             click: async () => {
                 await RpcApi.SetMetaCommand(TabRpcClient, {
                     oref: WOS.makeORef("block", blockData.oid),
-                    meta: { "pane-title": "" },
+                    meta: { "pane-title": "" } as any,
                 });
             },
         }
@@ -106,171 +104,178 @@ function handleHeaderContextMenu(
     ContextMenuModel.showContextMenu(menu, e);
 }
 
-function getViewIconElem(viewIconUnion: string | IconButtonDecl, blockData: Block): React.ReactElement {
+function getViewIconElem(viewIconUnion: string | IconButtonDecl, blockData: Block): JSX.Element {
     if (viewIconUnion == null || typeof viewIconUnion === "string") {
         const viewIcon = viewIconUnion as string;
-        return <div className="block-frame-view-icon">{getBlockHeaderIcon(viewIcon, blockData)}</div>;
+        return <div class="block-frame-view-icon">{getBlockHeaderIcon(viewIcon, blockData)}</div>;
     } else {
         return <IconButton decl={viewIconUnion} className="block-frame-view-icon" />;
     }
 }
 
-const OptMagnifyButton = React.memo(
-    ({ magnified, toggleMagnify, disabled }: { magnified: boolean; toggleMagnify: () => void; disabled: boolean }) => {
-        const magnifyDecl: IconButtonDecl = {
-            elemtype: "iconbutton",
-            icon: <MagnifyIcon enabled={magnified} />,
-            title: magnified ? "Minimize" : "Magnify",
-            click: toggleMagnify,
-            disabled,
-        };
-        return <IconButton key="magnify" decl={magnifyDecl} className="block-frame-magnify" />;
-    }
-);
+function OptMagnifyButton(props: { magnified: boolean; toggleMagnify: () => void; disabled: boolean }): JSX.Element {
+    const magnifyDecl = createMemo<IconButtonDecl>(() => ({
+        elemtype: "iconbutton",
+        icon: <MagnifyIcon enabled={props.magnified} />,
+        title: props.magnified ? "Minimize" : "Magnify",
+        click: props.toggleMagnify,
+        disabled: props.disabled,
+    }));
+    return <IconButton decl={magnifyDecl()} className="block-frame-magnify" />;
+}
 
-function computeEndIcons(
-    viewModel: ViewModel,
-    nodeModel: NodeModel,
-    onContextMenu: (e: React.MouseEvent<HTMLDivElement>) => void
-): React.ReactElement[] {
-    const endIconsElem: React.ReactElement[] = [];
-    const endIconButtons = util.useAtomValueSafe(viewModel?.endIconButtons);
-    const magnified = jotai.useAtomValue(nodeModel.isMagnified);
-    const ephemeral = jotai.useAtomValue(nodeModel.isEphemeral);
-    const numLeafs = jotai.useAtomValue(nodeModel.numLeafs);
-    const magnifyDisabled = numLeafs <= 1;
+function EndIcons(props: {
+    viewModel: ViewModel;
+    nodeModel: NodeModel;
+    onContextMenu: (e: MouseEvent) => void;
+}): JSX.Element {
+    const endIconButtons = util.useAtomValueSafe(props.viewModel?.endIconButtons);
+    const magnified = () => props.nodeModel.isMagnified();
+    const ephemeral = () => props.nodeModel.isEphemeral();
+    const magnifyDisabled = () => props.nodeModel.numLeafs() <= 1;
 
-    if (endIconButtons && endIconButtons.length > 0) {
-        endIconsElem.push(...endIconButtons.map((button, idx) => <IconButton key={idx} decl={button} />));
-    }
     const settingsDecl: IconButtonDecl = {
         elemtype: "iconbutton",
         icon: "cog",
         title: "Settings",
-        click: onContextMenu,
+        click: props.onContextMenu,
     };
-    endIconsElem.push(<IconButton key="settings" decl={settingsDecl} className="block-frame-settings" />);
-    if (ephemeral) {
-        const addToLayoutDecl: IconButtonDecl = {
-            elemtype: "iconbutton",
-            icon: "circle-plus",
-            title: "Add to Layout",
-            click: () => {
-                nodeModel.addEphemeralNodeToLayout();
-            },
-        };
-        endIconsElem.push(<IconButton key="add-to-layout" decl={addToLayoutDecl} />);
-    } else {
-        endIconsElem.push(
-            <OptMagnifyButton
-                key="unmagnify"
-                magnified={magnified}
-                toggleMagnify={nodeModel.toggleMagnify}
-                disabled={magnifyDisabled}
-            />
-        );
-    }
 
     const closeDecl: IconButtonDecl = {
         elemtype: "iconbutton",
         icon: "xmark-large",
         title: "Close",
-        click: nodeModel.onClose,
+        click: props.nodeModel.onClose,
     };
-    endIconsElem.push(<IconButton key="close" decl={closeDecl} className="block-frame-default-close" />);
-    return endIconsElem;
+
+    return (
+        <>
+            <Show when={endIconButtons && endIconButtons.length > 0}>
+                <For each={endIconButtons}>
+                    {(button) => <IconButton decl={button} />}
+                </For>
+            </Show>
+            <IconButton decl={settingsDecl} className="block-frame-settings" />
+            <Show when={ephemeral()} fallback={
+                <OptMagnifyButton
+                    magnified={magnified()}
+                    toggleMagnify={props.nodeModel.toggleMagnify}
+                    disabled={magnifyDisabled()}
+                />
+            }>
+                <IconButton decl={{
+                    elemtype: "iconbutton",
+                    icon: "circle-plus",
+                    title: "Add to Layout",
+                    click: () => { props.nodeModel.addEphemeralNodeToLayout(); },
+                }} />
+            </Show>
+            <IconButton decl={closeDecl} className="block-frame-default-close" />
+        </>
+    );
 }
 
-const BlockFrame_Header = ({
-    nodeModel,
-    viewModel,
-    preview,
-    connBtnRef,
-    changeConnModalAtom,
-    error,
-}: BlockFrameProps & { changeConnModalAtom: jotai.PrimitiveAtom<boolean>; error?: Error }) => {
-    const [blockData] = WOS.useWaveObjectValue<Block>(WOS.makeORef("block", nodeModel.blockId));
-    let viewName = util.useAtomValueSafe(viewModel?.viewName) ?? blockViewToName(blockData?.meta?.view);
-    const showBlockIds = jotai.useAtomValue(getSettingsKeyAtom("blockheader:showblockids"));
-    let viewIconUnion = util.useAtomValueSafe(viewModel?.viewIcon) ?? blockViewToIcon(blockData?.meta?.view);
-    const preIconButton = util.useAtomValueSafe(viewModel?.preIconButton);
-    let headerTextUnion = util.useAtomValueSafe(viewModel?.viewText);
-    const magnified = jotai.useAtomValue(nodeModel.isMagnified);
-    const prevMagifiedState = React.useRef(magnified);
-    const manageConnection = util.useAtomValueSafe(viewModel?.manageConnection);
-    const dragHandleRef = preview ? null : nodeModel.dragHandleRef;
-    const connName = blockData?.meta?.connection;
+function BlockFrame_Header(props: BlockFrameProps & { changeConnModalAtom: util.SignalAtom<boolean>; error?: Error }): JSX.Element {
+    const [blockData] = WOS.useWaveObjectValue<Block>(WOS.makeORef("block", props.nodeModel.blockId));
+    const showBlockIds = getSettingsKeyAtom("blockheader:showblockids")();
+    const preIconButton = util.useAtomValueSafe(props.viewModel?.preIconButton);
+    const manageConnection = util.useAtomValueSafe(props.viewModel?.manageConnection);
+    const dragHandleRef = props.preview ? null : props.nodeModel.dragHandleRef;
+    const connName = blockData()?.meta?.connection;
     const connStatus = util.useAtomValueSafe(getConnStatusAtom(connName));
     const wshProblem = connName && !connStatus?.wshenabled && connStatus?.status == "connected";
 
-    React.useEffect(() => {
-        if (!magnified || preview || prevMagifiedState.current) {
-            return;
+    // Track previous magnified state for one-time activity report
+    let prevMagnifiedState = props.nodeModel.isMagnified();
+    createEffect(() => {
+        const isMag = props.nodeModel.isMagnified();
+        if (isMag && !prevMagnifiedState && !props.preview) {
+            RpcApi.ActivityCommand(TabRpcClient, { nummagnify: 1 });
+            const vn = util.useAtomValueSafe(props.viewModel?.viewName) ?? blockViewToName(blockData()?.meta?.view);
+            recordTEvent("action:magnify", { "block:view": vn });
         }
-        RpcApi.ActivityCommand(TabRpcClient, { nummagnify: 1 });
-        recordTEvent("action:magnify", { "block:view": viewName });
-    }, [magnified]);
+        prevMagnifiedState = isMag;
+    });
 
-    if (blockData?.meta?.["frame:title"]) {
-        viewName = blockData.meta["frame:title"];
-    }
-    // Detect agent identity and color for terminal blocks
-    // Agent identity comes from block's cmd:env, which is set via OSC 16162 E from the shell
-    // Each pane can have its own agent based on shell environment variables
-    let agentColor: string | null = null;
-    let agentTextColor: string | null = null;
-    if (!blockData?.meta?.["frame:title"] && blockData?.meta?.view === "term") {
-        // Read from block's cmd:env (set via OSC 16162 from shell integration)
-        const blockEnv = blockData.meta["cmd:env"] as Record<string, string> | undefined;
-        const agentId = detectAgentFromEnv(blockEnv);
-        if (agentId) {
-            viewName = agentId;
-            agentColor = detectAgentColor(blockEnv, agentId);
-            agentTextColor = detectAgentTextColor(blockEnv, agentId);
+    const viewName = createMemo(() => {
+        const bd = blockData();
+        if (bd?.meta?.["frame:title"]) {
+            return bd.meta["frame:title"];
         }
-    }
-    if (blockData?.meta?.["frame:icon"]) {
-        viewIconUnion = blockData.meta["frame:icon"];
-    }
-    if (blockData?.meta?.["frame:text"]) {
-        headerTextUnion = blockData.meta["frame:text"];
-    }
+        let name = util.useAtomValueSafe(props.viewModel?.viewName) ?? blockViewToName(bd?.meta?.view);
+        if (!bd?.meta?.["frame:title"] && bd?.meta?.view === "term") {
+            const blockEnv = bd.meta["cmd:env"] as Record<string, string> | undefined;
+            const agentId = detectAgentFromEnv(blockEnv);
+            if (agentId) {
+                name = agentId;
+            }
+        }
+        return name;
+    });
 
-    const onContextMenu = React.useCallback(
-        (e: React.MouseEvent<HTMLDivElement>) => {
-            handleHeaderContextMenu(e, blockData, viewModel, magnified, nodeModel.toggleMagnify, nodeModel.onClose);
-        },
-        [magnified]
-    );
+    const agentColor = createMemo(() => {
+        const bd = blockData();
+        if (!bd?.meta?.["frame:title"] && bd?.meta?.view === "term") {
+            const blockEnv = bd.meta["cmd:env"] as Record<string, string> | undefined;
+            const agentId = detectAgentFromEnv(blockEnv);
+            if (agentId) return detectAgentColor(blockEnv, agentId);
+        }
+        return null;
+    });
 
-    const endIconsElem = computeEndIcons(viewModel, nodeModel, onContextMenu);
-    const viewIconElem = getViewIconElem(viewIconUnion, blockData);
-    let preIconButtonElem: React.ReactElement = null;
-    if (preIconButton) {
-        preIconButtonElem = <IconButton decl={preIconButton} className="block-frame-preicon-button" />;
-    }
+    const agentTextColor = createMemo(() => {
+        const bd = blockData();
+        if (!bd?.meta?.["frame:title"] && bd?.meta?.view === "term") {
+            const blockEnv = bd.meta["cmd:env"] as Record<string, string> | undefined;
+            const agentId = detectAgentFromEnv(blockEnv);
+            if (agentId) return detectAgentTextColor(blockEnv, agentId);
+        }
+        return null;
+    });
 
-    const headerTextElems: React.ReactElement[] = [];
-    if (typeof headerTextUnion === "string") {
-        if (!util.isBlank(headerTextUnion)) {
+    const viewIconUnion = createMemo(() => {
+        const bd = blockData();
+        if (bd?.meta?.["frame:icon"]) return bd.meta["frame:icon"];
+        return util.useAtomValueSafe(props.viewModel?.viewIcon) ?? blockViewToIcon(bd?.meta?.view);
+    });
+
+    const headerTextUnion = createMemo(() => {
+        const bd = blockData();
+        if (bd?.meta?.["frame:text"]) return bd.meta["frame:text"];
+        return util.useAtomValueSafe(props.viewModel?.viewText);
+    });
+
+    const onContextMenu = (e: MouseEvent) => {
+        handleHeaderContextMenu(e, blockData(), props.viewModel, props.nodeModel.isMagnified(), props.nodeModel.toggleMagnify, props.nodeModel.onClose);
+    };
+    const viewIconElem = getViewIconElem(viewIconUnion(), blockData());
+
+    const preIconButtonElem: JSX.Element = preIconButton
+        ? <IconButton decl={preIconButton} className="block-frame-preicon-button" />
+        : null;
+
+    const headerTextElems: JSX.Element[] = [];
+    const htu = headerTextUnion();
+    if (typeof htu === "string") {
+        if (!util.isBlank(htu)) {
             headerTextElems.push(
-                <div key="text" className="block-frame-text ellipsis">
-                    &lrm;{headerTextUnion}
+                <div class="block-frame-text ellipsis">
+                    &lrm;{htu}
                 </div>
             );
         }
-    } else if (Array.isArray(headerTextUnion)) {
-        headerTextElems.push(...renderHeaderElements(headerTextUnion, preview));
+    } else if (Array.isArray(htu)) {
+        headerTextElems.push(...renderHeaderElements(htu, props.preview));
     }
-    if (error != null) {
+    if (props.error != null) {
         const copyHeaderErr = () => {
-            navigator.clipboard.writeText(error.message + "\n" + error.stack);
+            navigator.clipboard.writeText(props.error.message + "\n" + props.error.stack);
         };
         headerTextElems.push(
-            <div className="iconbutton disabled" key="controller-status" onClick={copyHeaderErr}>
+            <div class="iconbutton disabled" onClick={copyHeaderErr}>
                 <i
-                    className="fa-sharp fa-solid fa-triangle-exclamation"
-                    title={"Error Rendering View Header: " + error.message}
+                    class="fa-sharp fa-solid fa-triangle-exclamation"
+                    title={"Error Rendering View Header: " + props.error.message}
                 />
             </div>
         );
@@ -282,45 +287,51 @@ const BlockFrame_Header = ({
     };
     const showNoWshButton = manageConnection && wshProblem && !util.isBlank(connName) && !connName.startsWith("aws:");
 
-    const headerStyle: React.CSSProperties = {};
-    if (agentColor) {
-        headerStyle.backgroundColor = agentColor;
-    }
-    if (agentTextColor) {
-        headerStyle.color = agentTextColor;
-    }
+    const headerStyle = createMemo<JSX.CSSProperties>(() => {
+        const style: JSX.CSSProperties = {};
+        const ac = agentColor();
+        const atc = agentTextColor();
+        if (ac) style["background-color"] = ac;
+        if (atc) style.color = atc;
+        return style;
+    });
 
     return (
         <div
-            className="block-frame-default-header"
+            class="block-frame-default-header"
             data-role="block-header"
             data-testid="block-header"
-            ref={dragHandleRef}
+            ref={dragHandleRef ? (el) => { dragHandleRef.current = el; } : undefined}
             onContextMenu={onContextMenu}
-            style={headerStyle}
+            style={headerStyle()}
         >
             {preIconButtonElem}
-            <div className="block-frame-default-header-iconview">
+            <div class="block-frame-default-header-iconview">
                 {viewIconElem}
-                <div className="block-frame-view-type">{viewName}</div>
-                {showBlockIds && <div className="block-frame-blockid">[{nodeModel.blockId.substring(0, 8)}]</div>}
+                <div class="block-frame-view-type">{viewName()}</div>
+                <Show when={showBlockIds}>
+                    <div class="block-frame-blockid">[{props.nodeModel.blockId.substring(0, 8)}]</div>
+                </Show>
             </div>
-            {manageConnection && (
+            <Show when={manageConnection}>
                 <ConnectionButton
-                    ref={connBtnRef}
-                    key="connbutton"
-                    connection={blockData?.meta?.connection}
-                    changeConnModalAtom={changeConnModalAtom}
+                    ref={props.connBtnRef}
+                    connection={blockData()?.meta?.connection}
+                    changeConnModalAtom={props.changeConnModalAtom}
                 />
-            )}
-            {showNoWshButton && <IconButton decl={wshInstallButton} className="block-frame-header-iconbutton" />}
-            <div className="block-frame-textelems-wrapper">{headerTextElems}</div>
-            <div className="block-frame-end-icons">{endIconsElem}</div>
+            </Show>
+            <Show when={showNoWshButton}>
+                <IconButton decl={wshInstallButton} className="block-frame-header-iconbutton" />
+            </Show>
+            <div class="block-frame-textelems-wrapper">{headerTextElems}</div>
+            <div class="block-frame-end-icons">
+                <EndIcons viewModel={props.viewModel} nodeModel={props.nodeModel} onContextMenu={onContextMenu} />
+            </div>
         </div>
     );
-};
+}
 
-const HeaderTextElem = React.memo(({ elem, preview }: { elem: HeaderElem; preview: boolean }) => {
+function HeaderTextElem({ elem, preview }: { elem: HeaderElem; preview: boolean }): JSX.Element {
     if (elem.elemtype == "iconbutton") {
         return <IconButton decl={elem} className={clsx("block-frame-header-iconbutton", elem.className)} />;
     } else if (elem.elemtype == "toggleiconbutton") {
@@ -329,41 +340,41 @@ const HeaderTextElem = React.memo(({ elem, preview }: { elem: HeaderElem; previe
         return <Input decl={elem} className={clsx("block-frame-input", elem.className)} preview={preview} />;
     } else if (elem.elemtype == "text") {
         return (
-            <div className={clsx("block-frame-text ellipsis", elem.className, { "flex-nogrow": elem.noGrow })}>
-                <span ref={preview ? null : elem.ref} onClick={(e) => elem?.onClick(e)}>
+            <div class={clsx("block-frame-text ellipsis", elem.className, { "flex-nogrow": elem.noGrow })}>
+                <span ref={preview ? undefined : (el) => { if (elem.ref) (elem.ref as any).current = el; }} onClick={(e) => elem?.onClick?.(e)}>
                     &lrm;{elem.text}
                 </span>
             </div>
         );
     } else if (elem.elemtype == "textbutton") {
         return (
-            <Button className={elem.className} onClick={(e) => elem.onClick(e)} title={elem.title}>
+            <Button className={elem.className} onClick={(e) => elem.onClick?.(e)} title={elem.title}>
                 {elem.text}
             </Button>
         );
     } else if (elem.elemtype == "div") {
         return (
             <div
-                className={clsx("block-frame-div", elem.className)}
+                class={clsx("block-frame-div", elem.className)}
                 onMouseOver={elem.onMouseOver}
                 onMouseOut={elem.onMouseOut}
             >
-                {elem.children.map((child, childIdx) => (
-                    <HeaderTextElem elem={child} key={childIdx} preview={preview} />
-                ))}
+                <For each={elem.children}>
+                    {(child, childIdx) => <HeaderTextElem elem={child} preview={preview} />}
+                </For>
             </div>
         );
     } else if (elem.elemtype == "menubutton") {
         return <MenuButton className="block-frame-menubutton" {...(elem as MenuButtonProps)} />;
     }
     return null;
-});
+}
 
-function renderHeaderElements(headerTextUnion: HeaderElem[], preview: boolean): React.ReactElement[] {
-    const headerTextElems: React.ReactElement[] = [];
+function renderHeaderElements(headerTextUnion: HeaderElem[], preview: boolean): JSX.Element[] {
+    const headerTextElems: JSX.Element[] = [];
     for (let idx = 0; idx < headerTextUnion.length; idx++) {
         const elem = headerTextUnion[idx];
-        const renderedElement = <HeaderTextElem elem={elem} key={idx} preview={preview} />;
+        const renderedElement = <HeaderTextElem elem={elem} preview={preview} />;
         if (renderedElement) {
             headerTextElems.push(renderedElement);
         }
@@ -371,257 +382,274 @@ function renderHeaderElements(headerTextUnion: HeaderElem[], preview: boolean): 
     return headerTextElems;
 }
 
-const ConnStatusOverlay = React.memo(
-    ({
-        nodeModel,
-        viewModel,
-        changeConnModalAtom,
-    }: {
-        nodeModel: NodeModel;
-        viewModel: ViewModel;
-        changeConnModalAtom: jotai.PrimitiveAtom<boolean>;
-    }) => {
-        const [blockData] = WOS.useWaveObjectValue<Block>(WOS.makeORef("block", nodeModel.blockId));
-        const [connModalOpen] = jotai.useAtom(changeConnModalAtom);
-        const connName = blockData.meta?.connection;
-        const connStatus = jotai.useAtomValue(getConnStatusAtom(connName));
-        const isLayoutMode = jotai.useAtomValue(atoms.controlShiftDelayAtom);
-        const [overlayRefCallback, _, domRect] = useDimensionsWithCallbackRef(30);
-        const width = domRect?.width;
-        const [showError, setShowError] = React.useState(false);
-        const fullConfig = jotai.useAtomValue(atoms.fullConfigAtom);
-        const [showWshError, setShowWshError] = React.useState(false);
+function ConnStatusOverlay({
+    nodeModel,
+    viewModel,
+    changeConnModalAtom,
+}: {
+    nodeModel: NodeModel;
+    viewModel: ViewModel;
+    changeConnModalAtom: util.SignalAtom<boolean>;
+}): JSX.Element {
+    const [blockData] = WOS.useWaveObjectValue<Block>(WOS.makeORef("block", nodeModel.blockId));
+    const connModalOpen = changeConnModalAtom();
+    const connName = createMemo(() => blockData()?.meta?.connection);
+    const connStatus = createMemo(() => getConnStatusAtom(connName())());
+    const isLayoutMode = atoms.controlShiftDelayAtom();
+    const [width, setWidth] = createSignal<number>(null);
+    let overlayRef: HTMLDivElement;
+    const [showError, setShowError] = createSignal(false);
+    const fullConfig = atoms.fullConfigAtom();
+    const [showWshError, setShowWshError] = createSignal(false);
 
-        React.useEffect(() => {
-            if (width) {
-                const hasError = !util.isBlank(connStatus.error);
-                const showError = hasError && width >= 250 && connStatus.status == "error";
-                setShowError(showError);
+    onMount(() => {
+        const rszObs = new ResizeObserver((entries) => {
+            for (const entry of entries) {
+                setWidth(entry.contentRect.width);
             }
-        }, [width, connStatus, setShowError]);
+        });
+        if (overlayRef) rszObs.observe(overlayRef);
+        onCleanup(() => rszObs.disconnect());
+    });
 
-        const handleTryReconnect = React.useCallback(() => {
-            const prtn = RpcApi.ConnConnectCommand(
-                TabRpcClient,
-                { host: connName, logblockid: nodeModel.blockId },
-                { timeout: 60000 }
-            );
-            prtn.catch((e) => console.log("error reconnecting", connName, e));
-        }, [connName]);
-
-        const handleDisableWsh = React.useCallback(async () => {
-            // using unknown is a hack. we need proper types for the
-            // connection config on the frontend
-            const metamaptype: unknown = {
-                "conn:wshenabled": false,
-            };
-            const data: ConnConfigRequest = {
-                host: connName,
-                metamaptype: metamaptype,
-            };
-            try {
-                await RpcApi.SetConnectionsConfigCommand(TabRpcClient, data);
-            } catch (e) {
-                console.log("problem setting connection config: ", e);
-            }
-        }, [connName]);
-
-        const handleRemoveWshError = React.useCallback(async () => {
-            try {
-                await RpcApi.DismissWshFailCommand(TabRpcClient, connName);
-            } catch (e) {
-                console.log("unable to dismiss wsh error: ", e);
-            }
-        }, [connName]);
-
-        let statusText = `Disconnected from "${connName}"`;
-        let showReconnect = true;
-        if (connStatus.status == "connecting") {
-            statusText = `Connecting to "${connName}"...`;
-            showReconnect = false;
+    createEffect(() => {
+        const w = width();
+        if (w) {
+            const cs = connStatus();
+            const hasError = !util.isBlank(cs?.error);
+            const show = hasError && w >= 250 && cs?.status == "error";
+            setShowError(show);
         }
-        if (connStatus.status == "connected") {
-            showReconnect = false;
-        }
-        let reconDisplay = null;
-        let reconClassName = "outlined grey";
-        if (width && width < 350) {
-            reconDisplay = <i className="fa-sharp fa-solid fa-rotate-right"></i>;
-            reconClassName = clsx(reconClassName, "text-[12px] py-[5px] px-[6px]");
-        } else {
-            reconDisplay = "Reconnect";
-            reconClassName = clsx(reconClassName, "text-[11px] py-[3px] px-[7px]");
-        }
-        const showIcon = connStatus.status != "connecting";
+    });
 
-        const wshConfigEnabled = fullConfig?.connections?.[connName]?.["conn:wshenabled"] ?? true;
-        React.useEffect(() => {
-            const showWshErrorTemp =
-                connStatus.status == "connected" &&
-                connStatus.wsherror &&
-                connStatus.wsherror != "" &&
-                wshConfigEnabled;
+    createEffect(() => {
+        const cs = connStatus();
+        const wshConfigEnabled = fullConfig?.connections?.[connName()]?.["conn:wshenabled"] ?? true;
+        const showWshErrorTemp =
+            cs?.status == "connected" &&
+            cs?.wsherror &&
+            cs?.wsherror != "" &&
+            wshConfigEnabled;
+        setShowWshError(showWshErrorTemp);
+    });
 
-            setShowWshError(showWshErrorTemp);
-        }, [connStatus, wshConfigEnabled]);
-
-        const handleCopy = React.useCallback(
-            async (e: React.MouseEvent) => {
-                const errTexts = [];
-                if (showError) {
-                    errTexts.push(`error: ${connStatus.error}`);
-                }
-                if (showWshError) {
-                    errTexts.push(`unable to use wsh: ${connStatus.wsherror}`);
-                }
-                const textToCopy = errTexts.join("\n");
-                await navigator.clipboard.writeText(textToCopy);
-            },
-            [showError, showWshError, connStatus.error, connStatus.wsherror]
+    const handleTryReconnect = () => {
+        const prtn = RpcApi.ConnConnectCommand(
+            TabRpcClient,
+            { host: connName(), logblockid: nodeModel.blockId },
+            { timeout: 60000 }
         );
+        prtn.catch((e) => console.log("error reconnecting", connName(), e));
+    };
 
-        if (!showWshError && (isLayoutMode || connStatus.status == "connected" || connModalOpen)) {
-            return null;
+    const handleDisableWsh = async () => {
+        const metamaptype: unknown = {
+            "conn:wshenabled": false,
+        };
+        const data: ConnConfigRequest = {
+            host: connName(),
+            metamaptype: metamaptype,
+        };
+        try {
+            await RpcApi.SetConnectionsConfigCommand(TabRpcClient, data);
+        } catch (e) {
+            console.log("problem setting connection config: ", e);
         }
+    };
 
-        return (
-            <div className="connstatus-overlay" ref={overlayRefCallback}>
-                <div className="connstatus-content">
-                    <div className={clsx("connstatus-status-icon-wrapper", { "has-error": showError || showWshError })}>
-                        {showIcon && <i className="fa-solid fa-triangle-exclamation"></i>}
-                        <div className="connstatus-status ellipsis">
-                            <div className="connstatus-status-text">{statusText}</div>
-                            {(showError || showWshError) && (
-                                <OverlayScrollbarsComponent
-                                    className="connstatus-error"
-                                    options={{ scrollbars: { autoHide: "leave" } }}
-                                >
+    const handleRemoveWshError = async () => {
+        try {
+            await RpcApi.DismissWshFailCommand(TabRpcClient, connName());
+        } catch (e) {
+            console.log("unable to dismiss wsh error: ", e);
+        }
+    };
+
+    const statusText = createMemo(() => {
+        const cs = connStatus();
+        if (cs?.status == "connecting") return `Connecting to "${connName()}"...`;
+        return `Disconnected from "${connName()}"`;
+    });
+
+    const showReconnect = createMemo(() => {
+        const cs = connStatus();
+        return cs?.status !== "connecting" && cs?.status !== "connected";
+    });
+
+    const reconClassName = createMemo(() => {
+        const w = width();
+        let base = "outlined grey";
+        if (w && w < 350) {
+            return clsx(base, "text-[12px] py-[5px] px-[6px]");
+        }
+        return clsx(base, "text-[11px] py-[3px] px-[7px]");
+    });
+
+    const showIcon = createMemo(() => connStatus()?.status != "connecting");
+
+    const handleCopy = async (e: MouseEvent) => {
+        const errTexts = [];
+        if (showError()) {
+            errTexts.push(`error: ${connStatus()?.error}`);
+        }
+        if (showWshError()) {
+            errTexts.push(`unable to use wsh: ${connStatus()?.wsherror}`);
+        }
+        const textToCopy = errTexts.join("\n");
+        await navigator.clipboard.writeText(textToCopy);
+    };
+
+    return (
+        <Show when={showWshError() || (!isLayoutMode && connStatus()?.status !== "connected" && !connModalOpen)}>
+            <div class="connstatus-overlay" ref={(el) => { overlayRef = el; }}>
+                <div class="connstatus-content">
+                    <div class={clsx("connstatus-status-icon-wrapper", { "has-error": showError() || showWshError() })}>
+                        <Show when={showIcon()}>
+                            <i class="fa-solid fa-triangle-exclamation"></i>
+                        </Show>
+                        <div class="connstatus-status ellipsis">
+                            <div class="connstatus-status-text">{statusText()}</div>
+                            <Show when={showError() || showWshError()}>
+                                <div class="connstatus-error" style={{ "overflow-y": "auto" }}>
                                     <CopyButton className="copy-button" onClick={handleCopy} title="Copy" />
-                                    {showError ? <div>error: {connStatus.error}</div> : null}
-                                    {showWshError ? <div>unable to use wsh: {connStatus.wsherror}</div> : null}
-                                </OverlayScrollbarsComponent>
-                            )}
-                            {showWshError && (
-                                <Button className={reconClassName} onClick={handleDisableWsh}>
+                                    <Show when={showError()}>
+                                        <div>error: {connStatus()?.error}</div>
+                                    </Show>
+                                    <Show when={showWshError()}>
+                                        <div>unable to use wsh: {connStatus()?.wsherror}</div>
+                                    </Show>
+                                </div>
+                            </Show>
+                            <Show when={showWshError()}>
+                                <Button className={reconClassName()} onClick={handleDisableWsh}>
                                     always disable wsh
                                 </Button>
-                            )}
+                            </Show>
                         </div>
                     </div>
-                    {showReconnect ? (
-                        <div className="connstatus-actions">
-                            <Button className={reconClassName} onClick={handleTryReconnect}>
-                                {reconDisplay}
+                    <Show when={showReconnect()}>
+                        <div class="connstatus-actions">
+                            <Button className={reconClassName()} onClick={handleTryReconnect}>
+                                <Show
+                                    when={width() && width() < 350}
+                                    fallback="Reconnect"
+                                >
+                                    <i class="fa-sharp fa-solid fa-rotate-right"></i>
+                                </Show>
                             </Button>
                         </div>
-                    ) : null}
-                    {showWshError ? (
-                        <div className="connstatus-actions">
-                            <Button className={`fa-xmark fa-solid ${reconClassName}`} onClick={handleRemoveWshError} />
+                    </Show>
+                    <Show when={showWshError()}>
+                        <div class="connstatus-actions">
+                            <Button className={`fa-xmark fa-solid ${reconClassName()}`} onClick={handleRemoveWshError} />
                         </div>
-                    ) : null}
+                    </Show>
                 </div>
             </div>
-        );
-    }
-);
+        </Show>
+    );
+}
 
-const BlockMask = React.memo(({ nodeModel }: { nodeModel: NodeModel }) => {
-    const isFocused = jotai.useAtomValue(nodeModel.isFocused);
-    const blockNum = jotai.useAtomValue(nodeModel.blockNum);
-    const isLayoutMode = jotai.useAtomValue(atoms.controlShiftDelayAtom);
-    const showOverlayBlockNums = jotai.useAtomValue(getSettingsKeyAtom("app:showoverlayblocknums")) ?? true;
+function BlockMask({ nodeModel }: { nodeModel: NodeModel }): JSX.Element {
+    const isFocused = () => nodeModel.isFocused();
+    const blockNum = () => nodeModel.blockNum();
+    const isLayoutMode = () => atoms.controlShiftDelayAtom();
+    const showOverlayBlockNums = () => getSettingsKeyAtom("app:showoverlayblocknums")() ?? true;
     const [blockData] = WOS.useWaveObjectValue<Block>(WOS.makeORef("block", nodeModel.blockId));
-    const style: React.CSSProperties = {};
-    let showBlockMask = false;
-    if (isFocused) {
-        const tabData = jotai.useAtomValue(atoms.tabAtom);
-        const tabActiveBorderColor = tabData?.meta?.["bg:activebordercolor"];
-        if (tabActiveBorderColor) {
-            style.borderColor = tabActiveBorderColor;
+
+    const style = createMemo<JSX.CSSProperties>(() => {
+        const style: JSX.CSSProperties = {};
+        const bd = blockData();
+        if (isFocused()) {
+            const tabData = atoms.tabAtom();
+            const tabActiveBorderColor = tabData?.meta?.["bg:activebordercolor"];
+            if (tabActiveBorderColor) {
+                style["border-color"] = tabActiveBorderColor;
+            }
+            if (bd?.meta?.["frame:activebordercolor"]) {
+                style["border-color"] = bd.meta["frame:activebordercolor"];
+            }
+        } else {
+            const tabData = atoms.tabAtom();
+            const tabBorderColor = tabData?.meta?.["bg:bordercolor"];
+            if (tabBorderColor) {
+                style["border-color"] = tabBorderColor;
+            }
+            if (bd?.meta?.["frame:bordercolor"]) {
+                style["border-color"] = bd.meta["frame:bordercolor"];
+            }
         }
-        if (blockData?.meta?.["frame:activebordercolor"]) {
-            style.borderColor = blockData.meta["frame:activebordercolor"];
-        }
-    } else {
-        const tabData = jotai.useAtomValue(atoms.tabAtom);
-        const tabBorderColor = tabData?.meta?.["bg:bordercolor"];
-        if (tabBorderColor) {
-            style.borderColor = tabBorderColor;
-        }
-        if (blockData?.meta?.["frame:bordercolor"]) {
-            style.borderColor = blockData.meta["frame:bordercolor"];
-        }
-    }
-    let innerElem = null;
-    if (isLayoutMode && showOverlayBlockNums) {
-        showBlockMask = true;
-        innerElem = (
-            <div className="block-mask-inner">
-                <div className="bignum">{blockNum}</div>
-            </div>
-        );
-    }
+        return style;
+    });
+
+    const showBlockMask = () => isLayoutMode() && showOverlayBlockNums();
+
     return (
-        <div className={clsx("block-mask", { "show-block-mask": showBlockMask })} style={style}>
-            {innerElem}
+        <div class={clsx("block-mask", { "show-block-mask": showBlockMask() })} style={style()}>
+            <Show when={showBlockMask()}>
+                <div class="block-mask-inner">
+                    <div class="bignum">{blockNum()}</div>
+                </div>
+            </Show>
         </div>
     );
-});
+}
 
-const BlockFrame_Default_Component = (props: BlockFrameProps) => {
+function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
     const { nodeModel, viewModel, blockModel, preview, numBlocksInTab, children } = props;
     const [blockData] = WOS.useWaveObjectValue<Block>(WOS.makeORef("block", nodeModel.blockId));
-    const isFocused = jotai.useAtomValue(nodeModel.isFocused);
-    const viewIconUnion = util.useAtomValueSafe(viewModel?.viewIcon) ?? blockViewToIcon(blockData?.meta?.view);
+    const isFocused = () => nodeModel.isFocused();
     const customBg = util.useAtomValueSafe(viewModel?.blockBg);
     const manageConnection = util.useAtomValueSafe(viewModel?.manageConnection);
     const changeConnModalAtom = useBlockAtom(nodeModel.blockId, "changeConn", () => {
-        return jotai.atom(false);
-    }) as jotai.PrimitiveAtom<boolean>;
-    const connModalOpen = jotai.useAtomValue(changeConnModalAtom);
-    const isMagnified = jotai.useAtomValue(nodeModel.isMagnified);
-    const isEphemeral = jotai.useAtomValue(nodeModel.isEphemeral);
-    const [magnifiedBlockBlurAtom] = React.useState(() => getSettingsKeyAtom("window:magnifiedblockblurprimarypx"));
-    const magnifiedBlockBlur = jotai.useAtomValue(magnifiedBlockBlurAtom);
-    const [magnifiedBlockOpacityAtom] = React.useState(() => getSettingsKeyAtom("window:magnifiedblockopacity"));
-    const magnifiedBlockOpacity = jotai.useAtomValue(magnifiedBlockOpacityAtom);
-    const connBtnRef = React.useRef<HTMLDivElement>(null);
+        return util.createSignalAtom(false);
+    }) as util.SignalAtom<boolean>;
+    const connModalOpen = () => changeConnModalAtom();
+    const isMagnified = () => nodeModel.isMagnified();
+    const isEphemeral = () => nodeModel.isEphemeral();
+    const magnifiedBlockBlurAtom = getSettingsKeyAtom("window:magnifiedblockblurprimarypx");
+    const magnifiedBlockBlur = () => magnifiedBlockBlurAtom();
+    const magnifiedBlockOpacityAtom = getSettingsKeyAtom("window:magnifiedblockopacity");
+    const magnifiedBlockOpacity = () => magnifiedBlockOpacityAtom();
+    let connBtnRef: { current: HTMLDivElement | null } = { current: null };
     const noHeader = util.useAtomValueSafe(viewModel?.noHeader);
 
     // Compute agent color for border styling (matches header color)
-    let blockAgentColor: string | null = null;
-    if (!preview && blockData?.meta?.view === "term") {
-        const blockEnv = blockData.meta["cmd:env"] as Record<string, string> | undefined;
-        const agentId = detectAgentFromEnv(blockEnv);
-        if (agentId) {
-            blockAgentColor = detectAgentColor(blockEnv, agentId);
+    const blockAgentColor = createMemo(() => {
+        if (!preview && blockData()?.meta?.view === "term") {
+            const blockEnv = blockData()?.meta?.["cmd:env"] as Record<string, string> | undefined;
+            const agentId = detectAgentFromEnv(blockEnv);
+            if (agentId) {
+                return detectAgentColor(blockEnv, agentId);
+            }
         }
-    }
+        return null;
+    });
 
-    React.useEffect(() => {
+    createEffect(() => {
         if (!manageConnection) {
             return;
         }
         const bcm = getBlockComponentModel(nodeModel.blockId);
         if (bcm != null) {
             bcm.openSwitchConnection = () => {
-                globalStore.set(changeConnModalAtom, true);
+                changeConnModalAtom._set(true);
             };
         }
-        return () => {
+        onCleanup(() => {
             const bcm = getBlockComponentModel(nodeModel.blockId);
             if (bcm != null) {
                 bcm.openSwitchConnection = null;
             }
-        };
-    }, [manageConnection]);
-    React.useEffect(() => {
+        });
+    });
+
+    createEffect(() => {
         // on mount, if manageConnection, call ConnEnsure
-        if (!manageConnection || blockData == null || preview) {
+        if (!manageConnection || blockData() == null || preview) {
             return;
         }
-        const connName = blockData?.meta?.connection;
+        const connName = blockData()?.meta?.connection;
         if (!util.isBlank(connName)) {
             console.log("ensure conn", nodeModel.blockId, connName);
             RpcApi.ConnEnsureCommand(
@@ -632,105 +660,107 @@ const BlockFrame_Default_Component = (props: BlockFrameProps) => {
                 console.log("error ensuring connection", nodeModel.blockId, connName, e);
             });
         }
-    }, [manageConnection, blockData]);
+    });
 
-    const viewIconElem = getViewIconElem(viewIconUnion, blockData);
-    let innerStyle: React.CSSProperties = {};
+    const viewIconUnion = util.useAtomValueSafe(viewModel?.viewIcon) ?? blockViewToIcon(blockData()?.meta?.view);
+    const viewIconElem = getViewIconElem(viewIconUnion, blockData());
+    let innerStyle: JSX.CSSProperties = {};
     if (!preview) {
         innerStyle = computeBgStyleFromMeta(customBg);
     }
-    const previewElem = <div className="block-frame-preview">{viewIconElem}</div>;
+    const previewElem = <div class="block-frame-preview">{viewIconElem}</div>;
     const headerElem = (
         <BlockFrame_Header {...props} connBtnRef={connBtnRef} changeConnModalAtom={changeConnModalAtom} />
     );
-    const headerElemNoView = React.cloneElement(headerElem, { viewModel: null });
-
-    // Body right-click handler — fires when clicking the pane content (not the header,
-    // since handleHeaderContextMenu calls e.stopPropagation() which prevents bubbling here).
-    const onBodyContextMenu = React.useCallback(
-        (e: React.MouseEvent<HTMLDivElement>) => {
-            if (!blockData || preview) return;
-            e.preventDefault();
-            e.stopPropagation();
-            const menu = buildPaneContextMenu(blockData, {
-                magnified: isMagnified,
-                onMagnifyToggle: nodeModel.toggleMagnify,
-                onClose: nodeModel.onClose,
-            }, viewModel);
-            ContextMenuModel.showContextMenu(menu, e);
-        },
-        [blockData, isMagnified, preview, viewModel]
+    const headerElemNoView = (
+        <BlockFrame_Header {...props} connBtnRef={connBtnRef} changeConnModalAtom={changeConnModalAtom} viewModel={null} />
     );
+
+    // Body right-click handler
+    const onBodyContextMenu = (e: MouseEvent) => {
+        if (!blockData() || preview) return;
+        e.preventDefault();
+        e.stopPropagation();
+        const menu = buildPaneContextMenu(blockData(), {
+            magnified: isMagnified(),
+            onMagnifyToggle: nodeModel.toggleMagnify,
+            onClose: nodeModel.onClose,
+        }, viewModel);
+        ContextMenuModel.showContextMenu(menu, e);
+    };
 
     return (
         <div
-            className={clsx("block", "block-frame-default", "block-" + nodeModel.blockId, {
-                "block-focused": isFocused || preview,
+            class={clsx("block", "block-frame-default", "block-" + nodeModel.blockId, {
+                "block-focused": isFocused() || preview,
                 "block-preview": preview,
                 "block-no-highlight": numBlocksInTab === 1,
-                "has-agent-color": !!blockAgentColor,
-                ephemeral: isEphemeral,
-                magnified: isMagnified,
+                "has-agent-color": !!blockAgentColor(),
+                ephemeral: isEphemeral(),
+                magnified: isMagnified(),
             })}
             data-blockid={nodeModel.blockId}
             onClick={blockModel?.onClick}
-            onFocusCapture={blockModel?.onFocusCapture}
+            onFocusIn={blockModel?.onFocusCapture}
             onContextMenu={onBodyContextMenu}
-            ref={blockModel?.blockRef}
+            ref={blockModel?.blockRef ? (el) => { blockModel.blockRef.current = el; } : undefined}
             style={
                 {
-                    "--magnified-block-opacity": magnifiedBlockOpacity,
-                    "--magnified-block-blur": `${magnifiedBlockBlur}px`,
-                    "--block-agent-color": blockAgentColor ?? "transparent",
-                } as React.CSSProperties
+                    "--magnified-block-opacity": magnifiedBlockOpacity(),
+                    "--magnified-block-blur": `${magnifiedBlockBlur()}px`,
+                    "--block-agent-color": blockAgentColor() ?? "transparent",
+                } as JSX.CSSProperties
             }
-            // @ts-ignore: inert does exist in the DOM, just not in react
-            inert={preview ? "1" : undefined} //
+            inert={preview || undefined}
         >
             <BlockMask nodeModel={nodeModel} />
-            {preview || viewModel == null ? null : (
+            <Show when={!preview && viewModel != null}>
                 <ConnStatusOverlay
                     nodeModel={nodeModel}
                     viewModel={viewModel}
                     changeConnModalAtom={changeConnModalAtom}
                 />
-            )}
-            <div className="block-frame-default-inner" style={innerStyle}>
+            </Show>
+            <div class="block-frame-default-inner" style={innerStyle}>
                 {noHeader || <ErrorBoundary fallback={headerElemNoView}>{headerElem}</ErrorBoundary>}
-                {!preview && blockData && (
+                <Show when={!preview && blockData()}>
                     <TitleBar
                         blockId={nodeModel.blockId}
-                        blockMeta={blockData.meta}
-                        title={getEffectiveTitle(blockData, false, globalStore.get(atoms.fullConfigAtom)?.settings?.["cmd:env"] as Record<string, string> | undefined)}
+                        blockMeta={blockData()?.meta}
+                        title={getEffectiveTitle(blockData(), false, atoms.fullConfigAtom()?.settings?.["cmd:env"] as Record<string, string> | undefined)}
                     />
-                )}
+                </Show>
                 {preview ? previewElem : children}
             </div>
-            {preview || viewModel == null || !connModalOpen ? null : (
+            <Show when={!preview && viewModel != null && connModalOpen()}>
                 <ChangeConnectionBlockModal
                     blockId={nodeModel.blockId}
                     nodeModel={nodeModel}
                     viewModel={viewModel}
                     blockRef={blockModel?.blockRef}
-                    changeConnModalAtom={changeConnModalAtom}
+                    changeConnModalOpen={changeConnModalAtom}
+                    setChangeConnModalOpen={(v) => changeConnModalAtom._set(v)}
                     connBtnRef={connBtnRef}
                 />
-            )}
+            </Show>
         </div>
     );
-};
+}
 
-const BlockFrame_Default = React.memo(BlockFrame_Default_Component) as typeof BlockFrame_Default_Component;
+function BlockFrame_Default(props: BlockFrameProps): JSX.Element {
+    return <BlockFrame_Default_Component {...props} />;
+}
 
-const BlockFrame = React.memo((props: BlockFrameProps) => {
+function BlockFrame(props: BlockFrameProps): JSX.Element {
     const blockId = props.nodeModel.blockId;
     const [blockData] = WOS.useWaveObjectValue<Block>(WOS.makeORef("block", blockId));
-    const tabData = jotai.useAtomValue(atoms.tabAtom);
-    if (!blockId || !blockData) {
-        return null;
-    }
-    const numBlocks = tabData?.blockids?.length ?? 0;
-    return <BlockFrame_Default {...props} numBlocksInTab={numBlocks} />;
-});
+    const tabData = atoms.tabAtom();
+    const numBlocks = () => tabData?.blockids?.length ?? 0;
+    return (
+        <Show when={blockId && blockData()}>
+            <BlockFrame_Default {...props} numBlocksInTab={numBlocks()} />
+        </Show>
+    );
+}
 
 export { BlockFrame, NumActiveConnColors };

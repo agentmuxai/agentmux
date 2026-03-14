@@ -1,7 +1,7 @@
 // Copyright 2025, Command Line Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-import { getApi } from "@/app/store/global";
+import { batch } from "solid-js";
 import { fireAndForget } from "@/util/util";
 import { findNodeByBlockId, newLayoutNode } from "./layoutNode";
 import {
@@ -48,10 +48,8 @@ export function initializeFromWaveObject(model: LayoutModel) {
  * @param model The LayoutModel instance.
  */
 export function onBackendUpdate(model: LayoutModel) {
-    getApi().sendLog("[BUG-TRACE] onBackendUpdate called");
     const waveObj = model.getter(model.waveObjectAtom);
     const pendingActions = waveObj?.pendingbackendactions;
-    getApi().sendLog(`[BUG-TRACE] onBackendUpdate pendingActions: ${JSON.stringify(pendingActions)}`);
     if (pendingActions?.length) {
         fireAndForget(() => processPendingBackendActions(model));
     }
@@ -80,8 +78,10 @@ export async function processPendingBackendActions(model: LayoutModel) {
         await handleBackendAction(model, action);
     }
 
-    model.updateTree();
-    model.setter(model.localTreeStateAtom, { ...model.treeState });
+    batch(() => {
+        model.updateTree();
+        model.setter(model.localTreeStateAtom, { ...model.treeState });
+    });
     model.persistToBackend();
 }
 
@@ -109,16 +109,12 @@ async function handleBackendAction(model: LayoutModel, action: LayoutActionData)
             break;
         }
         case LayoutTreeActionType.DeleteNode: {
-            getApi().sendLog(`[BUG-TRACE] handleBackendAction DeleteNode triggered for blockId: ${action.blockid}`);
             let leaf = model?.getNodeByBlockId(action.blockid);
 
             // If not found in leafs array, search the tree directly (handles orphaned blocks)
             if (!leaf && model.treeState.rootNode) {
                 leaf = findNodeByBlockId(model.treeState.rootNode, action.blockid);
                 if (leaf) {
-                    getApi().sendLog(
-                        `[BUG-TRACE] Found orphaned block in tree: ${action.blockid}, nodeId: ${leaf.id}`
-                    );
                     // Delete directly from tree instead of closeNode (which may expect block to exist)
                     model.treeReducer(
                         {
@@ -132,7 +128,6 @@ async function handleBackendAction(model: LayoutModel, action: LayoutActionData)
             }
 
             if (leaf) {
-                getApi().sendLog(`[BUG-TRACE] handleBackendAction calling closeNode for leaf: ${leaf.id}`);
                 await model.closeNode(leaf.id);
             } else {
                 console.error(

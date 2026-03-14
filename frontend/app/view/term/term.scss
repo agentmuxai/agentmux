@@ -147,6 +147,12 @@
     }
 
     .terminal {
+        // WebView2 renders the native textarea caret even at opacity:0
+        // when the terminal background is transparent.
+        .xterm-helper-textarea {
+            caret-color: transparent !important;
+        }
+
         .xterm-viewport {
             &::-webkit-scrollbar {
                 width: 6px;

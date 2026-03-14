@@ -1,17 +1,17 @@
 // Copyright 2025, Command Line Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-import React from "react";
+import { JSX } from "solid-js";
 import "./quickelems.scss";
 
-function CenteredLoadingDiv() {
+function CenteredLoadingDiv(): JSX.Element {
     return <CenteredDiv>loading...</CenteredDiv>;
 }
 
-function CenteredDiv({ children }: { children: React.ReactNode }) {
+function CenteredDiv(props: { children?: JSX.Element }): JSX.Element {
     return (
-        <div className="centered-div">
-            <div>{children}</div>
+        <div class="centered-div">
+            <div>{props.children}</div>
         </div>
     );
 }

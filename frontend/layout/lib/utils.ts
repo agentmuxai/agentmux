@@ -1,9 +1,11 @@
 // Copyright 2025, Command Line Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-import { CSSProperties } from "react";
-import { XYCoord } from "react-dnd";
+import type { Properties as CSSProperties } from "csstype";
 import { DropDirection, FlexDirection, NavigateDirection } from "./types";
+
+// XYCoord was from react-dnd; define it inline.
+type XYCoord = { x: number; y: number };
 
 export function reverseFlexDirection(flexDirection: FlexDirection): FlexDirection {
     return flexDirection === FlexDirection.Row ? FlexDirection.Column : FlexDirection.Row;

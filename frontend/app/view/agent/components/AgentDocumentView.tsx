@@ -6,92 +6,93 @@
  * Routes each node type to the appropriate block component.
  */
 
-import React, { memo, useCallback, useEffect, useRef } from "react";
-import { useAtomValue, useSetAtom } from "jotai";
-import type { PrimitiveAtom } from "jotai";
+import { createEffect, For, Show, type Accessor, type JSX } from "solid-js";
+import type { SignalPair } from "../state";
 import type { DocumentNode, DocumentState } from "../types";
+import { AgentMessageBlock } from "./AgentMessageBlock";
 import { MarkdownBlock } from "./MarkdownBlock";
 import { ToolBlock } from "./ToolBlock";
-import { AgentMessageBlock } from "./AgentMessageBlock";
 
 interface AgentDocumentViewProps {
-    documentAtom: PrimitiveAtom<DocumentNode[]>;
-    documentStateAtom: PrimitiveAtom<DocumentState>;
+    documentAtom: SignalPair<DocumentNode[]>;
+    documentStateAtom: SignalPair<DocumentState>;
 }
 
-export const AgentDocumentView: React.FC<AgentDocumentViewProps> = memo(
-    ({ documentAtom, documentStateAtom }) => {
-        const document = useAtomValue(documentAtom);
-        const documentState = useAtomValue(documentStateAtom);
-        const setDocumentState = useSetAtom(documentStateAtom);
-        const scrollRef = useRef<HTMLDivElement>(null);
-        const autoScrollRef = useRef(true);
+export const AgentDocumentView = ({ documentAtom, documentStateAtom }: AgentDocumentViewProps): JSX.Element => {
+    const [document] = documentAtom;
+    const [documentState, setDocumentState] = documentStateAtom;
+    let scrollRef!: HTMLDivElement;
+    let autoScroll = true;
 
-        // Toggle collapsed state for a node
-        const toggleCollapse = useCallback(
-            (nodeId: string) => {
-                setDocumentState((prev) => {
-                    const collapsed = new Set(prev.collapsedNodes);
-                    if (collapsed.has(nodeId)) {
-                        collapsed.delete(nodeId);
-                    } else {
-                        collapsed.add(nodeId);
-                    }
-                    return { ...prev, collapsedNodes: collapsed };
-                });
-            },
-            [setDocumentState]
-        );
-
-        // Auto-scroll to bottom when new nodes arrive
-        useEffect(() => {
-            if (autoScrollRef.current && scrollRef.current) {
-                scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    // Toggle collapsed state for a node
+    const toggleCollapse = (nodeId: string) => {
+        setDocumentState((prev) => {
+            const collapsed = new Set(prev.collapsedNodes);
+            if (collapsed.has(nodeId)) {
+                collapsed.delete(nodeId);
+            } else {
+                collapsed.add(nodeId);
             }
-        }, [document.length]);
+            return { ...prev, collapsedNodes: collapsed };
+        });
+    };
 
-        // Detect if user scrolled up (disable auto-scroll)
-        const handleScroll = useCallback(() => {
-            if (!scrollRef.current) return;
-            const { scrollTop, scrollHeight, clientHeight } = scrollRef.current;
-            autoScrollRef.current = scrollHeight - scrollTop - clientHeight < 50;
-        }, []);
+    // Auto-scroll to bottom when new nodes arrive
+    createEffect(() => {
+        // Read document length to track changes
+        const len = document().length;
+        if (autoScroll && scrollRef) {
+            scrollRef.scrollTop = scrollRef.scrollHeight;
+        }
+    });
 
-        if (document.length === 0) {
-            return (
-                <div className="agent-document" ref={scrollRef}>
-                    <div className="agent-styled-empty">
-                        <div className="agent-styled-spinner" />
-                        <div className="agent-styled-status-text">Waiting for output...</div>
+    // Detect if user scrolled up (disable auto-scroll)
+    const handleScroll = () => {
+        if (!scrollRef) return;
+        const { scrollTop, scrollHeight, clientHeight } = scrollRef;
+        autoScroll = scrollHeight - scrollTop - clientHeight < 50;
+    };
+
+    return (
+        <Show
+            when={document().length > 0}
+            fallback={
+                <div class="agent-document" ref={scrollRef}>
+                    <div class="agent-styled-empty">
+                        <div class="agent-styled-spinner" />
+                        <div class="agent-styled-status-text">Waiting for output...</div>
                     </div>
                 </div>
-            );
-        }
-
-        return (
-            <div className="agent-document" ref={scrollRef} onScroll={handleScroll}>
-                {document.map((node) => (
-                    <DocumentNodeRenderer
-                        key={node.id}
-                        node={node}
-                        collapsed={documentState.collapsedNodes.has(node.id)}
-                        onToggle={() => toggleCollapse(node.id)}
-                    />
-                ))}
+            }
+        >
+            <div class="agent-document" ref={scrollRef} onScroll={handleScroll}>
+                <For each={document()}>
+                    {(node) => (
+                        <DocumentNodeRenderer
+                            node={node}
+                            collapsed={documentState().collapsedNodes.has(node.id)}
+                            onToggle={() => toggleCollapse(node.id)}
+                        />
+                    )}
+                </For>
             </div>
-        );
-    }
-);
+        </Show>
+    );
+};
 
 AgentDocumentView.displayName = "AgentDocumentView";
 
 // ── Node renderer ────────────────────────────────────────────────────────────
 
-const DocumentNodeRenderer: React.FC<{
+const DocumentNodeRenderer = ({
+    node,
+    collapsed,
+    onToggle,
+}: {
     node: DocumentNode;
     collapsed: boolean;
     onToggle: () => void;
-}> = memo(({ node, collapsed, onToggle }) => {
+}): JSX.Element => {
     switch (node.type) {
         case "markdown":
             return <MarkdownBlock node={node} />;
@@ -104,9 +105,9 @@ const DocumentNodeRenderer: React.FC<{
 
         case "user_message":
             return (
-                <div className="agent-user-message">
-                    <span className="agent-user-message-icon">{node.summary}</span>
-                    <div className="agent-user-message-content">
+                <div class="agent-user-message">
+                    <span class="agent-user-message-icon">{node.summary}</span>
+                    <div class="agent-user-message-content">
                         <pre>{node.message}</pre>
                     </div>
                 </div>
@@ -114,16 +115,22 @@ const DocumentNodeRenderer: React.FC<{
 
         case "section":
             return (
-                <div className={`agent-section level-${node.level}`}>
-                    {node.level === 1 && <h1>{node.title}</h1>}
-                    {node.level === 2 && <h2>{node.title}</h2>}
-                    {node.level === 3 && <h3>{node.title}</h3>}
+                <div class={`agent-section level-${node.level}`}>
+                    <Show when={node.level === 1}>
+                        <h1>{node.title}</h1>
+                    </Show>
+                    <Show when={node.level === 2}>
+                        <h2>{node.title}</h2>
+                    </Show>
+                    <Show when={node.level === 3}>
+                        <h3>{node.title}</h3>
+                    </Show>
                 </div>
             );
 
         default:
             return null;
     }
-});
+};
 
 DocumentNodeRenderer.displayName = "DocumentNodeRenderer";

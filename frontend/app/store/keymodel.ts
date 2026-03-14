@@ -17,6 +17,8 @@ import {
     refocusNode,
     replaceBlock,
     setActiveTab,
+    setControlShiftDelayAtom,
+    setIsTermMultiInput,
     WOS,
 } from "@/app/store/global";
 import { WorkspaceService } from "@/app/store/services";
@@ -28,7 +30,7 @@ import { deleteLayoutModelForTab, getLayoutModelForStaticTab, NavigateDirection 
 import * as keyutil from "@/util/keyutil";
 import { CHORD_TIMEOUT } from "@/util/sharedconst";
 import { fireAndForget } from "@/util/util";
-import * as jotai from "jotai";
+import { createSignal } from "solid-js";
 import { modalsModel } from "./modalmodel";
 
 // Debug logging function - writes to file
@@ -60,7 +62,7 @@ function debugLog(message: string, data?: unknown): void {
 
 type KeyHandler = (event: WaveKeyboardEvent) => boolean;
 
-const simpleControlShiftAtom = jotai.atom(false);
+const [simpleControlShift, setSimpleControlShift] = createSignal(false);
 const globalKeyMap = new Map<string, (waveEvent: WaveKeyboardEvent) => boolean>();
 const globalChordMap = new Map<string, Map<string, KeyHandler>>();
 let globalKeybindingsDisabled = false;
@@ -94,27 +96,26 @@ export function keyboardMouseDownHandler(e: MouseEvent) {
 
 function getFocusedBlockInStaticTab() {
     const layoutModel = getLayoutModelForStaticTab();
-    const focusedNode = globalStore.get(layoutModel.focusedNode);
-    return focusedNode.data?.blockId;
+    const focusedNode = layoutModel.focusedNode?.();
+    return focusedNode?.data?.blockId;
 }
 
 function getSimpleControlShiftAtom() {
-    return simpleControlShiftAtom;
+    return simpleControlShift;
 }
 
 function setControlShift() {
-    globalStore.set(simpleControlShiftAtom, true);
+    setSimpleControlShift(true);
     setTimeout(() => {
-        const simpleState = globalStore.get(simpleControlShiftAtom);
-        if (simpleState) {
-            globalStore.set(atoms.controlShiftDelayAtom, true);
+        if (simpleControlShift()) {
+            setControlShiftDelayAtom(true);
         }
     }, 400);
 }
 
 function unsetControlShift() {
-    globalStore.set(simpleControlShiftAtom, false);
-    globalStore.set(atoms.controlShiftDelayAtom, false);
+    setSimpleControlShift(false);
+    setControlShiftDelayAtom(false);
 }
 
 function disableGlobalKeybindings() {
@@ -126,7 +127,7 @@ function enableGlobalKeybindings() {
 }
 
 function shouldDispatchToBlock(e: WaveKeyboardEvent): boolean {
-    if (globalStore.get(atoms.modalOpen)) {
+    if (atoms.modalOpen()) {
         return false;
     }
     const activeElem = document.activeElement;
@@ -145,23 +146,23 @@ function shouldDispatchToBlock(e: WaveKeyboardEvent): boolean {
 }
 
 function getStaticTabBlockCount(): number {
-    const tabId = globalStore.get(atoms.activeTabId);
+    const tabId = atoms.activeTabId();
     const tabORef = WOS.makeORef("tab", tabId);
     const tabAtom = WOS.getWaveObjectAtom<Tab>(tabORef);
-    const tabData = globalStore.get(tabAtom);
+    const tabData = tabAtom();
     return tabData?.blockids?.length ?? 0;
 }
 
 function isStaticTabPinned(): boolean {
-    const ws = globalStore.get(atoms.workspace);
-    const tabId = globalStore.get(atoms.activeTabId);
-    return ws.pinnedtabids?.includes(tabId) ?? false;
+    const ws = atoms.workspace();
+    const tabId = atoms.activeTabId();
+    return ws?.pinnedtabids?.includes(tabId) ?? false;
 }
 
 function simpleCloseStaticTab() {
     debugLog("simpleCloseStaticTab called");
-    const ws = globalStore.get(atoms.workspace);
-    const tabId = globalStore.get(atoms.activeTabId);
+    const ws = atoms.workspace();
+    const tabId = atoms.activeTabId();
     WorkspaceService.CloseTab(ws.oid, tabId).catch((e) => {
         console.error("[closeTab] failed:", e);
     });
@@ -212,10 +213,10 @@ function switchBlockByBlockNum(index: number) {
 
 function cyclePaneFocus(direction: "forward" | "backward") {
     const layoutModel = getLayoutModelForStaticTab();
-    const spiralOrder = globalStore.get(layoutModel.spiralLeafOrder);
+    const spiralOrder = layoutModel.spiralLeafOrder?.() ?? [];
     if (spiralOrder.length <= 1) return;
 
-    const focusedNode = globalStore.get(layoutModel.focusedNode);
+    const focusedNode = layoutModel.focusedNode?.();
     const currentIndex = spiralOrder.findIndex((entry) => entry.nodeid === focusedNode?.id);
 
     let nextIndex: number;
@@ -244,7 +245,7 @@ function getAllTabs(ws: Workspace): string[] {
 
 function switchTabAbs(index: number) {
     console.log("switchTabAbs", index);
-    const ws = globalStore.get(atoms.workspace);
+    const ws = atoms.workspace();
     const newTabIdx = index - 1;
     const tabids = getAllTabs(ws);
     if (newTabIdx < 0 || newTabIdx >= tabids.length) {
@@ -256,8 +257,8 @@ function switchTabAbs(index: number) {
 
 function switchTab(offset: number) {
     console.log("switchTab", offset);
-    const ws = globalStore.get(atoms.workspace);
-    const curTabId = globalStore.get(atoms.activeTabId);
+    const ws = atoms.workspace();
+    const curTabId = atoms.activeTabId();
     let tabIdx = -1;
     const tabids = getAllTabs(ws);
     for (let i = 0; i < tabids.length; i++) {
@@ -286,7 +287,7 @@ function globalRefocusWithTimeout(timeoutVal: number) {
 
 function globalRefocus() {
     const layoutModel = getLayoutModelForStaticTab();
-    const focusedNode = globalStore.get(layoutModel.focusedNode);
+    const focusedNode = layoutModel.focusedNode?.();
     if (focusedNode == null) {
         // focus a node
         layoutModel.focusFirstNode();
@@ -301,7 +302,7 @@ function globalRefocus() {
 
 function getDefaultNewBlockDef(): BlockDef {
     const adnbAtom = getSettingsKeyAtom("app:defaultnewblock");
-    const adnb = globalStore.get(adnbAtom) ?? "term";
+    const adnb = adnbAtom() ?? "term";
     if (adnb == "launcher") {
         return {
             meta: {
@@ -317,10 +318,10 @@ function getDefaultNewBlockDef(): BlockDef {
         },
     };
     const layoutModel = getLayoutModelForStaticTab();
-    const focusedNode = globalStore.get(layoutModel.focusedNode);
+    const focusedNode = layoutModel.focusedNode?.();
     if (focusedNode != null) {
         const blockAtom = WOS.getWaveObjectAtom<Block>(WOS.makeORef("block", focusedNode.data?.blockId));
-        const blockData = globalStore.get(blockAtom);
+        const blockData = blockAtom();
         if (blockData?.meta?.view == "term") {
             if (blockData?.meta?.["cmd:cwd"] != null) {
                 termBlockDef.meta["cmd:cwd"] = blockData.meta["cmd:cwd"];
@@ -340,7 +341,7 @@ async function handleCmdN() {
 
 async function handleSplitHorizontal(position: "before" | "after") {
     const layoutModel = getLayoutModelForStaticTab();
-    const focusedNode = globalStore.get(layoutModel.focusedNode);
+    const focusedNode = layoutModel.focusedNode?.();
     if (focusedNode == null) {
         return;
     }
@@ -350,7 +351,7 @@ async function handleSplitHorizontal(position: "before" | "after") {
 
 async function handleSplitVertical(position: "before" | "after") {
     const layoutModel = getLayoutModelForStaticTab();
-    const focusedNode = globalStore.get(layoutModel.focusedNode);
+    const focusedNode = layoutModel.focusedNode?.();
     if (focusedNode == null) {
         return;
     }
@@ -409,7 +410,7 @@ function appHandleKeyDown(waveEvent: WaveKeyboardEvent): boolean {
         }
     }
     const layoutModel = getLayoutModelForStaticTab();
-    const focusedNode = globalStore.get(layoutModel.focusedNode);
+    const focusedNode = layoutModel.focusedNode?.();
     const blockId = focusedNode?.data?.blockId;
     if (blockId != null && shouldDispatchToBlock(waveEvent)) {
         const bcm = getBlockComponentModel(blockId);
@@ -441,10 +442,9 @@ function tryReinjectKey(event: WaveKeyboardEvent): boolean {
 function countTermBlocks(): number {
     const allBCMs = getAllBlockComponentModels();
     let count = 0;
-    let gsGetBound = globalStore.get.bind(globalStore);
     for (const bcm of allBCMs) {
         const viewModel = bcm.viewModel;
-        if (viewModel.viewType == "term" && viewModel.isBasicTerm?.(gsGetBound)) {
+        if (viewModel.viewType == "term" && viewModel.isBasicTerm?.()) {
             count++;
         }
     }
@@ -502,7 +502,7 @@ function registerGlobalKeys() {
     });
     globalKeyMap.set("Cmd:m", () => {
         const layoutModel = getLayoutModelForStaticTab();
-        const focusedNode = globalStore.get(layoutModel.focusedNode);
+        const focusedNode = layoutModel.focusedNode?.();
         if (focusedNode != null) {
             layoutModel.magnifyNodeToggle(focusedNode.id);
         }
@@ -555,13 +555,13 @@ function registerGlobalKeys() {
             return true;
         }
     });
-    globalKeyMap.set("Ctrl:Shift:i", () => {
-        const curMI = globalStore.get(atoms.isTermMultiInput);
+    globalKeyMap.set("Ctrl:Shift:m", () => {
+        const curMI = atoms.isTermMultiInput();
         if (!curMI && countTermBlocks() <= 1) {
             // don't turn on multi-input unless there are 2 or more basic term blocks
             return true;
         }
-        globalStore.set(atoms.isTermMultiInput, !curMI);
+        setIsTermMultiInput(!curMI);
         return true;
     });
     for (let idx = 1; idx <= 9; idx++) {
@@ -586,7 +586,7 @@ function registerGlobalKeys() {
             return false;
         }
         if (bcm.viewModel.searchAtoms) {
-            globalStore.set(bcm.viewModel.searchAtoms.isOpen, true);
+            bcm.viewModel.searchAtoms.isOpen._set(true);
             return true;
         }
         return false;
@@ -594,8 +594,8 @@ function registerGlobalKeys() {
     function deactivateSearch(): boolean {
         const bcm = getBlockComponentModel(getFocusedBlockInStaticTab());
         if (bcm == null) return false;
-        if (bcm.viewModel.searchAtoms && globalStore.get(bcm.viewModel.searchAtoms.isOpen)) {
-            globalStore.set(bcm.viewModel.searchAtoms.isOpen, false);
+        if (bcm.viewModel.searchAtoms && bcm.viewModel.searchAtoms.isOpen()) {
+            bcm.viewModel.searchAtoms.isOpen._set(false);
             return true;
         }
         return false;

@@ -165,7 +165,7 @@ export function handleOscTitleCommand(data: string, blockId: string, loaded: boo
         fireAndForget(async () => {
             await services.ObjectService.UpdateObjectMeta(WOS.makeORef("block", blockId), {
                 "term:activity": activity,
-            });
+            } as any);
         });
     }, TITLE_UPDATE_DEBOUNCE_MS);
 
@@ -271,7 +271,7 @@ export function handleOsc16162Command(data: string, blockId: string, loaded: boo
                 }, 0);
 
                 const agentId = cmd.data["AGENTMUX_AGENT_ID"] as string | undefined;
-                const tabId = globalStore.get(atoms.staticTabId);
+                const tabId = atoms.staticTabId();
                 handleAgentIdChange(blockId, agentId, tabId);
             }
             break;

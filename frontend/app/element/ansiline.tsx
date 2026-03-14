@@ -1,3 +1,5 @@
+import { For, JSX } from "solid-js";
+
 export const ANSI_TAILWIND_MAP = {
     // Reset and modifiers
     0: "reset", // special: clear state
@@ -68,7 +70,7 @@ const makeInitialState: () => InternalStateType = () => ({
     reverse: false,
 });
 
-const updateStateWithCodes = (state, codes) => {
+const updateStateWithCodes = (state: InternalStateType, codes: number[]) => {
     codes.forEach((code) => {
         if (code === 0) {
             // Reset state
@@ -83,7 +85,7 @@ const updateStateWithCodes = (state, codes) => {
             state.reverse = true;
             return;
         }
-        const tailwindClass = ANSI_TAILWIND_MAP[code];
+        const tailwindClass = (ANSI_TAILWIND_MAP as any)[code];
         if (tailwindClass && tailwindClass !== "reset") {
             if (tailwindClass.startsWith("text-")) {
                 state.textColor = tailwindClass;
@@ -98,7 +100,7 @@ const updateStateWithCodes = (state, codes) => {
 };
 
 const stateToClasses = (state: InternalStateType) => {
-    const classes = [];
+    const classes: string[] = [];
     classes.push(...Array.from(state.modifiers));
 
     // Apply reverse: swap text and background colors if flag is set.
@@ -115,12 +117,14 @@ const stateToClasses = (state: InternalStateType) => {
 
 const ansiRegex = /\x1b\[([0-9;]+)m/g;
 
-const AnsiLine = ({ line }) => {
+const AnsiLine = ({ line }: { line: string }): JSX.Element => {
     const segments: SegmentType[] = [];
     let lastIndex = 0;
     let currentState = makeInitialState();
 
-    let match: RegExpExecArray;
+    // Reset regex lastIndex
+    ansiRegex.lastIndex = 0;
+    let match: RegExpExecArray | null;
     while ((match = ansiRegex.exec(line)) !== null) {
         if (match.index > lastIndex) {
             segments.push({
@@ -142,11 +146,11 @@ const AnsiLine = ({ line }) => {
 
     return (
         <div>
-            {segments.map((seg, idx) => (
-                <span key={idx} className={seg.classes}>
-                    {seg.text}
-                </span>
-            ))}
+            <For each={segments}>
+                {(seg) => (
+                    <span class={seg.classes}>{seg.text}</span>
+                )}
+            </For>
         </div>
     );
 };

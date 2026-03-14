@@ -7,23 +7,23 @@
 
 import { Markdown } from "@/app/element/markdown";
 import clsx from "clsx";
-import React, { memo } from "react";
+import { type JSX } from "solid-js";
 import type { MarkdownNode } from "../types";
 
 interface MarkdownBlockProps {
     node: MarkdownNode;
 }
 
-export const MarkdownBlock: React.FC<MarkdownBlockProps> = memo(({ node }) => {
+export const MarkdownBlock = ({ node }: MarkdownBlockProps): JSX.Element => {
     return (
         <div
-            className={clsx("agent-markdown-block", {
+            class={clsx("agent-markdown-block", {
                 "thinking-block": node.metadata?.thinking,
             })}
         >
             <Markdown text={node.content} />
         </div>
     );
-});
+};
 
 MarkdownBlock.displayName = "MarkdownBlock";

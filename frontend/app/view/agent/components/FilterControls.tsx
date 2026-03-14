@@ -5,77 +5,77 @@
  * FilterControls - Advanced filtering for agent document
  */
 
-import { useAtomValue, useSetAtom } from "jotai";
-import { Atom, PrimitiveAtom } from "jotai";
-import React, { memo } from "react";
+import { type Accessor, type JSX } from "solid-js";
+import type { SignalPair } from "../state";
 import type { DocumentState } from "../types";
 
 interface FilterControlsProps {
-    documentStateAtom: PrimitiveAtom<DocumentState>;
-    documentStatsAtom: Atom<any>;
-    updateFilter: any;
+    documentStateAtom: SignalPair<DocumentState>;
+    documentStatsAtom: Accessor<any>;
+    updateFilter: (updates: Partial<DocumentState["filter"]>) => void;
 }
 
-export const FilterControls: React.FC<FilterControlsProps> = memo(
-    ({ documentStateAtom, documentStatsAtom, updateFilter }) => {
-        const documentState = useAtomValue(documentStateAtom);
-        const stats = useAtomValue(documentStatsAtom);
-        const setFilter = useSetAtom(updateFilter);
+export const FilterControls = ({
+    documentStateAtom,
+    documentStatsAtom,
+    updateFilter,
+}: FilterControlsProps): JSX.Element => {
+    const [documentState] = documentStateAtom;
+    const stats = documentStatsAtom;
 
-    const { filter } = documentState;
+    const { filter } = documentState();
 
     return (
-        <div className="agent-filter-controls">
-            <div className="agent-filter-title">Filters</div>
-            <div className="agent-filter-options">
-                <label className="agent-filter-option">
+        <div class="agent-filter-controls">
+            <div class="agent-filter-title">Filters</div>
+            <div class="agent-filter-options">
+                <label class="agent-filter-option">
                     <input
                         type="checkbox"
                         checked={filter.showThinking}
-                        onChange={(e) => setFilter({ showThinking: e.target.checked })}
+                        onChange={(e) => updateFilter({ showThinking: (e.target as HTMLInputElement).checked })}
                     />
-                    <span>Thinking ({stats.markdownNodes})</span>
+                    <span>Thinking ({stats().markdownNodes})</span>
                 </label>
 
-                <label className="agent-filter-option">
+                <label class="agent-filter-option">
                     <input
                         type="checkbox"
                         checked={filter.showSuccessfulTools}
-                        onChange={(e) => setFilter({ showSuccessfulTools: e.target.checked })}
+                        onChange={(e) => updateFilter({ showSuccessfulTools: (e.target as HTMLInputElement).checked })}
                     />
-                    <span>Successful Tools ({stats.successfulTools})</span>
+                    <span>Successful Tools ({stats().successfulTools})</span>
                 </label>
 
-                <label className="agent-filter-option">
+                <label class="agent-filter-option">
                     <input
                         type="checkbox"
                         checked={filter.showFailedTools}
-                        onChange={(e) => setFilter({ showFailedTools: e.target.checked })}
+                        onChange={(e) => updateFilter({ showFailedTools: (e.target as HTMLInputElement).checked })}
                     />
-                    <span>Failed Tools ({stats.failedTools})</span>
+                    <span>Failed Tools ({stats().failedTools})</span>
                 </label>
 
-                <label className="agent-filter-option">
+                <label class="agent-filter-option">
                     <input
                         type="checkbox"
                         checked={filter.showIncoming}
-                        onChange={(e) => setFilter({ showIncoming: e.target.checked })}
+                        onChange={(e) => updateFilter({ showIncoming: (e.target as HTMLInputElement).checked })}
                     />
-                    <span>Incoming Messages ({stats.agentMessages})</span>
+                    <span>Incoming Messages ({stats().agentMessages})</span>
                 </label>
 
-                <label className="agent-filter-option">
+                <label class="agent-filter-option">
                     <input
                         type="checkbox"
                         checked={filter.showOutgoing}
-                        onChange={(e) => setFilter({ showOutgoing: e.target.checked })}
+                        onChange={(e) => updateFilter({ showOutgoing: (e.target as HTMLInputElement).checked })}
                     />
-                    <span>Outgoing Messages ({stats.agentMessages})</span>
+                    <span>Outgoing Messages ({stats().agentMessages})</span>
                 </label>
             </div>
         </div>
     );
-    }
-);
+};
 
 FilterControls.displayName = "FilterControls";

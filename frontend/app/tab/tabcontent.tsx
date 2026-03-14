@@ -8,30 +8,26 @@ import { TileLayoutContents } from "@/layout/lib/types";
 import { atoms, getApi } from "@/store/global";
 import * as services from "@/store/services";
 import * as WOS from "@/store/wos";
-import { atom, useAtomValue } from "jotai";
-import * as React from "react";
-import { useMemo } from "react";
+import { createMemo, Show } from "solid-js";
+import type { JSX } from "solid-js";
 
-const tileGapSizeAtom = atom((get) => {
-    const settings = get(atoms.settingsAtom);
-    return settings["window:tilegapsize"];
-});
+function TabContent(props: { tabId: string }): JSX.Element {
+    const oref = createMemo(() => WOS.makeORef("tab", props.tabId));
+    const tabAtom = createMemo(() => WOS.getWaveObjectAtom<Tab>(oref()));
+    const tabData = createMemo(() => tabAtom()());
 
-const TabContent = React.memo(({ tabId }: { tabId: string }) => {
-    const oref = useMemo(() => WOS.makeORef("tab", tabId), [tabId]);
-    const loadingAtom = useMemo(() => WOS.getWaveObjectLoadingAtom(oref), [oref]);
-    const tabLoading = useAtomValue(loadingAtom);
-    const tabAtom = useMemo(() => WOS.getWaveObjectAtom<Tab>(oref), [oref]);
-    const tabData = useAtomValue(tabAtom);
-    const tileGapSize = useAtomValue(tileGapSizeAtom);
+    const tileGapSize = createMemo(() => {
+        const settings = atoms.settingsAtom();
+        return settings["window:tilegapsize"];
+    });
 
-    const tileLayoutContents = useMemo(() => {
+    const tileLayoutContents = createMemo<TileLayoutContents>(() => {
         const renderContent: ContentRenderer = (nodeModel: NodeModel) => {
-            return <Block key={nodeModel.blockId} nodeModel={nodeModel} preview={false} />;
+            return <Block nodeModel={nodeModel} preview={false} />;
         };
 
         const renderPreview: PreviewRenderer = (nodeModel: NodeModel) => {
-            return <Block key={nodeModel.blockId} nodeModel={nodeModel} preview={true} />;
+            return <Block nodeModel={nodeModel} preview={true} />;
         };
 
         async function onNodeDelete(data: TabLayoutData) {
@@ -49,34 +45,26 @@ const TabContent = React.memo(({ tabId }: { tabId: string }) => {
         return {
             renderContent,
             renderPreview,
-            tabId,
+            tabId: props.tabId,
             onNodeDelete,
-            gapSizePx: tileGapSize,
-        } as TileLayoutContents;
-    }, [tabId, tileGapSize]);
-
-    let innerContent;
-
-    if (tabLoading) {
-        innerContent = <CenteredDiv>Tab Loading</CenteredDiv>;
-    } else if (!tabData) {
-        innerContent = <CenteredDiv>Tab Not Found</CenteredDiv>;
-    } else {
-        innerContent = (
-            <TileLayout
-                key={tabId}
-                contents={tileLayoutContents}
-                tabAtom={tabAtom}
-                getCursorPoint={getApi().getCursorPoint}
-            />
-        );
-    }
+            gapSizePx: tileGapSize(),
+        };
+    });
 
     return (
-        <div className="flex flex-row flex-grow min-h-0 w-full items-center justify-center overflow-hidden relative ">
-            {innerContent}
+        <div class="flex flex-row flex-grow min-h-0 w-full items-center justify-center overflow-hidden relative">
+            <Show
+                when={tabData() != null}
+                fallback={<CenteredDiv>Tab Not Found</CenteredDiv>}
+            >
+                <TileLayout
+                    contents={tileLayoutContents()}
+                    tabAtom={tabAtom()}
+                    getCursorPoint={getApi().getCursorPoint}
+                />
+            </Show>
         </div>
     );
-});
+}
 
 export { TabContent };

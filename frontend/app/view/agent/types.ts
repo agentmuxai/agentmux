@@ -9,6 +9,27 @@
  */
 
 /**
+ * Initialization question asked by the CLI during startup
+ */
+export interface InitQuestion {
+    type: "theme" | "login" | "generic" | "other";
+    text?: string;
+    prompt?: string;
+    options?: string[];
+    expectsInput?: boolean;
+}
+
+/**
+ * State of the CLI initialization process
+ */
+export type InitState = {
+    phase: "spawning" | "awaiting_response" | "processing" | "ready" | "error";
+    message?: string;
+    question?: InitQuestion;
+    error?: string;
+};
+
+/**
  * Document node types that make up the agent's markdown document
  */
 export type DocumentNode = MarkdownNode | SectionNode | ToolNode | AgentMessageNode | UserMessageNode;

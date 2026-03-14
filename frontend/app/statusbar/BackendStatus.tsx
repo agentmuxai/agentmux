@@ -1,50 +1,51 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { getApi } from "@/store/global";
-import { atoms } from "@/store/global";
-import { useAtomValue } from "jotai";
-import { memo, useEffect, useRef, useState } from "react";
+import { atoms, getApi } from "@/store/global";
+import { createEffect, createSignal, Show, type JSX } from "solid-js";
 
-const BackendStatus = memo(() => {
-    const backendStatus = useAtomValue(atoms.backendStatusAtom);
-    const [popoverOpen, setPopoverOpen] = useState(false);
-    const [backendInfo, setBackendInfo] = useState<{
+const BackendStatus = (): JSX.Element => {
+    const backendStatus = atoms.backendStatusAtom;
+    const [popoverOpen, setPopoverOpen] = createSignal(false);
+    const [backendInfo, setBackendInfo] = createSignal<{
         pid?: number;
         started_at?: string;
         web_endpoint?: string;
         version: string;
     } | null>(null);
-    const popoverRef = useRef<HTMLDivElement>(null);
+    let popoverRef!: HTMLDivElement;
 
-    let icon: string;
-    let color: string;
-    let label: string;
-    let iconSpin = false;
+    const icon = () => {
+        switch (backendStatus()) {
+            case "running": return "●";
+            case "connecting": return "◌";
+            case "crashed": return "●";
+            default: return null;
+        }
+    };
 
-    switch (backendStatus) {
-        case "running":
-            icon = "●";
-            color = "var(--accent-color)";
-            label = "Backend";
-            break;
-        case "connecting":
-            icon = "◌";
-            color = "var(--warning-color)";
-            label = "Connecting…";
-            iconSpin = true;
-            break;
-        case "crashed":
-            icon = "●";
-            color = "var(--error-color)";
-            label = "Backend offline";
-            break;
-        default:
-            return null;
-    }
+    const color = () => {
+        switch (backendStatus()) {
+            case "running": return "var(--accent-color)";
+            case "connecting": return "var(--warning-color)";
+            case "crashed": return "var(--error-color)";
+            default: return null;
+        }
+    };
+
+    const label = () => {
+        switch (backendStatus()) {
+            case "running": return "Backend";
+            case "connecting": return "Connecting…";
+            case "crashed": return "Backend offline";
+            default: return null;
+        }
+    };
+
+    const iconSpin = () => backendStatus() === "connecting";
 
     const handleClick = async () => {
-        if (popoverOpen) {
+        if (popoverOpen()) {
             setPopoverOpen(false);
             return;
         }
@@ -57,16 +58,16 @@ const BackendStatus = memo(() => {
         setPopoverOpen(true);
     };
 
-    useEffect(() => {
-        if (!popoverOpen) return;
+    createEffect(() => {
+        if (!popoverOpen()) return;
         const handleOutsideClick = (e: MouseEvent) => {
-            if (popoverRef.current && !popoverRef.current.contains(e.target as Node)) {
+            if (popoverRef && !popoverRef.contains(e.target as Node)) {
                 setPopoverOpen(false);
             }
         };
         document.addEventListener("mousedown", handleOutsideClick);
         return () => document.removeEventListener("mousedown", handleOutsideClick);
-    }, [popoverOpen]);
+    });
 
     const formatUptime = (startedAt: string): string => {
         const start = new Date(startedAt).getTime();
@@ -80,52 +81,54 @@ const BackendStatus = memo(() => {
     };
 
     return (
-        <div style={{ position: "relative" }} ref={popoverRef}>
-            <div
-                className="status-bar-item clickable"
-                title="Click for backend details"
-                onClick={handleClick}
-            >
-                <span className={`status-icon${iconSpin ? " status-icon-spin" : ""}`} style={{ color }}>
-                    {icon}
-                </span>
-                <span style={{ color }}>{label}</span>
-            </div>
-            {popoverOpen && (
-                <div className="status-bar-popover">
-                    <div className="status-bar-popover-row">
-                        <span className="status-bar-popover-label">Status</span>
-                        <span style={{ color }}>{backendStatus}</span>
-                    </div>
-                    {backendInfo?.pid && (
-                        <div className="status-bar-popover-row">
-                            <span className="status-bar-popover-label">PID</span>
-                            <span>{backendInfo.pid}</span>
-                        </div>
-                    )}
-                    {backendInfo?.started_at && (
-                        <div className="status-bar-popover-row">
-                            <span className="status-bar-popover-label">Uptime</span>
-                            <span>{formatUptime(backendInfo.started_at)}</span>
-                        </div>
-                    )}
-                    {backendInfo?.web_endpoint && (
-                        <div className="status-bar-popover-row">
-                            <span className="status-bar-popover-label">Endpoint</span>
-                            <span className="status-bar-popover-mono">{backendInfo.web_endpoint}</span>
-                        </div>
-                    )}
-                    {backendInfo?.version && (
-                        <div className="status-bar-popover-row">
-                            <span className="status-bar-popover-label">Version</span>
-                            <span>{backendInfo.version}</span>
-                        </div>
-                    )}
+        <Show when={backendStatus() !== null && icon() !== null}>
+            <div style={{ position: "relative" }} ref={popoverRef}>
+                <div
+                    class="status-bar-item clickable"
+                    title="Click for backend details"
+                    onClick={handleClick}
+                >
+                    <span class={`status-icon${iconSpin() ? " status-icon-spin" : ""}`} style={{ color: color() }}>
+                        {icon()}
+                    </span>
+                    <span style={{ color: color() }}>{label()}</span>
                 </div>
-            )}
-        </div>
+                <Show when={popoverOpen()}>
+                    <div class="status-bar-popover">
+                        <div class="status-bar-popover-row">
+                            <span class="status-bar-popover-label">Status</span>
+                            <span style={{ color: color() }}>{backendStatus()}</span>
+                        </div>
+                        <Show when={backendInfo()?.pid}>
+                            <div class="status-bar-popover-row">
+                                <span class="status-bar-popover-label">PID</span>
+                                <span>{backendInfo().pid}</span>
+                            </div>
+                        </Show>
+                        <Show when={backendInfo()?.started_at}>
+                            <div class="status-bar-popover-row">
+                                <span class="status-bar-popover-label">Uptime</span>
+                                <span>{formatUptime(backendInfo().started_at)}</span>
+                            </div>
+                        </Show>
+                        <Show when={backendInfo()?.web_endpoint}>
+                            <div class="status-bar-popover-row">
+                                <span class="status-bar-popover-label">Endpoint</span>
+                                <span class="status-bar-popover-mono">{backendInfo().web_endpoint}</span>
+                            </div>
+                        </Show>
+                        <Show when={backendInfo()?.version}>
+                            <div class="status-bar-popover-row">
+                                <span class="status-bar-popover-label">Version</span>
+                                <span>{backendInfo().version}</span>
+                            </div>
+                        </Show>
+                    </div>
+                </Show>
+            </div>
+        </Show>
     );
-});
+};
 
 BackendStatus.displayName = "BackendStatus";
 

@@ -13,7 +13,8 @@
 
 import { getApi } from "@/store/global";
 import { Logger } from "@/util/logger";
-import { memo, useEffect, useState } from "react";
+import { createSignal, onCleanup, onMount, Show } from "solid-js";
+import type { JSX } from "solid-js";
 import "./drag-overlay.scss";
 
 interface CrossDragUpdateEvent {
@@ -31,89 +32,79 @@ interface CrossDragEndEvent {
     result: "drop" | "tearoff" | "cancel";
 }
 
-const DragOverlay = memo(() => {
-    const [isTarget, setIsTarget] = useState(false);
-    const [dragType, setDragType] = useState<"pane" | "tab" | null>(null);
-    const [windowLabel, setWindowLabel] = useState<string | null>(null);
+function DragOverlay(): JSX.Element {
+    const [isTarget, setIsTarget] = createSignal(false);
+    const [dragType, setDragType] = createSignal<"pane" | "tab" | null>(null);
+    const [windowLabel, setWindowLabel] = createSignal<string | null>(null);
 
-    useEffect(() => {
-        getApi()
-            .getWindowLabel()
-            .then((label) => setWindowLabel(label));
-    }, []);
+    onMount(async () => {
+        const label = await getApi().getWindowLabel();
+        setWindowLabel(label);
+    });
 
-    useEffect(() => {
-        if (!windowLabel) return;
+    // Set up event listeners once we have the window label
+    const setupListeners = () => {
+        const wl = windowLabel();
+        if (!wl) return;
+
+        const api = getApi();
+        Logger.debug("dnd:overlay", "DragOverlay listening for events", { windowLabel: wl });
 
         let unlistenUpdate: (() => void) | null = null;
         let unlistenEnd: (() => void) | null = null;
-
-        const api = getApi();
-
-        Logger.debug("dnd:overlay", "DragOverlay listening for events", { windowLabel });
+        let unlistenStart: (() => void) | null = null;
 
         api.listen("cross-drag-update", (event: { payload: CrossDragUpdateEvent }) => {
             const data = event.payload;
-            if (data.targetWindow === windowLabel && data.sourceWindow !== windowLabel) {
-                Logger.info("dnd:overlay", "this window is drop target", {
-                    windowLabel,
-                    dragId: data.dragId,
-                    dragType: data.dragType,
-                    sourceWindow: data.sourceWindow,
-                    screenX: data.screenX,
-                    screenY: data.screenY,
-                });
+            if (data.targetWindow === wl && data.sourceWindow !== wl) {
                 setIsTarget(true);
                 setDragType(data.dragType);
             } else {
-                if (isTarget) {
-                    Logger.debug("dnd:overlay", "no longer drop target", { windowLabel, targetWindow: data.targetWindow });
-                }
                 setIsTarget(false);
                 setDragType(null);
             }
-        }).then((fn) => {
-            unlistenUpdate = fn;
-        });
+        }).then((fn) => { unlistenUpdate = fn; });
 
         api.listen("cross-drag-end", (event: { payload: CrossDragEndEvent }) => {
             Logger.info("dnd:overlay", "cross-drag ended", { dragId: event.payload.dragId, result: event.payload.result });
             setIsTarget(false);
             setDragType(null);
-        }).then((fn) => {
-            unlistenEnd = fn;
-        });
+        }).then((fn) => { unlistenEnd = fn; });
 
-        // Also listen for cross-drag-start to clear stale state
-        let unlistenStart: (() => void) | null = null;
         api.listen("cross-drag-start", () => {
-            Logger.debug("dnd:overlay", "cross-drag started — resetting overlay state");
-            // New drag started — reset state
             setIsTarget(false);
             setDragType(null);
-        }).then((fn) => {
-            unlistenStart = fn;
-        });
+        }).then((fn) => { unlistenStart = fn; });
 
-        return () => {
+        onCleanup(() => {
             unlistenUpdate?.();
             unlistenEnd?.();
             unlistenStart?.();
-        };
-    }, [windowLabel]);
+        });
+    };
 
-    if (!isTarget) return null;
+    // Run setup once window label is available
+    onMount(() => {
+        // Poll until label is set (it's set async in onMount above)
+        const interval = setInterval(() => {
+            if (windowLabel()) {
+                clearInterval(interval);
+                setupListeners();
+            }
+        }, 10);
+        onCleanup(() => clearInterval(interval));
+    });
 
     return (
-        <div className="cross-drag-overlay">
-            <div className="cross-drag-overlay-content">
-                <i className={dragType === "tab" ? "fa fa-window-maximize" : "fa fa-th-large"} />
-                <span>Drop {dragType === "tab" ? "tab" : "pane"} here</span>
+        <Show when={isTarget()}>
+            <div class="cross-drag-overlay">
+                <div class="cross-drag-overlay-content">
+                    <i class={dragType() === "tab" ? "fa fa-window-maximize" : "fa fa-th-large"} />
+                    <span>Drop {dragType() === "tab" ? "tab" : "pane"} here</span>
+                </div>
             </div>
-        </div>
+        </Show>
     );
-});
-
-DragOverlay.displayName = "DragOverlay";
+}
 
 export { DragOverlay };

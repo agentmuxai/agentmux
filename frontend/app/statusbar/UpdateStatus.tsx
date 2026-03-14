@@ -2,66 +2,64 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { atoms, getApi } from "@/store/global";
-import { useAtomValue } from "jotai";
-import { memo } from "react";
+import { Show, type JSX } from "solid-js";
 
-const UpdateStatus = memo(() => {
-    const updaterStatus = useAtomValue(atoms.updaterStatusAtom);
+const UpdateStatus = (): JSX.Element => {
+    const updaterStatus = atoms.updaterStatusAtom;
 
-    if (updaterStatus === "up-to-date" || updaterStatus === "checking") {
-        return null;
-    }
+    const icon = () => {
+        switch (updaterStatus()) {
+            case "downloading": return "↓";
+            case "ready": return "↑";
+            case "installing": return "⟳";
+            case "error": return "✕";
+            default: return null;
+        }
+    };
 
-    let icon: string;
-    let color: string;
-    let label: string;
-    let clickable = false;
+    const color = () => {
+        switch (updaterStatus()) {
+            case "downloading": return "var(--warning-color)";
+            case "ready": return "var(--accent-color)";
+            case "installing": return "var(--warning-color)";
+            case "error": return "var(--error-color)";
+            default: return null;
+        }
+    };
 
-    switch (updaterStatus) {
-        case "downloading":
-            icon = "↓";
-            color = "var(--warning-color)";
-            label = "Downloading update…";
-            break;
-        case "ready":
-            icon = "↑";
-            color = "var(--accent-color)";
-            label = "Restart to update";
-            clickable = true;
-            break;
-        case "installing":
-            icon = "⟳";
-            color = "var(--warning-color)";
-            label = "Installing…";
-            break;
-        case "error":
-            icon = "✕";
-            color = "var(--error-color)";
-            label = "Update failed";
-            break;
-        default:
-            return null;
-    }
+    const label = () => {
+        switch (updaterStatus()) {
+            case "downloading": return "Downloading update…";
+            case "ready": return "Restart to update";
+            case "installing": return "Installing…";
+            case "error": return "Update failed";
+            default: return null;
+        }
+    };
 
-    function handleClick() {
-        if (updaterStatus === "ready") {
+    const clickable = () => updaterStatus() === "ready";
+
+    const handleClick = () => {
+        if (updaterStatus() === "ready") {
             getApi().installAppUpdate();
         }
-    }
+    };
 
     return (
-        <div
-            className={`status-bar-item${clickable ? " clickable" : ""}`}
-            onClick={clickable ? handleClick : undefined}
-            title={label}
-        >
-            <span className="status-icon" style={{ color }}>
-                {icon}
-            </span>
-            <span style={{ color }}>{label}</span>
-        </div>
+        <Show when={updaterStatus() !== "up-to-date" && updaterStatus() !== "checking" && icon() !== null}>
+            <div
+                class={`status-bar-item${clickable() ? " clickable" : ""}`}
+                onClick={clickable() ? handleClick : undefined}
+                title={label()}
+            >
+                <span class="status-icon" style={{ color: color() }}>
+                    {icon()}
+                </span>
+                <span style={{ color: color() }}>{label()}</span>
+            </div>
+        </Show>
     );
-});
+};
 
 UpdateStatus.displayName = "UpdateStatus";
 

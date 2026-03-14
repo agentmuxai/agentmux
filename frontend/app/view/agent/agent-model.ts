@@ -5,8 +5,8 @@ import { BlockNodeModel } from "@/app/block/blocktypes";
 import { RpcApi } from "@/app/store/wshclientapi";
 import { TabRpcClient } from "@/app/store/wshrpcutil";
 import { atoms, getApi, globalStore, WOS } from "@/app/store/global";
-import { atom, Atom, PrimitiveAtom } from "jotai";
-import React from "react";
+import { createSignal } from "solid-js";
+import { SignalAtom } from "@/util/util";
 import { AgentViewWrapper } from "./agent-view";
 import { PROVIDERS } from "./providers";
 import { buildBootstrapScript, guessShellType } from "./bootstrap";
@@ -17,13 +17,13 @@ export class AgentViewModel implements ViewModel {
     viewType = "agent";
     blockId: string;
     nodeModel: BlockNodeModel;
-    blockAtom: Atom<Block>;
+    blockAtom: SignalAtom<Block>;
 
-    viewIcon: Atom<string>;
-    viewName: Atom<string>;
-    viewText: Atom<string | HeaderElem[]>;
+    viewIcon: () => string;
+    viewName: () => string;
+    viewText: () => string | HeaderElem[];
     viewComponent: ViewComponent;
-    noPadding = atom(true);
+    noPadding: () => boolean;
 
     constructor(blockId: string, nodeModel: BlockNodeModel) {
         this.blockId = blockId;
@@ -31,9 +31,10 @@ export class AgentViewModel implements ViewModel {
         this.blockAtom = WOS.getWaveObjectAtom<Block>(`block:${blockId}`);
         this.viewComponent = AgentViewWrapper as any;
 
-        this.viewIcon = atom("sparkles");
-        this.viewName = atom("Agent");
-        this.viewText = atom<string | HeaderElem[]>([]);
+        this.viewIcon = () => "sparkles";
+        this.viewName = () => "Agent";
+        this.viewText = () => [] as HeaderElem[];
+        this.noPadding = () => true;
     }
 
     /**

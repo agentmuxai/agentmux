@@ -4,34 +4,39 @@
 import { useOnResize } from "@/app/hook/useDimensions";
 import { atoms, globalStore, WOS } from "@/app/store/global";
 import { fireAndForget } from "@/util/util";
-import { Atom, useAtomValue } from "jotai";
-import { CSSProperties, useCallback, useEffect, useState } from "react";
+import type { Properties as CSSProperties } from "csstype";
+import { createEffect, createMemo, createSignal, onCleanup, onMount, untrack } from "solid-js";
 import { getLayoutStateAtomFromTab } from "./layoutAtom";
 import { LayoutModel } from "./layoutModel";
 import { LayoutNode, NodeModel, TileLayoutContents } from "./types";
 
 const layoutModelMap: Map<string, LayoutModel> = new Map();
 
-function getLayoutModelForTab(tabAtom: Atom<Tab>): LayoutModel {
-    const tabData = globalStore.get(tabAtom);
+function getLayoutModelForTab(tabAtom: () => Tab): LayoutModel {
+    const tabData = tabAtom();
     if (!tabData) return;
     const tabId = tabData.oid;
     if (layoutModelMap.has(tabId)) {
-        const layoutModel = layoutModelMap.get(tabData.oid);
+        const layoutModel = layoutModelMap.get(tabId);
         if (layoutModel) {
             return layoutModel;
         }
     }
-    const layoutModel = new LayoutModel(tabAtom, globalStore.get, globalStore.set);
-    
-    const activeTabId = globalStore.get(atoms.activeTabId);
+    const layoutModel = new LayoutModel(tabAtom);
+
+    const activeTabId = atoms.activeTabId();
     if (tabId === activeTabId) {
-        const layoutStateAtom = getLayoutStateAtomFromTab(tabAtom, globalStore.get);
-        globalStore.sub(layoutStateAtom, () => {
+        const layoutStateAtom = getLayoutStateAtomFromTab(tabAtom);
+        // Subscribe to layout state changes via a reactive effect.
+        // createEffect runs in the reactive owner context of the calling component.
+        createEffect(() => {
+            // Reading layoutStateAtom() tracks it reactively; when it changes,
+            // this effect re-runs and calls onBackendUpdate.
+            layoutStateAtom();
             layoutModel.onBackendUpdate();
         });
     }
-    
+
     layoutModelMap.set(tabId, layoutModel);
     return layoutModel;
 }
@@ -43,7 +48,7 @@ function getLayoutModelForTabById(tabId: string) {
 }
 
 export function getLayoutModelForStaticTab() {
-    const tabId = globalStore.get(atoms.activeTabId);
+    const tabId = atoms.activeTabId();
     return getLayoutModelForTabById(tabId);
 }
 
@@ -51,21 +56,25 @@ export function deleteLayoutModelForTab(tabId: string) {
     if (layoutModelMap.has(tabId)) layoutModelMap.delete(tabId);
 }
 
-function useLayoutModel(tabAtom: Atom<Tab>): LayoutModel {
+function useLayoutModel(tabAtom: () => Tab): LayoutModel {
     return getLayoutModelForTab(tabAtom);
 }
 
-export function useTileLayout(tabAtom: Atom<Tab>, tileContent: TileLayoutContents): LayoutModel {
-    // Use tab data to ensure we can reload if the tab is disposed and remade (such as during Hot Module Reloading)
-    useAtomValue(tabAtom);
+export function useTileLayout(tabAtom: () => Tab, tileContent: TileLayoutContents): LayoutModel {
+    // Read tabAtom reactively so that we reload if the tab is disposed and remade (e.g. HMR).
+    tabAtom();
     const layoutModel = useLayoutModel(tabAtom);
 
-    useOnResize(layoutModel?.displayContainerRef, layoutModel?.onContainerResize);
+    useOnResize(layoutModel?.displayContainerRef, layoutModel?.onContainerResize, 50);
 
-    // Once the TileLayout is mounted, re-run the state update to get all the nodes to flow in the layout.
-    useEffect(() => fireAndForget(() => layoutModel.onTreeStateAtomUpdated(true)), []);
+    // Once the TileLayout is mounted, re-run the state update to get all nodes to flow into the layout.
+    onMount(() => fireAndForget(() => layoutModel.onTreeStateAtomUpdated(true)));
 
-    useEffect(() => layoutModel.registerTileLayout(tileContent), [tileContent]);
+    createEffect(() => {
+        const cleanup = layoutModel.registerTileLayout(tileContent);
+        if (typeof cleanup === "function") onCleanup(cleanup);
+    });
+
     return layoutModel;
 }
 
@@ -73,41 +82,42 @@ export function useNodeModel(layoutModel: LayoutModel, layoutNode: LayoutNode): 
     return layoutModel.getNodeModel(layoutNode);
 }
 
-export function useDebouncedNodeInnerRect(nodeModel: NodeModel): CSSProperties {
-    const nodeInnerRect = useAtomValue(nodeModel.innerRect);
-    const animationTimeS = useAtomValue(nodeModel.animationTimeS);
-    const isMagnified = useAtomValue(nodeModel.isMagnified);
-    const isResizing = useAtomValue(nodeModel.isResizing);
-    const prefersReducedMotion = useAtomValue(atoms.prefersReducedMotionAtom);
-    const [innerRect, setInnerRect] = useState<CSSProperties>();
-    const [innerRectDebounceTimeout, setInnerRectDebounceTimeout] = useState<NodeJS.Timeout>();
+export function useDebouncedNodeInnerRect(nodeModel: NodeModel): () => CSSProperties {
+    const [innerRect, setInnerRect] = createSignal<CSSProperties>(undefined);
+    const [innerRectDebounceTimeout, setInnerRectDebounceTimeout] = createSignal<NodeJS.Timeout>(undefined);
 
-    const setInnerRectDebounced = useCallback(
-        (nodeInnerRect: CSSProperties) => {
-            clearInnerRectDebounce();
-            setInnerRectDebounceTimeout(
-                setTimeout(() => {
-                    setInnerRect(nodeInnerRect);
-                }, animationTimeS * 1000)
-            );
-        },
-        [animationTimeS]
-    );
-    const clearInnerRectDebounce = useCallback(() => {
-        if (innerRectDebounceTimeout) {
-            clearTimeout(innerRectDebounceTimeout);
+    const clearInnerRectDebounce = () => {
+        const t = untrack(innerRectDebounceTimeout);
+        if (t) {
+            clearTimeout(t);
             setInnerRectDebounceTimeout(undefined);
         }
-    }, [innerRectDebounceTimeout]);
+    };
 
-    useEffect(() => {
+    const setInnerRectDebounced = (nodeInnerRect: CSSProperties) => {
+        clearInnerRectDebounce();
+        setInnerRectDebounceTimeout(
+            setTimeout(() => {
+                setInnerRect(nodeInnerRect as any);
+            }, nodeModel.animationTimeS() * 1000)
+        );
+    };
+
+    createEffect(() => {
+        const nodeInnerRect = nodeModel.innerRect();
+        const isMagnified = nodeModel.isMagnified();
+        const isResizing = nodeModel.isResizing();
+        const prefersReducedMotion = atoms.prefersReducedMotionAtom();
+
         if (prefersReducedMotion || isMagnified || isResizing) {
             clearInnerRectDebounce();
-            setInnerRect(nodeInnerRect);
+            setInnerRect(nodeInnerRect as any);
         } else {
             setInnerRectDebounced(nodeInnerRect);
         }
-    }, [nodeInnerRect]);
+    });
+
+    onCleanup(() => clearInnerRectDebounce());
 
     return innerRect;
 }

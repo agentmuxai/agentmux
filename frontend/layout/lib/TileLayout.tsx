@@ -4,21 +4,10 @@
 import { getSettingsKeyAtom } from "@/app/store/global";
 import clsx from "clsx";
 import { toPng } from "html-to-image";
-import { Atom, useAtomValue, useSetAtom } from "jotai";
-import React, {
-    CSSProperties,
-    ReactNode,
-    Suspense,
-    memo,
-    useCallback,
-    useEffect,
-    useMemo,
-    useRef,
-    useState,
-} from "react";
-import { DropTargetMonitor, XYCoord, useDrag, useDragLayer, useDrop } from "react-dnd";
+import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js";
+import type { JSX } from "solid-js";
+import { Key } from "@solid-primitives/keyed";
 import { debounce, throttle } from "throttle-debounce";
-import { useDevicePixelRatio } from "use-device-pixel-ratio";
 import { LayoutModel } from "./layoutModel";
 import { useNodeModel, useTileLayout } from "./layoutModelHooks";
 import "./tilelayout.scss";
@@ -33,11 +22,14 @@ import { determineDropDirection } from "./utils";
 
 export const tileItemType = "TILE_ITEM";
 
+// Data stored in the HTML5 drag event dataTransfer
+const DRAG_DATA_KEY = "application/x-tile-node-id";
+
 export interface TileLayoutProps {
     /**
-     * The atom containing the layout tree state.
+     * The accessor returning the current tab.
      */
-    tabAtom: Atom<Tab>;
+    tabAtom: () => Tab;
 
     /**
      * callbacks and information about the contents (or styling) of the TileLayout or contents
@@ -45,302 +37,275 @@ export interface TileLayoutProps {
     contents: TileLayoutContents;
 
     /**
-     * A callback for getting the cursor point in reference to the current window. This allows for better integration with Storybook.
+     * A callback for getting the cursor point in reference to the current window.
      * @returns The cursor position relative to the current window.
      */
-    getCursorPoint?: () => Point;
+    getCursorPoint?: () => { x: number; y: number };
 }
 
 const DragPreviewWidth = 300;
 const DragPreviewHeight = 300;
 
-function TileLayoutComponent({ tabAtom, contents, getCursorPoint }: TileLayoutProps) {
-    const layoutModel = useTileLayout(tabAtom, contents);
-    const overlayTransform = useAtomValue(layoutModel.overlayTransform);
-    const setActiveDrag = useSetAtom(layoutModel.activeDrag);
-    const setReady = useSetAtom(layoutModel.ready);
-    const isResizing = useAtomValue(layoutModel.isResizing);
+// Global drag state — track the node being dragged and current cursor position.
+let globalDragNodeId: string | null = null;
+let globalDragLayoutModel: LayoutModel | null = null;
 
-    const { activeDrag, dragClientOffset, dragItemType } = useDragLayer((monitor) => ({
-        activeDrag: monitor.isDragging(),
-        dragClientOffset: monitor.getClientOffset(),
-        dragItemType: monitor.getItemType(),
-    }));
+function TileLayoutComponent(props: TileLayoutProps) {
+    const layoutModel = useTileLayout(props.tabAtom, props.contents);
+    const overlayTransform = () => layoutModel.overlayTransform();
+    const isResizing = () => layoutModel.isResizing();
 
-    useEffect(() => {
-        const activeTileDrag = activeDrag && dragItemType == tileItemType;
-        setActiveDrag(activeTileDrag);
-    }, [activeDrag, dragItemType]);
-
-    const checkForCursorBounds = useCallback(
-        debounce(100, (dragClientOffset: XYCoord) => {
-            const cursorPoint = dragClientOffset ?? getCursorPoint?.();
-            if (cursorPoint && layoutModel.displayContainerRef?.current) {
-                const displayContainerRect = layoutModel.displayContainerRef.current.getBoundingClientRect();
-                const normalizedX = cursorPoint.x - displayContainerRect.x;
-                const normalizedY = cursorPoint.y - displayContainerRect.y;
-                if (
-                    normalizedX <= 0 ||
-                    normalizedX >= displayContainerRect.width ||
-                    normalizedY <= 0 ||
-                    normalizedY >= displayContainerRect.height
-                ) {
-                    layoutModel.treeReducer({ type: LayoutTreeActionType.ClearPendingAction });
-                }
-            }
-        }),
-        [getCursorPoint]
-    );
-
-    // Effect to detect when the cursor leaves the TileLayout hit trap so we can remove any placeholders. This cannot be done using pointer capture
-    // because that conflicts with the DnD layer.
-    useEffect(() => checkForCursorBounds(dragClientOffset), [dragClientOffset]);
-
-    // Ensure that we don't see any jostling in the layout when we're rendering it the first time.
-    // `animate` will be disabled until after the transforms have all applied the first time.
-    const [animate, setAnimate] = useState(false);
-    useEffect(() => {
+    // Track animate state
+    const [animate, setAnimate] = createSignal(false);
+    onMount(() => {
         setTimeout(() => {
             setAnimate(true);
-            setReady(true);
+            layoutModel.ready._set(true);
         }, 50);
-    }, []);
+    });
 
-    const gapSizePx = useAtomValue(layoutModel.gapSizePx);
-    const animationTimeS = useAtomValue(layoutModel.animationTimeS);
-    const tileStyle = useMemo(
+    const gapSizePx = () => layoutModel.gapSizePx();
+    const animationTimeS = () => layoutModel.animationTimeS();
+
+    const tileStyle = createMemo(
         () =>
             ({
-                "--gap-size-px": `${gapSizePx}px`,
-                "--animation-time-s": `${animationTimeS}s`,
-            }) as CSSProperties,
-        [gapSizePx, animationTimeS]
+                "--gap-size-px": `${gapSizePx()}px`,
+                "--animation-time-s": `${animationTimeS()}s`,
+            }) as JSX.CSSProperties
     );
+
+    // Handle drag-over for bounds checking to clear pending action when cursor leaves container.
+    const checkForCursorBounds = debounce(100, (x: number, y: number) => {
+        if (layoutModel.displayContainerRef?.current) {
+            const displayContainerRect = layoutModel.displayContainerRef.current.getBoundingClientRect();
+            const normalizedX = x - displayContainerRect.x;
+            const normalizedY = y - displayContainerRect.y;
+            if (
+                normalizedX <= 0 ||
+                normalizedX >= displayContainerRect.width ||
+                normalizedY <= 0 ||
+                normalizedY >= displayContainerRect.height
+            ) {
+                layoutModel.treeReducer({ type: LayoutTreeActionType.ClearPendingAction });
+            }
+        }
+    });
+
+    // Global dragover handler to detect when cursor leaves tile layout
+    const onWindowDragOver = (e: DragEvent) => {
+        checkForCursorBounds(e.clientX, e.clientY);
+    };
+
+    onMount(() => {
+        window.addEventListener("dragover", onWindowDragOver);
+    });
+    onCleanup(() => {
+        window.removeEventListener("dragover", onWindowDragOver);
+    });
 
     return (
-        <Suspense>
+        <div
+            class={clsx("tile-layout", props.contents.className, { animate: animate() && !isResizing() })}
+            style={tileStyle()}
+        >
             <div
-                className={clsx("tile-layout", contents.className, { animate: animate && !isResizing })}
-                style={tileStyle}
+                ref={(el) => {
+                    (layoutModel.displayContainerRef as any).current = el;
+                }}
+                class="display-container"
             >
-                <div key="display" ref={layoutModel.displayContainerRef} className="display-container">
-                    <ResizeHandleWrapper layoutModel={layoutModel} />
-                    <DisplayNodesWrapper layoutModel={layoutModel} />
-                    <NodeBackdrops layoutModel={layoutModel} />
-                </div>
-                <Placeholder key="placeholder" layoutModel={layoutModel} style={{ top: 10000, ...overlayTransform }} />
-                <OverlayNodeWrapper layoutModel={layoutModel} />
+                <ResizeHandleWrapper layoutModel={layoutModel} />
+                <DisplayNodesWrapper layoutModel={layoutModel} />
+                <NodeBackdrops layoutModel={layoutModel} />
             </div>
-        </Suspense>
+            <Placeholder layoutModel={layoutModel} style={{ top: "10000px", ...overlayTransform() }} />
+            <OverlayNodeWrapper layoutModel={layoutModel} />
+        </div>
     );
 }
-export const TileLayout = memo(TileLayoutComponent) as typeof TileLayoutComponent;
+export const TileLayout = TileLayoutComponent;
 
-function NodeBackdrops({ layoutModel }: { layoutModel: LayoutModel }) {
-    const [blockBlurAtom] = useState(() => getSettingsKeyAtom("window:magnifiedblockblursecondarypx"));
-    const blockBlur = useAtomValue(blockBlurAtom);
-    const ephemeralNode = useAtomValue(layoutModel.ephemeralNode);
-    const magnifiedNodeId = useAtomValue(layoutModel.magnifiedNodeIdAtom);
+function NodeBackdrops(props: { layoutModel: LayoutModel }) {
+    const blockBlurAtom = getSettingsKeyAtom("window:magnifiedblockblursecondarypx");
+    const blockBlur = () => blockBlurAtom();
+    const ephemeralNode = () => props.layoutModel.ephemeralNode();
+    const magnifiedNodeId = () => props.layoutModel.magnifiedNodeIdAtom();
 
-    const [showMagnifiedBackdrop, setShowMagnifiedBackdrop] = useState(!!magnifiedNodeId);
-    const [showEphemeralBackdrop, setShowEphemeralBackdrop] = useState(!!ephemeralNode);
+    const [showMagnifiedBackdrop, setShowMagnifiedBackdrop] = createSignal(!!magnifiedNodeId());
+    const [showEphemeralBackdrop, setShowEphemeralBackdrop] = createSignal(!!ephemeralNode());
 
-    const debouncedSetMagnifyBackdrop = useCallback(
-        debounce(100, () => setShowMagnifiedBackdrop(true)),
-        []
-    );
+    const debouncedSetMagnifyBackdrop = debounce(100, () => setShowMagnifiedBackdrop(true));
 
-    useEffect(() => {
-        if (magnifiedNodeId && !showMagnifiedBackdrop) {
+    createEffect(() => {
+        const mId = magnifiedNodeId();
+        const eph = ephemeralNode();
+        if (mId && !showMagnifiedBackdrop()) {
             debouncedSetMagnifyBackdrop();
         }
-        if (!magnifiedNodeId) {
+        if (!mId) {
             setShowMagnifiedBackdrop(false);
         }
-        if (ephemeralNode && !showEphemeralBackdrop) {
+        if (eph && !showEphemeralBackdrop()) {
             setShowEphemeralBackdrop(true);
         }
-        if (!ephemeralNode) {
+        if (!eph) {
             setShowEphemeralBackdrop(false);
         }
-    }, [ephemeralNode, magnifiedNodeId]);
+    });
 
-    const blockBlurStr = `${blockBlur}px`;
+    const blockBlurStr = () => `${blockBlur()}px`;
 
     return (
         <>
-            {showMagnifiedBackdrop && (
+            <Show when={showMagnifiedBackdrop()}>
                 <div
-                    className="magnified-node-backdrop"
+                    class="magnified-node-backdrop"
                     onClick={() => {
-                        layoutModel.magnifyNodeToggle(magnifiedNodeId);
+                        props.layoutModel.magnifyNodeToggle(magnifiedNodeId());
                     }}
-                    style={{ "--block-blur": blockBlurStr } as CSSProperties}
+                    style={{ "--block-blur": blockBlurStr() } as JSX.CSSProperties}
                 />
-            )}
-            {showEphemeralBackdrop && (
+            </Show>
+            <Show when={showEphemeralBackdrop()}>
                 <div
-                    className="ephemeral-node-backdrop"
+                    class="ephemeral-node-backdrop"
                     onClick={() => {
-                        layoutModel.closeNode(ephemeralNode?.id);
+                        props.layoutModel.closeNode(ephemeralNode()?.id);
                     }}
-                    style={{ "--block-blur": blockBlurStr } as CSSProperties}
+                    style={{ "--block-blur": blockBlurStr() } as JSX.CSSProperties}
                 />
-            )}
+            </Show>
         </>
     );
 }
 
 interface DisplayNodesWrapperProps {
-    /**
-     * The layout tree state.
-     */
     layoutModel: LayoutModel;
 }
 
-const DisplayNodesWrapper = ({ layoutModel }: DisplayNodesWrapperProps) => {
-    const leafs = useAtomValue(layoutModel.leafs);
+const DisplayNodesWrapper = (props: DisplayNodesWrapperProps) => {
+    const leafs = () => props.layoutModel.leafs();
 
-    // Debug logging to track leaf changes
-    useEffect(() => {
-        const logData = {
-            leafCount: leafs?.length ?? 0,
-            leafIds: leafs?.map((l) => l.id) ?? [],
-        };
-        console.log("[RENDER] DisplayNodesWrapper leafs changed:", logData);
-        if (typeof window !== "undefined" && (window as any).getApi) {
-            (window as any).getApi().sendLog(`[RENDER] DisplayNodesWrapper leafs: ${JSON.stringify(logData)}`);
-        }
-    }, [leafs]);
-
-    return useMemo(
-        () =>
-            leafs.map((node) => {
-                return <DisplayNode key={node.id} layoutModel={layoutModel} node={node} />;
-            }),
-        [leafs]
+    return (
+        <Key each={leafs()} by={(node) => node.id}>
+            {(node) => <DisplayNode layoutModel={props.layoutModel} node={node()} />}
+        </Key>
     );
 };
 
 interface DisplayNodeProps {
     layoutModel: LayoutModel;
-    /**
-     * The leaf node object, containing the data needed to display the leaf contents to the user.
-     */
     node: LayoutNode;
 }
 
 /**
  * The draggable and displayable portion of a leaf node in a layout tree.
  */
-const DisplayNode = ({ layoutModel, node }: DisplayNodeProps) => {
-    const nodeModel = useNodeModel(layoutModel, node);
-    const tileNodeRef = useRef<HTMLDivElement>(null);
-    const previewRef = useRef<HTMLDivElement>(null);
-    const addlProps = useAtomValue(nodeModel.additionalProps);
-    const devicePixelRatio = useDevicePixelRatio();
-    const isEphemeral = useAtomValue(nodeModel.isEphemeral);
-    const isMagnified = useAtomValue(nodeModel.isMagnified);
+const DisplayNode = (props: DisplayNodeProps) => {
+    const nodeModel = useNodeModel(props.layoutModel, props.node);
+    let tileNodeRef: HTMLDivElement | undefined;
+    let previewRef: HTMLDivElement | undefined;
+    const addlProps = () => nodeModel.additionalProps();
+    const isEphemeral = () => nodeModel.isEphemeral();
+    const isMagnified = () => nodeModel.isMagnified();
+    const [isDragging, setIsDragging] = createSignal(false);
 
-    // Debug logging to track node props
-    useEffect(() => {
-        const logData = {
-            nodeId: node.id,
-            blockId: node.data?.blockId,
-            hasAddlProps: !!addlProps,
-            hasTransform: !!addlProps?.transform,
-            rect: addlProps?.rect,
-        };
-        console.log("[RENDER] DisplayNode props:", logData);
-        if (typeof window !== "undefined" && (window as any).getApi) {
-            (window as any).getApi().sendLog(`[RENDER] DisplayNode: ${JSON.stringify(logData)}`);
+
+    // Drag preview image state
+    const [previewImage, setPreviewImage] = createSignal<HTMLImageElement | null>(null);
+    const [previewElementGeneration, setPreviewElementGeneration] = createSignal(0);
+    const [previewImageGeneration, setPreviewImageGeneration] = createSignal(0);
+
+    const devicePixelRatio = () => window.devicePixelRatio ?? 1;
+
+    const generatePreviewImage = () => {
+        const dpr = typeof devicePixelRatio === "function" ? (devicePixelRatio as () => number)() : devicePixelRatio;
+        const offsetX = (DragPreviewWidth * dpr - DragPreviewWidth) / 2 + 10;
+        const offsetY = (DragPreviewHeight * dpr - DragPreviewHeight) / 2 + 10;
+        const img = previewImage();
+        const prevElGen = previewElementGeneration();
+        const prevImgGen = previewImageGeneration();
+        if (img !== null && prevElGen === prevImgGen) {
+            // already up-to-date preview image; used on next dragstart
+        } else if (previewRef) {
+            setPreviewImageGeneration(prevElGen);
+            toPng(previewRef).then((url) => {
+                const newImg = new Image();
+                newImg.src = url;
+                setPreviewImage(newImg);
+            });
         }
-    }, [node.id, addlProps]);
+    };
 
-    const [{ isDragging }, drag, dragPreview] = useDrag(
-        () => ({
-            type: tileItemType,
-            canDrag: () => !(isEphemeral || isMagnified),
-            item: () => node,
-            collect: (monitor) => ({
-                isDragging: monitor.isDragging(),
-            }),
-        }),
-        [node, addlProps, isEphemeral, isMagnified]
+    const onDragStart = (e: DragEvent) => {
+        if (isEphemeral() || isMagnified()) {
+            e.preventDefault();
+            return;
+        }
+        e.dataTransfer?.setData(DRAG_DATA_KEY, props.node.id);
+        const img = previewImage();
+        if (img) {
+            const dpr = typeof devicePixelRatio === "function" ? (devicePixelRatio as () => number)() : devicePixelRatio;
+            const offsetX = (DragPreviewWidth * dpr - DragPreviewWidth) / 2 + 10;
+            const offsetY = (DragPreviewHeight * dpr - DragPreviewHeight) / 2 + 10;
+            e.dataTransfer?.setDragImage(img, offsetX, offsetY);
+        }
+        globalDragNodeId = props.node.id;
+        globalDragLayoutModel = props.layoutModel;
+        props.layoutModel.activeDrag._set(true);
+        setIsDragging(true);
+    };
+
+    const onDragEnd = (e: DragEvent) => {
+        globalDragNodeId = null;
+        globalDragLayoutModel = null;
+        props.layoutModel.activeDrag._set(false);
+        setIsDragging(false);
+    };
+
+    // Attach drag handle ref to the drag handle element
+    const dragHandleRef = nodeModel.dragHandleRef;
+
+    const leafContent = () => (
+        <div class="tile-leaf">
+            {props.layoutModel.renderContent(nodeModel)}
+        </div>
     );
 
-    const [previewElementGeneration, setPreviewElementGeneration] = useState(0);
-    const previewElement = useMemo(() => {
-        setPreviewElementGeneration(previewElementGeneration + 1);
+    const previewElement = () => {
+        const dpr = typeof devicePixelRatio === "function" ? (devicePixelRatio as () => number)() : devicePixelRatio;
         return (
-            <div key="preview" className="tile-preview-container">
+            <div class="tile-preview-container">
                 <div
-                    className="tile-preview"
+                    class="tile-preview"
                     ref={previewRef}
                     style={{
-                        width: DragPreviewWidth,
-                        height: DragPreviewHeight,
-                        transform: `scale(${1 / devicePixelRatio})`,
+                        width: `${DragPreviewWidth}px`,
+                        height: `${DragPreviewHeight}px`,
+                        transform: `scale(${1 / dpr})`,
                     }}
                 >
-                    {layoutModel.renderPreview?.(nodeModel)}
+                    {props.layoutModel.renderPreview?.(nodeModel)}
                 </div>
             </div>
         );
-    }, [devicePixelRatio, nodeModel]);
-
-    const [previewImage, setPreviewImage] = useState<HTMLImageElement>(null);
-    const [previewImageGeneration, setPreviewImageGeneration] = useState(0);
-    const generatePreviewImage = useCallback(() => {
-        const offsetX = (DragPreviewWidth * devicePixelRatio - DragPreviewWidth) / 2 + 10;
-        const offsetY = (DragPreviewHeight * devicePixelRatio - DragPreviewHeight) / 2 + 10;
-        if (previewImage !== null && previewElementGeneration === previewImageGeneration) {
-            dragPreview(previewImage, { offsetY, offsetX });
-        } else if (previewRef.current) {
-            setPreviewImageGeneration(previewElementGeneration);
-            toPng(previewRef.current).then((url) => {
-                const img = new Image();
-                img.src = url;
-                setPreviewImage(img);
-                dragPreview(img, { offsetY, offsetX });
-            });
-        }
-    }, [
-        dragPreview,
-        previewRef.current,
-        previewElementGeneration,
-        previewImageGeneration,
-        previewImage,
-        devicePixelRatio,
-    ]);
-
-    const leafContent = useMemo(() => {
-        return (
-            <div key="leaf" className="tile-leaf">
-                {layoutModel.renderContent(nodeModel)}
-            </div>
-        );
-    }, [nodeModel]);
-
-    // Register the display node as a draggable item
-    useEffect(() => {
-        drag(nodeModel.dragHandleRef);
-    }, [drag, nodeModel.dragHandleRef.current]);
+    };
 
     return (
         <div
-            className={clsx("tile-node", {
-                dragging: isDragging,
-            })}
-            key={node.id}
+            class={clsx("tile-node", { dragging: isDragging() })}
             ref={tileNodeRef}
-            id={node.id}
-            style={addlProps?.transform}
+            id={props.node.id}
+            style={addlProps()?.transform as JSX.CSSProperties}
+            draggable={!isEphemeral() && !isMagnified()}
+            onDragStart={onDragStart}
+            onDragEnd={onDragEnd}
             onPointerEnter={generatePreviewImage}
             onPointerOver={(event) => event.stopPropagation()}
         >
-            {leafContent}
-            {previewElement}
+            {leafContent()}
+            {previewElement()}
         </div>
     );
 };
@@ -349,189 +314,160 @@ interface OverlayNodeWrapperProps {
     layoutModel: LayoutModel;
 }
 
-const OverlayNodeWrapper = memo(({ layoutModel }: OverlayNodeWrapperProps) => {
-    const leafs = useAtomValue(layoutModel.leafs);
-    const overlayTransform = useAtomValue(layoutModel.overlayTransform);
-
-    const overlayNodes = useMemo(
-        () =>
-            leafs.map((node) => {
-                return <OverlayNode key={node.id} layoutModel={layoutModel} node={node} />;
-            }),
-        [leafs]
-    );
+const OverlayNodeWrapper = (props: OverlayNodeWrapperProps) => {
+    const leafs = () => props.layoutModel.leafs();
+    const overlayTransform = () => props.layoutModel.overlayTransform();
 
     return (
-        <div key="overlay" className="overlay-container" style={{ top: 10000, ...overlayTransform }}>
-            {overlayNodes}
+        <div class="overlay-container" style={{ top: "10000px", ...overlayTransform() }}>
+            <Key each={leafs()} by={(node) => node.id}>
+                {(node) => <OverlayNode layoutModel={props.layoutModel} node={node()} />}
+            </Key>
         </div>
     );
-});
+};
 
 interface OverlayNodeProps {
-    /**
-     * The layout tree state.
-     */
     layoutModel: LayoutModel;
     node: LayoutNode;
 }
 
 /**
- * An overlay representing the true flexbox layout of the LayoutTreeState. This holds the drop targets for moving around nodes and is used to calculate the
- * dimensions of the corresponding DisplayNode for each LayoutTreeState leaf.
+ * An overlay representing the true flexbox layout of the LayoutTreeState.
+ * Holds the drop targets for moving around nodes.
  */
-const OverlayNode = memo(({ node, layoutModel }: OverlayNodeProps) => {
-    const nodeModel = useNodeModel(layoutModel, node);
-    const additionalProps = useAtomValue(nodeModel.additionalProps);
-    const overlayRef = useRef<HTMLDivElement>(null);
+const OverlayNode = (props: OverlayNodeProps) => {
+    const nodeModel = useNodeModel(props.layoutModel, props.node);
+    const additionalProps = () => nodeModel.additionalProps();
+    let overlayRef: HTMLDivElement | undefined;
 
-    const [, drop] = useDrop(
-        () => ({
-            accept: tileItemType,
-            canDrop: (_, monitor) => {
-                const dragItem = monitor.getItem<LayoutNode>();
-                if (monitor.isOver({ shallow: true }) && dragItem.id !== node.id) {
-                    return true;
-                }
-                return false;
-            },
-            drop: (_, monitor) => {
-                if (!monitor.didDrop()) {
-                    layoutModel.onDrop();
-                }
-            },
-            hover: throttle(50, (_, monitor: DropTargetMonitor<unknown, unknown>) => {
-                if (monitor.isOver({ shallow: true })) {
-                    if (monitor.canDrop() && layoutModel.displayContainerRef?.current && additionalProps?.rect) {
-                        const dragItem = monitor.getItem<LayoutNode>();
-                        // console.log("computing operation", layoutNode, dragItem, additionalProps.rect);
-                        const offset = monitor.getClientOffset();
-                        const containerRect = layoutModel.displayContainerRef.current.getBoundingClientRect();
-                        offset.x -= containerRect.x;
-                        offset.y -= containerRect.y;
-                        layoutModel.treeReducer({
-                            type: LayoutTreeActionType.ComputeMove,
-                            nodeId: node.id,
-                            nodeToMoveId: dragItem.id,
-                            direction: determineDropDirection(additionalProps.rect, offset),
-                        } as LayoutTreeComputeMoveNodeAction);
-                    } else {
-                        layoutModel.treeReducer({
-                            type: LayoutTreeActionType.ClearPendingAction,
-                        });
-                    }
-                }
-            }),
-        }),
-        [node.id, additionalProps?.rect, layoutModel.displayContainerRef, layoutModel.onDrop, layoutModel.treeReducer]
+    const handleDragOver = throttle(50, (e: DragEvent) => {
+        e.preventDefault();
+        const dragNodeId = globalDragNodeId;
+        if (!dragNodeId || dragNodeId === props.node.id) return;
+
+        if (props.layoutModel.displayContainerRef?.current && additionalProps()?.rect) {
+            const offset = { x: e.clientX, y: e.clientY };
+            const containerRect = props.layoutModel.displayContainerRef.current.getBoundingClientRect();
+            offset.x -= containerRect.x;
+            offset.y -= containerRect.y;
+            props.layoutModel.treeReducer({
+                type: LayoutTreeActionType.ComputeMove,
+                nodeId: props.node.id,
+                nodeToMoveId: dragNodeId,
+                direction: determineDropDirection(additionalProps().rect, offset),
+            } as LayoutTreeComputeMoveNodeAction);
+        } else {
+            props.layoutModel.treeReducer({
+                type: LayoutTreeActionType.ClearPendingAction,
+            });
+        }
+    });
+
+    const handleDragLeave = (e: DragEvent) => {
+        // Only clear if leaving this overlay node entirely (not entering a child)
+        if (overlayRef && !overlayRef.contains(e.relatedTarget as Node)) {
+            props.layoutModel.treeReducer({ type: LayoutTreeActionType.ClearPendingAction });
+        }
+    };
+
+    const handleDrop = (e: DragEvent) => {
+        e.preventDefault();
+        props.layoutModel.onDrop();
+    };
+
+    return (
+        <div
+            ref={overlayRef}
+            class="overlay-node"
+            id={props.node.id}
+            style={additionalProps()?.transform as JSX.CSSProperties}
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
+        />
     );
-
-    // Register the overlay node as a drop target
-    useEffect(() => {
-        drop(overlayRef);
-    }, []);
-
-    return <div ref={overlayRef} className="overlay-node" id={node.id} style={additionalProps?.transform} />;
-});
+};
 
 interface ResizeHandleWrapperProps {
     layoutModel: LayoutModel;
 }
 
-const ResizeHandleWrapper = memo(({ layoutModel }: ResizeHandleWrapperProps) => {
-    const resizeHandles = useAtomValue(layoutModel.resizeHandles) as Atom<ResizeHandleProps>[];
+const ResizeHandleWrapper = (props: ResizeHandleWrapperProps) => {
+    const resizeHandles = () => props.layoutModel.resizeHandles();
 
-    return resizeHandles.map((resizeHandleAtom, i) => (
-        <ResizeHandle key={`resize-handle-${i}`} layoutModel={layoutModel} resizeHandleAtom={resizeHandleAtom} />
-    ));
-});
+    return (
+        <For each={resizeHandles()}>
+            {(resizeHandleProps, i) => (
+                <ResizeHandle
+                    layoutModel={props.layoutModel}
+                    resizeHandleProps={resizeHandleProps}
+                />
+            )}
+        </For>
+    );
+};
 
 interface ResizeHandleComponentProps {
-    resizeHandleAtom: Atom<ResizeHandleProps>;
+    resizeHandleProps: ResizeHandleProps;
     layoutModel: LayoutModel;
 }
 
-const ResizeHandle = memo(({ resizeHandleAtom, layoutModel }: ResizeHandleComponentProps) => {
-    const resizeHandleProps = useAtomValue(resizeHandleAtom);
-    const resizeHandleRef = useRef<HTMLDivElement>(null);
+const ResizeHandle = (props: ResizeHandleComponentProps) => {
+    let resizeHandleRef: HTMLDivElement | undefined;
+    const [trackingPointer, setTrackingPointer] = createSignal<number | undefined>(undefined);
 
-    // The pointer currently captured, or undefined.
-    const [trackingPointer, setTrackingPointer] = useState<number>(undefined);
+    const handlePointerMove = throttle(10, (event: PointerEvent) => {
+        if (trackingPointer() === event.pointerId) {
+            const { clientX, clientY } = event;
+            props.layoutModel.onResizeMove(props.resizeHandleProps, clientX, clientY);
+        }
+    });
 
-    // Calculates the new size of the two nodes on either side of the handle, based on the position of the cursor
-    const handlePointerMove = useCallback(
-        throttle(10, (event: React.PointerEvent<HTMLDivElement>) => {
-            if (trackingPointer === event.pointerId) {
-                const { clientX, clientY } = event;
-                layoutModel.onResizeMove(resizeHandleProps, clientX, clientY);
-            }
-        }),
-        [trackingPointer, layoutModel.onResizeMove, resizeHandleProps]
-    );
-
-    // We want to use pointer capture so the operation continues even if the pointer leaves the bounds of the handle
-    function onPointerDown(event: React.PointerEvent<HTMLDivElement>) {
-        resizeHandleRef.current?.setPointerCapture(event.pointerId);
+    function onPointerDown(event: PointerEvent) {
+        resizeHandleRef?.setPointerCapture(event.pointerId);
     }
 
-    // This indicates that we're ready to start tracking the resize operation via the pointer
-    function onPointerCapture(event: React.PointerEvent<HTMLDivElement>) {
+    function onPointerCapture(event: PointerEvent) {
         setTrackingPointer(event.pointerId);
     }
 
-    // We want to wait a bit before committing the pending resize operation in case some events haven't arrived yet.
-    const onPointerRelease = useCallback(
-        debounce(30, (event: React.PointerEvent<HTMLDivElement>) => {
-            setTrackingPointer(undefined);
-            layoutModel.onResizeEnd();
-        }),
-        [layoutModel]
-    );
+    const onPointerRelease = debounce(30, (event: PointerEvent) => {
+        setTrackingPointer(undefined);
+        props.layoutModel.onResizeEnd();
+    });
 
     return (
         <div
             ref={resizeHandleRef}
-            className={clsx("resize-handle", `flex-${resizeHandleProps.flexDirection}`)}
+            class={clsx("resize-handle", `flex-${props.resizeHandleProps.flexDirection}`)}
             onPointerDown={onPointerDown}
             onGotPointerCapture={onPointerCapture}
             onLostPointerCapture={onPointerRelease}
-            style={resizeHandleProps.transform}
+            style={props.resizeHandleProps.transform as JSX.CSSProperties}
             onPointerMove={handlePointerMove}
         >
-            <div className="line" />
+            <div class="line" />
         </div>
     );
-});
+};
 
 interface PlaceholderProps {
-    /**
-     * The layout tree state.
-     */
     layoutModel: LayoutModel;
-    /**
-     * Any styling to apply to the placeholder container div.
-     */
-    style: React.CSSProperties;
+    style: JSX.CSSProperties;
 }
 
 /**
  * An overlay to preview pending actions on the layout tree.
  */
-const Placeholder = memo(({ layoutModel, style }: PlaceholderProps) => {
-    const [placeholderOverlay, setPlaceholderOverlay] = useState<ReactNode>(null);
-    const placeholderTransform = useAtomValue(layoutModel.placeholderTransform);
-
-    useEffect(() => {
-        if (placeholderTransform) {
-            setPlaceholderOverlay(<div className="placeholder" style={placeholderTransform} />);
-        } else {
-            setPlaceholderOverlay(null);
-        }
-    }, [placeholderTransform]);
+const Placeholder = (props: PlaceholderProps) => {
+    const placeholderTransform = () => props.layoutModel.placeholderTransform();
 
     return (
-        <div className="placeholder-container" style={style}>
-            {placeholderOverlay}
+        <div class="placeholder-container" style={props.style}>
+            <Show when={placeholderTransform()}>
+                <div class="placeholder" style={placeholderTransform() as JSX.CSSProperties} />
+            </Show>
         </div>
     );
-});
+};

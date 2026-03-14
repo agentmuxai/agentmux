@@ -2,15 +2,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import clsx from "clsx";
-import React, { forwardRef, memo, useEffect, useImperativeHandle, useRef, useState } from "react";
+import { createSignal, JSX, onMount, onCleanup, createEffect } from "solid-js";
 
 import "./multilineinput.scss";
 
 interface MultiLineInputProps {
     value?: string;
     className?: string;
-    onChange?: (e: React.ChangeEvent<HTMLTextAreaElement>) => void;
-    onKeyDown?: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void;
+    onChange?: (e: InputEvent & { target: HTMLTextAreaElement }) => void;
+    onKeyDown?: (e: KeyboardEvent) => void;
     onFocus?: () => void;
     onBlur?: () => void;
     placeholder?: string;
@@ -21,123 +21,111 @@ interface MultiLineInputProps {
     rows?: number;
     maxRows?: number;
     manageFocus?: (isFocused: boolean) => void;
+    ref?: HTMLTextAreaElement | ((el: HTMLTextAreaElement) => void);
 }
 
-const MultiLineInput = memo(
-    forwardRef<HTMLTextAreaElement, MultiLineInputProps>(
-        (
-            {
-                value,
-                className,
-                onChange,
-                onKeyDown,
-                onFocus,
-                onBlur,
-                placeholder,
-                defaultValue = "",
-                maxLength,
-                autoFocus,
-                disabled,
-                rows = 1,
-                maxRows = 5,
-                manageFocus,
-            }: MultiLineInputProps,
-            ref
-        ) => {
-            const textareaRef = useRef<HTMLTextAreaElement>(null);
-            const [internalValue, setInternalValue] = useState(defaultValue);
-            const [lineHeight, setLineHeight] = useState(24); // Default line height fallback of 24px
-            const [paddingTop, setPaddingTop] = useState(0);
-            const [paddingBottom, setPaddingBottom] = useState(0);
+const MultiLineInput = (props: MultiLineInputProps): JSX.Element => {
+    const defaultValue = props.defaultValue ?? "";
+    const rows = props.rows ?? 1;
+    const maxRows = props.maxRows ?? 5;
 
-            useImperativeHandle(ref, () => textareaRef.current as HTMLTextAreaElement);
+    const [internalValue, setInternalValue] = createSignal(defaultValue);
+    const [lineHeight, setLineHeight] = createSignal(24); // Default line height fallback of 24px
+    const [paddingTop, setPaddingTop] = createSignal(0);
+    const [paddingBottom, setPaddingBottom] = createSignal(0);
 
-            // Function to count the number of lines in the textarea value
-            const countLines = (text: string) => {
-                return text.split("\n").length;
-            };
+    let textareaRef!: HTMLTextAreaElement;
 
-            const adjustTextareaHeight = () => {
-                if (textareaRef.current) {
-                    textareaRef.current.style.height = "auto"; // Reset height to auto first
+    // Function to count the number of lines in the textarea value
+    const countLines = (text: string) => {
+        return text.split("\n").length;
+    };
 
-                    const maxHeight = maxRows * lineHeight + paddingTop + paddingBottom; // Max height based on maxRows
-                    const currentLines = countLines(textareaRef.current.value); // Count the number of lines
-                    const newHeight = Math.min(textareaRef.current.scrollHeight, maxHeight); // Calculate new height
+    const adjustTextareaHeight = () => {
+        if (textareaRef) {
+            textareaRef.style.height = "auto"; // Reset height to auto first
 
-                    // If the number of lines is less than or equal to maxRows, set height accordingly
-                    const calculatedHeight =
-                        currentLines <= maxRows
-                            ? `${lineHeight * currentLines + paddingTop + paddingBottom}px`
-                            : `${newHeight}px`;
+            const maxHeight = maxRows * lineHeight() + paddingTop() + paddingBottom();
+            const currentLines = countLines(textareaRef.value);
+            const newHeight = Math.min(textareaRef.scrollHeight, maxHeight);
 
-                    textareaRef.current.style.height = calculatedHeight;
-                }
-            };
+            const calculatedHeight =
+                currentLines <= maxRows
+                    ? `${lineHeight() * currentLines + paddingTop() + paddingBottom()}px`
+                    : `${newHeight}px`;
 
-            const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-                setInternalValue(e.target.value);
-                onChange?.(e);
-
-                // Adjust the height of the textarea after text change
-                adjustTextareaHeight();
-            };
-
-            const handleFocus = () => {
-                manageFocus?.(true);
-                onFocus?.();
-            };
-
-            const handleBlur = () => {
-                manageFocus?.(false);
-                onBlur?.();
-            };
-
-            useEffect(() => {
-                if (textareaRef.current) {
-                    const computedStyle = window.getComputedStyle(textareaRef.current);
-                    const detectedLineHeight = parseFloat(computedStyle.lineHeight);
-                    const detectedPaddingTop = parseFloat(computedStyle.paddingTop);
-                    const detectedPaddingBottom = parseFloat(computedStyle.paddingBottom);
-
-                    setLineHeight(detectedLineHeight);
-                    setPaddingTop(detectedPaddingTop);
-                    setPaddingBottom(detectedPaddingBottom);
-                }
-            }, [textareaRef]);
-
-            useEffect(() => {
-                adjustTextareaHeight();
-            }, [value, maxRows, lineHeight, paddingTop, paddingBottom]);
-
-            const inputValue = value ?? internalValue;
-
-            return (
-                <textarea
-                    className={clsx("multiline-input", className)}
-                    ref={textareaRef}
-                    value={inputValue}
-                    onChange={handleInputChange}
-                    onKeyDown={onKeyDown}
-                    onFocus={handleFocus}
-                    onBlur={handleBlur}
-                    placeholder={placeholder}
-                    maxLength={maxLength}
-                    autoFocus={autoFocus}
-                    disabled={disabled}
-                    rows={rows}
-                    style={{
-                        overflowY:
-                            textareaRef.current &&
-                            textareaRef.current.scrollHeight > maxRows * lineHeight + paddingTop + paddingBottom
-                                ? "auto"
-                                : "hidden",
-                    }}
-                />
-            );
+            textareaRef.style.height = calculatedHeight;
         }
-    )
-);
+    };
+
+    const handleInputChange = (e: InputEvent & { target: HTMLTextAreaElement }) => {
+        setInternalValue((e.target as HTMLTextAreaElement).value);
+        props.onChange?.(e);
+        adjustTextareaHeight();
+    };
+
+    const handleFocus = () => {
+        props.manageFocus?.(true);
+        props.onFocus?.();
+    };
+
+    const handleBlur = () => {
+        props.manageFocus?.(false);
+        props.onBlur?.();
+    };
+
+    onMount(() => {
+        if (textareaRef) {
+            const computedStyle = window.getComputedStyle(textareaRef);
+            const detectedLineHeight = parseFloat(computedStyle.lineHeight);
+            const detectedPaddingTop = parseFloat(computedStyle.paddingTop);
+            const detectedPaddingBottom = parseFloat(computedStyle.paddingBottom);
+
+            setLineHeight(detectedLineHeight);
+            setPaddingTop(detectedPaddingTop);
+            setPaddingBottom(detectedPaddingBottom);
+        }
+    });
+
+    createEffect(() => {
+        // Reactive dependency on these signals
+        const _lh = lineHeight();
+        const _pt = paddingTop();
+        const _pb = paddingBottom();
+        const _v = props.value;
+        adjustTextareaHeight();
+    });
+
+    const inputValue = () => props.value ?? internalValue();
+
+    const overflowY = () => {
+        if (!textareaRef) return "hidden";
+        return textareaRef.scrollHeight > maxRows * lineHeight() + paddingTop() + paddingBottom()
+            ? "auto"
+            : "hidden";
+    };
+
+    return (
+        <textarea
+            class={clsx("multiline-input", props.className)}
+            ref={(el) => {
+                textareaRef = el;
+                if (typeof props.ref === "function") props.ref(el);
+            }}
+            value={inputValue()}
+            onInput={handleInputChange as any}
+            onKeyDown={props.onKeyDown}
+            onFocus={handleFocus}
+            onBlur={handleBlur}
+            placeholder={props.placeholder}
+            maxLength={props.maxLength}
+            autofocus={props.autoFocus}
+            disabled={props.disabled}
+            rows={rows}
+            style={{ "overflow-y": overflowY() }}
+        />
+    );
+};
 
 export { MultiLineInput };
 export type { MultiLineInputProps };

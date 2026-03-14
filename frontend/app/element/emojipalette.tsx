@@ -1,9 +1,9 @@
 // Copyright 2025, Command Line Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-import { type Placement } from "@floating-ui/react";
+import { type Placement } from "@floating-ui/dom";
 import clsx from "clsx";
-import { memo, useState } from "react";
+import { createSignal, For, JSX, Show } from "solid-js";
 import { Button } from "./button";
 import { Input, InputGroup, InputLeftElement } from "./input";
 import { Popover, PopoverButton, PopoverContent } from "./popover";
@@ -219,50 +219,51 @@ interface EmojiPaletteProps {
     onSelect?: (_: EmojiItem) => void;
 }
 
-const EmojiPalette = memo(({ className, placement, onSelect }: EmojiPaletteProps) => {
-    const [searchTerm, setSearchTerm] = useState("");
+const EmojiPalette = (props: EmojiPaletteProps): JSX.Element => {
+    const [searchTerm, setSearchTerm] = createSignal("");
 
     const handleSearchChange = (val: string) => {
         setSearchTerm(val.toLowerCase());
     };
 
-    const handleSelect = (item: { name: string; emoji: string }) => {
-        onSelect?.(item);
+    const handleSelect = (item: EmojiItem) => {
+        props.onSelect?.(item);
     };
 
-    const filteredEmojis = emojiList.filter((item) => item.name.includes(searchTerm));
+    const filteredEmojis = () => emojiList.filter((item) => item.name.includes(searchTerm()));
 
     return (
-        <div className={clsx("emoji-palette", className)}>
-            <Popover placement={placement}>
+        <div class={clsx("emoji-palette", props.className)}>
+            <Popover placement={props.placement}>
                 <PopoverButton className="ghost grey">
-                    <i className="fa-sharp fa-solid fa-face-smile"></i>
+                    <i class="fa-sharp fa-solid fa-face-smile" />
                 </PopoverButton>
                 <PopoverContent className="emoji-palette-content">
                     <InputGroup>
                         <InputLeftElement>
-                            <i className="fa-sharp fa-solid fa-magnifying-glass"></i>
+                            <i class="fa-sharp fa-solid fa-magnifying-glass" />
                         </InputLeftElement>
-                        <Input placeholder="Search emojis..." value={searchTerm} onChange={handleSearchChange} />
+                        <Input placeholder="Search emojis..." value={searchTerm()} onChange={handleSearchChange} />
                     </InputGroup>
-                    <div className="emoji-grid">
-                        {filteredEmojis.length > 0 ? (
-                            filteredEmojis.map((item, index) => (
-                                <Button key={index} className="ghost emoji-button" onClick={() => handleSelect(item)}>
-                                    {item.emoji}
-                                </Button>
-                            ))
-                        ) : (
-                            <div className="no-emojis">No emojis found</div>
-                        )}
+                    <div class="emoji-grid">
+                        <Show
+                            when={filteredEmojis().length > 0}
+                            fallback={<div class="no-emojis">No emojis found</div>}
+                        >
+                            <For each={filteredEmojis()}>
+                                {(item) => (
+                                    <Button className="ghost emoji-button" onClick={() => handleSelect(item)}>
+                                        {item.emoji}
+                                    </Button>
+                                )}
+                            </For>
+                        </Show>
                     </div>
                 </PopoverContent>
             </Popover>
         </div>
     );
-});
-
-EmojiPalette.displayName = "EmojiPalette";
+};
 
 export { EmojiPalette };
 export type { EmojiItem };

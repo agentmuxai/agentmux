@@ -1,14 +1,13 @@
 // Copyright 2025, Command Line Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-import { atoms, getApi, getSettingsKeyAtom } from "@/app/store/global";
+import { atoms, getSettingsKeyAtom } from "@/app/store/global";
 import { focusManager } from "@/app/store/focusManager";
 import { RpcApi } from "@/app/store/wshclientapi";
 import { TabRpcClient } from "@/app/store/wshrpcutil";
-import { atomWithThrottle, boundNumber } from "@/util/util";
-import { Atom, atom, Getter, PrimitiveAtom, Setter } from "jotai";
-import { splitAtom } from "jotai/utils";
-import { createRef, CSSProperties } from "react";
+import { atomWithThrottle, boundNumber, createSignalAtom, SignalAtom } from "@/util/util";
+import type { Properties as CSSProperties } from "csstype";
+import { createMemo } from "solid-js";
 import { getLayoutStateAtomFromTab } from "./layoutAtom";
 import { findNode } from "./layoutNode";
 import {
@@ -101,31 +100,25 @@ import {
     computeSpiralOrder,
 } from "./layoutGeometry";
 
-// Debug logging function - uses getApi().sendLog() which writes to task dev output
-function debugLog(message: string, data?: unknown): void {
-    const logLine = `[LAYOUT] ${message}${data !== undefined ? ": " + JSON.stringify(data) : ""}`;
-    getApi().sendLog(logLine);
-}
-
-const DefaultAnimationTimeS = 0.15;
+const DefaultAnimationTimeS = 0;
 
 export class LayoutModel {
     /**
-     * Local atom holding the current tree state (source of truth during runtime)
+     * Local signal atom holding the current tree state (source of truth during runtime)
      * @internal
      */
-    localTreeStateAtom: PrimitiveAtom<LayoutTreeState>;
+    localTreeStateAtom: SignalAtom<LayoutTreeState>;
     /**
      * The tree state (local cache)
      */
     treeState: LayoutTreeState;
     /**
-     * Reference to the tab atom for accessing WaveObject
+     * Reference to the tab accessor for accessing WaveObject
      * @internal
      */
-    tabAtom: Atom<Tab>;
+    tabAtom: () => Tab;
     /**
-     * WaveObject atom for persistence
+     * WaveObject signal atom for persistence
      * @internal
      */
     waveObjectAtom: WritableWaveObjectAtom<LayoutState>;
@@ -140,13 +133,26 @@ export class LayoutModel {
      */
     processedActionIds: Set<string>;
     /**
-     * The jotai getter that is used to read atom values.
+     * Read a signal value (signal accessor — call to read, returns current value).
+     * Kept for compatibility with modules that call model.getter(signal).
      */
-    getter: Getter;
+    getter<T>(accessor: () => T): T;
+    getter(accessor: any): any;
+    getter<T>(accessor: (() => T) | any): T {
+        if (typeof accessor === "function") return (accessor as () => T)();
+        return undefined;
+    }
     /**
-     * The jotai setter that is used to update atom values.
+     * Write a signal value.
+     * Kept for compatibility with modules that call model.setter(signal, value).
      */
-    setter: Setter;
+    setter<T>(accessor: ((...args: any[]) => any) | any, value: T | ((prev: T) => T)): void {
+        if (accessor && typeof (accessor as any)._set === "function") {
+            (accessor as any)._set(value);
+        } else if (typeof accessor === "function") {
+            (accessor as Function)(value);
+        }
+    }
     /**
      * Callback that is invoked to render the block associated with a leaf node.
      */
@@ -162,29 +168,29 @@ export class LayoutModel {
     /**
      * The size of the gap between nodes in CSS pixels.
      */
-    gapSizePx: PrimitiveAtom<number>;
+    gapSizePx: SignalAtom<number>;
 
     /**
      * The time a transition animation takes, in seconds.
      */
-    animationTimeS: PrimitiveAtom<number>;
+    animationTimeS: SignalAtom<number>;
 
     /**
      * List of nodes that are leafs and should be rendered as a DisplayNode.
      */
-    leafs: PrimitiveAtom<LayoutNode[]>;
+    leafs: SignalAtom<LayoutNode[]>;
     /**
      * An ordered list of node ids starting from the top left corner to the bottom right corner.
      */
-    leafOrder: PrimitiveAtom<LeafOrderEntry[]>;
+    leafOrder: SignalAtom<LeafOrderEntry[]>;
     /**
      * Leaf nodes ordered in a clockwise spiral pattern for Tab cycling.
      */
-    spiralLeafOrder: Atom<LeafOrderEntry[]>;
+    spiralLeafOrder: () => LeafOrderEntry[];
     /**
-     * Atom representing the number of leaf nodes in a layout.
+     * Accessor representing the number of leaf nodes in a layout.
      */
-    numLeafs: Atom<number>;
+    numLeafs: () => number;
     /**
      * A map of node models for currently-active leafs.
      * @internal
@@ -192,14 +198,15 @@ export class LayoutModel {
     nodeModels: Map<string, NodeModel>;
 
     /**
-     * Split atom containing the properties of all of the resize handles that should be placed in the layout.
+     * Computed list of resize handle props derived from additionalProps.
+     * Replaces the jotai splitAtom(resizeHandleListAtom).
      */
-    resizeHandles: SplitAtom<ResizeHandleProps>;
+    resizeHandles: () => ResizeHandleProps[];
     /**
      * Layout node derived properties that are not persisted to the backend.
      * @see updateTreeHelper for the logic to update these properties.
      */
-    additionalProps: PrimitiveAtom<Record<string, LayoutNodeAdditionalProps>>;
+    additionalProps: SignalAtom<Record<string, LayoutNodeAdditionalProps>>;
     /**
      * Set if there is currently an uncommitted action pending on the layout tree.
      * @see LayoutTreeActionType for the different types of actions.
@@ -208,29 +215,30 @@ export class LayoutModel {
     /**
      * Whether a node is currently being dragged.
      */
-    activeDrag: PrimitiveAtom<boolean>;
+    activeDrag: SignalAtom<boolean>;
     /**
      * Whether the overlay container should be shown.
      * @see overlayTransform contains the actual CSS transform that moves the overlay into view.
      */
-    showOverlay: PrimitiveAtom<boolean>;
+    showOverlay: SignalAtom<boolean>;
     /**
      * Whether the nodes within the layout should be displaying content.
      */
-    ready: PrimitiveAtom<boolean>;
+    ready: SignalAtom<boolean>;
 
     /**
-     * RefObject for the display container, that holds the display nodes. This is used to get the size of the whole layout.
+     * Plain ref object for the display container, that holds the display nodes.
+     * This is used to get the size of the whole layout.
      */
-    displayContainerRef: React.RefObject<HTMLDivElement>;
+    displayContainerRef: { current: HTMLDivElement | null };
     /**
      * CSS properties for the placeholder element.
      */
-    placeholderTransform: Atom<CSSProperties>;
+    placeholderTransform: () => CSSProperties;
     /**
      * CSS properties for the overlay container.
      */
-    overlayTransform: Atom<CSSProperties>;
+    overlayTransform: () => CSSProperties;
 
     /**
      * The currently focused node.
@@ -238,9 +246,9 @@ export class LayoutModel {
      */
     focusedNodeIdStack: string[];
     /**
-     * Atom pointing to the currently focused node.
+     * Accessor pointing to the currently focused node.
      */
-    focusedNode: Atom<LayoutNode>;
+    focusedNode: () => LayoutNode;
 
     // TODO: Nodes that need to be placed at higher z-indices should probably be handled by an ordered list, rather than individual properties.
     /**
@@ -248,30 +256,28 @@ export class LayoutModel {
      */
     magnifiedNodeId: string;
     /**
-     * Atom for the magnified node ID (derived from local tree state)
+     * Accessor for the magnified node ID (derived from local tree state)
      */
-    magnifiedNodeIdAtom: Atom<string>;
+    magnifiedNodeIdAtom: () => string;
     /**
-     * The last node to be magnified, other than the current magnified node, if set. This node should sit at a higher z-index than the others so that it floats above the other nodes as it returns to its original position.
+     * The last node to be magnified, other than the current magnified node, if set.
      */
     lastMagnifiedNodeId: string;
     /**
-     * Atom holding an ephemeral node that is not part of the layout tree. This node displays above all other nodes.
+     * Signal atom holding an ephemeral node that is not part of the layout tree.
      */
-    ephemeralNode: PrimitiveAtom<LayoutNode>;
+    ephemeralNode: SignalAtom<LayoutNode>;
     /**
-     * The last node to be an ephemeral node. This node should sit at a higher z-index than the others so that it floats above the other nodes as it returns to its original position.
+     * The last node to be an ephemeral node.
      */
     lastEphemeralNodeId: string;
-    magnifiedNodeSizeAtom: Atom<number>;
+    magnifiedNodeSizeAtom: () => number;
 
     /**
      * The size of the resize handles, in CSS pixels.
-     * The resize handle size is double the gap size, or double the default gap size, whichever is greater.
-     * @see gapSizePx @see DefaultGapSizePx
      * @internal
      */
-    resizeHandleSizePx: Atom<number>;
+    resizeHandleSizePx: () => number;
     /**
      * A context used by the resize handles to keep track of precomputed values for the current resize operation.
      * @internal
@@ -280,17 +286,15 @@ export class LayoutModel {
     /**
      * True if a resize handle is currently being dragged or the whole TileLayout container is being resized.
      */
-    isResizing: Atom<boolean>;
+    isResizing: () => boolean;
     /**
      * True if the whole TileLayout container is being resized.
      * @internal
      */
-    isContainerResizing: PrimitiveAtom<boolean>;
+    isContainerResizing: SignalAtom<boolean>;
 
     constructor(
-        tabAtom: Atom<Tab>,
-        getter: Getter,
-        setter: Setter,
+        tabAtom: () => Tab,
         renderContent?: ContentRenderer,
         renderPreview?: PreviewRenderer,
         onNodeDelete?: (data: TabLayoutData) => Promise<void>,
@@ -298,23 +302,21 @@ export class LayoutModel {
         animationTimeS?: number
     ) {
         this.tabAtom = tabAtom;
-        this.getter = getter;
-        this.setter = setter;
         this.renderContent = renderContent;
         this.renderPreview = renderPreview;
         this.onNodeDelete = onNodeDelete;
-        this.gapSizePx = atom(gapSizePx ?? DefaultGapSizePx);
-        this.resizeHandleSizePx = atom((get) => {
-            const gapSizePx = get(this.gapSizePx);
-            return 2 * (gapSizePx > 5 ? gapSizePx : DefaultGapSizePx);
+        this.gapSizePx = createSignalAtom(gapSizePx ?? DefaultGapSizePx);
+        this.resizeHandleSizePx = createMemo(() => {
+            const gap = this.gapSizePx();
+            return 2 * (gap > 5 ? gap : DefaultGapSizePx);
         });
-        this.animationTimeS = atom(animationTimeS ?? DefaultAnimationTimeS);
+        this.animationTimeS = createSignalAtom(animationTimeS ?? DefaultAnimationTimeS);
         this.persistDebounceTimer = null;
         this.processedActionIds = new Set();
 
-        this.waveObjectAtom = getLayoutStateAtomFromTab(tabAtom, getter);
+        this.waveObjectAtom = getLayoutStateAtomFromTab(tabAtom);
 
-        this.localTreeStateAtom = atom<LayoutTreeState>({
+        this.localTreeStateAtom = createSignalAtom<LayoutTreeState>({
             rootNode: undefined,
             focusedNodeId: undefined,
             magnifiedNodeId: undefined,
@@ -330,39 +332,42 @@ export class LayoutModel {
             pendingBackendActions: undefined,
         };
 
-        this.leafs = atom([]);
-        this.leafOrder = atom([]);
-        this.spiralLeafOrder = atom((get) => {
-            const leafOrd = get(this.leafOrder);
-            const addlProps = get(this.additionalProps);
-            return computeSpiralOrder(leafOrd, addlProps);
-        });
-        this.numLeafs = atom((get) => get(this.leafOrder).length);
+        this.leafs = createSignalAtom<LayoutNode[]>([]);
+        this.leafOrder = createSignalAtom<LeafOrderEntry[]>([]);
+        this.numLeafs = createMemo(() => this.leafOrder().length);
 
         this.nodeModels = new Map();
-        this.additionalProps = atom({});
+        this.additionalProps = createSignalAtom<Record<string, LayoutNodeAdditionalProps>>({});
 
-        const resizeHandleListAtom = atom((get) => {
-            const addlProps = get(this.additionalProps);
+        this.spiralLeafOrder = createMemo(() => {
+            const leafOrd = this.leafOrder();
+            const addlProps = this.additionalProps();
+            return computeSpiralOrder(leafOrd, addlProps);
+        });
+
+        this.resizeHandles = createMemo(() => {
+            const addlProps = this.additionalProps();
             return Object.values(addlProps)
                 .flatMap((props) => props.resizeHandles)
                 .filter((v) => v);
         });
-        this.resizeHandles = splitAtom(resizeHandleListAtom);
-        this.isContainerResizing = atom(false);
-        this.isResizing = atom((get) => {
-            const pendingAction = get(this.pendingTreeAction.throttledValueAtom);
-            const isWindowResizing = get(this.isContainerResizing);
+
+        this.pendingTreeAction = atomWithThrottle<LayoutTreeAction>(null, 10);
+
+        this.isContainerResizing = createSignalAtom(false);
+        this.isResizing = createMemo(() => {
+            const pendingAction = this.pendingTreeAction.throttledValueAtom();
+            const isWindowResizing = this.isContainerResizing();
             return isWindowResizing || pendingAction?.type === LayoutTreeActionType.ResizeNode;
         });
 
-        this.displayContainerRef = createRef();
-        this.activeDrag = atom(false);
-        this.showOverlay = atom(false);
-        this.ready = atom(false);
-        this.overlayTransform = atom<CSSProperties>((get) => {
-            const activeDrag = get(this.activeDrag);
-            const showOverlay = get(this.showOverlay);
+        this.displayContainerRef = { current: null };
+        this.activeDrag = createSignalAtom(false);
+        this.showOverlay = createSignalAtom(false);
+        this.ready = createSignalAtom(false);
+        this.overlayTransform = createMemo<CSSProperties>(() => {
+            const activeDrag = this.activeDrag();
+            const showOverlay = this.showOverlay();
             if (this.displayContainerRef.current) {
                 const displayBoundingRect = this.displayContainerRef.current.getBoundingClientRect();
                 const newOverlayOffset = displayBoundingRect.top + 2 * displayBoundingRect.height;
@@ -377,19 +382,20 @@ export class LayoutModel {
                 );
                 return newTransform;
             }
+            return undefined;
         });
 
-        this.ephemeralNode = atom();
+        this.ephemeralNode = createSignalAtom<LayoutNode>(undefined);
         this.magnifiedNodeSizeAtom = getSettingsKeyAtom("window:magnifiedblocksize");
 
-        this.magnifiedNodeIdAtom = atom((get) => {
-            const treeState = get(this.localTreeStateAtom);
+        this.magnifiedNodeIdAtom = createMemo(() => {
+            const treeState = this.localTreeStateAtom();
             return treeState.magnifiedNodeId;
         });
 
-        this.focusedNode = atom((get) => {
-            const ephemeralNode = get(this.ephemeralNode);
-            const treeState = get(this.localTreeStateAtom);
+        this.focusedNode = createMemo(() => {
+            const ephemeralNode = this.ephemeralNode();
+            const treeState = this.localTreeStateAtom();
             if (ephemeralNode) {
                 return ephemeralNode;
             }
@@ -400,9 +406,8 @@ export class LayoutModel {
         });
         this.focusedNodeIdStack = [];
 
-        this.pendingTreeAction = atomWithThrottle<LayoutTreeAction>(null, 10);
-        this.placeholderTransform = atom<CSSProperties>((get: Getter) => {
-            const pendingAction = get(this.pendingTreeAction.throttledValueAtom);
+        this.placeholderTransform = createMemo<CSSProperties>(() => {
+            const pendingAction = this.pendingTreeAction.throttledValueAtom();
             return this.getPlaceholderTransform(pendingAction);
         });
 
@@ -431,7 +436,7 @@ export class LayoutModel {
         this.renderPreview = contents.renderPreview;
         this.onNodeDelete = contents.onNodeDelete;
         if (contents.gapSizePx !== undefined) {
-            this.setter(this.gapSizePx, contents.gapSizePx);
+            this.gapSizePx._set(contents.gapSizePx);
         }
     }
 
@@ -442,8 +447,7 @@ export class LayoutModel {
     treeReducer(action: LayoutTreeAction, setState = true) {
         switch (action.type) {
             case LayoutTreeActionType.ComputeMove:
-                this.setter(
-                    this.pendingTreeAction.throttledValueAtom,
+                this.pendingTreeAction.throttledValueAtom._set(
                     computeMoveNode(this.treeState, action as LayoutTreeComputeMoveNodeAction)
                 );
                 break;
@@ -464,16 +468,7 @@ export class LayoutModel {
                 break;
             case LayoutTreeActionType.DeleteNode: {
                 const delAction = action as LayoutTreeDeleteNodeAction;
-                debugLog("treeReducer DeleteNode BEFORE", {
-                    actionNodeId: delAction.nodeId,
-                    rootNodeId: this.treeState.rootNode?.id,
-                    willClearTree: delAction.nodeId === this.treeState.rootNode?.id,
-                });
                 deleteNode(this.treeState, delAction);
-                debugLog("treeReducer DeleteNode AFTER", {
-                    rootNodeExists: !!this.treeState.rootNode,
-                    rootNodeId: this.treeState.rootNode?.id,
-                });
                 break;
             }
             case LayoutTreeActionType.Swap:
@@ -485,23 +480,23 @@ export class LayoutModel {
             case LayoutTreeActionType.SetPendingAction: {
                 const pendingAction = (action as LayoutTreeSetPendingAction).action;
                 if (pendingAction) {
-                    this.setter(this.pendingTreeAction.throttledValueAtom, pendingAction);
+                    this.pendingTreeAction.throttledValueAtom._set(pendingAction);
                 } else {
                     console.warn("No new pending action provided");
                 }
                 break;
             }
             case LayoutTreeActionType.ClearPendingAction:
-                this.setter(this.pendingTreeAction.throttledValueAtom, undefined);
+                this.pendingTreeAction.throttledValueAtom._set(undefined);
                 break;
             case LayoutTreeActionType.CommitPendingAction: {
-                const pendingAction = this.getter(this.pendingTreeAction.currentValueAtom);
+                const pendingAction = this.pendingTreeAction.currentValueAtom();
                 if (!pendingAction) {
                     console.error("unable to commit pending action, does not exist");
                     break;
                 }
                 this.treeReducer(pendingAction);
-                this.setter(this.pendingTreeAction.throttledValueAtom, undefined);
+                this.pendingTreeAction.throttledValueAtom._set(undefined);
                 break;
             }
             case LayoutTreeActionType.FocusNode:
@@ -534,26 +529,21 @@ export class LayoutModel {
         }
         if (setState) {
             this.updateTree();
-            this.setter(this.localTreeStateAtom, { ...this.treeState });
+            this.localTreeStateAtom._set({ ...this.treeState });
             this.persistToBackend();
         }
     }
 
     /**
-     * Callback that is invoked when the upstream tree state has been updated. This ensures the model is updated if the atom is not fully loaded when the model is first instantiated.
+     * Callback that is invoked when the upstream tree state has been updated. This ensures the model is updated if the signal is not fully loaded when the model is first instantiated.
      * @param force Whether to force the local tree state to update, regardless of whether the state is already up to date.
      */
     async onTreeStateAtomUpdated(force = false) {
         if (force) {
             this.updateTree();
-            this.setter(this.localTreeStateAtom, { ...this.treeState });
+            this.localTreeStateAtom._set({ ...this.treeState });
         }
     }
-
-    /**
-     * Set the upstream tree state atom to the value of the local tree state.
-     * @param bumpGeneration Whether to bump the generation of the tree state before setting the atom.
-     */
 
     updateTree(balanceTree = true) {
         updateTreeImpl(this, balanceTree);
@@ -581,11 +571,7 @@ export class LayoutModel {
     }
 
     /**
-     * Helper function for the placeholderTransform atom, which computes the new transform value when the pending action changes.
-     * @param pendingAction The new pending action value.
-     * @returns The computed placeholder transform.
-     *
-     * @see placeholderTransform the atom that invokes this function and persists the updated value.
+     * Helper function for the placeholderTransform memo, which computes the new transform value when the pending action changes.
      */
     private getPlaceholderTransform(pendingAction: LayoutTreeAction): CSSProperties {
         if (pendingAction) {
@@ -611,7 +597,6 @@ export class LayoutModel {
                             const targetBoundingRect = this.getNodeRect(targetNode);
 
                             // Placeholder should be either half the height or half the width of the targetNode, depending on the flex direction of the targetNode's parent.
-                            // Default to placing the placeholder in the first half of the target node.
                             const placeholderDimensions: Dimensions = {
                                 height:
                                     parentNode.flexDirection === FlexDirection.Column
@@ -627,14 +612,12 @@ export class LayoutModel {
 
                             if (action.index > targetIndex) {
                                 if (action.index >= (parentNode.children?.length ?? 1)) {
-                                    // If there are no more nodes after the specified index, place the placeholder in the second half of the target node (either right or bottom).
                                     placeholderDimensions.top +=
                                         parentNode.flexDirection === FlexDirection.Column &&
                                         targetBoundingRect.height / 2;
                                     placeholderDimensions.left +=
                                         parentNode.flexDirection === FlexDirection.Row && targetBoundingRect.width / 2;
                                 } else {
-                                    // Otherwise, place the placeholder between the target node (the one after which it will be inserted) and the next node
                                     placeholderDimensions.top +=
                                         parentNode.flexDirection === FlexDirection.Column &&
                                         (3 * targetBoundingRect.height) / 4;
@@ -733,7 +716,7 @@ export class LayoutModel {
      * Callback that is invoked when a drag operation completes and the pending action should be committed.
      */
     onDrop() {
-        if (this.getter(this.pendingTreeAction.currentValueAtom)) {
+        if (this.pendingTreeAction.currentValueAtom()) {
             this.treeReducer({
                 type: LayoutTreeActionType.CommitPendingAction,
             });
@@ -770,7 +753,7 @@ export class LayoutModel {
         return getNodeByBlockIdImpl(this, blockId);
     }
 
-    getNodeAdditionalPropertiesAtom(nodeId: string): Atom<LayoutNodeAdditionalProps> {
+    getNodeAdditionalPropertiesAtom(nodeId: string): () => LayoutNodeAdditionalProps {
         return getNodeAdditionalPropertiesAtomImpl(this, nodeId);
     }
 

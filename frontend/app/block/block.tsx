@@ -13,10 +13,9 @@ import { LauncherViewModel } from "@/app/view/launcher/launcher";
 import { SysinfoViewModel } from "@/app/view/sysinfo/sysinfo";
 import { AgentViewModel } from "@/app/view/agent";
 import { ForgeViewModel } from "@/app/view/forge/forge";
-import { VDomModel } from "@/app/view/vdom/vdom-model";
 import { ErrorBoundary } from "@/element/errorboundary";
 import { CenteredDiv } from "@/element/quickelems";
-import { useDebouncedNodeInnerRect } from "@/layout/index";
+import { NodeModel, useDebouncedNodeInnerRect } from "@/layout/index";
 import {
     counterInc,
     getBlockComponentModel,
@@ -29,37 +28,36 @@ import { isBlank, useAtomValueSafe } from "@/util/util";
 import { HelpViewModel } from "@/view/helpview/helpview";
 import { TermViewModel } from "@/view/term/term";
 import clsx from "clsx";
-import { atom, useAtomValue } from "jotai";
-import { memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import type { JSX } from "solid-js";
+import { createEffect, createMemo, createSignal, onCleanup, onMount, Show, Suspense } from "solid-js";
 import "./block.scss";
 import { BlockFrame } from "./blockframe";
 import { blockViewToIcon, blockViewToName } from "./blockutil";
 
 const BlockRegistry: Map<string, ViewModelClass> = new Map();
-BlockRegistry.set("term", TermViewModel);
-BlockRegistry.set("cpuplot", SysinfoViewModel);
-BlockRegistry.set("sysinfo", SysinfoViewModel);
-BlockRegistry.set("vdom", VDomModel);
-BlockRegistry.set("help", HelpViewModel);
-BlockRegistry.set("launcher", LauncherViewModel);
-BlockRegistry.set("agent", AgentViewModel);
-BlockRegistry.set("forge", ForgeViewModel);
+BlockRegistry.set("term", TermViewModel as any);
+BlockRegistry.set("cpuplot", SysinfoViewModel as any);
+BlockRegistry.set("sysinfo", SysinfoViewModel as any);
+BlockRegistry.set("help", HelpViewModel as any);
+BlockRegistry.set("launcher", LauncherViewModel as any);
+BlockRegistry.set("agent", AgentViewModel as any);
+BlockRegistry.set("forge", ForgeViewModel as any);
 
-function makeViewModel(blockId: string, blockView: string, nodeModel: BlockNodeModel): ViewModel {
+function makeViewModel(blockId: string, blockView: string, nodeModel: NodeModel): ViewModel {
     const ctor = BlockRegistry.get(blockView);
     if (ctor != null) {
-        return new ctor(blockId, nodeModel);
+        return new ctor(blockId, nodeModel as any);
     }
     return makeDefaultViewModel(blockId, blockView);
 }
 
 function getViewElem(
     blockId: string,
-    blockRef: React.RefObject<HTMLDivElement>,
-    contentRef: React.RefObject<HTMLDivElement>,
+    blockRef: { current: HTMLDivElement | null },
+    contentRef: { current: HTMLDivElement | null },
     blockView: string,
     viewModel: ViewModel
-): React.ReactElement {
+): JSX.Element {
     if (isBlank(blockView)) {
         return <CenteredDiv>No View</CenteredDiv>;
     }
@@ -67,102 +65,119 @@ function getViewElem(
         return <CenteredDiv>No View Component</CenteredDiv>;
     }
     const VC = viewModel.viewComponent;
-    return <VC key={blockId} blockId={blockId} blockRef={blockRef} contentRef={contentRef} model={viewModel} />;
+    return <VC blockId={blockId} blockRef={blockRef} contentRef={contentRef} model={viewModel} />;
 }
 
 function makeDefaultViewModel(blockId: string, viewType: string): ViewModel {
     const blockDataAtom = getWaveObjectAtom<Block>(makeORef("block", blockId));
     let viewModel: ViewModel = {
         viewType: viewType,
-        viewIcon: atom((get) => {
-            const blockData = get(blockDataAtom);
+        viewIcon: createMemo(() => {
+            const blockData = blockDataAtom();
             return blockViewToIcon(blockData?.meta?.view);
         }),
-        viewName: atom((get) => {
-            const blockData = get(blockDataAtom);
+        viewName: createMemo(() => {
+            const blockData = blockDataAtom();
             return blockViewToName(blockData?.meta?.view);
         }),
-        preIconButton: atom(null),
-        endIconButtons: atom(null),
+        preIconButton: createMemo(() => null),
+        endIconButtons: createMemo(() => null),
         viewComponent: null,
     };
     return viewModel;
 }
 
-const BlockPreview = memo(({ nodeModel, viewModel }: FullBlockProps) => {
+function BlockPreview({ nodeModel, viewModel }: FullBlockProps): JSX.Element {
     const [blockData] = useWaveObjectValue<Block>(makeORef("block", nodeModel.blockId));
-    if (!blockData) {
+    if (!blockData()) {
         return null;
     }
     return (
         <BlockFrame
-            key={nodeModel.blockId}
             nodeModel={nodeModel}
             preview={true}
             blockModel={null}
             viewModel={viewModel}
         />
     );
-});
+}
 
-const BlockSubBlock = memo(({ nodeModel, viewModel }: FullSubBlockProps) => {
+function BlockSubBlock({ nodeModel, viewModel }: FullSubBlockProps): JSX.Element {
     const [blockData] = useWaveObjectValue<Block>(makeORef("block", nodeModel.blockId));
-    const blockRef = useRef<HTMLDivElement>(null);
-    const contentRef = useRef<HTMLDivElement>(null);
-    const viewElem = useMemo(
-        () => getViewElem(nodeModel.blockId, blockRef, contentRef, blockData?.meta?.view, viewModel),
-        [nodeModel.blockId, blockData?.meta?.view, viewModel]
+    let blockRef: { current: HTMLDivElement | null } = { current: null };
+    let contentRef: { current: HTMLDivElement | null } = { current: null };
+    const blockViewType = createMemo(() => blockData()?.meta?.view);
+    const viewElem = createMemo(
+        () => getViewElem(nodeModel.blockId, blockRef, contentRef, blockViewType(), viewModel)
     );
     const noPadding = useAtomValueSafe(viewModel.noPadding);
-    if (!blockData) {
-        return null;
-    }
     return (
-        <div key="content" className={clsx("block-content", { "block-no-padding": noPadding })} ref={contentRef}>
-            <ErrorBoundary>
-                <Suspense fallback={<CenteredDiv>Loading...</CenteredDiv>}>{viewElem}</Suspense>
-            </ErrorBoundary>
-        </div>
+        <Show when={blockData()}>
+            <div class={clsx("block-content", { "block-no-padding": noPadding })} ref={(el) => { contentRef.current = el; }}>
+                <ErrorBoundary>
+                    <Suspense fallback={<CenteredDiv>Loading...</CenteredDiv>}>{viewElem()}</Suspense>
+                </ErrorBoundary>
+            </div>
+        </Show>
     );
-});
+}
 
-const BlockFull = memo(({ nodeModel, viewModel }: FullBlockProps) => {
+function BlockFull({ nodeModel, viewModel }: FullBlockProps): JSX.Element {
     counterInc("render-BlockFull");
-    const focusElemRef = useRef<HTMLInputElement>(null);
-    const blockRef = useRef<HTMLDivElement>(null);
-    const contentRef = useRef<HTMLDivElement>(null);
-    const [blockClicked, setBlockClicked] = useState(false);
+    let focusElemRef: { current: HTMLInputElement | null } = { current: null };
+    let blockRef: { current: HTMLDivElement | null } = { current: null };
+    let contentRef: { current: HTMLDivElement | null } = { current: null };
+    const [blockClicked, setBlockClicked] = createSignal(false);
     const [blockData] = useWaveObjectValue<Block>(makeORef("block", nodeModel.blockId));
-    const isFocused = useAtomValue(nodeModel.isFocused);
-    const disablePointerEvents = useAtomValue(nodeModel.disablePointerEvents);
+    const isFocused = nodeModel.isFocused;
+    const disablePointerEvents = nodeModel.disablePointerEvents;
     const innerRect = useDebouncedNodeInnerRect(nodeModel);
     const noPadding = useAtomValueSafe(viewModel.noPadding);
 
-    useLayoutEffect(() => {
-        setBlockClicked(isFocused);
-    }, [isFocused]);
+    // Track previous focus state to handle blockClicked
+    const [blockContentOffset, setBlockContentOffset] = createSignal<Dimensions>(null);
 
-    useLayoutEffect(() => {
-        if (!blockClicked) {
-            return;
+    const blockContentStyle = createMemo<JSX.CSSProperties>(() => {
+        const retVal: JSX.CSSProperties = {
+            "pointer-events": disablePointerEvents() ? "none" : undefined,
+        };
+        const rect = innerRect();
+        const offset = blockContentOffset();
+        if (rect?.width && rect?.height && offset) {
+            retVal.width = `calc(${rect.width} - ${offset.width}px)`;
+            retVal.height = `calc(${rect.height} - ${offset.height}px)`;
         }
-        setBlockClicked(false);
-        const focusWithin = focusedBlockId() == nodeModel.blockId;
-        if (!focusWithin) {
-            setFocusTarget();
-        }
-        if (!isFocused) {
+        return retVal;
+    });
+
+    const blockViewType = createMemo(() => blockData()?.meta?.view);
+    const viewElem = createMemo(
+        () => getViewElem(nodeModel.blockId, blockRef, contentRef, blockViewType(), viewModel)
+    );
+
+    const handleChildFocus = (event: FocusEvent) => {
+        console.log("setFocusedChild", nodeModel.blockId, getElemAsStr(event.target));
+        if (!isFocused()) {
+            console.log("focusedChild focus", nodeModel.blockId);
             nodeModel.focusNode();
         }
-    }, [blockClicked, isFocused]);
+    };
 
-    const setBlockClickedTrue = useCallback(() => {
+    const setFocusTarget = () => {
+        const ok = viewModel?.giveFocus?.();
+        if (ok) {
+            return;
+        }
+        focusElemRef.current?.focus({ preventScroll: true });
+    };
+
+    const setBlockClickedTrue = () => {
         setBlockClicked(true);
-    }, []);
+    };
 
-    const [blockContentOffset, setBlockContentOffset] = useState<Dimensions>();
-
-    useEffect(() => {
+    // Handle blockClicked -> focus logic
+    onMount(() => {
+        // Measure content offset once DOM is ready
         if (blockRef.current && contentRef.current) {
             const blockRect = blockRef.current.getBoundingClientRect();
             const contentRect = contentRef.current.getBoundingClientRect();
@@ -173,126 +188,127 @@ const BlockFull = memo(({ nodeModel, viewModel }: FullBlockProps) => {
                 height: blockRect.height - contentRect.height,
             });
         }
-    }, [blockRef, contentRef]);
+    });
 
-    const blockContentStyle = useMemo<React.CSSProperties>(() => {
-        const retVal: React.CSSProperties = {
-            pointerEvents: disablePointerEvents ? "none" : undefined,
-        };
-        if (innerRect?.width && innerRect.height && blockContentOffset) {
-            retVal.width = `calc(${innerRect?.width} - ${blockContentOffset.width}px)`;
-            retVal.height = `calc(${innerRect?.height} - ${blockContentOffset.height}px)`;
+    // Watch isFocused to handle setBlockClicked
+    // In SolidJS we use createEffect for reactive side effects, but here we just handle
+    // the click in the onClick handler directly
+    const handleBlockClick = () => {
+        setBlockClicked(true);
+        const focusWithin = focusedBlockId() == nodeModel.blockId;
+        if (!focusWithin) {
+            setFocusTarget();
         }
-        return retVal;
-    }, [innerRect, disablePointerEvents, blockContentOffset]);
-
-    const viewElem = useMemo(
-        () => getViewElem(nodeModel.blockId, blockRef, contentRef, blockData?.meta?.view, viewModel),
-        [nodeModel.blockId, blockData?.meta?.view, viewModel]
-    );
-
-    const handleChildFocus = useCallback(
-        (event: React.FocusEvent<HTMLDivElement, Element>) => {
-            console.log("setFocusedChild", nodeModel.blockId, getElemAsStr(event.target));
-            if (!isFocused) {
-                console.log("focusedChild focus", nodeModel.blockId);
-                nodeModel.focusNode();
-            }
-        },
-        [isFocused]
-    );
-
-    const setFocusTarget = useCallback(() => {
-        const ok = viewModel?.giveFocus?.();
-        if (ok) {
-            return;
+        if (!isFocused()) {
+            nodeModel.focusNode();
         }
-        focusElemRef.current?.focus({ preventScroll: true });
-    }, []);
+    };
 
     const blockModel: BlockComponentModel2 = {
-        onClick: setBlockClickedTrue,
+        onClick: handleBlockClick,
         onFocusCapture: handleChildFocus,
         blockRef: blockRef,
     };
 
     return (
         <BlockFrame
-            key={nodeModel.blockId}
             nodeModel={nodeModel}
             preview={false}
             blockModel={blockModel}
             viewModel={viewModel}
         >
-            <div key="focuselem" className="block-focuselem">
+            <div class="block-focuselem">
                 <input
                     type="text"
                     value=""
-                    ref={focusElemRef}
-                    id={`${nodeModel.blockId}-dummy-focus`} // don't change this name (used in refocusNode)
-                    className="dummy-focus"
-                    onChange={() => {}}
+                    ref={(el) => { focusElemRef.current = el; }}
+                    id={`${nodeModel.blockId}-dummy-focus`}
+                    class="dummy-focus"
+                    onInput={() => {}}
                 />
             </div>
             <div
-                key="content"
-                className={clsx("block-content", { "block-no-padding": noPadding })}
-                ref={contentRef}
-                style={blockContentStyle}
+                class={clsx("block-content", { "block-no-padding": noPadding })}
+                ref={(el) => { contentRef.current = el; }}
+                style={blockContentStyle()}
             >
                 <ErrorBoundary>
-                    <Suspense fallback={<CenteredDiv>Loading...</CenteredDiv>}>{viewElem}</Suspense>
+                    <Suspense fallback={<CenteredDiv>Loading...</CenteredDiv>}>{viewElem()}</Suspense>
                 </ErrorBoundary>
             </div>
         </BlockFrame>
     );
-});
+}
 
-const Block = memo((props: BlockProps) => {
+function Block(props: BlockProps): JSX.Element {
     counterInc("render-Block");
     counterInc("render-Block-" + props.nodeModel?.blockId?.substring(0, 8));
     const [blockData, loading] = useWaveObjectValue<Block>(makeORef("block", props.nodeModel.blockId));
-    const bcm = getBlockComponentModel(props.nodeModel.blockId);
-    let viewModel = bcm?.viewModel;
-    if (viewModel == null || viewModel.viewType != blockData?.meta?.view) {
-        viewModel = makeViewModel(props.nodeModel.blockId, blockData?.meta?.view, props.nodeModel);
-        registerBlockComponentModel(props.nodeModel.blockId, { viewModel });
-    }
-    useEffect(() => {
-        return () => {
-            unregisterBlockComponentModel(props.nodeModel.blockId);
-            viewModel?.dispose?.();
-        };
-    }, []);
-    if (loading || isBlank(props.nodeModel.blockId) || blockData == null) {
-        return null;
-    }
-    if (props.preview) {
-        return <BlockPreview {...props} viewModel={viewModel} />;
-    }
-    return <BlockFull {...props} viewModel={viewModel} />;
-});
 
-const SubBlock = memo((props: SubBlockProps) => {
+    // Reactively create/update the viewModel when blockData loads or view type changes.
+    // In SolidJS the component body runs once, so we use createEffect to handle async data.
+    const [viewModel, setViewModel] = createSignal<ViewModel>(null);
+
+    createEffect(() => {
+        const bd = blockData();
+        const view = bd?.meta?.view;
+        if (!bd || !view) return;
+        const bcm = getBlockComponentModel(props.nodeModel.blockId);
+        let vm = bcm?.viewModel;
+        if (vm == null || vm.viewType !== view) {
+            vm = makeViewModel(props.nodeModel.blockId, view, props.nodeModel);
+            registerBlockComponentModel(props.nodeModel.blockId, { viewModel: vm });
+        }
+        setViewModel(vm);
+    });
+
+    onCleanup(() => {
+        unregisterBlockComponentModel(props.nodeModel.blockId);
+        viewModel()?.dispose?.();
+    });
+
+    const ready = createMemo(() => !loading() && !isBlank(props.nodeModel.blockId) && blockData() != null && viewModel() != null);
+
+    return (
+        <Show when={ready()}>
+            {props.preview
+                ? <BlockPreview nodeModel={props.nodeModel} viewModel={viewModel()} preview={props.preview} />
+                : <BlockFull nodeModel={props.nodeModel} viewModel={viewModel()} preview={props.preview} />
+            }
+        </Show>
+    );
+}
+
+function SubBlock(props: SubBlockProps): JSX.Element {
     counterInc("render-Block");
     counterInc("render-Block-" + props.nodeModel?.blockId?.substring(0, 8));
     const [blockData, loading] = useWaveObjectValue<Block>(makeORef("block", props.nodeModel.blockId));
-    const bcm = getBlockComponentModel(props.nodeModel.blockId);
-    let viewModel = bcm?.viewModel;
-    if (viewModel == null || viewModel.viewType != blockData?.meta?.view) {
-        viewModel = makeViewModel(props.nodeModel.blockId, blockData?.meta?.view, props.nodeModel);
-        registerBlockComponentModel(props.nodeModel.blockId, { viewModel });
-    }
-    useEffect(() => {
-        return () => {
-            unregisterBlockComponentModel(props.nodeModel.blockId);
-            viewModel?.dispose?.();
-        };
-    }, []);
-    if (loading || isBlank(props.nodeModel.blockId) || blockData == null) {
-        return null;
-    }
-    return <BlockSubBlock {...props} viewModel={viewModel} />;
-});
+
+    const [viewModel, setViewModel] = createSignal<ViewModel>(null);
+
+    createEffect(() => {
+        const bd = blockData();
+        const view = bd?.meta?.view;
+        if (!bd || !view) return;
+        const bcm = getBlockComponentModel(props.nodeModel.blockId);
+        let vm = bcm?.viewModel;
+        if (vm == null || vm.viewType !== view) {
+            vm = makeViewModel(props.nodeModel.blockId, view, props.nodeModel as any);
+            registerBlockComponentModel(props.nodeModel.blockId, { viewModel: vm });
+        }
+        setViewModel(vm);
+    });
+
+    onCleanup(() => {
+        unregisterBlockComponentModel(props.nodeModel.blockId);
+        viewModel()?.dispose?.();
+    });
+
+    return (
+        <Show when={!loading() && !isBlank(props.nodeModel.blockId) && blockData() != null && viewModel()}>
+            <BlockSubBlock nodeModel={props.nodeModel} viewModel={viewModel()} />
+        </Show>
+    );
+}
 
 export { Block, SubBlock };
