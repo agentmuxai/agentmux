@@ -423,6 +423,29 @@ pub struct ForgeContent {
     pub updated_at: i64,
 }
 
+/// A reusable skill/capability attached to a forge agent.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ForgeSkill {
+    pub id: String,
+    pub agent_id: String,
+    pub name: String,
+    pub trigger: String,
+    pub skill_type: String,
+    pub description: String,
+    pub content: String,
+    pub created_at: i64,
+}
+
+/// An append-only session history entry for a forge agent.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ForgeHistory {
+    pub id: i64,
+    pub agent_id: String,
+    pub session_date: String,
+    pub entry: String,
+    pub timestamp: i64,
+}
+
 impl WaveStore {
     /// List all forge agents, ordered by created_at ascending.
     pub fn forge_list(&self) -> Result<Vec<ForgeAgent>, StoreError> {
@@ -588,6 +611,233 @@ impl WaveStore {
         )?;
         Ok(rows > 0)
     }
+
+    // ---- ForgeSkill CRUD ----
+
+    /// List all skills for an agent, ordered by created_at ascending.
+    pub fn forge_list_skills(&self, agent_id: &str) -> Result<Vec<ForgeSkill>, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, agent_id, name, trigger, skill_type, description, content, created_at
+             FROM db_forge_skills WHERE agent_id=?1 ORDER BY created_at ASC",
+        )?;
+        let rows = stmt.query_map(params![agent_id], |row| {
+            Ok(ForgeSkill {
+                id: row.get(0)?,
+                agent_id: row.get(1)?,
+                name: row.get(2)?,
+                trigger: row.get(3)?,
+                skill_type: row.get(4)?,
+                description: row.get(5)?,
+                content: row.get(6)?,
+                created_at: row.get(7)?,
+            })
+        })?;
+        let mut skills = Vec::new();
+        for row in rows {
+            skills.push(row?);
+        }
+        Ok(skills)
+    }
+
+    /// Get a single skill by id.
+    pub fn forge_get_skill(&self, id: &str) -> Result<Option<ForgeSkill>, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, agent_id, name, trigger, skill_type, description, content, created_at
+             FROM db_forge_skills WHERE id=?1",
+        )?;
+        let result = stmt.query_row(params![id], |row| {
+            Ok(ForgeSkill {
+                id: row.get(0)?,
+                agent_id: row.get(1)?,
+                name: row.get(2)?,
+                trigger: row.get(3)?,
+                skill_type: row.get(4)?,
+                description: row.get(5)?,
+                content: row.get(6)?,
+                created_at: row.get(7)?,
+            })
+        });
+        match result {
+            Ok(skill) => Ok(Some(skill)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(StoreError::Sqlite(e)),
+        }
+    }
+
+    /// Insert a new skill.
+    pub fn forge_insert_skill(&self, skill: &ForgeSkill) -> Result<(), StoreError> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO db_forge_skills (id, agent_id, name, trigger, skill_type, description, content, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![
+                skill.id,
+                skill.agent_id,
+                skill.name,
+                skill.trigger,
+                skill.skill_type,
+                skill.description,
+                skill.content,
+                skill.created_at
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Update an existing skill (all fields except id, agent_id, created_at).
+    pub fn forge_update_skill(&self, skill: &ForgeSkill) -> Result<bool, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let rows = conn.execute(
+            "UPDATE db_forge_skills SET name=?1, trigger=?2, skill_type=?3, description=?4, content=?5
+             WHERE id=?6",
+            params![
+                skill.name,
+                skill.trigger,
+                skill.skill_type,
+                skill.description,
+                skill.content,
+                skill.id
+            ],
+        )?;
+        Ok(rows > 0)
+    }
+
+    /// Delete a skill by id. Returns true if a row was deleted.
+    pub fn forge_delete_skill(&self, id: &str) -> Result<bool, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let rows = conn.execute(
+            "DELETE FROM db_forge_skills WHERE id=?1",
+            params![id],
+        )?;
+        Ok(rows > 0)
+    }
+
+    // ---- ForgeHistory methods ----
+
+    /// Append a history entry for an agent. Auto-sets session_date (today) and timestamp.
+    pub fn forge_append_history(&self, agent_id: &str, entry: &str) -> Result<ForgeHistory, StoreError> {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as i64;
+        // session_date as YYYY-MM-DD
+        let secs = (now / 1000) as u64;
+        let days = secs / 86400;
+        // Simple date calculation (no chrono dependency needed)
+        let session_date = format_epoch_date(days);
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO db_forge_history (agent_id, session_date, entry, timestamp) VALUES (?1, ?2, ?3, ?4)",
+            params![agent_id, session_date, entry, now],
+        )?;
+        let id = conn.last_insert_rowid();
+        Ok(ForgeHistory {
+            id,
+            agent_id: agent_id.to_string(),
+            session_date,
+            entry: entry.to_string(),
+            timestamp: now,
+        })
+    }
+
+    /// List history entries for an agent, with optional date filter and pagination.
+    pub fn forge_list_history(
+        &self,
+        agent_id: &str,
+        session_date: Option<&str>,
+        limit: i64,
+        offset: i64,
+    ) -> Result<Vec<ForgeHistory>, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let (sql, params_vec): (String, Vec<Box<dyn rusqlite::types::ToSql>>) = match session_date {
+            Some(date) => (
+                "SELECT id, agent_id, session_date, entry, timestamp
+                 FROM db_forge_history WHERE agent_id=?1 AND session_date=?2
+                 ORDER BY timestamp DESC LIMIT ?3 OFFSET ?4".to_string(),
+                vec![
+                    Box::new(agent_id.to_string()),
+                    Box::new(date.to_string()),
+                    Box::new(limit),
+                    Box::new(offset),
+                ],
+            ),
+            None => (
+                "SELECT id, agent_id, session_date, entry, timestamp
+                 FROM db_forge_history WHERE agent_id=?1
+                 ORDER BY timestamp DESC LIMIT ?2 OFFSET ?3".to_string(),
+                vec![
+                    Box::new(agent_id.to_string()),
+                    Box::new(limit),
+                    Box::new(offset),
+                ],
+            ),
+        };
+        let params_refs: Vec<&dyn rusqlite::types::ToSql> = params_vec.iter().map(|b| b.as_ref()).collect();
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map(params_refs.as_slice(), |row| {
+            Ok(ForgeHistory {
+                id: row.get(0)?,
+                agent_id: row.get(1)?,
+                session_date: row.get(2)?,
+                entry: row.get(3)?,
+                timestamp: row.get(4)?,
+            })
+        })?;
+        let mut entries = Vec::new();
+        for row in rows {
+            entries.push(row?);
+        }
+        Ok(entries)
+    }
+
+    /// Search history entries for an agent using LIKE-based matching.
+    pub fn forge_search_history(
+        &self,
+        agent_id: &str,
+        query: &str,
+        limit: i64,
+    ) -> Result<Vec<ForgeHistory>, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let pattern = format!("%{}%", query);
+        let mut stmt = conn.prepare(
+            "SELECT id, agent_id, session_date, entry, timestamp
+             FROM db_forge_history WHERE agent_id=?1 AND entry LIKE ?2
+             ORDER BY timestamp DESC LIMIT ?3",
+        )?;
+        let rows = stmt.query_map(params![agent_id, pattern, limit], |row| {
+            Ok(ForgeHistory {
+                id: row.get(0)?,
+                agent_id: row.get(1)?,
+                session_date: row.get(2)?,
+                entry: row.get(3)?,
+                timestamp: row.get(4)?,
+            })
+        })?;
+        let mut entries = Vec::new();
+        for row in rows {
+            entries.push(row?);
+        }
+        Ok(entries)
+    }
+}
+
+/// Format days-since-epoch as YYYY-MM-DD string.
+/// Simple implementation without chrono dependency.
+fn format_epoch_date(days_since_epoch: u64) -> String {
+    // Algorithm from https://howardhinnant.github.io/date_algorithms.html
+    let z = days_since_epoch + 719468;
+    let era = z / 146097;
+    let doe = z - era * 146097;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = if m <= 2 { y + 1 } else { y };
+    format!("{:04}-{:02}-{:02}", y, m, d)
 }
 
 // ====================================================================

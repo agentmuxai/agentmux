@@ -127,6 +127,14 @@ export class AgentViewModel implements ViewModel {
             contentMap[c.content_type] = c.content;
         }
 
+        // Load skills for this agent (lazy-loading: only names/descriptions injected)
+        let skills: ForgeSkill[] = [];
+        try {
+            skills = await RpcApi.ListForgeSkillsCommand(TabRpcClient, { agent_id: agent.id }) ?? [];
+        } catch (e: any) {
+            Logger.error("agent", "Failed to load forge skills", { error: String(e) });
+        }
+
         // Determine working directory
         const workDir = agent.working_directory || `~/.agentmux/agents/${agent.name.toLowerCase().replace(/[^a-z0-9-_]/g, "-")}`;
 
@@ -153,7 +161,7 @@ export class AgentViewModel implements ViewModel {
 
             setTimeout(async () => {
                 // Build config-writing preamble
-                const preamble = buildConfigPreamble(contentMap, workDir, agent);
+                const preamble = buildConfigPreamble(contentMap, workDir, agent, skills);
 
                 const script = buildBootstrapScript({
                     version,
@@ -190,14 +198,15 @@ export class AgentViewModel implements ViewModel {
 function buildConfigPreamble(
     contentMap: Record<string, string>,
     workDir: string,
-    agent: ForgeAgent
+    agent: ForgeAgent,
+    skills: ForgeSkill[] = []
 ): string {
     const lines: string[] = [];
 
     // Create working directory
     lines.push(`mkdir -p ${shellEscape(workDir)}`);
 
-    // Build CLAUDE.md content: Soul + AgentMD + Memory
+    // Build CLAUDE.md content: Soul + AgentMD + Memory + Skills Index
     const claudeMdParts: string[] = [];
     if (contentMap["soul"]) {
         claudeMdParts.push(contentMap["soul"]);
@@ -209,6 +218,16 @@ function buildConfigPreamble(
     if (contentMap["memory"]) {
         claudeMdParts.push("\n# Memory\n");
         claudeMdParts.push(contentMap["memory"]);
+    }
+
+    // Append skill index (lazy-loading: only names/descriptions, not full content)
+    if (skills.length > 0) {
+        claudeMdParts.push("\n# Available Skills\n\n");
+        for (const skill of skills) {
+            const triggerPart = skill.trigger ? ` (trigger: /${skill.trigger})` : "";
+            const descPart = skill.description ? ` \u2014 ${skill.description}` : "";
+            claudeMdParts.push(`- **${skill.name}**${triggerPart}${descPart}\n`);
+        }
     }
 
     if (claudeMdParts.length > 0) {

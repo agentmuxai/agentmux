@@ -543,6 +543,46 @@ class RpcApiType {
         return client.wshRpcCall("getallforgecontent", data, opts);
     }
 
+    // command "listforgeskills" [call]
+    ListForgeSkillsCommand(client: WshClient, data: CommandListForgeSkillsData, opts?: RpcOpts): Promise<ForgeSkill[]> {
+        return client.wshRpcCall("listforgeskills", data, opts);
+    }
+
+    // command "createforgeskill" [call]
+    CreateForgeSkillCommand(client: WshClient, data: CommandCreateForgeSkillData, opts?: RpcOpts): Promise<ForgeSkill> {
+        return client.wshRpcCall("createforgeskill", data, opts);
+    }
+
+    // command "updateforgeskill" [call]
+    UpdateForgeSkillCommand(client: WshClient, data: CommandUpdateForgeSkillData, opts?: RpcOpts): Promise<ForgeSkill> {
+        return client.wshRpcCall("updateforgeskill", data, opts);
+    }
+
+    // command "deleteforgeskill" [call]
+    DeleteForgeSkillCommand(client: WshClient, data: CommandDeleteForgeSkillData, opts?: RpcOpts): Promise<void> {
+        return client.wshRpcCall("deleteforgeskill", data, opts);
+    }
+
+    // command "appendforgehistory" [call]
+    AppendForgeHistoryCommand(client: WshClient, data: CommandAppendForgeHistoryData, opts?: RpcOpts): Promise<ForgeHistory> {
+        return client.wshRpcCall("appendforgehistory", data, opts);
+    }
+
+    // command "listforgehistory" [call]
+    ListForgeHistoryCommand(client: WshClient, data: CommandListForgeHistoryData, opts?: RpcOpts): Promise<ForgeHistory[]> {
+        return client.wshRpcCall("listforgehistory", data, opts);
+    }
+
+    // command "searchforgehistory" [call]
+    SearchForgeHistoryCommand(client: WshClient, data: CommandSearchForgeHistoryData, opts?: RpcOpts): Promise<ForgeHistory[]> {
+        return client.wshRpcCall("searchforgehistory", data, opts);
+    }
+
+    // command "importforgefromclaw" [call]
+    ImportForgeFromClawCommand(client: WshClient, data: CommandImportForgeFromClawData, opts?: RpcOpts): Promise<ForgeAgent> {
+        return client.wshRpcCall("importforgefromclaw", data, opts);
+    }
+
 }
 
 export const RpcApi = new RpcApiType();

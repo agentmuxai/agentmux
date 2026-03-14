@@ -270,6 +270,84 @@ declare global {
         agent_id: string;
     };
 
+    // ForgeSkill
+    type ForgeSkill = {
+        id: string;
+        agent_id: string;
+        name: string;
+        trigger: string;
+        skill_type: string;
+        description: string;
+        content: string;
+        created_at: number;
+    };
+
+    // CommandListForgeSkillsData
+    type CommandListForgeSkillsData = {
+        agent_id: string;
+    };
+
+    // CommandCreateForgeSkillData
+    type CommandCreateForgeSkillData = {
+        agent_id: string;
+        name: string;
+        trigger?: string;
+        skill_type?: string;
+        description?: string;
+        content?: string;
+    };
+
+    // CommandUpdateForgeSkillData
+    type CommandUpdateForgeSkillData = {
+        id: string;
+        name: string;
+        trigger?: string;
+        skill_type?: string;
+        description?: string;
+        content?: string;
+    };
+
+    // CommandDeleteForgeSkillData
+    type CommandDeleteForgeSkillData = {
+        id: string;
+    };
+
+    // ForgeHistory
+    type ForgeHistory = {
+        id: number;
+        agent_id: string;
+        session_date: string;
+        entry: string;
+        timestamp: number;
+    };
+
+    // CommandAppendForgeHistoryData
+    type CommandAppendForgeHistoryData = {
+        agent_id: string;
+        entry: string;
+    };
+
+    // CommandListForgeHistoryData
+    type CommandListForgeHistoryData = {
+        agent_id: string;
+        session_date?: string;
+        limit?: number;
+        offset?: number;
+    };
+
+    // CommandSearchForgeHistoryData
+    type CommandSearchForgeHistoryData = {
+        agent_id: string;
+        query: string;
+        limit?: number;
+    };
+
+    // CommandImportForgeFromClawData
+    type CommandImportForgeFromClawData = {
+        workspace_path: string;
+        agent_name: string;
+    };
+
     // wshrpc.CommandDeleteBlockData
     type CommandDeleteBlockData = {
         blockid: string;

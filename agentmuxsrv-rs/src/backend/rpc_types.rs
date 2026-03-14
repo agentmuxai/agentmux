@@ -263,6 +263,20 @@ pub const COMMAND_GET_FORGE_CONTENT: &str = "getforgecontent";
 pub const COMMAND_SET_FORGE_CONTENT: &str = "setforgecontent";
 pub const COMMAND_GET_ALL_FORGE_CONTENT: &str = "getallforgecontent";
 
+// Forge Skills
+pub const COMMAND_LIST_FORGE_SKILLS: &str = "listforgeskills";
+pub const COMMAND_CREATE_FORGE_SKILL: &str = "createforgeskill";
+pub const COMMAND_UPDATE_FORGE_SKILL: &str = "updateforgeskill";
+pub const COMMAND_DELETE_FORGE_SKILL: &str = "deleteforgeskill";
+
+// Forge History
+pub const COMMAND_APPEND_FORGE_HISTORY: &str = "appendforgehistory";
+pub const COMMAND_LIST_FORGE_HISTORY: &str = "listforgehistory";
+pub const COMMAND_SEARCH_FORGE_HISTORY: &str = "searchforgehistory";
+
+// Forge Import
+pub const COMMAND_IMPORT_FORGE_FROM_CLAW: &str = "importforgefromclaw";
+
 // ---- Client type constants ----
 
 pub const CLIENT_TYPE_CONN_SERVER: &str = "connserver";
@@ -694,6 +708,97 @@ pub struct CommandSetForgeContentData {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CommandGetAllForgeContentData {
     pub agent_id: String,
+}
+
+// ---- Forge Skills command data types ----
+
+/// Input for listforgeskills
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommandListForgeSkillsData {
+    pub agent_id: String,
+}
+
+/// Input for createforgeskill
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommandCreateForgeSkillData {
+    pub agent_id: String,
+    pub name: String,
+    #[serde(default)]
+    pub trigger: String,
+    #[serde(default = "default_skill_type")]
+    pub skill_type: String,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub content: String,
+}
+
+fn default_skill_type() -> String {
+    "prompt".to_string()
+}
+
+/// Input for updateforgeskill
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommandUpdateForgeSkillData {
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub trigger: String,
+    #[serde(default)]
+    pub skill_type: String,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub content: String,
+}
+
+/// Input for deleteforgeskill
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommandDeleteForgeSkillData {
+    pub id: String,
+}
+
+// ---- Forge History command data types ----
+
+/// Input for appendforgehistory
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommandAppendForgeHistoryData {
+    pub agent_id: String,
+    pub entry: String,
+}
+
+/// Input for listforgehistory
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommandListForgeHistoryData {
+    pub agent_id: String,
+    #[serde(default)]
+    pub session_date: Option<String>,
+    #[serde(default = "default_history_limit")]
+    pub limit: i64,
+    #[serde(default)]
+    pub offset: i64,
+}
+
+fn default_history_limit() -> i64 {
+    50
+}
+
+/// Input for searchforgehistory
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommandSearchForgeHistoryData {
+    pub agent_id: String,
+    pub query: String,
+    #[serde(default = "default_history_limit")]
+    pub limit: i64,
+}
+
+// ---- Forge Import command data types ----
+
+/// Input for importforgefromclaw
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommandImportForgeFromClawData {
+    pub workspace_path: String,
+    pub agent_name: String,
 }
 
 // ====================================================================

@@ -125,6 +125,35 @@ pub fn run_forge_v2_migrations(conn: &Connection) -> Result<(), StoreError> {
         );",
     )?;
 
+    // Create db_forge_skills table for reusable agent skills
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS db_forge_skills (
+            id TEXT PRIMARY KEY,
+            agent_id TEXT NOT NULL,
+            name TEXT NOT NULL,
+            trigger TEXT NOT NULL DEFAULT '',
+            skill_type TEXT NOT NULL DEFAULT 'prompt',
+            description TEXT NOT NULL DEFAULT '',
+            content TEXT NOT NULL DEFAULT '',
+            created_at INTEGER NOT NULL DEFAULT 0,
+            FOREIGN KEY (agent_id) REFERENCES db_forge_agents(id) ON DELETE CASCADE
+        );",
+    )?;
+
+    // Create db_forge_history table for append-only session logs
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS db_forge_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            agent_id TEXT NOT NULL,
+            session_date TEXT NOT NULL,
+            entry TEXT NOT NULL,
+            timestamp INTEGER NOT NULL DEFAULT 0,
+            FOREIGN KEY (agent_id) REFERENCES db_forge_agents(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_forge_history_agent_date
+            ON db_forge_history(agent_id, session_date);",
+    )?;
+
     Ok(())
 }
 
