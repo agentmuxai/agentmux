@@ -127,6 +127,67 @@ bump show                              # display current version state
 
 Config lives in `.bump.json`. See [BUILD.md](./BUILD.md) for the full workflow.
 
+## Releases
+
+Releases are built by [`agentmuxai/agentmux-builder`](https://github.com/agentmuxai/agentmux-builder) — a private repo that holds CI/CD workflows and signing secrets separate from the public source.
+
+### How it works
+
+1. The builder's `tauri-build.yml` workflow checks out this repo at the given ref
+2. Builds run in parallel on `ubuntu-latest`, `macos-latest`, and `windows-latest`
+3. Each job builds Rust backend binaries (agentmuxsrv-rs + wsh-rs), then builds the Tauri app
+4. macOS builds are code-signed and notarized via Apple Developer credentials
+5. Windows builds include both an NSIS installer and a portable ZIP
+6. A final `create-release` job collects all artifacts and creates a GitHub Release on this repo
+
+### Triggering a release
+
+```bash
+# Option 1: Manual workflow dispatch (pass a tag, branch, or SHA)
+gh workflow run tauri-build.yml -R agentmuxai/agentmux-builder -f ref=v0.32.0
+
+# Option 2: Repository dispatch from this repo
+gh api repos/agentmuxai/agentmux-builder/dispatches \
+  -f event_type=build \
+  -f 'client_payload[ref]=v0.32.0'
+```
+
+### Release artifacts
+
+| Platform | Artifact |
+|----------|----------|
+| macOS Apple Silicon | `AgentMux_*_aarch64.dmg` |
+| Windows x64 (installer) | `AgentMux_*_x64-setup.exe` |
+| Windows x64 (portable) | `agentmux-*-x64-portable.zip` |
+| Linux x64 (AppImage) | `AgentMux_*_amd64.AppImage` |
+| Linux x64 (deb) | `AgentMux_*_amd64.deb` |
+
+### Full release checklist
+
+```bash
+# 1. Bump version and commit
+bump patch -m "Description" --commit
+bump verify
+
+# 2. Push and tag
+git push origin main
+git tag v0.X.Y && git push origin v0.X.Y
+
+# 3. Trigger the builder (builds all platforms, creates GitHub Release)
+gh workflow run tauri-build.yml -R agentmuxai/agentmux-builder -f ref=v0.X.Y
+
+# 4. Wait for build to complete (~15-20 min)
+gh run list -R agentmuxai/agentmux-builder --limit 1
+
+# 5. Deploy landing site (fetches new release, updates download links)
+cd /workspace/agentmux-landing
+deploy run --env prod
+
+# 6. Verify
+gh release view v0.X.Y --repo agentmuxai/agentmux    # release exists with assets
+curl -sf https://agentmux.ai/release.json | jq .version  # landing shows new version
+```
+
 ## License
 
 Developed by **[AgentMux Corp.](https://agentmux.ai)** — Delaware corporation.
