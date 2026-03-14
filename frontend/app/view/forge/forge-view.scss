@@ -90,6 +90,7 @@
     background: var(--block-bg-color);
     border: 1px solid var(--border-color);
     border-radius: 6px;
+    cursor: pointer;
 
     &:hover {
         border-color: var(--highlight-bg-color);
@@ -305,5 +306,211 @@
     &:hover {
         background: var(--highlight-bg-color);
         color: var(--main-text-color);
+    }
+}
+
+// ── Detail view ──────────────────────────────────────────────────────────────
+
+.forge-detail-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 8px;
+}
+
+.forge-back-btn {
+    padding: 3px 8px;
+    background: transparent;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    color: var(--secondary-text-color);
+    font-size: 12px;
+    cursor: pointer;
+    flex-shrink: 0;
+
+    &:hover {
+        background: var(--highlight-bg-color);
+        color: var(--main-text-color);
+    }
+}
+
+.forge-detail-icon {
+    font-size: 22px;
+    flex-shrink: 0;
+}
+
+.forge-detail-info {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    overflow: hidden;
+    gap: 1px;
+}
+
+.forge-detail-name {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--main-text-color);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.forge-detail-sub {
+    font-size: 11px;
+    color: var(--secondary-text-color);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+// ── Content tabs ────────────────────────────────────────────────────────────
+
+.forge-content-tabs {
+    display: flex;
+    gap: 2px;
+    margin-bottom: 8px;
+}
+
+.forge-content-tab {
+    padding: 5px 12px;
+    background: transparent;
+    border: 1px solid var(--border-color);
+    border-radius: 4px 4px 0 0;
+    color: var(--secondary-text-color);
+    font-size: 12px;
+    cursor: pointer;
+
+    &:hover {
+        background: var(--highlight-bg-color);
+        color: var(--main-text-color);
+    }
+
+    &.active {
+        background: var(--block-bg-color);
+        border-bottom-color: transparent;
+        color: var(--main-text-color);
+        font-weight: 500;
+    }
+}
+
+// ── Content body ────────────────────────────────────────────────────────────
+
+.forge-content-body {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.forge-content-loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex: 1;
+    color: var(--secondary-text-color);
+    font-size: 12px;
+}
+
+// ── Content display (read-only) ─────────────────────────────────────────────
+
+.forge-content-display {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    overflow: hidden;
+}
+
+.forge-content-pre {
+    flex: 1;
+    overflow: auto;
+    padding: 10px;
+    margin: 0;
+    background: var(--input-bg-color, var(--block-bg-color));
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    color: var(--main-text-color);
+    font-family: var(--termfontfamily, monospace);
+    font-size: 12px;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.forge-content-empty {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--secondary-text-color);
+    font-size: 12px;
+    border: 1px dashed var(--border-color);
+    border-radius: 4px;
+    min-height: 80px;
+}
+
+.forge-content-display-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: 8px;
+    gap: 8px;
+}
+
+.forge-content-charcount {
+    font-size: 11px;
+    color: var(--secondary-text-color);
+}
+
+// ── Content editor (edit mode) ──────────────────────────────────────────────
+
+.forge-content-editor {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    overflow: hidden;
+}
+
+.forge-content-textarea {
+    flex: 1;
+    padding: 10px;
+    background: var(--input-bg-color, var(--block-bg-color));
+    border: 1px solid var(--accent-color, #a78bfa);
+    border-radius: 4px;
+    color: var(--main-text-color);
+    font-family: var(--termfontfamily, monospace);
+    font-size: 12px;
+    resize: none;
+    outline: none;
+    min-height: 120px;
+}
+
+.forge-content-editor-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: 8px;
+    gap: 8px;
+}
+
+.forge-content-editor-actions {
+    display: flex;
+    gap: 6px;
+}
+
+// ── Form extras ─────────────────────────────────────────────────────────────
+
+.forge-form-select {
+    appearance: auto;
+}
+
+.forge-form-checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: auto;
+    cursor: pointer;
+
+    input[type="checkbox"] {
+        accent-color: var(--accent-color, #a78bfa);
     }
 }

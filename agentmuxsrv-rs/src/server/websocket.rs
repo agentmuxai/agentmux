@@ -23,10 +23,12 @@ use crate::backend::rpc_types::{
     COMMAND_GET_AI_RATE_LIMIT, COMMAND_ROUTE_ANNOUNCE, COMMAND_ROUTE_UNANNOUNCE,
     COMMAND_SET_META, COMMAND_SET_CONFIG, COMMAND_APP_INFO,
     COMMAND_LIST_FORGE_AGENTS, COMMAND_CREATE_FORGE_AGENT, COMMAND_UPDATE_FORGE_AGENT,
-    COMMAND_DELETE_FORGE_AGENT, CommandCreateForgeAgentData, CommandUpdateForgeAgentData,
-    CommandDeleteForgeAgentData,
+    COMMAND_DELETE_FORGE_AGENT, COMMAND_GET_FORGE_CONTENT, COMMAND_SET_FORGE_CONTENT,
+    COMMAND_GET_ALL_FORGE_CONTENT,
+    CommandCreateForgeAgentData, CommandUpdateForgeAgentData, CommandDeleteForgeAgentData,
+    CommandGetForgeContentData, CommandSetForgeContentData, CommandGetAllForgeContentData,
 };
-use crate::backend::storage::ForgeAgent;
+use crate::backend::storage::{ForgeAgent, ForgeContent};
 use crate::backend::waveobj::{Block, TermSize, WaveObjUpdate, wave_obj_to_value};
 use super::service::update_object_meta;
 
@@ -765,6 +767,12 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                     icon: cmd.icon,
                     provider: cmd.provider,
                     description: cmd.description,
+                    working_directory: cmd.working_directory,
+                    shell: cmd.shell,
+                    provider_flags: cmd.provider_flags,
+                    auto_start: cmd.auto_start,
+                    restart_on_crash: cmd.restart_on_crash,
+                    idle_timeout_minutes: cmd.idle_timeout_minutes,
                     created_at: now,
                 };
                 wstore.forge_insert(&agent).map_err(|e| format!("createforgeagent: {e}"))?;
@@ -801,6 +809,12 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                     icon: cmd.icon,
                     provider: cmd.provider,
                     description: cmd.description,
+                    working_directory: cmd.working_directory,
+                    shell: cmd.shell,
+                    provider_flags: cmd.provider_flags,
+                    auto_start: cmd.auto_start,
+                    restart_on_crash: cmd.restart_on_crash,
+                    idle_timeout_minutes: cmd.idle_timeout_minutes,
                     created_at: old.created_at,
                 };
                 let found = wstore.forge_update(&agent).map_err(|e| format!("updateforgeagent: {e}"))?;
@@ -839,6 +853,72 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                     data: None,
                 });
                 Ok(None)
+            })
+        }),
+    );
+
+    // getforgecontent → return a single content blob for an agent
+    let wstore_gfc = state.wstore.clone();
+    engine.register_handler(
+        COMMAND_GET_FORGE_CONTENT,
+        Box::new(move |data, _ctx| {
+            let wstore = wstore_gfc.clone();
+            Box::pin(async move {
+                let cmd: CommandGetForgeContentData = serde_json::from_value(data)
+                    .map_err(|e| format!("getforgecontent: {e}"))?;
+                let content = wstore.forge_get_content(&cmd.agent_id, &cmd.content_type)
+                    .map_err(|e| format!("getforgecontent: {e}"))?;
+                Ok(content.map(|c| serde_json::to_value(&c).unwrap_or_default()))
+            })
+        }),
+    );
+
+    // setforgecontent → upsert a content blob, broadcast forgecontent:changed
+    let wstore_sfc = state.wstore.clone();
+    let broker_sfc = state.broker.clone();
+    engine.register_handler(
+        COMMAND_SET_FORGE_CONTENT,
+        Box::new(move |data, _ctx| {
+            let wstore = wstore_sfc.clone();
+            let broker = broker_sfc.clone();
+            Box::pin(async move {
+                let cmd: CommandSetForgeContentData = serde_json::from_value(data)
+                    .map_err(|e| format!("setforgecontent: {e}"))?;
+                let now = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis() as i64;
+                let content = ForgeContent {
+                    agent_id: cmd.agent_id,
+                    content_type: cmd.content_type,
+                    content: cmd.content,
+                    updated_at: now,
+                };
+                wstore.forge_set_content(&content).map_err(|e| format!("setforgecontent: {e}"))?;
+                broker.publish(crate::backend::wps::WaveEvent {
+                    event: "forgecontent:changed".to_string(),
+                    scopes: vec![],
+                    sender: String::new(),
+                    persist: 0,
+                    data: None,
+                });
+                Ok(Some(serde_json::to_value(&content).unwrap_or_default()))
+            })
+        }),
+    );
+
+    // getallforgecontent → return all content blobs for an agent
+    let wstore_gafc = state.wstore.clone();
+    engine.register_handler(
+        COMMAND_GET_ALL_FORGE_CONTENT,
+        Box::new(move |data, _ctx| {
+            let wstore = wstore_gafc.clone();
+            Box::pin(async move {
+                let cmd: CommandGetAllForgeContentData = serde_json::from_value(data)
+                    .map_err(|e| format!("getallforgecontent: {e}"))?;
+                let contents = wstore.forge_get_all_content(&cmd.agent_id)
+                    .map_err(|e| format!("getallforgecontent: {e}"))?;
+                Ok(Some(serde_json::to_value(&contents).unwrap_or_default()))
             })
         }),
     );

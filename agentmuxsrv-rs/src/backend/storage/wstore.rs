@@ -399,7 +399,28 @@ pub struct ForgeAgent {
     pub icon: String,
     pub provider: String,
     pub description: String,
+    #[serde(default)]
+    pub working_directory: String,
+    #[serde(default)]
+    pub shell: String,
+    #[serde(default)]
+    pub provider_flags: String,
+    #[serde(default)]
+    pub auto_start: i64,
+    #[serde(default)]
+    pub restart_on_crash: i64,
+    #[serde(default)]
+    pub idle_timeout_minutes: i64,
     pub created_at: i64,
+}
+
+/// A content blob associated with a forge agent.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ForgeContent {
+    pub agent_id: String,
+    pub content_type: String,
+    pub content: String,
+    pub updated_at: i64,
 }
 
 impl WaveStore {
@@ -407,7 +428,8 @@ impl WaveStore {
     pub fn forge_list(&self) -> Result<Vec<ForgeAgent>, StoreError> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT id, name, icon, provider, description, created_at
+            "SELECT id, name, icon, provider, description, working_directory, shell,
+                    provider_flags, auto_start, restart_on_crash, idle_timeout_minutes, created_at
              FROM db_forge_agents ORDER BY created_at ASC",
         )?;
         let rows = stmt.query_map([], |row| {
@@ -417,7 +439,13 @@ impl WaveStore {
                 icon: row.get(2)?,
                 provider: row.get(3)?,
                 description: row.get(4)?,
-                created_at: row.get(5)?,
+                working_directory: row.get(5)?,
+                shell: row.get(6)?,
+                provider_flags: row.get(7)?,
+                auto_start: row.get(8)?,
+                restart_on_crash: row.get(9)?,
+                idle_timeout_minutes: row.get(10)?,
+                created_at: row.get(11)?,
             })
         })?;
         let mut agents = Vec::new();
@@ -431,14 +459,22 @@ impl WaveStore {
     pub fn forge_insert(&self, agent: &ForgeAgent) -> Result<(), StoreError> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
-            "INSERT INTO db_forge_agents (id, name, icon, provider, description, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            "INSERT INTO db_forge_agents (id, name, icon, provider, description,
+             working_directory, shell, provider_flags, auto_start, restart_on_crash,
+             idle_timeout_minutes, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
             params![
                 agent.id,
                 agent.name,
                 agent.icon,
                 agent.provider,
                 agent.description,
+                agent.working_directory,
+                agent.shell,
+                agent.provider_flags,
+                agent.auto_start,
+                agent.restart_on_crash,
+                agent.idle_timeout_minutes,
                 agent.created_at
             ],
         )?;
@@ -449,13 +485,21 @@ impl WaveStore {
     pub fn forge_update(&self, agent: &ForgeAgent) -> Result<bool, StoreError> {
         let conn = self.conn.lock().unwrap();
         let rows = conn.execute(
-            "UPDATE db_forge_agents SET name=?1, icon=?2, provider=?3, description=?4
-             WHERE id=?5",
+            "UPDATE db_forge_agents SET name=?1, icon=?2, provider=?3, description=?4,
+             working_directory=?5, shell=?6, provider_flags=?7, auto_start=?8,
+             restart_on_crash=?9, idle_timeout_minutes=?10
+             WHERE id=?11",
             params![
                 agent.name,
                 agent.icon,
                 agent.provider,
                 agent.description,
+                agent.working_directory,
+                agent.shell,
+                agent.provider_flags,
+                agent.auto_start,
+                agent.restart_on_crash,
+                agent.idle_timeout_minutes,
                 agent.id
             ],
         )?;
@@ -468,6 +512,79 @@ impl WaveStore {
         let rows = conn.execute(
             "DELETE FROM db_forge_agents WHERE id=?1",
             params![id],
+        )?;
+        Ok(rows > 0)
+    }
+
+    // ---- ForgeContent CRUD ----
+
+    /// Get a single content blob for an agent.
+    pub fn forge_get_content(&self, agent_id: &str, content_type: &str) -> Result<Option<ForgeContent>, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT agent_id, content_type, content, updated_at
+             FROM db_forge_content WHERE agent_id=?1 AND content_type=?2",
+        )?;
+        let result = stmt.query_row(params![agent_id, content_type], |row| {
+            Ok(ForgeContent {
+                agent_id: row.get(0)?,
+                content_type: row.get(1)?,
+                content: row.get(2)?,
+                updated_at: row.get(3)?,
+            })
+        });
+        match result {
+            Ok(content) => Ok(Some(content)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(StoreError::Sqlite(e)),
+        }
+    }
+
+    /// Upsert a content blob for an agent.
+    pub fn forge_set_content(&self, content: &ForgeContent) -> Result<(), StoreError> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO db_forge_content (agent_id, content_type, content, updated_at)
+             VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(agent_id, content_type) DO UPDATE SET content=?3, updated_at=?4",
+            params![
+                content.agent_id,
+                content.content_type,
+                content.content,
+                content.updated_at,
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Get all content blobs for an agent.
+    pub fn forge_get_all_content(&self, agent_id: &str) -> Result<Vec<ForgeContent>, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT agent_id, content_type, content, updated_at
+             FROM db_forge_content WHERE agent_id=?1 ORDER BY content_type ASC",
+        )?;
+        let rows = stmt.query_map(params![agent_id], |row| {
+            Ok(ForgeContent {
+                agent_id: row.get(0)?,
+                content_type: row.get(1)?,
+                content: row.get(2)?,
+                updated_at: row.get(3)?,
+            })
+        })?;
+        let mut contents = Vec::new();
+        for row in rows {
+            contents.push(row?);
+        }
+        Ok(contents)
+    }
+
+    /// Delete a specific content blob. Returns true if a row was deleted.
+    pub fn forge_delete_content(&self, agent_id: &str, content_type: &str) -> Result<bool, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let rows = conn.execute(
+            "DELETE FROM db_forge_content WHERE agent_id=?1 AND content_type=?2",
+            params![agent_id, content_type],
         )?;
         Ok(rows > 0)
     }
