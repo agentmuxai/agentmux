@@ -113,90 +113,85 @@ function getViewIconElem(viewIconUnion: string | IconButtonDecl, blockData: Bloc
     }
 }
 
-function OptMagnifyButton({ magnified, toggleMagnify, disabled }: { magnified: boolean; toggleMagnify: () => void; disabled: boolean }): JSX.Element {
-    const magnifyDecl: IconButtonDecl = {
+function OptMagnifyButton(props: { magnified: boolean; toggleMagnify: () => void; disabled: boolean }): JSX.Element {
+    const magnifyDecl = createMemo<IconButtonDecl>(() => ({
         elemtype: "iconbutton",
-        icon: <MagnifyIcon enabled={magnified} />,
-        title: magnified ? "Minimize" : "Magnify",
-        click: toggleMagnify,
-        disabled,
-    };
-    return <IconButton decl={magnifyDecl} className="block-frame-magnify" />;
+        icon: <MagnifyIcon enabled={props.magnified} />,
+        title: props.magnified ? "Minimize" : "Magnify",
+        click: props.toggleMagnify,
+        disabled: props.disabled,
+    }));
+    return <IconButton decl={magnifyDecl()} className="block-frame-magnify" />;
 }
 
-function computeEndIcons(
-    viewModel: ViewModel,
-    nodeModel: NodeModel,
-    onContextMenu: (e: MouseEvent) => void
-): JSX.Element[] {
-    const endIconsElem: JSX.Element[] = [];
-    const endIconButtons = util.useAtomValueSafe(viewModel?.endIconButtons);
-    const magnified = nodeModel.isMagnified();
-    const ephemeral = nodeModel.isEphemeral();
-    const numLeafs = nodeModel.numLeafs();
-    const magnifyDisabled = numLeafs <= 1;
+function EndIcons(props: {
+    viewModel: ViewModel;
+    nodeModel: NodeModel;
+    onContextMenu: (e: MouseEvent) => void;
+}): JSX.Element {
+    const endIconButtons = util.useAtomValueSafe(props.viewModel?.endIconButtons);
+    const magnified = () => props.nodeModel.isMagnified();
+    const ephemeral = () => props.nodeModel.isEphemeral();
+    const magnifyDisabled = () => props.nodeModel.numLeafs() <= 1;
 
-    if (endIconButtons && endIconButtons.length > 0) {
-        endIconButtons.forEach((button, idx) => {
-            endIconsElem.push(<IconButton decl={button} />);
-        });
-    }
     const settingsDecl: IconButtonDecl = {
         elemtype: "iconbutton",
         icon: "cog",
         title: "Settings",
-        click: onContextMenu,
+        click: props.onContextMenu,
     };
-    endIconsElem.push(<IconButton decl={settingsDecl} className="block-frame-settings" />);
-    if (ephemeral) {
-        const addToLayoutDecl: IconButtonDecl = {
-            elemtype: "iconbutton",
-            icon: "circle-plus",
-            title: "Add to Layout",
-            click: () => {
-                nodeModel.addEphemeralNodeToLayout();
-            },
-        };
-        endIconsElem.push(<IconButton decl={addToLayoutDecl} />);
-    } else {
-        endIconsElem.push(
-            <OptMagnifyButton
-                magnified={magnified}
-                toggleMagnify={nodeModel.toggleMagnify}
-                disabled={magnifyDisabled}
-            />
-        );
-    }
 
     const closeDecl: IconButtonDecl = {
         elemtype: "iconbutton",
         icon: "xmark-large",
         title: "Close",
-        click: nodeModel.onClose,
+        click: props.nodeModel.onClose,
     };
-    endIconsElem.push(<IconButton decl={closeDecl} className="block-frame-default-close" />);
-    return endIconsElem;
+
+    return (
+        <>
+            <Show when={endIconButtons && endIconButtons.length > 0}>
+                <For each={endIconButtons}>
+                    {(button) => <IconButton decl={button} />}
+                </For>
+            </Show>
+            <IconButton decl={settingsDecl} className="block-frame-settings" />
+            <Show when={ephemeral()} fallback={
+                <OptMagnifyButton
+                    magnified={magnified()}
+                    toggleMagnify={props.nodeModel.toggleMagnify}
+                    disabled={magnifyDisabled()}
+                />
+            }>
+                <IconButton decl={{
+                    elemtype: "iconbutton",
+                    icon: "circle-plus",
+                    title: "Add to Layout",
+                    click: () => { props.nodeModel.addEphemeralNodeToLayout(); },
+                }} />
+            </Show>
+            <IconButton decl={closeDecl} className="block-frame-default-close" />
+        </>
+    );
 }
 
 function BlockFrame_Header(props: BlockFrameProps & { changeConnModalAtom: util.SignalAtom<boolean>; error?: Error }): JSX.Element {
-    const { nodeModel, viewModel, preview, connBtnRef, changeConnModalAtom, error } = props;
-    const [blockData] = WOS.useWaveObjectValue<Block>(WOS.makeORef("block", nodeModel.blockId));
+    const [blockData] = WOS.useWaveObjectValue<Block>(WOS.makeORef("block", props.nodeModel.blockId));
     const showBlockIds = getSettingsKeyAtom("blockheader:showblockids")();
-    const preIconButton = util.useAtomValueSafe(viewModel?.preIconButton);
-    const magnified = nodeModel.isMagnified();
-    const manageConnection = util.useAtomValueSafe(viewModel?.manageConnection);
-    const dragHandleRef = preview ? null : nodeModel.dragHandleRef;
+    const preIconButton = util.useAtomValueSafe(props.viewModel?.preIconButton);
+    const manageConnection = util.useAtomValueSafe(props.viewModel?.manageConnection);
+    const dragHandleRef = props.preview ? null : props.nodeModel.dragHandleRef;
     const connName = blockData()?.meta?.connection;
     const connStatus = util.useAtomValueSafe(getConnStatusAtom(connName));
     const wshProblem = connName && !connStatus?.wshenabled && connStatus?.status == "connected";
 
     // Track previous magnified state for one-time activity report
-    let prevMagnifiedState = magnified;
+    let prevMagnifiedState = props.nodeModel.isMagnified();
     createEffect(() => {
-        const isMag = nodeModel.isMagnified();
-        if (isMag && !prevMagnifiedState && !preview) {
+        const isMag = props.nodeModel.isMagnified();
+        if (isMag && !prevMagnifiedState && !props.preview) {
             RpcApi.ActivityCommand(TabRpcClient, { nummagnify: 1 });
-            const vn = util.useAtomValueSafe(viewModel?.viewName) ?? blockViewToName(blockData()?.meta?.view);
+            const vn = util.useAtomValueSafe(props.viewModel?.viewName) ?? blockViewToName(blockData()?.meta?.view);
             recordTEvent("action:magnify", { "block:view": vn });
         }
         prevMagnifiedState = isMag;
@@ -207,7 +202,7 @@ function BlockFrame_Header(props: BlockFrameProps & { changeConnModalAtom: util.
         if (bd?.meta?.["frame:title"]) {
             return bd.meta["frame:title"];
         }
-        let name = util.useAtomValueSafe(viewModel?.viewName) ?? blockViewToName(bd?.meta?.view);
+        let name = util.useAtomValueSafe(props.viewModel?.viewName) ?? blockViewToName(bd?.meta?.view);
         if (!bd?.meta?.["frame:title"] && bd?.meta?.view === "term") {
             const blockEnv = bd.meta["cmd:env"] as Record<string, string> | undefined;
             const agentId = detectAgentFromEnv(blockEnv);
@@ -241,20 +236,18 @@ function BlockFrame_Header(props: BlockFrameProps & { changeConnModalAtom: util.
     const viewIconUnion = createMemo(() => {
         const bd = blockData();
         if (bd?.meta?.["frame:icon"]) return bd.meta["frame:icon"];
-        return util.useAtomValueSafe(viewModel?.viewIcon) ?? blockViewToIcon(bd?.meta?.view);
+        return util.useAtomValueSafe(props.viewModel?.viewIcon) ?? blockViewToIcon(bd?.meta?.view);
     });
 
     const headerTextUnion = createMemo(() => {
         const bd = blockData();
         if (bd?.meta?.["frame:text"]) return bd.meta["frame:text"];
-        return util.useAtomValueSafe(viewModel?.viewText);
+        return util.useAtomValueSafe(props.viewModel?.viewText);
     });
 
     const onContextMenu = (e: MouseEvent) => {
-        handleHeaderContextMenu(e, blockData(), viewModel, magnified, nodeModel.toggleMagnify, nodeModel.onClose);
+        handleHeaderContextMenu(e, blockData(), props.viewModel, props.nodeModel.isMagnified(), props.nodeModel.toggleMagnify, props.nodeModel.onClose);
     };
-
-    const endIconsElem = computeEndIcons(viewModel, nodeModel, onContextMenu);
     const viewIconElem = getViewIconElem(viewIconUnion(), blockData());
 
     const preIconButtonElem: JSX.Element = preIconButton
@@ -272,17 +265,17 @@ function BlockFrame_Header(props: BlockFrameProps & { changeConnModalAtom: util.
             );
         }
     } else if (Array.isArray(htu)) {
-        headerTextElems.push(...renderHeaderElements(htu, preview));
+        headerTextElems.push(...renderHeaderElements(htu, props.preview));
     }
-    if (error != null) {
+    if (props.error != null) {
         const copyHeaderErr = () => {
-            navigator.clipboard.writeText(error.message + "\n" + error.stack);
+            navigator.clipboard.writeText(props.error.message + "\n" + props.error.stack);
         };
         headerTextElems.push(
             <div class="iconbutton disabled" onClick={copyHeaderErr}>
                 <i
                     class="fa-sharp fa-solid fa-triangle-exclamation"
-                    title={"Error Rendering View Header: " + error.message}
+                    title={"Error Rendering View Header: " + props.error.message}
                 />
             </div>
         );
@@ -317,21 +310,23 @@ function BlockFrame_Header(props: BlockFrameProps & { changeConnModalAtom: util.
                 {viewIconElem}
                 <div class="block-frame-view-type">{viewName()}</div>
                 <Show when={showBlockIds}>
-                    <div class="block-frame-blockid">[{nodeModel.blockId.substring(0, 8)}]</div>
+                    <div class="block-frame-blockid">[{props.nodeModel.blockId.substring(0, 8)}]</div>
                 </Show>
             </div>
             <Show when={manageConnection}>
                 <ConnectionButton
-                    ref={connBtnRef}
+                    ref={props.connBtnRef}
                     connection={blockData()?.meta?.connection}
-                    changeConnModalAtom={changeConnModalAtom}
+                    changeConnModalAtom={props.changeConnModalAtom}
                 />
             </Show>
             <Show when={showNoWshButton}>
                 <IconButton decl={wshInstallButton} className="block-frame-header-iconbutton" />
             </Show>
             <div class="block-frame-textelems-wrapper">{headerTextElems}</div>
-            <div class="block-frame-end-icons">{endIconsElem}</div>
+            <div class="block-frame-end-icons">
+                <EndIcons viewModel={props.viewModel} nodeModel={props.nodeModel} onContextMenu={onContextMenu} />
+            </div>
         </div>
     );
 }

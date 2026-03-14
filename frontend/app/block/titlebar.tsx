@@ -20,42 +20,34 @@ interface TitleBarProps {
     onTitleChange?: (newTitle: string) => void;
 }
 
-function TitleBar({ blockId, blockMeta, title, icon, color, onTitleChange }: TitleBarProps): JSX.Element {
+function TitleBar(props: TitleBarProps): JSX.Element {
     const [isEditing, setIsEditing] = createSignal(false);
-    const [localTitle, setLocalTitle] = createSignal(title || "");
+    const [localTitle, setLocalTitle] = createSignal(props.title || "");
     const fullConfig = atoms.fullConfigAtom();
 
-    // Check if pane labels are enabled
-    const paneLabelSettings = fullConfig?.settings?.["pane-labels"];
-    const isEnabled = paneLabelSettings?.enabled ?? false;
-    const displayMode = paneLabelSettings?.["display-mode"] ?? "always";
-    const showIcons = paneLabelSettings?.["show-icons"] ?? true;
-    const maxLength = paneLabelSettings?.["max-length"] ?? 50;
+    // Check if pane labels are enabled (derived as functions for reactivity)
+    const paneLabelSettings = () => fullConfig?.settings?.["pane-labels"];
+    const isEnabled = () => paneLabelSettings()?.enabled ?? false;
+    const displayMode = () => paneLabelSettings()?.["display-mode"] ?? "always";
+    const showIcons = () => paneLabelSettings()?.["show-icons"] ?? true;
+    const maxLength = () => paneLabelSettings()?.["max-length"] ?? 50;
 
     // Check if this specific pane has labels hidden
-    const hideOverride = blockMeta?.["pane-title:hide"];
+    const hideOverride = () => props.blockMeta?.["pane-title:hide"];
 
     const [isHovered, setIsHovered] = createSignal(false);
-
-    // Don't render if disabled globally or hidden for this pane
-    if (!isEnabled || hideOverride) {
-        return null;
-    }
-
-    // Handle display mode
-    if (displayMode === "never") return null;
 
     const handleSave = () => {
         setIsEditing(false);
         const trimmedTitle = localTitle().trim();
-        if (trimmedTitle !== title) {
+        if (trimmedTitle !== props.title) {
             fireAndForget(async () => {
                 await RpcApi.SetMetaCommand(TabRpcClient, {
-                    oref: WOS.makeORef("block", blockId),
+                    oref: WOS.makeORef("block", props.blockId),
                     meta: { "pane-title": trimmedTitle } as any,
                 });
             });
-            onTitleChange?.(trimmedTitle);
+            props.onTitleChange?.(trimmedTitle);
         }
     };
 
@@ -65,60 +57,63 @@ function TitleBar({ blockId, blockMeta, title, icon, color, onTitleChange }: Tit
             handleSave();
         } else if (e.key === "Escape") {
             e.preventDefault();
-            setLocalTitle(title || "");
+            setLocalTitle(props.title || "");
             setIsEditing(false);
         }
     };
 
     const displayTitle = () => {
         const t = localTitle();
-        return t.length > maxLength ? t.slice(0, maxLength) + "..." : t;
+        const ml = maxLength();
+        return t.length > ml ? t.slice(0, ml) + "..." : t;
     };
-    const effectiveIcon = icon || blockMeta?.["pane-title:icon"];
-    const effectiveColor = color || blockMeta?.["pane-title:color"];
+    const effectiveIcon = () => props.icon || props.blockMeta?.["pane-title:icon"];
+    const effectiveColor = () => props.color || props.blockMeta?.["pane-title:color"];
 
     return (
-        <Show when={displayMode !== "on-hover" || isHovered()}>
-            <div
-                class={clsx("pane-title-bar", { "is-editing": isEditing(), "is-hovered": isHovered() })}
-                onMouseEnter={() => setIsHovered(true)}
-                onMouseLeave={() => setIsHovered(false)}
-            >
-                <Show when={showIcons && effectiveIcon && !isBlank(effectiveIcon)}>
-                    <div class="pane-title-icon" style={{ color: effectiveColor }}>
-                        <i class={makeIconClass(effectiveIcon, false, { defaultIcon: "square" })} />
-                    </div>
-                </Show>
-                <Show
-                    when={isEditing()}
-                    fallback={
-                        <span
-                            class="pane-title-text"
-                            onClick={() => setIsEditing(true)}
-                            title={localTitle().length > maxLength ? localTitle() : undefined}
-                        >
-                            {displayTitle() || "Untitled Pane"}
-                        </span>
-                    }
+        <Show when={isEnabled() && !hideOverride() && displayMode() !== "never"}>
+            <Show when={displayMode() !== "on-hover" || isHovered()}>
+                <div
+                    class={clsx("pane-title-bar", { "is-editing": isEditing(), "is-hovered": isHovered() })}
+                    onMouseEnter={() => setIsHovered(true)}
+                    onMouseLeave={() => setIsHovered(false)}
                 >
-                    <input
-                        class="pane-title-input"
-                        value={localTitle()}
-                        onInput={(e) => setLocalTitle((e.target as HTMLInputElement).value)}
-                        onBlur={handleSave}
-                        onKeyDown={handleKeyDown}
-                        maxLength={maxLength}
-                        autofocus
-                        placeholder="Enter pane title..."
-                    />
-                </Show>
-                <Show when={isHovered() && !isEditing()}>
-                    <IconButton
-                        className="pane-title-edit-btn"
-                        decl={{ elemtype: "iconbutton", icon: "pencil", click: () => setIsEditing(true) }}
-                    />
-                </Show>
-            </div>
+                    <Show when={showIcons() && effectiveIcon() && !isBlank(effectiveIcon())}>
+                        <div class="pane-title-icon" style={{ color: effectiveColor() }}>
+                            <i class={makeIconClass(effectiveIcon(), false, { defaultIcon: "square" })} />
+                        </div>
+                    </Show>
+                    <Show
+                        when={isEditing()}
+                        fallback={
+                            <span
+                                class="pane-title-text"
+                                onClick={() => setIsEditing(true)}
+                                title={localTitle().length > maxLength() ? localTitle() : undefined}
+                            >
+                                {displayTitle() || "Untitled Pane"}
+                            </span>
+                        }
+                    >
+                        <input
+                            class="pane-title-input"
+                            value={localTitle()}
+                            onInput={(e) => setLocalTitle((e.target as HTMLInputElement).value)}
+                            onBlur={handleSave}
+                            onKeyDown={handleKeyDown}
+                            maxLength={maxLength()}
+                            autofocus
+                            placeholder="Enter pane title..."
+                        />
+                    </Show>
+                    <Show when={isHovered() && !isEditing()}>
+                        <IconButton
+                            className="pane-title-edit-btn"
+                            decl={{ elemtype: "iconbutton", icon: "pencil", click: () => setIsEditing(true) }}
+                        />
+                    </Show>
+                </div>
+            </Show>
         </Show>
     );
 }
