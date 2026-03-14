@@ -11,7 +11,6 @@ import * as fs from "fs";
 import * as path from "path";
 import solid from "vite-plugin-solid";
 import { defineConfig, type Plugin } from "vite";
-import { ViteImageOptimizer } from "vite-plugin-image-optimizer";
 import svgr from "vite-plugin-svgr";
 import tsconfigPaths from "vite-tsconfig-paths";
 
@@ -79,7 +78,6 @@ export default defineConfig({
     },
     plugins: [
         tsconfigPaths(),
-        { ...ViteImageOptimizer(), apply: "build" },
         svgr({
             svgrOptions: { exportType: "default", ref: true, svgo: false, titleProp: true },
             include: "**/*.svg",
