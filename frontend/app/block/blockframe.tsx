@@ -302,6 +302,8 @@ function BlockFrame_Header(props: BlockFrameProps & { changeConnModalAtom: util.
             data-role="block-header"
             data-testid="block-header"
             ref={dragHandleRef ? (el) => { dragHandleRef.current = el; } : undefined}
+            onPointerDown={dragHandleRef ? () => { props.nodeModel.dragReady._set(true); } : undefined}
+            onPointerUp={dragHandleRef ? () => { props.nodeModel.dragReady._set(false); } : undefined}
             onContextMenu={onContextMenu}
             style={headerStyle()}
         >
