@@ -126,6 +126,22 @@
         z-index: var(--zindex-layout-ephemeral-node-backdrop);
     }
 
+    .magnify-container {
+        position: absolute;
+        z-index: var(--zindex-layout-magnify-container);
+        border-radius: var(--block-border-radius);
+        overflow: hidden;
+    }
+
+    .magnify-pane {
+        width: 100%;
+        height: 100%;
+    }
+
+    .tile-node.tile-hidden {
+        visibility: hidden;
+    }
+
     &.animate {
         .tile-node,
         .placeholder {
