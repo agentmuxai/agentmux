@@ -259,6 +259,9 @@ pub const COMMAND_LIST_FORGE_AGENTS: &str = "listforgeagents";
 pub const COMMAND_CREATE_FORGE_AGENT: &str = "createforgeagent";
 pub const COMMAND_UPDATE_FORGE_AGENT: &str = "updateforgeagent";
 pub const COMMAND_DELETE_FORGE_AGENT: &str = "deleteforgeagent";
+pub const COMMAND_GET_FORGE_CONTENT: &str = "getforgecontent";
+pub const COMMAND_SET_FORGE_CONTENT: &str = "setforgecontent";
+pub const COMMAND_GET_ALL_FORGE_CONTENT: &str = "getallforgecontent";
 
 // ---- Client type constants ----
 
@@ -625,6 +628,18 @@ pub struct CommandCreateForgeAgentData {
     pub provider: String,
     #[serde(default)]
     pub description: String,
+    #[serde(default)]
+    pub working_directory: String,
+    #[serde(default)]
+    pub shell: String,
+    #[serde(default)]
+    pub provider_flags: String,
+    #[serde(default)]
+    pub auto_start: i64,
+    #[serde(default)]
+    pub restart_on_crash: i64,
+    #[serde(default)]
+    pub idle_timeout_minutes: i64,
 }
 
 fn default_forge_icon() -> String {
@@ -640,12 +655,45 @@ pub struct CommandUpdateForgeAgentData {
     pub provider: String,
     #[serde(default)]
     pub description: String,
+    #[serde(default)]
+    pub working_directory: String,
+    #[serde(default)]
+    pub shell: String,
+    #[serde(default)]
+    pub provider_flags: String,
+    #[serde(default)]
+    pub auto_start: i64,
+    #[serde(default)]
+    pub restart_on_crash: i64,
+    #[serde(default)]
+    pub idle_timeout_minutes: i64,
 }
 
 /// Input for deleteforgeagent
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CommandDeleteForgeAgentData {
     pub id: String,
+}
+
+/// Input for getforgecontent
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommandGetForgeContentData {
+    pub agent_id: String,
+    pub content_type: String,
+}
+
+/// Input for setforgecontent
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommandSetForgeContentData {
+    pub agent_id: String,
+    pub content_type: String,
+    pub content: String,
+}
+
+/// Input for getallforgecontent
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommandGetAllForgeContentData {
+    pub agent_id: String,
 }
 
 // ====================================================================

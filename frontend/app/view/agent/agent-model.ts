@@ -97,6 +97,8 @@ export class AgentViewModel implements ViewModel {
     /**
      * Launch a Forge-managed agent in presentation view.
      * Uses the ForgeAgent's provider to look up CLI config.
+     * Loads content blobs (soul, agentmd, mcp, env) and writes config files
+     * to the working directory before bootstrapping the agent CLI.
      */
     launchForgeAgent = async (agent: ForgeAgent): Promise<void> => {
         const provider = PROVIDERS[agent.provider];
@@ -112,6 +114,21 @@ export class AgentViewModel implements ViewModel {
             agentId: agent.id,
             provider: agent.provider,
         });
+
+        // Load all content for this agent
+        let contents: ForgeContent[] = [];
+        try {
+            contents = await RpcApi.GetAllForgeContentCommand(TabRpcClient, { agent_id: agent.id }) ?? [];
+        } catch (e: any) {
+            Logger.error("agent", "Failed to load forge content", { error: String(e) });
+        }
+        const contentMap: Record<string, string> = {};
+        for (const c of contents) {
+            contentMap[c.content_type] = c.content;
+        }
+
+        // Determine working directory
+        const workDir = agent.working_directory || `~/.agentmux/agents/${agent.name.toLowerCase().replace(/[^a-z0-9-_]/g, "-")}`;
 
         const oref = WOS.makeORef("block", this.blockId);
         const blockId = this.blockId;
@@ -135,11 +152,17 @@ export class AgentViewModel implements ViewModel {
             });
 
             setTimeout(async () => {
+                // Build config-writing preamble
+                const preamble = buildConfigPreamble(contentMap, workDir, agent);
+
                 const script = buildBootstrapScript({
                     version,
                     provider,
                     shellType,
                     args: provider.styledArgs,
+                    preamble,
+                    cwd: workDir,
+                    extraFlags: agent.provider_flags || undefined,
                 });
                 const b64data = stringToBase64(script + "\r");
                 await RpcApi.ControllerInputCommand(TabRpcClient, {
@@ -157,4 +180,70 @@ export class AgentViewModel implements ViewModel {
     }
 
     dispose(): void {}
+}
+
+/**
+ * Build shell commands to write config files before agent bootstrap.
+ * Creates the working directory, writes CLAUDE.md (soul + agentmd + memory),
+ * .mcp.json, and sets environment variables.
+ */
+function buildConfigPreamble(
+    contentMap: Record<string, string>,
+    workDir: string,
+    agent: ForgeAgent
+): string {
+    const lines: string[] = [];
+
+    // Create working directory
+    lines.push(`mkdir -p ${shellEscape(workDir)}`);
+
+    // Build CLAUDE.md content: Soul + AgentMD + Memory
+    const claudeMdParts: string[] = [];
+    if (contentMap["soul"]) {
+        claudeMdParts.push(contentMap["soul"]);
+    }
+    if (contentMap["agentmd"]) {
+        if (claudeMdParts.length > 0) claudeMdParts.push("\n---\n");
+        claudeMdParts.push(contentMap["agentmd"]);
+    }
+    if (contentMap["memory"]) {
+        claudeMdParts.push("\n# Memory\n");
+        claudeMdParts.push(contentMap["memory"]);
+    }
+
+    if (claudeMdParts.length > 0) {
+        const claudeMd = claudeMdParts.join("");
+        lines.push(`cat > ${shellEscape(workDir)}/CLAUDE.md << 'FORGE_EOF'`);
+        lines.push(claudeMd);
+        lines.push("FORGE_EOF");
+    }
+
+    // Write .mcp.json if MCP content exists
+    if (contentMap["mcp"]) {
+        lines.push(`cat > ${shellEscape(workDir)}/.mcp.json << 'FORGE_EOF'`);
+        lines.push(contentMap["mcp"]);
+        lines.push("FORGE_EOF");
+    }
+
+    // Set environment variables from env content (key=value format, one per line)
+    if (contentMap["env"]) {
+        const envLines = contentMap["env"].split("\n").filter((l) => l.includes("=") && !l.startsWith("#"));
+        for (const envLine of envLines) {
+            const trimmed = envLine.trim();
+            if (trimmed) {
+                lines.push(`export ${trimmed}`);
+            }
+        }
+    }
+
+    // cd to working directory
+    lines.push(`cd ${shellEscape(workDir)}`);
+
+    return lines.join("\n");
+}
+
+/** Simple shell escaping for paths */
+function shellEscape(s: string): string {
+    if (/^[a-zA-Z0-9_.~/-]+$/.test(s)) return s;
+    return `"${s.replace(/["\\$`]/g, "\\$&")}"`;
 }
