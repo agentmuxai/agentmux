@@ -208,6 +208,10 @@ declare global {
         restart_on_crash: number;
         idle_timeout_minutes: number;
         created_at: number;
+        agent_type: string;
+        environment: string;
+        agent_bus_id: string;
+        is_seeded: number;
     };
 
     // ForgeContent
@@ -230,6 +234,9 @@ declare global {
         auto_start?: number;
         restart_on_crash?: number;
         idle_timeout_minutes?: number;
+        agent_type?: string;
+        environment?: string;
+        agent_bus_id?: string;
     };
 
     // CommandUpdateForgeAgentData
@@ -245,6 +252,9 @@ declare global {
         auto_start?: number;
         restart_on_crash?: number;
         idle_timeout_minutes?: number;
+        agent_type?: string;
+        environment?: string;
+        agent_bus_id?: string;
     };
 
     // CommandDeleteForgeAgentData

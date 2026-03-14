@@ -277,6 +277,9 @@ pub const COMMAND_SEARCH_FORGE_HISTORY: &str = "searchforgehistory";
 // Forge Import
 pub const COMMAND_IMPORT_FORGE_FROM_CLAW: &str = "importforgefromclaw";
 
+// Forge Seed
+pub const COMMAND_RESEED_FORGE_AGENTS: &str = "reseedforgeagents";
+
 // ---- Client type constants ----
 
 pub const CLIENT_TYPE_CONN_SERVER: &str = "connserver";
@@ -654,6 +657,16 @@ pub struct CommandCreateForgeAgentData {
     pub restart_on_crash: i64,
     #[serde(default)]
     pub idle_timeout_minutes: i64,
+    #[serde(default = "default_agent_type")]
+    pub agent_type: String,
+    #[serde(default)]
+    pub environment: String,
+    #[serde(default)]
+    pub agent_bus_id: String,
+}
+
+fn default_agent_type() -> String {
+    "standalone".to_string()
 }
 
 fn default_forge_icon() -> String {
@@ -681,6 +694,12 @@ pub struct CommandUpdateForgeAgentData {
     pub restart_on_crash: i64,
     #[serde(default)]
     pub idle_timeout_minutes: i64,
+    #[serde(default = "default_agent_type")]
+    pub agent_type: String,
+    #[serde(default)]
+    pub environment: String,
+    #[serde(default)]
+    pub agent_bus_id: String,
 }
 
 /// Input for deleteforgeagent

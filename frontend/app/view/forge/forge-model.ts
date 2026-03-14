@@ -380,6 +380,20 @@ export class ForgeViewModel implements ViewModel {
         }
     };
 
+    // ── Reseed built-in agents ──────────────────────────────────────────────
+
+    reseedAgents = async (): Promise<void> => {
+        this.setLoading(true);
+        this.setError(null);
+        try {
+            await RpcApi.ReseedForgeAgentsCommand(TabRpcClient);
+        } catch (e: any) {
+            this.setError(String(e?.message ?? e));
+        } finally {
+            this.setLoading(false);
+        }
+    };
+
     // ── Edit from detail ──────────────────────────────────────────────────
 
     startEditFromDetail = (): void => {

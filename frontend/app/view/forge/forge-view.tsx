@@ -38,6 +38,10 @@ function ForgeList(props: { model: ForgeViewModel }): JSX.Element {
     const agents = props.model.agentsAtom;
     const [showImport, setShowImport] = createSignal(false);
 
+    const hostAgents = () => agents().filter((a) => a.agent_type === "host");
+    const containerAgents = () => agents().filter((a) => a.agent_type === "container");
+    const customAgents = () => agents().filter((a) => a.agent_type !== "host" && a.agent_type !== "container");
+
     return (
         <div class="forge-pane">
             <div class="forge-header">
@@ -58,9 +62,24 @@ function ForgeList(props: { model: ForgeViewModel }): JSX.Element {
                 </div>
             }>
                 <div class="forge-list">
-                    <For each={agents()}>{(agent) =>
-                        <ForgeAgentCard agent={agent} model={props.model} />
-                    }</For>
+                    <Show when={hostAgents().length > 0}>
+                        <div class="forge-group-header">Host Agents</div>
+                        <For each={hostAgents()}>{(agent) =>
+                            <ForgeAgentCard agent={agent} model={props.model} />
+                        }</For>
+                    </Show>
+                    <Show when={containerAgents().length > 0}>
+                        <div class="forge-group-header">Container Agents</div>
+                        <For each={containerAgents()}>{(agent) =>
+                            <ForgeAgentCard agent={agent} model={props.model} />
+                        }</For>
+                    </Show>
+                    <Show when={customAgents().length > 0}>
+                        <div class="forge-group-header">Custom Agents</div>
+                        <For each={customAgents()}>{(agent) =>
+                            <ForgeAgentCard agent={agent} model={props.model} />
+                        }</For>
+                    </Show>
                 </div>
                 <div class="forge-list-footer">
                     <button class="forge-new-btn" onClick={() => props.model.startCreate()}>
@@ -68,6 +87,9 @@ function ForgeList(props: { model: ForgeViewModel }): JSX.Element {
                     </button>
                     <button class="forge-new-btn forge-import-btn" onClick={() => setShowImport(true)}>
                         Import from Claw
+                    </button>
+                    <button class="forge-new-btn forge-reseed-btn" onClick={() => props.model.reseedAgents()}>
+                        Reset Built-in Agents
                     </button>
                 </div>
             </Show>
@@ -107,12 +129,22 @@ function ForgeAgentCard(props: { agent: ForgeAgent; model: ForgeViewModel }): JS
     };
 
     const providerLabel = () => PROVIDERS.find((p) => p.id === props.agent.provider)?.label ?? props.agent.provider;
+    const typeBadge = () => {
+        if (props.agent.agent_type === "host") return "HOST";
+        if (props.agent.agent_type === "container") return "CTR";
+        return null;
+    };
 
     return (
         <div class="forge-card" onClick={handleClick}>
             <span class="forge-card-icon">{props.agent.icon}</span>
             <div class="forge-card-info">
-                <span class="forge-card-name">{props.agent.name}</span>
+                <div class="forge-card-name-row">
+                    <span class="forge-card-name">{props.agent.name}</span>
+                    <Show when={typeBadge()}>
+                        <span class={`forge-agent-type-badge forge-agent-type-${props.agent.agent_type}`}>{typeBadge()}</span>
+                    </Show>
+                </div>
                 <span class="forge-card-provider">{providerLabel()}</span>
                 <Show when={props.agent.description}>
                     <span class="forge-card-desc">{props.agent.description}</span>
@@ -151,6 +183,11 @@ function ForgeDetail(props: { model: ForgeViewModel }): JSX.Element {
         <Show when={agent()}>
             {(agentVal) => {
                 const providerLabel = () => PROVIDERS.find((p) => p.id === agentVal().provider)?.label ?? agentVal().provider;
+                const detailTypeBadge = () => {
+                    if (agentVal().agent_type === "host") return "HOST";
+                    if (agentVal().agent_type === "container") return "CTR";
+                    return null;
+                };
                 return (
                     <div class="forge-pane">
                         <div class="forge-detail-header">
@@ -159,7 +196,12 @@ function ForgeDetail(props: { model: ForgeViewModel }): JSX.Element {
                             </button>
                             <span class="forge-detail-icon">{agentVal().icon}</span>
                             <div class="forge-detail-info">
-                                <span class="forge-detail-name">{agentVal().name}</span>
+                                <div class="forge-detail-name-row">
+                                    <span class="forge-detail-name">{agentVal().name}</span>
+                                    <Show when={detailTypeBadge()}>
+                                        <span class={`forge-agent-type-badge forge-agent-type-${agentVal().agent_type}`}>{detailTypeBadge()}</span>
+                                    </Show>
+                                </div>
                                 <span class="forge-detail-sub">
                                     {providerLabel()}
                                     {agentVal().description ? ` \u2022 ${agentVal().description}` : ""}
