@@ -1542,6 +1542,41 @@ declare global {
         commandtype: string;
     };
 
+    // wshrpc.CommandSubprocessSpawnData
+    type CommandSubprocessSpawnData = {
+        blockid: string;
+        tabid: string;
+        cli_command: string;
+        cli_args?: string[];
+        working_dir?: string;
+        env_vars?: {[key: string]: string};
+        message: string;
+    };
+
+    // wshrpc.CommandAgentInputData
+    type CommandAgentInputData = {
+        blockid: string;
+        message: string;
+    };
+
+    // wshrpc.CommandAgentStopData
+    type CommandAgentStopData = {
+        blockid: string;
+        force?: boolean;
+    };
+
+    // wshrpc.AgentConfigFile
+    type AgentConfigFile = {
+        path: string;
+        content: string;
+    };
+
+    // wshrpc.CommandWriteAgentConfigData
+    type CommandWriteAgentConfigData = {
+        working_dir: string;
+        files: AgentConfigFile[];
+    };
+
 }
 
 export {}

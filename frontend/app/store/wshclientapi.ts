@@ -568,6 +568,26 @@ class RpcApiType {
         return client.wshRpcCall("reseedforgeagents", {}, opts);
     }
 
+    // command "subprocessspawn" [call]
+    SubprocessSpawnCommand(client: WshClient, data: CommandSubprocessSpawnData, opts?: RpcOpts): Promise<void> {
+        return client.wshRpcCall("subprocessspawn", data, opts);
+    }
+
+    // command "agentinput" [call]
+    AgentInputCommand(client: WshClient, data: CommandAgentInputData, opts?: RpcOpts): Promise<void> {
+        return client.wshRpcCall("agentinput", data, opts);
+    }
+
+    // command "agentstop" [call]
+    AgentStopCommand(client: WshClient, data: CommandAgentStopData, opts?: RpcOpts): Promise<void> {
+        return client.wshRpcCall("agentstop", data, opts);
+    }
+
+    // command "writeagentconfig" [call]
+    WriteAgentConfigCommand(client: WshClient, data: CommandWriteAgentConfigData, opts?: RpcOpts): Promise<void> {
+        return client.wshRpcCall("writeagentconfig", data, opts);
+    }
+
 }
 
 export const RpcApi = new RpcApiType();

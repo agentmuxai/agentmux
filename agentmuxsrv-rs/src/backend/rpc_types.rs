@@ -149,6 +149,12 @@ pub const COMMAND_CONTROLLER_RESTART: &str = "controllerrestart";
 pub const COMMAND_CONTROLLER_STOP: &str = "controllerstop";
 pub const COMMAND_CONTROLLER_RESYNC: &str = "controllerresync";
 
+// Subprocess agent commands
+pub const COMMAND_SUBPROCESS_SPAWN: &str = "subprocessspawn";
+pub const COMMAND_AGENT_INPUT: &str = "agentinput";
+pub const COMMAND_AGENT_STOP: &str = "agentstop";
+pub const COMMAND_WRITE_AGENT_CONFIG: &str = "writeagentconfig";
+
 // Block commands
 pub const COMMAND_MKDIR: &str = "mkdir";
 pub const COMMAND_RESOLVE_IDS: &str = "resolveids";
@@ -403,6 +409,56 @@ pub struct CommandBlockInputData {
     pub signame: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub termsize: Option<serde_json::Value>,
+}
+
+// ---- Subprocess agent command data types ----
+
+/// Data for SubprocessSpawnCommand — spawn agent CLI for a single turn.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommandSubprocessSpawnData {
+    pub blockid: String,
+    pub tabid: String,
+    pub cli_command: String,
+    #[serde(default)]
+    pub cli_args: Vec<String>,
+    #[serde(default)]
+    pub working_dir: String,
+    #[serde(default)]
+    pub env_vars: std::collections::HashMap<String, String>,
+    /// The user's JSON message to write to subprocess stdin.
+    pub message: String,
+}
+
+/// Data for AgentInputCommand — send a follow-up message (re-spawns with --resume).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommandAgentInputData {
+    pub blockid: String,
+    /// The user's JSON message string.
+    pub message: String,
+}
+
+/// Data for AgentStopCommand — stop the running subprocess.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommandAgentStopData {
+    pub blockid: String,
+    #[serde(default)]
+    pub force: bool,
+}
+
+/// A file to write as part of agent config.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentConfigFile {
+    pub path: String,
+    pub content: String,
+}
+
+/// Data for WriteAgentConfigCommand — write config files atomically.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommandWriteAgentConfigData {
+    /// Agent working directory where files are written.
+    pub working_dir: String,
+    /// Files to write (path relative to working_dir, content).
+    pub files: Vec<AgentConfigFile>,
 }
 
 /// Matches Go's `FileDataAt`

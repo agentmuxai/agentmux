@@ -817,6 +817,10 @@ impl Controller for ShellController {
     fn block_id(&self) -> &str {
         &self.block_id
     }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
 
 // ---- File operation helpers ----
