@@ -188,6 +188,18 @@ pub fn run() {
                 if window.outer_position().map(|p| p.x == 0 && p.y == 0).unwrap_or(true) {
                     let _ = window.center();
                 }
+
+                // On Linux: show the window from Rust as a fallback.
+                // The window is created with visible:false to avoid FOUC; JS calls
+                // currentWindow.show() after initialization. But if the JS bundle fails
+                // to execute, the window would stay invisible forever. Showing it from
+                // Rust ensures the window is always visible even if JS fails.
+                // JS calling show() again later is harmless (idempotent).
+                #[cfg(target_os = "linux")]
+                {
+                    let _ = window.show();
+                    tracing::info!("[diag] window.show() called from Rust (Linux fallback)");
+                }
             }
 
             // Register deep link handler for OAuth callback (agentmux://auth?code=...)
