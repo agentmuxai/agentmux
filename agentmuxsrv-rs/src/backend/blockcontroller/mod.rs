@@ -13,7 +13,9 @@
 //! - Controllers dispatch I/O between the user and the process/service
 
 pub mod shell;
+pub mod subprocess;
 
+use std::any::Any;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
@@ -35,6 +37,7 @@ pub const STATUS_DONE: &str = "done";
 pub const BLOCK_CONTROLLER_SHELL: &str = "shell";
 pub const BLOCK_CONTROLLER_CMD: &str = "cmd";
 pub const BLOCK_CONTROLLER_TSUNAMI: &str = "tsunami";
+pub const BLOCK_CONTROLLER_SUBPROCESS: &str = "subprocess";
 
 // ---- Block metadata key constants (match Go) ----
 
@@ -154,6 +157,9 @@ pub trait Controller: Send + Sync {
 
     /// Get the block ID.
     fn block_id(&self) -> &str;
+
+    /// Downcast support for concrete controller types.
+    fn as_any(&self) -> &dyn Any;
 }
 
 // ---- Global controller registry ----
@@ -298,6 +304,18 @@ pub fn resync_controller(
         BLOCK_CONTROLLER_SHELL | BLOCK_CONTROLLER_CMD => {
             let ctrl = shell::ShellController::new(
                 controller_type.clone(),
+                tab_id.to_string(),
+                block_id.to_string(),
+                broker,
+                event_bus,
+                wstore,
+            );
+            let ctrl = Arc::new(ctrl);
+            register_controller(block_id, ctrl.clone());
+            ctrl.start(block_meta.clone(), rt_opts, force)
+        }
+        BLOCK_CONTROLLER_SUBPROCESS => {
+            let ctrl = subprocess::SubprocessController::new(
                 tab_id.to_string(),
                 block_id.to_string(),
                 broker,

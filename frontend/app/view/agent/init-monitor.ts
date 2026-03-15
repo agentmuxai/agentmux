@@ -4,7 +4,7 @@
 /**
  * InitializationMonitor - Detects and handles Claude Code initialization prompts
  *
- * Monitors raw PTY output for patterns like:
+ * Monitors raw subprocess output for patterns like:
  * - "Choose theme (light/dark):"
  * - "Log in? (y/n):"
  *
@@ -74,7 +74,7 @@ export class InitializationMonitor {
     }
 
     /**
-     * Handle raw output chunk from PTY
+     * Handle raw output chunk from subprocess
      *
      * @param chunk - Raw text from process output
      */

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * useAgentStream — SolidJS hook that subscribes to a block's PTY output,
+ * useAgentStream — SolidJS hook that subscribes to a block's subprocess output,
  * pipes it through the provider translator + stream parser, and feeds
  * the resulting DocumentNodes into SolidJS signals.
  */
@@ -15,7 +15,7 @@ import { ClaudeCodeStreamParser } from "./stream-parser";
 import type { SignalPair } from "./state";
 import type { DocumentNode, StreamingState } from "./types";
 
-const TermFileName = "term";
+const OutputFileName = "output";
 
 interface UseAgentStreamOpts {
     blockId: string;
@@ -26,7 +26,7 @@ interface UseAgentStreamOpts {
 }
 
 /**
- * Subscribe to PTY output and parse it into styled DocumentNodes.
+ * Subscribe to subprocess output and parse it into styled DocumentNodes.
  */
 export function useAgentStream({
     blockId,
@@ -55,7 +55,7 @@ export function useAgentStream({
 
         setStreaming((prev) => ({ ...prev, active: true, lastEventTime: Date.now() }));
 
-        const fileSubject = getFileSubject(blockId, TermFileName);
+        const fileSubject = getFileSubject(blockId, OutputFileName);
 
         const subscription = fileSubject.subscribe((msg: { fileop: string; data64: string }) => {
             if (msg.fileop === "truncate") {
@@ -70,7 +70,7 @@ export function useAgentStream({
 
             if (msg.fileop !== "append" || !msg.data64) return;
 
-            // Decode base64 PTY data to UTF-8 text
+            // Decode base64 subprocess data to UTF-8 text
             const bytes = base64ToArray(msg.data64);
             const text = new TextDecoder().decode(bytes);
 
