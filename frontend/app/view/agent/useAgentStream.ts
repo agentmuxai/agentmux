@@ -79,6 +79,8 @@ export function useAgentStream({
             const lines = lineBuffer.split("\n");
             lineBuffer = lines.pop() || ""; // Keep incomplete line
 
+            console.log(`[useAgentStream] received ${lines.length} lines, buffer remainder: ${lineBuffer.length} chars`);
+
             const newNodes: DocumentNode[] = [];
             const updatedNodes: DocumentNode[] = [];
 
@@ -95,6 +97,19 @@ export function useAgentStream({
                     continue;
                 }
 
+                // Handle stderr events from subprocess
+                if (rawEvent.type === "stderr" && rawEvent.text) {
+                    const stderrNode: DocumentNode = {
+                        id: `stderr-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+                        type: "markdown",
+                        content: `**stderr:** ${rawEvent.text}`,
+                    };
+                    newNodes.push(stderrNode);
+                    continue;
+                }
+
+                console.log(`[useAgentStream] rawEvent type=${rawEvent.type}`, rawEvent.type === "stream_event" ? rawEvent.event?.type : "");
+
                 // Translate provider-specific format → StreamEvent[]
                 const streamEvents = translator.translate(rawEvent);
 
@@ -104,7 +119,7 @@ export function useAgentStream({
                     if (!node) continue;
 
                     if (nodeIdSet.has(node.id)) {
-                        // Update existing node (e.g. tool_result completing a tool_call)
+                        // Existing node — append content for text/thinking, replace for others
                         updatedNodes.push(node);
                     } else {
                         nodeIdSet.add(node.id);
@@ -112,6 +127,8 @@ export function useAgentStream({
                     }
                 }
             }
+
+            console.log(`[useAgentStream] processed: ${newNodes.length} new, ${updatedNodes.length} updated`);
 
             // Batch update the document signal
             if (newNodes.length > 0 || updatedNodes.length > 0) {
@@ -122,7 +139,17 @@ export function useAgentStream({
                     for (const updated of updatedNodes) {
                         const idx = result.findIndex((n) => n.id === updated.id);
                         if (idx !== -1) {
-                            result[idx] = updated;
+                            const existing = result[idx];
+                            if (existing.type === "markdown" && updated.type === "markdown") {
+                                // Append text content for streaming text/thinking deltas
+                                result[idx] = {
+                                    ...existing,
+                                    content: existing.content + updated.content,
+                                };
+                            } else {
+                                // Replace for other node types (tool_result completing tool_call)
+                                result[idx] = updated;
+                            }
                         }
                     }
 

@@ -154,6 +154,8 @@ pub const COMMAND_SUBPROCESS_SPAWN: &str = "subprocessspawn";
 pub const COMMAND_AGENT_INPUT: &str = "agentinput";
 pub const COMMAND_AGENT_STOP: &str = "agentstop";
 pub const COMMAND_WRITE_AGENT_CONFIG: &str = "writeagentconfig";
+pub const COMMAND_RESOLVE_CLI: &str = "resolvecli";
+pub const COMMAND_CHECK_CLI_AUTH: &str = "checkcliauth";
 
 // Block commands
 pub const COMMAND_MKDIR: &str = "mkdir";
@@ -459,6 +461,55 @@ pub struct CommandWriteAgentConfigData {
     pub working_dir: String,
     /// Files to write (path relative to working_dir, content).
     pub files: Vec<AgentConfigFile>,
+}
+
+/// Data for ResolveCliCommand — detect or install a CLI tool.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommandResolveCliData {
+    /// Provider ID (e.g. "claude", "codex", "gemini")
+    pub provider_id: String,
+    /// CLI command name (e.g. "claude")
+    pub cli_command: String,
+    /// npm package name for fallback install (e.g. "@anthropic-ai/claude-code")
+    pub npm_package: String,
+    /// Version to install ("latest" or specific version)
+    pub pinned_version: String,
+    /// Windows install command (e.g. "irm https://claude.ai/install.ps1 | iex")
+    #[serde(default)]
+    pub windows_install_command: String,
+    /// Unix install command (e.g. "curl -fsSL https://claude.ai/install.sh | bash")
+    #[serde(default)]
+    pub unix_install_command: String,
+}
+
+/// Result from ResolveCliCommand
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResolveCliResult {
+    /// Absolute path to the CLI binary
+    pub cli_path: String,
+    /// CLI version string
+    pub version: String,
+    /// How it was resolved: "path", "local_install", "installed"
+    pub source: String,
+}
+
+/// Data for CheckCliAuthCommand — check if CLI is authenticated.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommandCheckCliAuthData {
+    /// Absolute path to CLI binary
+    pub cli_path: String,
+    /// Auth check args (e.g. ["auth", "status", "--json"])
+    pub auth_check_args: Vec<String>,
+}
+
+/// Result from CheckCliAuthCommand
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CheckCliAuthResult {
+    pub authenticated: bool,
+    pub email: Option<String>,
+    pub auth_method: Option<String>,
+    /// Raw stdout from auth check command
+    pub raw_output: String,
 }
 
 /// Matches Go's `FileDataAt`

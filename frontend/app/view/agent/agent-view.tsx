@@ -3,7 +3,7 @@
 
 import { createMemo, createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
 import type { AgentViewModel } from "./agent-model";
-import { getProvider } from "./providers";
+import { getProvider, type ProviderDefinition } from "./providers";
 import { createAgentAtoms } from "./state";
 import { useAgentStream } from "./useAgentStream";
 import { AgentDocumentView } from "./components/AgentDocumentView";
@@ -11,6 +11,10 @@ import { AgentFooter } from "./components/AgentFooter";
 import { RpcApi } from "@/app/store/wshclientapi";
 import { TabRpcClient } from "@/app/store/wshrpcutil";
 import { waveEventSubscribe } from "@/app/store/wps";
+import * as WOS from "@/app/store/wos";
+import { BlockService } from "@/app/store/services";
+import { staticTabId } from "@/app/store/global";
+import { ContextMenuModel } from "@/app/store/contextmenu";
 import "./agent-view.scss";
 
 // ── useForgeAgents hook ───────────────────────────────────────────────────────
@@ -137,17 +141,156 @@ const AgentPicker = ({ model }: { model: AgentViewModel }): JSX.Element => {
 
 AgentPicker.displayName = "AgentPicker";
 
+// ── Launch Flow ──────────────────────────────────────────────────────────────────
+
+type LogFn = (tag: string, text: string, level?: "info" | "error" | "warn") => void;
+
+/**
+ * Full agent launch flow: CLI detection → auth check → controller registration.
+ * Emits terminal-style log lines at each phase.
+ */
+async function runLaunchFlow(
+    blockId: string,
+    provider: ProviderDefinition | undefined,
+    log: LogFn,
+): Promise<void> {
+    if (!provider) {
+        log("error", "no provider definition — cannot resolve CLI", "error");
+        return;
+    }
+
+    const oref = WOS.makeORef("block", blockId);
+
+    // Phase 1: CLI Detection / Installation
+    log("cli", `checking for ${provider.cliCommand}...`);
+    let cliResult: ResolveCliResult;
+    try {
+        cliResult = await RpcApi.ResolveCliCommand(TabRpcClient, {
+            provider_id: provider.id,
+            cli_command: provider.cliCommand,
+            npm_package: provider.npmPackage,
+            pinned_version: provider.pinnedVersion,
+            windows_install_command: provider.windowsInstallCommand,
+            unix_install_command: provider.unixInstallCommand,
+        }, { timeout: 120000 });
+    } catch (err: any) {
+        const msg = err?.message ?? String(err);
+        log("cli", msg, "error");
+        log("error", `${provider.cliCommand} not available — install manually or check your internet connection`, "error");
+        return;
+    }
+
+    if (cliResult.source === "installed") {
+        log("cli", `installed ${provider.npmPackage} (${cliResult.version})`);
+    } else if (cliResult.source === "local_install") {
+        log("cli", `found: ${cliResult.cli_path} (${cliResult.version}) [local install]`);
+    } else {
+        log("cli", `found: ${cliResult.cli_path} (${cliResult.version})`);
+    }
+
+    // Update block meta with resolved absolute path
+    await RpcApi.SetMetaCommand(TabRpcClient, {
+        oref,
+        meta: { cmd: cliResult.cli_path },
+    });
+
+    // Phase 2: Auth Check
+    log("auth", `checking ${provider.cliCommand} authentication...`);
+    try {
+        const authResult = await RpcApi.CheckCliAuthCommand(TabRpcClient, {
+            cli_path: cliResult.cli_path,
+            auth_check_args: provider.authCheckCommand,
+        }, { timeout: 30000 });
+        if (authResult.authenticated) {
+            const emailPart = authResult.email ? ` as ${authResult.email}` : "";
+            const methodPart = authResult.auth_method ? ` (${authResult.auth_method})` : "";
+            log("auth", `authenticated${emailPart}${methodPart}`);
+        } else {
+            log("auth", "not authenticated", "warn");
+            log("auth", `run: ${provider.cliCommand} ${provider.authLoginCommand.join(" ")}`, "warn");
+        }
+    } catch (err: any) {
+        log("auth", `check failed: ${err?.message ?? String(err)}`, "warn");
+        log("auth", "authentication status unknown — will attempt anyway", "warn");
+    }
+
+    // Phase 3: Controller Registration
+    log("controller", "registering subprocess controller...");
+    try {
+        await RpcApi.ControllerResyncCommand(TabRpcClient, {
+            tabid: staticTabId(),
+            blockid: blockId,
+            forcerestart: false,
+        });
+        const rts = await BlockService.GetControllerStatus(blockId);
+        const status = rts?.shellprocstatus ?? "init";
+        log("controller", `status: ${status}`);
+        if (status === "init") {
+            log("agent", "ready — type a message below to start");
+        } else if (status === "done") {
+            log("agent", "previous turn complete — send a message to continue");
+        }
+    } catch (err: any) {
+        log("controller", `resync failed: ${err?.message ?? String(err)}`, "warn");
+        log("agent", "ready — type a message below to start");
+    }
+}
+
 // ── Presentation View ───────────────────────────────────────────────────────────
 
 const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agentId: string }): JSX.Element => {
     const block = model.blockAtom;
-    // agentProvider stores the provider id (claude/codex/gemini) — set when launching
     const providerKey = (): string => block()?.meta?.["agentProvider"] ?? agentId;
     const provider = () => getProvider(providerKey());
     const outputFormat = (): string => block()?.meta?.["agentOutputFormat"] ?? "claude-stream-json";
 
-    // Create per-instance signals (stable across re-renders via createMemo keyed on blockId)
     const agentAtoms = createMemo(() => createAgentAtoms(model.blockId));
+
+    // Accumulated terminal-style log lines
+    type LogLine = { tag: string; text: string; level?: "info" | "error" | "warn" };
+    const [logLines, setLogLines] = createSignal<LogLine[]>([]);
+    const log = (tag: string, text: string, level?: "info" | "error" | "warn") => {
+        setLogLines((prev) => [...prev, { tag, text, level: level ?? "info" }]);
+    };
+
+    onMount(() => {
+        const name = block()?.meta?.["agentName"] ?? agentId;
+        const prov = provider();
+        const provName = prov?.displayName ?? providerKey();
+        const cwd = block()?.meta?.["cmd:cwd"] ?? "";
+
+        log("agent", `${name} selected (provider: ${provName})`);
+        if (cwd) log("env", `working directory: ${cwd}`);
+
+        // Full launch flow: CLI resolution → auth check → controller registration
+        (async () => {
+            try {
+                await runLaunchFlow(model.blockId, prov, log);
+            } catch (err: any) {
+                log("error", err?.message ?? String(err), "error");
+            }
+        })();
+
+        // Subscribe to status changes
+        const unsub = waveEventSubscribe({
+            eventType: "controllerstatus",
+            scope: WOS.makeORef("block", model.blockId),
+            handler: (event) => {
+                const status = (event as any)?.data?.shellprocstatus;
+                if (status === "running") {
+                    log("subprocess", "spawned, waiting for response...");
+                } else if (status === "done") {
+                    const exitCode = (event as any)?.data?.shellprocexitcode;
+                    if (exitCode != null && exitCode !== 0) {
+                        log("subprocess", `exited with code ${exitCode}`, "error");
+                    } else {
+                        log("subprocess", "turn complete");
+                    }
+                }
+            },
+        });
+        onCleanup(() => unsub());
+    });
 
     // Subscribe to subprocess output and parse into DocumentNodes
     useAgentStream({
@@ -158,18 +301,19 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         enabled: true,
     });
 
-    // Send user message — spawns a new subprocess turn (or resumes existing session)
+    // Send user message
     const handleSendMessage = (message: string) => {
+        log("input", `sending message to ${block()?.meta?.["agentName"] ?? agentId}...`);
         RpcApi.AgentInputCommand(TabRpcClient, {
             blockid: model.blockId,
             message: message,
-        }).catch(() => {
-            // logged by RPC layer
+        }).catch((err) => {
+            const errMsg = err?.message ?? String(err);
+            log("error", errMsg, "error");
         });
     };
 
     const handleBack = async () => {
-        const { WOS } = await import("@/app/store/global");
         const oref = WOS.makeORef("block", model.blockId);
         try {
             await RpcApi.SetMetaCommand(TabRpcClient, {
@@ -191,8 +335,31 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         }
     };
 
+    // Per-pane zoom: read term:zoom from block meta (same key as terminal panes)
+    const zoomFactor = createMemo(() => {
+        const meta = block()?.meta;
+        const z = meta?.["term:zoom"];
+        if (z == null || typeof z !== "number" || isNaN(z)) return 1.0;
+        return Math.max(0.5, Math.min(2.0, z));
+    });
+
+    // Context menu for copy
+    const handleContextMenu = (e: MouseEvent) => {
+        const sel = window.getSelection()?.toString();
+        if (!sel) return; // no selection, let default behavior
+        e.preventDefault();
+        ContextMenuModel.showContextMenu(
+            [{ label: "Copy", click: () => navigator.clipboard.writeText(sel) }],
+            e,
+        );
+    };
+
     return (
-        <div class="agent-view agent-view--presentation">
+        <div
+            class="agent-view agent-view--presentation"
+            style={{ "font-size": `${13 * zoomFactor()}px` }}
+            onContextMenu={handleContextMenu}
+        >
             <div class="agent-pres-header">
                 <span class="agent-pres-icon">{block()?.meta?.["agentIcon"] ?? "\u26A1"}</span>
                 <span class="agent-pres-name">{block()?.meta?.["agentName"] ?? provider()?.displayName ?? agentId}</span>
@@ -204,6 +371,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
             <AgentDocumentView
                 documentAtom={agentAtoms().documentAtom}
                 documentStateAtom={agentAtoms().documentStateAtom}
+                logLines={logLines}
             />
 
             <AgentFooter agentId={agentId} onSendMessage={handleSendMessage} />

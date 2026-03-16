@@ -9,7 +9,6 @@
     background: var(--main-bg-color);
     color: var(--main-text-color);
     font-family: var(--termfontfamily, "JetBrains Mono", "Fira Code", "Consolas", monospace);
-    font-size: var(--termfontsize, 13px);
     line-height: 1.6;
     display: flex;
     flex-direction: column;
@@ -17,6 +16,8 @@
     width: 100%;
     overflow: hidden;
     position: relative;
+    user-select: text;
+    cursor: text;
 
     // === Document Container ===
     .agent-document {
@@ -26,6 +27,36 @@
         display: flex;
         flex-direction: column;
         gap: 8px;
+    }
+
+    // === Status Log (terminal-style) ===
+    .agent-status-log {
+        padding: 8px 12px;
+        font-family: var(--fixed-font);
+        font-size: 12px;
+        line-height: 1.7;
+        border-bottom: 1px solid var(--border-color);
+        margin-bottom: 8px;
+    }
+
+    .agent-status-line {
+        color: var(--secondary-text-color);
+        opacity: 0.7;
+        white-space: pre-wrap;
+
+        &--error {
+            color: var(--error-color);
+            opacity: 1;
+        }
+
+        &--warn {
+            color: var(--warning-color);
+            opacity: 0.9;
+        }
+    }
+
+    .agent-status-tag {
+        opacity: 0.5;
     }
 
     // === Empty State ===
@@ -298,26 +329,27 @@
 
     // === Tool Block ===
     .agent-tool-block {
-        border: 1px solid var(--border-color);
-        border-radius: 4px;
-        background: color-mix(in srgb, var(--main-text-color) 2%, transparent);
+        border: none;
+        border-left: 2px solid var(--border-color);
+        border-radius: 0;
+        background: transparent;
         cursor: pointer;
         transition: background 0.1s;
 
         &:hover {
-            background: color-mix(in srgb, var(--main-text-color) 4%, transparent);
+            background: color-mix(in srgb, var(--main-text-color) 3%, transparent);
         }
 
         &.running {
-            border-left: 3px solid var(--warning-color);
+            border-left: 2px solid var(--warning-color);
         }
 
         &.success {
-            border-left: 3px solid var(--success-color);
+            border-left: 2px solid var(--success-color);
         }
 
         &.failed {
-            border-left: 3px solid var(--error-color);
+            border-left: 2px solid var(--error-color);
         }
 
         .agent-tool-summary {
@@ -372,8 +404,9 @@
     // === Diff Viewer ===
     .agent-diff {
         background: var(--main-bg-color);
-        border: 1px solid var(--border-color);
-        border-radius: 4px;
+        border: none;
+        border-left: 2px solid var(--border-color);
+        border-radius: 0;
         overflow-x: auto;
         font-size: 12px;
 
@@ -414,8 +447,9 @@
     // === Bash Output ===
     .agent-bash {
         background: var(--main-bg-color);
-        border: 1px solid var(--border-color);
-        border-radius: 4px;
+        border: none;
+        border-left: 2px solid var(--border-color);
+        border-radius: 0;
         overflow-x: auto;
 
         .agent-bash-cmd {
@@ -436,7 +470,7 @@
             overflow-y: auto;
 
             &.has-error {
-                border-left: 3px solid var(--error-color);
+                border-left: 2px solid var(--error-color);
             }
 
             .agent-bash-stderr {
@@ -462,17 +496,18 @@
 
     // === Agent Message Block ===
     .agent-message-block {
-        border: 1px solid var(--border-color);
-        border-radius: 4px;
-        background: color-mix(in srgb, var(--main-text-color) 2%, transparent);
+        border: none;
+        border-left: 2px solid var(--border-color);
+        border-radius: 0;
+        background: transparent;
         cursor: pointer;
 
         &.incoming {
-            border-left: 3px solid var(--accent-color);
+            border-left: 2px solid var(--accent-color);
         }
 
         &.outgoing {
-            border-left: 3px solid var(--secondary-text-color);
+            border-left: 2px solid var(--secondary-text-color);
             opacity: 0.7;
         }
 
@@ -535,7 +570,7 @@
         padding: 8px 12px;
         background: color-mix(in srgb, var(--accent-color) 5%, transparent);
         border-left: 2px solid var(--accent-color);
-        border-radius: 4px;
+        border-radius: 0;
 
         .agent-user-message-icon {
             font-size: 20px;

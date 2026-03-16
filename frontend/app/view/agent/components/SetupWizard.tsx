@@ -268,7 +268,7 @@ const CliResultCard = ({ result }: { result: CliDetectionResult }): JSX.Element 
                     </button>
                     <Show when={showInstall()}>
                         <div class="setup-wizard-install-info">
-                            <code>{providerDef.installCommand}</code>
+                            <code>{providerDef.windowsInstallCommand}</code>
                             <a
                                 href="#"
                                 onClick={(e) => {

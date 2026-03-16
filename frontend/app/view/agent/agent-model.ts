@@ -47,11 +47,10 @@ export class AgentViewModel implements ViewModel {
             return;
         }
 
-        const version = getApi().getAboutModalDetails().version;
-        const cliDir = resolveCliDir(version, provider.id);
-        const cliBin = `${cliDir}/node_modules/.bin/${provider.cliCommand}`;
+        // Use bare command name (relies on PATH) — version-isolated installs are optional
+        const cliBin = provider.cliCommand;
 
-        Logger.info("agent", `Launching agent ${agentId} (v${version})`, {
+        Logger.info("agent", `Launching agent ${agentId} cmd=${cliBin}`, {
             agentId,
             styledArgs: provider.styledArgs,
             outputFormat: provider.styledOutputFormat,
@@ -98,10 +97,9 @@ export class AgentViewModel implements ViewModel {
 
     /**
      * Launch a Forge-managed agent in presentation view.
-     * Uses the ForgeAgent's provider to look up CLI config.
-     * Loads content blobs (soul, agentmd, mcp, env) and writes config files
-     * to the working directory via WriteAgentConfigCommand, then creates
-     * a SubprocessController ready for user input.
+     * Phase 1: Sets block metadata and loads content — enough to transition to presentation view.
+     * Phase 2 (CLI resolution, auth, controller) happens in AgentPresentationView.onMount
+     * so that log lines are visible to the user.
      */
     launchForgeAgent = async (agent: ForgeAgent): Promise<void> => {
         const provider = PROVIDERS[agent.provider];
@@ -109,10 +107,6 @@ export class AgentViewModel implements ViewModel {
             Logger.error("agent", "Unknown provider in forge agent", { agentId: agent.id, provider: agent.provider });
             return;
         }
-
-        const version = getApi().getAboutModalDetails().version;
-        const cliDir = resolveCliDir(version, provider.id);
-        const cliBin = `${cliDir}/node_modules/.bin/${provider.cliCommand}`;
 
         Logger.info("agent", `Launching forge agent ${agent.name} (${agent.provider})`, {
             agentId: agent.id,
@@ -172,9 +166,9 @@ export class AgentViewModel implements ViewModel {
         const configFiles = buildConfigFiles(contentMap, skills);
 
         const oref = WOS.makeORef("block", this.blockId);
-        const blockId = this.blockId;
         try {
-            // Store CLI config in block metadata
+            // Store agent identity + CLI config in block metadata
+            // cmd is set to bare command name initially; presentation view will resolve it
             await RpcApi.SetMetaCommand(TabRpcClient, {
                 oref,
                 meta: {
@@ -184,7 +178,7 @@ export class AgentViewModel implements ViewModel {
                     agentName: agent.name,
                     agentIcon: agent.icon,
                     controller: "subprocess",
-                    cmd: cliBin,
+                    cmd: provider.cliCommand,
                     "cmd:args": cliArgs,
                     "cmd:cwd": workDir,
                     "cmd:env": envVars,
@@ -198,13 +192,6 @@ export class AgentViewModel implements ViewModel {
                     files: configFiles,
                 });
             }
-
-            // Create SubprocessController (no-op start — waits for first message)
-            await RpcApi.ControllerResyncCommand(TabRpcClient, {
-                tabid: globalStore.get(atoms.staticTabId),
-                blockid: blockId,
-                forcerestart: true,
-            });
         } catch (e: any) {
             Logger.error("agent", "Failed to launch forge agent", { error: String(e) });
         }

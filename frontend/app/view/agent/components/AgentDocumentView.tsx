@@ -4,6 +4,7 @@
 /**
  * AgentDocumentView — Renders the styled document as a list of DocumentNodes.
  * Routes each node type to the appropriate block component.
+ * When no document nodes exist yet, shows accumulated log lines (terminal-style).
  */
 
 import { createEffect, For, Show, type Accessor, type JSX } from "solid-js";
@@ -13,12 +14,19 @@ import { AgentMessageBlock } from "./AgentMessageBlock";
 import { MarkdownBlock } from "./MarkdownBlock";
 import { ToolBlock } from "./ToolBlock";
 
+export interface LogLine {
+    tag: string;        // "agent", "cli", "auth", "env", "error", etc.
+    text: string;
+    level?: "info" | "error" | "warn";
+}
+
 interface AgentDocumentViewProps {
     documentAtom: SignalPair<DocumentNode[]>;
     documentStateAtom: SignalPair<DocumentState>;
+    logLines: Accessor<LogLine[]>;
 }
 
-export const AgentDocumentView = ({ documentAtom, documentStateAtom }: AgentDocumentViewProps): JSX.Element => {
+export const AgentDocumentView = ({ documentAtom, documentStateAtom, logLines }: AgentDocumentViewProps): JSX.Element => {
     const [document] = documentAtom;
     const [documentState, setDocumentState] = documentStateAtom;
     let scrollRef!: HTMLDivElement;
@@ -37,10 +45,10 @@ export const AgentDocumentView = ({ documentAtom, documentStateAtom }: AgentDocu
         });
     };
 
-    // Auto-scroll to bottom when new nodes arrive
+    // Auto-scroll to bottom when new content arrives
     createEffect(() => {
-        // Read document length to track changes
-        const len = document().length;
+        const _docLen = document().length;
+        const _logLen = logLines().length;
         if (autoScroll && scrollRef) {
             scrollRef.scrollTop = scrollRef.scrollHeight;
         }
@@ -54,29 +62,37 @@ export const AgentDocumentView = ({ documentAtom, documentStateAtom }: AgentDocu
     };
 
     return (
-        <Show
-            when={document().length > 0}
-            fallback={
-                <div class="agent-document" ref={scrollRef}>
-                    <div class="agent-styled-empty">
-                        <div class="agent-styled-spinner" />
-                        <div class="agent-styled-status-text">Waiting for output...</div>
-                    </div>
+        <div class="agent-document" ref={scrollRef} onScroll={handleScroll}>
+            {/* Log lines always shown at the top */}
+            <Show when={logLines().length > 0}>
+                <div class="agent-status-log">
+                    <For each={logLines()}>
+                        {(line) => (
+                            <div
+                                class="agent-status-line"
+                                classList={{
+                                    "agent-status-line--error": line.level === "error",
+                                    "agent-status-line--warn": line.level === "warn",
+                                }}
+                            >
+                                <span class="agent-status-tag">[{line.tag}]</span> {line.text}
+                            </div>
+                        )}
+                    </For>
                 </div>
-            }
-        >
-            <div class="agent-document" ref={scrollRef} onScroll={handleScroll}>
-                <For each={document()}>
-                    {(node) => (
-                        <DocumentNodeRenderer
-                            node={node}
-                            collapsed={documentState().collapsedNodes.has(node.id)}
-                            onToggle={() => toggleCollapse(node.id)}
-                        />
-                    )}
-                </For>
-            </div>
-        </Show>
+            </Show>
+
+            {/* Document nodes render below log lines */}
+            <For each={document()}>
+                {(node) => (
+                    <DocumentNodeRenderer
+                        node={node}
+                        collapsed={documentState().collapsedNodes.has(node.id)}
+                        onToggle={() => toggleCollapse(node.id)}
+                    />
+                )}
+            </For>
+        </div>
     );
 };
 

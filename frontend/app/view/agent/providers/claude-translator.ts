@@ -25,6 +25,7 @@ export class ClaudeTranslator implements OutputTranslator {
     private currentToolCallId: string | null = null;
     private currentToolName: string | null = null;
     private toolInputBuffer: string = "";
+    private hasReceivedStreamEvents: boolean = false;
 
     translate(rawEvent: any): StreamEvent[] {
         if (!rawEvent || typeof rawEvent !== "object") return [];
@@ -36,6 +37,7 @@ export class ClaudeTranslator implements OutputTranslator {
 
         // Case 2: Wrapped in {"type":"stream_event","event":{...}}
         if (rawEvent.type === "stream_event" && rawEvent.event) {
+            this.hasReceivedStreamEvents = true;
             return this.translateInnerEvent(rawEvent.event);
         }
 
@@ -62,6 +64,7 @@ export class ClaudeTranslator implements OutputTranslator {
         this.currentToolCallId = null;
         this.currentToolName = null;
         this.toolInputBuffer = "";
+        this.hasReceivedStreamEvents = false;
     }
 
     private isStreamEvent(event: any): boolean {
@@ -115,16 +118,33 @@ export class ClaudeTranslator implements OutputTranslator {
 
     /**
      * Top-level "assistant" event contains the complete message.
-     * We extract text, tool_use, and thinking blocks.
-     * NOTE: We skip text blocks here since they arrive incrementally via stream_event.
-     * We only extract tool_use blocks that we haven't seen via content_block_start.
+     * When --include-partial-messages is used, stream_events arrive first and
+     * this duplicates them — so we skip text that we've already seen via deltas.
+     * When partial messages are NOT available, this is the only source of content.
      */
     private handleAssistantMessage(message: any): StreamEvent[] {
         if (!message || !Array.isArray(message.content)) return [];
-        // The assistant message duplicates content from stream_events.
-        // We skip it to avoid double-rendering. The stream_events provide
-        // incremental content which is better for UX.
-        return [];
+
+        // If we've already received stream_event content, skip to avoid duplicates
+        if (this.hasReceivedStreamEvents) return [];
+
+        // Fallback: extract content from complete message
+        const results: StreamEvent[] = [];
+        for (const block of message.content) {
+            if (block.type === "text" && block.text) {
+                results.push({ type: "text", content: block.text });
+            } else if (block.type === "thinking" && block.thinking) {
+                results.push({ type: "thinking", content: block.thinking });
+            } else if (block.type === "tool_use") {
+                results.push({
+                    type: "tool_call",
+                    tool: block.name || "Unknown",
+                    id: block.id || `tool_${Date.now()}`,
+                    params: block.input || {},
+                });
+            }
+        }
+        return results;
     }
 
     /**

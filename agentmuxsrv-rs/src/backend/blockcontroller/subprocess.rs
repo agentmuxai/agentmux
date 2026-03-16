@@ -195,7 +195,26 @@ impl SubprocessController {
         let mut cmd = Command::new(&config.cli_command);
         cmd.args(&args);
         if !config.working_dir.is_empty() {
-            cmd.current_dir(&config.working_dir);
+            // Expand ~ to home directory (Rust doesn't do shell expansion)
+            let working_dir = if config.working_dir.starts_with("~/") || config.working_dir == "~" {
+                if let Some(home) = std::env::var_os("HOME")
+                    .or_else(|| std::env::var_os("USERPROFILE"))
+                {
+                    let home = home.to_string_lossy().to_string();
+                    config.working_dir.replacen("~", &home, 1)
+                } else {
+                    tracing::warn!("[subprocess] no HOME or USERPROFILE env var, cannot expand ~");
+                    config.working_dir.clone()
+                }
+            } else {
+                config.working_dir.clone()
+            };
+            tracing::info!("[subprocess] working_dir: raw={:?} expanded={:?}", config.working_dir, working_dir);
+            // Create working directory if it doesn't exist
+            if let Err(e) = std::fs::create_dir_all(&working_dir) {
+                tracing::warn!("[subprocess] failed to create working dir {:?}: {}", working_dir, e);
+            }
+            cmd.current_dir(&working_dir);
         }
         for (k, v) in &config.env_vars {
             cmd.env(k, v);
@@ -325,6 +344,12 @@ impl SubprocessController {
                 }
 
                 // Publish the NDJSON line as a WPS blockfile event on the "output" subject
+                tracing::debug!(
+                    block_id = %block_id_read,
+                    line_len = trimmed.len(),
+                    line_prefix = %&trimmed[..trimmed.len().min(80)],
+                    "subprocess stdout line"
+                );
                 if let Some(ref broker) = broker_read {
                     // Include the newline so the frontend line splitter works correctly
                     let line_with_newline = format!("{}\n", trimmed);
@@ -338,17 +363,34 @@ impl SubprocessController {
             }
         });
 
-        // Spawn stderr reader (log warnings, don't publish)
+        // Spawn stderr reader — publish to frontend as error lines on the "output" subject
         let block_id_err = self.block_id.clone();
+        let broker_err = self.broker.clone();
         tokio::spawn(async move {
             let reader = BufReader::new(stderr);
             let mut lines = reader.lines();
             while let Ok(Some(line)) = lines.next_line().await {
-                if !line.trim().is_empty() {
-                    tracing::debug!(
-                        block_id = %block_id_err,
-                        stderr = %line,
-                        "subprocess stderr"
+                let trimmed = line.trim();
+                if trimmed.is_empty() {
+                    continue;
+                }
+                tracing::debug!(
+                    block_id = %block_id_err,
+                    stderr = %trimmed,
+                    "subprocess stderr"
+                );
+                // Publish stderr as a JSON error event so the frontend can display it
+                if let Some(ref broker) = broker_err {
+                    let err_json = serde_json::json!({
+                        "type": "stderr",
+                        "text": trimmed,
+                    });
+                    let line_with_newline = format!("{}\n", err_json);
+                    super::shell::handle_append_block_file(
+                        broker,
+                        &block_id_err,
+                        SUBPROCESS_OUTPUT_SUBJECT,
+                        line_with_newline.as_bytes(),
                     );
                 }
             }

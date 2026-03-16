@@ -77,6 +77,7 @@ pub fn run_forge_migrations(conn: &Connection) -> Result<(), StoreError> {
     )?;
     run_forge_v2_migrations(conn)?;
     run_forge_v3_migrations(conn)?;
+    run_forge_v4_migrations(conn)?;
     Ok(())
 }
 
@@ -187,6 +188,16 @@ pub fn run_forge_v3_migrations(conn: &Connection) -> Result<(), StoreError> {
             }
         }
     }
+    Ok(())
+}
+
+/// Forge v4 migration: fix provider "claude-code" → "claude" for seeded agents.
+/// The forge-seed.json originally used "claude-code" but the frontend PROVIDERS
+/// map uses "claude" as the key. This one-time UPDATE corrects existing rows.
+pub fn run_forge_v4_migrations(conn: &Connection) -> Result<(), StoreError> {
+    conn.execute_batch(
+        "UPDATE db_forge_agents SET provider = 'claude' WHERE provider = 'claude-code';",
+    )?;
     Ok(())
 }
 
