@@ -280,6 +280,10 @@ pub async fn open_window_at_position(
     #[cfg(target_os = "linux")]
     crate::drag::attach_drag_handler(&_new_window);
 
+    // On macOS: apply frameless resize handles via NSWindow styleMask override.
+    #[cfg(target_os = "macos")]
+    crate::apply_macos_frameless_resize(&_new_window);
+
     // Register instance number and notify all windows
     let count = {
         let mut reg = state.window_instance_registry.lock().unwrap();

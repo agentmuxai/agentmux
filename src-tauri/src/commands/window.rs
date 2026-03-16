@@ -62,6 +62,10 @@ pub async fn open_new_window<R: Runtime>(app: tauri::AppHandle<R>) -> Result<Str
     #[cfg(target_os = "linux")]
     drag::attach_drag_handler(&_new_window);
 
+    // On macOS: apply frameless resize handles via NSWindow styleMask override.
+    #[cfg(target_os = "macos")]
+    crate::apply_macos_frameless_resize(&_new_window);
+
     // Assign a stable instance number to the new window and notify all windows.
     let state = app.state::<AppState>();
     let count = {
