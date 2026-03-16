@@ -12,6 +12,7 @@
 //! - ShellController handles "shell" and "cmd" block types
 //! - Controllers dispatch I/O between the user and the process/service
 
+pub mod pidregistry;
 pub mod shell;
 
 use std::collections::HashMap;

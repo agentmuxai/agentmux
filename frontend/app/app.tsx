@@ -207,8 +207,8 @@ const AppZoomHandler = () => {
             const target = e.target as HTMLElement;
             const zoomOut = e.deltaY > 0;
 
-            // Check if hovering over chrome (title bar or status bar)
-            if (target.closest(".window-header") || target.closest(".status-bar")) {
+            // Check if hovering over chrome (title bar, status bar, or pane header)
+            if (target.closest(".window-header") || target.closest(".status-bar") || target.closest(".block-frame-default-header")) {
                 if (zoomOut) chromeZoomOut(WHEEL_STEP);
                 else chromeZoomIn(WHEEL_STEP);
                 return;
