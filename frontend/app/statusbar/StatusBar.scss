@@ -68,6 +68,19 @@
     .stat-mono {
         font-family: var(--fixed-font);
         font-size: 11px;
+        display: inline-block;
+    }
+
+    .stat-uptime {
+        min-width: 6.5ch; // fits "99m 59s"
+    }
+
+    .stat-cpu {
+        min-width: 8ch; // fits "CPU 100%"
+    }
+
+    .stat-mem {
+        min-width: 14ch; // fits "Mem 99.9G/99.9G"
     }
 
     .stat-separator {

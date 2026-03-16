@@ -53,11 +53,11 @@ const SystemStats = (): JSX.Element => {
         <Show when={stats()}>
             {(s) => (
                 <div class="status-bar-item system-stats">
-                    <span class="stat-mono" style={{ color: cpuColor(s().cpu) }}>
+                    <span class="stat-mono stat-cpu" style={{ color: cpuColor(s().cpu) }}>
                         CPU {Math.round(s().cpu)}%
                     </span>
                     <span class="stat-separator">|</span>
-                    <span class="stat-mono" style={{ color: memColor(s().memUsed, s().memTotal) }}>
+                    <span class="stat-mono stat-mem" style={{ color: memColor(s().memUsed, s().memTotal) }}>
                         Mem {formatBytes(s().memUsed)}/{formatBytes(s().memTotal)}
                     </span>
                 </div>
