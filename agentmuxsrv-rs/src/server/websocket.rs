@@ -1181,6 +1181,8 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
     );
 
     // checkcliauth → check if a CLI tool is authenticated
+    // For Claude: reads ~/.claude/.credentials.json directly (instant, no subprocess).
+    // For other providers: falls back to running the CLI auth check command.
     engine.register_handler(
         COMMAND_CHECK_CLI_AUTH,
         Box::new(|data, _ctx| {
@@ -1189,19 +1191,81 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                     .map_err(|e| format!("checkcliauth: {e}"))?;
                 tracing::info!(cli = %cmd.cli_path, "CheckCliAuth");
 
+                // Fast path: read credentials file directly (Claude)
+                if cmd.cli_path.contains("claude") {
+                    let home = std::env::var("HOME")
+                        .or_else(|_| std::env::var("USERPROFILE"))
+                        .unwrap_or_default();
+                    let creds_path = format!("{}/.claude/.credentials.json", home);
+
+                    if let Ok(content) = std::fs::read_to_string(&creds_path) {
+                        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
+                            // Check claudeAiOauth credentials
+                            let oauth = json.get("claudeAiOauth");
+                            let has_token = oauth
+                                .and_then(|o| o.get("accessToken"))
+                                .and_then(|v| v.as_str())
+                                .map(|s| !s.is_empty())
+                                .unwrap_or(false);
+
+                            let expires_at = oauth
+                                .and_then(|o| o.get("expiresAt"))
+                                .and_then(|v| v.as_u64())
+                                .unwrap_or(0);
+
+                            let now_ms = std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap_or_default()
+                                .as_millis() as u64;
+
+                            let authenticated = has_token && expires_at > now_ms;
+
+                            let subscription = oauth
+                                .and_then(|o| o.get("subscriptionType"))
+                                .and_then(|v| v.as_str())
+                                .map(|s| s.to_string());
+
+                            let auth_method = Some("claude.ai oauth".to_string());
+
+                            tracing::info!(
+                                authenticated = authenticated,
+                                subscription = ?subscription,
+                                expires_at = expires_at,
+                                "claude auth check (credentials file)"
+                            );
+
+                            let result = CheckCliAuthResult {
+                                authenticated,
+                                email: subscription.clone(), // no email in creds, show subscription
+                                auth_method,
+                                raw_output: format!("subscription: {}", subscription.unwrap_or_default()),
+                            };
+                            return Ok(Some(serde_json::to_value(&result).unwrap()));
+                        }
+                    }
+                    // Credentials file not found or unparseable — not authenticated
+                    let result = CheckCliAuthResult {
+                        authenticated: false,
+                        email: None,
+                        auth_method: None,
+                        raw_output: "no credentials file found".to_string(),
+                    };
+                    return Ok(Some(serde_json::to_value(&result).unwrap()));
+                }
+
+                // Slow path: run CLI auth check command (other providers)
                 let output = tokio::time::timeout(
                     std::time::Duration::from_secs(25),
                     tokio::process::Command::new(&cmd.cli_path)
                         .args(&cmd.auth_check_args)
                         .output(),
                 ).await
-                    .map_err(|_| "auth check timed out (25s) — CLI may be slow to start".to_string())?
+                    .map_err(|_| "auth check timed out (25s)".to_string())?
                     .map_err(|e| format!("failed to run auth check: {e}"))?;
 
                 let stdout = String::from_utf8_lossy(&output.stdout).to_string();
                 let stderr = String::from_utf8_lossy(&output.stderr).to_string();
 
-                // Try to parse JSON output (Claude uses --json flag)
                 let mut authenticated = false;
                 let mut email = None;
                 let mut auth_method = None;
@@ -1217,7 +1281,6 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                         .and_then(|v| v.as_str())
                         .map(|s| s.to_string());
                 } else {
-                    // Fallback: check exit code
                     authenticated = output.status.success();
                 }
 
