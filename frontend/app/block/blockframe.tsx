@@ -19,6 +19,7 @@ import { RpcApi } from "@/app/store/wshclientapi";
 import { TabRpcClient } from "@/app/store/wshrpcutil";
 import { ErrorBoundary } from "@/element/errorboundary";
 import { IconButton, ToggleIconButton } from "@/element/iconbutton";
+import { BlockStatsBadge } from "@/element/blockstats";
 import { MagnifyIcon } from "@/element/magnify";
 import { MenuButton } from "@/element/menubutton";
 import { NodeModel } from "@/layout/index";
@@ -303,6 +304,7 @@ function BlockFrame_Header(props: BlockFrameProps & { changeConnModalAtom: util.
             data-testid="block-header"
             ref={dragHandleRef ? (el) => { dragHandleRef.current = el; } : undefined}
             onContextMenu={onContextMenu}
+            onDblClick={() => props.nodeModel.toggleMagnify()}
             style={headerStyle()}
         >
             {preIconButtonElem}
@@ -732,6 +734,7 @@ function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
                 </Show>
                 {props.preview ? previewElem : props.children}
             </div>
+            <BlockStatsBadge blockId={nodeModel.blockId} />
             <Show when={!props.preview && props.viewModel != null && connModalOpen()}>
                 <ChangeConnectionBlockModal
                     blockId={nodeModel.blockId}

@@ -522,6 +522,11 @@ impl Controller for ShellController {
         })?;
         tracing::info!(block_id = %self.block_id, "process spawned successfully");
 
+        // Register PID for per-pane metrics collection
+        if let Some(pid) = child.process_id() {
+            super::pidregistry::register(&self.block_id, pid);
+        }
+
         // Auto-register with jekt if AGENTMUX_AGENT_ID was set in the block env.
         // This maps agent_id → block_id in the ReactiveHandler so jekt can deliver
         // messages directly to this PTY without a separate /wave/reactive/register call.
@@ -729,6 +734,9 @@ impl Controller for ShellController {
             };
 
             tracing::info!(block_id = %block_id_wait, exit_code = exit_code, "process exited");
+
+            // Unregister PID from per-pane metrics
+            super::pidregistry::unregister(&block_id_wait);
 
             // Deregister from jekt — removes the agent_id → block_id mapping so
             // subsequent jekt attempts fall back to MessageBus rather than a dead PTY.

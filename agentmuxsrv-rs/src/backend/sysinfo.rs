@@ -9,12 +9,13 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use sysinfo::Networks;
+use sysinfo::{Networks, Pid, ProcessesToUpdate};
 use tokio::time::MissedTickBehavior;
 
+use crate::backend::blockcontroller::pidregistry;
 use crate::backend::rpc_types::TimeSeriesData;
 use crate::backend::wconfig::ConfigWatcher;
-use crate::backend::wps::{Broker, WaveEvent, EVENT_SYS_INFO};
+use crate::backend::wps::{Broker, WaveEvent, EVENT_BLOCK_STATS, EVENT_SYS_INFO};
 
 const BYTES_PER_GB: f64 = 1_073_741_824.0;
 const BYTES_PER_MB: f64 = 1_048_576.0;
@@ -158,5 +159,33 @@ pub async fn run_sysinfo_loop(broker: Arc<Broker>, config_watcher: Arc<ConfigWat
         };
 
         broker.publish(event);
+
+        // Per-pane process metrics: query each registered block's PID
+        let block_pids = pidregistry::get_all();
+        if !block_pids.is_empty() {
+            let pids: Vec<Pid> = block_pids.iter().map(|(_, pid)| Pid::from(*pid as usize)).collect();
+            sys.refresh_processes_specifics(ProcessesToUpdate::Some(&pids), true, sysinfo::ProcessRefreshKind::everything());
+        }
+        for (block_id, pid) in &block_pids {
+            let sysinfo_pid = Pid::from(*pid as usize);
+            if let Some(process) = sys.process(sysinfo_pid) {
+                let mut block_values = HashMap::new();
+                block_values.insert("cpu".to_string(), process.cpu_usage() as f64);
+                block_values.insert("mem".to_string(), process.memory() as f64);
+
+                let block_ts = TimeSeriesData {
+                    ts: now,
+                    values: block_values,
+                };
+                let block_event = WaveEvent {
+                    event: EVENT_BLOCK_STATS.to_string(),
+                    scopes: vec![format!("block:{}", block_id)],
+                    sender: String::new(),
+                    persist: 0,
+                    data: serde_json::to_value(&block_ts).ok(),
+                };
+                broker.publish(block_event);
+            }
+        }
     }
 }

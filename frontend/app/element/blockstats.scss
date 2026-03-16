@@ -1,0 +1,32 @@
+// Copyright 2025, Command Line Inc.
+// SPDX-License-Identifier: Apache-2.0
+
+.block-stats-badge {
+    position: absolute;
+    top: calc(var(--header-height) + 4px);
+    right: 6px;
+    z-index: 5;
+    display: flex;
+    gap: 6px;
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+    opacity: 0.5;
+    white-space: nowrap;
+    padding: 1px 6px;
+    border-radius: 3px;
+    background: rgba(0, 0, 0, 0.3);
+    pointer-events: none;
+
+    .stats-cpu,
+    .stats-mem {
+        color: var(--secondary-text-color);
+    }
+
+    &.cpu-medium .stats-cpu {
+        color: var(--warning-color, #f59e0b);
+    }
+
+    &.cpu-high .stats-cpu {
+        color: var(--error-color, #ef4444);
+    }
+}

@@ -30,6 +30,7 @@ pub const EVENT_USER_INPUT: &str = "userinput";
 pub const EVENT_ROUTE_GONE: &str = "route:gone";
 pub const EVENT_WORKSPACE_UPDATE: &str = "workspace:update";
 pub const EVENT_WAVE_AI_RATE_LIMIT: &str = "waveai:ratelimit";
+pub const EVENT_BLOCK_STATS: &str = "blockstats";
 
 // File operation constants
 pub const FILE_OP_CREATE: &str = "create";
