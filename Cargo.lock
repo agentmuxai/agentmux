@@ -17,7 +17,8 @@ dependencies = [
  "glib",
  "gtk",
  "json_comments",
- "libc",
+ "objc2-app-kit 0.3.2",
+ "objc2-foundation 0.3.2",
  "serde",
  "serde_json",
  "tauri",
@@ -1185,9 +1186,9 @@ checksum = "d0881ea181b1df73ff77ffaaf9c7544ecc11e82fba9b5f27b262a3c73a332555"
 
 [[package]]
 name = "embed-resource"
-version = "3.0.6"
+version = "3.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "55a075fc573c64510038d7ee9abc7990635863992f83ebc52c8b433b8411a02e"
+checksum = "47ec73ddcf6b7f23173d5c3c5a32b5507dc0a734de7730aa14abc5d5e296bb5f"
 dependencies = [
  "cc",
  "memchr",
@@ -2874,9 +2875,9 @@ dependencies = [
 
 [[package]]
 name = "num_enum"
-version = "0.7.5"
+version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b1207a7e20ad57b847bbddc6776b968420d38292bbfe2089accff5e19e82454c"
+checksum = "5d0bca838442ec211fa11de3a8b0e0e8f3a4522575b5c4c06ed722e005036f26"
 dependencies = [
  "num_enum_derive",
  "rustversion",
@@ -2884,9 +2885,9 @@ dependencies = [
 
 [[package]]
 name = "num_enum_derive"
-version = "0.7.5"
+version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ff32365de1b6743cb203b710788263c44a03de03802daf96092f2da4fe6ba4d7"
+checksum = "680998035259dcfcafe653688bf2aa6d3e2dc05e98be6ab46afb089dc84f1df8"
 dependencies = [
  "proc-macro-crate 3.5.0",
  "proc-macro2",
@@ -2930,8 +2931,8 @@ dependencies = [
  "block2 0.5.1",
  "libc",
  "objc2 0.5.2",
- "objc2-core-data",
- "objc2-core-image",
+ "objc2-core-data 0.2.2",
+ "objc2-core-image 0.2.2",
  "objc2-foundation 0.2.2",
  "objc2-quartz-core 0.2.2",
 ]
@@ -2944,9 +2945,27 @@ checksum = "d49e936b501e5c5bf01fda3a9452ff86dc3ea98ad5f283e1455153142d97518c"
 dependencies = [
  "bitflags 2.11.0",
  "block2 0.6.2",
+ "libc",
  "objc2 0.6.4",
+ "objc2-cloud-kit",
+ "objc2-core-data 0.3.2",
  "objc2-core-foundation",
  "objc2-core-graphics",
+ "objc2-core-image 0.3.2",
+ "objc2-core-text",
+ "objc2-core-video",
+ "objc2-foundation 0.3.2",
+ "objc2-quartz-core 0.3.2",
+]
+
+[[package]]
+name = "objc2-cloud-kit"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "73ad74d880bb43877038da939b7427bba67e9dd42004a18b809ba7d87cee241c"
+dependencies = [
+ "bitflags 2.11.0",
+ "objc2 0.6.4",
  "objc2-foundation 0.3.2",
 ]
 
@@ -2960,6 +2979,17 @@ dependencies = [
  "block2 0.5.1",
  "objc2 0.5.2",
  "objc2-foundation 0.2.2",
+]
+
+[[package]]
+name = "objc2-core-data"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0b402a653efbb5e82ce4df10683b6b28027616a2715e90009947d50b8dd298fa"
+dependencies = [
+ "bitflags 2.11.0",
+ "objc2 0.6.4",
+ "objc2-foundation 0.3.2",
 ]
 
 [[package]]
@@ -2996,6 +3026,41 @@ dependencies = [
  "objc2 0.5.2",
  "objc2-foundation 0.2.2",
  "objc2-metal",
+]
+
+[[package]]
+name = "objc2-core-image"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e5d563b38d2b97209f8e861173de434bd0214cf020e3423a52624cd1d989f006"
+dependencies = [
+ "objc2 0.6.4",
+ "objc2-foundation 0.3.2",
+]
+
+[[package]]
+name = "objc2-core-text"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0cde0dfb48d25d2b4862161a4d5fcc0e3c24367869ad306b0c9ec0073bfed92d"
+dependencies = [
+ "bitflags 2.11.0",
+ "objc2 0.6.4",
+ "objc2-core-foundation",
+ "objc2-core-graphics",
+]
+
+[[package]]
+name = "objc2-core-video"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d425caf1df73233f29fd8a5c3e5edbc30d2d4307870f802d18f00d83dc5141a6"
+dependencies = [
+ "bitflags 2.11.0",
+ "objc2 0.6.4",
+ "objc2-core-foundation",
+ "objc2-core-graphics",
+ "objc2-io-surface",
 ]
 
 [[package]]
@@ -5349,9 +5414,9 @@ dependencies = [
 
 [[package]]
 name = "tinyvec"
-version = "1.10.0"
+version = "1.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bfa5fdc3bce6191a1dbc8c02d5c8bffcf557bafa17c124c5264a458f1b0613fa"
+checksum = "3e61e67053d25a4e82c844e8424039d9745781b3fc4f32b8d55ed50f5f667ef3"
 dependencies = [
  "tinyvec_macros",
 ]
@@ -5763,9 +5828,9 @@ checksum = "562d481066bde0658276a35467c4af00bdc6ee726305698a55b86e61d7ad82bb"
 
 [[package]]
 name = "uds_windows"
-version = "1.2.0"
+version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "51b70b87d15e91f553711b40df3048faf27a7a04e01e0ddc0cf9309f0af7c2ca"
+checksum = "f2f6fb2847f6742cd76af783a2a2c49e9375d0a111c7bef6f71cd9e738c72d6e"
 dependencies = [
  "memoffset",
  "tempfile",
