@@ -36,9 +36,11 @@ const ConnectionStatusModal = ({ conns }: { conns: ConnStatus[] }): JSX.Element 
 const ConnectionStatus = (): JSX.Element => {
     const allConnStatus = atoms.allConnStatus;
 
-    const errorCount = () => allConnStatus().filter((c) => c.status === "error").length;
-    const connectingCount = () => allConnStatus().filter((c) => c.status === "connecting" || c.status === "init").length;
-    const total = () => allConnStatus().length;
+    // Only show remote connections (SSH/WSL) — filter out local websocket
+    const remoteConns = () => allConnStatus().filter((c) => c.connection != null && c.connection !== "" && c.connection !== "local");
+    const errorCount = () => remoteConns().filter((c) => c.status === "error").length;
+    const connectingCount = () => remoteConns().filter((c) => c.status === "connecting" || c.status === "init").length;
+    const total = () => remoteConns().length;
 
     const icon = () => {
         if (errorCount() > 0) return "✕";
@@ -55,7 +57,7 @@ const ConnectionStatus = (): JSX.Element => {
     const label = () => {
         if (errorCount() > 0) return `${errorCount()} error`;
         if (connectingCount() > 0) return `${connectingCount()} connecting`;
-        return `${total()} connection${total() !== 1 ? "s" : ""}`;
+        return `${total()} remote`;
     };
 
     const handleClick = () => {
@@ -65,7 +67,7 @@ const ConnectionStatus = (): JSX.Element => {
     };
 
     return (
-        <Show when={allConnStatus().length > 0}>
+        <Show when={total() > 0}>
             <div class="status-bar-item clickable" title="Click to view connections" onClick={handleClick}>
                 <span class="status-icon" style={{ color: color() }}>
                     {icon()}

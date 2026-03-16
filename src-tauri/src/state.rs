@@ -112,6 +112,12 @@ pub struct AppState {
     /// Handle to the sidecar child process for graceful shutdown
     pub sidecar_child: Mutex<Option<tauri_plugin_shell::process::CommandChild>>,
 
+    /// Backend process PID (set after spawn)
+    pub backend_pid: Mutex<Option<u32>>,
+
+    /// Backend process start time as ISO 8601 string
+    pub backend_started_at: Mutex<Option<String>>,
+
     /// Current zoom factor (replaces Electron's webContents zoom)
     pub zoom_factor: Mutex<f64>,
 
@@ -155,6 +161,8 @@ impl Default for AppState {
             auth_key: Mutex::new(uuid::Uuid::new_v4().to_string()),
             backend_endpoints: Mutex::new(BackendEndpoints::default()),
             sidecar_child: Mutex::new(None),
+            backend_pid: Mutex::new(None),
+            backend_started_at: Mutex::new(None),
             zoom_factor: Mutex::new(1.0),
             client_id: Mutex::new(None),
             window_id: Mutex::new(None),

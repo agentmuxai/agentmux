@@ -203,11 +203,13 @@ pub async fn spawn_backend(app: &tauri::AppHandle) -> Result<BackendSpawnResult,
     // Get the child PID before storing the handle
     let child_pid = child.pid();
 
-    // Store child handle for graceful shutdown
+    // Store child handle, PID, and start time
     {
         let state = app.state::<crate::state::AppState>();
         let mut sidecar = state.sidecar_child.lock().unwrap();
         *sidecar = Some(child);
+        *state.backend_pid.lock().unwrap() = Some(child_pid);
+        *state.backend_started_at.lock().unwrap() = Some(chrono::Utc::now().to_rfc3339());
     }
 
     // Windows: Create Job Object and assign the backend process to it.
