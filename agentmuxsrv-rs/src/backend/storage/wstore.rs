@@ -412,6 +412,18 @@ pub struct ForgeAgent {
     #[serde(default)]
     pub idle_timeout_minutes: i64,
     pub created_at: i64,
+    #[serde(default = "default_agent_type")]
+    pub agent_type: String,
+    #[serde(default)]
+    pub environment: String,
+    #[serde(default)]
+    pub agent_bus_id: String,
+    #[serde(default)]
+    pub is_seeded: i64,
+}
+
+fn default_agent_type() -> String {
+    "standalone".to_string()
 }
 
 /// A content blob associated with a forge agent.
@@ -452,7 +464,8 @@ impl WaveStore {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT id, name, icon, provider, description, working_directory, shell,
-                    provider_flags, auto_start, restart_on_crash, idle_timeout_minutes, created_at
+                    provider_flags, auto_start, restart_on_crash, idle_timeout_minutes, created_at,
+                    agent_type, environment, agent_bus_id, is_seeded
              FROM db_forge_agents ORDER BY created_at ASC",
         )?;
         let rows = stmt.query_map([], |row| {
@@ -469,6 +482,10 @@ impl WaveStore {
                 restart_on_crash: row.get(9)?,
                 idle_timeout_minutes: row.get(10)?,
                 created_at: row.get(11)?,
+                agent_type: row.get(12)?,
+                environment: row.get(13)?,
+                agent_bus_id: row.get(14)?,
+                is_seeded: row.get(15)?,
             })
         })?;
         let mut agents = Vec::new();
@@ -478,14 +495,32 @@ impl WaveStore {
         Ok(agents)
     }
 
+    /// Count forge agents (used by seed engine to check if seeding is needed).
+    pub fn forge_count(&self) -> Result<i64, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM db_forge_agents",
+            [],
+            |row| row.get(0),
+        )?;
+        Ok(count)
+    }
+
+    /// Delete all seeded agents (is_seeded=1). Used by reseed to clear built-in agents.
+    pub fn forge_delete_seeded(&self) -> Result<usize, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let rows = conn.execute("DELETE FROM db_forge_agents WHERE is_seeded=1", [])?;
+        Ok(rows)
+    }
+
     /// Insert a new forge agent.
     pub fn forge_insert(&self, agent: &ForgeAgent) -> Result<(), StoreError> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
             "INSERT INTO db_forge_agents (id, name, icon, provider, description,
              working_directory, shell, provider_flags, auto_start, restart_on_crash,
-             idle_timeout_minutes, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+             idle_timeout_minutes, created_at, agent_type, environment, agent_bus_id, is_seeded)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
             params![
                 agent.id,
                 agent.name,
@@ -498,20 +533,25 @@ impl WaveStore {
                 agent.auto_start,
                 agent.restart_on_crash,
                 agent.idle_timeout_minutes,
-                agent.created_at
+                agent.created_at,
+                agent.agent_type,
+                agent.environment,
+                agent.agent_bus_id,
+                agent.is_seeded
             ],
         )?;
         Ok(())
     }
 
-    /// Update an existing forge agent (all fields except id and created_at).
+    /// Update an existing forge agent (all fields except id, created_at, is_seeded).
     pub fn forge_update(&self, agent: &ForgeAgent) -> Result<bool, StoreError> {
         let conn = self.conn.lock().unwrap();
         let rows = conn.execute(
             "UPDATE db_forge_agents SET name=?1, icon=?2, provider=?3, description=?4,
              working_directory=?5, shell=?6, provider_flags=?7, auto_start=?8,
-             restart_on_crash=?9, idle_timeout_minutes=?10
-             WHERE id=?11",
+             restart_on_crash=?9, idle_timeout_minutes=?10,
+             agent_type=?11, environment=?12, agent_bus_id=?13
+             WHERE id=?14",
             params![
                 agent.name,
                 agent.icon,
@@ -523,6 +563,9 @@ impl WaveStore {
                 agent.auto_start,
                 agent.restart_on_crash,
                 agent.idle_timeout_minutes,
+                agent.agent_type,
+                agent.environment,
+                agent.agent_bus_id,
                 agent.id
             ],
         )?;

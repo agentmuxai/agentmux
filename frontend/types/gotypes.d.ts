@@ -208,6 +208,10 @@ declare global {
         restart_on_crash: number;
         idle_timeout_minutes: number;
         created_at: number;
+        agent_type: string;
+        environment: string;
+        agent_bus_id: string;
+        is_seeded: number;
     };
 
     // ForgeContent
@@ -230,6 +234,9 @@ declare global {
         auto_start?: number;
         restart_on_crash?: number;
         idle_timeout_minutes?: number;
+        agent_type?: string;
+        environment?: string;
+        agent_bus_id?: string;
     };
 
     // CommandUpdateForgeAgentData
@@ -245,6 +252,9 @@ declare global {
         auto_start?: number;
         restart_on_crash?: number;
         idle_timeout_minutes?: number;
+        agent_type?: string;
+        environment?: string;
+        agent_bus_id?: string;
     };
 
     // CommandDeleteForgeAgentData
@@ -1530,6 +1540,41 @@ declare global {
     // wshrpc.WshServerCommandMeta
     type WshServerCommandMeta = {
         commandtype: string;
+    };
+
+    // wshrpc.CommandSubprocessSpawnData
+    type CommandSubprocessSpawnData = {
+        blockid: string;
+        tabid: string;
+        cli_command: string;
+        cli_args?: string[];
+        working_dir?: string;
+        env_vars?: {[key: string]: string};
+        message: string;
+    };
+
+    // wshrpc.CommandAgentInputData
+    type CommandAgentInputData = {
+        blockid: string;
+        message: string;
+    };
+
+    // wshrpc.CommandAgentStopData
+    type CommandAgentStopData = {
+        blockid: string;
+        force?: boolean;
+    };
+
+    // wshrpc.AgentConfigFile
+    type AgentConfigFile = {
+        path: string;
+        content: string;
+    };
+
+    // wshrpc.CommandWriteAgentConfigData
+    type CommandWriteAgentConfigData = {
+        working_dir: string;
+        files: AgentConfigFile[];
     };
 
 }

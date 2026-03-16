@@ -29,12 +29,15 @@ use crate::backend::rpc_types::{
     COMMAND_DELETE_FORGE_SKILL,
     COMMAND_APPEND_FORGE_HISTORY, COMMAND_LIST_FORGE_HISTORY, COMMAND_SEARCH_FORGE_HISTORY,
     COMMAND_IMPORT_FORGE_FROM_CLAW,
+    COMMAND_RESEED_FORGE_AGENTS,
     CommandCreateForgeAgentData, CommandUpdateForgeAgentData, CommandDeleteForgeAgentData,
     CommandGetForgeContentData, CommandSetForgeContentData, CommandGetAllForgeContentData,
     CommandListForgeSkillsData, CommandCreateForgeSkillData, CommandUpdateForgeSkillData,
     CommandDeleteForgeSkillData,
     CommandAppendForgeHistoryData, CommandListForgeHistoryData, CommandSearchForgeHistoryData,
     CommandImportForgeFromClawData,
+    COMMAND_SUBPROCESS_SPAWN, COMMAND_AGENT_INPUT, COMMAND_AGENT_STOP, COMMAND_WRITE_AGENT_CONFIG,
+    CommandSubprocessSpawnData, CommandAgentInputData, CommandAgentStopData, CommandWriteAgentConfigData,
 };
 use crate::backend::storage::{ForgeAgent, ForgeContent, ForgeSkill};
 use crate::backend::waveobj::{Block, TermSize, WaveObjUpdate, wave_obj_to_value};
@@ -681,6 +684,198 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
         }),
     );
 
+    // subprocessspawn → spawn agent CLI as subprocess for a single turn
+    let wstore_spawn = state.wstore.clone();
+    let broker_spawn = state.broker.clone();
+    let event_bus_spawn = state.event_bus.clone();
+    engine.register_handler(
+        COMMAND_SUBPROCESS_SPAWN,
+        Box::new(move |data, _ctx| {
+            let wstore = wstore_spawn.clone();
+            let broker = broker_spawn.clone();
+            let event_bus = event_bus_spawn.clone();
+            Box::pin(async move {
+                let cmd: CommandSubprocessSpawnData = serde_json::from_value(data)
+                    .map_err(|e| format!("subprocessspawn: {e}"))?;
+                tracing::info!(
+                    block_id = %cmd.blockid,
+                    cli = %cmd.cli_command,
+                    "SubprocessSpawn"
+                );
+
+                // Get or create a SubprocessController for this block
+                let ctrl = match blockcontroller::get_controller(&cmd.blockid) {
+                    Some(c) if c.controller_type() == blockcontroller::BLOCK_CONTROLLER_SUBPROCESS => c,
+                    _ => {
+                        // Create and register a new SubprocessController
+                        let ctrl = blockcontroller::subprocess::SubprocessController::new(
+                            cmd.tabid.clone(),
+                            cmd.blockid.clone(),
+                            Some(broker),
+                            Some(event_bus),
+                            Some(wstore),
+                        );
+                        let ctrl = std::sync::Arc::new(ctrl);
+                        blockcontroller::register_controller(&cmd.blockid, ctrl.clone());
+                        ctrl as std::sync::Arc<dyn blockcontroller::Controller>
+                    }
+                };
+
+                // Downcast to SubprocessController to call spawn_turn
+                let subprocess_ctrl = ctrl
+                    .as_any()
+                    .downcast_ref::<blockcontroller::subprocess::SubprocessController>()
+                    .ok_or_else(|| "controller is not a SubprocessController".to_string())?;
+
+                let config = blockcontroller::subprocess::SubprocessSpawnConfig {
+                    cli_command: cmd.cli_command,
+                    cli_args: cmd.cli_args,
+                    working_dir: cmd.working_dir,
+                    env_vars: cmd.env_vars,
+                    message: cmd.message,
+                };
+                subprocess_ctrl.spawn_turn(config)?;
+                Ok(None)
+            })
+        }),
+    );
+
+    // agentinput → send follow-up message to agent (re-spawns with --resume)
+    let wstore_ai = state.wstore.clone();
+    engine.register_handler(
+        COMMAND_AGENT_INPUT,
+        Box::new(move |data, _ctx| {
+            let wstore = wstore_ai.clone();
+            Box::pin(async move {
+                let cmd: CommandAgentInputData = serde_json::from_value(data)
+                    .map_err(|e| format!("agentinput: {e}"))?;
+                tracing::info!(block_id = %cmd.blockid, "AgentInput");
+
+                let ctrl = blockcontroller::get_controller(&cmd.blockid)
+                    .ok_or_else(|| format!("no controller for block {}", cmd.blockid))?;
+
+                let subprocess_ctrl = ctrl
+                    .as_any()
+                    .downcast_ref::<blockcontroller::subprocess::SubprocessController>()
+                    .ok_or_else(|| "controller is not a SubprocessController".to_string())?;
+
+                // Re-read the original spawn config from block metadata
+                let block: Block = wstore
+                    .get(&cmd.blockid)
+                    .map_err(|e| format!("agentinput: load block: {e}"))?
+                    .ok_or_else(|| format!("block {} not found", cmd.blockid))?;
+
+                let cli_command = crate::backend::waveobj::meta_get_string(
+                    &block.meta, "cmd", "claude",
+                );
+                let cli_args: Vec<String> = match block.meta.get("cmd:args") {
+                    Some(serde_json::Value::Array(arr)) => arr
+                        .iter()
+                        .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                        .collect(),
+                    _ => vec![
+                        "-p".to_string(),
+                        "--input-format".to_string(),
+                        "stream-json".to_string(),
+                        "--output-format".to_string(),
+                        "stream-json".to_string(),
+                    ],
+                };
+                let working_dir = crate::backend::waveobj::meta_get_string(
+                    &block.meta, "cmd:cwd", "",
+                );
+                let env_vars: std::collections::HashMap<String, String> = match block.meta.get("cmd:env") {
+                    Some(serde_json::Value::Object(obj)) => obj
+                        .iter()
+                        .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
+                        .collect(),
+                    _ => std::collections::HashMap::new(),
+                };
+
+                let config = blockcontroller::subprocess::SubprocessSpawnConfig {
+                    cli_command,
+                    cli_args,
+                    working_dir,
+                    env_vars,
+                    message: cmd.message,
+                };
+                subprocess_ctrl.spawn_turn(config)?;
+                Ok(None)
+            })
+        }),
+    );
+
+    // agentstop → stop the running agent subprocess
+    engine.register_handler(
+        COMMAND_AGENT_STOP,
+        Box::new(|data, _ctx| {
+            Box::pin(async move {
+                let cmd: CommandAgentStopData = serde_json::from_value(data)
+                    .map_err(|e| format!("agentstop: {e}"))?;
+                tracing::info!(block_id = %cmd.blockid, force = cmd.force, "AgentStop");
+                match blockcontroller::get_controller(&cmd.blockid) {
+                    Some(ctrl) => {
+                        ctrl.stop(!cmd.force, blockcontroller::STATUS_DONE)?;
+                        Ok(None)
+                    }
+                    None => Ok(None),
+                }
+            })
+        }),
+    );
+
+    // writeagentconfig → write config files atomically to agent working directory
+    engine.register_handler(
+        COMMAND_WRITE_AGENT_CONFIG,
+        Box::new(|data, _ctx| {
+            Box::pin(async move {
+                let cmd: CommandWriteAgentConfigData = serde_json::from_value(data)
+                    .map_err(|e| format!("writeagentconfig: {e}"))?;
+                tracing::info!(
+                    working_dir = %cmd.working_dir,
+                    file_count = cmd.files.len(),
+                    "WriteAgentConfig"
+                );
+
+                let base_path = std::path::Path::new(&cmd.working_dir);
+                if !base_path.exists() {
+                    std::fs::create_dir_all(base_path)
+                        .map_err(|e| format!("failed to create working dir: {e}"))?;
+                }
+
+                for file in &cmd.files {
+                    let file_path = base_path.join(&file.path);
+                    // Prevent path traversal: resolved path must stay within base_path
+                    let canonical_base = base_path.canonicalize()
+                        .map_err(|e| format!("failed to canonicalize base path: {e}"))?;
+                    let canonical_file = file_path.canonicalize().unwrap_or_else(|_| {
+                        // File doesn't exist yet — normalize by resolving parent + filename
+                        if let (Some(parent), Some(name)) = (file_path.parent(), file_path.file_name()) {
+                            parent.canonicalize().map(|p| p.join(name)).unwrap_or_else(|_| file_path.clone())
+                        } else {
+                            file_path.clone()
+                        }
+                    });
+                    if !canonical_file.starts_with(&canonical_base) {
+                        return Err(format!("path traversal denied: {} escapes working dir", file.path));
+                    }
+                    // Create parent directories if needed
+                    if let Some(parent) = file_path.parent() {
+                        if !parent.exists() {
+                            std::fs::create_dir_all(parent)
+                                .map_err(|e| format!("failed to create dir for {}: {e}", file.path))?;
+                        }
+                    }
+                    std::fs::write(&file_path, &file.content)
+                        .map_err(|e| format!("failed to write {}: {e}", file.path))?;
+                    tracing::debug!(path = %file_path.display(), "wrote config file");
+                }
+
+                Ok(None)
+            })
+        }),
+    );
+
     // eventreadhistory → read persisted event history from the WPS broker
     let broker_history = state.broker.clone();
     engine.register_handler(
@@ -782,6 +977,10 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                     restart_on_crash: cmd.restart_on_crash,
                     idle_timeout_minutes: cmd.idle_timeout_minutes,
                     created_at: now,
+                    agent_type: cmd.agent_type,
+                    environment: cmd.environment,
+                    agent_bus_id: cmd.agent_bus_id,
+                    is_seeded: 0,
                 };
                 wstore.forge_insert(&agent).map_err(|e| format!("createforgeagent: {e}"))?;
                 broker.publish(crate::backend::wps::WaveEvent {
@@ -824,6 +1023,10 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                     restart_on_crash: cmd.restart_on_crash,
                     idle_timeout_minutes: cmd.idle_timeout_minutes,
                     created_at: old.created_at,
+                    agent_type: cmd.agent_type,
+                    environment: cmd.environment,
+                    agent_bus_id: cmd.agent_bus_id,
+                    is_seeded: old.is_seeded,
                 };
                 let found = wstore.forge_update(&agent).map_err(|e| format!("updateforgeagent: {e}"))?;
                 if !found {
@@ -1165,6 +1368,10 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                     restart_on_crash: 0,
                     idle_timeout_minutes: 0,
                     created_at: now,
+                    agent_type: "standalone".to_string(),
+                    environment: String::new(),
+                    agent_bus_id: String::new(),
+                    is_seeded: 0,
                 };
                 wstore.forge_insert(&agent).map_err(|e| format!("importforgefromclaw: {e}"))?;
 
@@ -1204,6 +1411,39 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                     data: None,
                 });
                 Ok(Some(serde_json::to_value(&agent).unwrap_or_default()))
+            })
+        }),
+    );
+
+    // reseedforgeagents → delete all seeded agents and re-run seed from manifest
+    let wstore_rsfa = state.wstore.clone();
+    let broker_rsfa = state.broker.clone();
+    engine.register_handler(
+        COMMAND_RESEED_FORGE_AGENTS,
+        Box::new(move |_data, _ctx| {
+            let wstore = wstore_rsfa.clone();
+            let broker = broker_rsfa.clone();
+            Box::pin(async move {
+                // Delete all previously seeded agents (cascade deletes content, skills, history)
+                let deleted = wstore.forge_delete_seeded()
+                    .map_err(|e| format!("reseedforgeagents: delete seeded: {e}"))?;
+
+                // Re-run seed
+                let report = crate::backend::forge_seed::seed_forge_agents(&wstore)
+                    .map_err(|e| format!("reseedforgeagents: seed: {e}"))?;
+
+                broker.publish(crate::backend::wps::WaveEvent {
+                    event: "forgeagents:changed".to_string(),
+                    scopes: vec![],
+                    sender: String::new(),
+                    persist: 0,
+                    data: None,
+                });
+                Ok(Some(json!({
+                    "deleted": deleted,
+                    "created": report.created,
+                    "skipped": report.skipped,
+                })))
             })
         }),
     );

@@ -27,6 +27,7 @@ const StatusBar = (): JSX.Element => {
         <div class="status-bar">
             <div class="status-bar-left">
                 <BackendStatus />
+                <span class="stat-separator">|</span>
                 <SystemStats />
             </div>
             <div class="status-bar-center" />

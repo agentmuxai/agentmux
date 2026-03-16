@@ -11,7 +11,6 @@ import { AgentFooter } from "./components/AgentFooter";
 import { RpcApi } from "@/app/store/wshclientapi";
 import { TabRpcClient } from "@/app/store/wshrpcutil";
 import { waveEventSubscribe } from "@/app/store/wps";
-import { stringToBase64 } from "@/util/util";
 import "./agent-view.scss";
 
 // ── useForgeAgents hook ───────────────────────────────────────────────────────
@@ -150,7 +149,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
     // Create per-instance signals (stable across re-renders via createMemo keyed on blockId)
     const agentAtoms = createMemo(() => createAgentAtoms(model.blockId));
 
-    // Subscribe to PTY output and parse into DocumentNodes
+    // Subscribe to subprocess output and parse into DocumentNodes
     useAgentStream({
         blockId: model.blockId,
         outputFormat: outputFormat(),
@@ -159,12 +158,11 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         enabled: true,
     });
 
-    // Send user message to the PTY via ControllerInputCommand
+    // Send user message — spawns a new subprocess turn (or resumes existing session)
     const handleSendMessage = (message: string) => {
-        const b64data = stringToBase64(message + "\n");
-        RpcApi.ControllerInputCommand(TabRpcClient, {
+        RpcApi.AgentInputCommand(TabRpcClient, {
             blockid: model.blockId,
-            inputdata64: b64data,
+            message: message,
         }).catch(() => {
             // logged by RPC layer
         });

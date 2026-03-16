@@ -78,6 +78,8 @@
     margin-top: 12px;
     display: flex;
     justify-content: flex-start;
+    gap: 6px;
+    flex-wrap: wrap;
 }
 
 // ── Agent card ────────────────────────────────────────────────────────────────
@@ -743,3 +745,70 @@
 .forge-import-btn {
     margin-left: 6px;
 }
+
+// ── Group headers ──────────────────────────────────────────────────────────
+
+.forge-group-header {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--secondary-text-color);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    padding: 8px 0 2px;
+    margin-top: 4px;
+
+    &:first-child {
+        margin-top: 0;
+    }
+}
+
+// ── Agent type badges ──────────────────────────────────────────────────────
+
+.forge-agent-type-badge {
+    font-size: 9px;
+    font-weight: 600;
+    padding: 1px 5px;
+    border-radius: 3px;
+    white-space: nowrap;
+    letter-spacing: 0.3px;
+    background: var(--highlight-bg-color);
+    color: var(--secondary-text-color);
+    border: 1px solid var(--border-color);
+
+    &.forge-agent-type-host {
+        color: #e8a040;
+        border-color: rgba(232, 160, 64, 0.3);
+        background: rgba(232, 160, 64, 0.1);
+    }
+
+    &.forge-agent-type-container {
+        color: #60a8e0;
+        border-color: rgba(96, 168, 224, 0.3);
+        background: rgba(96, 168, 224, 0.1);
+    }
+}
+
+.forge-card-name-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.forge-detail-name-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+// ── Reseed button ──────────────────────────────────────────────────────────
+
+.forge-reseed-btn {
+    margin-left: 6px;
+    color: var(--secondary-text-color);
+
+    &:hover {
+        border-color: var(--error-color, #e55);
+        color: var(--error-color, #e55);
+    }
+}
+

@@ -5,13 +5,10 @@ import { BlockNodeModel } from "@/app/block/blocktypes";
 import { RpcApi } from "@/app/store/wshclientapi";
 import { TabRpcClient } from "@/app/store/wshrpcutil";
 import { atoms, getApi, globalStore, WOS } from "@/app/store/global";
-import { createSignal } from "solid-js";
 import { SignalAtom } from "@/util/util";
 import { AgentViewWrapper } from "./agent-view";
 import { PROVIDERS } from "./providers";
-import { buildBootstrapScript, guessShellType } from "./bootstrap";
 import { Logger } from "@/util/logger";
-import { stringToBase64 } from "@/util/util";
 
 export class AgentViewModel implements ViewModel {
     viewType = "agent";
@@ -40,7 +37,8 @@ export class AgentViewModel implements ViewModel {
     /**
      * Launch an agent in presentation view.
      * For Phase 1, agentId maps to a provider ID (claude/codex/gemini).
-     * In Phase 2 this will be a Forge agent UUID.
+     * Sets block metadata with CLI config and creates a SubprocessController.
+     * The agent CLI is not started until the user sends the first message.
      */
     launchAgent = async (agentId: string): Promise<void> => {
         const provider = PROVIDERS[agentId];
@@ -50,46 +48,49 @@ export class AgentViewModel implements ViewModel {
         }
 
         const version = getApi().getAboutModalDetails().version;
-        const shellType = guessShellType(getApi().getPlatform());
+        const cliDir = resolveCliDir(version, provider.id);
+        const cliBin = `${cliDir}/node_modules/.bin/${provider.cliCommand}`;
 
         Logger.info("agent", `Launching agent ${agentId} (v${version})`, {
             agentId,
-            shellType,
             styledArgs: provider.styledArgs,
             outputFormat: provider.styledOutputFormat,
         });
 
         const oref = WOS.makeORef("block", this.blockId);
         const blockId = this.blockId;
+
+        // Build CLI args: -p for non-interactive, plus provider's streaming flags
+        const cliArgs = ["-p", ...provider.styledArgs];
+
+        // Build env vars: unset nested-session guards by setting them empty
+        const envVars: Record<string, string> = {};
+        if (provider.unsetEnv) {
+            for (const key of provider.unsetEnv) {
+                envVars[key] = "";
+            }
+        }
+
         try {
+            // Store CLI config in block metadata for the backend to read on AgentInput
             await RpcApi.SetMetaCommand(TabRpcClient, {
                 oref,
                 meta: {
-                    "agentId": agentId,
-                    "agentOutputFormat": provider.styledOutputFormat,
-                    "controller": "shell",
+                    agentId: agentId,
+                    agentOutputFormat: provider.styledOutputFormat,
+                    controller: "subprocess",
+                    cmd: cliBin,
+                    "cmd:args": cliArgs,
+                    "cmd:env": envVars,
                 },
             });
 
+            // Create SubprocessController (no-op start — waits for first message)
             await RpcApi.ControllerResyncCommand(TabRpcClient, {
                 tabid: globalStore.get(atoms.staticTabId),
                 blockid: blockId,
                 forcerestart: true,
             });
-
-            setTimeout(async () => {
-                const script = buildBootstrapScript({
-                    version,
-                    provider,
-                    shellType,
-                    args: provider.styledArgs,
-                });
-                const b64data = stringToBase64(script + "\r");
-                await RpcApi.ControllerInputCommand(TabRpcClient, {
-                    blockid: blockId,
-                    inputdata64: b64data,
-                });
-            }, 500);
         } catch (e: any) {
             Logger.error("agent", "Failed to launch agent", { error: String(e) });
         }
@@ -99,7 +100,8 @@ export class AgentViewModel implements ViewModel {
      * Launch a Forge-managed agent in presentation view.
      * Uses the ForgeAgent's provider to look up CLI config.
      * Loads content blobs (soul, agentmd, mcp, env) and writes config files
-     * to the working directory before bootstrapping the agent CLI.
+     * to the working directory via WriteAgentConfigCommand, then creates
+     * a SubprocessController ready for user input.
      */
     launchForgeAgent = async (agent: ForgeAgent): Promise<void> => {
         const provider = PROVIDERS[agent.provider];
@@ -109,7 +111,8 @@ export class AgentViewModel implements ViewModel {
         }
 
         const version = getApi().getAboutModalDetails().version;
-        const shellType = guessShellType(getApi().getPlatform());
+        const cliDir = resolveCliDir(version, provider.id);
+        const cliBin = `${cliDir}/node_modules/.bin/${provider.cliCommand}`;
 
         Logger.info("agent", `Launching forge agent ${agent.name} (${agent.provider})`, {
             agentId: agent.id,
@@ -139,9 +142,39 @@ export class AgentViewModel implements ViewModel {
         // Determine working directory
         const workDir = agent.working_directory || `~/.agentmux/agents/${agent.name.toLowerCase().replace(/[^a-z0-9-_]/g, "-")}`;
 
+        // Build CLI args: -p for non-interactive, plus provider's streaming flags, plus forge flags
+        const cliArgs = ["-p", ...provider.styledArgs];
+        if (agent.provider_flags) {
+            cliArgs.push(...agent.provider_flags.split(/\s+/).filter(Boolean));
+        }
+
+        // Build env vars from provider unsetEnv + forge env content
+        const envVars: Record<string, string> = {};
+        if (provider.unsetEnv) {
+            for (const key of provider.unsetEnv) {
+                envVars[key] = "";
+            }
+        }
+        if (contentMap["env"]) {
+            for (const line of contentMap["env"].split("\n")) {
+                const trimmed = line.trim();
+                if (!trimmed || trimmed.startsWith("#")) continue;
+                const eqIdx = trimmed.indexOf("=");
+                if (eqIdx < 1) continue;
+                const key = trimmed.substring(0, eqIdx);
+                const val = trimmed.substring(eqIdx + 1);
+                if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(key)) continue;
+                envVars[key] = val;
+            }
+        }
+
+        // Build config files to write via backend RPC
+        const configFiles = buildConfigFiles(contentMap, skills);
+
         const oref = WOS.makeORef("block", this.blockId);
         const blockId = this.blockId;
         try {
+            // Store CLI config in block metadata
             await RpcApi.SetMetaCommand(TabRpcClient, {
                 oref,
                 meta: {
@@ -150,35 +183,28 @@ export class AgentViewModel implements ViewModel {
                     agentOutputFormat: provider.styledOutputFormat,
                     agentName: agent.name,
                     agentIcon: agent.icon,
-                    controller: "shell",
+                    controller: "subprocess",
+                    cmd: cliBin,
+                    "cmd:args": cliArgs,
+                    "cmd:cwd": workDir,
+                    "cmd:env": envVars,
                 },
             });
 
+            // Write config files (CLAUDE.md, .mcp.json) to working directory via backend
+            if (configFiles.length > 0) {
+                await RpcApi.WriteAgentConfigCommand(TabRpcClient, {
+                    working_dir: workDir,
+                    files: configFiles,
+                });
+            }
+
+            // Create SubprocessController (no-op start — waits for first message)
             await RpcApi.ControllerResyncCommand(TabRpcClient, {
                 tabid: globalStore.get(atoms.staticTabId),
                 blockid: blockId,
                 forcerestart: true,
             });
-
-            setTimeout(async () => {
-                // Build config-writing preamble
-                const preamble = buildConfigPreamble(contentMap, workDir, agent, skills);
-
-                const script = buildBootstrapScript({
-                    version,
-                    provider,
-                    shellType,
-                    args: provider.styledArgs,
-                    preamble,
-                    cwd: workDir,
-                    extraFlags: agent.provider_flags || undefined,
-                });
-                const b64data = stringToBase64(script + "\r");
-                await RpcApi.ControllerInputCommand(TabRpcClient, {
-                    blockid: blockId,
-                    inputdata64: b64data,
-                });
-            }, 500);
         } catch (e: any) {
             Logger.error("agent", "Failed to launch forge agent", { error: String(e) });
         }
@@ -192,20 +218,22 @@ export class AgentViewModel implements ViewModel {
 }
 
 /**
- * Build shell commands to write config files before agent bootstrap.
- * Creates the working directory, writes CLAUDE.md (soul + agentmd + memory),
- * .mcp.json, and sets environment variables.
+ * Resolve the version-isolated CLI install directory.
  */
-function buildConfigPreamble(
-    contentMap: Record<string, string>,
-    workDir: string,
-    agent: ForgeAgent,
-    skills: ForgeSkill[] = []
-): string {
-    const lines: string[] = [];
+function resolveCliDir(version: string, providerId: string): string {
+    return `~/.agentmux/instances/v${version}/cli/${providerId}`;
+}
 
-    // Create working directory
-    lines.push(`mkdir -p ${shellEscape(workDir)}`);
+/**
+ * Build the list of config files to write to the agent working directory.
+ * Assembles CLAUDE.md from soul + agentmd + memory + skills index,
+ * and includes .mcp.json if present.
+ */
+function buildConfigFiles(
+    contentMap: Record<string, string>,
+    skills: ForgeSkill[] = []
+): AgentConfigFile[] {
+    const files: AgentConfigFile[] = [];
 
     // Build CLAUDE.md content: Soul + AgentMD + Memory + Skills Index
     const claudeMdParts: string[] = [];
@@ -232,63 +260,13 @@ function buildConfigPreamble(
     }
 
     if (claudeMdParts.length > 0) {
-        const claudeMd = claudeMdParts.join("");
-        writeHeredoc(lines, `${shellEscape(workDir)}/CLAUDE.md`, claudeMd);
+        files.push({ path: "CLAUDE.md", content: claudeMdParts.join("") });
     }
 
     // Write .mcp.json if MCP content exists
     if (contentMap["mcp"]) {
-        writeHeredoc(lines, `${shellEscape(workDir)}/.mcp.json`, contentMap["mcp"]);
+        files.push({ path: ".mcp.json", content: contentMap["mcp"] });
     }
 
-    // Set environment variables from env content (key=value format, one per line)
-    if (contentMap["env"]) {
-        const envLines = contentMap["env"].split("\n").filter((l) => l.includes("=") && !l.startsWith("#"));
-        for (const envLine of envLines) {
-            const trimmed = envLine.trim();
-            if (!trimmed) continue;
-            // Validate KEY=VALUE format: key must be alphanumeric/underscore,
-            // value is single-quoted to prevent injection
-            const eqIdx = trimmed.indexOf("=");
-            if (eqIdx < 1) continue;
-            const key = trimmed.substring(0, eqIdx);
-            const val = trimmed.substring(eqIdx + 1);
-            if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(key)) continue;
-            lines.push(`export ${key}=${shellQuote(val)}`);
-        }
-    }
-
-    // cd to working directory
-    lines.push(`cd ${shellEscape(workDir)}`);
-
-    return lines.join("\n");
-}
-
-/**
- * Write content to a file using a heredoc with a unique delimiter.
- * Generates a delimiter that doesn't appear in the content to prevent
- * heredoc injection attacks.
- */
-function writeHeredoc(lines: string[], path: string, content: string): void {
-    let delimiter = "FORGE_EOF";
-    let suffix = 0;
-    // Ensure delimiter doesn't appear as a standalone line in content
-    while (content.split("\n").some((line) => line.trim() === delimiter)) {
-        suffix++;
-        delimiter = `FORGE_EOF_${suffix}`;
-    }
-    lines.push(`cat > ${path} << '${delimiter}'`);
-    lines.push(content);
-    lines.push(delimiter);
-}
-
-/** Single-quote a value for safe shell use (escapes embedded single quotes) */
-function shellQuote(s: string): string {
-    return "'" + s.replace(/'/g, "'\\''") + "'";
-}
-
-/** Shell escaping for paths — uses single quotes for safety */
-function shellEscape(s: string): string {
-    if (/^[a-zA-Z0-9_.\/-]+$/.test(s)) return s;
-    return shellQuote(s);
+    return files;
 }

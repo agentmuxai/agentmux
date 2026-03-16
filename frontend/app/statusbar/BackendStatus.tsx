@@ -4,20 +4,18 @@
 import { atoms, getApi } from "@/store/global";
 import { createEffect, createSignal, onCleanup, onMount, Show, type JSX } from "solid-js";
 
+function pad2(n: number): string {
+    return n < 10 ? `0${n}` : `${n}`;
+}
+
 function formatUptime(secs: number): string {
-    if (secs < 60) return `${secs}s`;
-    const mins = Math.floor(secs / 60);
-    if (mins < 60) return `${mins}m ${secs % 60}s`;
-    const hrs = Math.floor(mins / 60);
-    if (hrs < 24) return `${hrs}h ${mins % 60}m`;
-    const days = Math.floor(hrs / 24);
-    if (days < 7) return `${days}d ${hrs % 24}h`;
-    const weeks = Math.floor(days / 7);
-    if (days < 30) return `${weeks}w ${days % 7}d`;
-    const months = Math.floor(days / 30);
-    if (months < 12) return `${months}mo ${days % 30}d`;
-    const years = Math.floor(months / 12);
-    return `${years}yr ${months % 12}mo`;
+    const s = secs % 60;
+    const m = Math.floor(secs / 60) % 60;
+    const h = Math.floor(secs / 3600) % 24;
+    const d = Math.floor(secs / 86400);
+    if (d > 0) return `${d}:${pad2(h)}:${pad2(m)}:${pad2(s)}`;
+    if (h > 0) return `${h}:${pad2(m)}:${pad2(s)}`;
+    return `${m}:${pad2(s)}`;
 }
 
 const BackendStatus = (): JSX.Element => {
@@ -114,7 +112,7 @@ const BackendStatus = (): JSX.Element => {
                         {icon()}
                     </span>
                     <Show when={backendStatus() === "running" && startedAt() != null}>
-                        <span class="stat-mono">{formatUptime(uptimeSecs())}</span>
+                        <span class="stat-mono stat-uptime">{formatUptime(uptimeSecs())}</span>
                     </Show>
                     <Show when={backendStatus() === "connecting"}>
                         <span style={{ color: color() }}>Connecting…</span>
