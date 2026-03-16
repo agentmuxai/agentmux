@@ -86,6 +86,10 @@ pub async fn spawn_backend(app: &tauri::AppHandle) -> Result<BackendSpawnResult,
     let current_version = env!("CARGO_PKG_VERSION");
     let version_instance_id = format!("v{}", current_version);
 
+    // Kill any orphaned backend processes from previous versions
+    #[cfg(unix)]
+    cleanup_stale_backends(current_version);
+
     // Clean up any stale endpoints files from previous versions that used the reuse mechanism
     cleanup_stale_endpoints(&config_dir);
 
@@ -318,6 +322,179 @@ pub async fn spawn_backend(app: &tauri::AppHandle) -> Result<BackendSpawnResult,
         result.ws_endpoint, result.web_endpoint, result.version, result.instance_id, key_preview);
 
     Ok(result)
+}
+
+/// Find and kill stale agentmuxsrv-rs processes left behind by previous versions.
+///
+/// When the frontend crashes or is force-killed, the backend process may survive.
+/// On the next launch we find all running agentmuxsrv-rs processes, inspect their
+/// `--instance` argument, and kill any whose version differs from `current_version`.
+#[cfg(unix)]
+fn cleanup_stale_backends(current_version: &str) {
+    let current_instance = format!("v{}", current_version);
+    let my_pid = std::process::id();
+
+    tracing::info!(
+        "cleanup_stale_backends: looking for stale agentmuxsrv-rs processes (current instance={})",
+        current_instance
+    );
+
+    // Step 1: Find all agentmuxsrv-rs PIDs via pgrep
+    let pgrep_output = match std::process::Command::new("pgrep")
+        .args(["-f", "agentmuxsrv-rs"])
+        .output()
+    {
+        Ok(output) => output,
+        Err(e) => {
+            tracing::warn!("cleanup_stale_backends: failed to run pgrep: {}", e);
+            return;
+        }
+    };
+
+    if !pgrep_output.status.success() && pgrep_output.stdout.is_empty() {
+        tracing::info!("cleanup_stale_backends: no agentmuxsrv-rs processes found");
+        return;
+    }
+
+    let stdout = String::from_utf8_lossy(&pgrep_output.stdout);
+    let pids: Vec<u32> = stdout
+        .lines()
+        .filter_map(|line| line.trim().parse::<u32>().ok())
+        .collect();
+
+    if pids.is_empty() {
+        tracing::info!("cleanup_stale_backends: no agentmuxsrv-rs PIDs parsed");
+        return;
+    }
+
+    tracing::info!(
+        "cleanup_stale_backends: found {} candidate PID(s): {:?}",
+        pids.len(),
+        pids
+    );
+
+    for pid in pids {
+        // Never kill our own process
+        if pid == my_pid {
+            tracing::info!("cleanup_stale_backends: skipping our own PID {}", pid);
+            continue;
+        }
+
+        // Step 2: Get the full command line for this PID
+        let ps_output = match std::process::Command::new("ps")
+            .args(["-p", &pid.to_string(), "-o", "args="])
+            .output()
+        {
+            Ok(output) => output,
+            Err(e) => {
+                tracing::warn!(
+                    "cleanup_stale_backends: failed to run ps for PID {}: {}",
+                    pid,
+                    e
+                );
+                continue;
+            }
+        };
+
+        if !ps_output.status.success() {
+            tracing::info!(
+                "cleanup_stale_backends: PID {} no longer exists (ps failed), skipping",
+                pid
+            );
+            continue;
+        }
+
+        let cmdline = String::from_utf8_lossy(&ps_output.stdout).trim().to_string();
+        if cmdline.is_empty() {
+            tracing::info!(
+                "cleanup_stale_backends: PID {} has empty command line, skipping",
+                pid
+            );
+            continue;
+        }
+
+        // Step 3: Parse the --instance argument
+        let instance_version = cmdline
+            .split_whitespace()
+            .collect::<Vec<&str>>()
+            .windows(2)
+            .find_map(|pair| {
+                if pair[0] == "--instance" {
+                    Some(pair[1].to_string())
+                } else {
+                    None
+                }
+            });
+
+        let instance_version = match instance_version {
+            Some(v) => v,
+            None => {
+                tracing::info!(
+                    "cleanup_stale_backends: PID {} has no --instance arg, skipping",
+                    pid
+                );
+                continue;
+            }
+        };
+
+        // Step 4: Compare versions — skip if it matches the current version
+        if instance_version == current_instance {
+            tracing::info!(
+                "cleanup_stale_backends: PID {} is current version ({}), keeping",
+                pid,
+                instance_version
+            );
+            continue;
+        }
+
+        tracing::info!(
+            "cleanup_stale_backends: PID {} is stale (instance={}, current={}), terminating",
+            pid,
+            instance_version,
+            current_instance
+        );
+
+        // Step 5: Send SIGTERM
+        let pid_i32 = pid as i32;
+        let term_result = unsafe { libc::kill(pid_i32, libc::SIGTERM) };
+        if term_result != 0 {
+            let err = std::io::Error::last_os_error();
+            tracing::warn!(
+                "cleanup_stale_backends: SIGTERM failed for PID {}: {}",
+                pid,
+                err
+            );
+            continue;
+        }
+
+        // Step 6: Wait up to 3 seconds for the process to exit
+        let mut exited = false;
+        for _ in 0..30 {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            unsafe {
+                if libc::kill(pid_i32, 0) != 0 {
+                    exited = true;
+                    break;
+                }
+            }
+        }
+
+        if exited {
+            tracing::info!(
+                "cleanup_stale_backends: PID {} exited after SIGTERM",
+                pid
+            );
+        } else {
+            tracing::warn!(
+                "cleanup_stale_backends: PID {} did not exit after SIGTERM, sending SIGKILL",
+                pid
+            );
+            unsafe {
+                libc::kill(pid_i32, libc::SIGKILL);
+            }
+            tracing::info!("cleanup_stale_backends: sent SIGKILL to PID {}", pid);
+        }
+    }
 }
 
 /// Remove stale wave-endpoints.json files from all instance directories.
