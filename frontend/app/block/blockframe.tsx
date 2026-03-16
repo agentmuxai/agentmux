@@ -733,8 +733,8 @@ function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
                     />
                 </Show>
                 {props.preview ? previewElem : props.children}
+                <BlockStatsBadge blockId={nodeModel.blockId} />
             </div>
-            <BlockStatsBadge blockId={nodeModel.blockId} />
             <Show when={!props.preview && props.viewModel != null && connModalOpen()}>
                 <ChangeConnectionBlockModal
                     blockId={nodeModel.blockId}
