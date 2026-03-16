@@ -65,6 +65,24 @@
         }
     }
 
+    .stat-mono {
+        font-family: var(--fixed-font);
+        font-size: 11px;
+    }
+
+    .stat-separator {
+        opacity: 0.2;
+        margin: 0 2px;
+    }
+
+    .system-stats {
+        opacity: 0.6;
+
+        &:hover {
+            opacity: 1;
+        }
+    }
+
     .status-version {
         opacity: 0.4;
         font-size: 10px;

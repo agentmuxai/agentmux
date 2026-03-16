@@ -52,8 +52,12 @@ pub fn get_wave_init_opts(
 pub fn get_backend_info(state: tauri::State<'_, AppState>) -> serde_json::Value {
     let current_version = env!("CARGO_PKG_VERSION");
     let endpoints = state.backend_endpoints.lock().unwrap();
+    let pid = state.backend_pid.lock().unwrap().clone();
+    let started_at = state.backend_started_at.lock().unwrap().clone();
 
     serde_json::json!({
+        "pid": pid,
+        "started_at": started_at,
         "web_endpoint": endpoints.web_endpoint,
         "version": current_version,
     })

@@ -6,6 +6,7 @@ import { Show, type JSX } from "solid-js";
 import { BackendStatus } from "./BackendStatus";
 import { ConfigStatus } from "./ConfigStatus";
 import { ConnectionStatus } from "./ConnectionStatus";
+import { SystemStats } from "./SystemStats";
 import { UpdateStatus } from "./UpdateStatus";
 import "./StatusBar.scss";
 
@@ -26,10 +27,11 @@ const StatusBar = (): JSX.Element => {
         <div class="status-bar">
             <div class="status-bar-left">
                 <BackendStatus />
-                <ConnectionStatus />
+                <SystemStats />
             </div>
             <div class="status-bar-center" />
             <div class="status-bar-right">
+                <ConnectionStatus />
                 <ConfigStatus />
                 <UpdateStatus />
                 <Show when={version}>
