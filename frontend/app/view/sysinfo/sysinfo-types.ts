@@ -48,6 +48,17 @@ function defaultNetMeta(name: string): TimeSeriesMeta {
     };
 }
 
+function defaultDiskMeta(name: string): TimeSeriesMeta {
+    return {
+        name: name,
+        label: "MB/s",
+        miny: 0,
+        maxy: 100,
+        color: "var(--sysinfo-net-color)",
+        decimalPlaces: 2,
+    };
+}
+
 export const PlotTypes: Record<string, (dataItem: DataItem) => string[]> = {
     CPU: function (dataItem: DataItem): Array<string> {
         return ["cpu"];
@@ -66,6 +77,12 @@ export const PlotTypes: Record<string, (dataItem: DataItem) => string[]> = {
     },
     "CPU + Mem + Net": function (dataItem: DataItem): Array<string> {
         return ["cpu", "mem:used", "net:bytestotal"];
+    },
+    "Disk I/O": function (dataItem: DataItem): Array<string> {
+        return ["disk:total"];
+    },
+    "Disk I/O (R/W)": function (dataItem: DataItem): Array<string> {
+        return ["disk:read", "disk:write"];
     },
     "All CPU": function (dataItem: DataItem): Array<string> {
         return Object.keys(dataItem)
@@ -87,6 +104,9 @@ export const DefaultPlotMeta: Record<string, TimeSeriesMeta> = {
     "net:bytessent": defaultNetMeta("Network Sent"),
     "net:bytesrecv": defaultNetMeta("Network Recv"),
     "net:bytestotal": defaultNetMeta("Network Total"),
+    "disk:read": defaultDiskMeta("Disk Read"),
+    "disk:write": defaultDiskMeta("Disk Write"),
+    "disk:total": defaultDiskMeta("Disk Total"),
 };
 for (let i = 0; i < 32; i++) {
     DefaultPlotMeta[`cpu:${i}`] = defaultCpuMeta(`Core ${i}`);

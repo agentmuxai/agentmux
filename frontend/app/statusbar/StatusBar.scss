@@ -79,8 +79,21 @@
         min-width: 8ch; // fits "CPU 100%"
     }
 
+    .stat-gpu {
+        min-width: 8ch; // fits "GPU 100%"
+    }
+
     .stat-mem {
         min-width: 14ch; // fits "Mem 99.9G/99.9G"
+    }
+
+    .stat-disk {
+        min-width: 12ch; // fits "R999M W999M"
+    }
+
+    .stat-disk-arrow {
+        opacity: 0.5;
+        margin-right: 1px;
     }
 
     .stat-separator {

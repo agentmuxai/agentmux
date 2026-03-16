@@ -6,26 +6,36 @@ import { createSignal, onCleanup, onMount, Show, type JSX } from "solid-js";
 
 type SysStats = {
     cpu: number;
+    gpu: number | null;
     memUsed: number;
     memTotal: number;
+    diskRead: number;
+    diskWrite: number;
 };
 
-function formatBytes(gb: number): string {
+function formatMemBytes(gb: number): string {
     if (gb >= 1) return `${gb.toFixed(1)}G`;
     const mb = gb * 1024;
     return `${Math.round(mb)}M`;
 }
 
-function cpuColor(cpu: number): string {
-    if (cpu > 95) return "var(--error-color)";
-    if (cpu > 80) return "var(--warning-color)";
+function formatRate(mbps: number): string {
+    if (mbps >= 1000) return `${(mbps / 1024).toFixed(1)}G`;
+    if (mbps >= 1) return `${mbps.toFixed(1)}M`;
+    const kbps = mbps * 1024;
+    if (kbps >= 1) return `${Math.round(kbps)}K`;
+    return "0K";
+}
+
+function cpuColor(pct: number): string {
+    if (pct > 95) return "var(--error-color)";
+    if (pct > 80) return "var(--warning-color)";
     return "var(--secondary-text-color)";
 }
 
 function memColor(used: number, total: number): string {
     if (total <= 0) return "var(--secondary-text-color)";
-    const pct = used / total;
-    if (pct > 0.9) return "var(--warning-color)";
+    if (used / total > 0.9) return "var(--warning-color)";
     return "var(--secondary-text-color)";
 }
 
@@ -41,8 +51,11 @@ const SystemStats = (): JSX.Element => {
                 if (vals == null) return;
                 setStats({
                     cpu: vals["cpu"] ?? 0,
+                    gpu: vals["gpu"] != null ? vals["gpu"] : null,
                     memUsed: vals["mem:used"] ?? 0,
                     memTotal: vals["mem:total"] ?? 0,
+                    diskRead: vals["disk:read"] ?? 0,
+                    diskWrite: vals["disk:write"] ?? 0,
                 });
             },
         });
@@ -56,10 +69,24 @@ const SystemStats = (): JSX.Element => {
                     <span class="stat-mono stat-cpu" style={{ color: cpuColor(s().cpu) }}>
                         CPU {Math.round(s().cpu)}%
                     </span>
+                    <Show when={s().gpu != null}>
+                        <span class="stat-separator">|</span>
+                        <span class="stat-mono stat-gpu" style={{ color: cpuColor(s().gpu!) }}>
+                            GPU {Math.round(s().gpu!)}%
+                        </span>
+                    </Show>
                     <span class="stat-separator">|</span>
                     <span class="stat-mono stat-mem" style={{ color: memColor(s().memUsed, s().memTotal) }}>
-                        Mem {formatBytes(s().memUsed)}/{formatBytes(s().memTotal)}
+                        Mem {formatMemBytes(s().memUsed)}/{formatMemBytes(s().memTotal)}
                     </span>
+                    {/* TODO: disk I/O reads zero on Windows — investigate sysinfo Disk::usage() delta behavior */}
+                    <Show when={s().diskRead > 0 || s().diskWrite > 0}>
+                        <span class="stat-separator">|</span>
+                        <span class="stat-mono stat-disk">
+                            <span class="stat-disk-arrow">R</span>{formatRate(s().diskRead)}{" "}
+                            <span class="stat-disk-arrow">W</span>{formatRate(s().diskWrite)}
+                        </span>
+                    </Show>
                 </div>
             )}
         </Show>

@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use sysinfo::{Networks, Pid, ProcessesToUpdate};
+use sysinfo::{Disks, Networks, Pid, ProcessesToUpdate};
 use tokio::time::MissedTickBehavior;
 
 use crate::backend::blockcontroller::pidregistry;
@@ -95,6 +95,24 @@ impl NetState {
     }
 }
 
+/// Collect disk I/O rates (in MB/s).
+/// sysinfo Disk::usage() returns deltas (bytes since last refresh) so we
+/// divide by elapsed time to get rates.
+fn get_disk_data(disks: &Disks, elapsed_secs: f64, values: &mut HashMap<String, f64>) {
+    if elapsed_secs <= 0.0 {
+        return;
+    }
+    let (total_read, total_write) = disks.list().iter().fold((0u64, 0u64), |(r, w), disk| {
+        let u = disk.usage();
+        (r + u.read_bytes, w + u.written_bytes)
+    });
+    let read_rate = total_read as f64 / elapsed_secs / BYTES_PER_MB;
+    let write_rate = total_write as f64 / elapsed_secs / BYTES_PER_MB;
+    values.insert("disk:read".to_string(), read_rate);
+    values.insert("disk:write".to_string(), write_rate);
+    values.insert("disk:total".to_string(), read_rate + write_rate);
+}
+
 /// Read the telemetry interval from config, clamped to [MIN, MAX].
 fn get_interval_secs(config_watcher: &ConfigWatcher) -> f64 {
     let val = config_watcher.get_settings().telemetry_interval;
@@ -111,6 +129,8 @@ pub async fn run_sysinfo_loop(broker: Arc<Broker>, config_watcher: Arc<ConfigWat
     let mut sys = sysinfo::System::new_all();
     let mut networks = Networks::new_with_refreshed_list();
     let mut net_state = NetState::new();
+    let mut disks = Disks::new_with_refreshed_list();
+    let mut last_tick = Instant::now();
 
     let mut current_interval = get_interval_secs(&config_watcher);
     let mut ticker = tokio::time::interval(Duration::from_secs_f64(current_interval));
@@ -133,15 +153,21 @@ pub async fn run_sysinfo_loop(broker: Arc<Broker>, config_watcher: Arc<ConfigWat
             tracing::info!("sysinfo interval changed to {}s", current_interval);
         }
 
-        // Refresh CPU and memory data
+        // Refresh all metrics
         sys.refresh_cpu_usage();
         sys.refresh_memory();
         networks.refresh(true);
+        disks.refresh(true);
+
+        let now_instant = Instant::now();
+        let elapsed_secs = now_instant.duration_since(last_tick).as_secs_f64();
+        last_tick = now_instant;
 
         let mut values = HashMap::new();
         get_cpu_data(&sys, &mut values);
         get_mem_data(&sys, &mut values);
         net_state.get_net_data(&networks, &mut values);
+        get_disk_data(&disks, elapsed_secs, &mut values);
 
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
