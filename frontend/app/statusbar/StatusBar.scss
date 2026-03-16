@@ -72,7 +72,7 @@
     }
 
     .stat-uptime {
-        min-width: 6.5ch; // fits "99m 59s"
+        min-width: 7ch; // fits "H:MM:SS", grows naturally for "D:HH:MM:SS"
     }
 
     .stat-cpu {
