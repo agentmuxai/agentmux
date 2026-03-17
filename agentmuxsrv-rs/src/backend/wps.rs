@@ -31,6 +31,7 @@ pub const EVENT_ROUTE_GONE: &str = "route:gone";
 pub const EVENT_WORKSPACE_UPDATE: &str = "workspace:update";
 pub const EVENT_WAVE_AI_RATE_LIMIT: &str = "waveai:ratelimit";
 pub const EVENT_BLOCK_STATS: &str = "blockstats";
+pub const EVENT_AGENT_HEALTH: &str = "agenthealth";
 
 // File operation constants
 pub const FILE_OP_CREATE: &str = "create";
