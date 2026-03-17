@@ -14,6 +14,7 @@ import { SysinfoViewModel } from "@/app/view/sysinfo/sysinfo";
 import { AgentViewModel } from "@/app/view/agent";
 import { ForgeViewModel } from "@/app/view/forge/forge";
 import { SubagentViewModel } from "@/app/view/subagent/subagent";
+import { SwarmViewModel } from "@/app/view/swarm/swarm";
 import { ErrorBoundary } from "@/element/errorboundary";
 import { CenteredDiv } from "@/element/quickelems";
 import { NodeModel, useDebouncedNodeInnerRect } from "@/layout/index";
@@ -44,6 +45,7 @@ BlockRegistry.set("launcher", LauncherViewModel as any);
 BlockRegistry.set("agent", AgentViewModel as any);
 BlockRegistry.set("forge", ForgeViewModel as any);
 BlockRegistry.set("subagent", SubagentViewModel as any);
+BlockRegistry.set("swarm", SwarmViewModel as any);
 
 function makeViewModel(blockId: string, blockView: string, nodeModel: NodeModel): ViewModel {
     const ctor = BlockRegistry.get(blockView);
