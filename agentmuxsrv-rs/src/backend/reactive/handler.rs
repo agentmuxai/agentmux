@@ -96,8 +96,10 @@ impl Handler {
             return Err(format!("invalid agent ID: {}", agent_id));
         }
 
+        let agent_key = agent_id.to_lowercase();
+
         // Remove existing registration for this agent
-        if let Some(old_block) = self.agent_to_block.remove(agent_id) {
+        if let Some(old_block) = self.agent_to_block.remove(&agent_key) {
             self.block_to_agent.remove(&old_block);
         }
 
@@ -109,11 +111,11 @@ impl Handler {
 
         let now = now_unix_millis();
         self.agent_to_block
-            .insert(agent_id.to_string(), block_id.to_string());
+            .insert(agent_key.clone(), block_id.to_string());
         self.block_to_agent
-            .insert(block_id.to_string(), agent_id.to_string());
+            .insert(block_id.to_string(), agent_key.clone());
         self.agent_info.insert(
-            agent_id.to_string(),
+            agent_key.clone(),
             AgentRegistration {
                 agent_id: agent_id.to_string(),
                 block_id: block_id.to_string(),
@@ -128,10 +130,11 @@ impl Handler {
 
     /// Unregister an agent.
     pub fn unregister_agent(&mut self, agent_id: &str) {
-        if let Some(block_id) = self.agent_to_block.remove(agent_id) {
+        let agent_key = agent_id.to_lowercase();
+        if let Some(block_id) = self.agent_to_block.remove(&agent_key) {
             self.block_to_agent.remove(&block_id);
         }
-        self.agent_info.remove(agent_id);
+        self.agent_info.remove(&agent_key);
     }
 
     /// Unregister by block ID.
@@ -144,14 +147,14 @@ impl Handler {
 
     /// Update the last_seen timestamp for an agent.
     pub fn update_last_seen(&mut self, agent_id: &str) {
-        if let Some(info) = self.agent_info.get_mut(agent_id) {
+        if let Some(info) = self.agent_info.get_mut(&agent_id.to_lowercase()) {
             info.last_seen = now_unix_millis();
         }
     }
 
     /// Get agent registration by agent ID.
     pub fn get_agent(&self, agent_id: &str) -> Option<&AgentRegistration> {
-        self.agent_info.get(agent_id)
+        self.agent_info.get(&agent_id.to_lowercase())
     }
 
     /// Get agent registration by block ID.
@@ -206,7 +209,7 @@ impl Handler {
         let sanitized = sanitize_message(&req.message);
 
         // Look up block ID
-        let block_id = match self.agent_to_block.get(&req.target_agent) {
+        let block_id = match self.agent_to_block.get(&req.target_agent.to_lowercase()) {
             Some(id) => id.clone(),
             None => {
                 let err = format!("agent not found: {}", req.target_agent);
