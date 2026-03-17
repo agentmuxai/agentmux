@@ -79,8 +79,20 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
     },
 };
 
+// Aliases for provider IDs from older databases or alternate naming
+const PROVIDER_ALIASES: Record<string, string> = {
+    "claude-code": "claude",
+    "claude_code": "claude",
+    "codex-cli": "codex",
+    "gemini-cli": "gemini",
+};
+
+export function resolveProviderAlias(id: string): string {
+    return PROVIDER_ALIASES[id] ?? id;
+}
+
 export function getProvider(id: string): ProviderDefinition | undefined {
-    return PROVIDERS[id];
+    return PROVIDERS[id] ?? PROVIDERS[resolveProviderAlias(id)];
 }
 
 export function getProviderList(): ProviderDefinition[] {

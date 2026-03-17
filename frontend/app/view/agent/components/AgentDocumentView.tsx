@@ -144,7 +144,6 @@ const DocumentNodeRenderer = ({
         case "user_message":
             return (
                 <div class="agent-user-message">
-                    <span class="agent-user-message-icon">{node.summary}</span>
                     <div class="agent-user-message-content">
                         <pre>{node.message}</pre>
                     </div>

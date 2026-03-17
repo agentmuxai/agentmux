@@ -7,7 +7,7 @@ import { TabRpcClient } from "@/app/store/wshrpcutil";
 import { atoms, getApi, globalStore, WOS } from "@/app/store/global";
 import { SignalAtom } from "@/util/util";
 import { AgentViewWrapper } from "./agent-view";
-import { PROVIDERS } from "./providers";
+import { PROVIDERS, resolveProviderAlias } from "./providers";
 import { Logger } from "@/util/logger";
 
 export class AgentViewModel implements ViewModel {
@@ -104,7 +104,7 @@ export class AgentViewModel implements ViewModel {
      * a SubprocessController ready for user input.
      */
     launchForgeAgent = async (agent: ForgeAgent): Promise<void> => {
-        const provider = PROVIDERS[agent.provider];
+        const provider = PROVIDERS[agent.provider] ?? PROVIDERS[resolveProviderAlias(agent.provider)];
         if (!provider) {
             Logger.error("agent", "Unknown provider in forge agent", { agentId: agent.id, provider: agent.provider });
             return;
@@ -148,7 +148,7 @@ export class AgentViewModel implements ViewModel {
             cliArgs.push(...agent.provider_flags.split(/\s+/).filter(Boolean));
         }
 
-        // Build env vars from provider unsetEnv + forge env content
+        // Build env vars from provider unsetEnv + forge env content + per-agent isolation
         const envVars: Record<string, string> = {};
         if (provider.unsetEnv) {
             for (const key of provider.unsetEnv) {
@@ -168,8 +168,14 @@ export class AgentViewModel implements ViewModel {
             }
         }
 
+        // Per-agent config isolation: separate Claude, GitHub, and GCP config dirs
+        const agentSlug = agent.name.toLowerCase().replace(/[^a-z0-9-_]/g, "-");
+        envVars["CLAUDE_CONFIG_DIR"] = `~/.agentmux/config/claude-${agentSlug}`;
+        envVars["GH_CONFIG_DIR"] = `~/.agentmux/config/gh-${agentSlug}`;
+        envVars["AGENTMUX_AGENT_ID"] = agent.name;
+
         // Build config files to write via backend RPC
-        const configFiles = buildConfigFiles(contentMap, skills);
+        const configFiles = buildConfigFiles(contentMap, skills, agent);
 
         const oref = WOS.makeORef("block", this.blockId);
         const blockId = this.blockId;
@@ -227,31 +233,45 @@ function resolveCliDir(version: string, providerId: string): string {
 /**
  * Build the list of config files to write to the agent working directory.
  * Assembles CLAUDE.md from soul + agentmd + memory + skills index,
- * and includes .mcp.json if present.
+ * writes each skill as a slash command in .claude/commands/,
+ * writes hooks.json if present, auto-injects AgentMux MCP server,
+ * and applies template variable substitution.
  */
 function buildConfigFiles(
     contentMap: Record<string, string>,
-    skills: ForgeSkill[] = []
+    skills: ForgeSkill[] = [],
+    agent?: ForgeAgent
 ): AgentConfigFile[] {
     const files: AgentConfigFile[] = [];
+
+    // Template variables for {{}} substitution
+    const templateVars: Record<string, string> = {};
+    if (agent) {
+        templateVars["AGENT"] = agent.name;
+        templateVars["AGENT_DISPLAY"] = agent.name;
+        templateVars["WORKING_DIR"] = agent.working_directory || "";
+        templateVars["AGENT_ID"] = agent.id;
+    }
+    templateVars["DATE"] = new Date().toISOString().slice(0, 10);
 
     // Build CLAUDE.md content: Soul + AgentMD + Memory + Skills Index
     const claudeMdParts: string[] = [];
     if (contentMap["soul"]) {
-        claudeMdParts.push(contentMap["soul"]);
+        claudeMdParts.push(expandTemplate(contentMap["soul"], templateVars));
     }
     if (contentMap["agentmd"]) {
         if (claudeMdParts.length > 0) claudeMdParts.push("\n---\n");
-        claudeMdParts.push(contentMap["agentmd"]);
+        claudeMdParts.push(expandTemplate(contentMap["agentmd"], templateVars));
     }
     if (contentMap["memory"]) {
         claudeMdParts.push("\n# Memory\n");
         claudeMdParts.push(contentMap["memory"]);
     }
 
-    // Append skill index (lazy-loading: only names/descriptions, not full content)
+    // Append skill index with trigger references
     if (skills.length > 0) {
         claudeMdParts.push("\n# Available Skills\n\n");
+        claudeMdParts.push("Use `/<trigger>` to invoke a skill.\n\n");
         for (const skill of skills) {
             const triggerPart = skill.trigger ? ` (trigger: /${skill.trigger})` : "";
             const descPart = skill.description ? ` \u2014 ${skill.description}` : "";
@@ -263,10 +283,70 @@ function buildConfigFiles(
         files.push({ path: "CLAUDE.md", content: claudeMdParts.join("") });
     }
 
-    // Write .mcp.json if MCP content exists
-    if (contentMap["mcp"]) {
-        files.push({ path: ".mcp.json", content: contentMap["mcp"] });
+    // Write each skill as a slash command: .claude/commands/{trigger}.md
+    for (const skill of skills) {
+        if (skill.trigger && skill.content) {
+            const content = expandTemplate(skill.content, templateVars);
+            files.push({ path: `.claude/commands/${skill.trigger}.md`, content });
+        }
+    }
+
+    // Write hooks.json if hooks content exists
+    if (contentMap["hooks"]) {
+        files.push({ path: ".claude/hooks.json", content: contentMap["hooks"] });
+    }
+
+    // Build .mcp.json: auto-inject AgentMux MCP + merge user-provided config
+    const mcpConfig = buildMcpConfig(contentMap["mcp"], agent);
+    if (mcpConfig) {
+        files.push({ path: ".mcp.json", content: mcpConfig });
     }
 
     return files;
+}
+
+/**
+ * Replace {{VARIABLE}} placeholders in content with values from vars map.
+ */
+function expandTemplate(content: string, vars: Record<string, string>): string {
+    return content.replace(/\{\{(\w+)\}\}/g, (match, key) => {
+        return vars[key] ?? match;
+    });
+}
+
+/**
+ * Build .mcp.json content with auto-injected AgentMux MCP server.
+ * Merges with user-provided MCP config if present.
+ */
+function buildMcpConfig(userMcpContent: string | undefined, agent?: ForgeAgent): string | null {
+    // Auto-inject AgentMux MCP server for inter-agent messaging
+    const agentMuxServer: Record<string, any> = {
+        type: "stdio",
+        command: "agentmux-mcp",
+        args: [],
+        env: {} as Record<string, string>,
+    };
+    if (agent) {
+        agentMuxServer.env["AGENTMUX_AGENT_ID"] = agent.name;
+        if (agent.agent_bus_id) {
+            agentMuxServer.env["AGENTMUX_AGENT_BUS_ID"] = agent.agent_bus_id;
+        }
+    }
+
+    let mcpObj: Record<string, any> = { mcpServers: { agentmux: agentMuxServer } };
+
+    // Merge user-provided MCP config
+    if (userMcpContent) {
+        try {
+            const userMcp = JSON.parse(userMcpContent);
+            if (userMcp.mcpServers) {
+                mcpObj.mcpServers = { ...mcpObj.mcpServers, ...userMcp.mcpServers };
+            }
+        } catch {
+            // If user MCP isn't valid JSON, skip merge but still write auto-injected
+            Logger.error("agent", "Invalid MCP JSON in forge content, using auto-injected only");
+        }
+    }
+
+    return JSON.stringify(mcpObj, null, 2);
 }

@@ -314,7 +314,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 message,
                 timestamp: Date.now(),
                 collapsed: false,
-                summary: "\u{1F464} You",
+                summary: "",
             } as DocumentNode,
         ]);
 
