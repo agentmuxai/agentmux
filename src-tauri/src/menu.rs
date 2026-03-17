@@ -273,9 +273,13 @@ pub fn handle_menu_event<R: Runtime>(app: &AppHandle<R>, event: MenuEvent) {
             // TODO: Call workspace service
         }
         _ => {
-            // Handle context menu clicks - emit to frontend
+            // Handle context menu clicks - emit to the window that opened the menu,
+            // not just whatever window happens to be focused right now.
             tracing::debug!("Context menu click: {}", event.id.as_ref());
-            if let Some(w) = window {
+            let origin_window = crate::commands::contextmenu::take_context_menu_origin()
+                .and_then(|label| app.get_webview_window(&label));
+            let target = origin_window.or(window);
+            if let Some(w) = target {
                 let _ = w.emit("context-menu-click", event.id.as_ref());
             }
         }
