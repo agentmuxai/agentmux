@@ -5,7 +5,8 @@ import { createMemo, createSignal, For, onCleanup, onMount, Show, type JSX } fro
 import type { AgentViewModel } from "./agent-model";
 import { getProvider, type ProviderDefinition } from "./providers";
 import { createAgentAtoms } from "./state";
-import type { DocumentNode } from "./types";
+import type { DocumentNode, SubagentLinkNode } from "./types";
+import { openSubagentPane, isSubagentPaneOpen } from "@/app/store/subagent-pane-manager";
 import { useAgentStream } from "./useAgentStream";
 import { AgentDocumentView } from "./components/AgentDocumentView";
 import { AgentFooter } from "./components/AgentFooter";
@@ -291,6 +292,51 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
             },
         });
         onCleanup(() => unsub());
+
+        // Subscribe to subagent:spawned events — render clickable links
+        const unsubSpawned = waveEventSubscribe({
+            eventType: "subagent:spawned",
+            handler: (event: WaveEvent) => {
+                const data = event?.data as any;
+                if (!data?.agentId) return;
+
+                const linkNode: SubagentLinkNode = {
+                    type: "subagent_link",
+                    id: `subagent_${data.agentId}`,
+                    subagentId: data.agentId,
+                    slug: data.slug ?? "",
+                    parentAgent: data.parentAgent ?? "",
+                    sessionId: data.sessionId ?? "",
+                    status: "active",
+                    model: data.model ?? null,
+                };
+
+                const [, setDoc] = agentAtoms().documentAtom;
+                setDoc((prev) => [...prev, linkNode]);
+                log("subagent", `spawned: ${data.slug || data.agentId}`);
+            },
+        });
+        onCleanup(() => unsubSpawned());
+
+        // Subscribe to subagent:completed — update link status
+        const unsubCompleted = waveEventSubscribe({
+            eventType: "subagent:completed",
+            handler: (event: WaveEvent) => {
+                const data = event?.data as any;
+                if (!data?.agentId) return;
+
+                const nodeId = `subagent_${data.agentId}`;
+                const [, setDoc] = agentAtoms().documentAtom;
+                setDoc((prev) =>
+                    prev.map((n) =>
+                        n.id === nodeId && n.type === "subagent_link"
+                            ? { ...n, status: "completed" as const }
+                            : n
+                    )
+                );
+            },
+        });
+        onCleanup(() => unsubCompleted());
     });
 
     // Subscribe to subprocess output and parse into DocumentNodes
@@ -357,6 +403,25 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         return Math.max(0.5, Math.min(2.0, z));
     });
 
+    // Handle subagent link click — open a subagent pane
+    const handleSubagentClick = (node: SubagentLinkNode) => {
+        if (isSubagentPaneOpen(node.subagentId)) {
+            log("subagent", `pane already open for ${node.slug || node.subagentId}`);
+            return;
+        }
+        openSubagentPane({
+            subagentId: node.subagentId,
+            slug: node.slug,
+            parentAgent: node.parentAgent,
+            parentBlockId: model.blockId,
+            sessionId: node.sessionId,
+        }).then((blockId) => {
+            if (blockId) {
+                log("subagent", `opened pane for ${node.slug || node.subagentId}`);
+            }
+        });
+    };
+
     // Context menu for copy
     const handleContextMenu = (e: MouseEvent) => {
         const sel = window.getSelection()?.toString();
@@ -386,6 +451,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 documentAtom={agentAtoms().documentAtom}
                 documentStateAtom={agentAtoms().documentStateAtom}
                 logLines={logLines}
+                onSubagentClick={handleSubagentClick}
             />
 
             <AgentFooter agentId={agentId} onSendMessage={handleSendMessage} />

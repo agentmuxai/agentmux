@@ -32,7 +32,7 @@ export type InitState = {
 /**
  * Document node types that make up the agent's markdown document
  */
-export type DocumentNode = MarkdownNode | SectionNode | ToolNode | AgentMessageNode | UserMessageNode;
+export type DocumentNode = MarkdownNode | SectionNode | ToolNode | AgentMessageNode | UserMessageNode | SubagentLinkNode;
 
 /**
  * Raw markdown text block
@@ -171,6 +171,21 @@ export interface UserMessageNode {
     timestamp: number;
     collapsed: boolean;
     summary: string; // "👤 User Message"
+}
+
+/**
+ * Subagent link — rendered as a clickable badge in the agent pane.
+ * Clicking opens a subagent activity pane split from the parent.
+ */
+export interface SubagentLinkNode {
+    type: "subagent_link";
+    id: string;
+    subagentId: string;
+    slug: string;
+    parentAgent: string;
+    sessionId: string;
+    status: "active" | "completed";
+    model: string | null;
 }
 
 /**

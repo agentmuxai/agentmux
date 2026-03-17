@@ -847,6 +847,11 @@ declare global {
         agentCliArgs?: string[];
         agentOutputFormat?: string;
         agentBinDir?: string;
+        "subagent:*"?: boolean;
+        "subagent:id"?: string;
+        "subagent:slug"?: string;
+        "subagent:parent"?: string;
+        "subagent:session"?: string;
     };
 
     // tsgenmeta.MethodMeta

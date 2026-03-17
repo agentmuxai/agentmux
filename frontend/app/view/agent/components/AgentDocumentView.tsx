@@ -9,9 +9,10 @@
 
 import { createEffect, For, Show, type Accessor, type JSX, onCleanup } from "solid-js";
 import type { SignalPair } from "../state";
-import type { DocumentNode, DocumentState } from "../types";
+import type { DocumentNode, DocumentState, SubagentLinkNode } from "../types";
 import { AgentMessageBlock } from "./AgentMessageBlock";
 import { MarkdownBlock } from "./MarkdownBlock";
+import { SubagentLinkBlock } from "./SubagentLinkBlock";
 import { ToolBlock } from "./ToolBlock";
 
 export interface LogLine {
@@ -24,9 +25,10 @@ interface AgentDocumentViewProps {
     documentAtom: SignalPair<DocumentNode[]>;
     documentStateAtom: SignalPair<DocumentState>;
     logLines: Accessor<LogLine[]>;
+    onSubagentClick?: (node: SubagentLinkNode) => void;
 }
 
-export const AgentDocumentView = ({ documentAtom, documentStateAtom, logLines }: AgentDocumentViewProps): JSX.Element => {
+export const AgentDocumentView = ({ documentAtom, documentStateAtom, logLines, onSubagentClick }: AgentDocumentViewProps): JSX.Element => {
     const [document] = documentAtom;
     const [documentState, setDocumentState] = documentStateAtom;
     let scrollRef!: HTMLDivElement;
@@ -111,6 +113,7 @@ export const AgentDocumentView = ({ documentAtom, documentStateAtom, logLines }:
                         node={node}
                         collapsed={documentState().collapsedNodes.has(node.id)}
                         onToggle={() => toggleCollapse(node.id)}
+                        onSubagentClick={onSubagentClick}
                     />
                 )}
             </For>
@@ -126,10 +129,12 @@ const DocumentNodeRenderer = ({
     node,
     collapsed,
     onToggle,
+    onSubagentClick,
 }: {
     node: DocumentNode;
     collapsed: boolean;
     onToggle: () => void;
+    onSubagentClick?: (node: SubagentLinkNode) => void;
 }): JSX.Element => {
     switch (node.type) {
         case "markdown":
@@ -150,6 +155,9 @@ const DocumentNodeRenderer = ({
                     </div>
                 </div>
             );
+
+        case "subagent_link":
+            return <SubagentLinkBlock node={node} onClick={onSubagentClick ?? (() => {})} />;
 
         case "section":
             return (
