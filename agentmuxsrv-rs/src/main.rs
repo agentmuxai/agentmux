@@ -349,6 +349,9 @@ async fn main() {
     // Local MessageBus for inter-agent communication
     let messagebus = Arc::new(backend::messagebus::MessageBus::new());
 
+    // Subagent watcher — monitors Claude Code session dirs for spawned subagents
+    let subagent_watcher = backend::subagent_watcher::SubagentWatcher::spawn(event_bus.clone());
+
     // 5. Bind 2 TCP listeners on 127.0.0.1:0 (web + ws — separate ports matching Go)
     let web_listener = TcpListener::bind("127.0.0.1:0")
         .await
@@ -384,6 +387,7 @@ async fn main() {
         poller,
         config_watcher,
         messagebus,
+        subagent_watcher,
         local_web_url: local_web_url.clone(),
         http_client: reqwest::Client::new(),
     };

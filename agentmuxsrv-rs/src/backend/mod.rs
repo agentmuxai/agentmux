@@ -34,6 +34,7 @@ pub mod shellintegration;
 pub mod sigutil;
 pub mod sysinfo;
 pub mod storage;
+pub mod subagent_watcher;
 pub mod syncbuf;
 pub mod tarcopy;
 pub mod trimquotes;

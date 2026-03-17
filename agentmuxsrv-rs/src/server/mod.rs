@@ -27,6 +27,7 @@ use crate::backend::messagebus::MessageBus;
 use crate::backend::reactive::{Poller, ReactiveHandler};
 use crate::backend::storage::filestore::FileStore;
 use crate::backend::storage::wstore::WaveStore;
+use crate::backend::subagent_watcher::SubagentWatcher;
 use crate::backend::wconfig;
 use crate::backend::wps::Broker;
 
@@ -45,6 +46,7 @@ pub struct AppState {
     pub poller: Arc<Poller>,
     pub config_watcher: Arc<wconfig::ConfigWatcher>,
     pub messagebus: Arc<MessageBus>,
+    pub subagent_watcher: Arc<SubagentWatcher>,
     /// Local HTTP URL of this instance (e.g. "http://127.0.0.1:PORT").
     /// Used for cross-instance inject forwarding and file registry entries.
     pub local_web_url: String,

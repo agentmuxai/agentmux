@@ -18,6 +18,9 @@ export function blockViewToIcon(view: string): string {
     if (view == "help") {
         return "circle-question";
     }
+    if (view == "subagent") {
+        return "diagram-subtask";
+    }
     return "square";
 }
 
@@ -30,6 +33,9 @@ export function blockViewToName(view: string): string {
     }
     if (view == "help") {
         return "Help";
+    }
+    if (view == "subagent") {
+        return "Subagent";
     }
     return view;
 }

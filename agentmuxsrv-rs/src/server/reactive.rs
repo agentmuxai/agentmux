@@ -7,6 +7,7 @@ use serde_json::json;
 
 use crate::backend::reactive::InjectionRequest;
 use crate::backend::reactive::registry as agent_registry;
+use crate::backend::subagent_watcher;
 use crate::backend::wavebase;
 
 use super::AppState;
@@ -157,6 +158,12 @@ pub(super) async fn handle_reactive_register(
             // instances can forward inject requests to this one.
             let data_dir = wavebase::get_wave_data_dir();
             agent_registry::write(&data_dir, &req.agent_id, &state.local_web_url, &req.block_id);
+
+            // Auto-watch this agent's Claude Code config dir for subagent JSONL files.
+            if let Some(config_dir) = subagent_watcher::derive_claude_config_dir(&req.agent_id) {
+                state.subagent_watcher.watch_agent(&req.agent_id, config_dir);
+            }
+
             Json(json!({"success": true})).into_response()
         }
         Err(e) => (

@@ -844,6 +844,33 @@ fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType {
             WebReturnType::success_empty()
         }
 
+        // ---- SubagentService ----
+        ("subagent", "ListActive") => {
+            let subagents = state.subagent_watcher.list_active();
+            WebReturnType::success(serde_json::to_value(&subagents).unwrap_or_default())
+        }
+        ("subagent", "GetHistory") => {
+            let agent_id: String = match service::get_arg(args, 0) {
+                Ok(v) => v,
+                Err(e) => return WebReturnType::error(e),
+            };
+            let limit: usize = service::get_arg(args, 1).unwrap_or(100);
+            let history = state.subagent_watcher.get_history(&agent_id, limit);
+            WebReturnType::success(serde_json::to_value(&history).unwrap_or_default())
+        }
+        ("subagent", "WatchAgent") => {
+            let agent_id: String = match service::get_arg(args, 0) {
+                Ok(v) => v,
+                Err(e) => return WebReturnType::error(e),
+            };
+            let config_dir: String = match service::get_arg(args, 1) {
+                Ok(v) => v,
+                Err(e) => return WebReturnType::error(e),
+            };
+            state.subagent_watcher.watch_agent(&agent_id, std::path::PathBuf::from(config_dir));
+            WebReturnType::success_empty()
+        }
+
         _ => WebReturnType::error(format!(
             "unknown service method: {}.{}",
             call.service, call.method
