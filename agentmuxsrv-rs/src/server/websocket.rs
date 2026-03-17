@@ -37,7 +37,9 @@ use crate::backend::rpc_types::{
     CommandAppendForgeHistoryData, CommandListForgeHistoryData, CommandSearchForgeHistoryData,
     CommandImportForgeFromClawData,
     COMMAND_SUBPROCESS_SPAWN, COMMAND_AGENT_INPUT, COMMAND_AGENT_STOP, COMMAND_WRITE_AGENT_CONFIG,
+    COMMAND_RESOLVE_CLI, COMMAND_CHECK_CLI_AUTH,
     CommandSubprocessSpawnData, CommandAgentInputData, CommandAgentStopData, CommandWriteAgentConfigData,
+    CommandResolveCliData, ResolveCliResult, CommandCheckCliAuthData, CheckCliAuthResult,
 };
 use crate::backend::storage::{ForgeAgent, ForgeContent, ForgeSkill};
 use crate::backend::waveobj::{Block, TermSize, WaveObjUpdate, wave_obj_to_value};
@@ -876,6 +878,411 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
         }),
     );
 
+    // resolvecli → detect or install a CLI tool for an agent provider
+    // Each AgentMux version gets its own isolated CLI install at:
+    //   ~/.agentmux/<AGENTMUX_VERSION>/cli/<provider>/
+    // Never falls back to system PATH.
+    engine.register_handler(
+        COMMAND_RESOLVE_CLI,
+        Box::new(|data, _ctx| {
+            Box::pin(async move {
+                const AGENTMUX_VERSION: &str = env!("CARGO_PKG_VERSION");
+
+                let cmd: CommandResolveCliData = serde_json::from_value(data)
+                    .map_err(|e| format!("resolvecli: {e}"))?;
+                tracing::info!(
+                    provider = %cmd.provider_id,
+                    cli = %cmd.cli_command,
+                    agentmux_version = AGENTMUX_VERSION,
+                    "ResolveCli"
+                );
+
+                // Resolve home directory
+                let home = std::env::var("HOME")
+                    .or_else(|_| std::env::var("USERPROFILE"))
+                    .map_err(|_| "cannot determine home directory".to_string())?;
+
+                // Versioned install directory: ~/.agentmux/<version>/cli/<provider>/
+                let provider_dir = format!(
+                    "{}/.agentmux/{}/cli/{}",
+                    home, AGENTMUX_VERSION, cmd.provider_id
+                );
+                let bin_dir = format!("{}/bin", provider_dir);
+
+                // Expected binary path
+                let cli_bin = if cfg!(windows) {
+                    format!("{}/{}.exe", bin_dir, cmd.cli_command)
+                } else {
+                    format!("{}/{}", bin_dir, cmd.cli_command)
+                };
+
+                // Also check npm-style path (for npm-based providers like codex/gemini)
+                let npm_bin = if cfg!(windows) {
+                    format!("{}/node_modules/.bin/{}.cmd", provider_dir, cmd.cli_command)
+                } else {
+                    format!("{}/node_modules/.bin/{}", provider_dir, cmd.cli_command)
+                };
+
+                // Step 1: Check if already installed in versioned directory
+                for candidate in [&cli_bin, &npm_bin] {
+                    if std::path::Path::new(candidate).exists() {
+                        let version = get_cli_version(candidate).await;
+                        tracing::info!(
+                            path = %candidate, version = %version,
+                            "CLI found in versioned install"
+                        );
+                        return Ok(Some(serde_json::to_value(&ResolveCliResult {
+                            cli_path: candidate.clone(),
+                            version,
+                            source: "local_install".to_string(),
+                        }).unwrap()));
+                    }
+                }
+
+                // Step 2: Not in versioned dir yet. Try to copy from a known location.
+                let exe_name = if cfg!(windows) {
+                    format!("{}.exe", cmd.cli_command)
+                } else {
+                    cmd.cli_command.clone()
+                };
+
+                // Known locations where CLIs get installed on the system
+                let known_paths: Vec<String> = vec![
+                    format!("{}/.local/bin/{}", home, exe_name),
+                    format!("{}/.claude/local/bin/{}", home, exe_name),
+                    format!("{}/AppData/Local/Programs/{}/{}", home, cmd.cli_command, exe_name),
+                ];
+
+                // Also check PATH via where/which (to find binary, NOT to use directly)
+                let mut system_bin: Option<String> = None;
+                for path in &known_paths {
+                    if std::path::Path::new(path).exists() {
+                        system_bin = Some(path.clone());
+                        break;
+                    }
+                }
+                if system_bin.is_none() {
+                    let which_cmd = if cfg!(windows) { "where" } else { "which" };
+                    if let Ok(output) = tokio::process::Command::new(which_cmd)
+                        .arg(&cmd.cli_command)
+                        .output()
+                        .await
+                    {
+                        if output.status.success() {
+                            let path = String::from_utf8_lossy(&output.stdout)
+                                .lines().next().unwrap_or("").trim().to_string();
+                            if !path.is_empty() && std::path::Path::new(&path).exists() {
+                                system_bin = Some(path);
+                            }
+                        }
+                    }
+                }
+
+                // Create versioned directory
+                std::fs::create_dir_all(&bin_dir).map_err(|e| {
+                    format!("failed to create {}: {e}", bin_dir)
+                })?;
+
+                // Fast path: copy existing binary to versioned dir (no network needed)
+                if let Some(ref source) = system_bin {
+                    tracing::info!(
+                        source = %source, target = %cli_bin,
+                        "copying existing CLI binary to versioned directory"
+                    );
+                    std::fs::copy(source, &cli_bin).map_err(|e| {
+                        format!("failed to copy {} → {}: {e}", source, cli_bin)
+                    })?;
+                    let version = get_cli_version(&cli_bin).await;
+                    tracing::info!(path = %cli_bin, version = %version, "CLI copied to versioned dir");
+                    return Ok(Some(serde_json::to_value(&ResolveCliResult {
+                        cli_path: cli_bin,
+                        version,
+                        source: "local_install".to_string(),
+                    }).unwrap()));
+                }
+
+                // Slow path: binary not found anywhere — need to install from network
+                let install_cmd = if cfg!(windows) {
+                    &cmd.windows_install_command
+                } else {
+                    &cmd.unix_install_command
+                };
+
+                if install_cmd.is_empty() {
+                    return Err(format!(
+                        "{} not found and no install command configured for this provider",
+                        cmd.cli_command
+                    ));
+                }
+
+                tracing::info!(
+                    provider = %cmd.provider_id,
+                    install_cmd = %install_cmd,
+                    target_dir = %provider_dir,
+                    "CLI not found locally, installing from network"
+                );
+
+                // Determine if this is an npm-based provider or official installer
+                let is_npm_install = install_cmd.contains("npm install");
+
+                if is_npm_install {
+                    // npm-based providers (codex, gemini): install directly into versioned dir
+                    let npm_init = format!(
+                        "cd \"{}\" && npm init -y && npm install {}@{}",
+                        provider_dir, cmd.npm_package, cmd.pinned_version
+                    );
+                    let install_output = if cfg!(windows) {
+                        tokio::process::Command::new("cmd")
+                            .args(["/C", &npm_init])
+                            .output()
+                            .await
+                    } else {
+                        tokio::process::Command::new("bash")
+                            .args(["-c", &npm_init])
+                            .output()
+                            .await
+                    };
+
+                    let install_output = install_output.map_err(|e| {
+                        format!("failed to run npm install: {e}")
+                    })?;
+
+                    let stdout_str = String::from_utf8_lossy(&install_output.stdout);
+                    let stderr_str = String::from_utf8_lossy(&install_output.stderr);
+                    tracing::info!(
+                        exit_code = install_output.status.code().unwrap_or(-1),
+                        "npm install completed"
+                    );
+
+                    if !install_output.status.success() {
+                        let combined = format!("{}{}", stdout_str, stderr_str);
+                        return Err(check_network_error(
+                            &combined, &cmd.cli_command, install_cmd,
+                        ));
+                    }
+
+                    // Verify npm binary exists
+                    if std::path::Path::new(&npm_bin).exists() {
+                        let version = get_cli_version(&npm_bin).await;
+                        tracing::info!(path = %npm_bin, version = %version, "CLI installed (npm)");
+                        return Ok(Some(serde_json::to_value(&ResolveCliResult {
+                            cli_path: npm_bin,
+                            version,
+                            source: "installed".to_string(),
+                        }).unwrap()));
+                    }
+
+                    return Err(format!(
+                        "npm install completed but binary not found at {}",
+                        npm_bin
+                    ));
+                }
+
+                // Official installer (Claude): run installer with 120s timeout
+                let install_future = if cfg!(windows) {
+                    tokio::process::Command::new("powershell")
+                        .args(["-NoProfile", "-Command", install_cmd])
+                        .output()
+                } else {
+                    tokio::process::Command::new("bash")
+                        .args(["-c", install_cmd])
+                        .output()
+                };
+
+                let install_output = tokio::time::timeout(
+                    std::time::Duration::from_secs(120),
+                    install_future,
+                ).await
+                    .map_err(|_| format!("install timed out after 120s — try manually:\n  {}", install_cmd))?
+                    .map_err(|e| format!("failed to run install command: {e}"))?;
+
+                let stdout_str = String::from_utf8_lossy(&install_output.stdout);
+                let stderr_str = String::from_utf8_lossy(&install_output.stderr);
+                tracing::info!(
+                    exit_code = install_output.status.code().unwrap_or(-1),
+                    stdout_len = stdout_str.len(),
+                    stderr_len = stderr_str.len(),
+                    "official installer completed"
+                );
+
+                if !install_output.status.success() {
+                    let combined = format!("{}{}", stdout_str, stderr_str);
+                    return Err(check_network_error(
+                        &combined, &cmd.cli_command, install_cmd,
+                    ));
+                }
+
+                // Find where the official installer placed the binary
+                let search_paths = known_paths;
+
+                let mut found_source: Option<String> = None;
+                for search in &search_paths {
+                    if std::path::Path::new(search).exists() {
+                        found_source = Some(search.clone());
+                        break;
+                    }
+                }
+
+                // Also try `where`/`which` as last resort to find installed binary
+                if found_source.is_none() {
+                    let which_cmd = if cfg!(windows) { "where" } else { "which" };
+                    if let Ok(output) = tokio::process::Command::new(which_cmd)
+                        .arg(&cmd.cli_command)
+                        .output()
+                        .await
+                    {
+                        if output.status.success() {
+                            let path = String::from_utf8_lossy(&output.stdout)
+                                .lines().next().unwrap_or("").trim().to_string();
+                            if !path.is_empty() {
+                                found_source = Some(path);
+                            }
+                        }
+                    }
+                }
+
+                let source_path = found_source.ok_or_else(|| format!(
+                    "installer ran successfully but cannot find {} binary. \
+                     Searched: {:?}",
+                    cmd.cli_command, search_paths
+                ))?;
+
+                // Copy binary to versioned directory
+                tracing::info!(
+                    source = %source_path,
+                    target = %cli_bin,
+                    "copying CLI binary to versioned directory"
+                );
+                std::fs::copy(&source_path, &cli_bin).map_err(|e| {
+                    format!("failed to copy {} → {}: {e}", source_path, cli_bin)
+                })?;
+
+                let version = get_cli_version(&cli_bin).await;
+                tracing::info!(path = %cli_bin, version = %version, "CLI installed successfully");
+                Ok(Some(serde_json::to_value(&ResolveCliResult {
+                    cli_path: cli_bin,
+                    version,
+                    source: "installed".to_string(),
+                }).unwrap()))
+            })
+        }),
+    );
+
+    // checkcliauth → check if a CLI tool is authenticated
+    // For Claude: reads ~/.claude/.credentials.json directly (instant, no subprocess).
+    // For other providers: falls back to running the CLI auth check command.
+    engine.register_handler(
+        COMMAND_CHECK_CLI_AUTH,
+        Box::new(|data, _ctx| {
+            Box::pin(async move {
+                let cmd: CommandCheckCliAuthData = serde_json::from_value(data)
+                    .map_err(|e| format!("checkcliauth: {e}"))?;
+                tracing::info!(cli = %cmd.cli_path, "CheckCliAuth");
+
+                // Fast path: read credentials file directly (Claude)
+                if cmd.cli_path.contains("claude") {
+                    let home = std::env::var("HOME")
+                        .or_else(|_| std::env::var("USERPROFILE"))
+                        .unwrap_or_default();
+                    let creds_path = format!("{}/.claude/.credentials.json", home);
+
+                    if let Ok(content) = std::fs::read_to_string(&creds_path) {
+                        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
+                            // Check claudeAiOauth credentials
+                            let oauth = json.get("claudeAiOauth");
+                            let has_token = oauth
+                                .and_then(|o| o.get("accessToken"))
+                                .and_then(|v| v.as_str())
+                                .map(|s| !s.is_empty())
+                                .unwrap_or(false);
+
+                            let has_refresh = oauth
+                                .and_then(|o| o.get("refreshToken"))
+                                .and_then(|v| v.as_str())
+                                .map(|s| !s.is_empty())
+                                .unwrap_or(false);
+
+                            // Authenticated if we have an access token OR a refresh token
+                            // (CLI auto-refreshes expired tokens transparently)
+                            let authenticated = has_token || has_refresh;
+
+                            let subscription = oauth
+                                .and_then(|o| o.get("subscriptionType"))
+                                .and_then(|v| v.as_str())
+                                .map(|s| s.to_string());
+
+                            let auth_method = Some("claude.ai oauth".to_string());
+
+                            tracing::info!(
+                                authenticated = authenticated,
+                                subscription = ?subscription,
+                                has_refresh = has_refresh,
+                                "claude auth check (credentials file)"
+                            );
+
+                            let result = CheckCliAuthResult {
+                                authenticated,
+                                email: subscription.clone(), // no email in creds, show subscription
+                                auth_method,
+                                raw_output: format!("subscription: {}", subscription.unwrap_or_default()),
+                            };
+                            return Ok(Some(serde_json::to_value(&result).unwrap()));
+                        }
+                    }
+                    // Credentials file not found or unparseable — not authenticated
+                    let result = CheckCliAuthResult {
+                        authenticated: false,
+                        email: None,
+                        auth_method: None,
+                        raw_output: "no credentials file found".to_string(),
+                    };
+                    return Ok(Some(serde_json::to_value(&result).unwrap()));
+                }
+
+                // Slow path: run CLI auth check command (other providers)
+                let output = tokio::time::timeout(
+                    std::time::Duration::from_secs(25),
+                    tokio::process::Command::new(&cmd.cli_path)
+                        .args(&cmd.auth_check_args)
+                        .output(),
+                ).await
+                    .map_err(|_| "auth check timed out (25s)".to_string())?
+                    .map_err(|e| format!("failed to run auth check: {e}"))?;
+
+                let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+                let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+
+                let mut authenticated = false;
+                let mut email = None;
+                let mut auth_method = None;
+
+                if let Ok(json) = serde_json::from_str::<serde_json::Value>(&stdout) {
+                    authenticated = json.get("loggedIn")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false);
+                    email = json.get("email")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string());
+                    auth_method = json.get("authMethod")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string());
+                } else {
+                    authenticated = output.status.success();
+                }
+
+                let raw_output = if !stdout.is_empty() { stdout } else { stderr };
+
+                let result = CheckCliAuthResult {
+                    authenticated,
+                    email,
+                    auth_method,
+                    raw_output,
+                };
+                Ok(Some(serde_json::to_value(&result).unwrap()))
+            })
+        }),
+    );
+
     // eventreadhistory → read persisted event history from the WPS broker
     let broker_history = state.broker.clone();
     engine.register_handler(
@@ -1447,6 +1854,44 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
             })
         }),
     );
+}
+
+fn check_network_error(combined_output: &str, cli_command: &str, install_cmd: &str) -> String {
+    let lower = combined_output.to_lowercase();
+    if lower.contains("could not resolve host")
+        || lower.contains("network")
+        || lower.contains("timeout")
+        || lower.contains("connection refused")
+        || lower.contains("no internet")
+        || lower.contains("getaddrinfo")
+        || lower.contains("enotfound")
+    {
+        format!(
+            "no internet connection — cannot install {}. \
+             Connect to the internet and try again, or install manually:\n  {}",
+            cli_command, install_cmd
+        )
+    } else {
+        format!(
+            "install failed: {}",
+            combined_output.chars().take(500).collect::<String>()
+        )
+    }
+}
+
+async fn get_cli_version(cli_path: &str) -> String {
+    match tokio::process::Command::new(cli_path)
+        .arg("--version")
+        .output()
+        .await
+    {
+        Ok(output) if output.status.success() => {
+            String::from_utf8_lossy(&output.stdout)
+                .trim()
+                .to_string()
+        }
+        _ => "unknown".to_string(),
+    }
 }
 
 /// Parse a CommandBlockInputData into a BlockInputUnion.

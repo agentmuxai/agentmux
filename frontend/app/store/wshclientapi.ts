@@ -588,6 +588,16 @@ class RpcApiType {
         return client.wshRpcCall("writeagentconfig", data, opts);
     }
 
+    // command "resolvecli" [call]
+    ResolveCliCommand(client: WshClient, data: CommandResolveCliData, opts?: RpcOpts): Promise<ResolveCliResult> {
+        return client.wshRpcCall("resolvecli", data, opts);
+    }
+
+    // command "checkcliauth" [call]
+    CheckCliAuthCommand(client: WshClient, data: CommandCheckCliAuthData, opts?: RpcOpts): Promise<CheckCliAuthResult> {
+        return client.wshRpcCall("checkcliauth", data, opts);
+    }
+
 }
 
 export const RpcApi = new RpcApiType();

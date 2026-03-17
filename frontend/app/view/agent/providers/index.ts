@@ -15,7 +15,8 @@ export interface ProviderDefinition {
     npmPackage: string;          // npm package name for local install
     pinnedVersion: string;       // version to install ("latest" or specific)
     docsUrl: string;
-    installCommand?: string;
+    windowsInstallCommand: string;  // official installer for Windows (powershell)
+    unixInstallCommand: string;      // official installer for macOS/Linux (bash)
     icon: string;
     unsetEnv?: string[];         // env vars to unset before launching (e.g. nested-session guards)
 }
@@ -26,7 +27,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         displayName: "Claude Code",
         cliCommand: "claude",
         defaultArgs: [],
-        styledArgs: ["--output-format", "stream-json", "--verbose"],
+        styledArgs: ["--output-format", "stream-json", "--verbose", "--include-partial-messages"],
         outputFormat: "raw",
         styledOutputFormat: "claude-stream-json",
         authType: "oauth",
@@ -35,6 +36,8 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         npmPackage: "@anthropic-ai/claude-code",
         pinnedVersion: "latest",
         docsUrl: "https://docs.anthropic.com/claude-code",
+        windowsInstallCommand: "irm https://claude.ai/install.ps1 | iex",
+        unixInstallCommand: "curl -fsSL https://claude.ai/install.sh | bash",
         icon: "sparkles",
         unsetEnv: ["CLAUDECODE"],
     },
@@ -52,6 +55,8 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         npmPackage: "@openai/codex",
         pinnedVersion: "0.107.0",
         docsUrl: "https://platform.openai.com/docs/codex",
+        windowsInstallCommand: "npm install -g @openai/codex",
+        unixInstallCommand: "npm install -g @openai/codex",
         icon: "robot",
     },
     gemini: {
@@ -68,6 +73,8 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         npmPackage: "@google/gemini-cli",
         pinnedVersion: "0.31.0",
         docsUrl: "https://ai.google.dev/gemini-cli",
+        windowsInstallCommand: "npm install -g @google/gemini-cli",
+        unixInstallCommand: "npm install -g @google/gemini-cli",
         icon: "diamond",
     },
 };

@@ -1577,6 +1577,37 @@ declare global {
         files: AgentConfigFile[];
     };
 
+    // wshrpc.CommandResolveCliData
+    type CommandResolveCliData = {
+        provider_id: string;
+        cli_command: string;
+        npm_package: string;
+        pinned_version: string;
+        windows_install_command: string;
+        unix_install_command: string;
+    };
+
+    // wshrpc.ResolveCliResult
+    type ResolveCliResult = {
+        cli_path: string;
+        version: string;
+        source: string;
+    };
+
+    // wshrpc.CommandCheckCliAuthData
+    type CommandCheckCliAuthData = {
+        cli_path: string;
+        auth_check_args: string[];
+    };
+
+    // wshrpc.CheckCliAuthResult
+    type CheckCliAuthResult = {
+        authenticated: boolean;
+        email?: string;
+        auth_method?: string;
+        raw_output: string;
+    };
+
 }
 
 export {}
