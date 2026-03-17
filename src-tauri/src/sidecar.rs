@@ -1,3 +1,5 @@
+#[cfg(unix)]
+use libc;
 use tauri::Emitter;
 use tauri::Manager;
 use tauri_plugin_shell::ShellExt;

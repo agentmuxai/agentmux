@@ -1,6 +1,6 @@
 [package]
 name = "agentmux"
-version = "0.32.15"
+version = "0.32.16"
 description = "AgentMux - AI-Native Terminal"
 authors = ["AgentMux Corp"]
 edition = "2021"
@@ -57,3 +57,6 @@ objc2-foundation = "0.3"
 gtk = "0.18"
 glib = "0.18"
 webkit2gtk = { version = "2.0", features = ["v2_40"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"

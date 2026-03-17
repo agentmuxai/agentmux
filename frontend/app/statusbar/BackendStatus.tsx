@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { atoms, getApi } from "@/store/global";
+import { waveEventSubscribe } from "@/app/store/wps";
 import { createEffect, createSignal, onCleanup, onMount, Show, type JSX } from "solid-js";
 
 function pad2(n: number): string {
@@ -44,15 +45,22 @@ const BackendStatus = (): JSX.Element => {
         }
     });
 
-    // Tick uptime every second
+    // Drive uptime from sysinfo event timestamp so all windows update in sync.
+    // The backend broadcasts sysinfo with a server-side ts (ms epoch); all windows
+    // receive the same ts and compute the same integer, eliminating phase drift.
     onMount(() => {
-        const iv = setInterval(() => {
-            const start = startedAt();
-            if (start != null) {
-                setUptimeSecs(Math.floor((Date.now() - start) / 1000));
-            }
-        }, 1000);
-        onCleanup(() => clearInterval(iv));
+        const unsub = waveEventSubscribe({
+            eventType: "sysinfo",
+            scope: "local",
+            handler: (event) => {
+                const ts: number | undefined = (event as WaveEvent)?.data?.ts;
+                const start = startedAt();
+                if (ts != null && start != null) {
+                    setUptimeSecs(Math.floor((ts - start) / 1000));
+                }
+            },
+        });
+        onCleanup(() => unsub?.());
     });
 
     const icon = () => {
