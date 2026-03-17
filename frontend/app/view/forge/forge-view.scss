@@ -6,7 +6,7 @@
     flex-direction: column;
     height: 100%;
     overflow: hidden;
-    padding: 16px;
+    padding: 6px;
     box-sizing: border-box;
     color: var(--main-text-color);
     font-size: 13px;
@@ -16,7 +16,7 @@
     display: flex;
     align-items: center;
     gap: 6px;
-    margin-bottom: 8px;
+    margin-bottom: 4px;
 }
 
 .forge-title {
@@ -33,7 +33,7 @@
 .forge-divider {
     height: 1px;
     background: var(--border-color);
-    margin-bottom: 12px;
+    margin-bottom: 6px;
 }
 
 // ── Empty state ───────────────────────────────────────────────────────────────
@@ -69,13 +69,13 @@
 .forge-list {
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 4px;
     overflow-y: auto;
     flex: 1;
 }
 
 .forge-list-footer {
-    margin-top: 12px;
+    margin-top: 6px;
     display: flex;
     justify-content: flex-start;
     gap: 6px;
@@ -88,7 +88,7 @@
     display: flex;
     align-items: center;
     gap: 10px;
-    padding: 10px 12px;
+    padding: 6px 8px;
     background: var(--block-bg-color);
     border: 1px solid var(--border-color);
     border-radius: 6px;
@@ -169,7 +169,7 @@
 .forge-form {
     display: flex;
     flex-direction: column;
-    gap: 14px;
+    gap: 8px;
     overflow-y: auto;
     flex: 1;
 }

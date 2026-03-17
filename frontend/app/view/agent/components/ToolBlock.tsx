@@ -7,6 +7,7 @@
 
 import clsx from "clsx";
 import { createSignal, Show, type JSX } from "solid-js";
+import { createBlock } from "@/store/global";
 import type { ToolNode } from "../types";
 import { BashOutputViewer } from "./BashOutputViewer";
 import { DiffViewer } from "./DiffViewer";
@@ -78,6 +79,18 @@ export const ToolBlock = ({ node, collapsed, onToggle }: ToolBlockProps): JSX.El
                     </div>
                 );
 
+            case "Agent":
+                return (
+                    <div class="agent-tool-agent">
+                        <Show when={(node.params as any).description}>
+                            <div class="agent-tool-agent-desc">{(node.params as any).description}</div>
+                        </Show>
+                        <Show when={node.result}>
+                            <pre class="agent-tool-agent-result">{displayResult()}</pre>
+                        </Show>
+                    </div>
+                );
+
             case "Task":
                 return (
                     <div class="agent-tool-task">
@@ -106,6 +119,24 @@ export const ToolBlock = ({ node, collapsed, onToggle }: ToolBlockProps): JSX.El
                 <span class="agent-tool-name">{node.summary}</span>
                 <Show when={node.duration}>
                     <span class="agent-tool-duration">({node.duration.toFixed(1)}s)</span>
+                </Show>
+                <Show when={node.tool === "Agent"}>
+                    <button
+                        class="agent-tool-open-pane"
+                        title="Open subagent in new pane"
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            const agentId = (node.params as any).subagent_id || node.id;
+                            createBlock({
+                                meta: {
+                                    view: "subagent",
+                                    "subagent:id": agentId,
+                                } as any,
+                            });
+                        }}
+                    >
+                        ⧉
+                    </button>
                 </Show>
             </div>
             <Show when={!collapsed}>

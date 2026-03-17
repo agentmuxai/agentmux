@@ -306,6 +306,10 @@ export class ClaudeCodeStreamParser {
                 return params.pattern || "";
             case "Glob":
                 return params.pattern || "";
+            case "Agent": {
+                const desc = params.description || params.prompt || "";
+                return desc.length > 40 ? desc.substring(0, 40) + "..." : desc;
+            }
             default:
                 return "";
         }
@@ -316,7 +320,7 @@ export class ClaudeCodeStreamParser {
      */
     private normalizeToolName(tool: string): ToolNode['tool'] {
         const normalized = tool.charAt(0).toUpperCase() + tool.slice(1).toLowerCase();
-        const knownTools = ["Read", "Edit", "Bash", "Write", "Grep", "Glob", "Task"];
+        const knownTools = ["Read", "Edit", "Bash", "Write", "Grep", "Glob", "Task", "Agent"];
 
         return knownTools.includes(normalized) ? (normalized as ToolNode['tool']) : "Other";
     }
