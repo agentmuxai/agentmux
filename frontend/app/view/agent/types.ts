@@ -136,7 +136,7 @@ export type ToolResult = ReadResult | EditResult | WriteResult | BashResult | Gr
 export interface ToolNode {
     type: "tool";
     id: string;
-    tool: "Read" | "Edit" | "Bash" | "Write" | "Grep" | "Glob" | "Task" | "Other";
+    tool: "Read" | "Edit" | "Bash" | "Write" | "Grep" | "Glob" | "Task" | "Agent" | "Other";
     params: ToolParams;
     status: "running" | "success" | "failed";
     duration?: number; // Seconds
@@ -316,6 +316,7 @@ export const TOOL_ICONS: Record<string, string> = {
     Grep: "🔍",
     Glob: "📁",
     Task: "🛠️",
+    Agent: "🤖",
     Other: "🛠️",
 };
 

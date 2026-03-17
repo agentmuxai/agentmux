@@ -10,7 +10,7 @@
     color: var(--main-text-color);
     font-family: var(--termfontfamily, "JetBrains Mono", "Fira Code", "Consolas", monospace);
     font-size: var(--termfontsize, 13px);
-    line-height: 1.6;
+    line-height: 1.35;
     display: flex;
     flex-direction: column;
     height: 100%;
@@ -24,20 +24,20 @@
     .agent-document {
         flex: 1;
         overflow-y: auto;
-        padding: 12px 16px;
+        padding: 4px 6px;
         display: flex;
         flex-direction: column;
-        gap: 8px;
+        gap: 4px;
     }
 
     // === Status Log (terminal-style) ===
     .agent-status-log {
-        padding: 8px 12px;
+        padding: 4px 6px;
         font-family: var(--fixed-font);
         font-size: 12px;
-        line-height: 1.7;
+        line-height: 1.35;
         border-bottom: 1px solid var(--border-color);
-        margin-bottom: 8px;
+        margin-bottom: 4px;
     }
 
     .agent-status-line {
@@ -248,7 +248,7 @@
         display: flex;
         align-items: center;
         gap: 8px;
-        padding: 8px 12px;
+        padding: 4px 6px;
         border-bottom: 1px solid var(--border-color);
         background: color-mix(in srgb, var(--accent-color) 5%, transparent);
         flex-shrink: 0;
@@ -292,13 +292,13 @@
         white-space: pre-wrap;
         word-break: break-word;
         font-size: var(--termfontsize, 13px);
-        line-height: 1.5;
+        line-height: 1.35;
         color: var(--main-text-color);
     }
 
     // === Markdown Block ===
     .agent-markdown-block {
-        padding: 4px 8px;
+        padding: 2px 6px;
         color: var(--main-text-color);
         opacity: 0.9;
         user-select: text;
@@ -313,7 +313,7 @@
         }
 
         p {
-            margin: 4px 0;
+            margin: 2px 0;
         }
 
         code {
@@ -358,8 +358,8 @@
         .agent-tool-summary {
             display: flex;
             align-items: center;
-            gap: 8px;
-            padding: 8px 12px;
+            gap: 6px;
+            padding: 4px 6px;
             user-select: none;
 
             .agent-tool-chevron {
@@ -388,6 +388,39 @@
         .agent-tool-loading {
             color: var(--secondary-text-color);
             padding: 8px 0;
+        }
+
+        .agent-tool-open-pane {
+            background: none;
+            border: 1px solid var(--border-color);
+            border-radius: 3px;
+            color: var(--accent-color, #a78bfa);
+            cursor: pointer;
+            font-size: 13px;
+            padding: 1px 6px;
+            line-height: 1;
+            flex-shrink: 0;
+
+            &:hover {
+                background: var(--accent-color, #a78bfa);
+                color: #fff;
+            }
+        }
+
+        .agent-tool-agent {
+            .agent-tool-agent-desc {
+                color: var(--secondary-text-color);
+                font-size: 12px;
+                margin-bottom: 4px;
+            }
+
+            .agent-tool-agent-result {
+                font-size: 12px;
+                white-space: pre-wrap;
+                word-break: break-word;
+                max-height: 200px;
+                overflow-y: auto;
+            }
         }
 
         .agent-tool-show-more {
@@ -643,21 +676,12 @@
 
     // === User Message ===
     .agent-user-message {
-        display: flex;
-        gap: 12px;
         padding: 8px 12px;
         background: color-mix(in srgb, var(--accent-color) 5%, transparent);
         border-left: 2px solid var(--accent-color);
         border-radius: 4px;
 
-        .agent-user-message-icon {
-            font-size: 20px;
-            flex-shrink: 0;
-        }
-
         .agent-user-message-content {
-            flex: 1;
-
             pre {
                 margin: 0;
                 white-space: pre-wrap;
