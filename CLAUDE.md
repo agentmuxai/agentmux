@@ -183,6 +183,34 @@ Ensure `frontend/wave.ts` uses `getApi().getAboutModalDetails().version`
 `dist/schema/` is wiped by `task clean` but automatically recreated by the
 `copy:schema` dependency in `dev`, `start`, `quickdev`, and `package` tasks.
 
+### Backspace broken in terminal on Linux (WebGL renderer)
+**DO NOT remove the Linux Canvas renderer override in `termwrap.ts:loadRendererAddon`.**
+xterm.js's WebGL renderer does not correctly handle control sequences (`\x08` backspace,
+`ESC[K` erase-in-line) on WebKitGTK — the PTY round-trip is correct but WebGL fails to
+display the result. Fix: force Canvas renderer on Linux (`PLATFORM === PlatformLinux`
+check at the top of `loadRendererAddon`). WebGL is still used on macOS/Windows.
+This has regressed multiple times — the check must stay.
+
+### AppImage shows cog/gear icon instead of app icon
+`appimagetool` creates `.DirIcon` inside the AppImage as an **absolute symlink** to the
+build machine's AppDir path. The symlink is broken on any other machine, so Nautilus falls
+back to a generic icon.
+
+**Fix** (already applied in `Taskfile.yml` package task): the `.DirIcon` symlink is replaced
+with a real file copy of `AgentMux.png` before `appimagetool` runs. If the icon regresses,
+verify with:
+```bash
+./AgentMux_*.AppImage --appimage-extract .DirIcon
+ls -la squashfs-root/.DirIcon   # must be a regular file, not a symlink
+```
+Also clear Nautilus's thumbnail cache if the old icon was cached: `rm -rf ~/.cache/thumbnails/`
+
+### Wayland app_id and desktop file matching
+The Wayland `xdg_toplevel.app_id` is `"agentmux"` (the binary name), **not** the Tauri
+`identifier` field from `tauri.conf.json`. GNOME matches the running window to
+`agentmux.desktop` only. The old code incorrectly registered a versioned
+`ai.agentmux.app.vX-Y-Z.desktop` which was never matched. Only `agentmux.desktop` is needed.
+
 ### Port Conflicts
 - Dev server port: 1420 (Vite) + backend port (varies)
 - Check: `netstat -ano | grep :1420`

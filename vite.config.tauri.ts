@@ -53,13 +53,10 @@ export default defineConfig({
                 index: "index.html",
             },
             output: {
-                manualChunks(id) {
-                    const p = id.replace(/\\/g, "/");
-                    if (p.includes("node_modules/mermaid") || p.includes("node_modules/@mermaid")) return "mermaid";
-                    if (p.includes("node_modules/katex") || p.includes("node_modules/@katex")) return "katex";
-                    if (p.includes("node_modules/shiki") || p.includes("node_modules/@shiki")) return "shiki";
-                    return undefined;
-                },
+                // DISABLED: manualChunks creates static inter-chunk imports that
+                // WebKitGTK cannot resolve over tauri:// protocol, preventing JS from starting.
+                // All code goes in one bundle. Dynamic imports (mermaid, katex, shiki) are
+                // still lazy-loaded but as inlined chunks, not separate files.
             },
         },
     },

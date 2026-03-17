@@ -7,7 +7,7 @@ import { RpcApi } from "@/app/store/wshclientapi";
 import { TabRpcClient } from "@/app/store/wshrpcutil";
 import { WOS, atoms, fetchWaveFile, getSettingsKeyAtom, globalStore, openLink } from "@/app/store/global";
 import * as services from "@/app/store/services";
-import { PLATFORM, PlatformMacOS, PlatformWindows } from "@/util/platformutil";
+import { PLATFORM, PlatformLinux, PlatformMacOS, PlatformWindows } from "@/util/platformutil";
 import { base64ToArray, fireAndForget } from "@/util/util";
 import { SearchAddon } from "@xterm/addon-search";
 import { SerializeAddon } from "@xterm/addon-serialize";
@@ -301,6 +301,14 @@ export class TermWrap {
     // ── Private helpers ────────────────────────────────────────────────
 
     private loadRendererAddon(useWebGl: boolean) {
+        // WebKitGTK's WebGL renderer does not correctly handle control sequences
+        // (backspace \x08, erase-in-line ESC[K) — force Canvas on Linux.
+        if (PLATFORM === PlatformLinux) {
+            const canvasAddon = new CanvasAddon();
+            this.toDispose.push(canvasAddon);
+            this.terminal.loadAddon(canvasAddon);
+            return;
+        }
         if (WebGLSupported && useWebGl) {
             try {
                 const webglAddon = new WebglAddon();

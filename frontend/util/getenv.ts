@@ -27,7 +27,9 @@ export function getEnv(paramName: string): string {
         if ((win as any)[windowGlobalName] !== undefined) {
             return (win as any)[windowGlobalName];
         }
-        return getApi().getEnv(paramName);
+        const api = getApi();
+        if (api == null) return null;
+        return api.getEnv(paramName);
     }
 
     const proc = getProcess();

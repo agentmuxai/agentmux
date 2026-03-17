@@ -125,6 +125,39 @@ tasks:
             - task: tauri:copy-sidecars
             - task: copy:schema
             - npx tauri build {{.CLI_ARGS}}
+            # On Linux: patch the AppImage AppRun after Tauri/linuxdeploy creates it.
+            # linuxdeploy's default AppRun sources a GTK hook that forces GDK_BACKEND=x11
+            # (breaking Wayland) and does NOT set WEBKIT_DISABLE_DMABUF_RENDERER=1
+            # (causing the WebKit window to silently not appear on some systems).
+            - cmd: |
+                if [ "$(uname)" != "Linux" ]; then exit 0; fi
+                APPDIR="target/release/bundle/appimage/AgentMux.AppDir"
+                if [ ! -d "$APPDIR" ]; then
+                  echo "⚠ AppDir not found — skipping AppRun patch (non-AppImage build?)"
+                  exit 0
+                fi
+                # Strip bundled system libs — WebKitGTK and GTK3 must come from the
+                # host system so WebKit can locate its subprocess binaries (WebKitNetworkProcess
+                # etc.) at the correct system paths. Bundling them causes "No such file or
+                # directory" crashes when WebKit tries to spawn subprocesses via relative paths.
+                rm -rf "$APPDIR/usr/lib"
+                echo "✓ Stripped bundled system libraries (using host WebKitGTK)"
+                rm -rf "$APPDIR/apprun-hooks"
+                # Replace .DirIcon symlink with a real file copy so the icon resolves
+                # after distribution (absolute symlinks to the build machine's AppDir path
+                # are broken on any other machine / after the build tree is removed).
+                if [ -L "$APPDIR/.DirIcon" ] || [ ! -f "$APPDIR/.DirIcon" ]; then
+                  rm -f "$APPDIR/.DirIcon"
+                  cp "$APPDIR/AgentMux.png" "$APPDIR/.DirIcon"
+                  echo "✓ Replaced .DirIcon symlink with file copy"
+                fi
+                cp scripts/linux-apprun.sh "$APPDIR/AppRun"
+                chmod +x "$APPDIR/AppRun"
+                echo "✓ Patched AppRun (WEBKIT_DISABLE_DMABUF_RENDERER=1, GDK_BACKEND auto)"
+                VERSION=$(node version.cjs)
+                OUTPUT="target/release/bundle/appimage/AgentMux_${VERSION}_amd64.AppImage"
+                ARCH=x86_64 appimagetool "$APPDIR" "$OUTPUT" 2>&1
+                echo "✅ Repackaged AppImage: $OUTPUT"
         deps:
             - clean
             - npm:install
@@ -249,16 +282,32 @@ tasks:
                 cp "$SRC" "$HOME/Desktop/"
                 chmod +x "$HOME/Desktop/AgentMux_${VERSION}_amd64.AppImage"
                 echo "✅ Deployed to Desktop: AgentMux_${VERSION}_amd64.AppImage"
-                # Create trusted .desktop launcher for double-click support
+                # Pre-register icon and desktop files so GNOME shows the correct icon
+                # immediately, before the app is run for the first time.
+                # AppRun repeats this at runtime to keep paths current.
+                APPDIR="target/release/bundle/appimage/AgentMux.AppDir"
+                APPIMAGE_PATH="$HOME/Desktop/AgentMux_${VERSION}_amd64.AppImage"
+                ICON_DIR="$HOME/.local/share/icons/hicolor/256x256/apps"
+                APPS_DIR="$HOME/.local/share/applications"
+                mkdir -p "$ICON_DIR" "$APPS_DIR"
+                if [ -f "$APPDIR/AgentMux.png" ]; then
+                  cp -f "$APPDIR/AgentMux.png" "$ICON_DIR/agentmux.png"
+                  echo "✓ Pre-registered icon in hicolor theme"
+                fi
+                # Register agentmux.desktop — Wayland app_id and X11 WM_CLASS both equal
+                # the binary name "agentmux", so only this one file is needed.
+                _desktop_content=$(sed "s|^Exec=.*|Exec=$APPIMAGE_PATH|" "$APPDIR/AgentMux.desktop")
+                printf '%s\n' "$_desktop_content" > "$APPS_DIR/agentmux.desktop"
+                # Ensure hicolor has an index.theme so gtk-update-icon-cache succeeds
+                if [ ! -f "$HOME/.local/share/icons/hicolor/index.theme" ]; then
+                  cp /usr/share/icons/hicolor/index.theme "$HOME/.local/share/icons/hicolor/index.theme" 2>/dev/null || true
+                fi
+                update-desktop-database "$APPS_DIR" 2>/dev/null || true
+                gtk-update-icon-cache -f "$HOME/.local/share/icons/hicolor" 2>/dev/null || true
+                echo "✓ Registered desktop file: agentmux.desktop"
+                # Create trusted .desktop launcher on Desktop for double-click support
                 DESKTOP_FILE="$HOME/Desktop/AgentMux.desktop"
-                cat > "$DESKTOP_FILE" <<DEOF
-                [Desktop Entry]
-                Name=AgentMux
-                Exec=$HOME/Desktop/AgentMux_${VERSION}_amd64.AppImage
-                Icon=agentmux
-                Type=Application
-                Categories=Development;
-                DEOF
+                sed "s|^Exec=.*|Exec=$APPIMAGE_PATH|" "$APPDIR/AgentMux.desktop" > "$DESKTOP_FILE"
                 chmod +x "$DESKTOP_FILE"
                 # Trust the .desktop file for GNOME
                 gio set "$DESKTOP_FILE" metadata::trusted true 2>/dev/null || true

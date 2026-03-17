@@ -163,6 +163,10 @@ function createWaveValueObject<T extends WaveObj>(oref: string, shouldFetch: boo
         wov.pendingPromise = null;
         wov.setData({ value: val, loading: false });
         console.log("WaveObj resolved", oref, Date.now() - startTs + "ms");
+    }).catch(() => {
+        // fetch may fail transiently (e.g. endpoint not yet set at module init);
+        // caller can retry via getWaveObjectValue when ready
+        wov.pendingPromise = null;
     });
     return wov;
 }

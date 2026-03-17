@@ -37,13 +37,15 @@ import * as WOS from "@/app/store/wos";
 import { loadFonts } from "@/util/fontutil";
 import { setKeyUtilPlatform } from "@/util/keyutil";
 import { render } from "solid-js/web";
+import { ContextMenuModel } from "@/app/store/contextmenu";
+// Static import — avoids dynamic import() hang in WebKitGTK over tauri:// protocol.
+import { getCurrentWindow } from "@tauri-apps/api/window";
 
-
-const platform = getApi().getPlatform();
-
-const appVersion = getApi().getAboutModalDetails().version;
-
-document.title = `AgentMux ${appVersion}`;
+// Deferred — assigned inside initBare() after window.api is ready.
+// Do NOT call getApi() at module level: this file is statically imported by
+// tauri-bootstrap.ts before setupTauriApi() runs, so window.api does not exist yet.
+let platform: string;
+let appVersion: string;
 let savedInitOpts: AgentMuxInitOpts = null;
 
 // Update window title with instance ID if running in multi-instance mode
@@ -56,7 +58,6 @@ async function updateWindowTitleWithInstanceID() {
 
         const { invoke } = await import("@tauri-apps/api/core");
         const { readTextFile, exists } = await import("@tauri-apps/plugin-fs");
-        const { getCurrentWindow } = await import("@tauri-apps/api/window");
 
         const dataDir = await invoke<string>("get_data_dir");
         // Use platform-agnostic path joining
@@ -255,7 +256,6 @@ async function initTauriWave(): Promise<void> {
 
         // Show the window now that it's fully initialized (Tauri starts hidden)
         try {
-            const { getCurrentWindow } = await import("@tauri-apps/api/window");
             const currentWindow = getCurrentWindow();
             await currentWindow.show();
             if (platform === "linux") {
@@ -272,7 +272,6 @@ async function initTauriWave(): Promise<void> {
         showStartupError(String(error));
         // Show window even on error so user can see the error message
         try {
-            const { getCurrentWindow } = await import("@tauri-apps/api/window");
             await getCurrentWindow().show();
         } catch {}
     }
@@ -345,7 +344,6 @@ async function initTauriNewWindow(): Promise<void> {
 
         // Show the window now that it's initialized
         try {
-            const { getCurrentWindow } = await import("@tauri-apps/api/window");
             const currentWindow = getCurrentWindow();
             await currentWindow.show();
             await currentWindow.setFocus();
@@ -360,13 +358,21 @@ async function initTauriNewWindow(): Promise<void> {
         showStartupError("New window: " + String(error));
         // Show Tauri window so user sees the error
         try {
-            const { getCurrentWindow } = await import("@tauri-apps/api/window");
             await getCurrentWindow().show();
         } catch {}
     }
 }
 
-async function initBare() {
+export async function initBare() {
+    // window.api is guaranteed to exist here — tauri-bootstrap.ts calls setupTauriApi()
+    // before calling initBare(). Assign deferred module-level values now.
+    platform = getApi().getPlatform();
+    appVersion = getApi().getAboutModalDetails().version;
+    document.title = `AgentMux ${appVersion}`;
+
+    // Register context menu click handler now that window.api exists.
+    ContextMenuModel.init();
+
     const bareStart = performance.now();
     (window as any).__startupPerfStart = bareStart;
     getApi().sendLog("Init Bare");
@@ -446,12 +452,15 @@ async function initBare() {
     });
 }
 
-// Handle both cases: DOM not yet loaded, or already loaded (Tauri dynamic import)
-if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", initBare);
-} else {
-    // DOM already loaded (e.g., when dynamically imported from tauri-bootstrap)
-    initBare();
+// tauri-bootstrap.ts calls initBare() directly (static import).
+// This self-start path is kept only for non-Tauri/dev environments where
+// tauri-bootstrap is not the entry point.
+if (typeof (window as any).__TAURI_INTERNALS__ === "undefined") {
+    if (document.readyState === "loading") {
+        document.addEventListener("DOMContentLoaded", initBare);
+    } else {
+        initBare();
+    }
 }
 
 async function initWaveWrap(initOpts: AgentMuxInitOpts) {
