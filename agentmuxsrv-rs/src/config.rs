@@ -12,6 +12,7 @@ pub struct CliArgs {
     /// Instance identifier (used for multi-version coexistence)
     #[arg(long = "instance", default_value = "default")]
     pub instance: String,
+
 }
 
 #[derive(Debug, Clone)]

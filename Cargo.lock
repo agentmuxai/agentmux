@@ -17,6 +17,7 @@ dependencies = [
  "glib",
  "gtk",
  "json_comments",
+ "libc",
  "serde",
  "serde_json",
  "tauri",
