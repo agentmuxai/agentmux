@@ -30,6 +30,7 @@ use super::{
     BlockControllerRuntimeStatus, BlockInputUnion, Controller, STATUS_DONE, STATUS_INIT,
     STATUS_RUNNING,
 };
+use super::health::{classify_output_line, HealthMonitor};
 use crate::backend::eventbus::EventBus;
 use crate::backend::storage::wstore::WaveStore;
 use crate::backend::wps;
@@ -91,6 +92,8 @@ pub struct SubprocessController {
     event_bus: Option<Arc<EventBus>>,
     /// Wave object store for block metadata persistence.
     wstore: Option<Arc<WaveStore>>,
+    /// Agent health monitor (output activity + error tracking).
+    health_monitor: Arc<HealthMonitor>,
 }
 
 impl SubprocessController {
@@ -102,6 +105,10 @@ impl SubprocessController {
         event_bus: Option<Arc<EventBus>>,
         wstore: Option<Arc<WaveStore>>,
     ) -> Self {
+        let health_monitor = Arc::new(HealthMonitor::new(
+            block_id.clone(),
+            broker.clone(),
+        ));
         Self {
             tab_id,
             block_id,
@@ -117,6 +124,7 @@ impl SubprocessController {
             broker,
             event_bus,
             wstore,
+            health_monitor,
         }
     }
 
@@ -190,6 +198,7 @@ impl SubprocessController {
             Self::set_status(&mut inner, STATUS_RUNNING);
         }
         self.publish_status();
+        self.health_monitor.set_active_turn(true);
 
         // Build command
         let mut cmd = Command::new(&config.cli_command);
@@ -254,6 +263,7 @@ impl SubprocessController {
         let inner_read = Arc::clone(&self.inner);
         let wstore_read = self.wstore.clone();
         let event_bus_read = self.event_bus.clone();
+        let health_read = Arc::clone(&self.health_monitor);
         tokio::spawn(async move {
             let reader = BufReader::new(stdout);
             let mut lines = reader.lines();
@@ -262,6 +272,15 @@ impl SubprocessController {
                 let trimmed = line.trim();
                 if trimmed.is_empty() {
                     continue;
+                }
+
+                // Classify output for health monitoring
+                if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(trimmed) {
+                    let (meaningful, error) = classify_output_line(&parsed);
+                    health_read.record_output(meaningful);
+                    if let Some((class, msg)) = error {
+                        health_read.record_error(class, msg);
+                    }
                 }
 
                 // Try to capture session_id from system/init message
@@ -354,11 +373,25 @@ impl SubprocessController {
             }
         });
 
+        // Spawn health watchdog (checks every 5s while turn is active)
+        let health_watchdog = Arc::clone(&self.health_monitor);
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(5));
+            loop {
+                interval.tick().await;
+                if !health_watchdog.is_active_turn() {
+                    break;
+                }
+                health_watchdog.check();
+            }
+        });
+
         // Spawn process_waiter task
         let inner_wait = Arc::clone(&self.inner);
         let block_id_wait = self.block_id.clone();
         let broker_wait = self.broker.clone();
         let run_lock = Arc::clone(&self.run_lock);
+        let health_wait = Arc::clone(&self.health_monitor);
         tokio::spawn(async move {
             // Wait for either process exit or kill signal
             tokio::select! {
@@ -429,6 +462,12 @@ impl SubprocessController {
                         inner.kill_tx = None;
                     }
                 }
+            }
+
+            // Update health monitor with exit status
+            {
+                let inner = inner_wait.lock().unwrap();
+                health_wait.set_exited(inner.proc_exit_code);
             }
 
             // Publish done status

@@ -12,6 +12,7 @@
 //! - ShellController handles "shell" and "cmd" block types
 //! - Controllers dispatch I/O between the user and the process/service
 
+pub mod health;
 pub mod pidregistry;
 pub mod shell;
 pub mod subprocess;
