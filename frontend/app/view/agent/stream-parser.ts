@@ -29,13 +29,8 @@ export class ClaudeCodeStreamParser {
     private nodeIdCounter: number = 0;
     private pendingToolCalls: Map<string, ToolCallEvent> = new Map();
     private currentAgentId?: string;
-
-    // Text accumulation state — consecutive text events reuse the same node ID
-    private lastTextNodeId: string | null = null;
-    private lastTextContent: string = "";
-    // Thinking accumulation state — same pattern for thinking events
-    private lastThinkingNodeId: string | null = null;
-    private lastThinkingContent: string = "";
+    private currentTextNodeId: string | null = null;
+    private currentThinkingNodeId: string | null = null;
 
     /**
      * Parse NDJSON stream line by line
@@ -95,151 +90,77 @@ export class ClaudeCodeStreamParser {
     }
 
     /**
-     * Parse a pre-parsed StreamEvent directly (no JSON round-trip).
-     * Synchronous counterpart to parseEvent for use in hot paths.
-     */
-    parseStreamEvent(event: StreamEvent): DocumentNode | null {
-        return this.eventToNode(event);
-    }
-
-    /**
-     * Flush any pending text accumulator, returning the finalized node (or null).
-     * Call this when the stream ends or before reading final state.
-     */
-    flushPending(): DocumentNode[] {
-        const nodes: DocumentNode[] = [];
-        const t = this.flushTextAccumulator();
-        if (t) nodes.push(t);
-        const th = this.flushThinkingAccumulator();
-        if (th) nodes.push(th);
-        return nodes;
-    }
-
-    /**
-     * Convert stream event to document node.
-     *
-     * Text and thinking events accumulate into a single node until a
-     * non-text/thinking event arrives (or the stream ends). When a
-     * different event type breaks a run, the accumulated node is returned
-     * first via the nodeIdSetRef update path (same ID, new content).
+     * Convert stream event to document node
      */
     private eventToNode(event: StreamEvent): DocumentNode | null {
         switch (event.type) {
             case "text":
-                // Flush thinking if we were accumulating thinking before text
-                this.flushThinkingAccumulator();
                 return this.textToNode(event as TextEvent);
 
             case "thinking":
-                // Flush text if we were accumulating text before thinking
-                this.flushTextAccumulator();
                 return this.thinkingToNode(event as ThinkingEvent);
 
             case "tool_call":
-            case "tool_result":
-            case "agent_message":
-            case "user_message":
-                // Non-content event — finalize any pending accumulators
-                this.flushTextAccumulator();
-                this.flushThinkingAccumulator();
-                break;
-
-            default:
-                this.flushTextAccumulator();
-                this.flushThinkingAccumulator();
-                console.warn("Unknown event type:", (event as any).type);
-                return null;
-        }
-
-        // Dispatch non-text/thinking events
-        switch (event.type) {
-            case "tool_call":
+                this.currentTextNodeId = null;
+                this.currentThinkingNodeId = null;
                 return this.toolCallToNode(event as ToolCallEvent);
+
             case "tool_result":
+                this.currentTextNodeId = null;
+                this.currentThinkingNodeId = null;
                 return this.toolResultToNode(event as ToolResultEvent);
+
             case "agent_message":
+                this.currentTextNodeId = null;
+                this.currentThinkingNodeId = null;
                 return this.agentMessageToNode(event as AgentMessageEvent);
+
             case "user_message":
+                this.currentTextNodeId = null;
+                this.currentThinkingNodeId = null;
                 return this.userMessageToNode(event as UserMessageEvent);
+
             default:
+                console.warn("Unknown event type:", (event as any).type);
                 return null;
         }
     }
 
     /**
      * Convert text event to markdown node.
-     *
-     * Consecutive text events accumulate into a single node (same ID,
-     * growing content). The caller's nodeIdSetRef sees the repeated ID
-     * and performs an in-place update rather than appending a new node.
+     * Consecutive text deltas accumulate into a single node (same id).
      */
     private textToNode(event: TextEvent): DocumentNode {
-        if (this.lastTextNodeId !== null) {
-            // Append to existing accumulator
-            this.lastTextContent += event.content;
-        } else {
-            // Start new accumulator
-            this.lastTextNodeId = `node_${this.nodeIdCounter++}`;
-            this.lastTextContent = event.content;
-        }
+        // Break text accumulation when switching from thinking
+        this.currentThinkingNodeId = null;
 
+        if (!this.currentTextNodeId) {
+            this.currentTextNodeId = `node_${this.nodeIdCounter++}`;
+        }
         return {
             type: "markdown",
-            id: this.lastTextNodeId,
-            content: this.lastTextContent,
+            id: this.currentTextNodeId,
+            content: event.content,
         };
     }
 
     /**
      * Convert thinking event to markdown node with metadata.
-     *
-     * Same accumulation pattern as textToNode.
+     * Consecutive thinking deltas accumulate into a single node.
      */
     private thinkingToNode(event: ThinkingEvent): DocumentNode {
-        if (this.lastThinkingNodeId !== null) {
-            this.lastThinkingContent += event.content;
-        } else {
-            this.lastThinkingNodeId = `node_${this.nodeIdCounter++}`;
-            this.lastThinkingContent = event.content;
-        }
+        // Break text accumulation when switching to thinking
+        this.currentTextNodeId = null;
 
+        if (!this.currentThinkingNodeId) {
+            this.currentThinkingNodeId = `node_${this.nodeIdCounter++}`;
+        }
         return {
             type: "markdown",
-            id: this.lastThinkingNodeId,
-            content: this.lastThinkingContent,
+            id: this.currentThinkingNodeId,
+            content: event.content,
             metadata: { thinking: true },
         };
-    }
-
-    /**
-     * Finalize and reset the text accumulator.
-     */
-    private flushTextAccumulator(): DocumentNode | null {
-        if (this.lastTextNodeId === null) return null;
-        const node: DocumentNode = {
-            type: "markdown",
-            id: this.lastTextNodeId,
-            content: this.lastTextContent,
-        };
-        this.lastTextNodeId = null;
-        this.lastTextContent = "";
-        return node;
-    }
-
-    /**
-     * Finalize and reset the thinking accumulator.
-     */
-    private flushThinkingAccumulator(): DocumentNode | null {
-        if (this.lastThinkingNodeId === null) return null;
-        const node: DocumentNode = {
-            type: "markdown",
-            id: this.lastThinkingNodeId,
-            content: this.lastThinkingContent,
-            metadata: { thinking: true },
-        };
-        this.lastThinkingNodeId = null;
-        this.lastThinkingContent = "";
-        return node;
     }
 
     /**
@@ -407,9 +328,7 @@ export class ClaudeCodeStreamParser {
         this.buffer = "";
         this.nodeIdCounter = 0;
         this.pendingToolCalls.clear();
-        this.lastTextNodeId = null;
-        this.lastTextContent = "";
-        this.lastThinkingNodeId = null;
-        this.lastThinkingContent = "";
+        this.currentTextNodeId = null;
+        this.currentThinkingNodeId = null;
     }
 }

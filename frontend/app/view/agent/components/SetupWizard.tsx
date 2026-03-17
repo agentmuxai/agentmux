@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { getApi } from "@/app/store/global";
+import { isWindows } from "@/util/platformutil";
 import { createSignal, For, onMount, Show, type JSX } from "solid-js";
 import { PROVIDERS, type ProviderDefinition } from "../providers";
 
@@ -268,7 +269,7 @@ const CliResultCard = ({ result }: { result: CliDetectionResult }): JSX.Element 
                     </button>
                     <Show when={showInstall()}>
                         <div class="setup-wizard-install-info">
-                            <code>{providerDef.installCommand}</code>
+                            <code>{isWindows() ? providerDef.windowsInstallCommand : providerDef.unixInstallCommand}</code>
                             <a
                                 href="#"
                                 onClick={(e) => {

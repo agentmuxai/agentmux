@@ -41,7 +41,8 @@ function roundZoom(factor: number): number {
 function getBlockZoom(blockId: string): number | null {
     const bcm = getBlockComponentModel(blockId);
     if (!bcm?.viewModel) return null;
-    if (bcm.viewModel.viewType !== "term") return null;
+    const vt = bcm.viewModel.viewType;
+    if (vt !== "term" && vt !== "agent") return null;
 
     const blockOref = WOS.makeORef("block", blockId);
     const blockData = WOS.getObjectValue<Block>(blockOref);

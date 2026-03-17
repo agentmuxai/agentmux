@@ -79,6 +79,8 @@ export function useAgentStream({
             const lines = lineBuffer.split("\n");
             lineBuffer = lines.pop() || ""; // Keep incomplete line
 
+            // Process complete lines
+
             const newNodes: DocumentNode[] = [];
             const updatedNodes: DocumentNode[] = [];
 
@@ -95,6 +97,24 @@ export function useAgentStream({
                     continue;
                 }
 
+                // Handle stderr events from subprocess
+                if (rawEvent.type === "stderr" && rawEvent.text) {
+                    // Skip benign CLI warnings
+                    const text = rawEvent.text.trim();
+                    if (text.includes("Fast mode is not available") ||
+                        text.includes("[WARN]") && text.length < 200) {
+                        console.log("[useAgentStream] suppressed stderr:", text);
+                        continue;
+                    }
+                    const stderrNode: DocumentNode = {
+                        id: `stderr-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+                        type: "markdown",
+                        content: `**stderr:** ${text}`,
+                    };
+                    newNodes.push(stderrNode);
+                    continue;
+                }
+
                 // Translate provider-specific format → StreamEvent[]
                 const streamEvents = translator.translate(rawEvent);
 
@@ -104,7 +124,7 @@ export function useAgentStream({
                     if (!node) continue;
 
                     if (nodeIdSet.has(node.id)) {
-                        // Update existing node (e.g. tool_result completing a tool_call)
+                        // Existing node — append content for text/thinking, replace for others
                         updatedNodes.push(node);
                     } else {
                         nodeIdSet.add(node.id);
@@ -122,7 +142,17 @@ export function useAgentStream({
                     for (const updated of updatedNodes) {
                         const idx = result.findIndex((n) => n.id === updated.id);
                         if (idx !== -1) {
-                            result[idx] = updated;
+                            const existing = result[idx];
+                            if (existing.type === "markdown" && updated.type === "markdown") {
+                                // Append text content for streaming text/thinking deltas
+                                result[idx] = {
+                                    ...existing,
+                                    content: existing.content + updated.content,
+                                };
+                            } else {
+                                // Replace for other node types (tool_result completing tool_call)
+                                result[idx] = updated;
+                            }
                         }
                     }
 
