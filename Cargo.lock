@@ -17,6 +17,7 @@ dependencies = [
  "glib",
  "gtk",
  "json_comments",
+ "libc",
  "objc2-app-kit 0.3.2",
  "objc2-foundation 0.3.2",
  "serde",
