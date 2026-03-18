@@ -170,6 +170,12 @@ tasks:
             - task: package
             - powershell -ExecutionPolicy Bypass -Command "& ./scripts/package-portable.ps1"
 
+    package:msix:
+        desc: Package for Windows Store (MSIX). Run 'task package' first, or pass --Publisher.
+        platforms: [windows]
+        cmds:
+            - powershell -ExecutionPolicy Bypass -File scripts/package-msix.ps1 {{.CLI_ARGS}}
+
     package:macos:
         desc: Package the application for macOS (creates .app and .dmg).
         platforms: [darwin]
