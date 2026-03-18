@@ -66,7 +66,9 @@ if (-not $makeappx) {
 Write-Host "  makeappx : $makeappx"
 
 # ── Locate Tauri release dir ─────────────────────────────────────────────────
-$releaseDir = "src-tauri\target\release"
+# Tauri v2 with a Cargo workspace places binaries in the workspace root's
+# target/release/, not src-tauri/target/release/.
+$releaseDir = "target\release"
 $mainExe    = "$releaseDir\agentmux.exe"
 
 if (-not (Test-Path $mainExe)) {
@@ -96,10 +98,10 @@ Copy-Item "$mainExe" "$stagingDir\agentmux.exe" -Force
 $wv2 = "$releaseDir\WebView2Loader.dll"
 if (Test-Path $wv2) { Copy-Item $wv2 "$stagingDir\" -Force }
 
-# Sidecar binaries — Tauri strips the target triple when bundling
+# Sidecar binaries — Tauri strips the target triple when copying to target/release/
 $sidecars = @(
-  @{ src = "$releaseDir\agentmuxsrv-rs-x86_64-pc-windows-msvc.exe"; dst = "agentmuxsrv-rs.exe" },
-  @{ src = "$releaseDir\wsh-x86_64-pc-windows-msvc.exe";            dst = "wsh.exe" }
+  @{ src = "$releaseDir\agentmuxsrv-rs.exe"; dst = "agentmuxsrv-rs.exe" },
+  @{ src = "$releaseDir\wsh.exe";            dst = "wsh.exe" }
 )
 foreach ($s in $sidecars) {
   if (Test-Path $s.src) {
