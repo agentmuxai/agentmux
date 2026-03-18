@@ -189,6 +189,7 @@ export class AgentViewModel implements ViewModel {
                     agentOutputFormat: provider.styledOutputFormat,
                     agentName: agent.name,
                     agentIcon: agent.icon,
+                    agentMode: agent.agent_type || "host",
                     controller: "subprocess",
                     cmd: cliBin,
                     "cmd:args": cliArgs,
