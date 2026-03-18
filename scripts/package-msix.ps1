@@ -107,6 +107,8 @@ foreach ($s in $sidecars) {
   if (Test-Path $s.src) {
     Copy-Item $s.src "$stagingDir\$($s.dst)" -Force
     Write-Host "  + $($s.dst)"
+  } else {
+    Write-Error "Required sidecar not found: $($s.src). Run 'task package' first."
   }
 }
 
