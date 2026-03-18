@@ -220,16 +220,51 @@ body:not(.nohover) .tab.tab-colored.dragging {
 
 // --- Tab color picker popup ---
 
-.tab-color-picker {
-    display: grid;
-    grid-template-columns: repeat(4, 20px);
-    gap: 4px;
+.tab-context-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
     padding: 8px;
     background: var(--main-bg-color, #1a1a2e);
     border: 1px solid var(--border-color, #333);
     border-radius: 6px;
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
     user-select: none;
+}
+
+.tab-context-colors {
+    display: grid;
+    grid-template-columns: repeat(8, 20px);
+    gap: 4px;
+}
+
+.tab-context-actions {
+    display: flex;
+    gap: 4px;
+    border-top: 1px solid var(--border-color, #333);
+    padding-top: 6px;
+}
+
+.tab-context-btn {
+    flex: 1;
+    padding: 4px 6px;
+    background: transparent;
+    border: 1px solid var(--border-color, #333);
+    border-radius: 4px;
+    color: var(--secondary-text-color);
+    font-size: 11px;
+    cursor: pointer;
+    white-space: nowrap;
+
+    &:hover {
+        background: var(--highlight-bg-color);
+        color: var(--main-text-color);
+    }
+
+    &.tab-context-btn-close:hover {
+        border-color: var(--error-color, #e55);
+        color: var(--error-color, #e55);
+    }
 }
 
 .tab-color-swatch {
