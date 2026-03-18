@@ -87,11 +87,11 @@ interface TypeAheadModalProps {
 const TypeAheadModal = (props: TypeAheadModalProps) => {
     const [width, setWidth] = createSignal(0);
     const [height, setHeight] = createSignal(0);
-    let modalRef!: HTMLDivElement;
-    let inputRef!: HTMLInputElement;
-    let inputGroupRef!: HTMLDivElement;
-    let suggestionsWrapperRef!: HTMLDivElement;
-    let suggestionsRef!: HTMLDivElement;
+    let modalRef: HTMLDivElement | null = null;
+    let inputRef: HTMLInputElement | null = null;
+    let inputGroupRef: HTMLDivElement | null = null;
+    let suggestionsWrapperRef: HTMLDivElement | null = null;
+    let suggestionsRef: HTMLDivElement | null = null;
 
     // Observe blockRef for dimension changes
     onMount(() => {
@@ -108,42 +108,48 @@ const TypeAheadModal = (props: TypeAheadModalProps) => {
 
     createEffect(() => {
         const h = height();
-        if (!modalRef || !inputGroupRef || !suggestionsRef || !suggestionsWrapperRef) return;
+        if (h <= 0) return;
+        // Defer measurement until Portal children are rendered and laid out
+        requestAnimationFrame(() => {
+            if (!modalRef || !inputGroupRef || !suggestionsRef || !suggestionsWrapperRef) return;
 
-        const modalStyles = window.getComputedStyle(modalRef);
-        const paddingTop = parseFloat(modalStyles.paddingTop) || 0;
-        const paddingBottom = parseFloat(modalStyles.paddingBottom) || 0;
-        const borderTop = parseFloat(modalStyles.borderTopWidth) || 0;
-        const borderBottom = parseFloat(modalStyles.borderBottomWidth) || 0;
-        const modalPadding = paddingTop + paddingBottom;
-        const modalBorder = borderTop + borderBottom;
+            const modalStyles = window.getComputedStyle(modalRef);
+            const paddingTop = parseFloat(modalStyles.paddingTop) || 0;
+            const paddingBottom = parseFloat(modalStyles.paddingBottom) || 0;
+            const borderTop = parseFloat(modalStyles.borderTopWidth) || 0;
+            const borderBottom = parseFloat(modalStyles.borderBottomWidth) || 0;
+            const modalPadding = paddingTop + paddingBottom;
+            const modalBorder = borderTop + borderBottom;
 
-        const suggestionsWrapperStyles = window.getComputedStyle(suggestionsWrapperRef);
-        const suggestionsWrapperMarginTop = parseFloat(suggestionsWrapperStyles.marginTop) || 0;
+            const suggestionsWrapperStyles = window.getComputedStyle(suggestionsWrapperRef);
+            const suggestionsWrapperMarginTop = parseFloat(suggestionsWrapperStyles.marginTop) || 0;
 
-        const inputHeight = inputGroupRef.getBoundingClientRect().height;
-        let suggestionsTotalHeight = 0;
+            const inputHeight = inputGroupRef.getBoundingClientRect().height;
+            let suggestionsTotalHeight = 0;
 
-        const suggestionItems = suggestionsRef.children;
-        for (let i = 0; i < suggestionItems.length; i++) {
-            suggestionsTotalHeight += suggestionItems[i].getBoundingClientRect().height;
-        }
+            const suggestionItems = suggestionsRef.children;
+            for (let i = 0; i < suggestionItems.length; i++) {
+                suggestionsTotalHeight += suggestionItems[i].getBoundingClientRect().height;
+            }
 
-        const totalHeight =
-            modalPadding + modalBorder + inputHeight + suggestionsTotalHeight + suggestionsWrapperMarginTop;
-        const maxHeight = h * 0.8;
-        const computedHeight = totalHeight > maxHeight ? maxHeight : totalHeight;
+            const totalHeight =
+                modalPadding + modalBorder + inputHeight + suggestionsTotalHeight + suggestionsWrapperMarginTop;
+            const maxHeight = h * 0.8;
+            const computedHeight = totalHeight > maxHeight ? maxHeight : totalHeight;
 
-        modalRef.style.height = `${computedHeight}px`;
-        suggestionsWrapperRef.style.height = `${computedHeight - inputHeight - modalPadding - modalBorder - suggestionsWrapperMarginTop}px`;
+            modalRef.style.height = `${computedHeight}px`;
+            suggestionsWrapperRef.style.height = `${computedHeight - inputHeight - modalPadding - modalBorder - suggestionsWrapperMarginTop}px`;
+        });
     });
 
     createEffect(() => {
         const w = width();
-        if (!props.blockRef?.current || !modalRef) return;
+        if (w <= 0) return;
+        requestAnimationFrame(() => {
+            if (!props.blockRef?.current || !props.anchorRef?.current || !modalRef) return;
 
-        const blockRect = props.blockRef.current.getBoundingClientRect();
-        const anchorRect = props.anchorRef.current.getBoundingClientRect();
+            const blockRect = props.blockRef.current.getBoundingClientRect();
+            const anchorRect = props.anchorRef.current.getBoundingClientRect();
 
         const minGap = 20;
         const availableWidth = blockRect.width - minGap * 2;
@@ -165,8 +171,9 @@ const TypeAheadModal = (props: TypeAheadModalProps) => {
             leftPosition = minGap;
         }
 
-        modalRef.style.width = `${modalWidth}px`;
-        modalRef.style.left = `${leftPosition}px`;
+            modalRef.style.width = `${modalWidth}px`;
+            modalRef.style.left = `${leftPosition}px`;
+        });
     });
 
     onMount(() => {

@@ -217,7 +217,6 @@ const ActionWidgets = (): JSX.Element => {
             class="action-widgets"
             data-testid="action-widgets"
             onContextMenu={handleWidgetsBarContextMenu}
-            {...dragProps}
         >
             <For each={sortedWidgets()}>
                 {({ key, widget }, idx) => (
