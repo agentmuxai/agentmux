@@ -41,8 +41,10 @@ pub fn setup_window<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>) {
             }
         }
 
-        // Allow dragging by window background (header area).
-        ns_window.setMovableByWindowBackground(true);
+        // NOTE: Do NOT set setMovableByWindowBackground(true) — it makes the entire
+        // window content area draggable, which breaks pane header drag-to-rearrange
+        // and terminal interaction. Window drag on macOS is handled by
+        // data-tauri-drag-region on the window-header element (same as Windows).
 
         tracing::info!(
             "macOS: applied Titled+FullSizeContentView styleMask, hid traffic lights for window '{}'",

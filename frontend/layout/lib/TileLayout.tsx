@@ -301,6 +301,12 @@ const DisplayNode = (props: DisplayNodeProps) => {
             e.preventDefault();
             return;
         }
+        // Only allow drag from the header (dragHandleRef), not the entire tile
+        const handle = dragHandleRef?.current;
+        if (handle && !handle.contains(e.target as Node)) {
+            e.preventDefault();
+            return;
+        }
         e.dataTransfer?.setData(DRAG_DATA_KEY, props.node.id);
         const img = previewImage();
         if (img) {
