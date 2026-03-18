@@ -38,13 +38,14 @@ function DroppableTab(props: {
 }): JSX.Element {
     let tabWrapRef!: HTMLDivElement;
 
-    const handleDragStart = (e: MouseEvent) => {
-        if (props.allTabCount <= 1) return;
-        // Use HTML5 drag via dataTransfer when available
-        const dragEvent = e as unknown as DragEvent;
-        if (dragEvent.dataTransfer) {
-            dragEvent.dataTransfer.effectAllowed = "move";
-            dragEvent.dataTransfer.setData(
+    const handleDragStart = (e: DragEvent) => {
+        if (props.allTabCount <= 1) {
+            e.preventDefault();
+            return;
+        }
+        if (e.dataTransfer) {
+            e.dataTransfer.effectAllowed = "move";
+            e.dataTransfer.setData(
                 "application/x-tab-reorder",
                 JSON.stringify({ tabId: props.tabId, workspaceId: props.workspaceId, isPinned: props.isPinned })
             );

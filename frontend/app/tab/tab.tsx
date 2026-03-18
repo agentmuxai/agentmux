@@ -101,7 +101,7 @@ interface TabProps {
     isPinned: boolean;
     onSelect: () => void;
     onClose: (event: MouseEvent | null) => void;
-    onDragStart: (event: MouseEvent) => void;
+    onDragStart: (event: DragEvent) => void;
     onLoaded: () => void;
     onPinChange: () => void;
 }
@@ -296,7 +296,8 @@ function Tab(props: TabProps): JSX.Element {
                     "tab-colored": !!tabColor(),
                 })}
                 style={tabColor() ? ({ "--tab-color": tabColor() } as JSX.CSSProperties) : undefined}
-                onMouseDown={props.onDragStart}
+                draggable={true}
+                onDragStart={props.onDragStart}
                 onClick={props.onSelect}
                 onContextMenu={handleContextMenu}
                 data-tab-id={props.id}
