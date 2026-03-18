@@ -5,7 +5,6 @@ import { atoms, globalStore, recordTEvent, refocusNode } from "@/app/store/globa
 import { RpcApi } from "@/app/store/wshclientapi";
 import { TabRpcClient } from "@/app/store/wshrpcutil";
 import { Button } from "@/element/button";
-import { ContextMenuModel } from "@/store/contextmenu";
 import { fireAndForget } from "@/util/util";
 import clsx from "clsx";
 import { createEffect, createSignal, For, onCleanup, onMount, Show } from "solid-js";
@@ -36,19 +35,23 @@ const TAB_COLORS: { name: string; hex: string | null }[] = [
     { name: "None",   hex: null },
 ];
 
-interface TabColorPickerProps {
+interface TabContextPanelProps {
     anchor: DOMRect;
     currentColor: string | null | undefined;
-    onSelect: (hex: string | null) => void;
-    onClose: () => void;
+    isPinned: boolean;
+    onColorSelect: (hex: string | null) => void;
+    onRename: () => void;
+    onPinChange: () => void;
+    onClose: (e?: MouseEvent) => void;
+    onCloseTab: () => void;
 }
 
-const TabColorPicker = (props: TabColorPickerProps): JSX.Element => {
-    let pickerRef!: HTMLDivElement;
+const TabContextPanel = (props: TabContextPanelProps): JSX.Element => {
+    let panelRef!: HTMLDivElement;
 
     onMount(() => {
         const handleClickOutside = (e: MouseEvent) => {
-            if (pickerRef && !pickerRef.contains(e.target as Node)) {
+            if (panelRef && !panelRef.contains(e.target as Node)) {
                 props.onClose();
             }
         };
@@ -72,19 +75,32 @@ const TabColorPicker = (props: TabColorPickerProps): JSX.Element => {
 
     return (
         <Portal>
-            <div ref={pickerRef!} class="tab-color-picker" style={style()}>
-                <For each={TAB_COLORS}>
-                    {({ name, hex }) => (
-                        <div
-                            class={clsx("tab-color-swatch", { selected: (props.currentColor ?? null) === hex })}
-                            title={name}
-                            style={hex ? { "background-color": hex } : undefined}
-                            onClick={() => props.onSelect(hex)}
-                        >
-                            {!hex && <i class="fa fa-xmark" />}
-                        </div>
-                    )}
-                </For>
+            <div ref={panelRef!} class="tab-context-panel" style={style()}>
+                <div class="tab-context-colors">
+                    <For each={TAB_COLORS}>
+                        {({ name, hex }) => (
+                            <div
+                                class={clsx("tab-color-swatch", { selected: (props.currentColor ?? null) === hex })}
+                                title={name}
+                                style={hex ? { "background-color": hex } : undefined}
+                                onClick={() => props.onColorSelect(hex)}
+                            >
+                                {!hex && <i class="fa fa-xmark" />}
+                            </div>
+                        )}
+                    </For>
+                </div>
+                <div class="tab-context-actions">
+                    <button class="tab-context-btn" onClick={() => { props.onPinChange(); props.onClose(); }}>
+                        {props.isPinned ? "📌 Unpin" : "📌 Pin"}
+                    </button>
+                    <button class="tab-context-btn" onClick={() => { props.onRename(); props.onClose(); }}>
+                        ✏️ Rename
+                    </button>
+                    <button class="tab-context-btn tab-context-btn-close" onClick={() => { props.onCloseTab(); props.onClose(); }}>
+                        ✕ Close
+                    </button>
+                </div>
             </div>
         </Portal>
     );
@@ -228,60 +244,12 @@ function Tab(props: TabProps): JSX.Element {
 
     const handleContextMenu = (e: MouseEvent) => {
         e.preventDefault();
-        let menu: ContextMenuItem[] = [
-            { label: props.isPinned ? "Unpin Tab" : "Pin Tab", click: () => props.onPinChange() },
-            { label: "Rename Tab", click: () => handleRenameTab() },
-            {
-                label: "Copy TabId",
-                click: () => fireAndForget(() => navigator.clipboard.writeText(props.id)),
-            },
-            { type: "separator" },
-            {
-                label: "Color",
-                click: () => {
-                    const rect = tabRef?.getBoundingClientRect();
-                    if (rect) {
-                        setColorPickerAnchor(rect);
-                        setShowColorPicker(true);
-                    }
-                },
-            },
-            { type: "separator" },
-        ];
-        const fullConfig = atoms.fullConfigAtom();
-        const bgPresets: string[] = [];
-        for (const key in fullConfig?.presets ?? {}) {
-            if (key.startsWith("bg@")) {
-                bgPresets.push(key);
-            }
+        e.stopPropagation();
+        const rect = tabRef?.getBoundingClientRect();
+        if (rect) {
+            setColorPickerAnchor(rect);
+            setShowColorPicker(true);
         }
-        bgPresets.sort((a, b) => {
-            const aOrder = fullConfig.presets[a]["display:order"] ?? 0;
-            const bOrder = fullConfig.presets[b]["display:order"] ?? 0;
-            return aOrder - bOrder;
-        });
-        if (bgPresets.length > 0) {
-            const submenu: ContextMenuItem[] = [];
-            const oref = makeORef("tab", props.id);
-            for (const presetName of bgPresets) {
-                const preset = fullConfig.presets[presetName];
-                if (preset == null) {
-                    continue;
-                }
-                submenu.push({
-                    label: preset["display:name"] ?? presetName,
-                    click: () =>
-                        fireAndForget(async () => {
-                            await ObjectService.UpdateObjectMeta(oref, preset);
-                            RpcApi.ActivityCommand(TabRpcClient, { settabtheme: 1 }, { noresponse: true });
-                            recordTEvent("action:settabtheme");
-                        }),
-                });
-            }
-            menu.push({ label: "Backgrounds", type: "submenu", submenu }, { type: "separator" });
-        }
-        menu.push({ label: "Close Tab", click: () => props.onClose(null) });
-        ContextMenuModel.showContextMenu(menu, e);
     };
 
     return (
@@ -341,11 +309,15 @@ function Tab(props: TabProps): JSX.Element {
                 </div>
             </div>
             <Show when={showColorPicker() && colorPickerAnchor()}>
-                <TabColorPicker
+                <TabContextPanel
                     anchor={colorPickerAnchor()}
                     currentColor={tabColor()}
-                    onSelect={handleColorSelect}
+                    isPinned={props.isPinned}
+                    onColorSelect={handleColorSelect}
+                    onRename={() => handleRenameTab()}
+                    onPinChange={() => props.onPinChange()}
                     onClose={() => setShowColorPicker(false)}
+                    onCloseTab={() => props.onClose(null)}
                 />
             </Show>
         </>
