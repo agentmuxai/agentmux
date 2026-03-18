@@ -31,7 +31,7 @@ import { HelpViewModel } from "@/view/helpview/helpview";
 import { TermViewModel } from "@/view/term/term";
 import clsx from "clsx";
 import type { JSX } from "solid-js";
-import { createEffect, createMemo, createSignal, onCleanup, onMount, Show, Suspense } from "solid-js";
+import { createEffect, createMemo, createRoot, createSignal, onCleanup, onMount, Show, Suspense } from "solid-js";
 import "./block.scss";
 import { BlockFrame } from "./blockframe";
 import { blockViewToIcon, blockViewToName } from "./blockutil";
@@ -260,15 +260,22 @@ function Block(props: BlockProps): JSX.Element {
         const bcm = getBlockComponentModel(props.nodeModel.blockId);
         let vm = bcm?.viewModel;
         if (vm == null || vm.viewType !== view) {
-            vm = makeViewModel(props.nodeModel.blockId, view, props.nodeModel);
+            let rootDispose: () => void;
+            vm = createRoot((dispose) => {
+                rootDispose = dispose;
+                return makeViewModel(props.nodeModel.blockId, view, props.nodeModel);
+            });
+            (vm as any)._solidRootDispose = rootDispose;
             registerBlockComponentModel(props.nodeModel.blockId, { viewModel: vm });
         }
         setViewModel(vm);
     });
 
     onCleanup(() => {
+        const vm = viewModel();
+        (vm as any)?._solidRootDispose?.();
+        vm?.dispose?.();
         unregisterBlockComponentModel(props.nodeModel.blockId);
-        viewModel()?.dispose?.();
     });
 
     const ready = createMemo(() => !loading() && !isBlank(props.nodeModel.blockId) && blockData() != null && viewModel() != null);
@@ -297,15 +304,22 @@ function SubBlock(props: SubBlockProps): JSX.Element {
         const bcm = getBlockComponentModel(props.nodeModel.blockId);
         let vm = bcm?.viewModel;
         if (vm == null || vm.viewType !== view) {
-            vm = makeViewModel(props.nodeModel.blockId, view, props.nodeModel as any);
+            let rootDispose: () => void;
+            vm = createRoot((dispose) => {
+                rootDispose = dispose;
+                return makeViewModel(props.nodeModel.blockId, view, props.nodeModel as any);
+            });
+            (vm as any)._solidRootDispose = rootDispose;
             registerBlockComponentModel(props.nodeModel.blockId, { viewModel: vm });
         }
         setViewModel(vm);
     });
 
     onCleanup(() => {
+        const vm = viewModel();
+        (vm as any)?._solidRootDispose?.();
+        vm?.dispose?.();
         unregisterBlockComponentModel(props.nodeModel.blockId);
-        viewModel()?.dispose?.();
     });
 
     return (
