@@ -858,6 +858,37 @@ fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType {
             let history = state.subagent_watcher.get_history(&agent_id, limit);
             WebReturnType::success(serde_json::to_value(&history).unwrap_or_default())
         }
+        // ---- HistoryService ----
+        ("history", "List") => {
+            let provider: Option<String> = service::get_optional_arg(args, 0).unwrap_or(None);
+            let project: Option<String> = service::get_optional_arg(args, 1).unwrap_or(None);
+            let offset: usize = service::get_arg(args, 2).unwrap_or(0);
+            let limit: usize = service::get_arg(args, 3).unwrap_or(50);
+            let sort_by: String = service::get_arg(args, 4).unwrap_or_else(|_| "modified_at".to_string());
+            let sort_dir: String = service::get_arg(args, 5).unwrap_or_else(|_| "desc".to_string());
+            let result = state.history_service.list(
+                provider.as_deref(),
+                project.as_deref(),
+                offset,
+                limit,
+                &sort_by,
+                &sort_dir,
+            );
+            WebReturnType::success(result)
+        }
+        ("history", "Get") => {
+            let session_id: String = match service::get_arg(args, 0) {
+                Ok(v) => v,
+                Err(e) => return WebReturnType::error(e),
+            };
+            let result = state.history_service.get(&session_id);
+            WebReturnType::success(result)
+        }
+        ("history", "Refresh") => {
+            let result = state.history_service.refresh();
+            WebReturnType::success(result)
+        }
+
         ("subagent", "WatchAgent") => {
             let agent_id: String = match service::get_arg(args, 0) {
                 Ok(v) => v,

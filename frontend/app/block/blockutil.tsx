@@ -21,6 +21,9 @@ export function blockViewToIcon(view: string): string {
     if (view == "subagent") {
         return "diagram-subtask";
     }
+    if (view == "swarm") {
+        return "diagram-project";
+    }
     return "square";
 }
 
@@ -36,6 +39,9 @@ export function blockViewToName(view: string): string {
     }
     if (view == "subagent") {
         return "Subagent";
+    }
+    if (view == "swarm") {
+        return "Swarm";
     }
     return view;
 }

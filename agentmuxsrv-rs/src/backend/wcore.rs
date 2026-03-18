@@ -108,7 +108,28 @@ pub fn ensure_initial_data(store: &WaveStore) -> Result<bool, StoreError> {
     store.update(&mut client)?;
 
     // Create initial tab in workspace (pinned, matching Go's isInitialLaunch=true)
-    create_tab_with_opts(store, &ws.oid, "", true)?;
+    let tab = create_tab_with_opts(store, &ws.oid, "", true)?;
+
+    // Add a default Swarm widget block to the initial tab
+    let mut swarm_meta = MetaMapType::new();
+    swarm_meta.insert("view".to_string(), serde_json::json!("swarm"));
+    let swarm_block = create_block(store, &tab.oid, swarm_meta)?;
+
+    // Queue layout action so the frontend renders the swarm block
+    let mut layout = store.must_get::<LayoutState>(&tab.layoutstate)?;
+    layout.pendingbackendactions = Some(vec![LayoutActionData {
+        actiontype: "insert".to_string(),
+        actionid: Uuid::new_v4().to_string(),
+        blockid: swarm_block.oid.clone(),
+        nodesize: None,
+        indexarr: None,
+        focused: true,
+        magnified: false,
+        ephemeral: false,
+        targetblockid: String::new(),
+        position: String::new(),
+    }]);
+    store.update(&mut layout)?;
 
     Ok(first_launch)
 }
