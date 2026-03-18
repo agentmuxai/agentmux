@@ -134,7 +134,12 @@ class SysinfoViewModel implements ViewModel {
 
         this.viewIcon = createMemo(() => "chart-line");
 
-        this.viewName = createMemo(() => this.plotTypeSelectedAtom());
+        this.viewName = createMemo(() => {
+            const plotType = this.plotTypeSelectedAtom();
+            if (plotType === "Mem") return "Memory";
+            if (plotType === "Disk I/O") return "Disk";
+            return plotType;
+        });
 
         this.viewText = createMemo(() => "");
 
@@ -200,16 +205,12 @@ class SysinfoViewModel implements ViewModel {
             type: "radio" as const,
             checked: currentlySelected === plotType,
             click: async () => {
-                try {
-                    const dataItem = plotData.length > 0 ? plotData[plotData.length - 1] : ({} as DataItem);
-                    const dataTypes = PlotTypes[plotType](dataItem);
-                    await RpcApi.SetMetaCommand(TabRpcClient, {
-                        oref: WOS.makeORef("block", this.blockId),
-                        meta: { "graph:metrics": dataTypes, "sysinfo:type": plotType },
-                    });
-                } catch (e) {
-                    console.error("[sysinfo] Failed to switch plot type:", e);
-                }
+                const dataItem = plotData.length > 0 ? plotData[plotData.length - 1] : ({} as DataItem);
+                const dataTypes = PlotTypes[plotType](dataItem);
+                await RpcApi.SetMetaCommand(TabRpcClient, {
+                    oref: WOS.makeORef("block", this.blockId),
+                    meta: { "graph:metrics": dataTypes, "sysinfo:type": plotType },
+                });
             },
         }));
 
