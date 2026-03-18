@@ -86,7 +86,7 @@ const ActionWidget = ({
     }
 
     return (
-        <div data-tauri-drag-region="false">
+        <div>
             <Tooltip
                 content={widget.description || widget.label}
                 placement="bottom"
@@ -216,6 +216,7 @@ const ActionWidgets = (): JSX.Element => {
             ref={containerRef!}
             class="action-widgets"
             data-testid="action-widgets"
+            data-tauri-drag-region="true"
             onContextMenu={handleWidgetsBarContextMenu}
         >
             <For each={sortedWidgets()}>
