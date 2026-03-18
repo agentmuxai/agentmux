@@ -75,7 +75,7 @@ function SysinfoViewInner(props: SysinfoViewProps): JSX.Element {
     const targetLen = createMemo(() => model.numPoints() + 1);
     const intervalSecs = createMemo(() => model.intervalSecsAtom());
 
-    const title = createMemo(() => yvals().length > 1);
+    const title = createMemo(() => true);
     const cols2 = createMemo(() => yvals().length > 2);
 
     return (
