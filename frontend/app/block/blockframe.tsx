@@ -58,49 +58,6 @@ function handleHeaderContextMenu(
     const extraItems = viewModel?.getSettingsMenuItems?.();
     if (extraItems && extraItems.length > 0) menu.push({ type: "separator" }, ...extraItems);
 
-    // Header-only: title management + Copy BlockId
-    menu.push(
-        { type: "separator" },
-        {
-            label: "Copy BlockId",
-            click: () => {
-                navigator.clipboard.writeText(blockData.oid);
-            },
-        },
-        {
-            label: "Edit Pane Title",
-            click: () => {
-                const titleElement = document.querySelector(
-                    `.block-${blockData.oid} .pane-title-text`
-                ) as HTMLElement;
-                if (titleElement) {
-                    titleElement.click();
-                }
-            },
-        },
-        {
-            label: "Auto-Generate Title",
-            click: async () => {
-                const { generateAutoTitle } = await import("./autotitle");
-                const fullConfig = atoms.fullConfigAtom();
-                const settingsEnv = fullConfig?.settings?.["cmd:env"] as Record<string, string> | undefined;
-                const autoTitle = generateAutoTitle(blockData, settingsEnv);
-                await RpcApi.SetMetaCommand(TabRpcClient, {
-                    oref: WOS.makeORef("block", blockData.oid),
-                    meta: { "pane-title": autoTitle } as any,
-                });
-            },
-        },
-        {
-            label: "Clear Title",
-            click: async () => {
-                await RpcApi.SetMetaCommand(TabRpcClient, {
-                    oref: WOS.makeORef("block", blockData.oid),
-                    meta: { "pane-title": "" } as any,
-                });
-            },
-        }
-    );
 
     ContextMenuModel.showContextMenu(menu, e);
 }
@@ -156,7 +113,7 @@ function EndIcons(props: {
                     {(button) => <IconButton decl={button} />}
                 </For>
             </Show>
-            <IconButton decl={settingsDecl} className="block-frame-settings" />
+            {/* Cog removed — settings available via right-click context menu */}
             <Show when={ephemeral()} fallback={
                 <OptMagnifyButton
                     magnified={magnified()}
@@ -678,17 +635,10 @@ function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
         <BlockFrame_Header {...props} connBtnRef={connBtnRef} changeConnModalAtom={changeConnModalAtom} viewModel={null} />
     );
 
-    // Body right-click handler
+    // Body right-click — same full menu as header
     const onBodyContextMenu = (e: MouseEvent) => {
         if (!blockData() || props.preview) return;
-        e.preventDefault();
-        e.stopPropagation();
-        const menu = buildPaneContextMenu(blockData(), {
-            magnified: isMagnified(),
-            onMagnifyToggle: nodeModel.toggleMagnify,
-            onClose: nodeModel.onClose,
-        }, props.viewModel);
-        ContextMenuModel.showContextMenu(menu, e);
+        handleHeaderContextMenu(e, blockData(), props.viewModel, isMagnified(), nodeModel.toggleMagnify, nodeModel.onClose);
     };
 
     return (

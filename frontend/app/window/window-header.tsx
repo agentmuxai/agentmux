@@ -42,6 +42,8 @@ const WindowHeader = (props: WindowHeaderProps): JSX.Element => {
 
             <TabBar workspace={props.workspace} />
 
+            <WindowDrag class="center" />
+
             <SystemStatus />
         </div>
     );

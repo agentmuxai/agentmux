@@ -98,7 +98,7 @@ class SysinfoViewModel implements ViewModel {
         this.dataAtom = createSignalAtom<DataItem[]>([]);
         this.loadingAtom = createSignalAtom(true);
         this.plotMetaAtom = createSignalAtom(new Map(Object.entries(DefaultPlotMeta)));
-        this.manageConnection = createMemo(() => true);
+        this.manageConnection = createMemo(() => false);
         this.filterOutNowsh = createMemo(() => true);
 
         this.numPoints = createMemo(() => {
@@ -191,40 +191,29 @@ class SysinfoViewModel implements ViewModel {
     }
 
     getSettingsMenuItems(): ContextMenuItem[] {
-        const fullConfig = atoms.fullConfigAtom();
-        const termThemes = fullConfig?.termthemes ?? {};
-        const termThemeKeys = Object.keys(termThemes);
         const plotData = this.dataAtom();
+        const currentlySelected = this.plotTypeSelectedAtom();
+        const coreTypes = ["CPU", "Mem", "Disk I/O"];
 
-        termThemeKeys.sort((a, b) => {
-            return (termThemes[a]["display:order"] ?? 0) - (termThemes[b]["display:order"] ?? 0);
-        });
-        const fullMenu: ContextMenuItem[] = [];
-        let submenu: ContextMenuItem[];
-        if (plotData.length == 0) {
-            submenu = [];
-        } else {
-            const currentlySelected = this.plotTypeSelectedAtom();
-            submenu = Object.keys(PlotTypes).map((plotType) => {
-                const dataTypes = PlotTypes[plotType](plotData[plotData.length - 1]);
-                const menuItem: ContextMenuItem = {
-                    label: plotType,
-                    type: "radio",
-                    checked: currentlySelected == plotType,
-                    click: async () => {
-                        await RpcApi.SetMetaCommand(TabRpcClient, {
-                            oref: WOS.makeORef("block", this.blockId),
-                            meta: { "graph:metrics": dataTypes, "sysinfo:type": plotType },
-                        });
-                    },
-                };
-                return menuItem;
-            });
-        }
+        const items: ContextMenuItem[] = coreTypes.map((plotType) => ({
+            label: plotType === "Mem" ? "Memory" : plotType === "Disk I/O" ? "Disk" : plotType,
+            type: "radio" as const,
+            checked: currentlySelected === plotType,
+            click: async () => {
+                try {
+                    const dataItem = plotData.length > 0 ? plotData[plotData.length - 1] : ({} as DataItem);
+                    const dataTypes = PlotTypes[plotType](dataItem);
+                    await RpcApi.SetMetaCommand(TabRpcClient, {
+                        oref: WOS.makeORef("block", this.blockId),
+                        meta: { "graph:metrics": dataTypes, "sysinfo:type": plotType },
+                    });
+                } catch (e) {
+                    console.error("[sysinfo] Failed to switch plot type:", e);
+                }
+            },
+        }));
 
-        fullMenu.push({ label: "Plot Type", submenu: submenu });
-        fullMenu.push({ type: "separator" });
-        return fullMenu;
+        return items;
     }
 
     getDefaultData(): DataItem[] {

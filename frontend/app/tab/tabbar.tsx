@@ -196,7 +196,7 @@ function TabBar(props: TabBarProps): JSX.Element {
     const activeIndex = () => allTabIds().indexOf(activeTabId());
 
     return (
-        <div class="tab-bar" {...dragProps}>
+        <div class="tab-bar" data-tauri-drag-region="false">
             <button class="add-tab-btn" onClick={handleAddTab} title="New Tab" data-tauri-drag-region="false">
                 <i class="fa fa-plus" />
             </button>

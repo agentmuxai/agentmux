@@ -57,7 +57,6 @@ const ConfigErrorMessage = (): JSX.Element => {
 };
 
 const WindowActionButtons = (): JSX.Element => {
-    const { dragProps } = useWindowDrag();
     const handleMinimize = () => {
         getApi().minimizeWindow();
     };
@@ -71,7 +70,7 @@ const WindowActionButtons = (): JSX.Element => {
     };
 
     return (
-        <div class="window-action-buttons" {...dragProps}>
+        <div class="window-action-buttons" data-tauri-drag-region="false">
             <button
                 class="window-action-btn minimize-btn"
                 onClick={handleMinimize}
@@ -104,9 +103,8 @@ const WindowActionButtons = (): JSX.Element => {
 };
 
 const SystemStatus = (): JSX.Element => {
-    const { dragProps } = useWindowDrag();
     return (
-        <div class="system-status" {...dragProps}>
+        <div class="system-status">
             <ActionWidgets />
             <Show when={navigator.platform !== "MacIntel" && !navigator.platform.startsWith("Mac")}>
                 <WindowActionButtons />

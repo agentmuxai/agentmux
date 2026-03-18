@@ -32,7 +32,15 @@
 
     .window-drag {
         height: 100%;
-        width: var(--default-indent);
         flex-shrink: 0;
+
+        &.left {
+            width: var(--default-indent);
+        }
+
+        &.center {
+            flex: 1 1 auto;
+            min-width: 0;
+        }
     }
 }
