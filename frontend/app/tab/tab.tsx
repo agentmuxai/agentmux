@@ -300,6 +300,7 @@ function Tab(props: TabProps): JSX.Element {
                 onClick={props.onSelect}
                 onContextMenu={handleContextMenu}
                 data-tab-id={props.id}
+                data-tauri-drag-region="false"
             >
                 <div class="tab-inner">
                     <div

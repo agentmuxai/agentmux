@@ -5,11 +5,11 @@
     display: flex;
     flex-direction: row;
     align-items: flex-end;
-    flex: 0 1 auto;
+    flex: 1 1 auto;
     min-width: 0;
     height: 100%;
     overflow: hidden;
-    -webkit-app-region: no-drag;
+    // Drag cascades from window-header; individual tabs/buttons opt out
 
     .tab-bar-scroll {
         display: flex;
@@ -34,6 +34,7 @@
             flex-shrink: 0;
             left: unset;
             transform: none;
+            -webkit-app-region: no-drag;
         }
     }
 
@@ -57,6 +58,7 @@
         background: transparent;
         border: none;
         color: #22c55e;
+        -webkit-app-region: no-drag;
         cursor: pointer;
         align-self: center;
 
@@ -75,6 +77,7 @@
         flex-shrink: 0;
         display: flex;
         align-items: flex-end;
+        height: 100%;
         transition: opacity 0.15s ease;
 
         // Pane dragged over a tab — highlight with accent border

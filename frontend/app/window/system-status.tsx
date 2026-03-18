@@ -8,6 +8,7 @@
  */
 
 import { atoms, getApi } from "@/store/global";
+import { useWindowDrag } from "@/app/hook/useWindowDrag";
 import { For, Show, type JSX } from "solid-js";
 import { ActionWidgets } from "./action-widgets";
 import "./system-status.scss";
@@ -55,6 +56,7 @@ const ConfigErrorMessage = (): JSX.Element => {
 };
 
 const WindowActionButtons = (): JSX.Element => {
+    const { dragProps } = useWindowDrag();
     const handleMinimize = () => {
         getApi().minimizeWindow();
     };
@@ -68,12 +70,13 @@ const WindowActionButtons = (): JSX.Element => {
     };
 
     return (
-        <div class="window-action-buttons" data-tauri-drag-region="false">
+        <div class="window-action-buttons" {...dragProps}>
             <button
                 class="window-action-btn minimize-btn"
                 onClick={handleMinimize}
                 title="Minimize Window"
                 data-testid="window-minimize-btn"
+                data-tauri-drag-region="false"
             >
                 <i class="fa fa-window-minimize" />
             </button>
@@ -82,6 +85,7 @@ const WindowActionButtons = (): JSX.Element => {
                 onClick={handleMaximize}
                 title="Maximize Window"
                 data-testid="window-maximize-btn"
+                data-tauri-drag-region="false"
             >
                 <i class="fa fa-window-maximize" />
             </button>
@@ -90,6 +94,7 @@ const WindowActionButtons = (): JSX.Element => {
                 onClick={handleClose}
                 title="Close Window"
                 data-testid="window-close-btn"
+                data-tauri-drag-region="false"
             >
                 <i class="fa fa-times" />
             </button>
@@ -98,8 +103,9 @@ const WindowActionButtons = (): JSX.Element => {
 };
 
 const SystemStatus = (): JSX.Element => {
+    const { dragProps } = useWindowDrag();
     return (
-        <div class="system-status">
+        <div class="system-status" {...dragProps}>
             <ActionWidgets />
             <WindowActionButtons />
         </div>

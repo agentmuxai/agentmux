@@ -4,6 +4,7 @@
 import { atoms, createTab, setActiveTab } from "@/store/global";
 import { Logger } from "@/util/logger";
 import { fireAndForget } from "@/util/util";
+import { useWindowDrag } from "@/app/hook/useWindowDrag";
 import { For } from "solid-js";
 import type { JSX } from "solid-js";
 import { WorkspaceService } from "../store/services";
@@ -137,6 +138,7 @@ function NewTabDropZone(props: { workspaceId: string }): JSX.Element {
             class="new-tab-drop-zone"
             onDragOver={handleDragOver}
             title="Drop here to create new tab"
+            data-tauri-drag-region="true"
         >
             <i class="fa fa-plus" />
         </div>
@@ -186,13 +188,15 @@ function TabBar(props: TabBarProps): JSX.Element {
         createTab();
     };
 
+    const { dragProps } = useWindowDrag();
+
     if (!props.workspace) return null;
 
     const activeIndex = () => allTabIds().indexOf(activeTabId());
 
     return (
-        <div class="tab-bar" data-tauri-drag-region="false">
-            <button class="add-tab-btn" onClick={handleAddTab} title="New Tab">
+        <div class="tab-bar" {...dragProps}>
+            <button class="add-tab-btn" onClick={handleAddTab} title="New Tab" data-tauri-drag-region="false">
                 <i class="fa fa-plus" />
             </button>
             <div class="tab-bar-scroll">
