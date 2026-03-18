@@ -10,6 +10,7 @@ import { ContextMenuModel } from "@/app/store/contextmenu";
 import { RpcApi } from "@/app/store/wshclientapi";
 import { TabRpcClient } from "@/app/store/wshrpcutil";
 import { atoms, createBlock, getApi } from "@/store/global";
+import { useWindowDrag } from "@/app/hook/useWindowDrag";
 import { fireAndForget, isBlank, makeIconClass } from "@/util/util";
 import { invoke } from "@tauri-apps/api/core";
 import { createSignal, For, Show, type JSX } from "solid-js";
@@ -85,7 +86,7 @@ const ActionWidget = ({
     }
 
     return (
-        <div data-tauri-drag-region="false">
+        <div>
             <Tooltip
                 content={widget.description || widget.label}
                 placement="bottom"
@@ -106,6 +107,7 @@ const ActionWidget = ({
 const DRAG_THRESHOLD = 5;
 
 const ActionWidgets = (): JSX.Element => {
+    const { dragProps } = useWindowDrag();
     const fullConfig = atoms.fullConfigAtom;
     const settings = (): Record<string, any> => fullConfig()?.settings ?? {};
     const iconOnly = (): boolean => settings()["widget:icononly"] ?? false;
@@ -215,6 +217,7 @@ const ActionWidgets = (): JSX.Element => {
             class="action-widgets"
             data-testid="action-widgets"
             onContextMenu={handleWidgetsBarContextMenu}
+            {...dragProps}
         >
             <For each={sortedWidgets()}>
                 {({ key, widget }, idx) => (
@@ -225,7 +228,6 @@ const ActionWidgets = (): JSX.Element => {
                         <div
                             class={`action-widget-slot${draggingKey() === key ? " dragging" : ""}`}
                             data-widget-slot={idx()}
-                            data-tauri-drag-region="false"
                             onPointerDown={(e) => handlePointerDown(key, e)}
                             onPointerMove={handlePointerMove}
                             onPointerUp={handlePointerUp}

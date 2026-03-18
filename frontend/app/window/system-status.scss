@@ -10,7 +10,6 @@
     justify-content: flex-end;
     margin-left: auto;
     margin-right: 6px;
-    -webkit-app-region: no-drag;
 
     .config-error-button {
         color: black;
@@ -23,7 +22,6 @@
         flex-direction: row;
         gap: 4px;
         align-items: center;
-        -webkit-app-region: no-drag;
 
         .window-action-btn {
             cursor: pointer;
