@@ -7,16 +7,16 @@ import { isLinux } from "@/util/platformutil";
  * Centralized window drag hook. Returns props to spread on a draggable element.
  *
  * On Linux, drag is handled natively by drag.rs (GTK motion detection) —
- * data-tauri-drag-region triggers an immediate Wayland compositor pointer grab
- * that swallows button clicks. So on Linux no drag attributes are set.
+ * data-tauri-drag-region triggers an immediate Wayland compositor pointer grab.
+ * On Linux we use the attribute approach because startDragging() via GTK may
+ * behave differently.
  *
- * On macOS/Windows, data-tauri-drag-region is handled at the WebView/OS level
- * (synchronous, before JS runs). JS startDragging() is intentionally NOT used —
- * it is async, conflicts with the native handler, and causes race-condition dead
- * spots. Element nesting handles exclusions: child elements with
- * data-tauri-drag-region="false" (TabBar, window controls) correctly block drag.
+ * On Windows/macOS, we use programmatic startDragging() via onMouseDown in
+ * window-header.tsx. We intentionally do NOT set data-tauri-drag-region here
+ * so Tauri's own drag.js does not intercept mousedown events — our handler
+ * has full control over which elements drag and which don't.
  */
 export function useWindowDrag(): { dragProps: Record<string, unknown> } {
-    const dragProps = isLinux() ? {} : { "data-tauri-drag-region": true };
+    const dragProps = isLinux() ? { "data-tauri-drag-region": true } : {};
     return { dragProps };
 }

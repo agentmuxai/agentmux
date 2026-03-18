@@ -70,7 +70,7 @@ const WindowActionButtons = (): JSX.Element => {
     };
 
     return (
-        <div class="window-action-buttons">
+        <div class="window-action-buttons" data-tauri-drag-region="false">
             <button
                 class="window-action-btn minimize-btn"
                 onClick={handleMinimize}
@@ -104,7 +104,7 @@ const WindowActionButtons = (): JSX.Element => {
 
 const SystemStatus = (): JSX.Element => {
     return (
-        <div class="system-status" data-tauri-drag-region="true">
+        <div class="system-status">
             <ActionWidgets />
             <Show when={navigator.platform !== "MacIntel" && !navigator.platform.startsWith("Mac")}>
                 <WindowActionButtons />
