@@ -169,7 +169,7 @@ Output: `dist/agentmux-{version}-x64-portable.zip`
 ./bump-version.sh patch --message "Your change description"
 
 # Verify consistency
-bash scripts/verify-version.sh
+bump verify
 
 # Push with tags
 git push origin <branch> --tags
@@ -453,4 +453,4 @@ npx tauri build
 | **Portable ZIP** | `task package:portable` |
 | **Bump version** | `./bump-version.sh patch` |
 | **Run tests** | `npm test` |
-| **Verify versions** | `bash scripts/verify-version.sh` |
+| **Verify versions** | `bump verify` |

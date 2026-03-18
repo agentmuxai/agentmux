@@ -131,7 +131,7 @@ function ForgeAgentCard(props: { agent: ForgeAgent; model: ForgeViewModel }): JS
     const providerLabel = () => PROVIDERS.find((p) => p.id === props.agent.provider)?.label ?? props.agent.provider;
     const typeBadge = () => {
         if (props.agent.agent_type === "host") return "HOST";
-        if (props.agent.agent_type === "container") return "CTR";
+        if (props.agent.agent_type === "container") return "CONTAINER";
         return null;
     };
 
@@ -185,7 +185,7 @@ function ForgeDetail(props: { model: ForgeViewModel }): JSX.Element {
                 const providerLabel = () => PROVIDERS.find((p) => p.id === agentVal().provider)?.label ?? agentVal().provider;
                 const detailTypeBadge = () => {
                     if (agentVal().agent_type === "host") return "HOST";
-                    if (agentVal().agent_type === "container") return "CTR";
+                    if (agentVal().agent_type === "container") return "CONTAINER";
                     return null;
                 };
                 return (
