@@ -179,11 +179,20 @@ pub fn seed_forge_agents(wstore: &Arc<WaveStore>) -> Result<SeedReport, StoreErr
     Ok(SeedReport { created, skipped })
 }
 
-/// Run auto-seed on startup: only seeds if the forge agents table is empty.
+/// Run auto-seed on startup. Seeds if empty, or re-seeds if manifest version changed.
+/// Re-seeding updates existing seeded agents and removes seeded agents not in the manifest.
 pub fn auto_seed_on_startup(wstore: &Arc<WaveStore>) {
+    let manifest: SeedManifest = match serde_json::from_str(SEED_MANIFEST) {
+        Ok(m) => m,
+        Err(e) => {
+            tracing::error!("forge: failed to parse seed manifest: {e}");
+            return;
+        }
+    };
+
     match wstore.forge_count() {
-        Ok(count) if count == 0 => {
-            tracing::info!("forge: no agents found, seeding from manifest...");
+        Ok(0) => {
+            tracing::info!("forge: no agents found, seeding from manifest v{}...", manifest.version);
             match seed_forge_agents(wstore) {
                 Ok(report) => {
                     tracing::info!(
@@ -192,16 +201,126 @@ pub fn auto_seed_on_startup(wstore: &Arc<WaveStore>) {
                         report.skipped
                     );
                 }
-                Err(e) => {
-                    tracing::error!("forge: seed failed: {e}");
-                }
+                Err(e) => tracing::error!("forge: seed failed: {e}"),
             }
         }
         Ok(count) => {
-            tracing::info!("forge: {} agents exist, skipping auto-seed", count);
+            // Check if we need to re-seed (manifest version changed)
+            match reseed_if_needed(wstore, &manifest) {
+                Ok(Some(report)) => {
+                    tracing::info!(
+                        "forge: re-seeded from manifest v{}: {} created, {} updated, {} removed",
+                        manifest.version, report.created, report.updated, report.removed,
+                    );
+                }
+                Ok(None) => {
+                    tracing::info!("forge: {} agents exist, manifest up to date", count);
+                }
+                Err(e) => tracing::error!("forge: re-seed failed: {e}"),
+            }
         }
-        Err(e) => {
-            tracing::error!("forge: failed to count agents: {e}");
+        Err(e) => tracing::error!("forge: failed to count agents: {e}"),
+    }
+}
+
+/// Report from a re-seed operation.
+pub struct ReseedReport {
+    pub created: usize,
+    pub updated: usize,
+    pub removed: usize,
+}
+
+/// Re-seed if the manifest version is newer than what's in the DB.
+/// Updates seeded agents, adds new ones, removes seeded agents not in the manifest.
+fn reseed_if_needed(
+    wstore: &Arc<WaveStore>,
+    manifest: &SeedManifest,
+) -> Result<Option<ReseedReport>, StoreError> {
+    let existing = wstore.forge_list()?;
+
+    // Check if any seeded agent needs updating by comparing providers/descriptions
+    let manifest_ids: std::collections::HashSet<&str> =
+        manifest.agents.iter().map(|a| a.id.as_str()).collect();
+    let existing_map: std::collections::HashMap<&str, &ForgeAgent> =
+        existing.iter().map(|a| (a.id.as_str(), a)).collect();
+
+    let mut needs_reseed = false;
+
+    // Check for new agents or changed providers
+    for agent_def in &manifest.agents {
+        match existing_map.get(agent_def.id.as_str()) {
+            None => { needs_reseed = true; break; }
+            Some(existing_agent) => {
+                if existing_agent.provider != agent_def.provider
+                    || existing_agent.description != agent_def.description
+                    || existing_agent.agent_type != agent_def.agent_type
+                {
+                    needs_reseed = true;
+                    break;
+                }
+            }
         }
     }
+
+    // Check for agents to remove (seeded agents not in manifest)
+    for agent in &existing {
+        if agent.is_seeded == 1 && !manifest_ids.contains(agent.id.as_str()) {
+            needs_reseed = true;
+            break;
+        }
+    }
+
+    if !needs_reseed {
+        return Ok(None);
+    }
+
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as i64;
+
+    let mut created = 0usize;
+    let mut updated = 0usize;
+    let mut removed = 0usize;
+
+    // Upsert agents from manifest
+    for agent_def in &manifest.agents {
+        let agent = ForgeAgent {
+            id: agent_def.id.clone(),
+            name: agent_def.name.clone(),
+            icon: agent_def.icon.clone(),
+            provider: agent_def.provider.clone(),
+            description: agent_def.description.clone(),
+            working_directory: agent_def.working_directory.clone(),
+            shell: agent_def.shell.clone(),
+            provider_flags: String::new(),
+            auto_start: if agent_def.auto_start { 1 } else { 0 },
+            restart_on_crash: if agent_def.restart_on_crash { 1 } else { 0 },
+            idle_timeout_minutes: 0,
+            created_at: now,
+            agent_type: agent_def.agent_type.clone(),
+            environment: agent_def.environment.clone(),
+            agent_bus_id: agent_def.agent_bus_id.clone(),
+            is_seeded: 1,
+        };
+
+        if existing_map.contains_key(agent_def.id.as_str()) {
+            wstore.forge_update(&agent)?;
+            updated += 1;
+        } else {
+            wstore.forge_insert(&agent)?;
+            created += 1;
+        }
+    }
+
+    // Remove seeded agents not in manifest (e.g., agent4, agent5)
+    for agent in &existing {
+        if agent.is_seeded == 1 && !manifest_ids.contains(agent.id.as_str()) {
+            wstore.forge_delete(&agent.id)?;
+            removed += 1;
+            tracing::info!("forge: removed seeded agent '{}'", agent.id);
+        }
+    }
+
+    Ok(Some(ReseedReport { created, updated, removed }))
 }

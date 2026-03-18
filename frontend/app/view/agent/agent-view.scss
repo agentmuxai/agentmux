@@ -28,6 +28,8 @@
         display: flex;
         flex-direction: column;
         gap: 4px;
+        user-select: text;
+        cursor: text;
     }
 
     // === Status Log (terminal-style) ===
@@ -38,6 +40,8 @@
         line-height: 1.35;
         border-bottom: 1px solid var(--border-color);
         margin-bottom: 4px;
+        user-select: text;
+        cursor: text;
     }
 
     .agent-status-line {
@@ -680,6 +684,8 @@
         background: color-mix(in srgb, var(--accent-color) 5%, transparent);
         border-left: 2px solid var(--accent-color);
         border-radius: 4px;
+        user-select: text;
+        cursor: text;
 
         .agent-user-message-content {
             pre {

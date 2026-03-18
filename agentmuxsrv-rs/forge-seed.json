@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "agents": [
     {
       "id": "agentx",
@@ -7,33 +7,17 @@
       "icon": "\ud83d\udd34",
       "agent_type": "host",
       "environment": "windows",
-      "provider": "claude-code",
-      "description": "Primary host agent \u2014 claw deployment, container orchestration, host operations",
-      "working_directory": "~/.claw/agentx-workspace",
+      "provider": "claude",
+      "description": "Claude Code on host \u2014 primary coding agent",
+      "working_directory": "~/.agentmux/agents/agentx",
       "shell": "pwsh",
       "agent_bus_id": "agentx",
       "auto_start": false,
       "restart_on_crash": false,
       "content": {
-        "env": "AGENT_NAME=agentx\nAWS_PROFILE=AgentX\nAGENTBUS_URL=https://agentbus.asaf.cc\nAGENTBUS_AGENT_ID=agentx"
+        "env": "AGENT_NAME=agentx\nAGENTMUX_AGENT_ID=AgentX"
       },
-      "skills": [
-        { "name": "Startup", "trigger": "/startup", "skill_type": "prompt", "description": "Full context reload and verification" },
-        { "name": "Reinforce", "trigger": "/reinforce", "skill_type": "prompt", "description": "Quick critical rules reminder" },
-        { "name": "Git Workflow", "trigger": "/git-workflow", "skill_type": "prompt", "description": "Branch and PR rules" },
-        { "name": "Versioning", "trigger": "/versioning", "skill_type": "prompt", "description": "npm version bump rules" },
-        { "name": "GitHub Layers", "trigger": "/github-layers", "skill_type": "prompt", "description": "3-layer GitHub access system" },
-        { "name": "Dev Tools", "trigger": "/dev-tools", "skill_type": "prompt", "description": "@a5af package reference" },
-        { "name": "Deployment", "trigger": "/deployment", "skill_type": "prompt", "description": "Deploy CLI and CDK" },
-        { "name": "AWS Secrets", "trigger": "/aws-secrets", "skill_type": "prompt", "description": "Secrets Manager access" },
-        { "name": "AWS Setup", "trigger": "/aws-setup", "skill_type": "prompt", "description": "AWS identity and profiles" },
-        { "name": "MCP Servers", "trigger": "/mcp-servers", "skill_type": "prompt", "description": "MCP configuration reference" },
-        { "name": "ReAgent", "trigger": "/reagent", "skill_type": "prompt", "description": "PR review workflow" },
-        { "name": "E2E Testing", "trigger": "/e2e-testing", "skill_type": "prompt", "description": "HTTP Auth and Playwright" },
-        { "name": "VS Code Bridge", "trigger": "/vscode-bridge", "skill_type": "prompt", "description": "VS Code integration" },
-        { "name": "Container Mgmt", "trigger": "/container-mgmt", "skill_type": "prompt", "description": "Docker container operations (host only)" },
-        { "name": "PowerShell 7", "trigger": "/pwsh", "skill_type": "prompt", "description": "PowerShell 7 guidelines (host only)" }
-      ]
+      "skills": []
     },
     {
       "id": "agenty",
@@ -41,33 +25,35 @@
       "icon": "\ud83d\udfe1",
       "agent_type": "host",
       "environment": "windows",
-      "provider": "claude-code",
-      "description": "Secondary host agent",
-      "working_directory": "~/.claw/agenty-workspace",
+      "provider": "codex",
+      "description": "Codex CLI on host \u2014 OpenAI coding agent",
+      "working_directory": "~/.agentmux/agents/agenty",
       "shell": "pwsh",
       "agent_bus_id": "agenty",
       "auto_start": false,
       "restart_on_crash": false,
       "content": {
-        "env": "AGENT_NAME=agenty\nAWS_PROFILE=AgentY\nAGENTBUS_URL=https://agentbus.asaf.cc\nAGENTBUS_AGENT_ID=agenty"
+        "env": "AGENT_NAME=agenty\nAGENTMUX_AGENT_ID=AgentY"
       },
-      "skills": [
-        { "name": "Startup", "trigger": "/startup", "skill_type": "prompt", "description": "Full context reload and verification" },
-        { "name": "Reinforce", "trigger": "/reinforce", "skill_type": "prompt", "description": "Quick critical rules reminder" },
-        { "name": "Git Workflow", "trigger": "/git-workflow", "skill_type": "prompt", "description": "Branch and PR rules" },
-        { "name": "Versioning", "trigger": "/versioning", "skill_type": "prompt", "description": "npm version bump rules" },
-        { "name": "GitHub Layers", "trigger": "/github-layers", "skill_type": "prompt", "description": "3-layer GitHub access system" },
-        { "name": "Dev Tools", "trigger": "/dev-tools", "skill_type": "prompt", "description": "@a5af package reference" },
-        { "name": "Deployment", "trigger": "/deployment", "skill_type": "prompt", "description": "Deploy CLI and CDK" },
-        { "name": "AWS Secrets", "trigger": "/aws-secrets", "skill_type": "prompt", "description": "Secrets Manager access" },
-        { "name": "AWS Setup", "trigger": "/aws-setup", "skill_type": "prompt", "description": "AWS identity and profiles" },
-        { "name": "MCP Servers", "trigger": "/mcp-servers", "skill_type": "prompt", "description": "MCP configuration reference" },
-        { "name": "ReAgent", "trigger": "/reagent", "skill_type": "prompt", "description": "PR review workflow" },
-        { "name": "E2E Testing", "trigger": "/e2e-testing", "skill_type": "prompt", "description": "HTTP Auth and Playwright" },
-        { "name": "VS Code Bridge", "trigger": "/vscode-bridge", "skill_type": "prompt", "description": "VS Code integration" },
-        { "name": "Container Mgmt", "trigger": "/container-mgmt", "skill_type": "prompt", "description": "Docker container operations (host only)" },
-        { "name": "PowerShell 7", "trigger": "/pwsh", "skill_type": "prompt", "description": "PowerShell 7 guidelines (host only)" }
-      ]
+      "skills": []
+    },
+    {
+      "id": "agentz",
+      "name": "AgentZ",
+      "icon": "\ud83d\udd35",
+      "agent_type": "host",
+      "environment": "windows",
+      "provider": "gemini",
+      "description": "Gemini CLI on host \u2014 Google coding agent",
+      "working_directory": "~/.agentmux/agents/agentz",
+      "shell": "pwsh",
+      "agent_bus_id": "agentz",
+      "auto_start": false,
+      "restart_on_crash": false,
+      "content": {
+        "env": "AGENT_NAME=agentz\nAGENTMUX_AGENT_ID=AgentZ"
+      },
+      "skills": []
     },
     {
       "id": "agent1",
@@ -75,31 +61,17 @@
       "icon": "\ud83d\udfe2",
       "agent_type": "container",
       "environment": "linux",
-      "provider": "claude-code",
-      "description": "Container code agent \u2014 isolated Docker workspace for code, PRs, reviews",
+      "provider": "claude",
+      "description": "Claude Code in container \u2014 sandboxed coding",
       "working_directory": "/workspace",
       "shell": "bash",
       "agent_bus_id": "agent1",
       "auto_start": false,
       "restart_on_crash": true,
       "content": {
-        "env": "AGENT_NAME=agent1\nAWS_PROFILE=Agent1\nAGENTBUS_URL=https://agentbus.asaf.cc\nAGENTBUS_AGENT_ID=agent1\nPLAYWRIGHT_BROWSERS_SERVER=ws://playwright-browsers:3000\nCHOKIDAR_USEPOLLING=true"
+        "env": "AGENT_NAME=agent1\nAGENTMUX_AGENT_ID=Agent1"
       },
-      "skills": [
-        { "name": "Startup", "trigger": "/startup", "skill_type": "prompt", "description": "Full context reload and verification" },
-        { "name": "Reinforce", "trigger": "/reinforce", "skill_type": "prompt", "description": "Quick critical rules reminder" },
-        { "name": "Git Workflow", "trigger": "/git-workflow", "skill_type": "prompt", "description": "Branch and PR rules" },
-        { "name": "Versioning", "trigger": "/versioning", "skill_type": "prompt", "description": "npm version bump rules" },
-        { "name": "GitHub Layers", "trigger": "/github-layers", "skill_type": "prompt", "description": "3-layer GitHub access system" },
-        { "name": "Dev Tools", "trigger": "/dev-tools", "skill_type": "prompt", "description": "@a5af package reference" },
-        { "name": "Deployment", "trigger": "/deployment", "skill_type": "prompt", "description": "Deploy CLI and CDK" },
-        { "name": "AWS Secrets", "trigger": "/aws-secrets", "skill_type": "prompt", "description": "Secrets Manager access" },
-        { "name": "AWS Setup", "trigger": "/aws-setup", "skill_type": "prompt", "description": "AWS identity and profiles" },
-        { "name": "MCP Servers", "trigger": "/mcp-servers", "skill_type": "prompt", "description": "MCP configuration reference" },
-        { "name": "ReAgent", "trigger": "/reagent", "skill_type": "prompt", "description": "PR review workflow" },
-        { "name": "E2E Testing", "trigger": "/e2e-testing", "skill_type": "prompt", "description": "HTTP Auth and Playwright" },
-        { "name": "VS Code Bridge", "trigger": "/vscode-bridge", "skill_type": "prompt", "description": "VS Code integration" }
-      ]
+      "skills": []
     },
     {
       "id": "agent2",
@@ -107,31 +79,17 @@
       "icon": "\ud83d\udfe0",
       "agent_type": "container",
       "environment": "linux",
-      "provider": "claude-code",
-      "description": "Container code agent \u2014 isolated Docker workspace for code, PRs, reviews",
+      "provider": "codex",
+      "description": "Codex CLI in container \u2014 sandboxed coding",
       "working_directory": "/workspace",
       "shell": "bash",
       "agent_bus_id": "agent2",
       "auto_start": false,
       "restart_on_crash": true,
       "content": {
-        "env": "AGENT_NAME=agent2\nAWS_PROFILE=Agent2\nAGENTBUS_URL=https://agentbus.asaf.cc\nAGENTBUS_AGENT_ID=agent2\nPLAYWRIGHT_BROWSERS_SERVER=ws://playwright-browsers:3000\nCHOKIDAR_USEPOLLING=true"
+        "env": "AGENT_NAME=agent2\nAGENTMUX_AGENT_ID=Agent2"
       },
-      "skills": [
-        { "name": "Startup", "trigger": "/startup", "skill_type": "prompt", "description": "Full context reload and verification" },
-        { "name": "Reinforce", "trigger": "/reinforce", "skill_type": "prompt", "description": "Quick critical rules reminder" },
-        { "name": "Git Workflow", "trigger": "/git-workflow", "skill_type": "prompt", "description": "Branch and PR rules" },
-        { "name": "Versioning", "trigger": "/versioning", "skill_type": "prompt", "description": "npm version bump rules" },
-        { "name": "GitHub Layers", "trigger": "/github-layers", "skill_type": "prompt", "description": "3-layer GitHub access system" },
-        { "name": "Dev Tools", "trigger": "/dev-tools", "skill_type": "prompt", "description": "@a5af package reference" },
-        { "name": "Deployment", "trigger": "/deployment", "skill_type": "prompt", "description": "Deploy CLI and CDK" },
-        { "name": "AWS Secrets", "trigger": "/aws-secrets", "skill_type": "prompt", "description": "Secrets Manager access" },
-        { "name": "AWS Setup", "trigger": "/aws-setup", "skill_type": "prompt", "description": "AWS identity and profiles" },
-        { "name": "MCP Servers", "trigger": "/mcp-servers", "skill_type": "prompt", "description": "MCP configuration reference" },
-        { "name": "ReAgent", "trigger": "/reagent", "skill_type": "prompt", "description": "PR review workflow" },
-        { "name": "E2E Testing", "trigger": "/e2e-testing", "skill_type": "prompt", "description": "HTTP Auth and Playwright" },
-        { "name": "VS Code Bridge", "trigger": "/vscode-bridge", "skill_type": "prompt", "description": "VS Code integration" }
-      ]
+      "skills": []
     },
     {
       "id": "agent3",
@@ -139,95 +97,17 @@
       "icon": "\ud83d\udfe3",
       "agent_type": "container",
       "environment": "linux",
-      "provider": "claude-code",
-      "description": "Container code agent \u2014 isolated Docker workspace for code, PRs, reviews",
+      "provider": "gemini",
+      "description": "Gemini CLI in container \u2014 sandboxed coding",
       "working_directory": "/workspace",
       "shell": "bash",
       "agent_bus_id": "agent3",
       "auto_start": false,
       "restart_on_crash": true,
       "content": {
-        "env": "AGENT_NAME=agent3\nAWS_PROFILE=Agent3\nAGENTBUS_URL=https://agentbus.asaf.cc\nAGENTBUS_AGENT_ID=agent3\nPLAYWRIGHT_BROWSERS_SERVER=ws://playwright-browsers:3000\nCHOKIDAR_USEPOLLING=true"
+        "env": "AGENT_NAME=agent3\nAGENTMUX_AGENT_ID=Agent3"
       },
-      "skills": [
-        { "name": "Startup", "trigger": "/startup", "skill_type": "prompt", "description": "Full context reload and verification" },
-        { "name": "Reinforce", "trigger": "/reinforce", "skill_type": "prompt", "description": "Quick critical rules reminder" },
-        { "name": "Git Workflow", "trigger": "/git-workflow", "skill_type": "prompt", "description": "Branch and PR rules" },
-        { "name": "Versioning", "trigger": "/versioning", "skill_type": "prompt", "description": "npm version bump rules" },
-        { "name": "GitHub Layers", "trigger": "/github-layers", "skill_type": "prompt", "description": "3-layer GitHub access system" },
-        { "name": "Dev Tools", "trigger": "/dev-tools", "skill_type": "prompt", "description": "@a5af package reference" },
-        { "name": "Deployment", "trigger": "/deployment", "skill_type": "prompt", "description": "Deploy CLI and CDK" },
-        { "name": "AWS Secrets", "trigger": "/aws-secrets", "skill_type": "prompt", "description": "Secrets Manager access" },
-        { "name": "AWS Setup", "trigger": "/aws-setup", "skill_type": "prompt", "description": "AWS identity and profiles" },
-        { "name": "MCP Servers", "trigger": "/mcp-servers", "skill_type": "prompt", "description": "MCP configuration reference" },
-        { "name": "ReAgent", "trigger": "/reagent", "skill_type": "prompt", "description": "PR review workflow" },
-        { "name": "E2E Testing", "trigger": "/e2e-testing", "skill_type": "prompt", "description": "HTTP Auth and Playwright" },
-        { "name": "VS Code Bridge", "trigger": "/vscode-bridge", "skill_type": "prompt", "description": "VS Code integration" }
-      ]
-    },
-    {
-      "id": "agent4",
-      "name": "Agent4",
-      "icon": "\ud83d\udfe0",
-      "agent_type": "container",
-      "environment": "linux",
-      "provider": "claude-code",
-      "description": "Container code agent \u2014 isolated Docker workspace for code, PRs, reviews",
-      "working_directory": "/workspace",
-      "shell": "bash",
-      "agent_bus_id": "agent4",
-      "auto_start": false,
-      "restart_on_crash": true,
-      "content": {
-        "env": "AGENT_NAME=agent4\nAWS_PROFILE=Agent4\nAGENTBUS_URL=https://agentbus.asaf.cc\nAGENTBUS_AGENT_ID=agent4\nPLAYWRIGHT_BROWSERS_SERVER=ws://playwright-browsers:3000\nCHOKIDAR_USEPOLLING=true"
-      },
-      "skills": [
-        { "name": "Startup", "trigger": "/startup", "skill_type": "prompt", "description": "Full context reload and verification" },
-        { "name": "Reinforce", "trigger": "/reinforce", "skill_type": "prompt", "description": "Quick critical rules reminder" },
-        { "name": "Git Workflow", "trigger": "/git-workflow", "skill_type": "prompt", "description": "Branch and PR rules" },
-        { "name": "Versioning", "trigger": "/versioning", "skill_type": "prompt", "description": "npm version bump rules" },
-        { "name": "GitHub Layers", "trigger": "/github-layers", "skill_type": "prompt", "description": "3-layer GitHub access system" },
-        { "name": "Dev Tools", "trigger": "/dev-tools", "skill_type": "prompt", "description": "@a5af package reference" },
-        { "name": "Deployment", "trigger": "/deployment", "skill_type": "prompt", "description": "Deploy CLI and CDK" },
-        { "name": "AWS Secrets", "trigger": "/aws-secrets", "skill_type": "prompt", "description": "Secrets Manager access" },
-        { "name": "AWS Setup", "trigger": "/aws-setup", "skill_type": "prompt", "description": "AWS identity and profiles" },
-        { "name": "MCP Servers", "trigger": "/mcp-servers", "skill_type": "prompt", "description": "MCP configuration reference" },
-        { "name": "ReAgent", "trigger": "/reagent", "skill_type": "prompt", "description": "PR review workflow" },
-        { "name": "E2E Testing", "trigger": "/e2e-testing", "skill_type": "prompt", "description": "HTTP Auth and Playwright" },
-        { "name": "VS Code Bridge", "trigger": "/vscode-bridge", "skill_type": "prompt", "description": "VS Code integration" }
-      ]
-    },
-    {
-      "id": "agent5",
-      "name": "Agent5",
-      "icon": "\u26aa",
-      "agent_type": "container",
-      "environment": "linux",
-      "provider": "claude-code",
-      "description": "Container code agent \u2014 isolated Docker workspace for code, PRs, reviews",
-      "working_directory": "/workspace",
-      "shell": "bash",
-      "agent_bus_id": "agent5",
-      "auto_start": false,
-      "restart_on_crash": true,
-      "content": {
-        "env": "AGENT_NAME=agent5\nAWS_PROFILE=Agent5\nAGENTBUS_URL=https://agentbus.asaf.cc\nAGENTBUS_AGENT_ID=agent5\nPLAYWRIGHT_BROWSERS_SERVER=ws://playwright-browsers:3000\nCHOKIDAR_USEPOLLING=true"
-      },
-      "skills": [
-        { "name": "Startup", "trigger": "/startup", "skill_type": "prompt", "description": "Full context reload and verification" },
-        { "name": "Reinforce", "trigger": "/reinforce", "skill_type": "prompt", "description": "Quick critical rules reminder" },
-        { "name": "Git Workflow", "trigger": "/git-workflow", "skill_type": "prompt", "description": "Branch and PR rules" },
-        { "name": "Versioning", "trigger": "/versioning", "skill_type": "prompt", "description": "npm version bump rules" },
-        { "name": "GitHub Layers", "trigger": "/github-layers", "skill_type": "prompt", "description": "3-layer GitHub access system" },
-        { "name": "Dev Tools", "trigger": "/dev-tools", "skill_type": "prompt", "description": "@a5af package reference" },
-        { "name": "Deployment", "trigger": "/deployment", "skill_type": "prompt", "description": "Deploy CLI and CDK" },
-        { "name": "AWS Secrets", "trigger": "/aws-secrets", "skill_type": "prompt", "description": "Secrets Manager access" },
-        { "name": "AWS Setup", "trigger": "/aws-setup", "skill_type": "prompt", "description": "AWS identity and profiles" },
-        { "name": "MCP Servers", "trigger": "/mcp-servers", "skill_type": "prompt", "description": "MCP configuration reference" },
-        { "name": "ReAgent", "trigger": "/reagent", "skill_type": "prompt", "description": "PR review workflow" },
-        { "name": "E2E Testing", "trigger": "/e2e-testing", "skill_type": "prompt", "description": "HTTP Auth and Playwright" },
-        { "name": "VS Code Bridge", "trigger": "/vscode-bridge", "skill_type": "prompt", "description": "VS Code integration" }
-      ]
+      "skills": []
     }
   ]
 }

@@ -204,7 +204,37 @@ impl SubprocessController {
         let mut cmd = Command::new(&config.cli_command);
         cmd.args(&args);
         if !config.working_dir.is_empty() {
-            cmd.current_dir(&config.working_dir);
+            // Expand ~ to home directory (cross-platform)
+            let expanded_dir = if config.working_dir.starts_with("~/") || config.working_dir == "~" {
+                if let Some(home) = dirs::home_dir() {
+                    home.join(config.working_dir.trim_start_matches("~/")).to_string_lossy().to_string()
+                } else {
+                    config.working_dir.clone()
+                }
+            } else {
+                config.working_dir.clone()
+            };
+            // Create directory if it doesn't exist
+            let dir_path = std::path::Path::new(&expanded_dir);
+            if !dir_path.exists() {
+                if let Err(e) = std::fs::create_dir_all(dir_path) {
+                    tracing::warn!(
+                        block_id = %self.block_id,
+                        dir = %expanded_dir,
+                        error = %e,
+                        "failed to create working directory, using current dir"
+                    );
+                } else {
+                    tracing::info!(
+                        block_id = %self.block_id,
+                        dir = %expanded_dir,
+                        "created working directory"
+                    );
+                }
+            }
+            if dir_path.exists() {
+                cmd.current_dir(&expanded_dir);
+            }
         }
         for (k, v) in &config.env_vars {
             cmd.env(k, v);
