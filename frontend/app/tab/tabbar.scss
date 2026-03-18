@@ -20,6 +20,7 @@
         height: 100%;
         overflow-x: auto;
         overflow-y: hidden;
+        gap: 1px;
         scrollbar-width: none; // Firefox
         position: relative; // needed for absolutely-positioned .tab children
 
