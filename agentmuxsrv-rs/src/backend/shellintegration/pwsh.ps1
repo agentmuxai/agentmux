@@ -13,6 +13,9 @@ if ($env:AGENTMUX -and $env:AGENTMUX -ne "1") {
 
 # ─── Shell Integration ────────────────────────────────────────────────────────
 
+# PS5 (Windows PowerShell 5.1) does not support `e as ESC — use [char]0x1B instead
+if ($PSVersionTable.PSVersion.Major -ge 7) { $ESC = "`e" } else { $ESC = [char]0x1B }
+
 function Global:_agentmux_si_blocked {
     return ($env:TMUX -or $env:STY -or $env:TERM -like "tmux*" -or $env:TERM -like "screen*")
 }
@@ -21,7 +24,7 @@ function Global:_agentmux_si_osc7 {
     if (_agentmux_si_blocked) { return }
     $hostname = if ($env:COMPUTERNAME) { $env:COMPUTERNAME } else { $env:HOSTNAME }
     $encoded = [System.Uri]::EscapeDataString($PWD.Path)
-    Write-Host -NoNewline "`e]7;file://$hostname/$encoded`a"
+    Write-Host -NoNewline "${ESC}]7;file://$hostname/$encoded`a"
 }
 
 function Global:_agentmux_si_json_escape {
@@ -44,9 +47,9 @@ function Global:_agentmux_si_agent_env {
         $Global:_AGENTMUX_SI_LAST_AGENT = $current_agent
         if ($env:AGENTMUX_AGENT_ID) {
             $escaped = _agentmux_si_json_escape $env:AGENTMUX_AGENT_ID
-            Write-Host -NoNewline "`e]16162;E;{`"AGENTMUX_AGENT_ID`":`"$escaped`"}`a"
+            Write-Host -NoNewline "${ESC}]16162;E;{`"AGENTMUX_AGENT_ID`":`"$escaped`"}`a"
         } else {
-            Write-Host -NoNewline "`e]16162;E;{}`a"
+            Write-Host -NoNewline "${ESC}]16162;E;{}`a"
         }
     }
 }
