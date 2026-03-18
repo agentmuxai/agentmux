@@ -1,6 +1,6 @@
 [package]
 name = "wsh-rs"
-version = "0.32.20"
+version = "0.32.21"
 edition = "2021"
 description = "Shell integration CLI for AgentMux"
 

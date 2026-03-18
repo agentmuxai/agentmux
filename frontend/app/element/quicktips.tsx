@@ -161,7 +161,7 @@ const QuickTips = (): JSX.Element => {
                             <KeyBinding keyDecl="Cmd:n" />
                         </div>
                         <div class="flex flex-col gap-0.5 p-2 rounded-md hover:bg-white/5 transition-colors">
-                            <span class="text-[15px]">Open Wave AI Panel</span>
+                            <span class="text-[15px]">Open Agent Panel</span>
                             <KeyBinding keyDecl="Cmd:Shift:a" />
                         </div>
                     </div>
@@ -197,7 +197,7 @@ const QuickTips = (): JSX.Element => {
                             <KeyBinding keyDecl="Ctrl:Shift:Digit" />
                         </div>
                         <div class="flex flex-col gap-0.5 p-2 rounded-md hover:bg-white/5 transition-colors">
-                            <span class="text-[15px]">Focus Wave AI</span>
+                            <span class="text-[15px]">Focus Agent Panel</span>
                             <KeyBinding keyDecl="Ctrl:Shift:0" />
                         </div>
                     </div>
@@ -292,7 +292,7 @@ const QuickTips = (): JSX.Element => {
                         </IconBox>
                         <a
                             target="_blank"
-                            href="https://discord.gg/XfvZ334gwU"
+                            href="https://discord.gg/P5zSGXbP"
                             rel="noopener"
                             class="hover:text-accent-400 hover:underline transition-colors font-medium"
                         >

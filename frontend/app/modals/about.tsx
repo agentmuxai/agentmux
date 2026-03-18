@@ -22,9 +22,9 @@ const AboutModal = ({}: AboutModalProps) => {
                     <img src={logoUrl} style={{ height: "48px" }} />
                     <div class="text-[25px]">AgentMux</div>
                     <div class="leading-5">
-                        Open-Source AI-Native Terminal
+                        Open-Source Agentic Workflow Environment
                         <br />
-                        Built for Seamless Workflows
+                        Built for Seamless AI Agent Collaboration
                     </div>
                 </div>
                 <div class="items-center gap-4 self-stretch w-full text-center">
@@ -43,7 +43,7 @@ const AboutModal = ({}: AboutModalProps) => {
                         <i class="fa-brands fa-github mr-2"></i>Github
                     </a>
                     <a
-                        href="https://github.com/agentmuxai/agentmux?ref=about"
+                        href="https://agentmux.ai?ref=about"
                         target="_blank"
                         rel="noopener"
                         class="inline-flex items-center px-4 py-2 rounded border border-border hover:bg-hoverbg transition-colors duration-200"
@@ -60,7 +60,7 @@ const AboutModal = ({}: AboutModalProps) => {
                     </a>
                 </div>
                 <div class="items-center gap-4 self-stretch w-full text-center">
-                    &copy; {currentDate.getFullYear()} Command Line Inc.
+                    &copy; {currentDate.getFullYear()} AgentMux Corp
                 </div>
             </div>
         </Modal>
