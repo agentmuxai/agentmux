@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { createSignal, For, Show, type JSX } from "solid-js";
-import type { SwarmViewModel, ActiveSubagent } from "./swarm-model";
+import type { SwarmViewModel, ActiveSubagent, HistorySessionMeta, HistoryMessage } from "./swarm-model";
 import { openSubagentPane, isSubagentPaneOpen } from "@/app/store/subagent-pane-manager";
 import "./swarm-view.scss";
 
@@ -22,6 +22,15 @@ export function SwarmView(props: ViewComponentProps<SwarmViewModel>): JSX.Elemen
                         Overview
                     </button>
                     <button
+                        class={`swarm-tab ${model.tabAtom() === "history" ? "active" : ""}`}
+                        onClick={() => {
+                            model.setTab("history");
+                            model.loadHistory();
+                        }}
+                    >
+                        History
+                    </button>
+                    <button
                         class={`swarm-tab ${model.tabAtom() === "search" ? "active" : ""}`}
                         onClick={() => model.setTab("search")}
                     >
@@ -33,6 +42,9 @@ export function SwarmView(props: ViewComponentProps<SwarmViewModel>): JSX.Elemen
             <div class="swarm-content">
                 <Show when={model.tabAtom() === "overview"}>
                     <SwarmOverview model={model} />
+                </Show>
+                <Show when={model.tabAtom() === "history"}>
+                    <SwarmHistory model={model} />
                 </Show>
                 <Show when={model.tabAtom() === "search"}>
                     <SwarmSearch model={model} />
@@ -163,6 +175,198 @@ function SubagentCard({
                 </span>
                 <span class="swarm-subagent-time">{elapsed()}</span>
             </div>
+        </div>
+    );
+}
+
+// ── History Tab ─────────────────────────────────────────────────────────
+
+function SwarmHistory({ model }: { model: SwarmViewModel }): JSX.Element {
+    const formatDate = (ms: number): string => {
+        if (!ms) return "";
+        const d = new Date(ms);
+        const now = new Date();
+        const diffMs = now.getTime() - d.getTime();
+        const diffDays = Math.floor(diffMs / 86400000);
+        if (diffDays === 0) return `Today ${d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+        if (diffDays === 1) return `Yesterday ${d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+        if (diffDays < 7) return `${diffDays}d ago`;
+        return d.toLocaleDateString([], { month: "short", day: "numeric" });
+    };
+
+    const formatSize = (bytes: number): string => {
+        if (bytes < 1024) return `${bytes}B`;
+        if (bytes < 1048576) return `${(bytes / 1024).toFixed(0)}KB`;
+        return `${(bytes / 1048576).toFixed(1)}MB`;
+    };
+
+    const truncateMsg = (msg: string, len = 80): string => {
+        if (!msg) return "(no message)";
+        const clean = msg.replace(/\n/g, " ").trim();
+        return clean.length > len ? clean.substring(0, len) + "..." : clean;
+    };
+
+    const handleSessionClick = (session: HistorySessionMeta) => {
+        model.loadSession(session.session_id);
+    };
+
+    const handleLoadMore = () => {
+        model.loadHistory(model.historySessionsAtom().length);
+    };
+
+    return (
+        <div class="swarm-history">
+            <Show when={model.selectedSessionAtom() != null}>
+                <SwarmConversationViewer model={model} />
+            </Show>
+            <Show when={model.selectedSessionAtom() == null}>
+                {/* Header bar */}
+                <div class="swarm-history-toolbar">
+                    <span class="swarm-history-count">
+                        {model.historyTotalAtom()} sessions
+                    </span>
+                    <button
+                        class="swarm-history-refresh"
+                        onClick={() => model.refreshHistory()}
+                        disabled={model.historyLoadingAtom()}
+                    >
+                        {model.historyLoadingAtom() ? "Scanning..." : "Refresh"}
+                    </button>
+                </div>
+
+                {/* Session list */}
+                <Show when={model.historySessionsAtom().length > 0}>
+                    <div class="swarm-history-list">
+                        <For each={model.historySessionsAtom()}>
+                            {(session) => (
+                                <div
+                                    class="swarm-history-item"
+                                    onClick={() => handleSessionClick(session)}
+                                >
+                                    <div class="swarm-history-item-header">
+                                        <span class="swarm-history-item-slug">
+                                            {session.slug || session.session_id.substring(0, 12)}
+                                        </span>
+                                        <span class="swarm-history-item-date">
+                                            {formatDate(session.modified_at)}
+                                        </span>
+                                    </div>
+                                    <div class="swarm-history-item-preview">
+                                        {truncateMsg(session.first_user_message)}
+                                    </div>
+                                    <div class="swarm-history-item-meta">
+                                        <span>{session.message_count} msgs</span>
+                                        <span>{formatSize(session.file_size_bytes)}</span>
+                                        <Show when={session.model !== "unknown"}>
+                                            <span>{session.model}</span>
+                                        </Show>
+                                        <Show when={session.subagent_count > 0}>
+                                            <span>{session.subagent_count} subagents</span>
+                                        </Show>
+                                    </div>
+                                </div>
+                            )}
+                        </For>
+                    </div>
+                </Show>
+
+                <Show when={model.historyHasMoreAtom()}>
+                    <div class="swarm-history-load-more">
+                        <button
+                            class="swarm-history-load-more-btn"
+                            onClick={handleLoadMore}
+                            disabled={model.historyLoadingAtom()}
+                        >
+                            Load More
+                        </button>
+                    </div>
+                </Show>
+
+                <Show when={!model.historyLoadingAtom() && model.historySessionsAtom().length === 0}>
+                    <div class="swarm-empty-state">
+                        <div class="swarm-empty-icon">{"\u{1F4DC}"}</div>
+                        <div class="swarm-empty-title">No History Found</div>
+                        <div class="swarm-empty-desc">
+                            Click Refresh to scan for Claude Code session files on disk.
+                        </div>
+                    </div>
+                </Show>
+            </Show>
+        </div>
+    );
+}
+
+// ── Conversation Viewer ─────────────────────────────────────────────────
+
+function SwarmConversationViewer({ model }: { model: SwarmViewModel }): JSX.Element {
+    const session = () => model.selectedSessionAtom();
+    const meta = () => session()?.meta;
+
+    const formatTimestamp = (ms: number): string => {
+        if (!ms) return "";
+        return new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+    };
+
+    return (
+        <div class="swarm-conversation">
+            <div class="swarm-conversation-header">
+                <button class="swarm-conversation-back" onClick={() => model.closeSession()}>
+                    {"\u2190"} Back
+                </button>
+                <div class="swarm-conversation-title">
+                    <span class="swarm-conversation-slug">
+                        {meta()?.slug || meta()?.session_id?.substring(0, 12)}
+                    </span>
+                    <span class="swarm-conversation-meta">
+                        {meta()?.message_count} messages
+                        {meta()?.model !== "unknown" ? ` \u00B7 ${meta()?.model}` : ""}
+                    </span>
+                </div>
+            </div>
+
+            <Show when={model.sessionLoadingAtom()}>
+                <div class="swarm-empty">Loading conversation...</div>
+            </Show>
+
+            <Show when={!model.sessionLoadingAtom() && session()}>
+                <div class="swarm-conversation-messages">
+                    <For each={session()!.messages}>
+                        {(msg: HistoryMessage) => (
+                            <div class={`swarm-message swarm-message-${msg.role}`}>
+                                <div class="swarm-message-header">
+                                    <span class="swarm-message-role">
+                                        {msg.role === "user" ? "User" : "Assistant"}
+                                    </span>
+                                    <span class="swarm-message-time">
+                                        {formatTimestamp(msg.timestamp)}
+                                    </span>
+                                </div>
+                                <Show when={msg.content}>
+                                    <div class="swarm-message-content">
+                                        {msg.content}
+                                    </div>
+                                </Show>
+                                <Show when={msg.tool_uses.length > 0}>
+                                    <div class="swarm-message-tools">
+                                        <For each={msg.tool_uses}>
+                                            {(tool) => (
+                                                <div class="swarm-tool-use">
+                                                    <span class="swarm-tool-name">{tool.name}</span>
+                                                    <Show when={tool.argument_summary}>
+                                                        <span class="swarm-tool-args">
+                                                            {tool.argument_summary}
+                                                        </span>
+                                                    </Show>
+                                                </div>
+                                            )}
+                                        </For>
+                                    </div>
+                                </Show>
+                            </div>
+                        )}
+                    </For>
+                </div>
+            </Show>
         </div>
     );
 }

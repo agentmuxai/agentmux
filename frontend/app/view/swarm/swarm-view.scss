@@ -221,6 +221,275 @@
     line-height: 1.5;
 }
 
+// ── History ─────────────────────────────────────────────────────────────
+
+.swarm-history {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    height: 100%;
+}
+
+.swarm-history-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 4px 0;
+    flex-shrink: 0;
+}
+
+.swarm-history-count {
+    font-size: 11px;
+    color: var(--secondary-text-color);
+}
+
+.swarm-history-refresh {
+    padding: 4px 10px;
+    background: transparent;
+    border: 1px solid var(--border-color);
+    border-radius: 3px;
+    color: var(--secondary-text-color);
+    font-family: inherit;
+    font-size: 11px;
+    cursor: pointer;
+    transition: all 0.1s;
+
+    &:hover:not(:disabled) {
+        border-color: var(--accent-color);
+        color: var(--accent-color);
+    }
+
+    &:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
+}
+
+.swarm-history-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    overflow-y: auto;
+    flex: 1;
+}
+
+.swarm-history-item {
+    padding: 8px 10px;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.1s;
+
+    &:hover {
+        background: color-mix(in srgb, var(--accent-color) 6%, transparent);
+        border-color: var(--accent-color);
+    }
+}
+
+.swarm-history-item-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 3px;
+}
+
+.swarm-history-item-slug {
+    font-size: 12px;
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 60%;
+}
+
+.swarm-history-item-date {
+    font-size: 10px;
+    color: var(--secondary-text-color);
+    flex-shrink: 0;
+}
+
+.swarm-history-item-preview {
+    font-size: 11px;
+    color: var(--secondary-text-color);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-bottom: 3px;
+}
+
+.swarm-history-item-meta {
+    display: flex;
+    gap: 8px;
+    font-size: 10px;
+    color: var(--secondary-text-color);
+    opacity: 0.6;
+}
+
+.swarm-history-load-more {
+    display: flex;
+    justify-content: center;
+    padding: 8px 0;
+}
+
+.swarm-history-load-more-btn {
+    padding: 6px 16px;
+    background: transparent;
+    border: 1px solid var(--border-color);
+    border-radius: 3px;
+    color: var(--secondary-text-color);
+    font-family: inherit;
+    font-size: 11px;
+    cursor: pointer;
+
+    &:hover:not(:disabled) {
+        border-color: var(--accent-color);
+        color: var(--accent-color);
+    }
+
+    &:disabled {
+        opacity: 0.5;
+    }
+}
+
+// ── Conversation Viewer ────────────────────────────────────────────────
+
+.swarm-conversation {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+}
+
+.swarm-conversation-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border-color);
+    margin-bottom: 8px;
+    flex-shrink: 0;
+}
+
+.swarm-conversation-back {
+    padding: 4px 8px;
+    background: transparent;
+    border: 1px solid var(--border-color);
+    border-radius: 3px;
+    color: var(--secondary-text-color);
+    font-family: inherit;
+    font-size: 11px;
+    cursor: pointer;
+    flex-shrink: 0;
+
+    &:hover {
+        border-color: var(--accent-color);
+        color: var(--accent-color);
+    }
+}
+
+.swarm-conversation-title {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    min-width: 0;
+}
+
+.swarm-conversation-slug {
+    font-size: 12px;
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.swarm-conversation-meta {
+    font-size: 10px;
+    color: var(--secondary-text-color);
+}
+
+.swarm-conversation-messages {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    overflow-y: auto;
+    flex: 1;
+}
+
+.swarm-message {
+    padding: 8px 10px;
+    border-radius: 4px;
+
+    &.swarm-message-user {
+        background: color-mix(in srgb, var(--accent-color) 8%, transparent);
+        border-left: 2px solid var(--accent-color);
+    }
+
+    &.swarm-message-assistant {
+        background: color-mix(in srgb, var(--main-text-color) 4%, transparent);
+        border-left: 2px solid var(--secondary-text-color);
+    }
+}
+
+.swarm-message-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 4px;
+}
+
+.swarm-message-role {
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: var(--secondary-text-color);
+}
+
+.swarm-message-time {
+    font-size: 10px;
+    color: var(--secondary-text-color);
+    opacity: 0.5;
+}
+
+.swarm-message-content {
+    font-size: 12px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 300px;
+    overflow-y: auto;
+}
+
+.swarm-message-tools {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    margin-top: 4px;
+}
+
+.swarm-tool-use {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    padding: 3px 6px;
+    background: color-mix(in srgb, var(--main-text-color) 4%, transparent);
+    border-radius: 3px;
+    font-size: 11px;
+}
+
+.swarm-tool-name {
+    font-weight: 500;
+    color: var(--accent-color);
+    flex-shrink: 0;
+}
+
+.swarm-tool-args {
+    color: var(--secondary-text-color);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-size: 10px;
+}
+
 // ── Search ──────────────────────────────────────────────────────────────
 
 .swarm-search {

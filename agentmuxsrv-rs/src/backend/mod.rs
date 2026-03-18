@@ -13,6 +13,7 @@ pub mod envutil;
 pub mod eventbus;
 pub mod fileutil;
 pub mod forge_seed;
+pub mod history;
 pub mod messagebus;
 pub mod ijson;
 pub mod iochan;
