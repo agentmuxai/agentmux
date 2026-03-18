@@ -3,37 +3,13 @@ mod crash;
 mod drag;
 mod heartbeat;
 mod menu;
+pub mod platform;
 mod sidecar;
 mod state;
 // mod tray; // Tray now managed by backend (cmd/server/tray.go)
 
 use tauri::Emitter;
 use tauri::Manager;
-
-/// On macOS, override the NSWindow styleMask to restore native resize handles.
-/// `decorations:false` gives Borderless with ~1px thin resize edges (unusable).
-/// Switching to Titled + FullSizeContentView with a transparent hidden titlebar
-/// gives proper native resize handles while keeping the frameless appearance.
-#[cfg(target_os = "macos")]
-pub(crate) fn apply_macos_frameless_resize<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>) {
-    use objc2_app_kit::{NSWindow, NSWindowStyleMask, NSWindowTitleVisibility};
-
-    if let Ok(ns_win_ptr) = window.ns_window() {
-        let ns_window: &NSWindow = unsafe { &*(ns_win_ptr as *const NSWindow) };
-        let mask = NSWindowStyleMask::Titled
-            | NSWindowStyleMask::Resizable
-            | NSWindowStyleMask::Miniaturizable
-            | NSWindowStyleMask::Closable
-            | NSWindowStyleMask::FullSizeContentView;
-        ns_window.setStyleMask(mask);
-        ns_window.setTitlebarAppearsTransparent(true);
-        ns_window.setTitleVisibility(NSWindowTitleVisibility::Hidden);
-        ns_window.setMovableByWindowBackground(true);
-        tracing::info!("macOS: applied Titled+FullSizeContentView styleMask for window '{}'", window.label());
-    } else {
-        tracing::warn!("macOS: failed to get NSWindow handle for '{}'", window.label());
-    }
-}
 
 /// Initialize and run the AgentMux Tauri application.
 ///
@@ -151,19 +127,8 @@ pub fn run() {
             // Initialize logging
             let log_dir = init_logging(&handle);
 
-            // In dev mode, clear the WebView2 cache to prevent stale bundles
-            #[cfg(all(debug_assertions, target_os = "windows"))]
-            {
-                if let Ok(data_dir) = handle.path().app_local_data_dir() {
-                    let cache_dir = data_dir.join("EBWebView").join("Default").join("Cache");
-                    if cache_dir.exists() {
-                        match std::fs::remove_dir_all(&cache_dir) {
-                            Ok(_) => tracing::info!("Cleared WebView2 cache for dev mode"),
-                            Err(e) => tracing::debug!("Could not clear WebView2 cache: {}", e),
-                        }
-                    }
-                }
-            }
+            // Platform-specific app-level setup (WebView2 cache clear on Windows, etc.)
+            platform::setup_app(app);
 
             // Initialize crash handler
             crash::init_crash_handler(log_dir.clone());
@@ -197,35 +162,9 @@ pub fn run() {
                     tracing::error!("Failed to set window title: {}", e);
                 }
 
-                // macOS: override NSWindow styleMask to restore native resize handles.
-                #[cfg(target_os = "macos")]
-                apply_macos_frameless_resize(&window);
-
-                // On Linux: attach native GTK drag handler to this window.
-                #[cfg(target_os = "linux")]
-                drag::attach_drag_handler(&window);
-
-                // On Linux: center the window if no saved position exists.
-                // tauri_plugin_window_state auto-restores saved state at window creation.
-                // If no state was saved yet, the window lands at (0,0) on Linux because
-                // X11 has no default centering behavior (unlike macOS/Windows). So if
-                // the window is still at the origin after plugin restoration, center it.
-                #[cfg(target_os = "linux")]
-                if window.outer_position().map(|p| p.x == 0 && p.y == 0).unwrap_or(true) {
-                    let _ = window.center();
-                }
-
-                // On Linux: show the window from Rust as a fallback.
-                // The window is created with visible:false to avoid FOUC; JS calls
-                // currentWindow.show() after initialization. But if the JS bundle fails
-                // to execute, the window would stay invisible forever. Showing it from
-                // Rust ensures the window is always visible even if JS fails.
-                // JS calling show() again later is harmless (idempotent).
-                #[cfg(target_os = "linux")]
-                {
-                    let _ = window.show();
-                    tracing::info!("[diag] window.show() called from Rust (Linux fallback)");
-                }
+                // Platform-specific window setup (macOS styleMask + traffic lights,
+                // Linux GTK drag + centering + show fallback, etc.)
+                platform::setup_window(&window);
             }
 
             // Register deep link handler for OAuth callback (agentmux://auth?code=...)

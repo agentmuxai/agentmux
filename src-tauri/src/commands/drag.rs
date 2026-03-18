@@ -276,13 +276,9 @@ pub async fn open_window_at_position(
             format!("Failed to create window: {}", e)
         })?;
 
-    // On Linux: attach native GTK drag handler
-    #[cfg(target_os = "linux")]
-    crate::drag::attach_drag_handler(&_new_window);
-
-    // On macOS: apply frameless resize handles via NSWindow styleMask override.
-    #[cfg(target_os = "macos")]
-    crate::apply_macos_frameless_resize(&_new_window);
+    // Platform-specific window setup (macOS styleMask + traffic lights,
+    // Linux GTK drag + centering + show fallback, etc.)
+    crate::platform::setup_window(&_new_window);
 
     // Register instance number and notify all windows
     let count = {

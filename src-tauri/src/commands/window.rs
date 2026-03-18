@@ -2,8 +2,6 @@ use tauri::Emitter;
 use tauri::Manager;
 use tauri::Runtime;
 
-#[cfg(target_os = "linux")]
-use crate::drag;
 use crate::state::AppState;
 
 #[cfg(target_os = "macos")]
@@ -58,13 +56,9 @@ pub async fn open_new_window<R: Runtime>(app: tauri::AppHandle<R>) -> Result<Str
         .build()
         .map_err(|e| format!("Failed to create window: {}", e))?;
 
-    // On Linux: attach native GTK drag handler so the header is draggable.
-    #[cfg(target_os = "linux")]
-    drag::attach_drag_handler(&_new_window);
-
-    // On macOS: apply frameless resize handles via NSWindow styleMask override.
-    #[cfg(target_os = "macos")]
-    crate::apply_macos_frameless_resize(&_new_window);
+    // Platform-specific window setup (macOS styleMask + traffic lights,
+    // Linux GTK drag + centering + show fallback, etc.)
+    crate::platform::setup_window(&_new_window);
 
     // Assign a stable instance number to the new window and notify all windows.
     let state = app.state::<AppState>();

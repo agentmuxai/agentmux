@@ -9,6 +9,7 @@
 
 import { atoms, getApi } from "@/store/global";
 import { useWindowDrag } from "@/app/hook/useWindowDrag";
+import { isMacOS } from "@/util/platformutil";
 import { For, Show, type JSX } from "solid-js";
 import { ActionWidgets } from "./action-widgets";
 import "./system-status.scss";
@@ -107,7 +108,9 @@ const SystemStatus = (): JSX.Element => {
     return (
         <div class="system-status" {...dragProps}>
             <ActionWidgets />
-            <WindowActionButtons />
+            <Show when={!isMacOS()}>
+                <WindowActionButtons />
+            </Show>
         </div>
     );
 };
