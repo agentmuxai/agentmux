@@ -8,10 +8,10 @@
     gap: 4px;
     height: 100%;
     user-select: none;
-    -webkit-app-region: no-drag;
 }
 
 .action-widget-slot {
+    -webkit-app-region: no-drag;
     display: flex;
     align-items: center;
     cursor: grab;

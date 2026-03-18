@@ -1026,6 +1026,23 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                 let is_npm_install = install_cmd.contains("npm install");
 
                 if is_npm_install {
+                    // Verify npm is available before attempting install
+                    let npm_check = if cfg!(windows) {
+                        tokio::process::Command::new("where").arg("npm").output().await
+                    } else {
+                        tokio::process::Command::new("which").arg("npm").output().await
+                    };
+                    let npm_available = npm_check
+                        .map(|o| o.status.success())
+                        .unwrap_or(false);
+                    if !npm_available {
+                        return Err(format!(
+                            "{} requires Node.js/npm to install. \
+                            Install Node.js from https://nodejs.org then restart AgentMux.",
+                            cmd.cli_command
+                        ));
+                    }
+
                     // npm-based providers (codex, gemini): install directly into versioned dir
                     let npm_init = format!(
                         "cd \"{}\" && npm init -y && npm install {}@{}",

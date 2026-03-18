@@ -164,6 +164,16 @@ fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType {
                             }]);
                         }
                     }
+                    if oref.otype == OTYPE_TAB {
+                        if let Ok(tab) = store.must_get::<Tab>(&oref.oid) {
+                            return WebReturnType::success_with_updates(vec![WaveObjUpdate {
+                                updatetype: "update".into(),
+                                otype: OTYPE_TAB.to_string(),
+                                oid: oref.oid.clone(),
+                                obj: Some(wave_obj_to_value(&tab)),
+                            }]);
+                        }
+                    }
                     WebReturnType::success_empty()
                 }
                 Err(e) => WebReturnType::error(e),
