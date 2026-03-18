@@ -86,7 +86,7 @@ const ActionWidget = ({
     }
 
     return (
-        <div>
+        <div data-tauri-drag-region="false">
             <Tooltip
                 content={widget.description || widget.label}
                 placement="bottom"
@@ -228,6 +228,7 @@ const ActionWidgets = (): JSX.Element => {
                         <div
                             class={`action-widget-slot${draggingKey() === key ? " dragging" : ""}`}
                             data-widget-slot={idx()}
+                            data-tauri-drag-region="false"
                             onPointerDown={(e) => handlePointerDown(key, e)}
                             onPointerMove={handlePointerMove}
                             onPointerUp={handlePointerUp}

@@ -108,7 +108,7 @@ const SystemStatus = (): JSX.Element => {
     return (
         <div class="system-status" {...dragProps}>
             <ActionWidgets />
-            <Show when={!isMacOS()}>
+            <Show when={navigator.platform !== "MacIntel" && !navigator.platform.startsWith("Mac")}>
                 <WindowActionButtons />
             </Show>
         </div>
