@@ -32,12 +32,12 @@ pub fn setup_window<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>) {
         // frontend provides custom window action buttons on Windows/Linux,
         // and macOS users use Cmd-W / Cmd-M / green-button for these actions.
         for button_type in [
-            NSWindowButton::NSWindowCloseButton,
-            NSWindowButton::NSWindowMiniaturizeButton,
-            NSWindowButton::NSWindowZoomButton,
+            NSWindowButton::CloseButton,
+            NSWindowButton::MiniaturizeButton,
+            NSWindowButton::ZoomButton,
         ] {
-            if let Some(button) = unsafe { ns_window.standardWindowButton(button_type) } {
-                unsafe { button.setHidden(true) };
+            if let Some(button) = ns_window.standardWindowButton(button_type) {
+                button.setHidden(true);
             }
         }
 
