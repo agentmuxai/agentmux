@@ -311,6 +311,12 @@ const DisplayNode = (props: DisplayNodeProps) => {
     // The header becomes draggable, not the entire tile — so pane content
     // (terminal, agent view) doesn't interfere with drag initiation.
     createEffect(() => {
+        // Track nodeModel.ready() so this re-runs after the 50ms delay in
+        // TileLayoutComponent.onMount that gates BlockFull rendering via
+        // Show when={ready()}. Without this, dragHandleRef.current is null
+        // on the first run (header hasn't mounted yet) and the effect exits
+        // early and never re-runs.
+        nodeModel.ready();
         const handle = dragHandleRef?.current;
         if (!handle) return;
         const canDrag = !isEphemeral() && !isMagnified();
