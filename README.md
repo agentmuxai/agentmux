@@ -76,7 +76,7 @@ Available from the top bar (right side) or the window header right-click menu:
 | **Forge** | hammer | Create and manage your agents |
 | **Swarm** | bee | Multi-agent orchestration |
 | **Terminal** | square-terminal | Terminal with xterm.js and real PTY |
-| **Sysinfo** | chart-line | Live system metrics (CPU, memory, network, GPU) |
+| **Sysinfo** | chart-line | Live system metrics (CPU, memory, network, disk) |
 | **Settings** | cog | Open settings in external editor |
 | **Help** | circle-question | Built-in documentation and help |
 | **DevTools** | code | Toggle WebView developer tools |
@@ -90,7 +90,7 @@ AgentMux          (Tauri v2 — Rust + platform WebView)
 ```
 
 **Stack:**
-- **Frontend:** SolidJS + TypeScript + Vite
+- **Frontend:** SolidJS + TypeScript + Vite + Jotai
 - **Backend:** Rust (Tokio + Axum + SQLite + portable-pty)
 - **Desktop:** Tauri v2
 - **Terminal:** xterm.js
