@@ -325,6 +325,54 @@ const DisplayNode = (props: DisplayNodeProps) => {
     // Attach drag handle ref to the drag handle element
     const dragHandleRef = nodeModel.dragHandleRef;
 
+    // Register drag directly on the header element (dragHandleRef).
+    // This replaces the React-era `drag(nodeModel.dragHandleRef)` pattern.
+    // The header becomes draggable, not the entire tile — so pane content
+    // (terminal, agent view) doesn't interfere with drag initiation.
+    createEffect(() => {
+        // Track nodeModel.ready() so this re-runs after the 50ms delay in
+        // TileLayoutComponent.onMount that gates BlockFull rendering via
+        // Show when={ready()}. Without this, dragHandleRef.current is null
+        // on the first run (header hasn't mounted yet) and the effect exits
+        // early and never re-runs.
+        nodeModel.ready();
+        const handle = dragHandleRef?.current;
+        if (!handle) return;
+        const canDrag = !isEphemeral() && !isMagnified();
+        handle.draggable = canDrag;
+
+        const handleDragStart = (e: DragEvent) => {
+            if (!canDrag) {
+                e.preventDefault();
+                return;
+            }
+            e.dataTransfer?.setData(DRAG_DATA_KEY, props.node.id);
+            const img = previewImage();
+            if (img) {
+                const dpr = typeof devicePixelRatio === "function" ? (devicePixelRatio as () => number)() : devicePixelRatio;
+                const offsetX = (DragPreviewWidth * dpr - DragPreviewWidth) / 2 + 10;
+                const offsetY = (DragPreviewHeight * dpr - DragPreviewHeight) / 2 + 10;
+                e.dataTransfer?.setDragImage(img, offsetX, offsetY);
+            }
+            globalDragNodeId = props.node.id;
+            globalDragLayoutModel = props.layoutModel;
+            props.layoutModel.activeDrag._set(true);
+            setIsDragging(true);
+        };
+
+        const handleDragEnd = (e: DragEvent) => {
+            onDragEnd(e);
+        };
+
+        handle.addEventListener("dragstart", handleDragStart);
+        handle.addEventListener("dragend", handleDragEnd);
+        onCleanup(() => {
+            handle.removeEventListener("dragstart", handleDragStart);
+            handle.removeEventListener("dragend", handleDragEnd);
+            handle.draggable = false;
+        });
+    });
+
     const leafContent = () => (
         <div class="tile-leaf">
             {props.layoutModel.renderContent(nodeModel)}
