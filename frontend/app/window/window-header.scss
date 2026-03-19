@@ -23,10 +23,12 @@
     display: flex;
     flex-direction: row;
     align-items: end;
-    // Width is set by applyChromeZoomCSS in zoom.ts as --chrome-header-width.
-    // On macOS/Windows: calc(100vw / zoomfactor) compensates for zoom dividing flex space.
-    // On Linux/WebKitGTK: 100vw (no compensation) because zoom does NOT divide flex space.
-    width: var(--chrome-header-width, 100vw);
+    // Width compensation for CSS zoom:
+    // - Linux/macOS: --chrome-header-width is set by JS in applyChromeZoomCSS
+    // - Windows: JS removes --chrome-header-width, so the fallback
+    //   calc(100vw / var(--zoomfactor, 1)) is used. This CSS-native calc is
+    //   evaluated in the zoom context by the browser, unlike a JS-set literal.
+    width: var(--chrome-header-width, calc(100vw / var(--zoomfactor, 1)));
     height: 33px;
     zoom: var(--zoomfactor);
     cursor: default;
