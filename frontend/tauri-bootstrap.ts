@@ -12,10 +12,20 @@ import { initBare } from "./wave";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { readTextFile, exists } from "@tauri-apps/plugin-fs";
+import { benchMark } from "@/util/startup-bench";
 
 // Pipe all console.log/warn/error to the Rust host log file.
 // Must run before any other code so early messages are captured.
 initLogPipe();
+
+// Show the Tauri window immediately so the user sees the loading spinner
+// instead of staring at a blank screen while the backend starts (~1.4s on Windows 11).
+// The #startup-loading overlay stays visible until initWave() finishes rendering.
+// window.show() is a no-op if the window is already visible.
+if (typeof (window as any).__TAURI_INTERNALS__ !== "undefined") {
+    getCurrentWindow().show().catch(() => {});
+    benchMark("window-show-early");
+}
 
 // Static CSS imports so Vite includes them in the HTML <link> tags.
 // wave.ts is dynamically imported (for error handling), but its CSS must
@@ -116,6 +126,7 @@ async function checkBackendStartupError(): Promise<boolean> {
 
 async function bootstrap() {
     try {
+        benchMark("bootstrap-start");
         log("INFO", "=== Tauri Bootstrap Starting ===");
         log("INFO", "User Agent:", navigator.userAgent);
         log("INFO", "Location:", window.location.href);
@@ -133,7 +144,9 @@ async function bootstrap() {
 
         if (isTauriRuntime) {
             log("INFO", "Initializing Tauri API...");
+            benchMark("setupTauriApi-start");
             await setupTauriApi();
+            benchMark("setupTauriApi-done");
             log("INFO", "✅ Tauri API initialized successfully");
             log("INFO", "window.api available:", !!(window as any).api);
 
@@ -146,7 +159,9 @@ async function bootstrap() {
 
             // Check for backend startup errors before loading main app
             log("INFO", "Checking for backend startup errors...");
+            benchMark("checkError-start");
             const hasError = await checkBackendStartupError();
+            benchMark("checkError-done");
             if (hasError) {
                 log("ERROR", "Backend startup error detected, halting bootstrap");
                 return; // Don't load main app if backend failed
@@ -160,6 +175,7 @@ async function bootstrap() {
         // Static import avoids the dynamic import() hang in WebKitGTK over tauri:// protocol.
         // window.api is guaranteed to exist at this point (setupTauriApi() ran above).
         log("INFO", "Starting main application (wave.ts initBare)...");
+        benchMark("initBare-start");
         try {
             await initBare();
             log("INFO", "✅ Main application loaded successfully");

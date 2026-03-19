@@ -21,13 +21,37 @@
         position: fixed;
         inset: 0;
         display: flex;
+        flex-direction: column;
         align-items: center;
         justify-content: center;
+        gap: 20px;
+        background: rgb(34, 34, 34);
+        /* Stay visible even when wave.ts hides body during Solid.js render.
+           Without this the spinner disappears for ~200ms during the FOUC guard. */
+        visibility: visible !important;
+        opacity: 1 !important;
+        z-index: 99999;
       }
       #startup-loading svg {
-        width: 120px;
-        height: 120px;
-        opacity: 0.85;
+        width: 96px;
+        height: 96px;
+        opacity: 0.9;
+        animation: startup-pulse 1.8s ease-in-out infinite;
+      }
+      #startup-loading-label {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        font-size: 13px;
+        color: rgba(247, 247, 247, 0.45);
+        letter-spacing: 0.04em;
+        animation: startup-fade 1.8s ease-in-out infinite;
+      }
+      @keyframes startup-pulse {
+        0%, 100% { opacity: 0.9; transform: scale(1); }
+        50%       { opacity: 0.65; transform: scale(0.97); }
+      }
+      @keyframes startup-fade {
+        0%, 100% { opacity: 0.45; }
+        50%       { opacity: 0.25; }
       }
     </style>
     <link rel="stylesheet" href="/fontawesome/css/fontawesome.min.css" />
@@ -39,7 +63,7 @@
     <script type="module" src="frontend/tauri-bootstrap.ts"></script>
   </head>
   <body class="init" data-colorscheme="dark">
-    <div id="startup-loading"><svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 1200 1200">
+    <div id="startup-loading"><svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 1200 1200">
   <defs>
     <linearGradient id="ag-lg" x1="591.8" y1="896.61" x2="1009.22" y2="637.86" gradientUnits="userSpaceOnUse">
       <stop offset="0" stop-color="#8168d3"/>
@@ -87,7 +111,7 @@
       <path d="m363.1,701.79h-18c-4.42,0-8-3.58-8-8v-82.97h-36.15v82.97c0,4.42-3.58,8-8,8h-18c-4.42,0-8-3.58-8-8v-108.97c0-4.42,3.58-8,8-8h88.15c4.42,0,8,3.58,8,8v108.97c0,4.42-3.58,8-8,8Z" fill="url(#ag-lg-16)" stroke-width="0"/>
     </g>
   </g>
-</svg></div>
+</svg><div id="startup-loading-label">Starting AgentMux\u2026</div></div>
     <div id="main"></div>
   </body>
 </html>

@@ -37,6 +37,7 @@ import * as WOS from "@/app/store/wos";
 import { loadFonts } from "@/util/fontutil";
 import { setKeyUtilPlatform } from "@/util/keyutil";
 import { render } from "solid-js/web";
+import { benchMark, benchDump } from "@/util/startup-bench";
 import { ContextMenuModel } from "@/app/store/contextmenu";
 // Static import — avoids dynamic import() hang in WebKitGTK over tauri:// protocol.
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -257,11 +258,13 @@ async function initTauriWave(): Promise<void> {
         // Show the window now that it's fully initialized (Tauri starts hidden)
         try {
             const currentWindow = getCurrentWindow();
+            benchMark("window-show");
             await currentWindow.show();
             if (platform === "linux") {
                 await currentWindow.center();
             }
             await currentWindow.setFocus();
+            benchDump(); // emit full startup timeline to log
         } catch (showError) {
             console.warn("[initTauriWave] Failed to show window:", showError);
         }
@@ -409,6 +412,7 @@ export async function initBare() {
     const timeoutPromise = new Promise(resolve => setTimeout(resolve, 2000));
 
     Promise.race([fontsPromise, timeoutPromise]).then(async () => {
+        benchMark("fonts-ready");
         const fontsMsg = `[startup-perf] initBare (fonts ready): ${(performance.now() - bareStart).toFixed(1)}ms`;
         console.log(fontsMsg);
         try { getApi().sendLog(fontsMsg); } catch {}
@@ -420,9 +424,11 @@ export async function initBare() {
             getApi().sendLog("Starting Tauri initialization");
             try {
                 // Check if this is a new window or the main window
+                benchMark("isMainWindow-start");
                 const isMain = await getApi().isMainWindow();
                 getApi().sendLog(`Window type: ${isMain ? "main" : "new window"}`);
 
+                benchMark("isMainWindow-done");
                 if (isMain) {
                     // Main window with freshly spawned backend: standard initialization
                     await initTauriWave();
