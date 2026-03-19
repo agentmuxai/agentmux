@@ -301,37 +301,59 @@ const DisplayNode = (props: DisplayNodeProps) => {
     // (dragHandleRef) as the drag handle. pragmatic-dnd wraps HTML5 DnD but
     // fires onDragStart AFTER the browser commits the drag, so SolidJS
     // reactive state updates here won't cause mid-event DOM mutations.
+    //
+    // The header ref may not be available at mount time (block content loads
+    // async behind a Show gate). Poll briefly until the ref is set, then
+    // register with the correct drag handle. Without a drag handle, the
+    // entire tile would be draggable — breaking text selection in panes.
     const dragHandleRef = nodeModel.dragHandleRef;
     onMount(() => {
         if (!tileNodeRef) return;
-        const cleanup = draggable({
-            element: tileNodeRef,
-            dragHandle: dragHandleRef?.current ?? undefined,
-            canDrag: () => !isEphemeral() && !isMagnified(),
-            getInitialData: () => ({ nodeId: props.node.id, type: tileItemType }),
-            onGenerateDragPreview: ({ nativeSetDragImage }) => {
-                const img = previewImage();
-                if (img && nativeSetDragImage) {
-                    const dpr = typeof devicePixelRatio === "function" ? (devicePixelRatio as () => number)() : devicePixelRatio;
-                    const offsetX = (DragPreviewWidth * dpr - DragPreviewWidth) / 2 + 10;
-                    const offsetY = (DragPreviewHeight * dpr - DragPreviewHeight) / 2 + 10;
-                    nativeSetDragImage(img, offsetX, offsetY);
-                }
-            },
-            onDragStart: () => {
-                globalDragNodeId = props.node.id;
-                globalDragLayoutModel = props.layoutModel;
-                props.layoutModel.activeDrag._set(true);
-                setIsDragging(true);
-            },
-            onDrop: () => {
-                globalDragNodeId = null;
-                globalDragLayoutModel = null;
-                props.layoutModel.activeDrag._set(false);
-                setIsDragging(false);
-            },
-        });
-        onCleanup(cleanup);
+        let cleanupFn: (() => void) | null = null;
+
+        const register = () => {
+            const handle = dragHandleRef?.current;
+            if (!handle) return false;
+            cleanupFn = draggable({
+                element: tileNodeRef,
+                dragHandle: handle,
+                canDrag: () => !isEphemeral() && !isMagnified(),
+                getInitialData: () => ({ nodeId: props.node.id, type: tileItemType }),
+                onGenerateDragPreview: ({ nativeSetDragImage }) => {
+                    const img = previewImage();
+                    if (img && nativeSetDragImage) {
+                        const dpr = typeof devicePixelRatio === "function" ? (devicePixelRatio as () => number)() : devicePixelRatio;
+                        const offsetX = (DragPreviewWidth * dpr - DragPreviewWidth) / 2 + 10;
+                        const offsetY = (DragPreviewHeight * dpr - DragPreviewHeight) / 2 + 10;
+                        nativeSetDragImage(img, offsetX, offsetY);
+                    }
+                },
+                onDragStart: () => {
+                    globalDragNodeId = props.node.id;
+                    globalDragLayoutModel = props.layoutModel;
+                    props.layoutModel.activeDrag._set(true);
+                    setIsDragging(true);
+                },
+                onDrop: () => {
+                    globalDragNodeId = null;
+                    globalDragLayoutModel = null;
+                    props.layoutModel.activeDrag._set(false);
+                    setIsDragging(false);
+                },
+            });
+            return true;
+        };
+
+        // Try immediately, then poll briefly if header hasn't mounted yet
+        if (!register()) {
+            const interval = setInterval(() => {
+                if (register()) clearInterval(interval);
+            }, 50);
+            // Stop polling after 2s — if header still isn't there, skip drag
+            setTimeout(() => clearInterval(interval), 2000);
+        }
+
+        onCleanup(() => cleanupFn?.());
     });
 
     const leafContent = () => (
