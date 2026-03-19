@@ -31,17 +31,6 @@
     zoom: var(--zoomfactor);
     cursor: default;
 
-    // macOS/WebKit: CSS zoom causes sub-pixel rounding in the width compensation
-    // formula, making right-aligned widgets shift left at non-integer zoom levels.
-    // Use transform:scale instead — it doesn't affect the layout box, so the
-    // element stays at full width and right-aligned content stays pinned.
-    .platform-darwin & {
-        width: 100%;
-        zoom: unset;
-        transform: scale(var(--zoomfactor, 1));
-        transform-origin: left top;
-    }
-
     .window-drag {
         height: 100%;
         width: var(--default-indent);
