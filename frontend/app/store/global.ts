@@ -190,6 +190,8 @@ type GlobalInitOptions = {
 export function initGlobal(initOpts: GlobalInitOptions) {
     globalPrimaryTabStartup = initOpts.primaryTabStartup ?? false;
     setPlatform(initOpts.platform);
+    // Add platform CSS class to body for platform-specific styling
+    document.body.classList.add(`platform-${initOpts.platform}`);
     initGlobalSignals(initOpts);
 }
 

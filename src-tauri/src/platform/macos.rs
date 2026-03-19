@@ -4,9 +4,7 @@
 //! macOS-specific window setup.
 //!
 //! - Override NSWindow styleMask to restore native resize handles on a frameless window.
-//! - Hide traffic light buttons (close/minimize/zoom) — custom buttons handled in frontend
-//!   on non-macOS, and macOS users rely on keyboard shortcuts / app menu.
-//! - Enable dragging by window background.
+//! - Hide native traffic light buttons — frontend shows custom min/max/close on all platforms.
 
 use objc2_app_kit::{NSWindow, NSWindowButton, NSWindowStyleMask, NSWindowTitleVisibility};
 
@@ -27,25 +25,27 @@ pub fn setup_window<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>) {
         ns_window.setTitlebarAppearsTransparent(true);
         ns_window.setTitleVisibility(NSWindowTitleVisibility::Hidden);
 
-        // Hide traffic light buttons (close/minimize/zoom).
-        // These are visible because we use Titled style; hide them since the
-        // frontend provides custom window action buttons on Windows/Linux,
-        // and macOS users use Cmd-W / Cmd-M / green-button for these actions.
+        // Hide native traffic light buttons (close/minimize/zoom).
+        // The frontend provides custom window action buttons (WindowActionButtons)
+        // on all platforms including macOS, so native traffic lights are not needed.
         for button_type in [
-            NSWindowButton::NSWindowCloseButton,
-            NSWindowButton::NSWindowMiniaturizeButton,
-            NSWindowButton::NSWindowZoomButton,
+            NSWindowButton::CloseButton,
+            NSWindowButton::MiniaturizeButton,
+            NSWindowButton::ZoomButton,
         ] {
-            if let Some(button) = unsafe { ns_window.standardWindowButton(button_type) } {
-                unsafe { button.setHidden(true) };
+            if let Some(button) = ns_window.standardWindowButton(button_type) {
+                button.setHidden(true);
             }
         }
 
-        // Allow dragging by window background (header area).
-        ns_window.setMovableByWindowBackground(true);
+        // NOTE: do NOT set setMovableByWindowBackground(true) here.
+        // It makes macOS treat all non-interactive areas as window drag handles,
+        // which swallows pointer events and breaks pragmatic-dnd pane dragging.
+        // Window dragging is handled by data-tauri-drag-region + startDragging()
+        // on the header bar instead.
 
         tracing::info!(
-            "macOS: applied Titled+FullSizeContentView styleMask, hid traffic lights for window '{}'",
+            "macOS: applied Titled+FullSizeContentView styleMask for window '{}'",
             window.label()
         );
     } else {
