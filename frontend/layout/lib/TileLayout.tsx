@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { getSettingsKeyAtom } from "@/app/store/global";
+import { draggable, dropTargetForElements, monitorForElements } from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
 import clsx from "clsx";
 import { toPng } from "html-to-image";
 import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js";
@@ -296,34 +297,42 @@ const DisplayNode = (props: DisplayNodeProps) => {
         }
     };
 
-    const onDragStart = (e: DragEvent) => {
-        if (isEphemeral() || isMagnified()) {
-            e.preventDefault();
-            return;
-        }
-        e.dataTransfer?.setData(DRAG_DATA_KEY, props.node.id);
-        const img = previewImage();
-        if (img) {
-            const dpr = typeof devicePixelRatio === "function" ? (devicePixelRatio as () => number)() : devicePixelRatio;
-            const offsetX = (DragPreviewWidth * dpr - DragPreviewWidth) / 2 + 10;
-            const offsetY = (DragPreviewHeight * dpr - DragPreviewHeight) / 2 + 10;
-            e.dataTransfer?.setDragImage(img, offsetX, offsetY);
-        }
-        globalDragNodeId = props.node.id;
-        globalDragLayoutModel = props.layoutModel;
-        props.layoutModel.activeDrag._set(true);
-        setIsDragging(true);
-    };
-
-    const onDragEnd = (e: DragEvent) => {
-        globalDragNodeId = null;
-        globalDragLayoutModel = null;
-        props.layoutModel.activeDrag._set(false);
-        setIsDragging(false);
-    };
-
-    // Attach drag handle ref to the drag handle element
+    // Register pragmatic-dnd draggable on the tile node, using the header
+    // (dragHandleRef) as the drag handle. pragmatic-dnd wraps HTML5 DnD but
+    // fires onDragStart AFTER the browser commits the drag, so SolidJS
+    // reactive state updates here won't cause mid-event DOM mutations.
     const dragHandleRef = nodeModel.dragHandleRef;
+    onMount(() => {
+        if (!tileNodeRef) return;
+        const cleanup = draggable({
+            element: tileNodeRef,
+            dragHandle: dragHandleRef?.current ?? undefined,
+            canDrag: () => !isEphemeral() && !isMagnified(),
+            getInitialData: () => ({ nodeId: props.node.id, type: tileItemType }),
+            onGenerateDragPreview: ({ nativeSetDragImage }) => {
+                const img = previewImage();
+                if (img && nativeSetDragImage) {
+                    const dpr = typeof devicePixelRatio === "function" ? (devicePixelRatio as () => number)() : devicePixelRatio;
+                    const offsetX = (DragPreviewWidth * dpr - DragPreviewWidth) / 2 + 10;
+                    const offsetY = (DragPreviewHeight * dpr - DragPreviewHeight) / 2 + 10;
+                    nativeSetDragImage(img, offsetX, offsetY);
+                }
+            },
+            onDragStart: () => {
+                globalDragNodeId = props.node.id;
+                globalDragLayoutModel = props.layoutModel;
+                props.layoutModel.activeDrag._set(true);
+                setIsDragging(true);
+            },
+            onDrop: () => {
+                globalDragNodeId = null;
+                globalDragLayoutModel = null;
+                props.layoutModel.activeDrag._set(false);
+                setIsDragging(false);
+            },
+        });
+        onCleanup(cleanup);
+    });
 
     const leafContent = () => (
         <div class="tile-leaf">
@@ -358,9 +367,6 @@ const DisplayNode = (props: DisplayNodeProps) => {
             ref={tileNodeRef}
             id={props.node.id}
             style={tileTransform() as JSX.CSSProperties}
-            draggable={!isEphemeral() && !isMagnified()}
-            onDragStart={onDragStart}
-            onDragEnd={onDragEnd}
             onPointerEnter={generatePreviewImage}
             onPointerOver={(event) => event.stopPropagation()}
         >
@@ -377,9 +383,22 @@ interface OverlayNodeWrapperProps {
 const OverlayNodeWrapper = (props: OverlayNodeWrapperProps) => {
     const leafs = () => props.layoutModel.leafs();
     const overlayTransform = () => props.layoutModel.overlayTransform();
+    const activeDrag = () => props.layoutModel.activeDrag();
+
+    // Overlay is always positioned at top:0 so pragmatic-dnd drop targets
+    // are registered in the correct location. pointer-events toggles between
+    // "none" (pass-through for normal clicks) and "auto" (receive drag events).
+    // activeDrag is set by pragmatic-dnd's onDragStart callback which fires
+    // AFTER the browser commits the drag, so this toggle is safe.
+    const isActiveDrag = () => props.layoutModel.activeDrag();
+    const overlayStyle = createMemo<JSX.CSSProperties>(() => ({
+        ...overlayTransform(),
+        top: "0px",
+        "pointer-events": isActiveDrag() ? "auto" : "none",
+    }));
 
     return (
-        <div class="overlay-container" style={{ top: "10000px", ...overlayTransform() }}>
+        <div class="overlay-container" style={overlayStyle()}>
             <Key each={leafs()} by={(node) => node.id}>
                 {(node) => <OverlayNode layoutModel={props.layoutModel} node={node()} />}
             </Key>
@@ -401,16 +420,14 @@ const OverlayNode = (props: OverlayNodeProps) => {
     const additionalProps = () => nodeModel.additionalProps();
     let overlayRef: HTMLDivElement | undefined;
 
-    const handleDragOver = throttle(50, (e: DragEvent) => {
-        e.preventDefault();
+    // Throttled drop-direction computation (same logic as before, used by pragmatic-dnd onDrag)
+    const computeDropDirection = throttle(50, (clientX: number, clientY: number) => {
         const dragNodeId = globalDragNodeId;
         if (!dragNodeId || dragNodeId === props.node.id) return;
 
         if (props.layoutModel.displayContainerRef?.current && additionalProps()?.rect) {
-            const offset = { x: e.clientX, y: e.clientY };
             const containerRect = props.layoutModel.displayContainerRef.current.getBoundingClientRect();
-            offset.x -= containerRect.x;
-            offset.y -= containerRect.y;
+            const offset = { x: clientX - containerRect.x, y: clientY - containerRect.y };
             props.layoutModel.treeReducer({
                 type: LayoutTreeActionType.ComputeMove,
                 nodeId: props.node.id,
@@ -424,17 +441,24 @@ const OverlayNode = (props: OverlayNodeProps) => {
         }
     });
 
-    const handleDragLeave = (e: DragEvent) => {
-        // Only clear if leaving this overlay node entirely (not entering a child)
-        if (overlayRef && !overlayRef.contains(e.relatedTarget as Node)) {
-            props.layoutModel.treeReducer({ type: LayoutTreeActionType.ClearPendingAction });
-        }
-    };
-
-    const handleDrop = (e: DragEvent) => {
-        e.preventDefault();
-        props.layoutModel.onDrop();
-    };
+    onMount(() => {
+        if (!overlayRef) return;
+        const cleanup = dropTargetForElements({
+            element: overlayRef,
+            canDrop: ({ source }) => source.data.type === tileItemType && source.data.nodeId !== props.node.id,
+            onDrag: ({ location }) => {
+                const cursor = location.current.input;
+                computeDropDirection(cursor.clientX, cursor.clientY);
+            },
+            onDragLeave: () => {
+                props.layoutModel.treeReducer({ type: LayoutTreeActionType.ClearPendingAction });
+            },
+            onDrop: () => {
+                props.layoutModel.onDrop();
+            },
+        });
+        onCleanup(cleanup);
+    });
 
     return (
         <div
@@ -442,9 +466,6 @@ const OverlayNode = (props: OverlayNodeProps) => {
             class="overlay-node"
             id={props.node.id}
             style={additionalProps()?.transform as JSX.CSSProperties}
-            onDragOver={handleDragOver}
-            onDragLeave={handleDragLeave}
-            onDrop={handleDrop}
         />
     );
 };
