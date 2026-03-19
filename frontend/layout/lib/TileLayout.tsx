@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { getSettingsKeyAtom } from "@/app/store/global";
+import { isLinux } from "@/util/platformutil";
 import { draggable, dropTargetForElements, monitorForElements } from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
 import clsx from "clsx";
 import { toPng } from "html-to-image";
@@ -313,10 +314,14 @@ const DisplayNode = (props: DisplayNodeProps) => {
 
         const register = () => {
             const handle = dragHandleRef?.current;
-            if (!handle) return false;
+            // WebKitGTK (Linux) does not support HTML5 DnD from a draggable="true"
+            // child inside a draggable="false" parent — the draggable() call with a
+            // specific dragHandle makes the tile non-draggable on Linux. Fall back
+            // to whole-tile drag on Linux (no dragHandle restriction).
+            if (!handle && !isLinux()) return false;
             cleanupFn = draggable({
                 element: tileNodeRef,
-                dragHandle: handle,
+                dragHandle: isLinux() ? undefined : handle,
                 canDrag: () => !isEphemeral() && !isMagnified(),
                 getInitialData: () => ({ nodeId: props.node.id, type: tileItemType }),
                 onGenerateDragPreview: ({ nativeSetDragImage }) => {
@@ -344,7 +349,9 @@ const DisplayNode = (props: DisplayNodeProps) => {
             return true;
         };
 
-        // Try immediately, then poll briefly if header hasn't mounted yet
+        // Try immediately, then poll briefly if header hasn't mounted yet.
+        // On Linux: register() always succeeds immediately (no dragHandle needed).
+        // On other platforms: poll until the header ref is available.
         if (!register()) {
             const interval = setInterval(() => {
                 if (register()) clearInterval(interval);
