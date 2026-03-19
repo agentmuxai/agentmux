@@ -9,7 +9,6 @@
 
 import { atoms, getApi } from "@/store/global";
 import { useWindowDrag } from "@/app/hook/useWindowDrag";
-import { isMacOS } from "@/util/platformutil";
 import { For, Show, type JSX } from "solid-js";
 import { ActionWidgets } from "./action-widgets";
 import "./system-status.scss";
