@@ -8,7 +8,7 @@ import { getBlockComponentModel, getFocusedBlockId, WOS } from "@/app/store/glob
 import { RpcApi } from "@/app/store/wshclientapi";
 import { TabRpcClient } from "@/app/store/wshrpcutil";
 import { fireAndForget } from "@/util/util";
-import { PLATFORM, PlatformLinux } from "@/util/platformutil";
+import { PLATFORM, PlatformLinux, PlatformMacOS } from "@/util/platformutil";
 import { createSignal } from "solid-js";
 
 // Zoom constants
@@ -120,12 +120,19 @@ export function zoomReset(store: any): void {
 
 function applyChromeZoomCSS(factor: number): void {
     document.documentElement.style.setProperty("--zoomfactor", String(factor));
-    // Linux/WebKitGTK does not divide flex children's layout space by the zoom
-    // factor, so calc(100vw / zoomfactor) compensation is incorrect there.
-    // On Linux: use 100vw (no compensation). On other platforms: compensate.
-    const headerWidth = (PLATFORM === PlatformLinux || factor <= 1)
-        ? "100vw"
-        : `calc(100vw / ${factor})`;
+    let headerWidth: string;
+    if (PLATFORM === PlatformLinux || factor <= 1) {
+        // Linux/WebKitGTK: no compensation needed — zoom doesn't divide flex space.
+        headerWidth = "100vw";
+    } else if (PLATFORM === PlatformMacOS) {
+        // macOS/WebKit: use 100% to avoid sub-pixel rounding when mixing viewport
+        // units (100vw) with zoomed layout units. The parent is a full-width flex
+        // container, so 100% resolves to the viewport width natively.
+        headerWidth = "100%";
+    } else {
+        // Windows/WebView2: calc(100vw / factor) works correctly.
+        headerWidth = `calc(100vw / ${factor})`;
+    }
     document.documentElement.style.setProperty("--chrome-header-width", headerWidth);
 }
 
