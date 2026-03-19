@@ -369,6 +369,9 @@ export function buildTauriApi(): AppApi {
         getCliPath: async (provider: string) => {
             return await invoke<string | null>("get_cli_path", { provider });
         },
+        checkNodejsAvailable: async () => {
+            return await invoke<NodejsStatus>("check_nodejs_available");
+        },
 
         listen: async (event: string, callback: (event: any) => void) => {
             const unlisten = await listen(event, callback);

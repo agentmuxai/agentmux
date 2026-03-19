@@ -27,6 +27,15 @@ pub struct CliInstallResult {
     pub already_installed: bool,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct NodejsStatus {
+    pub available: bool,
+    pub version: Option<String>,
+    pub npm_available: bool,
+    pub npm_version: Option<String>,
+    pub path: Option<String>,
+}
+
 /// Returns the base install directory: ~/.agentmux/instances/v<version>/cli/<provider>/
 fn get_provider_install_dir(provider: &str) -> Result<PathBuf, String> {
     let home = dirs::home_dir().ok_or("Could not determine home directory")?;
@@ -86,6 +95,27 @@ fn install_via_npm(provider: &str) -> Result<String, String> {
     let npm_package = get_npm_package(provider)?;
     let pinned_version = get_pinned_version(provider)?;
     let install_dir = get_provider_install_dir(provider)?;
+
+    // Pre-flight: verify npm is available before attempting install
+    let npm_cmd = if cfg!(windows) { "npm.cmd" } else { "npm" };
+    let mut check = std::process::Command::new(npm_cmd);
+    check.arg("--version");
+    #[cfg(windows)]
+    check.creation_flags(0x08000000);
+    match check.output() {
+        Ok(output) if output.status.success() => {
+            let ver = String::from_utf8_lossy(&output.stdout);
+            tracing::info!("npm {} available for install", ver.trim());
+        }
+        _ => {
+            return Err(
+                "NODEJS_NOT_FOUND: Node.js/npm is not installed. \
+                 Codex and Gemini CLIs require Node.js to install. \
+                 Install Node.js from https://nodejs.org/ (LTS recommended)."
+                    .to_string(),
+            );
+        }
+    }
 
     std::fs::create_dir_all(&install_dir)
         .map_err(|e| format!("Failed to create install dir: {e}"))?;
@@ -227,6 +257,75 @@ pub async fn install_cli(provider: String) -> Result<CliInstallResult, String> {
     .map_err(|e| format!("Install task failed: {e}"))?;
 
     result
+}
+
+/// Check if Node.js and npm are available on the system.
+#[tauri::command]
+pub async fn check_nodejs_available() -> Result<NodejsStatus, String> {
+    let result = tokio::task::spawn_blocking(|| {
+        let node_cmd = if cfg!(windows) { "node.exe" } else { "node" };
+        let npm_cmd = if cfg!(windows) { "npm.cmd" } else { "npm" };
+
+        let mut status = NodejsStatus {
+            available: false,
+            version: None,
+            npm_available: false,
+            npm_version: None,
+            path: None,
+        };
+
+        // Check node
+        let mut cmd = std::process::Command::new(node_cmd);
+        cmd.arg("--version");
+        #[cfg(windows)]
+        cmd.creation_flags(0x08000000);
+        if let Ok(output) = cmd.output() {
+            if output.status.success() {
+                status.available = true;
+                status.version = Some(
+                    String::from_utf8_lossy(&output.stdout).trim().to_string(),
+                );
+
+                let which_cmd = if cfg!(windows) { "where" } else { "which" };
+                let mut wcmd = std::process::Command::new(which_cmd);
+                wcmd.arg(node_cmd);
+                #[cfg(windows)]
+                wcmd.creation_flags(0x08000000);
+                if let Ok(path_out) = wcmd.output() {
+                    if path_out.status.success() {
+                        status.path = Some(
+                            String::from_utf8_lossy(&path_out.stdout)
+                                .lines()
+                                .next()
+                                .unwrap_or("")
+                                .trim()
+                                .to_string(),
+                        );
+                    }
+                }
+            }
+        }
+
+        // Check npm
+        let mut cmd = std::process::Command::new(npm_cmd);
+        cmd.arg("--version");
+        #[cfg(windows)]
+        cmd.creation_flags(0x08000000);
+        if let Ok(output) = cmd.output() {
+            if output.status.success() {
+                status.npm_available = true;
+                status.npm_version = Some(
+                    String::from_utf8_lossy(&output.stdout).trim().to_string(),
+                );
+            }
+        }
+
+        status
+    })
+    .await
+    .map_err(|e| format!("Failed to check Node.js: {e}"))?;
+
+    Ok(result)
 }
 
 #[cfg(test)]

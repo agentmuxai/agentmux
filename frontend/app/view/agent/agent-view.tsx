@@ -75,12 +75,19 @@ AgentViewWrapper.displayName = "AgentViewWrapper";
 
 const AgentPicker = ({ model }: { model: AgentViewModel }): JSX.Element => {
     const [launching, setLaunching] = createSignal<string | null>(null);
+    const [nodejsError, setNodejsError] = createSignal<string | null>(null);
     const agents = useForgeAgents();
 
     const handleSelect = async (agent: ForgeAgent) => {
+        setNodejsError(null);
         setLaunching(agent.id);
         try {
             await model.launchForgeAgent(agent);
+            // Check if launch was blocked by missing Node.js
+            if (model.nodejsError) {
+                setNodejsError(model.nodejsError);
+                model.nodejsError = null;
+            }
         } catch {
             // model logs internally
         } finally {
@@ -130,6 +137,20 @@ const AgentPicker = ({ model }: { model: AgentViewModel }): JSX.Element => {
                             )}
                         </For>
                     </div>
+                    <Show when={nodejsError()}>
+                        <div class="agent-nodejs-notice">
+                            <div class="nodejs-notice-icon">
+                                <i class="fa-solid fa-circle-exclamation" />
+                            </div>
+                            <div class="nodejs-notice-content">
+                                <div class="nodejs-notice-title">Node.js Required</div>
+                                <div class="nodejs-notice-text">{nodejsError()}</div>
+                                <div class="nodejs-notice-hint">
+                                    After installing, restart AgentMux and try again.
+                                </div>
+                            </div>
+                        </div>
+                    </Show>
                     <div class="agent-picker-footer">
                         <button class="agent-picker-forge-btn" disabled>
                             + New agent in Forge

@@ -21,6 +21,7 @@ export class AgentViewModel implements ViewModel {
     viewText: () => string | HeaderElem[];
     viewComponent: ViewComponent;
     noPadding: () => boolean;
+    nodejsError: string | null = null;
 
     constructor(blockId: string, nodeModel: BlockNodeModel) {
         this.blockId = blockId;
@@ -44,6 +45,14 @@ export class AgentViewModel implements ViewModel {
         const provider = PROVIDERS[agentId];
         if (!provider) {
             Logger.error("agent", "Unknown agent", { agentId });
+            return;
+        }
+
+        // Check Node.js availability for npm-based providers
+        const nodejsError = await checkNodejsForProvider(provider.id);
+        if (nodejsError) {
+            this.nodejsError = nodejsError;
+            Logger.error("agent", "Node.js not available", { agentId, error: nodejsError });
             return;
         }
 
@@ -107,6 +116,14 @@ export class AgentViewModel implements ViewModel {
         const provider = PROVIDERS[agent.provider] ?? PROVIDERS[resolveProviderAlias(agent.provider)];
         if (!provider) {
             Logger.error("agent", "Unknown provider in forge agent", { agentId: agent.id, provider: agent.provider });
+            return;
+        }
+
+        // Check Node.js availability for npm-based providers
+        const nodejsError = await checkNodejsForProvider(provider.id);
+        if (nodejsError) {
+            this.nodejsError = nodejsError;
+            Logger.error("agent", "Node.js not available for forge agent", { agentId: agent.id, error: nodejsError });
             return;
         }
 
@@ -222,6 +239,26 @@ export class AgentViewModel implements ViewModel {
     }
 
     dispose(): void {}
+}
+
+/**
+ * Check if Node.js is available. Required for npm-based providers (Codex, Gemini).
+ * Claude has its own standalone installer and doesn't need Node.js.
+ * Returns null if Node.js is available or not needed, or an error message string.
+ */
+async function checkNodejsForProvider(providerId: string): Promise<string | null> {
+    if (providerId === "claude") return null; // Claude has standalone installer
+    try {
+        const status = await getApi().checkNodejsAvailable();
+        if (!status.available || !status.npm_available) {
+            const missing = !status.available ? "Node.js" : "npm";
+            return `${missing} is not installed. Install Node.js from https://nodejs.org/ (LTS recommended).`;
+        }
+        return null;
+    } catch (e) {
+        Logger.warn("agent", "Failed to check Node.js availability", { error: String(e) });
+        return null; // Don't block launch on check failure — let npm install fail with its own error
+    }
 }
 
 /**
