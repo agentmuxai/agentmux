@@ -120,20 +120,20 @@ export function zoomReset(store: any): void {
 
 function applyChromeZoomCSS(factor: number): void {
     document.documentElement.style.setProperty("--zoomfactor", String(factor));
-    let headerWidth: string;
+    // Platform-specific header width compensation:
+    // - Linux: 100vw (WebKitGTK doesn't divide flex space by zoom)
+    // - macOS: 100% (avoids sub-pixel rounding with viewport units under zoom)
+    // - Windows: NOT set — uses CSS calc(100vw / var(--zoomfactor, 1)) which is
+    //   evaluated live by the browser in the zoom context. Setting a JS literal
+    //   like calc(100vw / ${factor}) is NOT equivalent and breaks Windows.
     if (PLATFORM === PlatformLinux || factor <= 1) {
-        // Linux/WebKitGTK: no compensation needed — zoom doesn't divide flex space.
-        headerWidth = "100vw";
+        document.documentElement.style.setProperty("--chrome-header-width", "100vw");
     } else if (PLATFORM === PlatformMacOS) {
-        // macOS/WebKit: use 100% to avoid sub-pixel rounding when mixing viewport
-        // units (100vw) with zoomed layout units. The parent is a full-width flex
-        // container, so 100% resolves to the viewport width natively.
-        headerWidth = "100%";
+        document.documentElement.style.setProperty("--chrome-header-width", "100%");
     } else {
-        // Windows/WebView2: calc(100vw / factor) works correctly.
-        headerWidth = `calc(100vw / ${factor})`;
+        // Windows: remove the JS-set property so CSS fallback kicks in.
+        document.documentElement.style.removeProperty("--chrome-header-width");
     }
-    document.documentElement.style.setProperty("--chrome-header-width", headerWidth);
 }
 
 export function chromeZoomIn(step: number = WHEEL_STEP): void {
