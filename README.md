@@ -30,7 +30,7 @@ Cross-platform (Windows, macOS, Linux). 100% Rust backend (Tokio + Axum). Tauri 
 - **Guardrail observability** — See which constraints are active and firing. Tune your agent system from live signal, not post-mortem guesswork.
 - **Built-in Claude integration** — Agent sessions are first-class citizens alongside terminals, editor, and system metrics.
 - **Forge widget** — Agent picker wired to live Forge data for orchestration workflows.
-- **Drag and drop** — Drag files into terminal panes, reorder widgets, drag panes and tabs across windows.
+- **Drag and drop** — Rearrange panes by dragging headers, reorder tabs, drag panes and tabs across windows.
 - **Per-pane zoom** — Independent zoom level per pane, plus global chrome zoom.
 - **Real PTY support** — Authentic terminal emulation via xterm.js and portable-pty.
 - **Shell integration** — `wsh` binary deployable to remote hosts for multiplexed sessions.
@@ -66,17 +66,20 @@ task package:portable     # Windows portable ZIP
 task package:portable:linux  # Linux AppImage
 ```
 
-## Pane Types
+## Widgets
 
-| View | Description |
-|------|-------------|
-| `term` | Terminal with xterm.js and real PTY |
-| `agent` | AI agent pane (Claude integration, multi-provider) |
-| `codeeditor` | Monaco-based code editor |
-| `sysinfo` | Live system metrics (CPU, memory, network) |
-| `webview` | Embedded web browser |
-| `forge` | Agent orchestration — picker wired to live Forge data |
-| `help` | Built-in documentation viewer |
+Available from the top bar (right side) or the window header right-click menu:
+
+| Widget | Icon | Description |
+|--------|------|-------------|
+| **Agent** | sparkles | AI agent with streaming output and tool execution |
+| **Forge** | hammer | Create and manage your agents |
+| **Swarm** | bee | Multi-agent orchestration |
+| **Terminal** | square-terminal | Terminal with xterm.js and real PTY |
+| **Sysinfo** | chart-line | Live system metrics (CPU, memory, network, disk) |
+| **Settings** | cog | Open settings in external editor |
+| **Help** | circle-question | Built-in documentation and help |
+| **DevTools** | code | Toggle WebView developer tools |
 
 ## Architecture
 
@@ -87,10 +90,10 @@ AgentMux          (Tauri v2 — Rust + platform WebView)
 ```
 
 **Stack:**
-- **Frontend:** React 19 + TypeScript + Vite + Jotai
+- **Frontend:** SolidJS + TypeScript + Vite + Jotai
 - **Backend:** Rust (Tokio + Axum + SQLite + portable-pty)
 - **Desktop:** Tauri v2
-- **Terminal:** xterm.js + Monaco Editor
+- **Terminal:** xterm.js
 
 ## Build Commands
 
