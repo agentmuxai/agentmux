@@ -108,9 +108,7 @@ const SystemStatus = (): JSX.Element => {
     return (
         <div class="system-status" {...dragProps}>
             <ActionWidgets />
-            <Show when={!isMacOS()}>
-                <WindowActionButtons />
-            </Show>
+            <WindowActionButtons />
         </div>
     );
 };
