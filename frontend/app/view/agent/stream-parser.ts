@@ -29,8 +29,9 @@ export class ClaudeCodeStreamParser {
     private nodeIdCounter: number = 0;
     private pendingToolCalls: Map<string, ToolCallEvent> = new Map();
     private currentAgentId?: string;
-    private currentTextNodeId: string | null = null;
-    private currentThinkingNodeId: string | null = null;
+    // Mutable node objects for accumulated text/thinking — content is appended in-place
+    private currentTextNode: { type: "markdown"; id: string; content: string } | null = null;
+    private currentThinkingNode: { type: "markdown"; id: string; content: string; metadata: { thinking: true } } | null = null;
 
     /**
      * Parse NDJSON stream line by line
@@ -90,6 +91,28 @@ export class ClaudeCodeStreamParser {
     }
 
     /**
+     * Parse a single event synchronously and return the resulting node.
+     * Consecutive text/thinking events accumulate into the same node (same id,
+     * content grows with each call).
+     */
+    parseStreamEvent(event: StreamEvent): DocumentNode | null {
+        return this.eventToNode(event);
+    }
+
+    /**
+     * Return all currently open accumulated nodes (text and/or thinking) and
+     * close them so the next text/thinking event starts fresh.
+     */
+    flushPending(): DocumentNode[] {
+        const nodes: DocumentNode[] = [];
+        if (this.currentTextNode) nodes.push(this.currentTextNode);
+        if (this.currentThinkingNode) nodes.push(this.currentThinkingNode);
+        this.currentTextNode = null;
+        this.currentThinkingNode = null;
+        return nodes;
+    }
+
+    /**
      * Convert stream event to document node
      */
     private eventToNode(event: StreamEvent): DocumentNode | null {
@@ -101,23 +124,23 @@ export class ClaudeCodeStreamParser {
                 return this.thinkingToNode(event as ThinkingEvent);
 
             case "tool_call":
-                this.currentTextNodeId = null;
-                this.currentThinkingNodeId = null;
+                this.currentTextNode = null;
+                this.currentThinkingNode = null;
                 return this.toolCallToNode(event as ToolCallEvent);
 
             case "tool_result":
-                this.currentTextNodeId = null;
-                this.currentThinkingNodeId = null;
+                this.currentTextNode = null;
+                this.currentThinkingNode = null;
                 return this.toolResultToNode(event as ToolResultEvent);
 
             case "agent_message":
-                this.currentTextNodeId = null;
-                this.currentThinkingNodeId = null;
+                this.currentTextNode = null;
+                this.currentThinkingNode = null;
                 return this.agentMessageToNode(event as AgentMessageEvent);
 
             case "user_message":
-                this.currentTextNodeId = null;
-                this.currentThinkingNodeId = null;
+                this.currentTextNode = null;
+                this.currentThinkingNode = null;
                 return this.userMessageToNode(event as UserMessageEvent);
 
             default:
@@ -128,39 +151,32 @@ export class ClaudeCodeStreamParser {
 
     /**
      * Convert text event to markdown node.
-     * Consecutive text deltas accumulate into a single node (same id).
+     * Consecutive text deltas accumulate into the same mutable node (same id,
+     * content appended). Switches away from thinking accumulation.
      */
     private textToNode(event: TextEvent): DocumentNode {
-        // Break text accumulation when switching from thinking
-        this.currentThinkingNodeId = null;
-
-        if (!this.currentTextNodeId) {
-            this.currentTextNodeId = `node_${this.nodeIdCounter++}`;
+        this.currentThinkingNode = null;
+        if (!this.currentTextNode) {
+            this.currentTextNode = { type: "markdown", id: `node_${this.nodeIdCounter++}`, content: event.content };
+        } else {
+            this.currentTextNode = { ...this.currentTextNode, content: this.currentTextNode.content + event.content };
         }
-        return {
-            type: "markdown",
-            id: this.currentTextNodeId,
-            content: event.content,
-        };
+        return { ...this.currentTextNode };
     }
 
     /**
      * Convert thinking event to markdown node with metadata.
-     * Consecutive thinking deltas accumulate into a single node.
+     * Consecutive thinking deltas accumulate into the same logical node.
+     * Switches away from text accumulation.
      */
     private thinkingToNode(event: ThinkingEvent): DocumentNode {
-        // Break text accumulation when switching to thinking
-        this.currentTextNodeId = null;
-
-        if (!this.currentThinkingNodeId) {
-            this.currentThinkingNodeId = `node_${this.nodeIdCounter++}`;
+        this.currentTextNode = null;
+        if (!this.currentThinkingNode) {
+            this.currentThinkingNode = { type: "markdown", id: `node_${this.nodeIdCounter++}`, content: event.content, metadata: { thinking: true } };
+        } else {
+            this.currentThinkingNode = { ...this.currentThinkingNode, content: this.currentThinkingNode.content + event.content };
         }
-        return {
-            type: "markdown",
-            id: this.currentThinkingNodeId,
-            content: event.content,
-            metadata: { thinking: true },
-        };
+        return { ...this.currentThinkingNode };
     }
 
     /**
@@ -332,7 +348,7 @@ export class ClaudeCodeStreamParser {
         this.buffer = "";
         this.nodeIdCounter = 0;
         this.pendingToolCalls.clear();
-        this.currentTextNodeId = null;
-        this.currentThinkingNodeId = null;
+        this.currentTextNode = null;
+        this.currentThinkingNode = null;
     }
 }

@@ -237,7 +237,7 @@ function Tab(props: TabProps): JSX.Element {
     const handleColorSelect = (hex: string | null) => {
         const oref = makeORef("tab", props.id);
         fireAndForget(async () => {
-            await ObjectService.UpdateObjectMeta(oref, { "tab:color": hex });
+            await ObjectService.UpdateObjectMeta(oref, { "tab:color": hex } as MetaType);
         });
         setShowColorPicker(false);
     };
