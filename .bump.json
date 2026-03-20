@@ -37,6 +37,7 @@
   "lockfiles": [
     {
       "type": "npm",
+      "strategy": "npm-version",
       "command": "npm install --package-lock-only",
       "allowFailure": true
     },
