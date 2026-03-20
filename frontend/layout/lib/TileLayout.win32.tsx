@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // Windows-specific TileLayout.
-// dragHandle: handle — restricts pane drag to header element.
+// dragHandle: undefined — whole-tile drag (pragmatic-dnd dragHandle breaks WebView2).
 
 import { getSettingsKeyAtom } from "@/app/store/global";
 import { draggable, dropTargetForElements, monitorForElements } from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
