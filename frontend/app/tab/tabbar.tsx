@@ -5,8 +5,9 @@ import { atoms, createTab, setActiveTab } from "@/store/global";
 import { Logger } from "@/util/logger";
 import { fireAndForget } from "@/util/util";
 import { useWindowDrag } from "@/app/hook/useWindowDrag.platform";
-import { For } from "solid-js";
+import { createSignal, For } from "solid-js";
 import type { JSX } from "solid-js";
+import clsx from "clsx";
 import { WorkspaceService } from "../store/services";
 import { deleteLayoutModelForTab } from "@/layout/index";
 import { Tab } from "./tab";
@@ -37,6 +38,8 @@ function DroppableTab(props: {
     onPinChange: () => void;
 }): JSX.Element {
     let tabWrapRef!: HTMLDivElement;
+    const [isDragging, setIsDragging] = createSignal(false);
+    const [insertSide, setInsertSide] = createSignal<"left" | "right" | null>(null);
 
     const handleDragStart = (e: DragEvent) => {
         if (props.allTabCount <= 1) {
@@ -50,6 +53,7 @@ function DroppableTab(props: {
                 JSON.stringify({ tabId: props.tabId, workspaceId: props.workspaceId, isPinned: props.isPinned })
             );
         }
+        setIsDragging(true);
         Logger.info("dnd", "tab-drag started", {
             tabId: props.tabId,
             workspaceId: props.workspaceId,
@@ -57,15 +61,33 @@ function DroppableTab(props: {
         });
     };
 
+    const handleDragEnd = () => {
+        setIsDragging(false);
+        setInsertSide(null);
+    };
+
     const handleDragOver = (e: DragEvent) => {
         e.preventDefault();
         if (e.dataTransfer) {
             e.dataTransfer.dropEffect = "move";
         }
+        if (isDragging()) {
+            setInsertSide(null);
+            return;
+        }
+        if (!e.dataTransfer?.types.includes("application/x-tab-reorder")) return;
+        const rect = tabWrapRef.getBoundingClientRect();
+        const midX = rect.left + (rect.right - rect.left) / 2;
+        setInsertSide(e.clientX < midX ? "left" : "right");
+    };
+
+    const handleDragLeave = () => {
+        setInsertSide(null);
     };
 
     const handleDrop = (e: DragEvent) => {
         e.preventDefault();
+        setInsertSide(null);
         const raw = e.dataTransfer?.getData("application/x-tab-reorder");
         if (!raw) return;
         try {
@@ -102,16 +124,22 @@ function DroppableTab(props: {
     return (
         <div
             ref={tabWrapRef!}
-            class="tab-drop-wrapper"
+            class={clsx("tab-drop-wrapper", {
+                "tab-dragging": isDragging(),
+                "tab-insert-left": insertSide() === "left",
+                "tab-insert-right": insertSide() === "right",
+            })}
             onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
             onDrop={handleDrop}
+            onDragEnd={handleDragEnd}
         >
             <Tab
                 id={props.tabId}
                 active={props.isActive}
                 isFirst={props.isFirst}
                 isBeforeActive={props.isBeforeActive}
-                isDragging={false}
+                isDragging={isDragging()}
                 tabWidth={0}
                 isNew={false}
                 isPinned={props.isPinned}
