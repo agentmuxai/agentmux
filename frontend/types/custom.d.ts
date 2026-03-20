@@ -137,6 +137,7 @@ declare global {
         checkCliAuthStatus: (provider: string, cliPath?: string) => Promise<CliAuthStatus>;
         installCli: (provider: string) => Promise<CliInstallResult>;
         getCliPath: (provider: string) => Promise<string | null>;
+        checkNodejsAvailable: () => Promise<NodejsStatus>;
         listen: (event: string, callback: (event: any) => void) => Promise<() => void>;
         startCrossDrag: (
             dragType: "pane" | "tab",
@@ -490,6 +491,14 @@ declare global {
         cli_path: string;
         version: string;
         already_installed: boolean;
+    };
+
+    type NodejsStatus = {
+        available: boolean;
+        version: string | null;
+        npm_available: boolean;
+        npm_version: string | null;
+        path: string | null;
     };
 
     type DraggedFile = {

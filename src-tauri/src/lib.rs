@@ -109,6 +109,7 @@ pub fn run() {
             // CLI installer commands
             commands::cli_installer::install_cli,
             commands::cli_installer::get_cli_path,
+            commands::cli_installer::check_nodejs_available,
             // Cross-window drag commands
             commands::drag::start_cross_drag,
             commands::drag::update_cross_drag,
