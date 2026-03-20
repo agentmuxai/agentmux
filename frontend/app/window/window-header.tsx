@@ -4,12 +4,12 @@
 import { ContextMenuModel } from "@/app/store/contextmenu";
 import { TabBar } from "@/app/tab/tabbar";
 import { WindowDrag } from "@/element/windowdrag";
-import { useWindowDrag } from "@/app/hook/useWindowDrag";
+import { useWindowDrag } from "@/app/hook/useWindowDrag.platform";
 import { atoms } from "@/store/global";
 import { type JSX } from "solid-js";
 import { createTabBarMenu } from "@/app/menu/base-menus";
 import { SystemStatus } from "@/app/window/system-status";
-import "./window-header.scss";
+import "./window-header.platform.scss";
 
 
 interface WindowHeaderProps {

@@ -1,7 +1,7 @@
 // Copyright 2025, Command Line Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-import { zoomIndicatorTextAtom, zoomIndicatorVisibleAtom } from "@/app/store/zoom";
+import { zoomIndicatorTextAtom, zoomIndicatorVisibleAtom } from "@/app/store/zoom.platform";
 import { JSX, Show } from "solid-js";
 import "./zoomindicator.scss";
 

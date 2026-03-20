@@ -4,7 +4,7 @@
 import { atoms, createTab, setActiveTab } from "@/store/global";
 import { Logger } from "@/util/logger";
 import { fireAndForget } from "@/util/util";
-import { useWindowDrag } from "@/app/hook/useWindowDrag";
+import { useWindowDrag } from "@/app/hook/useWindowDrag.platform";
 import { For } from "solid-js";
 import type { JSX } from "solid-js";
 import { WorkspaceService } from "../store/services";

@@ -24,7 +24,7 @@ import {
 import { WorkspaceService } from "@/app/store/services";
 import { RpcApi } from "@/app/store/wshclientapi";
 import { TabRpcClient } from "@/app/store/wshrpcutil";
-import { zoomIn, zoomOut, zoomReset } from "@/app/store/zoom";
+import { zoomIn, zoomOut, zoomReset } from "@/app/store/zoom.platform";
 import { TabBarModel } from "@/app/tab/tabbar-model";
 import { deleteLayoutModelForTab, getLayoutModelForStaticTab, NavigateDirection } from "@/layout/index";
 import * as keyutil from "@/util/keyutil";

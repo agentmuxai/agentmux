@@ -8,7 +8,7 @@
  */
 
 import { atoms, getApi } from "@/store/global";
-import { useWindowDrag } from "@/app/hook/useWindowDrag";
+import { useWindowDrag } from "@/app/hook/useWindowDrag.platform";
 import { For, Show, type JSX } from "solid-js";
 import { ActionWidgets } from "./action-widgets";
 import "./system-status.scss";

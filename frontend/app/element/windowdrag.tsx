@@ -3,7 +3,7 @@
 
 import clsx from "clsx";
 import { JSX } from "solid-js";
-import { useWindowDrag } from "@/app/hook/useWindowDrag";
+import { useWindowDrag } from "@/app/hook/useWindowDrag.platform";
 import type { Properties as CSSProperties } from "csstype";
 
 import "./windowdrag.scss";

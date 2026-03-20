@@ -1,8 +1,11 @@
 // Copyright 2025, Command Line Inc.
 // SPDX-License-Identifier: Apache-2.0
+//
+// Linux-specific TileLayout.
+// dragHandle: undefined — whole-tile drag because WebKitGTK does not
+// support HTML5 DnD from draggable="true" child inside draggable="false" parent.
 
 import { getSettingsKeyAtom } from "@/app/store/global";
-import { isLinux } from "@/util/platformutil";
 import { draggable, dropTargetForElements, monitorForElements } from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
 import clsx from "clsx";
 import { toPng } from "html-to-image";
@@ -313,15 +316,11 @@ const DisplayNode = (props: DisplayNodeProps) => {
         let cleanupFn: (() => void) | null = null;
 
         const register = () => {
-            const handle = dragHandleRef?.current;
-            // WebKitGTK (Linux) does not support HTML5 DnD from a draggable="true"
-            // child inside a draggable="false" parent — the draggable() call with a
-            // specific dragHandle makes the tile non-draggable on Linux. Fall back
-            // to whole-tile drag on Linux (no dragHandle restriction).
-            if (!handle && !isLinux()) return false;
+            // WebKitGTK does not support HTML5 DnD from draggable="true" child
+            // inside draggable="false" parent — no dragHandle restriction.
             cleanupFn = draggable({
                 element: tileNodeRef,
-                dragHandle: isLinux() ? undefined : handle,
+                dragHandle: undefined,
                 canDrag: () => !isEphemeral() && !isMagnified(),
                 getInitialData: () => ({ nodeId: props.node.id, type: tileItemType }),
                 onGenerateDragPreview: ({ nativeSetDragImage }) => {
@@ -349,16 +348,8 @@ const DisplayNode = (props: DisplayNodeProps) => {
             return true;
         };
 
-        // Try immediately, then poll briefly if header hasn't mounted yet.
-        // On Linux: register() always succeeds immediately (no dragHandle needed).
-        // On other platforms: poll until the header ref is available.
-        if (!register()) {
-            const interval = setInterval(() => {
-                if (register()) clearInterval(interval);
-            }, 50);
-            // Stop polling after 2s — if header still isn't there, skip drag
-            setTimeout(() => clearInterval(interval), 2000);
-        }
+        // Register immediately — no dragHandle needed on Linux.
+        register();
 
         onCleanup(() => cleanupFn?.());
     });

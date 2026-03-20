@@ -10,7 +10,7 @@ import { ContextMenuModel } from "@/app/store/contextmenu";
 import { RpcApi } from "@/app/store/wshclientapi";
 import { TabRpcClient } from "@/app/store/wshrpcutil";
 import { atoms, createBlock, getApi } from "@/store/global";
-import { useWindowDrag } from "@/app/hook/useWindowDrag";
+import { useWindowDrag } from "@/app/hook/useWindowDrag.platform";
 import { fireAndForget, isBlank, makeIconClass } from "@/util/util";
 import { invoke } from "@tauri-apps/api/core";
 import { createSignal, For, Show, type JSX } from "solid-js";

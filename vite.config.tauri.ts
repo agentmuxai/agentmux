@@ -15,6 +15,57 @@ import svgr from "vite-plugin-svgr";
 import tsconfigPaths from "vite-tsconfig-paths";
 
 /**
+ * Maps Taskfile {{OS}} values to Node.js process.platform equivalents.
+ * Taskfile: "windows" | "darwin" | "linux"
+ * Node/Tauri: "win32" | "darwin" | "linux"
+ */
+const TASKFILE_OS_MAP: Record<string, string> = {
+    windows: "win32",
+    darwin: "darwin",
+    linux: "linux",
+};
+
+/**
+ * Returns the target platform for the build. Checks VITE_PLATFORM first (set
+ * by Taskfile), falls back to the current OS via process.platform.
+ */
+function getTargetPlatform(): string {
+    const env = process.env.VITE_PLATFORM;
+    if (env) {
+        return TASKFILE_OS_MAP[env] ?? env;
+    }
+    return process.platform;
+}
+
+/**
+ * Vite plugin that resolves `.platform.{ts,tsx,scss,css}` imports to the
+ * platform-specific file at build time.
+ *
+ * Example: `import "./foo.platform.scss"` resolves to `./foo.win32.scss`
+ * when building for Windows.
+ *
+ * Files must exist as `foo.win32.ts`, `foo.darwin.ts`, `foo.linux.ts`.
+ * If the platform file does not exist, the original import is left unchanged
+ * (Vite will error naturally).
+ */
+function platformResolve(): Plugin {
+    const platform = getTargetPlatform();
+    console.log(`[platformResolve] Target platform: ${platform}`);
+    return {
+        name: "platform-resolve",
+        enforce: "pre",
+        resolveId(source, importer) {
+            if (!source.includes(".platform")) return null;
+            const resolved = source.replace(/\.platform(\.(ts|tsx|scss|css))?$/, (_, ext) => {
+                return ext ? `.${platform}${ext}` : `.${platform}`;
+            });
+            if (resolved === source) return null;
+            return this.resolve(resolved, importer, { skipSelf: true });
+        },
+    };
+}
+
+/**
  * Strips redundant KaTeX font formats (TTF, WOFF) from the build output.
  * KaTeX CSS lists woff2/woff/ttf as @font-face fallbacks; Tauri's Chromium
  * webview only needs woff2, so the others are dead weight (~876 KB).
@@ -74,6 +125,7 @@ export default defineConfig({
         },
     },
     plugins: [
+        platformResolve(),
         tsconfigPaths(),
         svgr({
             svgrOptions: { exportType: "default", ref: true, svgo: false, titleProp: true },
