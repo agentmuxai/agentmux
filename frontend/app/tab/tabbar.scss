@@ -108,7 +108,6 @@
             background: var(--accent-color, #22c55e);
             border-radius: 1px;
             z-index: 10;
-            animation: insert-line-pulse 0.6s ease-in-out infinite alternate;
         }
 
         &.tab-insert-right::after {
@@ -121,7 +120,6 @@
             background: var(--accent-color, #22c55e);
             border-radius: 1px;
             z-index: 10;
-            animation: insert-line-pulse 0.6s ease-in-out infinite alternate;
         }
     }
 
@@ -170,16 +168,6 @@
     }
 }
 
-@keyframes insert-line-pulse {
-    from {
-        opacity: 1;
-        width: 2px;
-    }
-    to {
-        opacity: 0.6;
-        width: 3px;
-    }
-}
 
 @keyframes new-tab-zone-pulse {
     from {
