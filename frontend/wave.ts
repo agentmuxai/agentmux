@@ -402,7 +402,7 @@ export async function initBare() {
     }
 
     // Initialize chrome zoom CSS variables
-    import("@/app/store/zoom").then(({ initChromeZoom }) => {
+    import("@/app/store/zoom.platform").then(({ initChromeZoom }) => {
         initChromeZoom();
     });
 

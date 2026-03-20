@@ -1,5 +1,9 @@
 // Copyright 2024, Command Line Inc.
 // SPDX-License-Identifier: Apache-2.0
+//
+// macOS-specific window header styles.
+// CSS zoom divides flex space by zoom factor on WebKit.
+// calc(100vw / var(--zoomfactor, 1)) compensates so the header fills the viewport.
 
 .window-header {
     --default-indent: 10px;
@@ -23,12 +27,7 @@
     display: flex;
     flex-direction: row;
     align-items: end;
-    // Width compensation for CSS zoom:
-    // - Linux/macOS: --chrome-header-width is set by JS in applyChromeZoomCSS
-    // - Windows: JS removes --chrome-header-width, so the fallback
-    //   calc(100vw / var(--zoomfactor, 1)) is used. This CSS-native calc is
-    //   evaluated in the zoom context by the browser, unlike a JS-set literal.
-    width: var(--chrome-header-width, calc(100vw / var(--zoomfactor, 1)));
+    width: calc(100vw / var(--zoomfactor, 1));
     height: 33px;
     zoom: var(--zoomfactor);
     cursor: default;

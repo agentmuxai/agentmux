@@ -1,0 +1,40 @@
+// Copyright 2024, Command Line Inc.
+// SPDX-License-Identifier: Apache-2.0
+//
+// Linux-specific window header styles.
+// WebKitGTK does NOT divide flex space by CSS zoom factor,
+// so no width compensation is needed — 100vw is correct.
+
+.window-header {
+    --default-indent: 10px;
+}
+
+.config-error-message {
+    max-width: 500px;
+    margin-bottom: 20px;
+
+    h3 {
+        font-weight: bold;
+        font-size: 16px;
+        margin-bottom: 10px;
+    }
+}
+
+.window-header {
+    padding-top: 6px;
+    position: relative;
+    user-select: none;
+    display: flex;
+    flex-direction: row;
+    align-items: end;
+    width: 100vw;
+    height: 33px;
+    zoom: var(--zoomfactor);
+    cursor: default;
+
+    .window-drag {
+        height: 100%;
+        width: var(--default-indent);
+        flex-shrink: 0;
+    }
+}

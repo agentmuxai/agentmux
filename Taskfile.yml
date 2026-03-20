@@ -34,6 +34,7 @@ tasks:
             AGENTMUX_ENVFILE: "{{.ROOT_DIR}}/.env"
             WCLOUD_ENDPOINT: "https://api-dev.agentmux.ai/central"
             WCLOUD_WS_ENDPOINT: "wss://wsapi-dev.agentmux.ai"
+            VITE_PLATFORM: "{{OS}}"
 
     sync:dev:binaries:
         desc: Sync built binaries to Tauri dev/release cache (prevents stale binary issues)
@@ -83,6 +84,7 @@ tasks:
             AGENTMUX_ENVFILE: "{{.ROOT_DIR}}/.env"
             WCLOUD_ENDPOINT: "https://api-dev.agentmux.ai/central"
             WCLOUD_WS_ENDPOINT: "wss://wsapi-dev.agentmux.ai"
+            VITE_PLATFORM: "{{OS}}"
 
     quickdev:
         desc: Run the Tauri application in quick dev mode (no docsite, no wsh).
@@ -95,6 +97,7 @@ tasks:
             AGENTMUX_ENVFILE: "{{.ROOT_DIR}}/.env"
             WCLOUD_ENDPOINT: "https://api-dev.agentmux.ai/central"
             WCLOUD_WS_ENDPOINT: "wss://wsapi-dev.agentmux.ai/"
+            VITE_PLATFORM: "{{OS}}"
 
     storybook:
         desc: Start the Storybook server.
@@ -120,6 +123,8 @@ tasks:
 
     package:
         desc: Package the application for the current platform (Tauri).
+        env:
+            VITE_PLATFORM: "{{OS}}"
         cmds:
             - task: build:backend
             - task: tauri:copy-sidecars
@@ -325,12 +330,16 @@ tasks:
         cmd: npx vite build --mode production --config vite.config.tauri.ts
         deps:
             - npm:install
+        env:
+            VITE_PLATFORM: "{{OS}}"
 
     build:frontend:dev:
         desc: Build the frontend in development mode.
         cmd: npx vite build --mode dev --config vite.config.tauri.ts
         deps:
             - npm:install
+        env:
+            VITE_PLATFORM: "{{OS}}"
 
     build:backend:
         desc: Build the agentmuxsrv-rs and wsh-rs Rust components.
@@ -706,3 +715,5 @@ tasks:
         cmd: npx vite build --mode production --config vite.config.tauri.ts
         deps:
             - npm:install
+        env:
+            VITE_PLATFORM: "{{OS}}"

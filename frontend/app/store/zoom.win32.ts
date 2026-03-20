@@ -1,5 +1,10 @@
 // Copyright 2025, Command Line Inc.
 // SPDX-License-Identifier: Apache-2.0
+//
+// Windows-specific zoom module.
+// Chrome zoom sets only --zoomfactor. Width compensation is handled
+// purely in CSS: calc(100vw / var(--zoomfactor, 1)) in window-header.scss.
+// Do NOT set --chrome-header-width from JS — it breaks Windows.
 
 // Per-pane zoom — modifies the focused block's term:zoom metadata.
 // Chrome zoom — scales title bar + status bar together via --zoomfactor CSS var.
@@ -8,7 +13,6 @@ import { getBlockComponentModel, getFocusedBlockId, WOS } from "@/app/store/glob
 import { RpcApi } from "@/app/store/wshclientapi";
 import { TabRpcClient } from "@/app/store/wshrpcutil";
 import { fireAndForget } from "@/util/util";
-import { PLATFORM, PlatformLinux, PlatformMacOS } from "@/util/platformutil";
 import { createSignal } from "solid-js";
 
 // Zoom constants
@@ -36,9 +40,6 @@ function roundZoom(factor: number): number {
 
 // ── Per-pane zoom (terminal blocks) ───────────────────────────────
 
-/**
- * Get the current term:zoom for a specific block, or null if not a terminal.
- */
 function getBlockZoom(blockId: string): number | null {
     const bcm = getBlockComponentModel(blockId);
     if (!bcm?.viewModel) return null;
@@ -50,9 +51,6 @@ function getBlockZoom(blockId: string): number | null {
     return blockData?.meta?.["term:zoom"] ?? 1.0;
 }
 
-/**
- * Set zoom on a specific terminal pane.
- */
 function setBlockZoom(blockId: string, factor: number): void {
     const newZoom = clampZoom(roundZoom(factor));
     const metaValue = Math.abs(newZoom - 1.0) < 0.01 ? null : newZoom;
@@ -67,27 +65,18 @@ function setBlockZoom(blockId: string, factor: number): void {
     showZoomIndicator(`${Math.round(newZoom * 100)}%`);
 }
 
-/**
- * Zoom in a specific block by blockId (for scroll wheel on hovered pane).
- */
 export function zoomBlockIn(blockId: string, step: number = WHEEL_STEP): void {
     const zoom = getBlockZoom(blockId);
     if (zoom == null) return;
     setBlockZoom(blockId, zoom + step);
 }
 
-/**
- * Zoom out a specific block by blockId (for scroll wheel on hovered pane).
- */
 export function zoomBlockOut(blockId: string, step: number = WHEEL_STEP): void {
     const zoom = getBlockZoom(blockId);
     if (zoom == null) return;
     setBlockZoom(blockId, zoom - step);
 }
 
-/**
- * Zoom in the focused terminal pane (keyboard shortcut).
- */
 export function zoomIn(store: any, step: number = KEYBOARD_STEP): void {
     const blockId = getFocusedBlockId();
     if (!blockId) return;
@@ -96,9 +85,6 @@ export function zoomIn(store: any, step: number = KEYBOARD_STEP): void {
     setBlockZoom(blockId, zoom + step);
 }
 
-/**
- * Zoom out the focused terminal pane (keyboard shortcut).
- */
 export function zoomOut(store: any, step: number = KEYBOARD_STEP): void {
     const blockId = getFocusedBlockId();
     if (!blockId) return;
@@ -107,9 +93,6 @@ export function zoomOut(store: any, step: number = KEYBOARD_STEP): void {
     setBlockZoom(blockId, zoom - step);
 }
 
-/**
- * Reset zoom on the focused terminal pane to 100%.
- */
 export function zoomReset(store: any): void {
     const blockId = getFocusedBlockId();
     if (!blockId) return;
@@ -119,21 +102,8 @@ export function zoomReset(store: any): void {
 // ── Chrome zoom (title bar + status bar) ──────────────────────────
 
 function applyChromeZoomCSS(factor: number): void {
+    // Windows: only set --zoomfactor. Width compensation is pure CSS.
     document.documentElement.style.setProperty("--zoomfactor", String(factor));
-    // Platform-specific header width compensation:
-    // - Linux: 100vw (WebKitGTK doesn't divide flex space by zoom)
-    // - macOS: 100% (avoids sub-pixel rounding with viewport units under zoom)
-    // - Windows: NOT set — uses CSS calc(100vw / var(--zoomfactor, 1)) which is
-    //   evaluated live by the browser in the zoom context. Setting a JS literal
-    //   like calc(100vw / ${factor}) is NOT equivalent and breaks Windows.
-    if (PLATFORM === PlatformLinux || factor <= 1) {
-        document.documentElement.style.setProperty("--chrome-header-width", "100vw");
-    } else if (PLATFORM === PlatformMacOS) {
-        document.documentElement.style.setProperty("--chrome-header-width", "100%");
-    } else {
-        // Windows: remove the JS-set property so CSS fallback kicks in.
-        document.documentElement.style.removeProperty("--chrome-header-width");
-    }
 }
 
 export function chromeZoomIn(step: number = WHEEL_STEP): void {
@@ -155,19 +125,12 @@ function setChromeZoom(factor: number): void {
     showZoomIndicator(`Chrome ${Math.round(clamped * 100)}%`);
 }
 
-/**
- * Initialize chrome zoom on startup. Resets Tauri window zoom to 1.0
- * and applies the default chrome zoom CSS.
- */
 export function initChromeZoom(): void {
     applyChromeZoomCSS(DEFAULT_ZOOM);
 }
 
 // ── Shared helpers ────────────────────────────────────────────────
 
-/**
- * Show zoom indicator with auto-hide.
- */
 function showZoomIndicator(text: string): void {
     if (zoomIndicatorTimeout) {
         clearTimeout(zoomIndicatorTimeout);
@@ -181,9 +144,6 @@ function showZoomIndicator(text: string): void {
     }, 1500);
 }
 
-/**
- * Get zoom as percentage string for the focused pane.
- */
 export function getZoomPercentage(store: any): string {
     const blockId = getFocusedBlockId();
     if (!blockId) return "100%";
@@ -192,7 +152,4 @@ export function getZoomPercentage(store: any): string {
     return `${Math.round(zoom * 100)}%`;
 }
 
-/**
- * No-op — per-pane zoom is stored in block metadata, chrome zoom uses CSS vars.
- */
 export async function loadZoom(store: any): Promise<void> {}

@@ -1,0 +1,41 @@
+// Copyright 2024, Command Line Inc.
+// SPDX-License-Identifier: Apache-2.0
+//
+// Windows-specific window header styles.
+// CSS zoom divides flex space by zoom factor on Chromium/WebView2.
+// calc(100vw / var(--zoomfactor, 1)) compensates so the header fills the viewport.
+// This MUST remain pure CSS — setting the width from JS breaks Windows.
+
+.window-header {
+    --default-indent: 10px;
+}
+
+.config-error-message {
+    max-width: 500px;
+    margin-bottom: 20px;
+
+    h3 {
+        font-weight: bold;
+        font-size: 16px;
+        margin-bottom: 10px;
+    }
+}
+
+.window-header {
+    padding-top: 6px;
+    position: relative;
+    user-select: none;
+    display: flex;
+    flex-direction: row;
+    align-items: end;
+    width: calc(100vw / var(--zoomfactor, 1));
+    height: 33px;
+    zoom: var(--zoomfactor);
+    cursor: default;
+
+    .window-drag {
+        height: 100%;
+        width: var(--default-indent);
+        flex-shrink: 0;
+    }
+}
