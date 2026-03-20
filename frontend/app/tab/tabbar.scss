@@ -79,7 +79,8 @@
         display: flex;
         align-items: flex-end;
         height: 100%;
-        transition: opacity 0.15s ease;
+        // padding-left/right are driven by --tab-gap-before/after via JS inline style
+        transition: padding-left 100ms ease-out, padding-right 100ms ease-out, opacity 0.15s ease;
 
         // Pane dragged over a tab — highlight with accent border
         &.tile-drop-hover {
@@ -93,39 +94,24 @@
 
         // Tab being dragged — reduce opacity
         &.tab-dragging {
-            opacity: 0.4;
-            transition: opacity 0.1s ease;
+            opacity: 0.35;
+            transition: padding-left 100ms ease-out, padding-right 100ms ease-out, opacity 0.1s ease;
         }
 
-        // Tab reorder insertion indicators
-        &.tab-insert-left::before {
-            content: "";
-            position: absolute;
-            left: -1px;
-            top: 4px;
-            bottom: 2px;
-            width: 2px;
-            background: var(--accent-color, #22c55e);
-            border-radius: 1px;
-            z-index: 10;
-            animation: insert-line-pulse 0.6s ease-in-out infinite alternate;
-        }
-
-        &.tab-insert-right::after {
-            content: "";
-            position: absolute;
-            right: -1px;
-            top: 4px;
-            bottom: 2px;
-            width: 2px;
-            background: var(--accent-color, #22c55e);
-            border-radius: 1px;
-            z-index: 10;
-            animation: insert-line-pulse 0.6s ease-in-out infinite alternate;
+        // Landing bounce on the dropped tab
+        &.tab-bouncing .tab {
+            animation: tab-bounce 300ms cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+            transform-origin: center bottom;
         }
     }
 
     // --- New-tab drop zone (end of tab bar) ---
+    .tab-bar-fill {
+        flex: 1 1 auto;
+        min-width: 0;
+        height: 100%;
+    }
+
     .new-tab-drop-zone {
         flex-shrink: 0;
         display: flex;
@@ -170,16 +156,6 @@
     }
 }
 
-@keyframes insert-line-pulse {
-    from {
-        opacity: 1;
-        width: 2px;
-    }
-    to {
-        opacity: 0.6;
-        width: 3px;
-    }
-}
 
 @keyframes new-tab-zone-pulse {
     from {
@@ -188,4 +164,12 @@
     to {
         background: rgba(34, 197, 94, 0.18);
     }
+}
+
+// Spring bounce on tab landing — slight overshoot then settle
+@keyframes tab-bounce {
+    0%   { transform: scaleX(0.88); }
+    55%  { transform: scaleX(1.04); }
+    80%  { transform: scaleX(0.98); }
+    100% { transform: scaleX(1.0);  }
 }

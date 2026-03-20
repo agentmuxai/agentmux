@@ -15,24 +15,18 @@ import { makeORef, useWaveObjectValue } from "../store/wos";
 import { TabBarModel } from "./tabbar-model";
 import "./tab.scss";
 
-// 16-color palette arranged in a 4x4 grid
-const TAB_COLORS: { name: string; hex: string | null }[] = [
+// 10 equally-spaced hues (0°, 36°, 72°, … 324°) — full spectrum, no near-duplicates
+export const TAB_COLORS: { name: string; hex: string }[] = [
     { name: "Red",    hex: "#ef4444" },
     { name: "Orange", hex: "#f97316" },
-    { name: "Amber",  hex: "#f59e0b" },
     { name: "Yellow", hex: "#eab308" },
     { name: "Lime",   hex: "#84cc16" },
     { name: "Green",  hex: "#22c55e" },
     { name: "Teal",   hex: "#14b8a6" },
-    { name: "Cyan",   hex: "#06b6d4" },
     { name: "Blue",   hex: "#3b82f6" },
-    { name: "Indigo", hex: "#6366f1" },
     { name: "Violet", hex: "#8b5cf6" },
-    { name: "Purple", hex: "#a855f7" },
     { name: "Pink",   hex: "#ec4899" },
     { name: "Rose",   hex: "#f43f5e" },
-    { name: "Slate",  hex: "#64748b" },
-    { name: "None",   hex: null },
 ];
 
 interface TabContextPanelProps {
@@ -82,13 +76,21 @@ const TabContextPanel = (props: TabContextPanelProps): JSX.Element => {
                             <div
                                 class={clsx("tab-color-swatch", { selected: (props.currentColor ?? null) === hex })}
                                 title={name}
-                                style={hex ? { "background-color": hex } : undefined}
-                                onClick={() => props.onColorSelect(hex)}
-                            >
-                                {!hex && <i class="fa fa-xmark" />}
-                            </div>
+                                style={{ "background-color": hex }}
+                                onClick={() => props.onColorSelect(
+                                    (props.currentColor ?? null) === hex ? null : hex
+                                )}
+                            />
                         )}
                     </For>
+                </div>
+                <div class="tab-context-color-clear">
+                    <button
+                        class="tab-context-btn tab-context-btn-clear"
+                        onClick={() => props.onColorSelect(null)}
+                    >
+                        ✕ Clear color
+                    </button>
                 </div>
                 <div class="tab-context-actions">
                     <button class="tab-context-btn" onClick={() => { props.onPinChange(); props.onClose(); }}>
@@ -237,7 +239,7 @@ function Tab(props: TabProps): JSX.Element {
     const handleColorSelect = (hex: string | null) => {
         const oref = makeORef("tab", props.id);
         fireAndForget(async () => {
-            await ObjectService.UpdateObjectMeta(oref, { "tab:color": hex });
+            await ObjectService.UpdateObjectMeta(oref, { "tab:color": hex } as MetaType);
         });
         setShowColorPicker(false);
     };
@@ -264,8 +266,7 @@ function Tab(props: TabProps): JSX.Element {
                     "tab-colored": !!tabColor(),
                 })}
                 style={tabColor() ? ({ "--tab-color": tabColor() } as JSX.CSSProperties) : undefined}
-                draggable={true}
-                onDragStart={props.onDragStart}
+                draggable={false}
                 onClick={props.onSelect}
                 onContextMenu={handleContextMenu}
                 data-tab-id={props.id}

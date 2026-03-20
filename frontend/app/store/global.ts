@@ -22,6 +22,7 @@ import { setPlatform } from "@/util/platformutil";
 import { deepCompareReturnPrev, fireAndForget, getPrefixedSettings, isBlank } from "@/util/util";
 import { createMemo, createRoot, createSignal } from "solid-js";
 import { modalsModel } from "./modalmodel";
+import { TAB_COLORS } from "@/app/tab/tab";
 import { ClientService, ObjectService, WorkspaceService } from "./services";
 import * as WOS from "./wos";
 import { getFileSubject, waveEventSubscribe } from "./wps";
@@ -810,11 +811,34 @@ export function removeNotification(id: string) {
 // Tab management
 // ---------------------------------------------------------------------------
 
+/** Pick a palette color not already used by any tab in the workspace. */
+function pickTabColor(usedColors: (string | null | undefined)[]): string {
+    const palette = TAB_COLORS.map((c) => c.hex);
+    const available = palette.filter((hex) => !usedColors.includes(hex));
+    const pool = available.length > 0 ? available : palette;
+    return pool[Math.floor(Math.random() * pool.length)];
+}
+
+/** Collect the current tab:color values for all tabs in a workspace. */
+function getUsedTabColors(ws: Workspace): (string | null | undefined)[] {
+    const allIds = [...(ws.tabids ?? []), ...(ws.pinnedtabids ?? [])];
+    return allIds.map((id) => {
+        const tab = WOS.getObjectValue<Tab>(WOS.makeORef("tab", id));
+        return tab?.meta?.["tab:color"] as string | null | undefined;
+    });
+}
+
 export function createTab() {
     const ws = workspace();
     if (ws == null) return;
-    WorkspaceService.CreateTab(ws.oid, "", true, false).catch((e) => {
-        console.error("[createTab] failed:", e);
+    const color = pickTabColor(getUsedTabColors(ws));
+    fireAndForget(async () => {
+        try {
+            const tabId = await WorkspaceService.CreateTab(ws.oid, "", true, false);
+            await ObjectService.UpdateObjectMeta(WOS.makeORef("tab", tabId), { "tab:color": color } as MetaType);
+        } catch (e) {
+            console.error("[createTab] failed:", e);
+        }
     });
 }
 

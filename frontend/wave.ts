@@ -45,7 +45,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 // Deferred — assigned inside initBare() after window.api is ready.
 // Do NOT call getApi() at module level: this file is statically imported by
 // tauri-bootstrap.ts before setupTauriApi() runs, so window.api does not exist yet.
-let platform: string;
+let platform: NodeJS.Platform;
 let appVersion: string;
 let savedInitOpts: AgentMuxInitOpts = null;
 

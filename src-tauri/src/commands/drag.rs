@@ -266,6 +266,10 @@ pub async fn open_window_at_position(
     .min_inner_size(400.0, 300.0)
     .decorations(false)
     .transparent(true)
+    // Required for HTML5 drag-and-drop (pragmatic-dnd) to work on Windows.
+    // Without this, WebView2 intercepts drag events for OS file drops,
+    // preventing dragend from firing. Mirrors "dragDropEnabled": false in tauri.conf.json.
+    .disable_drag_drop_handler()
     .visible(false)
     .position(pos_x, pos_y);
 
