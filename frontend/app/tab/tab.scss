@@ -262,8 +262,18 @@ body:not(.nohover) .tab.tab-colored.dragging {
 
 .tab-context-colors {
     display: grid;
-    grid-template-columns: repeat(8, 20px);
+    grid-template-columns: repeat(5, 20px);
     gap: 4px;
+}
+
+.tab-context-color-clear {
+    display: flex;
+
+    .tab-context-btn-clear {
+        flex: 1;
+        font-size: 10px;
+        padding: 3px 6px;
+    }
 }
 
 .tab-context-actions {
