@@ -136,13 +136,6 @@ function EndIcons(props: {
     const ephemeral = () => props.nodeModel.isEphemeral();
     const magnifyDisabled = () => false;
 
-    const settingsDecl: IconButtonDecl = {
-        elemtype: "iconbutton",
-        icon: "cog",
-        title: "Settings",
-        click: props.onContextMenu,
-    };
-
     const closeDecl: IconButtonDecl = {
         elemtype: "iconbutton",
         icon: "xmark-large",
@@ -157,7 +150,6 @@ function EndIcons(props: {
                     {(button) => <IconButton decl={button} />}
                 </For>
             </Show>
-            <IconButton decl={settingsDecl} className="block-frame-settings" />
             <Show when={ephemeral()} fallback={
                 <OptMagnifyButton
                     magnified={magnified()}
