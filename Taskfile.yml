@@ -14,9 +14,9 @@ vars:
     BIN_DIR: "bin"
     VERSION:
         sh: 'PATH="$HOME/.cargo/bin:/opt/homebrew/opt/node@20/bin:/opt/homebrew/bin:/usr/local/bin:$PATH" node version.cjs'
-    RM: '{{if eq OS "windows"}}powershell Remove-Item -Force -ErrorAction SilentlyContinue{{else}}rm -f{{end}}'
-    RMRF: '{{if eq OS "windows"}}powershell Remove-Item -Force -Recurse -ErrorAction SilentlyContinue{{else}}rm -rf{{end}}'
-    DATE: '{{if eq OS "windows"}}powershell Get-Date -UFormat{{else}}date{{end}}'
+    RM: '{{if eq OS "windows"}}pwsh Remove-Item -Force -ErrorAction SilentlyContinue{{else}}rm -f{{end}}'
+    RMRF: '{{if eq OS "windows"}}pwsh Remove-Item -Force -Recurse -ErrorAction SilentlyContinue{{else}}rm -rf{{end}}'
+    DATE: '{{if eq OS "windows"}}pwsh Get-Date -UFormat{{else}}date{{end}}'
     ARTIFACTS_BUCKET: agentmux-github-artifacts/staging
     RELEASES_BUCKET: dl.agentmux.ai/releases
     WINGET_PACKAGE: AgentMux.AgentMux
@@ -45,9 +45,9 @@ tasks:
         internal: true
         platforms: [windows]
         cmds:
-            - powershell Copy-Item -Force dist/bin/agentmuxsrv-rs.x64.exe src-tauri/target/debug/agentmuxsrv-rs.exe -ErrorAction SilentlyContinue
-            - powershell Copy-Item -Force dist/bin/agentmuxsrv-rs.x64.exe src-tauri/target/release/agentmuxsrv-rs.exe -ErrorAction SilentlyContinue
-            - powershell Copy-Item -Force dist/bin/agentmuxsrv-rs.x64.exe src-tauri/binaries/agentmuxsrv-rs-x86_64-pc-windows-msvc.exe -ErrorAction SilentlyContinue
+            - pwsh Copy-Item -Force dist/bin/agentmuxsrv-rs.x64.exe src-tauri/target/debug/agentmuxsrv-rs.exe -ErrorAction SilentlyContinue
+            - pwsh Copy-Item -Force dist/bin/agentmuxsrv-rs.x64.exe src-tauri/target/release/agentmuxsrv-rs.exe -ErrorAction SilentlyContinue
+            - pwsh Copy-Item -Force dist/bin/agentmuxsrv-rs.x64.exe src-tauri/binaries/agentmuxsrv-rs-x86_64-pc-windows-msvc.exe -ErrorAction SilentlyContinue
             - echo "✓ Synced agentmuxsrv-rs to Tauri dev/release cache (Windows)"
 
     sync:dev:binaries:darwin:
@@ -116,7 +116,7 @@ tasks:
     copy:schema:
         desc: Copy schema directory to dist for Tauri bundling
         cmds:
-            - cmd: powershell -Command "New-Item -ItemType Directory -Force -Path dist/schema | Out-Null; Copy-Item schema/* dist/schema/ -Recurse -Force"
+            - cmd: pwsh -Command "New-Item -ItemType Directory -Force -Path dist/schema | Out-Null; Copy-Item schema/* dist/schema/ -Recurse -Force"
               platforms: [windows]
             - cmd: mkdir -p dist/schema && cp -r schema/* dist/schema/
               platforms: [linux, darwin]
@@ -173,13 +173,13 @@ tasks:
         platforms: [windows]
         cmds:
             - task: package
-            - powershell -ExecutionPolicy Bypass -Command "& ./scripts/package-portable.ps1"
+            - pwsh -ExecutionPolicy Bypass -Command "& ./scripts/package-portable.ps1"
 
     package:msix:
         desc: Package for Windows Store (MSIX). Run 'task package' first, or pass --Publisher.
         platforms: [windows]
         cmds:
-            - powershell -ExecutionPolicy Bypass -File scripts/package-msix.ps1 {{.CLI_ARGS}}
+            - pwsh -ExecutionPolicy Bypass -File scripts/package-msix.ps1 {{.CLI_ARGS}}
 
     package:macos:
         desc: Package the application for macOS (creates .app and .dmg).
@@ -379,7 +379,7 @@ tasks:
         platforms: [windows]
         cmds:
             - cargo build --release -p agentmuxsrv-rs
-            - cmd: powershell -Command "New-Item -ItemType Directory -Force -Path dist/bin | Out-Null; Copy-Item target/release/agentmuxsrv-rs.exe dist/bin/agentmuxsrv-rs.x64.exe -Force"
+            - cmd: pwsh -Command "New-Item -ItemType Directory -Force -Path dist/bin | Out-Null; Copy-Item target/release/agentmuxsrv-rs.exe dist/bin/agentmuxsrv-rs.x64.exe -Force"
             - echo "✓ Built agentmuxsrv-rs for Windows"
 
     # ========================================
@@ -401,7 +401,7 @@ tasks:
         platforms: [windows]
         cmds:
             - cargo build --release -p wsh-rs
-            - cmd: powershell -Command "New-Item -ItemType Directory -Force -Path dist/bin | Out-Null; Copy-Item target/release/wsh.exe dist/bin/wsh-{{.VERSION}}-windows.x64.exe -Force"
+            - cmd: pwsh -Command "New-Item -ItemType Directory -Force -Path dist/bin | Out-Null; Copy-Item target/release/wsh.exe dist/bin/wsh-{{.VERSION}}-windows.x64.exe -Force"
             - echo "✓ Built wsh-rs for Windows (dist/bin/wsh-{{.VERSION}}-windows.x64.exe)"
 
     build:wsh:darwin:
@@ -540,7 +540,7 @@ tasks:
     copyfiles:*:*:
         desc: Recursively copy directory and its contents.
         internal: true
-        cmd: '{{if eq OS "windows"}}powershell Copy-Item -Recurse -Force -Path {{index .MATCH 0}} -Destination {{index .MATCH 1}}{{else}}mkdir -p "$(dirname {{index .MATCH 1}})" && cp -r {{index .MATCH 0}} {{index .MATCH 1}}{{end}}'
+        cmd: '{{if eq OS "windows"}}pwsh Copy-Item -Recurse -Force -Path {{index .MATCH 0}} -Destination {{index .MATCH 1}}{{else}}mkdir -p "$(dirname {{index .MATCH 1}})" && cp -r {{index .MATCH 0}} {{index .MATCH 1}}{{end}}'
 
     clean:
         desc: clean dist directories
@@ -669,7 +669,7 @@ tasks:
             - mkdir -p src-tauri/binaries
             - |
                 {{if eq OS "windows"}}
-                powershell -Command "Copy-Item dist/bin/agentmuxsrv-rs.x64.exe src-tauri/binaries/agentmuxsrv-rs-x86_64-pc-windows-msvc.exe -Force; Copy-Item dist/bin/wsh-{{.VERSION}}-windows.x64.exe src-tauri/binaries/wsh-x86_64-pc-windows-msvc.exe -Force; Write-Host 'Copied binaries for x86_64-pc-windows-msvc'"
+                pwsh -Command "Copy-Item dist/bin/agentmuxsrv-rs.x64.exe src-tauri/binaries/agentmuxsrv-rs-x86_64-pc-windows-msvc.exe -Force; Copy-Item dist/bin/wsh-{{.VERSION}}-windows.x64.exe src-tauri/binaries/wsh-x86_64-pc-windows-msvc.exe -Force; Write-Host 'Copied binaries for x86_64-pc-windows-msvc'"
                 {{else}}
                 TRIPLE=$(rustc -vV | grep host | awk '{print $2}');
                 {{if eq OS "darwin"}}
@@ -686,7 +686,7 @@ tasks:
             # Clear stale wsh binaries then copy only current version (prevents DMG bloat)
             - |
                 {{if eq OS "windows"}}
-                powershell -Command "New-Item -ItemType Directory -Force -Path src-tauri/binaries/bin | Out-Null; Remove-Item src-tauri/binaries/bin/wsh-* -Force -ErrorAction SilentlyContinue; Copy-Item dist/bin/wsh-{{.VERSION}}-windows.x64.exe src-tauri/binaries/bin/ -Force; Write-Host 'Copied wsh to bin/ for backend deployment'"
+                pwsh -Command "New-Item -ItemType Directory -Force -Path src-tauri/binaries/bin | Out-Null; Remove-Item src-tauri/binaries/bin/wsh-* -Force -ErrorAction SilentlyContinue; Copy-Item dist/bin/wsh-{{.VERSION}}-windows.x64.exe src-tauri/binaries/bin/ -Force; Write-Host 'Copied wsh to bin/ for backend deployment'"
                 {{else if eq OS "darwin"}}
                 rm -f src-tauri/binaries/bin/wsh-*;
                 mkdir -p src-tauri/binaries/bin;
