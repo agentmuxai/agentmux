@@ -301,27 +301,65 @@ const DisplayNode = (props: DisplayNodeProps) => {
         }
     };
 
-    // Register pragmatic-dnd draggable on the tile node, using the header
-    // (dragHandleRef) as the drag handle. pragmatic-dnd wraps HTML5 DnD but
-    // fires onDragStart AFTER the browser commits the drag, so SolidJS
-    // reactive state updates here won't cause mid-event DOM mutations.
+    // Register pragmatic-dnd draggable on the HEADER element directly.
+    // pragmatic-dnd wraps HTML5 DnD and fires onDragStart AFTER the browser
+    // commits the drag, so SolidJS reactive state updates won't cause
+    // mid-event DOM mutations.
+    //
+    // We register on the header (dragHandleRef) rather than on tileNodeRef
+    // for a critical WebView2 reason: pragmatic-dnd's dragHandle option sets
+    // draggable="true" on the handle AND draggable="false" on the element.
+    // WebView2 does not fire dragstart from a draggable="true" child inside
+    // a draggable="false" parent — breaking pane DnD entirely on Windows.
+    //
+    // By registering directly on the header element, only the header gets
+    // draggable="true". The tile-node is untouched (no draggable attr) so it
+    // defaults to non-draggable. The body and all pane content have no drag
+    // attribute, meaning clicks, text selection, and widget interaction all
+    // work normally. No canDrag() tricks, no preventDefault() on dragstart.
     //
     // The header ref may not be available at mount time (block content loads
-    // async behind a Show gate). Poll briefly until the ref is set, then
-    // register with the correct drag handle. Without a drag handle, the
-    // entire tile would be draggable — breaking text selection in panes.
-    const dragHandleRef = nodeModel.dragHandleRef;
+    // async behind a Show gate). Poll briefly until the ref is set.
+    // SolidJS's <Show> gate destroys/recreates the header element during block
+    // data loading. We must re-register whenever dragHandleRef.current changes
+    // or the element leaves the DOM. A persistent poll (cleared on unmount)
+    // handles all cases without needing to observe SolidJS internals.
     onMount(() => {
         if (!tileNodeRef) return;
         let cleanupFn: (() => void) | null = null;
+        let registeredHandle: HTMLElement | null = null;
+
+        // Query the actual live header from the DOM rather than relying on dragHandleRef.
+        // dragHandleRef is written by two BlockFrame_Header instances (primary + ErrorBoundary
+        // fallback), and the fallback (never inserted into the DOM) always overwrites the
+        // primary one last, so the ref always points to a detached element.
+        // querySelector from tileNodeRef finds the header that is ACTUALLY in the DOM.
+        const findHandle = (): HTMLElement | null =>
+            tileNodeRef?.querySelector<HTMLElement>('[data-role="block-header"]') ?? null;
 
         const register = () => {
-            // Windows: whole-tile drag (no dragHandle restriction).
-            // pragmatic-dnd's dragHandle sets draggable="true" on handle +
-            // draggable="false" on tile, which breaks drag on WebView2/Chromium.
+            const handle = findHandle();
+
+            // Nothing changed
+            if (handle === registeredHandle) return;
+
+            // NEVER tear down while a drag is in progress. If we call cleanupFn()
+            // mid-drag, pragmatic-dnd removes its onDrop listener and activeDrag
+            // never resets to false — leaving pointer-events:none permanently on
+            // all pane bodies ("widgets broken").
+            if (props.layoutModel.activeDrag()) return;
+
+            // Handle changed or left DOM — tear down old registration
+            cleanupFn?.();
+            cleanupFn = null;
+            registeredHandle = null;
+
+            if (!handle) return;
+
+            // New live handle — register draggable on it
+            registeredHandle = handle;
             cleanupFn = draggable({
-                element: tileNodeRef,
-                dragHandle: undefined,
+                element: handle,
                 canDrag: () => !isEphemeral() && !isMagnified(),
                 getInitialData: () => ({ nodeId: props.node.id, type: tileItemType }),
                 onGenerateDragPreview: ({ nativeSetDragImage }) => {
@@ -349,13 +387,16 @@ const DisplayNode = (props: DisplayNodeProps) => {
                     // out-of-window. Cleared in dropTargetForElements.onDrop instead.
                 },
             });
-            return true;
         };
 
-        // Register immediately — no dragHandle needed on Windows.
+        // Poll every 100ms for the lifetime of this tile. Handles initial load
+        // and any SolidJS Show-gate replacements during the tile's lifetime.
         register();
-
-        onCleanup(() => cleanupFn?.());
+        const interval = setInterval(register, 100);
+        onCleanup(() => {
+            clearInterval(interval);
+            cleanupFn?.();
+        });
     });
 
     const leafContent = () => (
