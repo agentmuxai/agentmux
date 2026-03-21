@@ -15,7 +15,7 @@ import debug from "debug";
 import "overlayscrollbars/overlayscrollbars.css";
 import { createEffect, createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import { AppBackground } from "./app-bg";
-import { CrossWindowDragMonitor } from "./drag/CrossWindowDragMonitor";
+import { CrossWindowDragMonitor } from "./drag/CrossWindowDragMonitor.platform";
 import { DragOverlay } from "./drag/DragOverlay";
 import { CenteredDiv } from "./element/quickelems";
 import { ZoomIndicator } from "./element/zoomindicator";
