@@ -19,6 +19,10 @@ export interface ProviderDefinition {
     unixInstallCommand: string;      // official installer for macOS/Linux (bash)
     icon: string;
     unsetEnv?: string[];         // env vars to unset before launching (e.g. nested-session guards)
+    // Auth isolation — each provider gets its own versioned config dir
+    authConfigDirEnvVar: string;        // env var that redirects the provider's config/auth dir
+    authDirName: string;                // subdir name under {dataDir}/auth/ (e.g. "claude")
+    authExtraEnv?: Record<string, string>;  // extra env vars needed for auth isolation (e.g. GEMINI_FORCE_FILE_STORAGE)
 }
 
 export const PROVIDERS: Record<string, ProviderDefinition> = {
@@ -27,7 +31,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         displayName: "Claude Code",
         cliCommand: "claude",
         defaultArgs: [],
-        styledArgs: ["--output-format", "stream-json", "--verbose", "--include-partial-messages"],
+        styledArgs: ["--output-format", "stream-json", "--verbose", "--include-partial-messages", "--dangerously-skip-permissions"],
         outputFormat: "raw",
         styledOutputFormat: "claude-stream-json",
         authType: "oauth",
@@ -40,6 +44,8 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         unixInstallCommand: "curl -fsSL https://claude.ai/install.sh | bash",
         icon: "sparkles",
         unsetEnv: ["CLAUDECODE"],
+        authConfigDirEnvVar: "CLAUDE_CONFIG_DIR",
+        authDirName: "claude",
     },
     codex: {
         id: "codex",
@@ -58,6 +64,8 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         windowsInstallCommand: "npm install -g @openai/codex",
         unixInstallCommand: "npm install -g @openai/codex",
         icon: "robot",
+        authConfigDirEnvVar: "CODEX_HOME",
+        authDirName: "codex",
     },
     gemini: {
         id: "gemini",
@@ -76,6 +84,9 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         windowsInstallCommand: "npm install -g @google/gemini-cli",
         unixInstallCommand: "npm install -g @google/gemini-cli",
         icon: "diamond",
+        authConfigDirEnvVar: "GEMINI_CLI_HOME",
+        authDirName: "gemini",
+        authExtraEnv: { GEMINI_FORCE_FILE_STORAGE: "true" },
     },
 };
 

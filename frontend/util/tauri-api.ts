@@ -372,6 +372,9 @@ export function buildTauriApi(): AppApi {
         checkNodejsAvailable: async () => {
             return await invoke<NodejsStatus>("check_nodejs_available");
         },
+        ensureAuthDir: async (providerId: string) => {
+            return await invoke<string>("ensure_auth_dir", { providerId });
+        },
 
         listen: async (event: string, callback: (event: any) => void) => {
             const unlisten = await listen(event, callback);
