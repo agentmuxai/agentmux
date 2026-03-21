@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { CopyButton } from "@/app/element/copybutton";
+import { writeText as clipboardWriteText } from "@/util/clipboard";
 import { ErrorBoundary } from "@/app/element/errorboundary";
 import { IconButton } from "@/app/element/iconbutton";
 import { cn, useAtomValueSafe } from "@/util/util";
@@ -168,7 +169,7 @@ const CodeBlock = (props: CodeBlockProps): JSX.Element => {
 
     const handleCopy = async (e: MouseEvent) => {
         const textToCopy = extractText(props.children).replace(/\n$/, "");
-        await navigator.clipboard.writeText(textToCopy);
+        await clipboardWriteText(textToCopy);
     };
 
     const handleExecute = (e: MouseEvent) => {

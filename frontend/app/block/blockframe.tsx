@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { blockViewToIcon, blockViewToName, ConnectionButton, getBlockHeaderIcon, Input } from "@/app/block/blockutil";
+import { writeText as clipboardWriteText } from "@/util/clipboard";
 import { Button } from "@/app/element/button";
 import { ChangeConnectionBlockModal } from "@/app/modals/conntypeahead";
 import { ContextMenuModel } from "@/app/store/contextmenu";
@@ -64,7 +65,7 @@ function handleHeaderContextMenu(
         {
             label: "Copy BlockId",
             click: () => {
-                navigator.clipboard.writeText(blockData.oid);
+                clipboardWriteText(blockData.oid);
             },
         },
         {
@@ -270,7 +271,7 @@ function BlockFrame_Header(props: BlockFrameProps & { changeConnModalAtom: util.
     }
     if (props.error != null) {
         const copyHeaderErr = () => {
-            navigator.clipboard.writeText(props.error.message + "\n" + props.error.stack);
+            clipboardWriteText(props.error.message + "\n" + props.error.stack);
         };
         headerTextElems.push(
             <div class="iconbutton disabled" onClick={copyHeaderErr}>
@@ -498,7 +499,7 @@ function ConnStatusOverlay({
             errTexts.push(`unable to use wsh: ${connStatus()?.wsherror}`);
         }
         const textToCopy = errTexts.join("\n");
-        await navigator.clipboard.writeText(textToCopy);
+        await clipboardWriteText(textToCopy);
     };
 
     return (

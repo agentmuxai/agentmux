@@ -8,6 +8,7 @@ import { TabRpcClient } from "@/app/store/wshrpcutil";
 import { WOS, atoms, fetchWaveFile, getSettingsKeyAtom, globalStore, openLink } from "@/app/store/global";
 import * as services from "@/app/store/services";
 import { PLATFORM, PlatformLinux, PlatformMacOS, PlatformWindows } from "@/util/platformutil";
+import { writeText as clipboardWriteText } from "@/util/clipboard";
 import { base64ToArray, fireAndForget } from "@/util/util";
 import { SearchAddon } from "@xterm/addon-search";
 import { SerializeAddon } from "@xterm/addon-serialize";
@@ -174,7 +175,7 @@ export class TermWrap {
                     }
                     const selectedText = this.terminal.getSelection();
                     if (selectedText.length > 0) {
-                        navigator.clipboard.writeText(selectedText);
+                        clipboardWriteText(selectedText).catch((e) => console.log("clipboard write failed", e));
                     }
                 })
             )

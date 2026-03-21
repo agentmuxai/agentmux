@@ -8,6 +8,7 @@ import { appHandleKeyDown, keyboardMouseDownHandler } from "@/store/keymodel";
 import { chromeZoomIn, chromeZoomOut, zoomBlockIn, zoomBlockOut, WHEEL_STEP } from "@/store/zoom.platform";
 import { getElemAsStr } from "@/util/focusutil";
 import * as keyutil from "@/util/keyutil";
+import { readText as clipboardReadText, writeText as clipboardWriteText } from "@/util/clipboard";
 import { PLATFORM } from "@/util/platformutil";
 import * as util from "@/util/util";
 import clsx from "clsx";
@@ -62,7 +63,7 @@ function canEnableCut(): boolean {
 
 async function getClipboardURL(): Promise<URL> {
     try {
-        const clipboardText = await navigator.clipboard.readText();
+        const clipboardText = await clipboardReadText();
         if (clipboardText == null) {
             return null;
         }
@@ -271,7 +272,7 @@ const FlashError = () => {
             }
             text += ferr.message;
         }
-        navigator.clipboard.writeText(text);
+        clipboardWriteText(text);
     }
 
     function convertNewlinesToBreaks(text: string) {

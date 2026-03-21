@@ -6,7 +6,7 @@
   "productName": "AgentMux",
   "description": "Open-Source AI-Native Terminal Built for Seamless Workflows",
   "license": "Apache-2.0",
-  "version": "0.32.61",
+  "version": "0.32.62",
   "homepage": "https://github.com/agentmuxai/agentmux",
   "build": {
     "appId": "ai.agentmux.app"
@@ -93,6 +93,7 @@
     "@table-nav/react": "^0.0.9",
     "@tanstack/react-table": "^8.21.3",
     "@tauri-apps/api": "2.10.1",
+    "@tauri-apps/plugin-clipboard-manager": "^2.3.2",
     "@tauri-apps/plugin-fs": "2.4.5",
     "@tauri-apps/plugin-notification": "2.3.3",
     "@tauri-apps/plugin-opener": "2.5.3",

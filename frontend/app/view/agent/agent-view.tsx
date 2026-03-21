@@ -1,6 +1,7 @@
 // Copyright 2024, Command Line Inc.
 // SPDX-License-Identifier: Apache-2.0
 
+import { writeText as clipboardWriteText } from "@/util/clipboard";
 import { createMemo, createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
 import type { AgentViewModel } from "./agent-model";
 import { getProvider, type ProviderDefinition } from "./providers";
@@ -472,7 +473,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         if (!sel) return; // no selection, let default behavior
         e.preventDefault();
         ContextMenuModel.showContextMenu(
-            [{ label: "Copy", click: () => navigator.clipboard.writeText(sel) }],
+            [{ label: "Copy", click: () => clipboardWriteText(sel) }],
             e,
         );
     };

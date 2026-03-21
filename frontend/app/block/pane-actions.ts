@@ -7,6 +7,7 @@
  */
 
 import { createBlockSplitHorizontally, createBlockSplitVertically } from "@/app/store/global";
+import { readText as clipboardReadText, writeText as clipboardWriteText } from "@/util/clipboard";
 
 type SplitDirection = "up" | "down" | "left" | "right";
 
@@ -99,7 +100,7 @@ export function buildPaneContextMenu(
             enabled: hasSelection,
             click: () => {
                 if (selection) {
-                    navigator.clipboard.writeText(selection).catch(console.error);
+                    clipboardWriteText(selection).catch(console.error);
                 }
             },
         },
@@ -111,7 +112,7 @@ export function buildPaneContextMenu(
                       click: () => {
                           void (async () => {
                               try {
-                                  const text = await navigator.clipboard.readText();
+                                  const text = await clipboardReadText();
                                   if (!text) return;
                                   const terminal = (viewModel as any)?.termRef?.current?.terminal;
                                   if (terminal) {

@@ -9,6 +9,7 @@ import { RpcApi } from "@/app/store/wshclientapi";
 import { makeFeBlockRouteId } from "@/app/store/wshrouter";
 import { DefaultRouter, TabRpcClient } from "@/app/store/wshrpcutil";
 import { TermWshClient } from "@/app/view/term/term-wsh";
+import { readText as clipboardReadText, writeText as clipboardWriteText } from "@/util/clipboard";
 import {
     atoms,
     getAllBlockComponentModels,
@@ -367,16 +368,17 @@ class TermViewModel implements ViewModel {
             }
         }
         if (keyutil.checkKeyPressed(waveEvent, "Ctrl:Shift:v")) {
-            const p = navigator.clipboard.readText();
-            p.then((text) => {
-                this.termRef.current?.terminal.paste(text);
-            });
+            clipboardReadText()
+                .then((text) => {
+                    this.termRef.current?.terminal.paste(text);
+                })
+                .catch((e) => console.log("clipboard read failed", e));
             event.preventDefault();
             event.stopPropagation();
             return false;
         } else if (keyutil.checkKeyPressed(waveEvent, "Ctrl:Shift:c")) {
             const sel = this.termRef.current?.terminal.getSelection();
-            navigator.clipboard.writeText(sel);
+            clipboardWriteText(sel).catch((e) => console.log("clipboard write failed", e));
             event.preventDefault();
             event.stopPropagation();
             return false;

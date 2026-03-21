@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { getApi } from "@/store/global";
+import { writeText as clipboardWriteText } from "@/util/clipboard";
 import { MenuBuilder } from "./menu-builder";
 
 /**
@@ -16,7 +17,7 @@ export function createTabBarBaseMenu(): MenuBuilder {
     menu.add({
         label: `AgentMux v${version}`,
         click: () => {
-            navigator.clipboard.writeText(version);
+            clipboardWriteText(version);
             getApi().sendLog(`Version ${version} copied to clipboard`);
         },
     });

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { CopyButton } from "@/app/element/copybutton";
+import { writeText as clipboardWriteText } from "@/util/clipboard";
 import { ErrorBoundary } from "@/app/element/errorboundary";
 import { createContentBlockPlugin } from "@/app/element/markdown-contentblock-plugin";
 import {
@@ -184,7 +185,7 @@ const CodeBlock = ({ children, onClickExecute }: CodeBlockProps) => {
     const handleCopy = async (e: MouseEvent) => {
         let textToCopy = getTextContent(children);
         textToCopy = textToCopy.replace(/\n$/, "");
-        await navigator.clipboard.writeText(textToCopy);
+        await clipboardWriteText(textToCopy);
     };
 
     const handleExecute = (e: MouseEvent) => {

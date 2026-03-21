@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { atoms, getApi, setNotifications } from "@/store/global";
+import { writeText as clipboardWriteText } from "@/util/clipboard";
 import { createEffect, createSignal, onCleanup } from "solid-js";
 
 const notificationActions: { [key: string]: () => void } = {
@@ -42,8 +43,7 @@ export function useNotification() {
         if (notif.message) {
             text += text.length > 0 ? `\n${notif.message}` : notif.message;
         }
-        navigator.clipboard
-            .writeText(text)
+        clipboardWriteText(text)
             .then(() => {
                 console.info("Text copied to clipboard");
             })
