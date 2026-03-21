@@ -235,8 +235,9 @@ pub async fn open_window_at_position(
     state: tauri::State<'_, AppState>,
     screen_x: f64,
     screen_y: f64,
+    workspace_id: String,
 ) -> Result<String, String> {
-    tracing::info!(screen_x = %screen_x, screen_y = %screen_y, "[dnd:tauri] open_window_at_position");
+    tracing::info!(screen_x = %screen_x, screen_y = %screen_y, workspace_id = %workspace_id, "[dnd:tauri] open_window_at_position");
 
     let window_id = uuid::Uuid::new_v4();
     let label = format!("window-{}", window_id.simple());
@@ -258,10 +259,18 @@ pub async fn open_window_at_position(
         "[dnd:tauri] open_window_at_position: adjusted for cursor centering"
     );
 
+    // Embed the tear-off workspace ID in the URL so the new window's JS can
+    // call CreateWindow(workspaceId) to reuse the existing workspace.
+    let url_path = if workspace_id.is_empty() {
+        "index.html".to_string()
+    } else {
+        format!("index.html?workspaceId={}", workspace_id)
+    };
+
     let builder = tauri::WebviewWindowBuilder::new(
         &app,
         &label,
-        tauri::WebviewUrl::App("index.html".into()),
+        tauri::WebviewUrl::App(url_path.into()),
     )
     .title(&title)
     .inner_size(win_w, win_h)

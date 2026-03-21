@@ -408,8 +408,8 @@ export function buildTauriApi(): AppApi {
         cancelCrossDrag: async (dragId: string) => {
             await invoke("cancel_cross_drag", { dragId });
         },
-        openWindowAtPosition: async (screenX: number, screenY: number) => {
-            return await invoke<string>("open_window_at_position", { screenX, screenY });
+        openWindowAtPosition: async (screenX: number, screenY: number, workspaceId?: string) => {
+            return await invoke<string>("open_window_at_position", { screenX, screenY, workspaceId: workspaceId ?? "" });
         },
 
         // --- Drag cursor ---

@@ -154,7 +154,7 @@ declare global {
             screenY: number
         ) => Promise<void>;
         cancelCrossDrag: (dragId: string) => Promise<void>;
-        openWindowAtPosition: (screenX: number, screenY: number) => Promise<string>;
+        openWindowAtPosition: (screenX: number, screenY: number, workspaceId?: string) => Promise<string>;
         setDragCursor: () => Promise<void>;
         restoreDragCursor: () => Promise<void>;
         releaseDragCapture: () => Promise<void>;

@@ -302,9 +302,16 @@ async function initTauriNewWindow(): Promise<void> {
         const clientData = await withTimeout(ClientService.GetClientData(), RPC_TIMEOUT, "GetClientData");
         tlog("GetClientData", t);
 
-        // Create NEW window (not reuse)
+        // If this window was opened for a tear-off, the workspace ID is in the URL.
+        // Pass it to CreateWindow so the backend reuses the existing workspace+tab
+        // instead of creating a blank one.
+        const tearOffWsId = new URLSearchParams(window.location.search).get("workspaceId") ?? "";
+        if (tearOffWsId) {
+            getApi().sendLog(`[initTauriNewWindow] tear-off workspaceId=${tearOffWsId}`);
+        }
+
         t = performance.now();
-        const newWindow = await withTimeout(WindowService.CreateWindow(null, ""), RPC_TIMEOUT, "CreateWindow");
+        const newWindow = await withTimeout(WindowService.CreateWindow(null, tearOffWsId), RPC_TIMEOUT, "CreateWindow");
         tlog("CreateWindow", t);
 
         // Get the workspace that was auto-created with the window

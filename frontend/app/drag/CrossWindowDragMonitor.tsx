@@ -160,12 +160,12 @@ async function performTearOff(
     if (dragType === "pane" && payload.blockId) {
         const newWsId = await WorkspaceService.TearOffBlock(payload.blockId, sourceTabId, sourceWsId, true);
         if (newWsId) {
-            await api.openWindowAtPosition(screenX, screenY);
+            await api.openWindowAtPosition(screenX, screenY, newWsId);
         }
     } else if (dragType === "tab" && payload.tabId) {
         const newWsId = await WorkspaceService.TearOffTab(payload.tabId, sourceWsId);
         if (newWsId) {
-            await api.openWindowAtPosition(screenX, screenY);
+            await api.openWindowAtPosition(screenX, screenY, newWsId);
         }
     }
 }
