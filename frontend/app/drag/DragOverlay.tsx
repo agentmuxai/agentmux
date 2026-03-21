@@ -11,7 +11,8 @@
  * Only visible when this window is the target of an active cross-drag.
  */
 
-import { getApi } from "@/store/global";
+import { atoms, getApi } from "@/store/global";
+import { WorkspaceService } from "@/app/store/services";
 import { Logger } from "@/util/logger";
 import { createSignal, onCleanup, onMount, Show } from "solid-js";
 import type { JSX } from "solid-js";
@@ -30,6 +31,12 @@ interface CrossDragUpdateEvent {
 interface CrossDragEndEvent {
     dragId: string;
     result: "drop" | "tearoff" | "cancel";
+    targetWindow: string | null;
+    sourceWindow: string;
+    dragType: "pane" | "tab";
+    payload: { blockId?: string; tabId?: string };
+    sourceWorkspaceId: string;
+    sourceTabId: string;
 }
 
 function DragOverlay(): JSX.Element {
@@ -66,9 +73,40 @@ function DragOverlay(): JSX.Element {
         }).then((fn) => { unlistenUpdate = fn; });
 
         api.listen("cross-drag-end", (event: { payload: CrossDragEndEvent }) => {
-            Logger.info("dnd:overlay", "cross-drag ended", { dragId: event.payload.dragId, result: event.payload.result });
+            const data = event.payload;
+            Logger.info("dnd:overlay", "cross-drag ended", { dragId: data.dragId, result: data.result, targetWindow: data.targetWindow });
             setIsTarget(false);
             setDragType(null);
+
+            // Handle drop onto this window: move the item into our active workspace/tab
+            if (data.result === "drop" && data.targetWindow === wl) {
+                const myWsId = atoms.workspace()?.oid;
+                const myActiveTabId = atoms.activeTabId();
+                if (!myWsId || !myActiveTabId) {
+                    Logger.warn("dnd:overlay", "cross-window drop: no active workspace/tab", { myWsId, myActiveTabId });
+                    return;
+                }
+
+                if (data.dragType === "pane" && data.payload.blockId) {
+                    Logger.info("dnd:overlay", "cross-window drop: moving pane into this window", {
+                        blockId: data.payload.blockId,
+                        sourceTabId: data.sourceTabId,
+                        destTabId: myActiveTabId,
+                    });
+                    WorkspaceService.MoveBlockToTab(myWsId, data.payload.blockId, data.sourceTabId, myActiveTabId, true).catch((e) => {
+                        Logger.error("dnd:overlay", "MoveBlockToTab failed", { error: String(e) });
+                    });
+                } else if (data.dragType === "tab" && data.payload.tabId) {
+                    Logger.info("dnd:overlay", "cross-window drop: moving tab into this window", {
+                        tabId: data.payload.tabId,
+                        sourceWsId: data.sourceWorkspaceId,
+                        destWsId: myWsId,
+                    });
+                    WorkspaceService.MoveTabToWorkspace(data.payload.tabId, data.sourceWorkspaceId, myWsId).catch((e) => {
+                        Logger.error("dnd:overlay", "MoveTabToWorkspace failed", { error: String(e) });
+                    });
+                }
+            }
         }).then((fn) => { unlistenEnd = fn; });
 
         api.listen("cross-drag-start", () => {

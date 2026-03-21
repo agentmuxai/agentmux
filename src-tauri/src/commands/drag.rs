@@ -235,8 +235,9 @@ pub async fn open_window_at_position(
     state: tauri::State<'_, AppState>,
     screen_x: f64,
     screen_y: f64,
+    workspace_id: String,
 ) -> Result<String, String> {
-    tracing::info!(screen_x = %screen_x, screen_y = %screen_y, "[dnd:tauri] open_window_at_position");
+    tracing::info!(screen_x = %screen_x, screen_y = %screen_y, workspace_id = %workspace_id, "[dnd:tauri] open_window_at_position");
 
     let window_id = uuid::Uuid::new_v4();
     let label = format!("window-{}", window_id.simple());
@@ -246,20 +247,30 @@ pub async fn open_window_at_position(
     let win_w = 1200.0_f64;
     let win_h = 800.0_f64;
 
-    // Position the window so the cursor lands near the top-center.
-    // Offset left by half the width, and up by a small amount for the title bar area.
+    // Position the window so the cursor lands near the top-center of the title bar.
+    // Offset left by half the width so the cursor is horizontally centered.
+    // Offset up by 16px so the cursor lands in the middle of the 33px window header —
+    // this way the user can immediately drag the new window from where their cursor is.
     let pos_x = (screen_x - win_w / 2.0).max(0.0);
-    let pos_y = (screen_y - 40.0).max(0.0);
+    let pos_y = (screen_y - 16.0).max(0.0);
 
     tracing::info!(
         pos_x = %pos_x, pos_y = %pos_y,
         "[dnd:tauri] open_window_at_position: adjusted for cursor centering"
     );
 
+    // Embed the tear-off workspace ID in the URL so the new window's JS can
+    // call CreateWindow(workspaceId) to reuse the existing workspace.
+    let url_path = if workspace_id.is_empty() {
+        "index.html".to_string()
+    } else {
+        format!("index.html?workspaceId={}", workspace_id)
+    };
+
     let builder = tauri::WebviewWindowBuilder::new(
         &app,
         &label,
-        tauri::WebviewUrl::App("index.html".into()),
+        tauri::WebviewUrl::App(url_path.into()),
     )
     .title(&title)
     .inner_size(win_w, win_h)
@@ -371,6 +382,57 @@ pub async fn set_drag_cursor() -> Result<(), String> {
             }
         }
         tracing::debug!("[dnd:tauri] set_drag_cursor: replaced OCR_NO with IDC_CROSS");
+    }
+    Ok(())
+}
+
+/// Release any leftover mouse capture from an HTML5 drag that ended outside the window.
+///
+/// After an out-of-window HTML5 DnD (WebView2 IDropSource), the OS may not deliver
+/// WM_LBUTTONUP to WebView2, leaving Chromium's internal capture active. This prevents
+/// Tauri's JS-based drag region (drag.js mousedown → start_dragging) from working
+/// because Chromium's pointer state thinks the left button is still pressed.
+///
+/// Fix strategy (three layers):
+/// 1. ReleaseCapture() — releases Win32 mouse capture from any HWND in our process.
+/// 2. WM_CANCELMODE to the top-level HWND — cancels modal tracking on our window.
+/// 3. EnumChildWindows + WM_CANCELMODE to every child HWND — WebView2 hosts its visual
+///    content in child HWNDs within our process. WM_CANCELMODE does NOT automatically
+///    cascade to children, so we enumerate them and post to each explicitly.
+///    The WebView2 child HWND receiving WM_CANCELMODE will cancel its own capture and
+///    reset Chromium's internal pointer state, restoring normal mousedown delivery.
+#[tauri::command]
+pub async fn release_drag_capture(window: tauri::Window) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        use windows_sys::Win32::Foundation::{BOOL, HWND, LPARAM};
+        use windows_sys::Win32::UI::Input::KeyboardAndMouse::ReleaseCapture;
+        use windows_sys::Win32::UI::WindowsAndMessaging::{
+            EnumChildWindows, PostMessageW, WM_CANCELMODE,
+        };
+
+        let hwnd = window.hwnd().map_err(|e| format!("hwnd error: {e}"))?.0 as HWND;
+
+        unsafe {
+            // Layer 1: release any Win32 capture held by a window in our process.
+            ReleaseCapture();
+
+            // Layer 2: cancel modal tracking on the top-level window.
+            PostMessageW(hwnd, WM_CANCELMODE, 0, 0);
+
+            // Layer 3: enumerate all child HWNDs (WebView2 lives here) and post
+            // WM_CANCELMODE to each so the renderer resets its pointer state.
+            unsafe extern "system" fn cancel_child(child: HWND, _: LPARAM) -> BOOL {
+                PostMessageW(child, WM_CANCELMODE, 0, 0);
+                1 // TRUE — continue enumeration
+            }
+            EnumChildWindows(hwnd, Some(cancel_child), 0);
+        }
+
+        tracing::debug!(
+            "[dnd:tauri] release_drag_capture: ReleaseCapture + WM_CANCELMODE → hwnd={:?} + all children",
+            hwnd
+        );
     }
     Ok(())
 }
