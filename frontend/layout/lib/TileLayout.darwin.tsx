@@ -2,10 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // macOS-specific TileLayout.
-// dragHandle: undefined — whole-tile drag. WKWebView doesn't support
-// pragmatic-dnd's dragHandle (sets draggable="true/false" on child/parent,
-// which breaks drag in WKWebView). Instead, canDrag() checks whether the
-// pointer started inside the header element's bounding rect at drag time.
+// Draggable registered on the header element (querySelector '[data-role="block-header"]').
+// WKWebView doesn't support pragmatic-dnd's dragHandle option (sets draggable="true/false"
+// on child/parent which breaks drag). Registering directly on the header avoids that.
 
 import { getSettingsKeyAtom } from "@/app/store/global";
 import { draggable, dropTargetForElements, monitorForElements } from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
@@ -304,58 +303,83 @@ const DisplayNode = (props: DisplayNodeProps) => {
         }
     };
 
-    // Register pragmatic-dnd draggable on the tile node.
+    // Register pragmatic-dnd draggable on the HEADER element directly.
+    // pragmatic-dnd wraps HTML5 DnD and fires onDragStart AFTER the browser
+    // commits the drag, so SolidJS reactive state updates won't cause
+    // mid-event DOM mutations.
     //
     // macOS/WKWebView: cannot use dragHandle option — pragmatic-dnd sets
-    // draggable="true" on the handle and draggable="false" on the tile, which
-    // breaks drag entirely in WKWebView. Use whole-tile drag (dragHandle: undefined)
-    // and restrict to the header by checking cursor position in canDrag() instead.
-    // canDrag() is called with live pointer coords so the header ref doesn't need
-    // to be available at registration time — no polling required.
-    const dragHandleRef = nodeModel.dragHandleRef;
+    // draggable="true" on the handle AND draggable="false" on the tile,
+    // which breaks drag entirely in WKWebView. By registering directly on the
+    // header element, only the header gets draggable="true". The tile-node is
+    // untouched so text selection and widget interaction in pane bodies work.
+    //
+    // dragHandleRef is NOT used because BlockFrame_Default_Component creates
+    // two BlockFrame_Header instances (primary + ErrorBoundary fallback), and
+    // the fallback (never inserted into the DOM) always writes last — so the
+    // ref always points to a detached element. querySelector finds the live
+    // in-DOM header instead.
     onMount(() => {
         if (!tileNodeRef) return;
         let cleanupFn: (() => void) | null = null;
+        let registeredHandle: HTMLElement | null = null;
 
-        cleanupFn = draggable({
-            element: tileNodeRef,
-            dragHandle: undefined,
-            canDrag: ({ input }) => {
-                if (isEphemeral() || isMagnified()) return false;
-                const handle = dragHandleRef?.current;
-                if (!handle) return false;
-                const r = handle.getBoundingClientRect();
-                return input.clientX >= r.left && input.clientX <= r.right &&
-                       input.clientY >= r.top && input.clientY <= r.bottom;
-            },
-            getInitialData: () => ({ nodeId: props.node.id, type: tileItemType }),
-            onGenerateDragPreview: ({ nativeSetDragImage }) => {
-                const img = previewImage();
-                if (img && nativeSetDragImage) {
-                    const dpr = typeof devicePixelRatio === "function" ? (devicePixelRatio as () => number)() : devicePixelRatio;
-                    const offsetX = (DragPreviewWidth * dpr - DragPreviewWidth) / 2 + 10;
-                    const offsetY = (DragPreviewHeight * dpr - DragPreviewHeight) / 2 + 10;
-                    nativeSetDragImage(img, offsetX, offsetY);
-                }
-            },
-            onDragStart: () => {
-                globalDragNodeId = props.node.id;
-                globalDragLayoutModel = props.layoutModel;
-                props.layoutModel.activeDrag._set(true);
-                setIsDragging(true);
-                setCurrentDragPayload({ kind: "tile", node: props.node });
-            },
-            onDrop: () => {
-                globalDragNodeId = null;
-                globalDragLayoutModel = null;
-                props.layoutModel.activeDrag._set(false);
-                setIsDragging(false);
-                // Do NOT clear currentDragPayload here — fires for ALL drops.
-                // Cleared in dropTargetForElements.onDrop instead.
-            },
+        const findHandle = (): HTMLElement | null =>
+            tileNodeRef?.querySelector<HTMLElement>('[data-role="block-header"]') ?? null;
+
+        const register = () => {
+            const handle = findHandle();
+
+            if (handle === registeredHandle) return;
+
+            // Never tear down during an active drag — would leave activeDrag=true
+            // permanently, making all pane bodies pointer-events:none ("frozen").
+            if (props.layoutModel.activeDrag()) return;
+
+            cleanupFn?.();
+            cleanupFn = null;
+            registeredHandle = null;
+
+            if (!handle) return;
+
+            registeredHandle = handle;
+            cleanupFn = draggable({
+                element: handle,
+                canDrag: () => !isEphemeral() && !isMagnified(),
+                getInitialData: () => ({ nodeId: props.node.id, type: tileItemType }),
+                onGenerateDragPreview: ({ nativeSetDragImage }) => {
+                    const img = previewImage();
+                    if (img && nativeSetDragImage) {
+                        const dpr = typeof devicePixelRatio === "function" ? (devicePixelRatio as () => number)() : devicePixelRatio;
+                        const offsetX = (DragPreviewWidth * dpr - DragPreviewWidth) / 2 + 10;
+                        const offsetY = (DragPreviewHeight * dpr - DragPreviewHeight) / 2 + 10;
+                        nativeSetDragImage(img, offsetX, offsetY);
+                    }
+                },
+                onDragStart: () => {
+                    globalDragNodeId = props.node.id;
+                    globalDragLayoutModel = props.layoutModel;
+                    props.layoutModel.activeDrag._set(true);
+                    setIsDragging(true);
+                    setCurrentDragPayload({ kind: "tile", node: props.node });
+                },
+                onDrop: () => {
+                    globalDragNodeId = null;
+                    globalDragLayoutModel = null;
+                    props.layoutModel.activeDrag._set(false);
+                    setIsDragging(false);
+                    // Do NOT clear currentDragPayload here — fires for ALL drops.
+                    // Cleared in dropTargetForElements.onDrop instead.
+                },
+            });
+        };
+
+        register();
+        const interval = setInterval(register, 100);
+        onCleanup(() => {
+            clearInterval(interval);
+            cleanupFn?.();
         });
-
-        onCleanup(() => cleanupFn?.());
     });
 
     const leafContent = () => (
