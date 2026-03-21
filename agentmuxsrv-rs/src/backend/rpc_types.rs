@@ -517,6 +517,23 @@ pub struct CheckCliAuthResult {
     pub raw_output: String,
 }
 
+/// Input for RunCliLoginCommand — spawns the CLI login flow and extracts the OAuth URL
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommandRunCliLoginData {
+    pub cli_path: String,
+    pub login_args: Vec<String>,
+    #[serde(default)]
+    pub auth_env: HashMap<String, String>,
+}
+
+/// Result from RunCliLoginCommand
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RunCliLoginResult {
+    /// OAuth URL extracted from the CLI's output (open in browser)
+    pub auth_url: Option<String>,
+    pub raw_output: String,
+}
+
 /// Matches Go's `FileDataAt`
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileDataAt {

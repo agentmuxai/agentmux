@@ -242,6 +242,93 @@ fn extract_commented_setting_key(line: &str) -> Option<&str> {
     Some(&rest[..end])
 }
 
+/// Spawn a CLI auth login flow from the Tauri host process.
+///
+/// The Tauri host is a GUI process with full desktop access, so the CLI can open
+/// the browser normally. Returns immediately after spawning — the CLI process
+/// runs in the background waiting for the OAuth callback. The frontend polls
+/// CheckCliAuth every 2s to detect when the user completes login.
+///
+/// A cancellation channel is stored in AppState so `cancel_cli_login` can kill
+/// the child when the user cancels or closes the pane.
+#[tauri::command]
+pub async fn run_cli_login(
+    app: tauri::AppHandle,
+    cli_path: String,
+    login_args: Vec<String>,
+    auth_env: std::collections::HashMap<String, String>,
+) -> Result<Option<String>, String> {
+    let mut cmd = tokio::process::Command::new(&cli_path);
+    cmd.args(&login_args)
+        .envs(&auth_env)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+
+    // No console window for the child process on Windows
+    #[cfg(windows)]
+    cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+
+    let mut child = cmd.spawn()
+        .map_err(|e| format!("failed to spawn {cli_path}: {e}"))?;
+
+    tracing::info!(cli = %cli_path, "run_cli_login: spawned, browser should open");
+
+    // Register a cancellation channel so cancel_cli_login() can kill this child.
+    // If a previous login is still pending its cancel sender gets dropped here,
+    // which is harmless (the old oneshot receiver will see a disconnect error and
+    // the background task will just wait for child.wait() instead).
+    let (cancel_tx, cancel_rx) = tokio::sync::oneshot::channel::<()>();
+    {
+        let state = app.state::<crate::state::AppState>();
+        let mut stored = state.cli_login_cancel.lock().unwrap();
+        *stored = Some(cancel_tx);
+    }
+
+    // Background task: wait for child to exit normally, or kill it on cancel.
+    tokio::spawn(async move {
+        tokio::select! {
+            result = child.wait() => {
+                match result {
+                    Ok(status) => tracing::info!(
+                        exit_code = status.code(),
+                        "run_cli_login: child exited"
+                    ),
+                    Err(e) => tracing::warn!(
+                        error = %e,
+                        "run_cli_login: child wait error"
+                    ),
+                }
+            }
+            _ = cancel_rx => {
+                tracing::info!("run_cli_login: cancel signal received, killing child");
+                let _ = child.kill().await;
+            }
+        }
+    });
+
+    // Return None immediately — URL capture is not feasible when the browser
+    // opens successfully (the CLI only prints the URL as a fallback when the
+    // browser fails to open, and does so only after the process exits).
+    Ok(None)
+}
+
+/// Kill the in-progress CLI login process spawned by run_cli_login.
+/// Called when the user cancels login or closes the agent pane.
+#[tauri::command]
+pub async fn cancel_cli_login(app: tauri::AppHandle) -> Result<(), String> {
+    let state = app.state::<crate::state::AppState>();
+    let sender = {
+        let mut stored = state.cli_login_cancel.lock().unwrap();
+        stored.take()
+    };
+    if let Some(tx) = sender {
+        let _ = tx.send(());
+        tracing::info!("cancel_cli_login: cancel signal sent");
+    }
+    Ok(())
+}
+
 /// Open a file in the best available code editor.
 /// On macOS/Linux: probe CLI editors on PATH, then .app bundles, then OS default.
 /// On Windows: use OS default directly (avoids cmd shell flash).

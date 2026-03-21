@@ -204,16 +204,26 @@ pub async fn spawn_backend(app: &tauri::AppHandle) -> Result<BackendSpawnResult,
 
     let backend_name = "agentmuxsrv-rs";
 
-    // Try to find backend in portable mode first (bin/ subdir next to exe)
+    // Try to find backend in portable mode first (bin/ subdir next to exe),
+    // or in dev mode (agentmuxsrv-rs.exe without triple suffix in the same dir as the debug binary,
+    // placed there by the sync:dev:binaries task).
     let portable_path = std::env::current_exe().ok().and_then(|exe_path| {
         let exe_dir = exe_path.parent()?;
+        // Portable release: bin/{name}.x64.exe next to app exe
         let portable_binary = exe_dir.join("bin").join(format!("{}.x64.exe", backend_name));
         if portable_binary.exists() {
             tracing::info!("Using portable {} at: {:?}", backend_name, portable_binary);
-            Some(portable_binary)
-        } else {
-            None
+            return Some(portable_binary);
         }
+        // Dev mode (tauri dev / cargo run): sync:dev:binaries copies the binary as
+        // {name}.exe (no triple) into target/debug/ alongside the host binary.
+        let exe_suffix = if cfg!(windows) { ".exe" } else { "" };
+        let dev_binary = exe_dir.join(format!("{}{}", backend_name, exe_suffix));
+        if dev_binary.exists() {
+            tracing::info!("Using dev-mode {} at: {:?}", backend_name, dev_binary);
+            return Some(dev_binary);
+        }
+        None
     });
 
     let sidecar_cmd = if let Some(portable_exe) = portable_path {

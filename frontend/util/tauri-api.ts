@@ -375,6 +375,12 @@ export function buildTauriApi(): AppApi {
         ensureAuthDir: async (providerId: string) => {
             return await invoke<string>("ensure_auth_dir", { providerId });
         },
+        runCliLogin: async (cliPath: string, loginArgs: string[], authEnv: Record<string, string>) => {
+            return await invoke<string | null>("run_cli_login", { cliPath, loginArgs, authEnv });
+        },
+        cancelCliLogin: async () => {
+            await invoke("cancel_cli_login");
+        },
 
         listen: async (event: string, callback: (event: any) => void) => {
             const unlisten = await listen(event, callback);

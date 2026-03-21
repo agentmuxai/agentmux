@@ -138,6 +138,9 @@ declare global {
         installCli: (provider: string) => Promise<CliInstallResult>;
         getCliPath: (provider: string) => Promise<string | null>;
         checkNodejsAvailable: () => Promise<NodejsStatus>;
+        ensureAuthDir: (providerId: string) => Promise<string>;
+        runCliLogin: (cliPath: string, loginArgs: string[], authEnv: Record<string, string>) => Promise<string | null>;
+        cancelCliLogin: () => Promise<void>;
         listen: (event: string, callback: (event: any) => void) => Promise<() => void>;
         startCrossDrag: (
             dragType: "pane" | "tab",

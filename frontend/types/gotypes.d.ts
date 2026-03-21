@@ -1614,6 +1614,19 @@ declare global {
         raw_output: string;
     };
 
+    // wshrpc.CommandRunCliLoginData
+    type CommandRunCliLoginData = {
+        cli_path: string;
+        login_args: string[];
+        auth_env?: {[key: string]: string};
+    };
+
+    // wshrpc.RunCliLoginResult
+    type RunCliLoginResult = {
+        auth_url?: string;
+        raw_output: string;
+    };
+
 }
 
 export {}

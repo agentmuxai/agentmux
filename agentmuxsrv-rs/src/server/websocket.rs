@@ -40,6 +40,7 @@ use crate::backend::rpc_types::{
     COMMAND_RESOLVE_CLI, COMMAND_CHECK_CLI_AUTH,
     CommandSubprocessSpawnData, CommandAgentInputData, CommandAgentStopData, CommandWriteAgentConfigData,
     CommandResolveCliData, ResolveCliResult, CommandCheckCliAuthData, CheckCliAuthResult,
+    CommandRunCliLoginData, RunCliLoginResult,
 };
 use crate::backend::storage::{ForgeAgent, ForgeContent, ForgeSkill};
 use crate::backend::waveobj::{Block, TermSize, WaveObjUpdate, wave_obj_to_value};
@@ -1306,6 +1307,37 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                     auth_method,
                     raw_output,
                 };
+                Ok(Some(serde_json::to_value(&result).unwrap()))
+            })
+        }),
+    );
+
+    // runclilogin → spawn CLI login flow, extract OAuth URL from output, return immediately
+    engine.register_handler(
+        "runclilogin",
+        Box::new(|data, _ctx| {
+            Box::pin(async move {
+                let cmd: CommandRunCliLoginData = serde_json::from_value(data)
+                    .map_err(|e| format!("runclilogin: {e}"))?;
+                tracing::info!(cli = %cmd.cli_path, args = ?cmd.login_args, "RunCliLogin");
+
+                // Spawn the login process. On most platforms it opens the browser
+                // automatically and writes the URL to stderr. On Windows, stderr is
+                // block-buffered when piped so we can't reliably read it in real-time.
+                // Strategy: inherit stdout/stderr so the CLI can open the browser normally,
+                // then return immediately — the frontend polls auth status until done.
+                let mut child = tokio::process::Command::new(&cmd.cli_path)
+                    .args(&cmd.login_args)
+                    .envs(&cmd.auth_env)
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .spawn()
+                    .map_err(|e| format!("failed to spawn login: {e}"))?;
+
+                // Keep child alive in background — it waits for the user to complete OAuth
+                tokio::spawn(async move { let _ = child.wait().await; });
+
+                let result = RunCliLoginResult { auth_url: None, raw_output: String::new() };
                 Ok(Some(serde_json::to_value(&result).unwrap()))
             })
         }),

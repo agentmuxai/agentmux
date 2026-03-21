@@ -598,6 +598,11 @@ class RpcApiType {
         return client.wshRpcCall("checkcliauth", data, opts);
     }
 
+    // command "runclilogin" [call]
+    RunCliLoginCommand(client: WshClient, data: CommandRunCliLoginData, opts?: RpcOpts): Promise<RunCliLoginResult> {
+        return client.wshRpcCall("runclilogin", data, opts);
+    }
+
 }
 
 export const RpcApi = new RpcApiType();
