@@ -47,6 +47,8 @@ pub fn run() {
             commands::platform::get_is_dev,
             commands::platform::get_data_dir,
             commands::platform::ensure_auth_dir,
+            commands::platform::run_cli_login,
+            commands::platform::cancel_cli_login,
             commands::platform::get_config_dir,
             commands::platform::ensure_settings_file,
             commands::platform::open_in_editor,

@@ -172,16 +172,24 @@ type LogFn = (tag: string, text: string, level?: "info" | "error" | "warn") => v
 /**
  * Full agent launch flow: CLI detection → auth check → controller registration.
  * Emits terminal-style log lines at each phase.
+ *
+ * Returns:
+ *  "success"     — controller registered, ready
+ *  "auth_failed" — login timed out or errored (retry makes sense)
+ *  "fatal"       — CLI missing, Docker missing, etc. (retry won't help)
  */
 async function runLaunchFlow(
     blockId: string,
     provider: ProviderDefinition | undefined,
     log: LogFn,
+    setAuthUrl: (url: string | null) => void,
+    isCancelled: () => boolean,
+    setLoginWaiting: (v: boolean) => void,
     authEnv?: Record<string, string>,
-): Promise<void> {
+): Promise<"success" | "auth_failed" | "fatal"> {
     if (!provider) {
         log("error", "no provider definition — cannot resolve CLI", "error");
-        return;
+        return "fatal";
     }
 
     const oref = WOS.makeORef("block", blockId);
@@ -205,7 +213,7 @@ async function runLaunchFlow(
             log("docker", "Docker is not installed", "error");
             log("docker", "Container agents require Docker Desktop to run.", "error");
             log("docker", "Install from: https://www.docker.com/products/docker-desktop/", "error");
-            return;
+            return "fatal";
         }
     }
 
@@ -225,7 +233,7 @@ async function runLaunchFlow(
         const msg = err?.message ?? String(err);
         log("cli", msg, "error");
         log("error", `${provider.cliCommand} not available — install manually or check your internet connection`, "error");
-        return;
+        return "fatal";
     }
 
     if (cliResult.source === "installed") {
@@ -242,8 +250,9 @@ async function runLaunchFlow(
         meta: { cmd: cliResult.cli_path },
     });
 
-    // Phase 2: Auth Check
+    // Phase 2: Auth Check → auto-login if not authenticated
     log("auth", `checking ${provider.cliCommand} authentication...`);
+    let needsLogin = false;
     try {
         const authResult = await RpcApi.CheckCliAuthCommand(TabRpcClient, {
             cli_path: cliResult.cli_path,
@@ -255,12 +264,70 @@ async function runLaunchFlow(
             const methodPart = authResult.auth_method ? ` (${authResult.auth_method})` : "";
             log("auth", `authenticated${emailPart}${methodPart}`);
         } else {
-            log("auth", "not authenticated", "warn");
-            log("auth", `run: ${provider.cliCommand} ${provider.authLoginCommand.join(" ")}`, "warn");
+            needsLogin = true;
         }
     } catch (err: any) {
         log("auth", `check failed: ${err?.message ?? String(err)}`, "warn");
         log("auth", "authentication status unknown — will attempt anyway", "warn");
+    }
+
+    if (needsLogin) {
+        log("auth", "not authenticated — starting login flow...");
+        try {
+            // Run from Tauri host (GUI process) so the browser opens correctly on Windows.
+            // Returns immediately after spawning — browser opens, frontend polls for completion.
+            await getApi().runCliLogin(
+                cliResult.cli_path,
+                provider.authLoginCommand,
+                authEnv ?? {},
+            );
+            log("auth", "a browser window should have opened — complete login there");
+
+            // Poll until authenticated, cancelled, or timed out (5 minutes)
+            log("auth", "waiting for login to complete...");
+            setLoginWaiting(true);
+            const deadline = Date.now() + 5 * 60 * 1000;
+            let authenticated = false;
+            while (!isCancelled() && Date.now() < deadline) {
+                await new Promise<void>((r) => setTimeout(r, 2000));
+                if (isCancelled()) break;
+                try {
+                    const recheckResult = await RpcApi.CheckCliAuthCommand(TabRpcClient, {
+                        cli_path: cliResult.cli_path,
+                        auth_check_args: provider.authCheckCommand,
+                        auth_env: authEnv,
+                    }, { timeout: 10000 });
+                    if (recheckResult.authenticated) {
+                        const emailPart = recheckResult.email ? ` as ${recheckResult.email}` : "";
+                        log("auth", `authenticated${emailPart}`);
+                        authenticated = true;
+                        break;
+                    }
+                } catch {
+                    // keep polling on transient RPC errors
+                }
+            }
+            setLoginWaiting(false);
+
+            // Always clear auth URL after the login attempt
+            setAuthUrl(null);
+
+            if (isCancelled()) {
+                return "auth_failed";
+            }
+
+            if (!authenticated) {
+                log("auth", "login timed out after 5 minutes", "error");
+                log("auth", `retry: click the button below, or run '${provider.cliCommand} ${provider.authLoginCommand.join(" ")}' manually`, "warn");
+                return "auth_failed";
+            }
+        } catch (err: any) {
+            setLoginWaiting(false);
+            setAuthUrl(null);
+            log("auth", `login failed: ${err?.message ?? String(err)}`, "error");
+            log("auth", `run: ${provider.cliCommand} ${provider.authLoginCommand.join(" ")}`, "warn");
+            return "auth_failed";
+        }
     }
 
     // Phase 3: Controller Registration
@@ -283,6 +350,8 @@ async function runLaunchFlow(
         log("controller", `resync failed: ${err?.message ?? String(err)}`, "warn");
         log("agent", "ready — type a message below to start");
     }
+
+    return "success";
 }
 
 // ── Presentation View ───────────────────────────────────────────────────────────
@@ -302,6 +371,70 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         setLogLines((prev) => [...prev, { tag, text, level: level ?? "info" }]);
     };
 
+    // OAuth URL — shown prominently with a copy button when login is needed
+    const [authUrl, setAuthUrl] = createSignal<string | null>(null);
+    // Whether to show the retry button (after auth_failed)
+    const [canRetry, setCanRetry] = createSignal(false);
+    // Whether the launch flow is currently running
+    const [flowRunning, setFlowRunning] = createSignal(false);
+    // Whether we're specifically in the login-polling phase
+    const [loginWaiting, setLoginWaiting] = createSignal(false);
+    // Mutable flag for cancelling the polling loop (set by cancel or onCleanup)
+    let loginCancelled = false;
+
+    // Build auth env for a given provider
+    const buildAuthEnv = async (prov: ReturnType<typeof provider>): Promise<Record<string, string> | undefined> => {
+        if (!prov?.authConfigDirEnvVar || !prov?.authDirName) return undefined;
+        try {
+            const authDir = await getApi().ensureAuthDir(prov.id);
+            const env: Record<string, string> = { [prov.authConfigDirEnvVar]: authDir };
+            if (prov.authExtraEnv) Object.assign(env, prov.authExtraEnv);
+            return env;
+        } catch {
+            return undefined; // non-fatal — fall back to default auth dir
+        }
+    };
+
+    // Runs the full launch flow; can be triggered at mount time or via retry.
+    const startLaunchFlow = async () => {
+        if (flowRunning()) return;
+        loginCancelled = false;
+        setFlowRunning(true);
+        setCanRetry(false);
+        const prov = provider();
+        try {
+            const authEnv = await buildAuthEnv(prov);
+            const result = await runLaunchFlow(
+                model.blockId, prov, log, setAuthUrl,
+                () => loginCancelled,
+                setLoginWaiting,
+                authEnv,
+            );
+            if (result === "auth_failed" && !loginCancelled) {
+                setCanRetry(true);
+            }
+        } catch (err: any) {
+            log("error", err?.message ?? String(err), "error");
+        } finally {
+            setFlowRunning(false);
+        }
+    };
+
+    // Cancel login: stop polling and kill the background CLI process.
+    const cancelLogin = () => {
+        loginCancelled = true;
+        getApi().cancelCliLogin().catch(() => {});
+        log("auth", "login cancelled", "warn");
+    };
+
+    // If the pane is closed while login is in progress, cancel and kill the CLI process.
+    onCleanup(() => {
+        if (loginWaiting()) {
+            loginCancelled = true;
+            getApi().cancelCliLogin().catch(() => {});
+        }
+    });
+
     onMount(() => {
         const name = block()?.meta?.["agentName"] ?? agentId;
         const prov = provider();
@@ -312,24 +445,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         if (cwd) log("env", `working directory: ${cwd}`);
 
         // Full launch flow: CLI resolution → auth check → controller registration
-        (async () => {
-            try {
-                // Build auth env so the auth check uses the same isolated dir as the subprocess
-                let authEnv: Record<string, string> | undefined;
-                if (prov?.authConfigDirEnvVar && prov?.authDirName) {
-                    try {
-                        const authDir = await getApi().ensureAuthDir(prov.id);
-                        authEnv = { [prov.authConfigDirEnvVar]: authDir };
-                        if (prov.authExtraEnv) Object.assign(authEnv, prov.authExtraEnv);
-                    } catch {
-                        // non-fatal — fall back to checking default auth
-                    }
-                }
-                await runLaunchFlow(model.blockId, prov, log, authEnv);
-            } catch (err: any) {
-                log("error", err?.message ?? String(err), "error");
-            }
-        })();
+        startLaunchFlow();
 
         // Subscribe to status changes
         const unsub = waveEventSubscribe({
@@ -509,8 +625,24 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 documentAtom={agentAtoms().documentAtom}
                 documentStateAtom={agentAtoms().documentStateAtom}
                 logLines={logLines}
+                authUrl={authUrl}
                 onSubagentClick={handleSubagentClick}
             />
+
+            <Show when={loginWaiting()}>
+                <div class="agent-retry-bar">
+                    <button class="agent-retry-btn agent-retry-btn--cancel" onClick={cancelLogin}>
+                        Cancel Login
+                    </button>
+                </div>
+            </Show>
+            <Show when={canRetry()}>
+                <div class="agent-retry-bar">
+                    <button class="agent-retry-btn" onClick={startLaunchFlow}>
+                        Retry Login
+                    </button>
+                </div>
+            </Show>
 
             <AgentFooter agentId={agentId} onSendMessage={handleSendMessage} />
         </div>

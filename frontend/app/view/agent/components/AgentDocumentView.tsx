@@ -25,10 +25,11 @@ interface AgentDocumentViewProps {
     documentAtom: SignalPair<DocumentNode[]>;
     documentStateAtom: SignalPair<DocumentState>;
     logLines: Accessor<LogLine[]>;
+    authUrl?: Accessor<string | null>;
     onSubagentClick?: (node: SubagentLinkNode) => void;
 }
 
-export const AgentDocumentView = ({ documentAtom, documentStateAtom, logLines, onSubagentClick }: AgentDocumentViewProps): JSX.Element => {
+export const AgentDocumentView = ({ documentAtom, documentStateAtom, logLines, authUrl, onSubagentClick }: AgentDocumentViewProps): JSX.Element => {
     const [document] = documentAtom;
     const [documentState, setDocumentState] = documentStateAtom;
     let scrollRef!: HTMLDivElement;
@@ -103,6 +104,23 @@ export const AgentDocumentView = ({ documentAtom, documentStateAtom, logLines, o
                             </div>
                         )}
                     </For>
+                    <Show when={authUrl?.()}>
+                        {(url) => (
+                            <div class="agent-auth-url-box">
+                                <div class="agent-auth-url-label">Login URL (if browser didn't open):</div>
+                                <div class="agent-auth-url-row">
+                                    <span class="agent-auth-url-text">{url()}</span>
+                                    <button
+                                        class="agent-auth-url-copy"
+                                        onClick={() => navigator.clipboard.writeText(url())}
+                                        title="Copy URL"
+                                    >
+                                        Copy
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+                    </Show>
                 </div>
             </Show>
 

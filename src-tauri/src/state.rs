@@ -143,6 +143,10 @@ pub struct AppState {
     /// Set when a drag leaves the source window and enters cross-window mode.
     pub active_drag: Mutex<Option<DragSession>>,
 
+    /// Cancellation channel for an in-progress CLI login process.
+    /// Sending on this channel signals the background task to kill the child.
+    pub cli_login_cancel: Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
+
     /// Windows Job Object handle — keeps backend alive until frontend exits.
     /// When this handle is closed (including on crash), Windows kills all assigned processes.
     #[cfg(target_os = "windows")]
@@ -170,6 +174,7 @@ impl Default for AppState {
             window_init_status: Mutex::new(String::new()),
             window_instance_registry: Mutex::new(WindowInstanceRegistry::new()),
             active_drag: Mutex::new(None),
+            cli_login_cancel: Mutex::new(None),
             #[cfg(target_os = "windows")]
             job_handle: Mutex::new(None),
         }
