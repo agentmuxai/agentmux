@@ -1,8 +1,93 @@
 #[cfg(unix)]
 use libc;
+use std::path::PathBuf;
 use tauri::Emitter;
 use tauri::Manager;
 use tauri_plugin_shell::ShellExt;
+
+/// The full target triple this binary was compiled for (e.g. "x86_64-pc-windows-msvc").
+/// Emitted by build.rs so we can locate the bundled sidecar binary by name at runtime.
+const AGENTMUX_TARGET_TRIPLE: &str = env!("AGENTMUX_TARGET_TRIPLE");
+
+/// Copy a bundled sidecar to the version-isolated app local data dir.
+///
+/// Tauri's externalBin places sidecars at `src-tauri/binaries/{name}-{triple}`,
+/// which is a fixed path shared across all versions. On Windows, a running
+/// sidecar holds a read lock that blocks tauri-build during builds of new versions.
+///
+/// Fix: copy to `{app_local_data_dir}/sidecar/{name}(.exe)` on first launch and
+/// run from there. The app local data dir is already version-isolated via the
+/// Tauri identifier (e.g. `ai.agentmux.app.v0-32-63`).
+///
+/// The copy is skipped if the destination already exists with the same size+mtime.
+fn ensure_versioned_sidecar(app: &tauri::AppHandle, sidecar_name: &str) -> Result<PathBuf, String> {
+    let data_dir = app
+        .path()
+        .app_local_data_dir()
+        .map_err(|e| format!("data dir error: {e}"))?;
+    let sidecar_dir = data_dir.join("sidecar");
+    std::fs::create_dir_all(&sidecar_dir)
+        .map_err(|e| format!("create sidecar dir: {e}"))?;
+
+    let exe_suffix = if cfg!(windows) { ".exe" } else { "" };
+    let dest = sidecar_dir.join(format!("{}{}", sidecar_name, exe_suffix));
+
+    // Source binary: Tauri places externalBin entries in the resource dir as
+    // `{name}-{target-triple}(.exe)`
+    let src_name = format!("{}-{}{}", sidecar_name, AGENTMUX_TARGET_TRIPLE, exe_suffix);
+    let src = app
+        .path()
+        .resource_dir()
+        .map_err(|e| format!("resource dir: {e}"))?
+        .join(&src_name);
+
+    if !src.exists() {
+        return Err(format!(
+            "bundled sidecar not found at {} — cannot copy to versioned data dir",
+            src.display()
+        ));
+    }
+
+    // Skip copy if dest exists and is already up-to-date (same size + mtime)
+    if dest.exists() {
+        let src_meta = std::fs::metadata(&src).ok();
+        let dst_meta = std::fs::metadata(&dest).ok();
+        if let (Some(s), Some(d)) = (src_meta, dst_meta) {
+            if s.len() == d.len() && s.modified().ok() == d.modified().ok() {
+                tracing::debug!(
+                    "[sidecar] {} is up-to-date at {}",
+                    sidecar_name,
+                    dest.display()
+                );
+                return Ok(dest);
+            }
+        }
+    }
+
+    std::fs::copy(&src, &dest).map_err(|e| {
+        format!(
+            "copy {} → {}: {}",
+            src.display(),
+            dest.display(),
+            e
+        )
+    })?;
+
+    // Set executable bit on Unix
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&dest, std::fs::Permissions::from_mode(0o755)).ok();
+    }
+
+    tracing::info!(
+        "[sidecar] copied {} to versioned data dir: {}",
+        sidecar_name,
+        dest.display()
+    );
+
+    Ok(dest)
+}
 
 /// State returned after successfully spawning the backend.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -132,13 +217,16 @@ pub async fn spawn_backend(app: &tauri::AppHandle) -> Result<BackendSpawnResult,
     });
 
     let sidecar_cmd = if let Some(portable_exe) = portable_path {
-        // Portable mode: run executable from same directory
+        // Portable mode: run executable from bin/ subdir next to the app exe.
+        // This path is already version-isolated because each portable ZIP has its own dir.
         shell.command(portable_exe)
     } else {
-        // Installer mode: use bundled sidecar
-        shell
-            .sidecar(backend_name)
-            .map_err(|e| format!("Failed to find {} sidecar: {}", backend_name, e))?
+        // Installer / dev mode: copy sidecar to the version-isolated app local data dir
+        // and run from there.  This avoids the Windows file-lock problem where tauri-build
+        // tries to hash `src-tauri/binaries/agentmuxsrv-rs-{triple}.exe` while a previous
+        // version is still running and holding a read lock on that exact file.
+        let versioned_path = ensure_versioned_sidecar(app, backend_name)?;
+        shell.command(versioned_path)
     };
 
     // Resolve AGENTMUX_APP_PATH and deploy wsh binary for the backend.
