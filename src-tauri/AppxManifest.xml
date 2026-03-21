@@ -14,8 +14,8 @@
   IgnorableNamespaces="rescap">
 
   <Identity
-    Name="AgentMuxAI.AgentMux"
-    Publisher="CN=AgentMux"
+    Name="AgentMux.AgentMux"
+    Publisher="CN=C2BCB530-27CD-4DCF-87C5-2967CE009AAC"
     Version="0.32.20.0"
     ProcessorArchitecture="x64" />
 
