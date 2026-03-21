@@ -15,13 +15,13 @@
 
   <Identity
     Name="AgentMuxAI.AgentMux"
-    Publisher="CN=AgentMux Corp"
+    Publisher="CN=AgentMux"
     Version="0.32.20.0"
     ProcessorArchitecture="x64" />
 
   <Properties>
     <DisplayName>AgentMux</DisplayName>
-    <PublisherDisplayName>AgentMux Corp</PublisherDisplayName>
+    <PublisherDisplayName>AgentMux</PublisherDisplayName>
     <Logo>Assets\StoreLogo.png</Logo>
   </Properties>
 

@@ -15,7 +15,7 @@
   Publisher CN from Microsoft Partner Center.
   Format: "CN=XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
   Find it: Partner Center → Account settings → Legal info → Publisher ID
-  Default: "CN=AgentMux Corp" (placeholder — update before Store submission)
+  Default: "CN=AgentMux" (placeholder — update before Store submission)
 
 .PARAMETER OutputDir
   Directory for the output .msix file. Default: dist/msix
@@ -35,7 +35,7 @@
   pwsh -File scripts/package-msix.ps1
 #>
 param(
-  [string]$Publisher  = "CN=AgentMux Corp",
+  [string]$Publisher  = "CN=AgentMux",
   [string]$OutputDir  = "dist\msix",
   [switch]$SkipBuild  = $false
 )
@@ -199,9 +199,9 @@ Write-Host "  2. Upload to Partner Center:"
 Write-Host "       https://partner.microsoft.com → Apps → AgentMux → Submission"
 Write-Host ""
 
-if ($Publisher -eq "CN=AgentMux Corp") {
+if ($Publisher -eq "CN=AgentMux") {
   Write-Host ""
-  Write-Warning "  Publisher is still the placeholder 'CN=AgentMux Corp'."
+  Write-Warning "  Publisher is still the placeholder 'CN=AgentMux'."
   Write-Host "  Update with your actual Partner Center Publisher ID before submitting."
   Write-Host "  Pass it via: pwsh -File scripts/package-msix.ps1 -Publisher 'CN=...'"
   Write-Host ""
