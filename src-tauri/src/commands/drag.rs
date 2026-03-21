@@ -437,6 +437,27 @@ pub async fn release_drag_capture(window: tauri::Window) -> Result<(), String> {
     Ok(())
 }
 
+/// Check whether the primary mouse button (left button) is currently pressed.
+///
+/// Used by the WebView2 drag fallback in CrossWindowDragMonitor: when the cursor leaves
+/// the window during an HTML5 drag, we start a timer because OLE may not deliver `dragend`
+/// for drops over native apps. When the timer fires, we check if the button is still held
+/// before triggering tearoff — if it is, the user is still hovering (not dropping), so
+/// we reschedule instead of acting prematurely.
+#[tauri::command]
+pub async fn get_mouse_button_state() -> Result<bool, String> {
+    #[cfg(target_os = "windows")]
+    {
+        use windows_sys::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState;
+        // VK_LBUTTON = 0x01
+        let state = unsafe { GetAsyncKeyState(0x01) };
+        // High-order bit set means the key is currently down.
+        return Ok((state as u16 & 0x8000) != 0);
+    }
+    #[allow(unreachable_code)]
+    Ok(false)
+}
+
 /// Restore all system cursors to their defaults.
 /// Must be called when a drag ends (drop, tear-off, or cancel).
 #[tauri::command]
