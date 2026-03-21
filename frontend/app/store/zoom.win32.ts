@@ -19,8 +19,9 @@ import { createSignal } from "solid-js";
 export const MIN_ZOOM = 0.5;
 export const MAX_ZOOM = 2.0;
 export const DEFAULT_ZOOM = 1.0;
-export const KEYBOARD_STEP = 0.25; // 25% increments for keyboard
-export const WHEEL_STEP = 0.1; // 10% increments for scroll wheel
+export const KEYBOARD_STEP = 0.1; // 10% increments for keyboard
+export const WHEEL_STEP = 0.05; // 5% increments for scroll wheel
+const MICRO_STEP = 0.01; // fine step for skip-to-next-size logic
 
 // Zoom indicator visibility (auto-hide after 1.5s)
 export const [zoomIndicatorVisibleAtom, setZoomIndicatorVisible] = createSignal<boolean>(false);
@@ -35,10 +36,24 @@ function clampZoom(factor: number): number {
 }
 
 function roundZoom(factor: number): number {
-    return Math.round(factor * 20) / 20; // Round to 0.05 increments
+    return Math.round(factor * 100) / 100; // Round to 0.01 increments
 }
 
 // ── Per-pane zoom (terminal blocks) ───────────────────────────────
+
+function getBaseFontSize(blockId: string): number {
+    const blockOref = WOS.makeORef("block", blockId);
+    const blockData = WOS.getObjectValue<Block>(blockOref);
+    const metaFontSize = blockData?.meta?.["term:fontsize"];
+    if (typeof metaFontSize === "number" && !isNaN(metaFontSize) && metaFontSize >= 4 && metaFontSize <= 64) {
+        return metaFontSize;
+    }
+    return 12;
+}
+
+function computeEffectiveFontSize(baseFontSize: number, zoom: number): number {
+    return Math.max(4, Math.min(64, Math.round(baseFontSize * zoom)));
+}
 
 function getBlockZoom(blockId: string): number | null {
     const bcm = getBlockComponentModel(blockId);
@@ -65,16 +80,30 @@ function setBlockZoom(blockId: string, factor: number): void {
     showZoomIndicator(`${Math.round(newZoom * 100)}%`);
 }
 
+function stepZoom(blockId: string, zoom: number, step: number, direction: 1 | -1): void {
+    const baseFontSize = getBaseFontSize(blockId);
+    const currentFontSize = computeEffectiveFontSize(baseFontSize, zoom);
+    let newZoom = zoom + step * direction;
+    const limit = direction === 1 ? MAX_ZOOM : MIN_ZOOM;
+    while (
+        computeEffectiveFontSize(baseFontSize, newZoom) === currentFontSize &&
+        (direction === 1 ? newZoom < limit : newZoom > limit)
+    ) {
+        newZoom += MICRO_STEP * direction;
+    }
+    setBlockZoom(blockId, newZoom);
+}
+
 export function zoomBlockIn(blockId: string, step: number = WHEEL_STEP): void {
     const zoom = getBlockZoom(blockId);
     if (zoom == null) return;
-    setBlockZoom(blockId, zoom + step);
+    stepZoom(blockId, zoom, step, 1);
 }
 
 export function zoomBlockOut(blockId: string, step: number = WHEEL_STEP): void {
     const zoom = getBlockZoom(blockId);
     if (zoom == null) return;
-    setBlockZoom(blockId, zoom - step);
+    stepZoom(blockId, zoom, step, -1);
 }
 
 export function zoomIn(store: any, step: number = KEYBOARD_STEP): void {
@@ -82,7 +111,7 @@ export function zoomIn(store: any, step: number = KEYBOARD_STEP): void {
     if (!blockId) return;
     const zoom = getBlockZoom(blockId);
     if (zoom == null) return;
-    setBlockZoom(blockId, zoom + step);
+    stepZoom(blockId, zoom, step, 1);
 }
 
 export function zoomOut(store: any, step: number = KEYBOARD_STEP): void {
@@ -90,7 +119,7 @@ export function zoomOut(store: any, step: number = KEYBOARD_STEP): void {
     if (!blockId) return;
     const zoom = getBlockZoom(blockId);
     if (zoom == null) return;
-    setBlockZoom(blockId, zoom - step);
+    stepZoom(blockId, zoom, step, -1);
 }
 
 export function zoomReset(store: any): void {
