@@ -46,7 +46,38 @@ function CrossWindowDragMonitor(): JSX.Element {
         windowLabelRef = await getApi().getWindowLabel();
         Logger.debug("dnd:cross", "CrossWindowDragMonitor mounted", { windowLabel: windowLabelRef });
 
+        // WebView2 fallback: when a drag exits our window and the mouse is released over a
+        // native Windows app, OLE may not deliver a dragend event back to us (the drag source).
+        // The HTML5 `drag` event fires continuously on the source element (~every 100–350ms)
+        // throughout the drag. When it stops and dragend hasn't fired, assume the drop happened
+        // outside — trigger tearoff ourselves.
+        let fallbackTimer: ReturnType<typeof setTimeout> | null = null;
+
+        const clearFallback = () => {
+            if (fallbackTimer !== null) {
+                clearTimeout(fallbackTimer);
+                fallbackTimer = null;
+            }
+        };
+
+        const scheduleFallback = () => {
+            if (!_currentDragPayload) return;
+            clearFallback();
+            fallbackTimer = setTimeout(async () => {
+                const payload = _currentDragPayload;
+                if (!payload) return;
+                _currentDragPayload = null;
+                Logger.info("dnd:cross", "drag fallback fired (dragend not received over native window)", { hasPayload: true });
+                getApi().releaseDragCapture().catch(() => {});
+                await handleCrossWindowDragEnd(payload, windowLabelRef);
+            }, 800);
+        };
+
+        // `drag` bubbles from the draggable source element up to document.
+        const handleDragActive = () => scheduleFallback();
+
         const handleDragEnd = async (e: DragEvent) => {
+            clearFallback(); // dragend fired normally — cancel the fallback timer
             const payload = _currentDragPayload;
             _currentDragPayload = null;
 
@@ -64,11 +95,15 @@ function CrossWindowDragMonitor(): JSX.Element {
             // Brief delay to allow native drop handlers to run first
             await new Promise((r) => setTimeout(r, 50));
             await handleCrossWindowDragEnd(payload, windowLabelRef);
-
         };
 
+        document.addEventListener("drag", handleDragActive);
         document.addEventListener("dragend", handleDragEnd);
-        onCleanup(() => document.removeEventListener("dragend", handleDragEnd));
+        onCleanup(() => {
+            document.removeEventListener("drag", handleDragActive);
+            document.removeEventListener("dragend", handleDragEnd);
+            clearFallback();
+        });
     });
 
     return null;
