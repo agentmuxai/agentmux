@@ -2,7 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // macOS-specific TileLayout.
-// dragHandle: handle — restricts pane drag to header element.
+// dragHandle: undefined — whole-tile drag. WKWebView doesn't support
+// pragmatic-dnd's dragHandle (sets draggable="true/false" on child/parent,
+// which breaks drag in WKWebView). Instead, canDrag() checks whether the
+// pointer started inside the header element's bounding rect at drag time.
 
 import { getSettingsKeyAtom } from "@/app/store/global";
 import { draggable, dropTargetForElements, monitorForElements } from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
@@ -301,64 +304,56 @@ const DisplayNode = (props: DisplayNodeProps) => {
         }
     };
 
-    // Register pragmatic-dnd draggable on the tile node, using the header
-    // (dragHandleRef) as the drag handle. pragmatic-dnd wraps HTML5 DnD but
-    // fires onDragStart AFTER the browser commits the drag, so SolidJS
-    // reactive state updates here won't cause mid-event DOM mutations.
+    // Register pragmatic-dnd draggable on the tile node.
     //
-    // The header ref may not be available at mount time (block content loads
-    // async behind a Show gate). Poll briefly until the ref is set, then
-    // register with the correct drag handle. Without a drag handle, the
-    // entire tile would be draggable — breaking text selection in panes.
+    // macOS/WKWebView: cannot use dragHandle option — pragmatic-dnd sets
+    // draggable="true" on the handle and draggable="false" on the tile, which
+    // breaks drag entirely in WKWebView. Use whole-tile drag (dragHandle: undefined)
+    // and restrict to the header by checking cursor position in canDrag() instead.
+    // canDrag() is called with live pointer coords so the header ref doesn't need
+    // to be available at registration time — no polling required.
     const dragHandleRef = nodeModel.dragHandleRef;
     onMount(() => {
         if (!tileNodeRef) return;
         let cleanupFn: (() => void) | null = null;
 
-        const register = () => {
-            const handle = dragHandleRef?.current;
-            if (!handle) return false;
-            cleanupFn = draggable({
-                element: tileNodeRef,
-                dragHandle: handle,
-                canDrag: () => !isEphemeral() && !isMagnified(),
-                getInitialData: () => ({ nodeId: props.node.id, type: tileItemType }),
-                onGenerateDragPreview: ({ nativeSetDragImage }) => {
-                    const img = previewImage();
-                    if (img && nativeSetDragImage) {
-                        const dpr = typeof devicePixelRatio === "function" ? (devicePixelRatio as () => number)() : devicePixelRatio;
-                        const offsetX = (DragPreviewWidth * dpr - DragPreviewWidth) / 2 + 10;
-                        const offsetY = (DragPreviewHeight * dpr - DragPreviewHeight) / 2 + 10;
-                        nativeSetDragImage(img, offsetX, offsetY);
-                    }
-                },
-                onDragStart: () => {
-                    globalDragNodeId = props.node.id;
-                    globalDragLayoutModel = props.layoutModel;
-                    props.layoutModel.activeDrag._set(true);
-                    setIsDragging(true);
-                    setCurrentDragPayload({ kind: "tile", node: props.node });
-                },
-                onDrop: () => {
-                    globalDragNodeId = null;
-                    globalDragLayoutModel = null;
-                    props.layoutModel.activeDrag._set(false);
-                    setIsDragging(false);
-                    // Do NOT clear currentDragPayload here — fires for ALL drops.
-                    // Cleared in dropTargetForElements.onDrop instead.
-                },
-            });
-            return true;
-        };
-
-        // Try immediately, then poll briefly if header hasn't mounted yet.
-        if (!register()) {
-            const interval = setInterval(() => {
-                if (register()) clearInterval(interval);
-            }, 50);
-            // Stop polling after 2s — if header still isn't there, skip drag
-            setTimeout(() => clearInterval(interval), 2000);
-        }
+        cleanupFn = draggable({
+            element: tileNodeRef,
+            dragHandle: undefined,
+            canDrag: ({ input }) => {
+                if (isEphemeral() || isMagnified()) return false;
+                const handle = dragHandleRef?.current;
+                if (!handle) return false;
+                const r = handle.getBoundingClientRect();
+                return input.clientX >= r.left && input.clientX <= r.right &&
+                       input.clientY >= r.top && input.clientY <= r.bottom;
+            },
+            getInitialData: () => ({ nodeId: props.node.id, type: tileItemType }),
+            onGenerateDragPreview: ({ nativeSetDragImage }) => {
+                const img = previewImage();
+                if (img && nativeSetDragImage) {
+                    const dpr = typeof devicePixelRatio === "function" ? (devicePixelRatio as () => number)() : devicePixelRatio;
+                    const offsetX = (DragPreviewWidth * dpr - DragPreviewWidth) / 2 + 10;
+                    const offsetY = (DragPreviewHeight * dpr - DragPreviewHeight) / 2 + 10;
+                    nativeSetDragImage(img, offsetX, offsetY);
+                }
+            },
+            onDragStart: () => {
+                globalDragNodeId = props.node.id;
+                globalDragLayoutModel = props.layoutModel;
+                props.layoutModel.activeDrag._set(true);
+                setIsDragging(true);
+                setCurrentDragPayload({ kind: "tile", node: props.node });
+            },
+            onDrop: () => {
+                globalDragNodeId = null;
+                globalDragLayoutModel = null;
+                props.layoutModel.activeDrag._set(false);
+                setIsDragging(false);
+                // Do NOT clear currentDragPayload here — fires for ALL drops.
+                // Cleared in dropTargetForElements.onDrop instead.
+            },
+        });
 
         onCleanup(() => cleanupFn?.());
     });
