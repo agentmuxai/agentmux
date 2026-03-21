@@ -2,7 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // macOS-specific TileLayout.
-// dragHandle: handle — restricts pane drag to header element.
+// Draggable registered on the header element (querySelector '[data-role="block-header"]').
+// WKWebView doesn't support pragmatic-dnd's dragHandle option (sets draggable="true/false"
+// on child/parent which breaks drag). Registering directly on the header avoids that.
 
 import { getSettingsKeyAtom } from "@/app/store/global";
 import { draggable, dropTargetForElements, monitorForElements } from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
@@ -301,26 +303,48 @@ const DisplayNode = (props: DisplayNodeProps) => {
         }
     };
 
-    // Register pragmatic-dnd draggable on the tile node, using the header
-    // (dragHandleRef) as the drag handle. pragmatic-dnd wraps HTML5 DnD but
-    // fires onDragStart AFTER the browser commits the drag, so SolidJS
-    // reactive state updates here won't cause mid-event DOM mutations.
+    // Register pragmatic-dnd draggable on the HEADER element directly.
+    // pragmatic-dnd wraps HTML5 DnD and fires onDragStart AFTER the browser
+    // commits the drag, so SolidJS reactive state updates won't cause
+    // mid-event DOM mutations.
     //
-    // The header ref may not be available at mount time (block content loads
-    // async behind a Show gate). Poll briefly until the ref is set, then
-    // register with the correct drag handle. Without a drag handle, the
-    // entire tile would be draggable — breaking text selection in panes.
-    const dragHandleRef = nodeModel.dragHandleRef;
+    // macOS/WKWebView: cannot use dragHandle option — pragmatic-dnd sets
+    // draggable="true" on the handle AND draggable="false" on the tile,
+    // which breaks drag entirely in WKWebView. By registering directly on the
+    // header element, only the header gets draggable="true". The tile-node is
+    // untouched so text selection and widget interaction in pane bodies work.
+    //
+    // dragHandleRef is NOT used because BlockFrame_Default_Component creates
+    // two BlockFrame_Header instances (primary + ErrorBoundary fallback), and
+    // the fallback (never inserted into the DOM) always writes last — so the
+    // ref always points to a detached element. querySelector finds the live
+    // in-DOM header instead.
     onMount(() => {
         if (!tileNodeRef) return;
         let cleanupFn: (() => void) | null = null;
+        let registeredHandle: HTMLElement | null = null;
+
+        const findHandle = (): HTMLElement | null =>
+            tileNodeRef?.querySelector<HTMLElement>('[data-role="block-header"]') ?? null;
 
         const register = () => {
-            const handle = dragHandleRef?.current;
-            if (!handle) return false;
+            const handle = findHandle();
+
+            if (handle === registeredHandle) return;
+
+            // Never tear down during an active drag — would leave activeDrag=true
+            // permanently, making all pane bodies pointer-events:none ("frozen").
+            if (props.layoutModel.activeDrag()) return;
+
+            cleanupFn?.();
+            cleanupFn = null;
+            registeredHandle = null;
+
+            if (!handle) return;
+
+            registeredHandle = handle;
             cleanupFn = draggable({
-                element: tileNodeRef,
-                dragHandle: handle,
+                element: handle,
                 canDrag: () => !isEphemeral() && !isMagnified(),
                 getInitialData: () => ({ nodeId: props.node.id, type: tileItemType }),
                 onGenerateDragPreview: ({ nativeSetDragImage }) => {
@@ -348,19 +372,14 @@ const DisplayNode = (props: DisplayNodeProps) => {
                     // Cleared in dropTargetForElements.onDrop instead.
                 },
             });
-            return true;
         };
 
-        // Try immediately, then poll briefly if header hasn't mounted yet.
-        if (!register()) {
-            const interval = setInterval(() => {
-                if (register()) clearInterval(interval);
-            }, 50);
-            // Stop polling after 2s — if header still isn't there, skip drag
-            setTimeout(() => clearInterval(interval), 2000);
-        }
-
-        onCleanup(() => cleanupFn?.());
+        register();
+        const interval = setInterval(register, 100);
+        onCleanup(() => {
+            clearInterval(interval);
+            cleanupFn?.();
+        });
     });
 
     const leafContent = () => (

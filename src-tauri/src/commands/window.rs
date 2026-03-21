@@ -66,7 +66,18 @@ pub async fn open_new_window<R: Runtime>(app: tauri::AppHandle<R>) -> Result<Str
 
     // Platform-specific window setup (macOS styleMask + traffic lights,
     // Linux GTK drag + centering + show fallback, etc.)
-    crate::platform::setup_window(&_new_window);
+    //
+    // MUST run on the main thread. open_new_window is async so it runs on a
+    // tokio worker. Calling AppKit APIs (setStyleMask:, setHidden:) from any
+    // thread other than the main thread crashes WebKit — WKWindowVisibilityObserver
+    // pointer-authentication-traps when the WKWebView is moved to a new NSWindow
+    // off-thread. run_on_main_thread dispatches synchronously to the event loop.
+    let win_for_setup = _new_window.clone();
+    _new_window
+        .run_on_main_thread(move || {
+            crate::platform::setup_window(&win_for_setup);
+        })
+        .map_err(|e| format!("run_on_main_thread failed: {}", e))?;
 
     // Assign a stable instance number to the new window and notify all windows.
     let state = app.state::<AppState>();

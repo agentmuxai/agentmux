@@ -160,16 +160,12 @@ export function ConnectionButton({ connection, changeConnModalAtom, ref }: Conne
     let titleText = null;
     let shouldSpin = false;
 
+    if (isLocal) {
+        return null;
+    }
+
     const getConnIcon = (): JSX.Element => {
         const cs = connStatus();
-        if (isLocal) {
-            return (
-                <i
-                    class={clsx(util.makeIconClass("laptop", false), "fa-stack-1x")}
-                    style={{ color: "var(--grey-text-color)", "margin-right": "2px" }}
-                />
-            );
-        }
         if (cs?.status == "connecting") {
             return (
                 <div class="connecting-svg">
