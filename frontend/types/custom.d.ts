@@ -157,6 +157,7 @@ declare global {
         openWindowAtPosition: (screenX: number, screenY: number) => Promise<string>;
         setDragCursor: () => Promise<void>;
         restoreDragCursor: () => Promise<void>;
+        releaseDragCapture: () => Promise<void>;
     };
 
     type NativeContextMenuItem = {

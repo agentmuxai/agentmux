@@ -19,10 +19,9 @@
 import { atoms, getApi, globalStore } from "@/store/global";
 import { WorkspaceService } from "@/app/store/services";
 import { Logger } from "@/util/logger";
-import { fireAndForget } from "@/util/util";
 import { onCleanup, onMount } from "solid-js";
 import type { JSX } from "solid-js";
-import type { LayoutNode } from "@/layout/index";
+import type { LayoutNode } from "@/layout/lib/types";
 
 // Shared drag state set by TileLayout / TabBar drag handlers
 export type DragItemPayload =
@@ -51,18 +50,21 @@ function CrossWindowDragMonitor(): JSX.Element {
             const payload = _currentDragPayload;
             _currentDragPayload = null;
 
-            // Restore system cursor
-            fireAndForget(async () => {
-                try {
-                    await getApi().restoreDragCursor();
-                } catch {}
-            });
+            Logger.info("dnd:cross", "dragend fired", { hasPayload: !!payload, dropEffect: e.dataTransfer?.dropEffect });
 
             if (!payload) return;
+
+            // Fire-and-forget: release WebView2 mouse capture immediately on dragend,
+            // before the 50ms delay. After an HTML5 drag that ended outside the window,
+            // WebView2's OLE IDropSource may leave capture active, preventing the next
+            // mousedown from being delivered correctly to Tauri's drag-region JS handler.
+            // ReleaseCapture + WM_CANCELMODE to all child HWNDs resets Chromium's pointer state.
+            getApi().releaseDragCapture().catch(() => {});
 
             // Brief delay to allow native drop handlers to run first
             await new Promise((r) => setTimeout(r, 50));
             await handleCrossWindowDragEnd(payload, windowLabelRef);
+
         };
 
         document.addEventListener("dragend", handleDragEnd);
@@ -123,6 +125,11 @@ async function handleCrossWindowDragEnd(payload: DragItemPayload, sourceWindow: 
         } else if (!targetWindow) {
             await performTearOff(dragType, dragPayloadForApi, workspace.oid, activeTabId, cursorPoint.x, cursorPoint.y);
             await api.completeCrossDrag(dragId, null, cursorPoint.x, cursorPoint.y);
+            // After an out-of-window drop, WebView2 may retain mouse capture from the
+            // Chromium IDropSource operation (OS delivered mouseup outside the window).
+            // Post WM_CANCELMODE to our HWND to release any capture and restore normal
+            // pointer state so title-bar dragging (data-tauri-drag-region) works again.
+            try { await api.releaseDragCapture(); } catch {}
         } else {
             await api.cancelCrossDrag(dragId);
         }
@@ -132,16 +139,13 @@ async function handleCrossWindowDragEnd(payload: DragItemPayload, sourceWindow: 
 }
 
 async function performCrossWindowDrop(
-    dragType: "pane" | "tab",
-    payload: { blockId?: string; tabId?: string },
-    sourceWsId: string,
-    sourceTabId: string
+    _dragType: "pane" | "tab",
+    _payload: { blockId?: string; tabId?: string },
+    _sourceWsId: string,
+    _sourceTabId: string
 ) {
-    if (dragType === "pane" && payload.blockId) {
-        await WorkspaceService.TearOffBlock(payload.blockId, sourceTabId, sourceWsId, true);
-    } else if (dragType === "tab" && payload.tabId) {
-        await WorkspaceService.TearOffTab(payload.tabId, sourceWsId);
-    }
+    // The target window handles the actual move when it receives the cross-drag-end event.
+    // Source window just completes the drag session so the event fires with targetWindow set.
 }
 
 async function performTearOff(

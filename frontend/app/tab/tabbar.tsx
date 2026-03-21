@@ -21,6 +21,7 @@ import {
     computeInsertionPoint,
     InsertionPoint,
 } from "./tabbar-dnd";
+import { setCurrentDragPayload } from "@/app/drag/CrossWindowDragMonitor";
 import { Logger } from "@/util/logger";
 import "./tabbar.scss";
 
@@ -30,17 +31,6 @@ interface TabBarProps {
     workspace: Workspace;
 }
 
-function NewTabDropZone(): JSX.Element {
-    return (
-        <div
-            class="new-tab-drop-zone"
-            title="Drop here to create new tab"
-            data-tauri-drag-region="false"
-        >
-            <i class="fa fa-plus" />
-        </div>
-    );
-}
 
 function TabBar(props: TabBarProps): JSX.Element {
     const activeTabId = atoms.activeTabId;
@@ -107,7 +97,15 @@ function TabBar(props: TabBarProps): JSX.Element {
                 setInsertionPoint(computeInsertionPoint(location.current.input.clientX));
             },
 
-            onDrop: ({ source }) => {
+            onDrop: ({ source, location }) => {
+                // Only clear cross-window payload when there's a real in-window drop target.
+                // monitorForElements.onDrop fires for ALL drags (including out-of-window),
+                // so check dropTargets to distinguish a valid drop from a drag that ended
+                // outside the window (where CrossWindowDragMonitor should handle it instead).
+                if (location.current.dropTargets.length > 0) {
+                    setCurrentDragPayload(null);
+                }
+
                 const ip = insertionPoint();
                 const draggedTabId = source.data.tabId as string;
 
@@ -189,10 +187,10 @@ function TabBar(props: TabBarProps): JSX.Element {
                         />
                     )}
                 </For>
-                <NewTabDropZone />
+
             </div>
-            {/* Catch pointer releases in empty right-side space — must be "false" or Tauri eats pointerup */}
-            <div class="tab-bar-fill" data-tauri-drag-region="false" />
+            {/* Empty right-side space — draggable so the user can grab the window from here */}
+            <div class="tab-bar-fill" data-tauri-drag-region="true" />
         </div>
     );
 }

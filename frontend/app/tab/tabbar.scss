@@ -105,44 +105,12 @@
         }
     }
 
-    // --- New-tab drop zone (end of tab bar) ---
     .tab-bar-fill {
         flex: 1 1 auto;
         min-width: 0;
         height: 100%;
     }
 
-    .new-tab-drop-zone {
-        flex-shrink: 0;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        width: 28px;
-        height: 27px;
-        align-self: flex-end;
-        margin-bottom: 2px;
-        border: 1px dashed transparent;
-        border-radius: 4px;
-        color: var(--secondary-text-color, #666);
-        transition: all 0.15s ease;
-
-        i {
-            font-size: 11px;
-            opacity: 0;
-            transition: opacity 0.15s ease;
-        }
-
-        &.drop-hover {
-            border-color: var(--accent-color, #22c55e);
-            background: rgba(34, 197, 94, 0.1);
-            color: var(--accent-color, #22c55e);
-            animation: new-tab-zone-pulse 0.8s ease-in-out infinite alternate;
-
-            i {
-                opacity: 1;
-            }
-        }
-    }
 }
 
 // --- Drag-and-drop animations ---
@@ -153,16 +121,6 @@
     }
     to {
         outline-color: rgba(34, 197, 94, 0.5);
-    }
-}
-
-
-@keyframes new-tab-zone-pulse {
-    from {
-        background: rgba(34, 197, 94, 0.1);
-    }
-    to {
-        background: rgba(34, 197, 94, 0.18);
     }
 }
 

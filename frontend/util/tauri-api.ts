@@ -419,6 +419,9 @@ export function buildTauriApi(): AppApi {
         restoreDragCursor: async () => {
             await invoke("restore_drag_cursor");
         },
+        releaseDragCapture: async () => {
+            await invoke("release_drag_capture");
+        },
     };
 
     return api;

@@ -118,6 +118,7 @@ pub fn run() {
             commands::drag::open_window_at_position,
             commands::drag::set_drag_cursor,
             commands::drag::restore_drag_cursor,
+            commands::drag::release_drag_capture,
             // File operations
             commands::file_ops::copy_file_to_dir,
         ])

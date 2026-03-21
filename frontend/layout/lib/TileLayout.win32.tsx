@@ -24,6 +24,7 @@ import {
     TileLayoutContents,
 } from "./types";
 import { determineDropDirection } from "./utils";
+import { setCurrentDragPayload } from "@/app/drag/CrossWindowDragMonitor";
 
 export const tileItemType = "TILE_ITEM";
 
@@ -337,12 +338,15 @@ const DisplayNode = (props: DisplayNodeProps) => {
                     globalDragLayoutModel = props.layoutModel;
                     props.layoutModel.activeDrag._set(true);
                     setIsDragging(true);
+                    setCurrentDragPayload({ kind: "tile", node: props.node });
                 },
                 onDrop: () => {
                     globalDragNodeId = null;
                     globalDragLayoutModel = null;
                     props.layoutModel.activeDrag._set(false);
                     setIsDragging(false);
+                    // Do NOT clear currentDragPayload here — fires for ALL drops including
+                    // out-of-window. Cleared in dropTargetForElements.onDrop instead.
                 },
             });
             return true;
@@ -474,6 +478,8 @@ const OverlayNode = (props: OverlayNodeProps) => {
                 props.layoutModel.treeReducer({ type: LayoutTreeActionType.ClearPendingAction });
             },
             onDrop: () => {
+                // Valid in-window drop — clear cross-window payload so dragend monitor skips.
+                setCurrentDragPayload(null);
                 props.layoutModel.onDrop();
             },
         });

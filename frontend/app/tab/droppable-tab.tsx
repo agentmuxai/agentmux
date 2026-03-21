@@ -17,6 +17,7 @@ import {
     bouncingTabId,
     tabWrapperRefs,
 } from "./tabbar-dnd";
+import { setCurrentDragPayload } from "@/app/drag/CrossWindowDragMonitor";
 import { createSignal } from "solid-js";
 
 export interface DroppableTabProps {
@@ -75,6 +76,7 @@ export function DroppableTab(props: DroppableTabProps): JSX.Element {
                 setGlobalDragTabId(props.tabId);
                 setInsertionPoint(null);
                 setIsDragging(true);
+                setCurrentDragPayload({ kind: "tab", tabId: props.tabId, workspaceId: props.workspaceId, isPinned: props.isPinned });
                 Logger.info("dnd", "tab-drag started", {
                     tabId: props.tabId,
                     workspaceId: props.workspaceId,
@@ -85,7 +87,10 @@ export function DroppableTab(props: DroppableTabProps): JSX.Element {
             onDrop: () => {
                 setGlobalDragTabId(null);
                 setIsDragging(false);
-                // insertionPoint and bouncingTabId are cleared by the monitor's onDrop
+                // Do NOT clear currentDragPayload here — this fires for ALL drops including
+                // out-of-window. Payload is cleared in the monitorForElements onDrop in
+                // tabbar.tsx (only fires for valid in-window drops) so the CrossWindowDragMonitor
+                // can still read it when dragend fires for out-of-window drops.
             },
         });
 
