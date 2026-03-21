@@ -1603,6 +1603,7 @@ declare global {
     type CommandCheckCliAuthData = {
         cli_path: string;
         auth_check_args: string[];
+        auth_env?: {[key: string]: string};
     };
 
     // wshrpc.CheckCliAuthResult

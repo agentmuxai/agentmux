@@ -80,6 +80,14 @@ export class AgentViewModel implements ViewModel {
             }
         }
 
+        // Provider auth isolation
+        const authDir = await getApi().ensureAuthDir(provider.id);
+        envVars[provider.authConfigDirEnvVar] = authDir;
+        if (provider.authExtraEnv) {
+            Object.assign(envVars, provider.authExtraEnv);
+        }
+        envVars["CLAUDE_CODE_EXIT_AFTER_STOP_DELAY"] = "30000";
+
         try {
             // Store CLI config in block metadata for the backend to read on AgentInput
             await RpcApi.SetMetaCommand(TabRpcClient, {
@@ -185,11 +193,21 @@ export class AgentViewModel implements ViewModel {
             }
         }
 
-        // Per-agent config isolation: separate Claude, GitHub, and GCP config dirs
+        // Per-agent GitHub config isolation
         const agentSlug = agent.name.toLowerCase().replace(/[^a-z0-9-_]/g, "-");
-        envVars["CLAUDE_CONFIG_DIR"] = `~/.agentmux/config/claude-${agentSlug}`;
         envVars["GH_CONFIG_DIR"] = `~/.agentmux/config/gh-${agentSlug}`;
         envVars["AGENTMUX_AGENT_ID"] = agent.name;
+
+        // Provider auth isolation: shared per-version auth dir (not per-agent)
+        // Each AgentMux version gets its own auth space via the Tauri app data dir,
+        // which already includes the version in its identifier (ai.agentmux.app.vX-Y-Z).
+        const authDir = await getApi().ensureAuthDir(provider.id);
+        envVars[provider.authConfigDirEnvVar] = authDir;
+        if (provider.authExtraEnv) {
+            Object.assign(envVars, provider.authExtraEnv);
+        }
+        // Prevent process hang after result event
+        envVars["CLAUDE_CODE_EXIT_AFTER_STOP_DELAY"] = "30000";
 
         // Build config files to write via backend RPC
         const configFiles = buildConfigFiles(contentMap, skills, agent);

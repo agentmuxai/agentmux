@@ -1198,10 +1198,16 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
 
                 // Fast path: read credentials file directly (Claude)
                 if cmd.cli_path.contains("claude") {
-                    let home = std::env::var("HOME")
-                        .or_else(|_| std::env::var("USERPROFILE"))
-                        .unwrap_or_default();
-                    let creds_path = format!("{}/.claude/.credentials.json", home);
+                    // Use CLAUDE_CONFIG_DIR from auth_env if provided (isolated auth dir).
+                    // Fall back to ~/.claude/ for legacy/non-isolated invocations.
+                    let creds_path = if let Some(config_dir) = cmd.auth_env.get("CLAUDE_CONFIG_DIR") {
+                        format!("{}/.credentials.json", config_dir)
+                    } else {
+                        let home = std::env::var("HOME")
+                            .or_else(|_| std::env::var("USERPROFILE"))
+                            .unwrap_or_default();
+                        format!("{}/.claude/.credentials.json", home)
+                    };
 
                     if let Ok(content) = std::fs::read_to_string(&creds_path) {
                         if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
@@ -1259,9 +1265,14 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                 // Slow path: run CLI auth check command (other providers)
                 let output = tokio::time::timeout(
                     std::time::Duration::from_secs(25),
-                    tokio::process::Command::new(&cmd.cli_path)
-                        .args(&cmd.auth_check_args)
-                        .output(),
+                    {
+                        let mut check_cmd = tokio::process::Command::new(&cmd.cli_path);
+                        check_cmd.args(&cmd.auth_check_args);
+                        for (k, v) in &cmd.auth_env {
+                            check_cmd.env(k, v);
+                        }
+                        check_cmd.output()
+                    },
                 ).await
                     .map_err(|_| "auth check timed out (25s)".to_string())?
                     .map_err(|e| format!("failed to run auth check: {e}"))?;

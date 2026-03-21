@@ -16,7 +16,7 @@ import { TabRpcClient } from "@/app/store/wshrpcutil";
 import { waveEventSubscribe } from "@/app/store/wps";
 import * as WOS from "@/app/store/wos";
 import { BlockService } from "@/app/store/services";
-import { staticTabId } from "@/app/store/global";
+import { getApi, staticTabId } from "@/app/store/global";
 import { ContextMenuModel } from "@/app/store/contextmenu";
 import "./agent-view.scss";
 
@@ -177,6 +177,7 @@ async function runLaunchFlow(
     blockId: string,
     provider: ProviderDefinition | undefined,
     log: LogFn,
+    authEnv?: Record<string, string>,
 ): Promise<void> {
     if (!provider) {
         log("error", "no provider definition — cannot resolve CLI", "error");
@@ -247,6 +248,7 @@ async function runLaunchFlow(
         const authResult = await RpcApi.CheckCliAuthCommand(TabRpcClient, {
             cli_path: cliResult.cli_path,
             auth_check_args: provider.authCheckCommand,
+            auth_env: authEnv,
         }, { timeout: 30000 });
         if (authResult.authenticated) {
             const emailPart = authResult.email ? ` as ${authResult.email}` : "";
@@ -312,7 +314,18 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         // Full launch flow: CLI resolution → auth check → controller registration
         (async () => {
             try {
-                await runLaunchFlow(model.blockId, prov, log);
+                // Build auth env so the auth check uses the same isolated dir as the subprocess
+                let authEnv: Record<string, string> | undefined;
+                if (prov?.authConfigDirEnvVar && prov?.authDirName) {
+                    try {
+                        const authDir = await getApi().ensureAuthDir(prov.id);
+                        authEnv = { [prov.authConfigDirEnvVar]: authDir };
+                        if (prov.authExtraEnv) Object.assign(authEnv, prov.authExtraEnv);
+                    } catch {
+                        // non-fatal — fall back to checking default auth
+                    }
+                }
+                await runLaunchFlow(model.blockId, prov, log, authEnv);
             } catch (err: any) {
                 log("error", err?.message ?? String(err), "error");
             }

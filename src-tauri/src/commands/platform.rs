@@ -48,6 +48,27 @@ pub fn get_data_dir(app: tauri::AppHandle) -> Result<String, String> {
         .map_err(|e| format!("Failed to get data dir: {}", e))
 }
 
+/// Ensure a provider auth directory exists and return its absolute path.
+///
+/// Auth dirs live under {app_data_dir}/auth/{provider_id}/. The app data dir
+/// already includes the AgentMux version in its identifier (ai.agentmux.app.vX-Y-Z),
+/// so each version gets naturally isolated auth storage.
+///
+/// Codex requires the dir to exist before it is set as CODEX_HOME — this command
+/// handles pre-creation for all providers uniformly.
+#[tauri::command]
+pub fn ensure_auth_dir(app: tauri::AppHandle, provider_id: String) -> Result<String, String> {
+    let data_dir = app.path()
+        .app_data_dir()
+        .map_err(|e| format!("Failed to get data dir: {}", e))?;
+
+    let auth_dir = data_dir.join("auth").join(&provider_id);
+    std::fs::create_dir_all(&auth_dir)
+        .map_err(|e| format!("Failed to create auth dir for {}: {}", provider_id, e))?;
+
+    Ok(auth_dir.to_string_lossy().to_string())
+}
+
 /// Get the app config directory path.
 /// Replaces: ipcMain.on("get-config-dir") in emain/platform.ts
 #[tauri::command]

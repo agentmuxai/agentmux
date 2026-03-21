@@ -500,6 +500,11 @@ pub struct CommandCheckCliAuthData {
     pub cli_path: String,
     /// Auth check args (e.g. ["auth", "status", "--json"])
     pub auth_check_args: Vec<String>,
+    /// Environment variables to set when running the auth check (e.g. CLAUDE_CONFIG_DIR).
+    /// Must match the env vars used when spawning the actual subprocess so the check
+    /// reads credentials from the same isolated directory.
+    #[serde(default)]
+    pub auth_env: std::collections::HashMap<String, String>,
 }
 
 /// Result from CheckCliAuthCommand
