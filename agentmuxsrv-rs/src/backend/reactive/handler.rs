@@ -239,6 +239,53 @@ impl Handler {
             self.include_source_in_message,
         );
 
+        // Container agent delivery: block_id starts with "container:" (registered by
+        // agents running in Docker via entrypoint.sh's register_with_agentmux()).
+        // Delivery is via `docker attach` which writes to the container's PTY master,
+        // simulating keyboard input — identical semantics to the PTY InputSender path.
+        if block_id.starts_with("container:") {
+            let container_name = block_id["container:".len()..].to_string();
+            let msg = final_msg.clone();
+            let agent_for_log = req.target_agent.clone();
+            tracing::info!(
+                target_agent = %req.target_agent,
+                container = %container_name,
+                "inject: routing to container via docker attach"
+            );
+            tokio::spawn(async move {
+                if let Err(e) = inject_via_docker_attach(&container_name, &msg).await {
+                    tracing::warn!(
+                        container = %container_name,
+                        agent = %agent_for_log,
+                        error = %e,
+                        "inject: docker attach delivery failed"
+                    );
+                } else {
+                    tracing::info!(
+                        container = %container_name,
+                        agent = %agent_for_log,
+                        "inject: docker attach delivery succeeded"
+                    );
+                }
+            });
+            self.log_audit(
+                req.source_agent.as_deref(),
+                &req.target_agent,
+                &block_id,
+                &sanitized,
+                true,
+                None,
+                &request_id,
+            );
+            return InjectionResponse {
+                success: true,
+                request_id,
+                block_id: Some(block_id),
+                error: None,
+                timestamp: now,
+            };
+        }
+
         // Send message via input sender
         let sender = match &self.input_sender {
             Some(s) => s.clone(),
@@ -464,4 +511,68 @@ static GLOBAL_HANDLER: OnceLock<ReactiveHandler> = OnceLock::new();
 /// Get or initialize the global reactive handler.
 pub fn get_global_handler() -> &'static ReactiveHandler {
     GLOBAL_HANDLER.get_or_init(ReactiveHandler::new)
+}
+
+// ---- Container delivery ----
+
+/// Deliver a jekt message to a Docker container agent's terminal via `docker attach`.
+///
+/// Writes `\r{message}\r` followed by 3 delayed `\r` keypresses to the container's
+/// PTY master via `docker attach --sig-proxy=false`, simulating keyboard input. The
+/// container must have `tty: true` and `stdin_open: true` (set in docker-compose).
+///
+/// The container name is the part after "container:" in the block_id. For example,
+/// block_id="container:agent4" → container_name="agent4" → `docker attach agent4`.
+///
+/// Closing stdin causes `docker attach` to detach without stopping the container.
+///
+/// # Platform
+/// Uses the `docker` CLI (must be on PATH). Works on Linux, macOS, and Windows
+/// (Docker Desktop routes through `\\.\pipe\docker_engine` transparently).
+async fn inject_via_docker_attach(container_name: &str, message: &str) -> anyhow::Result<()> {
+    use tokio::io::AsyncWriteExt;
+    use tokio::process::Command;
+
+    let payload = format!("\r{}\r", message);
+
+    let mut child = Command::new("docker")
+        .args(["attach", "--sig-proxy=false", container_name])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map_err(|e| {
+            anyhow::anyhow!(
+                "failed to spawn 'docker attach {}': {} (is docker on PATH?)",
+                container_name,
+                e
+            )
+        })?;
+
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin
+            .write_all(payload.as_bytes())
+            .await
+            .map_err(|e| anyhow::anyhow!("docker attach stdin write failed: {}", e))?;
+        stdin.flush().await.ok();
+
+        // Delayed \r keypresses — same 200ms cadence as the PTY InputSender path.
+        // See specs/jekt-inject-timing.md for why three are needed.
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        stdin.write_all(b"\r").await.ok();
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        stdin.write_all(b"\r").await.ok();
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        stdin.write_all(b"\r").await.ok();
+
+        // Dropping stdin sends EOF → docker attach detaches cleanly.
+        drop(stdin);
+    }
+
+    // Give docker attach time to flush, then force-kill in case it hangs.
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    child.kill().await.ok();
+    child.wait().await.ok();
+
+    Ok(())
 }
