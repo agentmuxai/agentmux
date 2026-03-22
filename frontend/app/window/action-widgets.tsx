@@ -2,7 +2,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * ActionWidgets - Right-aligned buttons for creating blocks
+ * ActionWidgets — Widget bar with pinned widgets + "More" overflow dropdown.
+ *
+ * Pinned widgets appear directly in the bar. Everything else lives in the More
+ * dropdown. Users can pin/unpin via right-click on any widget.
+ *
+ * Settings keys:
+ *   widget:pinned       — ordered short-name array (e.g. ["agent","terminal","sysinfo"])
+ *   widget:order        — order within the More dropdown (legacy: was full-bar order)
+ *   widget:hidden@<key> — hide from bar and More entirely
+ *   widget:icononly     — icons only, no labels
  */
 
 import { Tooltip } from "@/app/element/tooltip";
@@ -13,50 +22,91 @@ import { atoms, createBlock, getApi } from "@/store/global";
 import { useWindowDrag } from "@/app/hook/useWindowDrag.platform";
 import { fireAndForget, isBlank, makeIconClass } from "@/util/util";
 import { invoke } from "@tauri-apps/api/core";
-import { createSignal, For, Show, type JSX } from "solid-js";
+import { createEffect, createSignal, For, onCleanup, Show, type JSX } from "solid-js";
+import { Portal } from "solid-js/web";
 import "./action-widgets.scss";
 
-function getSortedWidgets(
-    wmap: { [key: string]: WidgetConfigType },
-    settings: Record<string, any>
-): { key: string; widget: WidgetConfigType }[] {
-    if (wmap == null) return [];
-    const order: string[] | undefined = settings["widget:order"];
-    const entries = Object.entries(wmap).map(([key, widget]) => ({ key, widget }));
-    if (order && order.length > 0) {
-        entries.sort((a, b) => {
-            const ai = order.indexOf(a.key.replace("defwidget@", ""));
-            const bi = order.indexOf(b.key.replace("defwidget@", ""));
-            const an = ai === -1 ? 999 : ai;
-            const bn = bi === -1 ? 999 : bi;
-            if (an !== bn) return an - bn;
-            return (a.widget["display:order"] ?? 0) - (b.widget["display:order"] ?? 0);
-        });
-    } else {
-        entries.sort((a, b) => (a.widget["display:order"] ?? 0) - (b.widget["display:order"] ?? 0));
-    }
-    return entries;
-}
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
-/**
- * Determine whether a widget is hidden.
- * Priority: settings["widget:hidden@<key>"] > widget["display:hidden"] > false
- */
-function isWidgetHidden(settings: Record<string, any>, widgetKey: string, widgetConfig: WidgetConfigType): boolean {
+function isWidgetHidden(
+    settings: Record<string, any>,
+    widgetKey: string,
+    widgetConfig: WidgetConfigType
+): boolean {
     const settingsKey = `widget:hidden@${widgetKey}`;
-    if (settingsKey in settings) {
-        return Boolean(settings[settingsKey]);
-    }
+    if (settingsKey in settings) return Boolean(settings[settingsKey]);
     return widgetConfig?.["display:hidden"] ?? false;
 }
 
+/**
+ * Return the effective pinned short-names (no "defwidget@" prefix), in order.
+ *
+ * Priority:
+ *  1. widget:pinned is set → authoritative
+ *  2. widget:order is set, widget:pinned absent → migration: existing install had a
+ *     custom bar order; treat all visible ordered widgets as pinned
+ *  3. Neither set → new install; derive from display:pinned in widget config
+ */
+function getPinnedKeys(
+    settings: Record<string, any>,
+    wmap: Record<string, WidgetConfigType>
+): string[] {
+    const pinned: string[] | undefined = settings["widget:pinned"];
+    if (pinned !== undefined) {
+        return pinned.filter((shortName) => {
+            const fullKey = `defwidget@${shortName}`;
+            const w = wmap[fullKey];
+            return w != null && !isWidgetHidden(settings, fullKey, w);
+        });
+    }
+    const order: string[] | undefined = settings["widget:order"];
+    if (order && order.length > 0) {
+        // Migration: treat all visible ordered widgets as pinned
+        return order.filter((shortName) => {
+            const fullKey = `defwidget@${shortName}`;
+            const w = wmap[fullKey];
+            return w != null && !isWidgetHidden(settings, fullKey, w);
+        });
+    }
+    // New install: derive from display:pinned flag in widget config
+    return Object.entries(wmap)
+        .filter(([key, w]) => w["display:pinned"] && !isWidgetHidden(settings, key, w))
+        .sort(([, a], [, b]) => (a["display:order"] ?? 0) - (b["display:order"] ?? 0))
+        .map(([key]) => key.replace("defwidget@", ""));
+}
+
+function getPinnedWidgets(
+    settings: Record<string, any>,
+    wmap: Record<string, WidgetConfigType>
+): { key: string; widget: WidgetConfigType }[] {
+    if (!wmap) return [];
+    return getPinnedKeys(settings, wmap)
+        .map((shortName) => {
+            const key = `defwidget@${shortName}`;
+            return { key, widget: wmap[key] };
+        })
+        .filter((e) => e.widget != null);
+}
+
+function getMoreWidgets(
+    settings: Record<string, any>,
+    wmap: Record<string, WidgetConfigType>
+): { key: string; widget: WidgetConfigType }[] {
+    if (!wmap) return [];
+    const pinnedSet = new Set(getPinnedKeys(settings, wmap));
+    return Object.entries(wmap)
+        .filter(([key, w]) => !pinnedSet.has(key.replace("defwidget@", "")) && !isWidgetHidden(settings, key, w))
+        .sort(([, a], [, b]) => (a["display:order"] ?? 0) - (b["display:order"] ?? 0))
+        .map(([key, widget]) => ({ key, widget }));
+}
+
+// ── Widget actions ────────────────────────────────────────────────────────────
+
 async function handleWidgetSelect(widget: WidgetConfigType) {
-    // Special handling for devtools widget
     if (widget.blockdef?.meta?.view === "devtools") {
         getApi().toggleDevtools();
         return;
     }
-    // Special handling for settings widget -- open in external editor
     if (widget.blockdef?.meta?.view === "settings") {
         try {
             const path = await invoke<string>("ensure_settings_file");
@@ -66,43 +116,123 @@ async function handleWidgetSelect(widget: WidgetConfigType) {
         }
         return;
     }
-    const blockDef = widget.blockdef;
-    createBlock(blockDef, widget.magnified);
+    createBlock(widget.blockdef, widget.magnified);
 }
+
+function pinWidget(shortName: string, settings: Record<string, any>, wmap: Record<string, WidgetConfigType>) {
+    fireAndForget(async () => {
+        const current = getPinnedKeys(settings, wmap);
+        if (current.includes(shortName)) return;
+        await RpcApi.SetConfigCommand(TabRpcClient, { "widget:pinned": [...current, shortName] } as any);
+    });
+}
+
+function unpinWidget(shortName: string, settings: Record<string, any>, wmap: Record<string, WidgetConfigType>) {
+    fireAndForget(async () => {
+        const current = getPinnedKeys(settings, wmap);
+        await RpcApi.SetConfigCommand(TabRpcClient, {
+            "widget:pinned": current.filter((k) => k !== shortName),
+        } as any);
+    });
+}
+
+function hideWidget(fullKey: string) {
+    fireAndForget(async () => {
+        await RpcApi.SetConfigCommand(TabRpcClient, { [`widget:hidden@${fullKey}`]: true } as any);
+    });
+}
+
+// ── ActionWidget ──────────────────────────────────────────────────────────────
 
 const ActionWidget = ({
     widget,
-    widgetKey,
     iconOnly,
-    settings,
+    onContextMenu,
 }: {
     widget: WidgetConfigType;
-    widgetKey?: string;
     iconOnly: boolean;
-    settings: Record<string, any>;
+    onContextMenu?: (e: MouseEvent) => void;
+}): JSX.Element => (
+    <div onContextMenu={onContextMenu}>
+        <Tooltip
+            content={widget.description || widget.label}
+            placement="bottom"
+            divClassName="flex flex-row items-center gap-1 px-2 py-0.5 text-secondary hover:bg-hoverbg hover:text-white cursor-pointer rounded-sm h-full"
+            divOnClick={() => handleWidgetSelect(widget)}
+        >
+            <div style={{ color: widget.color }} class="text-sm">
+                <i class={makeIconClass(widget.icon, true, { defaultIcon: "browser" })}></i>
+            </div>
+            <Show when={!iconOnly && !isBlank(widget.label)}>
+                <div class="text-xs whitespace-nowrap">{widget.label}</div>
+            </Show>
+        </Tooltip>
+    </div>
+);
+
+ActionWidget.displayName = "ActionWidget";
+
+// ── More dropdown ─────────────────────────────────────────────────────────────
+
+const MoreDropdown = ({
+    widgets,
+    onClose,
+    pos,
+    settings,
+    wmap,
+}: {
+    widgets: () => { key: string; widget: WidgetConfigType }[];
+    onClose: () => void;
+    pos: () => { top: number; right: number };
+    settings: () => Record<string, any>;
+    wmap: () => Record<string, WidgetConfigType>;
 }): JSX.Element => {
-    if (widgetKey && isWidgetHidden(settings, widgetKey, widget)) {
-        return null;
-    }
+    const handleItemClick = (widget: WidgetConfigType) => {
+        handleWidgetSelect(widget);
+        onClose();
+    };
+
+    const handleItemContextMenu = (e: MouseEvent, key: string) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const shortName = key.replace("defwidget@", "");
+        ContextMenuModel.showContextMenu(
+            [
+                { label: "Pin to bar", click: () => pinWidget(shortName, settings(), wmap()) },
+                { type: "separator" },
+                { label: "Hide widget", click: () => hideWidget(key) },
+            ],
+            e
+        );
+        onClose();
+    };
 
     return (
-        <div>
-            <Tooltip
-                content={widget.description || widget.label}
-                placement="bottom"
-                divClassName="flex flex-row items-center gap-1 px-2 py-0.5 text-secondary hover:bg-hoverbg hover:text-white cursor-pointer rounded-sm h-full"
-                divOnClick={() => handleWidgetSelect(widget)}
-            >
-                <div style={{ color: widget.color }} class="text-sm">
-                    <i class={makeIconClass(widget.icon, true, { defaultIcon: "browser" })}></i>
-                </div>
-                <Show when={!iconOnly && !isBlank(widget.label)}>
-                    <div class="text-xs whitespace-nowrap">{widget.label}</div>
-                </Show>
-            </Tooltip>
+        <div
+            class="action-widget-more-dropdown"
+            style={{ position: "fixed", top: `${pos().top}px`, right: `${pos().right}px` }}
+        >
+            <For each={widgets()}>
+                {({ key, widget }) => (
+                    <div
+                        class="action-widget-more-item"
+                        onClick={() => handleItemClick(widget)}
+                        onContextMenu={(e) => handleItemContextMenu(e, key)}
+                    >
+                        <span class="action-widget-more-item-icon" style={{ color: widget.color }}>
+                            <i class={makeIconClass(widget.icon, true, { defaultIcon: "browser" })}></i>
+                        </span>
+                        <span class="action-widget-more-item-label">{widget.label}</span>
+                    </div>
+                )}
+            </For>
         </div>
     );
 };
+
+MoreDropdown.displayName = "MoreDropdown";
+
+// ── Main ActionWidgets ────────────────────────────────────────────────────────
 
 const DRAG_THRESHOLD = 5;
 
@@ -110,8 +240,39 @@ const ActionWidgets = (): JSX.Element => {
     const { dragProps } = useWindowDrag();
     const fullConfig = atoms.fullConfigAtom;
     const settings = (): Record<string, any> => fullConfig()?.settings ?? {};
+    const wmap = (): Record<string, WidgetConfigType> => fullConfig()?.widgets ?? {};
     const iconOnly = (): boolean => settings()["widget:icononly"] ?? false;
-    const sortedWidgets = () => getSortedWidgets(fullConfig()?.widgets, settings());
+    const pinnedWidgets = () => getPinnedWidgets(settings(), wmap());
+    const moreWidgets = () => getMoreWidgets(settings(), wmap());
+
+    // More dropdown state
+    const [moreOpen, setMoreOpen] = createSignal(false);
+    const [morePos, setMorePos] = createSignal<{ top: number; right: number }>({ top: 0, right: 0 });
+    let moreButtonRef!: HTMLDivElement;
+
+    const openMore = (e: MouseEvent) => {
+        if (moreOpen()) {
+            setMoreOpen(false);
+            return;
+        }
+        const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+        setMorePos({ top: rect.bottom + 4, right: window.innerWidth - rect.right });
+        setMoreOpen(true);
+    };
+
+    const closeMore = () => setMoreOpen(false);
+
+    // Close on outside click (capture phase to beat other handlers)
+    createEffect(() => {
+        if (!moreOpen()) return;
+        const handler = (e: MouseEvent) => {
+            if (!moreButtonRef?.contains(e.target as Node)) setMoreOpen(false);
+        };
+        document.addEventListener("mousedown", handler, true);
+        onCleanup(() => document.removeEventListener("mousedown", handler, true));
+    });
+
+    // ── Drag-to-reorder (pinned only, saves to widget:pinned) ─────────────────
 
     const [draggingKey, setDraggingKey] = createSignal<string | null>(null);
     const [dropIndex, setDropIndex] = createSignal<number | null>(null);
@@ -126,20 +287,16 @@ const ActionWidgets = (): JSX.Element => {
 
     const handlePointerMove = (e: PointerEvent) => {
         if (!dragStartRef) return;
-
         if (!draggingKeyRef) {
             const dx = e.clientX - dragStartRef.x;
             const dy = e.clientY - dragStartRef.y;
             if (Math.hypot(dx, dy) < DRAG_THRESHOLD) return;
-            // Threshold crossed — start drag with pointer capture
             (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
             draggingKeyRef = dragStartRef.key;
             setDraggingKey(dragStartRef.key);
         }
-
         e.preventDefault();
         if (!containerRef) return;
-
         const slots = Array.from(containerRef.querySelectorAll<HTMLElement>("[data-widget-slot]"));
         let newIndex = slots.length;
         for (let i = 0; i < slots.length; i++) {
@@ -159,29 +316,24 @@ const ActionWidgets = (): JSX.Element => {
         const wasActuallyDragging = draggingKeyRef != null;
         const dk = draggingKeyRef;
         const di = dropIndexRef;
-
         dragStartRef = null;
         draggingKeyRef = null;
         dropIndexRef = null;
         setDraggingKey(null);
         setDropIndex(null);
-
         if (!wasActuallyDragging || dk == null || di == null) return;
-
-        const currentWidgets = sortedWidgets();
-        const baseNames = currentWidgets.map(({ key }) => key.replace("defwidget@", ""));
-        const dragBaseName = dk.replace("defwidget@", "");
-        const fromIdx = baseNames.indexOf(dragBaseName);
+        const current = pinnedWidgets();
+        const shortNames = current.map(({ key }) => key.replace("defwidget@", ""));
+        const dragShort = dk.replace("defwidget@", "");
+        const fromIdx = shortNames.indexOf(dragShort);
         if (fromIdx === -1) return;
-
-        const next = [...baseNames];
+        const next = [...shortNames];
         next.splice(fromIdx, 1);
         const adjustedDrop = fromIdx < di ? di - 1 : di;
-        next.splice(adjustedDrop, 0, dragBaseName);
-
-        if (next.join(",") !== baseNames.join(",")) {
+        next.splice(adjustedDrop, 0, dragShort);
+        if (next.join(",") !== shortNames.join(",")) {
             fireAndForget(async () => {
-                await RpcApi.SetConfigCommand(TabRpcClient, { "widget:order": next } as any);
+                await RpcApi.SetConfigCommand(TabRpcClient, { "widget:pinned": next } as any);
             });
         }
     };
@@ -194,54 +346,111 @@ const ActionWidgets = (): JSX.Element => {
         setDropIndex(null);
     };
 
-    const handleWidgetsBarContextMenu = (e: MouseEvent) => {
+    // ── Context menus ─────────────────────────────────────────────────────────
+
+    const handleBarContextMenu = (e: MouseEvent) => {
         e.preventDefault();
-        const menu: ContextMenuItem[] = [
-            {
-                label: "Icon Only",
-                type: "checkbox",
-                checked: iconOnly(),
-                click: () => {
-                    fireAndForget(async () => {
-                        await RpcApi.SetConfigCommand(TabRpcClient, { "widget:icononly": !iconOnly() } as any);
-                    });
+        ContextMenuModel.showContextMenu(
+            [
+                {
+                    label: "Icon Only",
+                    type: "checkbox",
+                    checked: iconOnly(),
+                    click: () => {
+                        fireAndForget(async () => {
+                            await RpcApi.SetConfigCommand(TabRpcClient, {
+                                "widget:icononly": !iconOnly(),
+                            } as any);
+                        });
+                    },
                 },
-            },
-        ];
-        ContextMenuModel.showContextMenu(menu, e);
+            ],
+            e
+        );
     };
 
+    const handlePinnedContextMenu = (e: MouseEvent, key: string) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const shortName = key.replace("defwidget@", "");
+        ContextMenuModel.showContextMenu(
+            [
+                { label: "Unpin from bar", click: () => unpinWidget(shortName, settings(), wmap()) },
+                { type: "separator" },
+                { label: "Hide widget", click: () => hideWidget(key) },
+            ],
+            e
+        );
+    };
+
+    // ── Render ────────────────────────────────────────────────────────────────
+
     return (
-        <div
-            ref={containerRef!}
-            class="action-widgets"
-            data-testid="action-widgets"
-            onContextMenu={handleWidgetsBarContextMenu}
-            {...dragProps}
-        >
-            <For each={sortedWidgets()}>
-                {({ key, widget }, idx) => (
-                    <>
-                        <Show when={draggingKey() != null && dropIndex() === idx() && draggingKey() !== key}>
-                            <div class="action-widget-drop-indicator" />
+        <>
+            <div
+                ref={containerRef}
+                class="action-widgets"
+                data-testid="action-widgets"
+                onContextMenu={handleBarContextMenu}
+                {...dragProps}
+            >
+                <For each={pinnedWidgets()}>
+                    {({ key, widget }, idx) => (
+                        <>
+                            <Show when={draggingKey() != null && dropIndex() === idx() && draggingKey() !== key}>
+                                <div class="action-widget-drop-indicator" />
+                            </Show>
+                            <div
+                                class={`action-widget-slot${draggingKey() === key ? " dragging" : ""}`}
+                                data-widget-slot={idx()}
+                                onPointerDown={(e) => handlePointerDown(key, e)}
+                                onPointerMove={handlePointerMove}
+                                onPointerUp={handlePointerUp}
+                                onPointerCancel={handlePointerCancel}
+                            >
+                                <ActionWidget
+                                    widget={widget}
+                                    iconOnly={iconOnly()}
+                                    onContextMenu={(e) => handlePinnedContextMenu(e, key)}
+                                />
+                            </div>
+                        </>
+                    )}
+                </For>
+                <Show when={draggingKey() != null && dropIndex() === pinnedWidgets().length}>
+                    <div class="action-widget-drop-indicator" />
+                </Show>
+
+                <Show when={moreWidgets().length > 0}>
+                    <div
+                        ref={moreButtonRef}
+                        class="action-widget-more-btn"
+                        classList={{ open: moreOpen() }}
+                        onClick={openMore}
+                    >
+                        <i class="fa-solid fa-ellipsis" />
+                        <Show when={!iconOnly()}>
+                            <span class="action-widget-more-label">More</span>
                         </Show>
-                        <div
-                            class={`action-widget-slot${draggingKey() === key ? " dragging" : ""}`}
-                            data-widget-slot={idx()}
-                            onPointerDown={(e) => handlePointerDown(key, e)}
-                            onPointerMove={handlePointerMove}
-                            onPointerUp={handlePointerUp}
-                            onPointerCancel={handlePointerCancel}
-                        >
-                            <ActionWidget widget={widget} widgetKey={key} iconOnly={iconOnly()} settings={settings()} />
-                        </div>
-                    </>
-                )}
-            </For>
-            <Show when={draggingKey() != null && dropIndex() === sortedWidgets().length}>
-                <div class="action-widget-drop-indicator" />
-            </Show>
-        </div>
+                        <i
+                            class={`fa-solid ${moreOpen() ? "fa-chevron-up" : "fa-chevron-down"} action-widget-more-chevron`}
+                        />
+                    </div>
+                </Show>
+            </div>
+
+            <Portal>
+                <Show when={moreOpen()}>
+                    <MoreDropdown
+                        widgets={moreWidgets}
+                        onClose={closeMore}
+                        pos={morePos}
+                        settings={settings}
+                        wmap={wmap}
+                    />
+                </Show>
+            </Portal>
+        </>
     );
 };
 

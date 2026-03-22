@@ -36,3 +36,79 @@
     flex-shrink: 0;
     pointer-events: none;
 }
+
+// ── More button ──────────────────────────────────────────────────────────────
+
+.action-widget-more-btn {
+    -webkit-app-region: no-drag;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    height: 100%;
+    cursor: pointer;
+    border-radius: 4px;
+    color: var(--secondary-text-color, #888);
+    font-size: 12px;
+    white-space: nowrap;
+
+    &:hover,
+    &.open {
+        background: var(--hoverbg-color, rgba(255, 255, 255, 0.08));
+        color: white;
+    }
+
+    i {
+        font-size: 12px;
+    }
+
+    .action-widget-more-label {
+        font-size: 12px;
+    }
+
+    .action-widget-more-chevron {
+        font-size: 9px;
+        opacity: 0.7;
+    }
+}
+
+// ── More dropdown ─────────────────────────────────────────────────────────────
+
+.action-widget-more-dropdown {
+    z-index: 9999;
+    background: var(--main-bg-color, #1e1e1e);
+    border: 1px solid var(--border-color, rgba(255, 255, 255, 0.12));
+    border-radius: 6px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+    min-width: 170px;
+    padding: 4px 0;
+    user-select: none;
+
+    .action-widget-more-item {
+        display: flex;
+        flex-direction: row;
+        align-items: center;
+        gap: 10px;
+        padding: 6px 14px;
+        cursor: pointer;
+        font-size: 13px;
+        color: var(--secondary-text-color, #aaa);
+
+        &:hover {
+            background: var(--hoverbg-color, rgba(255, 255, 255, 0.08));
+            color: white;
+        }
+
+        .action-widget-more-item-icon {
+            width: 16px;
+            text-align: center;
+            flex-shrink: 0;
+            font-size: 13px;
+        }
+
+        .action-widget-more-item-label {
+            text-transform: capitalize;
+        }
+    }
+}
