@@ -69,8 +69,8 @@ export class AgentViewModel implements ViewModel {
         const oref = WOS.makeORef("block", this.blockId);
         const blockId = this.blockId;
 
-        // Build CLI args: -p for non-interactive, plus provider's streaming flags
-        const cliArgs = ["-p", ...provider.styledArgs];
+        // Build CLI args from provider's configured flags (e.g. Claude includes -p)
+        const cliArgs = [...provider.styledArgs];
 
         // Build env vars: unset nested-session guards by setting them empty
         const envVars: Record<string, string> = {};
@@ -167,8 +167,8 @@ export class AgentViewModel implements ViewModel {
         // Determine working directory
         const workDir = agent.working_directory || `~/.agentmux/agents/${agent.name.toLowerCase().replace(/[^a-z0-9-_]/g, "-")}`;
 
-        // Build CLI args: -p for non-interactive, plus provider's streaming flags, plus forge flags
-        const cliArgs = ["-p", ...provider.styledArgs];
+        // Build CLI args from provider's configured flags (e.g. Claude includes -p)
+        const cliArgs = [...provider.styledArgs];
         if (agent.provider_flags) {
             cliArgs.push(...agent.provider_flags.split(/\s+/).filter(Boolean));
         }

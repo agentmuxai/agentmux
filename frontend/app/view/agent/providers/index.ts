@@ -31,7 +31,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         displayName: "Claude Code",
         cliCommand: "claude",
         defaultArgs: [],
-        styledArgs: ["--output-format", "stream-json", "--verbose", "--include-partial-messages", "--dangerously-skip-permissions"],
+        styledArgs: ["-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--dangerously-skip-permissions"],
         outputFormat: "raw",
         styledOutputFormat: "claude-stream-json",
         authType: "oauth",

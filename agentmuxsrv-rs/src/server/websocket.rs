@@ -1027,43 +1027,61 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                 let is_npm_install = install_cmd.contains("npm install");
 
                 if is_npm_install {
-                    // Verify npm is available before attempting install
-                    let npm_check = if cfg!(windows) {
-                        tokio::process::Command::new("where").arg("npm").output().await
-                    } else {
-                        tokio::process::Command::new("which").arg("npm").output().await
-                    };
-                    let npm_available = npm_check
-                        .map(|o| o.status.success())
-                        .unwrap_or(false);
-                    if !npm_available {
+                    // Step A: Ensure the install directory exists
+                    if let Err(e) = std::fs::create_dir_all(&provider_dir) {
                         return Err(format!(
-                            "{} requires Node.js/npm to install. \
-                            Install Node.js from https://nodejs.org then restart AgentMux.",
-                            cmd.cli_command
+                            "failed to create install directory {}: {}", provider_dir, e
                         ));
                     }
 
-                    // npm-based providers (codex, gemini): install directly into versioned dir
-                    let npm_init = format!(
-                        "cd \"{}\" && npm init -y && npm install {}@{}",
-                        provider_dir, cmd.npm_package, cmd.pinned_version
-                    );
-                    let install_output = if cfg!(windows) {
-                        tokio::process::Command::new("cmd")
-                            .args(["/C", &npm_init])
+                    // Step B: Find the npm executable path.
+                    // On Windows npm is a .cmd batch file; we need the full path for direct
+                    // invocation (avoids cmd.exe /C shell escaping issues with paths).
+                    let npm_path = {
+                        let (find_cmd, arg) = if cfg!(windows) {
+                            ("where", "npm.cmd")
+                        } else {
+                            ("which", "npm")
+                        };
+                        let out = tokio::process::Command::new(find_cmd)
+                            .arg(arg)
                             .output()
                             .await
-                    } else {
-                        tokio::process::Command::new("bash")
-                            .args(["-c", &npm_init])
-                            .output()
-                            .await
+                            .ok();
+                        let found = out
+                            .filter(|o| o.status.success())
+                            .and_then(|o| String::from_utf8(o.stdout).ok())
+                            .map(|s| s.lines().next().unwrap_or("").trim().to_string())
+                            .filter(|s| !s.is_empty());
+                        match found {
+                            Some(p) => p,
+                            None => {
+                                return Err(format!(
+                                    "{} requires Node.js/npm to install. \
+                                    Install Node.js from https://nodejs.org then restart AgentMux.",
+                                    cmd.cli_command
+                                ));
+                            }
+                        }
                     };
 
-                    let install_output = install_output.map_err(|e| {
-                        format!("failed to run npm install: {e}")
-                    })?;
+                    // Step C: Run npm install --prefix <dir> <package>@<version>.
+                    // Using --prefix avoids cd + shell path issues on Windows.
+                    let native_dir = if cfg!(windows) {
+                        provider_dir.replace('/', "\\")
+                    } else {
+                        provider_dir.clone()
+                    };
+                    let package_spec = format!("{}@{}", cmd.npm_package, cmd.pinned_version);
+                    tracing::info!(
+                        npm = %npm_path, dir = %native_dir, package = %package_spec,
+                        "Running npm install"
+                    );
+                    let install_output = tokio::process::Command::new(&npm_path)
+                        .args(["install", "--prefix", &native_dir, &package_spec])
+                        .output()
+                        .await
+                        .map_err(|e| format!("failed to run npm install: {e}"))?;
 
                     let stdout_str = String::from_utf8_lossy(&install_output.stdout);
                     let stderr_str = String::from_utf8_lossy(&install_output.stderr);
@@ -1079,7 +1097,7 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                         ));
                     }
 
-                    // Verify npm binary exists
+                    // Step D: Verify binary exists at expected path
                     if std::path::Path::new(&npm_bin).exists() {
                         let version = get_cli_version(&npm_bin).await;
                         tracing::info!(path = %npm_bin, version = %version, "CLI installed (npm)");
