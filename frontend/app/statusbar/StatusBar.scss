@@ -72,7 +72,7 @@
     }
 
     .stat-uptime {
-        min-width: 7ch; // fits "H:MM:SS", grows naturally for "D:HH:MM:SS"
+        min-width: 12ch; // fits "365:23:59:59" (1 year max), prevents layout shift
     }
 
     .stat-cpu {
