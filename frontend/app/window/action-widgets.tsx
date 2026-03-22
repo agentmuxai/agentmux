@@ -8,10 +8,8 @@
  * dropdown. Users can pin/unpin via right-click on any widget.
  *
  * Settings keys:
- *   widget:pinned       — ordered short-name array (e.g. ["agent","terminal","sysinfo"])
- *   widget:order        — order within the More dropdown (legacy: was full-bar order)
- *   widget:hidden@<key> — hide from bar and More entirely
- *   widget:icononly     — icons only, no labels
+ *   widget:pinned   — ordered short-name array (e.g. ["agent","terminal","sysinfo"])
+ *   widget:icononly — icons only, no labels
  */
 
 import { Tooltip } from "@/app/element/tooltip";
@@ -19,7 +17,6 @@ import { ContextMenuModel } from "@/app/store/contextmenu";
 import { RpcApi } from "@/app/store/wshclientapi";
 import { TabRpcClient } from "@/app/store/wshrpcutil";
 import { atoms, createBlock, getApi } from "@/store/global";
-import { useWindowDrag } from "@/app/hook/useWindowDrag.platform";
 import { fireAndForget, isBlank, makeIconClass } from "@/util/util";
 import { invoke } from "@tauri-apps/api/core";
 import { createEffect, createSignal, For, onCleanup, Show, type JSX } from "solid-js";
@@ -28,24 +25,12 @@ import "./action-widgets.scss";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function isWidgetHidden(
-    settings: Record<string, any>,
-    widgetKey: string,
-    widgetConfig: WidgetConfigType
-): boolean {
-    const settingsKey = `widget:hidden@${widgetKey}`;
-    if (settingsKey in settings) return Boolean(settings[settingsKey]);
-    return widgetConfig?.["display:hidden"] ?? false;
-}
-
 /**
  * Return the effective pinned short-names (no "defwidget@" prefix), in order.
  *
  * Priority:
  *  1. widget:pinned is set → authoritative
- *  2. widget:order is set, widget:pinned absent → migration: existing install had a
- *     custom bar order; treat all visible ordered widgets as pinned
- *  3. Neither set → new install; derive from display:pinned in widget config
+ *  2. Not set → derive from display:pinned in widget config
  */
 function getPinnedKeys(
     settings: Record<string, any>,
@@ -53,24 +38,10 @@ function getPinnedKeys(
 ): string[] {
     const pinned: string[] | undefined = settings["widget:pinned"];
     if (pinned !== undefined) {
-        return pinned.filter((shortName) => {
-            const fullKey = `defwidget@${shortName}`;
-            const w = wmap[fullKey];
-            return w != null && !isWidgetHidden(settings, fullKey, w);
-        });
+        return pinned.filter((shortName) => wmap[`defwidget@${shortName}`] != null);
     }
-    const order: string[] | undefined = settings["widget:order"];
-    if (order && order.length > 0) {
-        // Migration: treat all visible ordered widgets as pinned
-        return order.filter((shortName) => {
-            const fullKey = `defwidget@${shortName}`;
-            const w = wmap[fullKey];
-            return w != null && !isWidgetHidden(settings, fullKey, w);
-        });
-    }
-    // New install: derive from display:pinned flag in widget config
     return Object.entries(wmap)
-        .filter(([key, w]) => w["display:pinned"] && !isWidgetHidden(settings, key, w))
+        .filter(([, w]) => w["display:pinned"])
         .sort(([, a], [, b]) => (a["display:order"] ?? 0) - (b["display:order"] ?? 0))
         .map(([key]) => key.replace("defwidget@", ""));
 }
@@ -95,7 +66,7 @@ function getMoreWidgets(
     if (!wmap) return [];
     const pinnedSet = new Set(getPinnedKeys(settings, wmap));
     return Object.entries(wmap)
-        .filter(([key, w]) => !pinnedSet.has(key.replace("defwidget@", "")) && !isWidgetHidden(settings, key, w))
+        .filter(([key]) => !pinnedSet.has(key.replace("defwidget@", "")))
         .sort(([, a], [, b]) => (a["display:order"] ?? 0) - (b["display:order"] ?? 0))
         .map(([key, widget]) => ({ key, widget }));
 }
@@ -136,11 +107,6 @@ function unpinWidget(shortName: string, settings: Record<string, any>, wmap: Rec
     });
 }
 
-function hideWidget(fullKey: string) {
-    fireAndForget(async () => {
-        await RpcApi.SetConfigCommand(TabRpcClient, { [`widget:hidden@${fullKey}`]: true } as any);
-    });
-}
 
 // ── ActionWidget ──────────────────────────────────────────────────────────────
 
@@ -180,12 +146,14 @@ const MoreDropdown = ({
     pos,
     settings,
     wmap,
+    ref,
 }: {
     widgets: () => { key: string; widget: WidgetConfigType }[];
     onClose: () => void;
     pos: () => { top: number; right: number };
     settings: () => Record<string, any>;
     wmap: () => Record<string, WidgetConfigType>;
+    ref?: (el: HTMLDivElement) => void;
 }): JSX.Element => {
     const handleItemClick = (widget: WidgetConfigType) => {
         handleWidgetSelect(widget);
@@ -197,11 +165,7 @@ const MoreDropdown = ({
         e.stopPropagation();
         const shortName = key.replace("defwidget@", "");
         ContextMenuModel.showContextMenu(
-            [
-                { label: "Pin to bar", click: () => pinWidget(shortName, settings(), wmap()) },
-                { type: "separator" },
-                { label: "Hide widget", click: () => hideWidget(key) },
-            ],
+            [{ label: "Pin to bar", click: () => pinWidget(shortName, settings(), wmap()) }],
             e
         );
         onClose();
@@ -209,6 +173,7 @@ const MoreDropdown = ({
 
     return (
         <div
+            ref={ref}
             class="action-widget-more-dropdown"
             style={{ position: "fixed", top: `${pos().top}px`, right: `${pos().right}px` }}
         >
@@ -237,7 +202,6 @@ MoreDropdown.displayName = "MoreDropdown";
 const DRAG_THRESHOLD = 5;
 
 const ActionWidgets = (): JSX.Element => {
-    const { dragProps } = useWindowDrag();
     const fullConfig = atoms.fullConfigAtom;
     const settings = (): Record<string, any> => fullConfig()?.settings ?? {};
     const wmap = (): Record<string, WidgetConfigType> => fullConfig()?.widgets ?? {};
@@ -249,6 +213,7 @@ const ActionWidgets = (): JSX.Element => {
     const [moreOpen, setMoreOpen] = createSignal(false);
     const [morePos, setMorePos] = createSignal<{ top: number; right: number }>({ top: 0, right: 0 });
     let moreButtonRef!: HTMLDivElement;
+    let moreDropdownRef: HTMLDivElement | undefined;
 
     const openMore = (e: MouseEvent) => {
         if (moreOpen()) {
@@ -262,11 +227,13 @@ const ActionWidgets = (): JSX.Element => {
 
     const closeMore = () => setMoreOpen(false);
 
-    // Close on outside click (capture phase to beat other handlers)
+    // Close on outside click — ignore clicks inside button or dropdown
     createEffect(() => {
         if (!moreOpen()) return;
         const handler = (e: MouseEvent) => {
-            if (!moreButtonRef?.contains(e.target as Node)) setMoreOpen(false);
+            const t = e.target as Node;
+            if (moreButtonRef?.contains(t) || moreDropdownRef?.contains(t)) return;
+            setMoreOpen(false);
         };
         document.addEventListener("mousedown", handler, true);
         onCleanup(() => document.removeEventListener("mousedown", handler, true));
@@ -374,11 +341,7 @@ const ActionWidgets = (): JSX.Element => {
         e.stopPropagation();
         const shortName = key.replace("defwidget@", "");
         ContextMenuModel.showContextMenu(
-            [
-                { label: "Unpin from bar", click: () => unpinWidget(shortName, settings(), wmap()) },
-                { type: "separator" },
-                { label: "Hide widget", click: () => hideWidget(key) },
-            ],
+            [{ label: "Unpin from bar", click: () => unpinWidget(shortName, settings(), wmap()) }],
             e
         );
     };
@@ -392,7 +355,6 @@ const ActionWidgets = (): JSX.Element => {
                 class="action-widgets"
                 data-testid="action-widgets"
                 onContextMenu={handleBarContextMenu}
-                {...dragProps}
             >
                 <For each={pinnedWidgets()}>
                     {({ key, widget }, idx) => (
@@ -447,6 +409,7 @@ const ActionWidgets = (): JSX.Element => {
                         pos={morePos}
                         settings={settings}
                         wmap={wmap}
+                        ref={(el) => (moreDropdownRef = el)}
                     />
                 </Show>
             </Portal>

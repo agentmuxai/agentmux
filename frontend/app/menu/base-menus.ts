@@ -25,18 +25,9 @@ export function createTabBarBaseMenu(): MenuBuilder {
     return menu;
 }
 
-function isWidgetHidden(settings: Record<string, any>, widgetKey: string, widgetConfig: any): boolean {
-    const settingsKey = `widget:hidden@${widgetKey}`;
-    if (settingsKey in settings) return Boolean(settings[settingsKey]);
-    return widgetConfig?.["display:hidden"] ?? false;
-}
-
 function getPinnedKeys(settings: Record<string, any>, widgets: Record<string, any>): string[] {
     const pinned: string[] | undefined = settings["widget:pinned"];
     if (pinned !== undefined) return pinned;
-    const order: string[] | undefined = settings["widget:order"];
-    if (order && order.length > 0) return order;
-    // New install: use display:pinned defaults
     return Object.entries(widgets)
         .filter(([, w]: any) => w["display:pinned"])
         .sort(([, a]: any, [, b]: any) => (a["display:order"] ?? 0) - (b["display:order"] ?? 0))
@@ -45,7 +36,7 @@ function getPinnedKeys(settings: Record<string, any>, widgets: Record<string, an
 
 /**
  * Create the widgets menu section.
- * Shows: pinned status (checkbox), visibility (checkbox), icon-only toggle.
+ * Shows: pinned status (checkbox), icon-only toggle.
  */
 export function createWidgetsMenu(fullConfig: any): MenuBuilder {
     const menu = new MenuBuilder();
@@ -63,7 +54,6 @@ export function createWidgetsMenu(fullConfig: any): MenuBuilder {
     if (widgetEntries.length > 0) {
         menu.section("Pinned in bar");
         widgetEntries.forEach(([widgetKey, widgetConfig]: [string, any]) => {
-            if (isWidgetHidden(settings, widgetKey, widgetConfig)) return;
             const shortName = widgetKey.replace("defwidget@", "");
             const label = widgetConfig.label || shortName;
             const isPinned = pinnedKeys.has(shortName);
@@ -79,25 +69,6 @@ export function createWidgetsMenu(fullConfig: any): MenuBuilder {
                         ? currentPinned.filter((k) => k !== shortName)
                         : [...currentPinned, shortName];
                     await RpcApi.SetConfigCommand(TabRpcClient, { "widget:pinned": next } as any);
-                },
-            });
-        });
-
-        menu.separator();
-        menu.section("Visible");
-        widgetEntries.forEach(([widgetKey, widgetConfig]: [string, any]) => {
-            const hidden = isWidgetHidden(settings, widgetKey, widgetConfig);
-            const label = widgetConfig.label || widgetKey.replace("defwidget@", "");
-            menu.add({
-                label,
-                type: "checkbox" as const,
-                checked: !hidden,
-                click: async () => {
-                    const { RpcApi } = await import("@/app/store/wshclientapi");
-                    const { TabRpcClient } = await import("@/app/store/wshrpcutil");
-                    await RpcApi.SetConfigCommand(TabRpcClient, {
-                        [`widget:hidden@${widgetKey}`]: !hidden,
-                    } as any);
                 },
             });
         });
