@@ -1,0 +1,567 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+.identity-view {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    overflow: hidden;
+    font-size: 13px;
+    color: var(--main-text-color, #e2e8f0);
+    background: var(--main-bg-color, #0f172a);
+}
+
+// ── Header ───────────────────────────────────────────────────────────────────
+
+.identity-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border-color, #1e293b);
+    flex-shrink: 0;
+}
+
+.identity-header-title {
+    font-weight: 600;
+    font-size: 13px;
+    color: var(--main-text-color, #e2e8f0);
+    margin-right: 4px;
+}
+
+.identity-tabs {
+    display: flex;
+    gap: 2px;
+}
+
+.identity-tab {
+    padding: 3px 10px;
+    font-size: 12px;
+    border-radius: 4px;
+    border: none;
+    background: transparent;
+    color: var(--secondary-text-color, #94a3b8);
+    cursor: pointer;
+    transition: background 0.1s, color 0.1s;
+
+    &:hover {
+        background: var(--hover-bg-color, #1e293b);
+        color: var(--main-text-color, #e2e8f0);
+    }
+
+    &.active {
+        background: var(--active-bg-color, #1e293b);
+        color: var(--main-text-color, #e2e8f0);
+    }
+}
+
+.identity-add-btn {
+    margin-left: auto;
+    padding: 3px 10px;
+    font-size: 12px;
+    border-radius: 4px;
+    border: 1px solid var(--border-color, #334155);
+    background: transparent;
+    color: var(--accent-color, #a78bfa);
+    cursor: pointer;
+
+    &:hover {
+        background: var(--hover-bg-color, #1e293b);
+    }
+}
+
+// ── Body ─────────────────────────────────────────────────────────────────────
+
+.identity-body {
+    flex: 1;
+    overflow: hidden;
+}
+
+// ── Accounts layout (list + detail) ──────────────────────────────────────────
+
+.identity-accounts-layout {
+    display: flex;
+    height: 100%;
+    overflow: hidden;
+}
+
+.identity-accounts-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px 0;
+    min-width: 0;
+
+    &::-webkit-scrollbar {
+        width: 4px;
+    }
+    &::-webkit-scrollbar-thumb {
+        background: var(--border-color, #334155);
+        border-radius: 2px;
+    }
+}
+
+// ── Group ─────────────────────────────────────────────────────────────────────
+
+.identity-group {
+    margin-bottom: 8px;
+}
+
+.identity-group-header {
+    padding: 4px 12px;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--secondary-text-color, #64748b);
+}
+
+// ── Account row ───────────────────────────────────────────────────────────────
+
+.identity-account-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    cursor: pointer;
+    transition: background 0.1s;
+
+    &:hover {
+        background: var(--hover-bg-color, #1e293b);
+    }
+
+    &.selected {
+        background: var(--selected-bg-color, #1e293b);
+        border-left: 2px solid var(--accent-color, #a78bfa);
+        padding-left: 10px;
+    }
+}
+
+.identity-account-name {
+    flex: 1;
+    font-size: 13px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.identity-row-meta {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+}
+
+.identity-display-name {
+    font-size: 11px;
+    color: var(--secondary-text-color, #64748b);
+}
+
+.identity-agent-count {
+    font-size: 11px;
+    color: var(--secondary-text-color, #64748b);
+    background: var(--tag-bg-color, #1e293b);
+    padding: 1px 5px;
+    border-radius: 3px;
+}
+
+// ── Provider badge ────────────────────────────────────────────────────────────
+
+.identity-provider-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 9px;
+    font-weight: 700;
+    width: 26px;
+    height: 18px;
+    border-radius: 3px;
+    letter-spacing: 0;
+    flex-shrink: 0;
+
+    &.provider-github {
+        background: #21262d;
+        color: #e6edf3;
+    }
+    &.provider-aws {
+        background: #161b22;
+        color: #f0a500;
+    }
+    &.provider-anthropic {
+        background: #161b22;
+        color: #c084fc;
+    }
+    &.provider-custom {
+        background: #1e293b;
+        color: #94a3b8;
+    }
+
+    &.matrix-badge {
+        font-size: 10px;
+        width: auto;
+        padding: 1px 5px;
+    }
+}
+
+// ── Status dot ────────────────────────────────────────────────────────────────
+
+.status-dot {
+    display: inline-block;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    flex-shrink: 0;
+
+    &.status-valid     { background: #22c55e; }
+    &.status-expired   { background: #ef4444; }
+    &.status-invalid   { background: #ef4444; }
+    &.status-checking  { background: #f59e0b; animation: pulse 1s infinite; }
+    &.status-unknown   { background: #475569; }
+
+    &.detail-status {
+        width: 8px;
+        height: 8px;
+        margin-left: 4px;
+    }
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+}
+
+// ── Detail panel ──────────────────────────────────────────────────────────────
+
+.identity-detail {
+    width: 280px;
+    flex-shrink: 0;
+    border-left: 1px solid var(--border-color, #1e293b);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.identity-detail-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border-color, #1e293b);
+    flex-shrink: 0;
+}
+
+.identity-detail-title {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.identity-detail-name {
+    font-weight: 600;
+    font-size: 13px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.identity-detail-subname {
+    font-size: 11px;
+    color: var(--secondary-text-color, #64748b);
+}
+
+.identity-detail-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px 12px;
+
+    &::-webkit-scrollbar {
+        width: 4px;
+    }
+    &::-webkit-scrollbar-thumb {
+        background: var(--border-color, #334155);
+        border-radius: 2px;
+    }
+}
+
+.identity-detail-section {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--secondary-text-color, #64748b);
+    margin: 10px 0 4px;
+
+    &:first-child {
+        margin-top: 0;
+    }
+}
+
+.identity-detail-field {
+    display: flex;
+    gap: 6px;
+    align-items: baseline;
+    margin-bottom: 4px;
+}
+
+.identity-detail-label {
+    font-size: 11px;
+    color: var(--secondary-text-color, #64748b);
+    min-width: 80px;
+    flex-shrink: 0;
+}
+
+.identity-detail-value {
+    font-size: 12px;
+    word-break: break-all;
+}
+
+.identity-detail-empty {
+    font-size: 11px;
+    color: var(--secondary-text-color, #64748b);
+    font-style: italic;
+}
+
+.identity-agent-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-bottom: 4px;
+}
+
+.identity-agent-chip {
+    font-size: 11px;
+    padding: 1px 6px;
+    border-radius: 3px;
+    background: var(--tag-bg-color, #1e293b);
+    color: var(--main-text-color, #e2e8f0);
+}
+
+.identity-detail-actions {
+    display: flex;
+    gap: 8px;
+    padding: 10px 12px;
+    border-top: 1px solid var(--border-color, #1e293b);
+    flex-shrink: 0;
+}
+
+// ── Buttons ───────────────────────────────────────────────────────────────────
+
+.identity-btn {
+    padding: 4px 12px;
+    font-size: 12px;
+    border-radius: 4px;
+    border: 1px solid transparent;
+    cursor: pointer;
+    transition: opacity 0.1s;
+
+    &:hover { opacity: 0.85; }
+
+    &.identity-btn-primary {
+        background: var(--accent-color, #a78bfa);
+        color: #0f172a;
+        border-color: var(--accent-color, #a78bfa);
+    }
+    &.identity-btn-secondary {
+        background: transparent;
+        color: var(--secondary-text-color, #94a3b8);
+        border-color: var(--border-color, #334155);
+    }
+    &.identity-btn-danger {
+        background: transparent;
+        color: #ef4444;
+        border-color: #ef4444;
+        margin-left: auto;
+    }
+}
+
+// ── Assignments matrix ────────────────────────────────────────────────────────
+
+.identity-assignments {
+    height: 100%;
+    overflow: auto;
+    padding: 12px;
+}
+
+.identity-matrix {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+
+    th, td {
+        padding: 6px 10px;
+        text-align: left;
+        border-bottom: 1px solid var(--border-color, #1e293b);
+    }
+
+    th {
+        font-size: 10px;
+        font-weight: 600;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--secondary-text-color, #64748b);
+    }
+
+    .identity-matrix-agent {
+        font-size: 12px;
+        color: var(--main-text-color, #e2e8f0);
+    }
+
+    .identity-matrix-cell {
+        vertical-align: middle;
+    }
+
+    .identity-matrix-empty-cell {
+        color: var(--secondary-text-color, #475569);
+    }
+
+    .identity-matrix-empty {
+        text-align: center;
+        color: var(--secondary-text-color, #64748b);
+        padding: 20px;
+        font-style: italic;
+    }
+}
+
+// ── Empty states ──────────────────────────────────────────────────────────────
+
+.identity-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 200px;
+    gap: 10px;
+    color: var(--secondary-text-color, #64748b);
+    font-size: 13px;
+
+    p { margin: 0; }
+}
+
+.identity-empty-add {
+    padding: 5px 14px;
+    font-size: 12px;
+    border-radius: 4px;
+    border: 1px solid var(--accent-color, #a78bfa);
+    background: transparent;
+    color: var(--accent-color, #a78bfa);
+    cursor: pointer;
+
+    &:hover {
+        background: var(--hover-bg-color, #1e293b);
+    }
+}
+
+// ── Add/Edit form overlay ─────────────────────────────────────────────────────
+
+.identity-form-overlay {
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.6);
+    display: flex;
+    align-items: flex-start;
+    justify-content: flex-end;
+    z-index: 100;
+}
+
+.identity-form {
+    width: 340px;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    background: var(--panel-bg-color, #0f172a);
+    border-left: 1px solid var(--border-color, #1e293b);
+    overflow: hidden;
+}
+
+.identity-form-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border-color, #1e293b);
+    font-weight: 600;
+    font-size: 13px;
+    flex-shrink: 0;
+}
+
+.identity-form-close {
+    background: transparent;
+    border: none;
+    color: var(--secondary-text-color, #94a3b8);
+    cursor: pointer;
+    font-size: 14px;
+    padding: 2px 6px;
+    border-radius: 3px;
+
+    &:hover { background: var(--hover-bg-color, #1e293b); }
+}
+
+.identity-form-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 12px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+
+    &::-webkit-scrollbar {
+        width: 4px;
+    }
+    &::-webkit-scrollbar-thumb {
+        background: var(--border-color, #334155);
+        border-radius: 2px;
+    }
+}
+
+.identity-form-field {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.identity-form-label {
+    font-size: 11px;
+    color: var(--secondary-text-color, #94a3b8);
+}
+
+.identity-input,
+.identity-select {
+    padding: 5px 8px;
+    font-size: 12px;
+    background: var(--input-bg-color, #1e293b);
+    border: 1px solid var(--border-color, #334155);
+    border-radius: 4px;
+    color: var(--main-text-color, #e2e8f0);
+    outline: none;
+    width: 100%;
+
+    &:focus {
+        border-color: var(--accent-color, #a78bfa);
+    }
+}
+
+.identity-form-error {
+    padding: 6px 10px;
+    font-size: 12px;
+    background: rgba(239, 68, 68, 0.1);
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    border-radius: 4px;
+    color: #ef4444;
+}
+
+.identity-form-warning {
+    padding: 6px 10px;
+    font-size: 11px;
+    background: rgba(245, 158, 11, 0.1);
+    border: 1px solid rgba(245, 158, 11, 0.3);
+    border-radius: 4px;
+    color: #f59e0b;
+}
+
+.identity-form-footer {
+    display: flex;
+    gap: 8px;
+    padding: 10px 14px;
+    border-top: 1px solid var(--border-color, #1e293b);
+    flex-shrink: 0;
+    justify-content: flex-end;
+}

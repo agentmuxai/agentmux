@@ -29,8 +29,21 @@
             }
         }
     },
-    "defwidget@swarm": {
+    "defwidget@identity": {
         "display:order": 3,
+        "icon": "id-card",
+        "color": "#a78bfa",
+        "label": "identity",
+        "description": "External account and credential management",
+        "blockdef": {
+            "meta": {
+                "view": "identity"
+            }
+        }
+    },
+    "defwidget@swarm": {
+        "display:order": 4,
+        "display:hidden": true,
         "icon": "bee",
         "color": "#f59e0b",
         "label": "swarm",
@@ -42,7 +55,7 @@
         }
     },
     "defwidget@terminal": {
-        "display:order": 4,
+        "display:order": 5,
         "display:pinned": true,
         "icon": "square-terminal",
         "label": "terminal",
@@ -54,7 +67,7 @@
         }
     },
     "defwidget@sysinfo": {
-        "display:order": 5,
+        "display:order": 6,
         "display:pinned": true,
         "icon": "chart-line",
         "label": "sysinfo",
@@ -65,7 +78,7 @@
         }
     },
     "defwidget@settings": {
-        "display:order": 6,
+        "display:order": 7,
         "icon": "cog",
         "label": "settings",
         "description": "Open Settings (external editor)",
@@ -76,7 +89,7 @@
         }
     },
     "defwidget@help": {
-        "display:order": 7,
+        "display:order": 8,
         "icon": "circle-question",
         "label": "help",
         "description": "Help and documentation",
@@ -87,7 +100,7 @@
         }
     },
     "defwidget@devtools": {
-        "display:order": 8,
+        "display:order": 9,
         "icon": "code",
         "label": "devtools",
         "description": "Toggle Developer Tools",
