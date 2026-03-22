@@ -219,6 +219,17 @@ async function runLaunchFlow(
 
     // Phase 1: CLI Detection / Installation
     log("cli", `checking for ${provider.cliCommand}...`);
+
+    // Subscribe to install-log events so npm output streams into the pane during install
+    const unsubInstallLog = waveEventSubscribe({
+        eventType: "cli:install:log",
+        scope: WOS.makeORef("block", blockId),
+        handler: (event: WaveEvent) => {
+            const line: string = (event.data as any)?.line ?? "";
+            if (line) log("cli", line);
+        },
+    });
+
     let cliResult: ResolveCliResult;
     try {
         cliResult = await RpcApi.ResolveCliCommand(TabRpcClient, {
@@ -228,12 +239,15 @@ async function runLaunchFlow(
             pinned_version: provider.pinnedVersion,
             windows_install_command: provider.windowsInstallCommand,
             unix_install_command: provider.unixInstallCommand,
+            block_id: blockId,
         }, { timeout: 120000 });
     } catch (err: any) {
         const msg = err?.message ?? String(err);
         log("cli", msg, "error");
         log("error", `${provider.cliCommand} not available — install manually or check your internet connection`, "error");
         return "fatal";
+    } finally {
+        unsubInstallLog();
     }
 
     if (cliResult.source === "installed") {

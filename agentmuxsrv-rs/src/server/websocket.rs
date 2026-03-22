@@ -883,9 +883,11 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
     // Each AgentMux version gets its own isolated CLI install at:
     //   ~/.agentmux/<AGENTMUX_VERSION>/cli/<provider>/
     // Never falls back to system PATH.
+    let event_bus_rc = state.event_bus.clone();
     engine.register_handler(
         COMMAND_RESOLVE_CLI,
-        Box::new(|data, _ctx| {
+        Box::new(move |data, _ctx| {
+            let event_bus = event_bus_rc.clone();
             Box::pin(async move {
                 const AGENTMUX_VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -1077,23 +1079,91 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                         npm = %npm_path, dir = %native_dir, package = %package_spec,
                         "Running npm install"
                     );
-                    let install_output = tokio::process::Command::new(&npm_path)
+
+                    use tokio::io::{AsyncBufReadExt, BufReader};
+                    use std::sync::{Arc as StdArc, Mutex as StdMutex};
+                    let mut child = tokio::process::Command::new(&npm_path)
                         .args(["install", "--prefix", &native_dir, &package_spec])
-                        .output()
-                        .await
+                        .stdout(std::process::Stdio::piped())
+                        .stderr(std::process::Stdio::piped())
+                        .spawn()
                         .map_err(|e| format!("failed to run npm install: {e}"))?;
 
-                    let stdout_str = String::from_utf8_lossy(&install_output.stdout);
-                    let stderr_str = String::from_utf8_lossy(&install_output.stderr);
+                    // Read stdout and stderr concurrently so npm progress lines appear as they arrive
+                    let combined_output = StdArc::new(StdMutex::new(String::new()));
+
+                    let stdout_task = {
+                        let emit = {
+                            let eb = event_bus.clone();
+                            let bid = cmd.block_id.clone();
+                            move |line: String| {
+                                if let Some(ref b) = bid {
+                                    eb.broadcast_event(&crate::backend::eventbus::WSEventType {
+                                        eventtype: "cli:install:log".to_string(),
+                                        oref: format!("block:{}", b),
+                                        data: Some(serde_json::json!({ "line": line })),
+                                    });
+                                }
+                            }
+                        };
+                        let buf = combined_output.clone();
+                        let pipe = child.stdout.take();
+                        tokio::spawn(async move {
+                            if let Some(p) = pipe {
+                                let mut lines = BufReader::new(p).lines();
+                                while let Ok(Some(line)) = lines.next_line().await {
+                                    tracing::debug!(line = %line, "npm stdout");
+                                    emit(line.clone());
+                                    let mut g = buf.lock().unwrap();
+                                    g.push_str(&line);
+                                    g.push('\n');
+                                }
+                            }
+                        })
+                    };
+
+                    let stderr_task = {
+                        let emit = {
+                            let eb = event_bus.clone();
+                            let bid = cmd.block_id.clone();
+                            move |line: String| {
+                                if let Some(ref b) = bid {
+                                    eb.broadcast_event(&crate::backend::eventbus::WSEventType {
+                                        eventtype: "cli:install:log".to_string(),
+                                        oref: format!("block:{}", b),
+                                        data: Some(serde_json::json!({ "line": line })),
+                                    });
+                                }
+                            }
+                        };
+                        let buf = combined_output.clone();
+                        let pipe = child.stderr.take();
+                        tokio::spawn(async move {
+                            if let Some(p) = pipe {
+                                let mut lines = BufReader::new(p).lines();
+                                while let Ok(Some(line)) = lines.next_line().await {
+                                    tracing::debug!(line = %line, "npm stderr");
+                                    emit(line.clone());
+                                    let mut g = buf.lock().unwrap();
+                                    g.push_str(&line);
+                                    g.push('\n');
+                                }
+                            }
+                        })
+                    };
+
+                    let _ = tokio::join!(stdout_task, stderr_task);
+                    let status = child.wait().await
+                        .map_err(|e| format!("npm install wait error: {e}"))?;
                     tracing::info!(
-                        exit_code = install_output.status.code().unwrap_or(-1),
+                        exit_code = status.code().unwrap_or(-1),
                         "npm install completed"
                     );
 
-                    if !install_output.status.success() {
-                        let combined = format!("{}{}", stdout_str, stderr_str);
+                    if !status.success() {
+                        let out = combined_output.lock().unwrap().clone();
                         return Err(check_network_error(
-                            &combined, &cmd.cli_command, install_cmd,
+                            &out, &cmd.cli_command, install_cmd,
                         ));
                     }
 
