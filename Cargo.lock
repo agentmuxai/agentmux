@@ -10,7 +10,7 @@ checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
 name = "agentmux"
-version = "0.32.70"
+version = "0.32.71"
 dependencies = [
  "chrono",
  "dirs 5.0.1",
@@ -46,7 +46,7 @@ dependencies = [
 
 [[package]]
 name = "agentmuxsrv-rs"
-version = "0.32.70"
+version = "0.32.71"
 dependencies = [
  "async-stream",
  "axum",
@@ -4849,9 +4849,9 @@ dependencies = [
 
 [[package]]
 name = "tao"
-version = "0.34.6"
+version = "0.34.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6e06d52c379e63da659a483a958110bbde891695a0ecb53e48cc7786d5eda7bb"
+checksum = "9103edf55f2da3c82aea4c7fab7c4241032bfeea0e71fa557d98e00e7ce7cc20"
 dependencies = [
  "bitflags 2.11.0",
  "block2 0.6.2",
@@ -7152,7 +7152,7 @@ dependencies = [
 
 [[package]]
 name = "wsh-rs"
-version = "0.32.70"
+version = "0.32.71"
 dependencies = [
  "base64 0.22.1",
  "clap",
