@@ -1,6 +1,7 @@
 {
     "defwidget@agent": {
         "display:order": 1,
+        "display:pinned": true,
         "icon": "sparkles",
         "color": "#cc785c",
         "label": "agent",
@@ -30,7 +31,6 @@
     },
     "defwidget@swarm": {
         "display:order": 3,
-        "display:hidden": true,
         "icon": "bee",
         "color": "#f59e0b",
         "label": "swarm",
@@ -43,6 +43,7 @@
     },
     "defwidget@terminal": {
         "display:order": 4,
+        "display:pinned": true,
         "icon": "square-terminal",
         "label": "terminal",
         "blockdef": {
@@ -54,6 +55,7 @@
     },
     "defwidget@sysinfo": {
         "display:order": 5,
+        "display:pinned": true,
         "icon": "chart-line",
         "label": "sysinfo",
         "blockdef": {

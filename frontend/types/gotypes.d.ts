@@ -1506,6 +1506,7 @@ declare global {
     type WidgetConfigType = {
         "display:order"?: number;
         "display:hidden"?: boolean;
+        "display:pinned"?: boolean;
         icon?: string;
         color?: string;
         label?: string;

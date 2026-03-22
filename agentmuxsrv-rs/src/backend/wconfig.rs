@@ -377,6 +377,11 @@ pub struct WidgetConfigType {
     #[serde(rename = "display:hidden", default, skip_serializing_if = "is_false")]
     pub display_hidden: bool,
 
+    /// Whether this widget is pinned to the action bar by default on new installs.
+    /// Once the user has a `widget:pinned` setting this field is ignored.
+    #[serde(rename = "display:pinned", default, skip_serializing_if = "is_false")]
+    pub display_pinned: bool,
+
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub icon: String,
 
