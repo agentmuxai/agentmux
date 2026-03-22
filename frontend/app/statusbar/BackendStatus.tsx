@@ -120,7 +120,10 @@ const BackendStatus = (): JSX.Element => {
                         {icon()}
                     </span>
                     <Show when={backendStatus() === "running" && startedAt() != null}>
-                        <span class="stat-mono stat-uptime">{formatUptime(uptimeSecs())}</span>
+                        <span
+                            class="stat-mono stat-uptime"
+                            style={{ "min-width": uptimeSecs() < 3600 ? "5ch" : uptimeSecs() < 86400 ? "8ch" : "12ch" }}
+                        >{formatUptime(uptimeSecs())}</span>
                     </Show>
                     <Show when={backendStatus() === "connecting"}>
                         <span style={{ color: color() }}>Connecting…</span>
