@@ -144,10 +144,12 @@ export function useAgentStream({
                         if (idx !== -1) {
                             const existing = result[idx];
                             if (existing.type === "markdown" && updated.type === "markdown") {
-                                // Append text content for streaming text/thinking deltas
+                                // Replace with accumulated content — the stream parser
+                                // already accumulates deltas into the full text, so we
+                                // must NOT append here or content gets duplicated.
                                 result[idx] = {
                                     ...existing,
-                                    content: existing.content + updated.content,
+                                    content: updated.content,
                                 };
                             } else {
                                 // Replace for other node types (tool_result completing tool_call)

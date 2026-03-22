@@ -24,22 +24,22 @@
     .agent-document {
         flex: 1;
         overflow-y: auto;
-        padding: 4px 6px;
+        padding: 2px 4px;
         display: flex;
         flex-direction: column;
-        gap: 4px;
+        gap: 1px;
         user-select: text;
         cursor: text;
     }
 
     // === Status Log (terminal-style) ===
     .agent-status-log {
-        padding: 4px 6px;
+        padding: 2px 4px;
         font-family: var(--fixed-font);
         font-size: 12px;
-        line-height: 1.35;
+        line-height: 1.3;
         border-bottom: 1px solid var(--border-color);
-        margin-bottom: 4px;
+        margin-bottom: 1px;
         user-select: text;
         cursor: text;
     }
@@ -107,7 +107,7 @@
     // === Retry Login Bar ===
     .agent-retry-bar {
         flex-shrink: 0;
-        padding: 6px 8px;
+        padding: 2px 4px;
         display: flex;
         justify-content: center;
         border-top: 1px solid var(--border-color, rgba(255,255,255,0.1));
@@ -393,17 +393,17 @@
     // === Raw Output ===
     .agent-raw-output {
         margin: 0;
-        padding: 4px 0;
+        padding: 1px 0;
         white-space: pre-wrap;
         word-break: break-word;
         font-size: var(--termfontsize, 13px);
-        line-height: 1.35;
+        line-height: 1.3;
         color: var(--main-text-color);
     }
 
     // === Markdown Block ===
     .agent-markdown-block {
-        padding: 2px 6px;
+        padding: 1px 4px;
         color: var(--main-text-color);
         opacity: 0.9;
         user-select: text;
@@ -413,12 +413,12 @@
             opacity: 0.6;
             font-style: italic;
             border-left: 2px solid var(--secondary-text-color);
-            padding-left: 12px;
+            padding-left: 8px;
             background: color-mix(in srgb, var(--main-text-color) 2%, transparent);
         }
 
         p {
-            margin: 2px 0;
+            margin: 1px 0;
         }
 
         code {
@@ -429,8 +429,8 @@
 
         pre {
             background: color-mix(in srgb, var(--main-text-color) 5%, transparent);
-            padding: 8px;
-            border-radius: 4px;
+            padding: 4px 6px;
+            border-radius: 3px;
             overflow-x: auto;
         }
     }
@@ -463,8 +463,8 @@
         .agent-tool-summary {
             display: flex;
             align-items: center;
-            gap: 6px;
-            padding: 4px 6px;
+            gap: 4px;
+            padding: 2px 4px;
             user-select: none;
 
             .agent-tool-chevron {
@@ -484,7 +484,7 @@
         }
 
         .agent-tool-content {
-            padding: 0 12px 12px 28px;
+            padding: 0 4px 4px 16px;
             cursor: default;
             user-select: text;
             cursor: text;
@@ -555,7 +555,7 @@
 
         .agent-diff-header {
             background: color-mix(in srgb, var(--main-text-color) 10%, transparent);
-            padding: 6px 8px;
+            padding: 3px 6px;
             font-weight: bold;
             border-bottom: 1px solid var(--border-color);
         }
@@ -582,9 +582,9 @@
 
     .agent-diff-empty {
         color: var(--secondary-text-color);
-        padding: 8px;
+        padding: 4px 6px;
         background: color-mix(in srgb, var(--main-text-color) 3%, transparent);
-        border-radius: 4px;
+        border-radius: 3px;
     }
 
     // === Bash Output ===
@@ -597,7 +597,7 @@
 
         .agent-bash-cmd {
             background: color-mix(in srgb, var(--main-text-color) 5%, transparent);
-            padding: 6px 8px;
+            padding: 3px 6px;
             border-bottom: 1px solid var(--border-color);
 
             .agent-bash-dollar {
@@ -607,7 +607,7 @@
         }
 
         .agent-bash-output {
-            padding: 8px;
+            padding: 3px 6px;
             margin: 0;
             max-height: 400px;
             overflow-y: auto;
@@ -622,7 +622,7 @@
         }
 
         .agent-bash-exit {
-            padding: 4px 8px;
+            padding: 2px 6px;
             font-size: 11px;
             border-top: 1px solid var(--border-color);
             background: color-mix(in srgb, var(--main-text-color) 3%, transparent);
@@ -665,8 +665,8 @@
         .agent-message-summary {
             display: flex;
             align-items: center;
-            gap: 8px;
-            padding: 8px 12px;
+            gap: 6px;
+            padding: 3px 4px;
             user-select: none;
 
             .agent-message-chevron {
@@ -685,7 +685,7 @@
         }
 
         .agent-message-content {
-            padding: 0 12px 12px 28px;
+            padding: 0 4px 4px 16px;
             cursor: default;
 
             .agent-message-meta {
@@ -698,8 +698,8 @@
 
             .agent-message-body {
                 background: color-mix(in srgb, var(--main-text-color) 5%, transparent);
-                padding: 8px;
-                border-radius: 4px;
+                padding: 4px 6px;
+                border-radius: 3px;
                 margin: 0;
                 white-space: pre-wrap;
             }
@@ -781,10 +781,10 @@
 
     // === User Message ===
     .agent-user-message {
-        padding: 8px 12px;
+        padding: 3px 4px;
         background: color-mix(in srgb, var(--accent-color) 5%, transparent);
         border-left: 2px solid var(--accent-color);
-        border-radius: 4px;
+        border-radius: 2px;
         user-select: text;
         cursor: text;
 
@@ -799,27 +799,27 @@
 
     // === Section Headings ===
     .agent-section {
-        margin-top: 12px;
-        padding: 4px 0;
+        margin-top: 6px;
+        padding: 2px 0;
 
         &.level-1 h1 {
-            font-size: 20px;
+            font-size: 18px;
             font-weight: bold;
-            margin: 8px 0;
+            margin: 4px 0;
             border-bottom: 2px solid var(--border-color);
-            padding-bottom: 4px;
+            padding-bottom: 2px;
         }
 
         &.level-2 h2 {
-            font-size: 16px;
+            font-size: 15px;
             font-weight: bold;
-            margin: 6px 0;
+            margin: 3px 0;
         }
 
         &.level-3 h3 {
-            font-size: 14px;
+            font-size: 13px;
             font-weight: 500;
-            margin: 4px 0;
+            margin: 2px 0;
             opacity: 0.8;
         }
     }
@@ -828,15 +828,15 @@
     .agent-tool-read {
         .agent-tool-file-path {
             color: var(--accent-color);
-            margin-bottom: 8px;
+            margin-bottom: 4px;
             font-weight: 500;
         }
 
         .agent-tool-read-content {
             background: var(--main-bg-color);
             border: 1px solid var(--border-color);
-            padding: 8px;
-            border-radius: 4px;
+            padding: 4px 6px;
+            border-radius: 3px;
             max-height: 400px;
             overflow-y: auto;
             margin: 0;
@@ -847,7 +847,7 @@
     .agent-tool-write {
         .agent-tool-file-path {
             color: var(--accent-color);
-            margin-bottom: 4px;
+            margin-bottom: 2px;
             font-weight: 500;
         }
 
@@ -861,15 +861,15 @@
     .agent-tool-search {
         .agent-tool-pattern {
             color: var(--accent-color);
-            margin-bottom: 8px;
+            margin-bottom: 4px;
             font-weight: 500;
         }
 
         .agent-tool-search-results {
             background: var(--main-bg-color);
             border: 1px solid var(--border-color);
-            padding: 8px;
-            border-radius: 4px;
+            padding: 4px 6px;
+            border-radius: 3px;
             max-height: 400px;
             overflow-y: auto;
             margin: 0;
@@ -882,8 +882,8 @@
     .agent-tool-task-info {
         background: var(--main-bg-color);
         border: 1px solid var(--border-color);
-        padding: 8px;
-        border-radius: 4px;
+        padding: 4px 6px;
+        border-radius: 3px;
         max-height: 400px;
         overflow-y: auto;
         margin: 0;
@@ -895,7 +895,7 @@
         display: flex;
         justify-content: space-between;
         align-items: center;
-        padding: 12px 16px;
+        padding: 4px 6px;
         background: color-mix(in srgb, var(--main-text-color) 5%, transparent);
         border-bottom: 1px solid var(--border-color);
 
@@ -1065,24 +1065,24 @@
     .agent-footer {
         border-top: 1px solid var(--border-color);
         background: color-mix(in srgb, var(--main-text-color) 3%, transparent);
-        padding: 12px 16px;
+        padding: 2px 2px;
 
         .agent-input-container {
             display: flex;
             flex-direction: column;
-            gap: 6px;
+            gap: 1px;
 
             .agent-input {
                 width: 100%;
-                padding: 8px;
+                padding: 3px 4px;
                 background: var(--main-bg-color);
                 border: 1px solid var(--border-color);
-                border-radius: 4px;
+                border-radius: 2px;
                 color: var(--main-text-color);
                 font-family: inherit;
                 font-size: 12px;
                 resize: vertical;
-                min-height: 40px;
+                min-height: 28px;
 
                 &:focus {
                     outline: none;
@@ -1091,10 +1091,11 @@
             }
 
             .agent-input-hint {
-                font-size: 10px;
+                font-size: 9px;
                 color: var(--secondary-text-color);
-                opacity: 0.6;
-                padding: 0 4px;
+                opacity: 0.5;
+                padding: 0 2px;
+                line-height: 1.2;
             }
         }
     }
