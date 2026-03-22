@@ -105,7 +105,11 @@ export class TermWrap {
         this.handleResize_debounced = debounce(50, this.handleResize.bind(this));
 
         // Create terminal and load addons
-        this.terminal = new Terminal(options);
+        // scrollOnUserInput: false — prevents scroll-to-bottom on keystrokes, letting the user
+        //   read scrollback while the PTY is active (xterm.js >= 5.1.0).
+        // smoothScrollDuration: 0 — disables animated scrolling, which makes cursor-tracking
+        //   viewport jumps (caused by Ink's erase-and-redraw pattern) more disorienting.
+        this.terminal = new Terminal({ ...options, scrollOnUserInput: false, smoothScrollDuration: 0 });
         this.fitAddon = new FitAddon();
         this.fitAddon.noScrollbar = PLATFORM === PlatformMacOS;
         this.serializeAddon = new SerializeAddon();
@@ -150,6 +154,16 @@ export class TermWrap {
             return handleOscTitleCommand(data, this.blockId, this.loaded);
         });
         this.terminal.attachCustomKeyEventHandler(waveOptions.keydownHandler);
+
+        // Tier-2 scroll fix: block macOS trackpad momentum scroll events.
+        // After the user lifts their finger, the OS keeps emitting WheelEvents with small,
+        // decaying deltaY values. These compound with Ink's cursor-up sequences (which move
+        // the viewport) to produce "rocket scroll". Blocking events with |deltaY| < 4px
+        // eliminates the feedback loop without affecting normal wheel or trackpad scrolling.
+        this.terminal.attachCustomWheelEventHandler((ev: WheelEvent) => {
+            if (Math.abs(ev.deltaY) < 4) return false;
+            return true;
+        });
     }
 
     // ── Phase 2: INIT (async) ──────────────────────────────────────────
