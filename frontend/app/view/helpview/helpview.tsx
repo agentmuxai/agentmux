@@ -59,7 +59,7 @@ function HelpView({ model }: { model: HelpViewModel }): JSX.Element {
         if (!e.ctrlKey && !e.metaKey) return;
         if (e.key === "=" || e.key === "+") { e.preventDefault(); e.stopPropagation(); adjustZoom(KEYBOARD_STEP); }
         else if (e.key === "-")            { e.preventDefault(); e.stopPropagation(); adjustZoom(-KEYBOARD_STEP); }
-        else if (e.key === "0")            { e.preventDefault(); e.stopPropagation(); setZoom(1.0); showZoomIndicator("100%"); }
+        else if (e.key === "0")            { e.preventDefault(); e.stopPropagation(); adjustZoom(1.0 - zoom()); }
     };
 
     const handleWheel = (e: WheelEvent) => {
@@ -76,6 +76,9 @@ function HelpView({ model }: { model: HelpViewModel }): JSX.Element {
             onKeyDown={handleKeyDown}
             onWheel={handleWheel}
         >
+            {/* CSS zoom (not font-size) is intentional: scales the full layout box so
+                @container breakpoints respond and the grid reflows responsively.
+                Tauri/WebKit handles zoom correctly; font-size only scales text. */}
             <div style={{ zoom: zoom(), padding: "10px 5px" }}>
                 <QuickTips />
             </div>
