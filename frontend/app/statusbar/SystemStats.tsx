@@ -11,6 +11,8 @@ type SysStats = {
     memTotal: number;
     diskRead: number;
     diskWrite: number;
+    netSent: number;
+    netRecv: number;
 };
 
 function formatMemBytes(gb: number): string {
@@ -56,6 +58,8 @@ const SystemStats = (): JSX.Element => {
                     memTotal: vals["mem:total"] ?? 0,
                     diskRead: vals["disk:read"] ?? 0,
                     diskWrite: vals["disk:write"] ?? 0,
+                    netSent: vals["net:bytessent"] ?? 0,
+                    netRecv: vals["net:bytesrecv"] ?? 0,
                 });
             },
         });
@@ -79,6 +83,13 @@ const SystemStats = (): JSX.Element => {
                     <span class="stat-mono stat-mem" style={{ color: memColor(s().memUsed, s().memTotal) }}>
                         Mem {formatMemBytes(s().memUsed)}/{formatMemBytes(s().memTotal)}
                     </span>
+                    <Show when={s().netSent > 0 || s().netRecv > 0}>
+                        <span class="stat-separator">|</span>
+                        <span class="stat-mono stat-net">
+                            <span class="stat-disk-arrow">↑</span>{formatRate(s().netSent)}{" "}
+                            <span class="stat-disk-arrow">↓</span>{formatRate(s().netRecv)}
+                        </span>
+                    </Show>
                     {/* TODO: disk I/O reads zero on Windows — investigate sysinfo Disk::usage() delta behavior */}
                     <Show when={s().diskRead > 0 || s().diskWrite > 0}>
                         <span class="stat-separator">|</span>

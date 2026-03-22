@@ -824,6 +824,7 @@ declare global {
         "term:zoom"?: number;
         "term:mode"?: string;
         "term:theme"?: string;
+        "help:zoom"?: number;
         "term:localshellpath"?: string;
         "term:localshellopts"?: string[];
         "term:scrollback"?: number;

@@ -159,7 +159,7 @@ export function initChromeZoom(): void {
 
 // ── Shared helpers ────────────────────────────────────────────────
 
-function showZoomIndicator(text: string): void {
+export function showZoomIndicator(text: string): void {
     if (zoomIndicatorTimeout) {
         clearTimeout(zoomIndicatorTimeout);
     }
