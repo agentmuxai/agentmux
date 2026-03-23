@@ -13,6 +13,7 @@
 
 import { atoms, getApi } from "@/store/global";
 import { WorkspaceService } from "@/app/store/services";
+import { deleteLayoutModelForTab } from "@/layout/index";
 import { Logger } from "@/util/logger";
 import { createSignal, onCleanup, onMount, Show } from "solid-js";
 import type { JSX } from "solid-js";
@@ -102,9 +103,13 @@ function DragOverlay(): JSX.Element {
                         sourceWsId: data.sourceWorkspaceId,
                         destWsId: myWsId,
                     });
-                    WorkspaceService.MoveTabToWorkspace(data.payload.tabId, data.sourceWorkspaceId, myWsId).catch((e) => {
-                        Logger.error("dnd:overlay", "MoveTabToWorkspace failed", { error: String(e) });
-                    });
+                    WorkspaceService.MoveTabToWorkspace(data.payload.tabId, data.sourceWorkspaceId, myWsId)
+                        .then(() => {
+                            deleteLayoutModelForTab(data.payload.tabId);
+                        })
+                        .catch((e) => {
+                            Logger.error("dnd:overlay", "MoveTabToWorkspace failed", { error: String(e) });
+                        });
                 }
             }
         }).then((fn) => { unlistenEnd = fn; });
