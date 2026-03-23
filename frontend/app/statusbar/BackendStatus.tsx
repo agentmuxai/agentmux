@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { atoms, getApi } from "@/store/global";
+import { atoms, backendDeathInfoAtom, getApi } from "@/store/global";
 import { waveEventSubscribe } from "@/app/store/wps";
 import { createEffect, createSignal, onCleanup, onMount, Show, type JSX } from "solid-js";
 
@@ -161,6 +161,31 @@ const BackendStatus = (): JSX.Element => {
                                 <span class="status-bar-popover-label">Version</span>
                                 <span>{backendInfo().version}</span>
                             </div>
+                        </Show>
+                        <Show when={backendStatus() === "crashed" && backendDeathInfoAtom() != null}>
+                            <div class="status-bar-popover-divider" />
+                            <div class="status-bar-popover-row">
+                                <span class="status-bar-popover-label">Died at</span>
+                                <span>{new Date(backendDeathInfoAtom()!.died_at).toLocaleTimeString()}</span>
+                            </div>
+                            <Show when={backendDeathInfoAtom()!.uptime_secs != null}>
+                                <div class="status-bar-popover-row">
+                                    <span class="status-bar-popover-label">Was up</span>
+                                    <span>{formatUptime(backendDeathInfoAtom()!.uptime_secs!)}</span>
+                                </div>
+                            </Show>
+                            <Show when={backendDeathInfoAtom()!.code != null}>
+                                <div class="status-bar-popover-row">
+                                    <span class="status-bar-popover-label">Exit code</span>
+                                    <span class="status-bar-popover-mono">{backendDeathInfoAtom()!.code}</span>
+                                </div>
+                            </Show>
+                            <Show when={backendDeathInfoAtom()!.signal != null}>
+                                <div class="status-bar-popover-row">
+                                    <span class="status-bar-popover-label">Signal</span>
+                                    <span class="status-bar-popover-mono">{backendDeathInfoAtom()!.signal}</span>
+                                </div>
+                            </Show>
                         </Show>
                     </div>
                 </Show>

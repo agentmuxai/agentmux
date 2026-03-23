@@ -168,6 +168,12 @@
         font-family: monospace;
         font-size: 0.95em;
     }
+
+    .status-bar-popover-divider {
+        border-top: 1px solid var(--border-color);
+        margin: 5px 0;
+        opacity: 0.4;
+    }
 }
 
 @keyframes status-icon-spin {
