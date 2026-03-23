@@ -9,10 +9,11 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use sysinfo::{Disks, Networks, Pid, ProcessesToUpdate};
+use sysinfo::{Disks, Networks, Pid, ProcessRefreshKind, ProcessesToUpdate};
 use tokio::time::MissedTickBehavior;
 
 use crate::backend::blockcontroller::pidregistry;
+use crate::backend::blockcontroller::process_tree;
 use crate::backend::rpc_types::TimeSeriesData;
 use crate::backend::wconfig::ConfigWatcher;
 use crate::backend::wps::{Broker, WaveEvent, EVENT_BLOCK_STATS, EVENT_SYS_INFO};
@@ -186,18 +187,65 @@ pub async fn run_sysinfo_loop(broker: Arc<Broker>, config_watcher: Arc<ConfigWat
 
         broker.publish(event);
 
-        // Per-pane process metrics: query each registered block's PID
+        // Per-pane process tree metrics: aggregate CPU/mem across each block's
+        // shell process and all its descendants.
         let block_pids = pidregistry::get_all();
         if !block_pids.is_empty() {
-            let pids: Vec<Pid> = block_pids.iter().map(|(_, pid)| Pid::from(*pid as usize)).collect();
-            sys.refresh_processes_specifics(ProcessesToUpdate::Some(&pids), true, sysinfo::ProcessRefreshKind::everything());
-        }
-        for (block_id, pid) in &block_pids {
-            let sysinfo_pid = Pid::from(*pid as usize);
-            if let Some(process) = sys.process(sysinfo_pid) {
+            // Pass 1: cheap minimal refresh of all processes to populate parent()
+            // links. ProcessRefreshKind::new() skips CPU accounting and memory
+            // queries — just PID/PPID/name. ~0.5ms on a typical desktop.
+            sys.refresh_processes_specifics(
+                ProcessesToUpdate::All,
+                false, // keep stale entries — pass 2 removes dead ones
+                ProcessRefreshKind::nothing(),
+            );
+
+            // For each block, BFS the process tree from the shell PID.
+            let mut block_trees: Vec<(String, Vec<Pid>)> = block_pids
+                .iter()
+                .map(|(block_id, pid)| {
+                    let root = Pid::from(*pid as usize);
+                    let tree = process_tree::collect_descendants(
+                        &sys,
+                        root,
+                        process_tree::MAX_PIDS_PER_BLOCK,
+                    );
+                    (block_id.clone(), tree)
+                })
+                .collect();
+
+            // Pass 2: targeted deep refresh (CPU + mem) for only the PIDs we care about.
+            // Deduplicate across blocks so each PID is refreshed at most once.
+            let mut all_pids: Vec<Pid> = block_trees
+                .iter()
+                .flat_map(|(_, pids)| pids.iter().copied())
+                .collect();
+            all_pids.sort_unstable();
+            all_pids.dedup();
+            sys.refresh_processes_specifics(
+                ProcessesToUpdate::Some(&all_pids),
+                true, // remove dead processes on this authoritative pass
+                ProcessRefreshKind::everything(),
+            );
+
+            // Aggregate per block and publish.
+            for (block_id, pids) in &mut block_trees {
+                let mut total_cpu: f64 = 0.0;
+                let mut total_mem: u64 = 0;
+                let mut live_count: u32 = 0;
+
+                for pid in pids.iter() {
+                    if let Some(proc) = sys.process(*pid) {
+                        total_cpu += proc.cpu_usage() as f64;
+                        total_mem += proc.memory();
+                        live_count += 1;
+                    }
+                }
+
                 let mut block_values = HashMap::new();
-                block_values.insert("cpu".to_string(), process.cpu_usage() as f64);
-                block_values.insert("mem".to_string(), process.memory() as f64);
+                block_values.insert("cpu".to_string(), total_cpu);
+                block_values.insert("mem".to_string(), total_mem as f64);
+                block_values.insert("pids".to_string(), live_count as f64);
 
                 let block_ts = TimeSeriesData {
                     ts: now,

@@ -14,6 +14,7 @@
 
 pub mod health;
 pub mod pidregistry;
+pub mod process_tree;
 pub mod shell;
 pub mod subprocess;
 
