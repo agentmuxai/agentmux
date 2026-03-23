@@ -386,11 +386,24 @@ pub async fn spawn_backend(app: &tauri::AppHandle) -> Result<BackendSpawnResult,
                     tracing::error!("[agentmuxsrv-rs error] {}", err);
                 }
                 CommandEvent::Terminated(status) => {
-                    tracing::warn!("[agentmuxsrv-rs] terminated with status: {:?}", status);
+                    let state = app_handle.state::<crate::state::AppState>();
+                    let pid = state.backend_pid.lock().unwrap().unwrap_or(0);
+                    let started_at = state.backend_started_at.lock().unwrap().clone();
+                    let uptime_secs: Option<i64> = started_at.as_deref().and_then(|s| {
+                        chrono::DateTime::parse_from_rfc3339(s).ok().map(|t| {
+                            (chrono::Utc::now() - t.with_timezone(&chrono::Utc)).num_seconds()
+                        })
+                    });
+                    tracing::error!(
+                        "[agentmuxsrv-rs] TERMINATED — pid={} exit_code={:?} signal={:?} uptime_secs={:?}",
+                        pid, status.code, status.signal, uptime_secs
+                    );
                     if let Some(window) = app_handle.get_webview_window("main") {
                         let _ = window.emit("backend-terminated", serde_json::json!({
                             "code": status.code,
                             "signal": status.signal,
+                            "pid": pid,
+                            "uptime_secs": uptime_secs,
                         }));
                     }
                     break;
