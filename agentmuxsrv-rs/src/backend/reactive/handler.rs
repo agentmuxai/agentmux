@@ -533,6 +533,23 @@ async fn inject_via_docker_attach(container_name: &str, message: &str) -> anyhow
     use tokio::io::AsyncWriteExt;
     use tokio::process::Command;
 
+    // Validate container name: Docker names must match [a-zA-Z0-9][a-zA-Z0-9_.-]*
+    // Reject anything outside that set before passing to the CLI.
+    if container_name.is_empty()
+        || !container_name
+            .chars()
+            .next()
+            .map_or(false, |c| c.is_ascii_alphanumeric())
+        || !container_name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == '.')
+    {
+        return Err(anyhow::anyhow!(
+            "invalid container name {:?}: must match [a-zA-Z0-9][a-zA-Z0-9_.-]*",
+            container_name
+        ));
+    }
+
     let payload = format!("\r{}\r", message);
 
     let mut child = Command::new("docker")
@@ -569,10 +586,12 @@ async fn inject_via_docker_attach(container_name: &str, message: &str) -> anyhow
         drop(stdin);
     }
 
-    // Give docker attach time to flush, then force-kill in case it hangs.
+    // Force-kill docker attach in case it's still running (e.g. tty not yet closed),
+    // then wait to reap the child process. Kill must come before wait to avoid
+    // waiting indefinitely on a process that hasn't exited on its own.
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-    child.kill().await.ok();
-    child.wait().await.ok();
+    child.kill().await.ok(); // send SIGKILL / TerminateProcess; no-op if already exited
+    child.wait().await.ok(); // reap — always call after kill to avoid zombies
 
     Ok(())
 }
