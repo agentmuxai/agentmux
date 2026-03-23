@@ -103,13 +103,17 @@ function DragOverlay(): JSX.Element {
                         sourceWsId: data.sourceWorkspaceId,
                         destWsId: myWsId,
                     });
-                    WorkspaceService.MoveTabToWorkspace(data.payload.tabId, data.sourceWorkspaceId, myWsId)
-                        .then(() => {
-                            deleteLayoutModelForTab(data.payload.tabId);
-                        })
-                        .catch((e) => {
-                            Logger.error("dnd:overlay", "MoveTabToWorkspace failed", { error: String(e) });
-                        });
+                    WorkspaceService.MoveTabToWorkspace(data.payload.tabId, data.sourceWorkspaceId, myWsId).catch((e) => {
+                        Logger.error("dnd:overlay", "MoveTabToWorkspace failed", { error: String(e) });
+                    });
+                }
+            }
+
+            // Source window: clean up the LayoutModel for a tab that was successfully dragged out.
+            // The model lives in this window's layoutModelMap; the destination window has no model to clean.
+            if (data.result === "drop" && data.sourceWindow === wl && data.targetWindow !== wl) {
+                if (data.dragType === "tab" && data.payload.tabId) {
+                    deleteLayoutModelForTab(data.payload.tabId);
                 }
             }
         }).then((fn) => { unlistenEnd = fn; });
