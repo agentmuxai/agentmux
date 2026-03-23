@@ -143,7 +143,7 @@ function TerminalView(props: ViewComponentProps<TermViewModel>): JSX.Element {
         const termBPMAtom = getOverrideConfigAtom(blockId, "term:allowbracketedpaste");
         const [termTheme] = computeTheme(fullConfig, termThemeName, termTransparency);
         const ts = termSettings();
-        let termScrollback = 2000;
+        let termScrollback = 10000;
         if (ts?.["term:scrollback"]) termScrollback = Math.floor(ts["term:scrollback"]);
         if (blockData()?.meta?.["term:scrollback"]) termScrollback = Math.floor(blockData().meta["term:scrollback"]);
         termScrollback = Math.max(0, Math.min(termScrollback, 50000));
