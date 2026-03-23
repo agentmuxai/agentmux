@@ -200,6 +200,14 @@ export class TermWrap {
             this.toDispose.push(this.searchAddon.onDidChangeResults(this.onSearchResultsDidChange.bind(this)));
         }
 
+        // Diag: log viewport scroll events to detect unexpected position changes
+        this.toDispose.push(
+            this.terminal.onScroll((ydisp: number) => {
+                const bufLines = this.terminal.buffer.active.length;
+                console.log(`[term-scroll] ydisp=${ydisp} bufLines=${bufLines}`);
+            })
+        );
+
         // Subscribe to PTY data stream BEFORE any backend communication.
         // This ensures we never miss data from the PTY.
         this.mainFileSubject = getFileSubject(this.blockId, TermFileName);
@@ -316,6 +324,7 @@ export class TermWrap {
     // Latency added: ≤ 40ms — imperceptible during streaming output.
     private static readonly RAF_BATCH_MS = 40;
     private rafScheduledAt: number = 0;
+    private rafLastFlushTime: number = 0;
 
     private scheduleRafWrite(data: Uint8Array) {
         this.rafBuffer.push(data);
@@ -339,15 +348,19 @@ export class TermWrap {
             }
             const chunkCount = this.rafBuffer.length;
             this.rafBuffer = [];
+            const gap = this.rafLastFlushTime > 0 ? (this.rafScheduledAt - this.rafLastFlushTime).toFixed(1) : "first";
+            this.rafLastFlushTime = performance.now();
             const t0 = performance.now();
             this.doTerminalWrite(merged, null).then(() => {
                 const elapsed = performance.now() - t0;
                 const bufLines = this.terminal.buffer.active.length;
-                if (elapsed > 8) {
-                    console.warn(`[raf-write] SLOW chunks=${chunkCount} bytes=${totalLen} elapsed=${elapsed.toFixed(1)}ms bufLines=${bufLines}`);
-                } else {
-                    console.log(`[raf-write] chunks=${chunkCount} bytes=${totalLen} elapsed=${elapsed.toFixed(1)}ms bufLines=${bufLines}`);
-                }
+                // Diag: for single-chunk writes, log first 8 bytes as hex to identify escape sequences
+                const hexPrefix = chunkCount === 1
+                    ? " hex=" + Array.from(merged.slice(0, 8)).map(b => b.toString(16).padStart(2, "0")).join("")
+                    : "";
+                const level = elapsed > 8 ? "SLOW " : "";
+                const logFn = elapsed > 8 ? console.warn : console.log;
+                logFn(`[raf-write] ${level}chunks=${chunkCount} bytes=${totalLen} elapsed=${elapsed.toFixed(1)}ms gap=${gap}ms bufLines=${bufLines}${hexPrefix}`);
             });
         };
         requestAnimationFrame(tryFlush);
