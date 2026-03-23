@@ -118,6 +118,34 @@ AgentMux          (Tauri v2 — Rust + platform WebView)
 | **Windows** | `src-tauri/target/release/bundle/nsis/AgentMux_*.exe` |
 | **Linux** | `target/release/bundle/appimage/AgentMux_*_amd64.AppImage` |
 
+## Debugging & Logging
+
+All `console.log/warn/error/debug/info` calls in the frontend are routed to the host log file via the Tauri backend — no DevTools required.
+
+### Log file location
+
+```
+~/.agentmux/logs/agentmux-host-v<VERSION>.log.<DATE>
+```
+
+Works in **both dev and portable builds**. Frontend messages are tagged `[fe]`:
+
+```json
+{"timestamp":"...","level":"INFO","fields":{"message":"[fe] my message","module":"console"}}
+```
+
+### Tail frontend logs live
+
+```bash
+tail -f ~/.agentmux/logs/agentmux-host-v*.log | grep '\[fe\]'
+```
+
+### How it works
+
+`console.log` → monkey-patched by `frontend/log/log-pipe.ts` at startup → `fe_log_structured` Tauri command → `tracing::info!` → log file.
+
+See [`docs/specs/frontend-log-pipe.md`](./docs/specs/frontend-log-pipe.md) for full details.
+
 ## Version Management
 
 Always use [`@a5af/bump-cli`](https://github.com/a5af/bump-cli) — never edit version numbers manually.
