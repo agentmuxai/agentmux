@@ -303,13 +303,31 @@ export class TermWrap {
     //
     // Buffering writes until the next animation frame coalesces same-cycle chunks into
     // one terminal.write() call so xterm.js only updates the viewport once, to the final
-    // cursor position (back at bottom). Latency added: ≤ 16ms — imperceptible during
-    // streaming output.
+    // cursor position (back at bottom).
+    //
+    // Tier-4: 40ms batch window.
+    // Claude Code (Ink) sends content then ~28-33ms later sends ESC[A (cursor-up,
+    // 3 bytes) to redraw the previous line. The RAF window (~16ms) fires BEFORE the
+    // cursor-up arrives, so content and cursor-up land in separate frames:
+    //   frame N:   content written  → viewport shows content
+    //   frame N+2: cursor-up written → viewport snaps UP → DWM flash
+    // Widening to 40ms ensures content + cursor-up coalesce into a single write,
+    // eliminating the intermediate viewport state that DWM captures as flash.
+    // Latency added: ≤ 40ms — imperceptible during streaming output.
+    private static readonly RAF_BATCH_MS = 40;
+    private rafScheduledAt: number = 0;
+
     private scheduleRafWrite(data: Uint8Array) {
         this.rafBuffer.push(data);
         if (this.rafPending) return;
         this.rafPending = true;
-        requestAnimationFrame(() => {
+        this.rafScheduledAt = performance.now();
+        const tryFlush = () => {
+            const held = performance.now() - this.rafScheduledAt;
+            if (held < TermWrap.RAF_BATCH_MS) {
+                requestAnimationFrame(tryFlush);
+                return;
+            }
             this.rafPending = false;
             if (this.rafBuffer.length === 0) return;
             const totalLen = this.rafBuffer.reduce((n, b) => n + b.length, 0);
@@ -331,7 +349,8 @@ export class TermWrap {
                     console.log(`[raf-write] chunks=${chunkCount} bytes=${totalLen} elapsed=${elapsed.toFixed(1)}ms bufLines=${bufLines}`);
                 }
             });
-        });
+        };
+        requestAnimationFrame(tryFlush);
     }
 
     doTerminalWrite(data: string | Uint8Array, setPtyOffset?: number): Promise<void> {
