@@ -72,7 +72,7 @@ export function setTransform(
     const widthRounded = roundVals ? Math.ceil(width) : width;
     const heightRounded = roundVals ? Math.ceil(height) : height;
     const translate = `translate3d(${leftRounded}px,${topRounded}px, 0)`;
-    return {
+    const style: CSSProperties = {
         top: 0,
         left: 0,
         transform: translate,
@@ -80,11 +80,16 @@ export function setTransform(
         MozTransform: translate,
         msTransform: translate,
         OTransform: translate,
-        width: setSize ? `${widthRounded}px` : undefined,
-        height: setSize ? `${heightRounded}px` : undefined,
         position: "absolute",
-        zIndex: zIndex,
     };
+    if (setSize) {
+        style.width = `${widthRounded}px`;
+        style.height = `${heightRounded}px`;
+    }
+    if (zIndex != null) {
+        style.zIndex = zIndex;
+    }
+    return style;
 }
 
 export function getCenter(dimensions: Dimensions): Point {

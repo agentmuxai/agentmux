@@ -547,6 +547,10 @@ const ResizeHandle = (props: ResizeHandleComponentProps) => {
     let resizeHandleRef: HTMLDivElement | undefined;
     const [trackingPointer, setTrackingPointer] = createSignal<number | undefined>(undefined);
 
+    // WKWebView does not apply CSS cursor on transformed absolute elements.
+    // Work around by setting document.body.style.cursor directly.
+    const cursorStyle = () => props.resizeHandleProps.flexDirection === "row" ? "ew-resize" : "ns-resize";
+
     const handlePointerMove = throttle(10, (event: PointerEvent) => {
         if (trackingPointer() === event.pointerId) {
             const { clientX, clientY } = event;
@@ -560,10 +564,12 @@ const ResizeHandle = (props: ResizeHandleComponentProps) => {
 
     function onPointerCapture(event: PointerEvent) {
         setTrackingPointer(event.pointerId);
+        document.body.style.cursor = cursorStyle();
     }
 
     const onPointerRelease = debounce(30, (event: PointerEvent) => {
         setTrackingPointer(undefined);
+        document.body.style.cursor = "";
         props.layoutModel.onResizeEnd();
     });
 
@@ -574,7 +580,14 @@ const ResizeHandle = (props: ResizeHandleComponentProps) => {
             onPointerDown={onPointerDown}
             onGotPointerCapture={onPointerCapture}
             onLostPointerCapture={onPointerRelease}
-            style={props.resizeHandleProps.transform as JSX.CSSProperties}
+            onMouseEnter={() => { document.body.style.cursor = cursorStyle(); }}
+            onMouseLeave={() => { document.body.style.cursor = ""; }}
+            style={{
+                ...props.resizeHandleProps.transform as JSX.CSSProperties,
+                cursor: cursorStyle(),
+                "pointer-events": "auto",
+                "z-index": "var(--zindex-layout-resize-handle)",
+            }}
             onPointerMove={handlePointerMove}
         >
             <div class="line" />
