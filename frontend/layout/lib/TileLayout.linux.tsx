@@ -5,7 +5,7 @@
 // dragHandle: undefined — whole-tile drag because WebKitGTK does not
 // support HTML5 DnD from draggable="true" child inside draggable="false" parent.
 
-import { getSettingsKeyAtom } from "@/app/store/global";
+import { getApi, getSettingsKeyAtom } from "@/app/store/global";
 import { draggable, dropTargetForElements, monitorForElements } from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
 import clsx from "clsx";
 import { toPng } from "html-to-image";
@@ -83,7 +83,10 @@ function TileLayoutComponent(props: TileLayoutProps) {
     );
 
     // Handle drag-over for bounds checking to clear pending action when cursor leaves container.
+    // Guard: only fire during an active tile drag (globalDragNodeId set). Tab DnD must not
+    // trigger persistToBackend via treeReducer, which caused a crash on Linux (see drag.rs notes).
     const checkForCursorBounds = debounce(100, (x: number, y: number) => {
+        if (!globalDragNodeId) return;
         if (layoutModel.displayContainerRef?.current) {
             const displayContainerRect = layoutModel.displayContainerRef.current.getBoundingClientRect();
             const normalizedX = x - displayContainerRect.x;
@@ -339,12 +342,14 @@ const DisplayNode = (props: DisplayNodeProps) => {
                     props.layoutModel.activeDrag._set(true);
                     setIsDragging(true);
                     setCurrentDragPayload({ kind: "tile", node: props.node });
+                    getApi().setJsDragActive(true).catch(() => {});
                 },
                 onDrop: () => {
                     globalDragNodeId = null;
                     globalDragLayoutModel = null;
                     props.layoutModel.activeDrag._set(false);
                     setIsDragging(false);
+                    getApi().setJsDragActive(false).catch(() => {});
                     // Do NOT clear currentDragPayload here — fires for ALL drops.
                     // Cleared in dropTargetForElements.onDrop instead.
                 },

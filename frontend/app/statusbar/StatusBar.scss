@@ -72,7 +72,7 @@
     }
 
     .stat-uptime {
-        min-width: 7ch; // fits "H:MM:SS", grows naturally for "D:HH:MM:SS"
+        // min-width set reactively in BackendStatus.tsx — steps up with format tier
     }
 
     .stat-cpu {
@@ -89,6 +89,10 @@
 
     .stat-disk {
         min-width: 12ch; // fits "R999M W999M"
+    }
+
+    .stat-net {
+        min-width: 12ch; // fits "↑999M ↓999M"
     }
 
     .stat-disk-arrow {

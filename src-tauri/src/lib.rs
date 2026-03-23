@@ -123,6 +123,7 @@ pub fn run() {
             commands::drag::restore_drag_cursor,
             commands::drag::release_drag_capture,
             commands::drag::get_mouse_button_state,
+            commands::drag::set_js_drag_active,
             // File operations
             commands::file_ops::copy_file_to_dir,
         ])
@@ -301,11 +302,6 @@ pub fn run() {
 // Deep link handler removed — auth is now handled by `claude auth login` via shell controller.
 // See docs/SPEC_CLAUDE_CLI_INTEGRATION.md for the auth flow.
 
-/// Leaked log guard — stored in a static to keep the non-blocking writer alive
-/// for the entire lifetime of the app without using `std::mem::forget`.
-static LOG_GUARD: std::sync::OnceLock<tracing_appender::non_blocking::WorkerGuard> =
-    std::sync::OnceLock::new();
-
 fn init_logging(_handle: &tauri::AppHandle) -> std::path::PathBuf {
     use tracing_subscriber::{fmt, layer::SubscriberExt, EnvFilter};
 
@@ -321,12 +317,10 @@ fn init_logging(_handle: &tauri::AppHandle) -> std::path::PathBuf {
     let _ = std::fs::create_dir_all(&log_dir);
 
     let log_prefix = format!("agentmux-host-v{}.log", version);
+    // Use a synchronous (blocking) file writer so log entries are flushed
+    // immediately on each write. Non-blocking buffers can lose the last
+    // entries when the process is killed by a signal or segfault.
     let file_appender = tracing_appender::rolling::daily(&log_dir, &log_prefix);
-    let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
-
-    // Store the guard in a static so the non-blocking writer stays alive
-    // and flushes properly for the entire app lifetime.
-    let _ = LOG_GUARD.set(guard);
 
     let subscriber = tracing_subscriber::registry()
         .with(
@@ -336,7 +330,7 @@ fn init_logging(_handle: &tauri::AppHandle) -> std::path::PathBuf {
         .with(
             fmt::layer()
                 .json()
-                .with_writer(non_blocking)
+                .with_writer(file_appender)
                 .with_target(true),
         )
         .with(fmt::layer().with_writer(std::io::stderr));

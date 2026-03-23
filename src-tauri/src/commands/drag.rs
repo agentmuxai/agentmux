@@ -458,6 +458,24 @@ pub async fn get_mouse_button_state() -> Result<bool, String> {
     Ok(false)
 }
 
+/// Signal that a JS-level drag (tab or pane via pragmatic-dnd) is starting or ending.
+///
+/// On Linux, the GTK window-drag handler (`drag.rs`) checks this flag before calling
+/// `begin_move_drag`. Without this guard, dragging a tab in the header area causes
+/// the GTK motion handler to call `begin_move_drag`, which on Wayland immediately
+/// grabs the compositor pointer and crashes WebKitGTK's drag state machine.
+///
+/// Call with `active = true` on drag start, `active = false` on drag end.
+#[tauri::command]
+pub async fn set_js_drag_active(active: bool) -> Result<(), String> {
+    #[cfg(target_os = "linux")]
+    {
+        crate::drag::JS_DRAG_ACTIVE.store(active, std::sync::atomic::Ordering::Relaxed);
+        tracing::debug!(active = active, "[dnd:tauri] set_js_drag_active");
+    }
+    Ok(())
+}
+
 /// Restore all system cursors to their defaults.
 /// Must be called when a drag ends (drop, tear-off, or cancel).
 #[tauri::command]

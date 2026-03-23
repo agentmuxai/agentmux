@@ -83,6 +83,8 @@ export class TermWrap {
     private toDispose: TermTypes.IDisposable[] = [];
     pasteActive: boolean = false;
     lastUpdated: number;
+    private rafBuffer: Uint8Array[] = [];
+    private rafPending: boolean = false;
 
     // ── Phase 1: CONSTRUCT (sync) ──────────────────────────────────────
 
@@ -262,6 +264,13 @@ export class TermWrap {
         if (this.multiInputCallback) {
             this.multiInputCallback(data.key);
         }
+        // Scroll to bottom on printable input (letter, digit, space, punctuation).
+        // scrollOnUserInput: false is kept off because it also fires on arrow keys,
+        // Ctrl combos, and function keys — those shouldn't yank the viewport.
+        const e = data.domEvent;
+        if (data.key.length === 1 && !e.ctrlKey && !e.altKey && !e.metaKey) {
+            this.terminal.scrollToBottom();
+        }
     }
 
     addFocusListener(focusFn: () => void) {
@@ -275,7 +284,7 @@ export class TermWrap {
         } else if (msg.fileop == "append") {
             const decodedData = base64ToArray(msg.data64);
             if (this.loaded) {
-                this.doTerminalWrite(decodedData, null);
+                this.scheduleRafWrite(decodedData);
             } else {
                 this.heldData.push(decodedData);
             }
@@ -283,6 +292,36 @@ export class TermWrap {
             console.log("bad fileop for terminal", msg);
             return;
         }
+    }
+
+    // Tier-3 scroll fix: RAF-batched writes.
+    // PTY data arrives as separate WebSocket messages. Each doTerminalWrite() call
+    // triggers an xterm.js viewport sync. When Ink's cursor-up chunk and content chunk
+    // land in back-to-back messages, the viewport snaps up then back down — two flashes
+    // per render cycle, visible on Windows 10 as the DWM compositor presents each snap
+    // as a distinct frame.
+    //
+    // Buffering writes until the next animation frame coalesces same-cycle chunks into
+    // one terminal.write() call so xterm.js only updates the viewport once, to the final
+    // cursor position (back at bottom). Latency added: ≤ 16ms — imperceptible during
+    // streaming output.
+    private scheduleRafWrite(data: Uint8Array) {
+        this.rafBuffer.push(data);
+        if (this.rafPending) return;
+        this.rafPending = true;
+        requestAnimationFrame(() => {
+            this.rafPending = false;
+            if (this.rafBuffer.length === 0) return;
+            const totalLen = this.rafBuffer.reduce((n, b) => n + b.length, 0);
+            const merged = new Uint8Array(totalLen);
+            let offset = 0;
+            for (const chunk of this.rafBuffer) {
+                merged.set(chunk, offset);
+                offset += chunk.length;
+            }
+            this.rafBuffer = [];
+            this.doTerminalWrite(merged, null);
+        });
     }
 
     doTerminalWrite(data: string | Uint8Array, setPtyOffset?: number): Promise<void> {

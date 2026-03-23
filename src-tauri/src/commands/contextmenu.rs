@@ -105,6 +105,55 @@ pub fn show_context_menu<R: Runtime>(
     Ok(())
 }
 
+/// Recursively build a `Submenu` from a slice of `MenuItem`.
+/// Used for nested submenus (e.g. the Opacity submenu).
+fn build_submenu<R: Runtime>(
+    label: &str,
+    items: &[MenuItem],
+    app: &AppHandle<R>,
+) -> Result<tauri::menu::Submenu<R>, tauri::Error> {
+    let mut builder = tauri::menu::SubmenuBuilder::new(app, label);
+    for item in items {
+        if let Some(false) = item.visible {
+            continue;
+        }
+        match item.r#type.as_deref() {
+            Some("separator") => {
+                builder = builder.separator();
+            }
+            Some("checkbox") | Some("radio") => {
+                let checked = item.checked.unwrap_or(false);
+                let enabled = item.enabled.unwrap_or(true);
+                let lbl = item.label.clone().unwrap_or_default();
+                let id = item.id.clone();
+                let check_item = tauri::menu::CheckMenuItemBuilder::new(&lbl)
+                    .id(&id)
+                    .checked(checked)
+                    .enabled(enabled)
+                    .build(app)?;
+                builder = builder.item(&check_item);
+            }
+            _ => {
+                if let Some(sub_items) = &item.submenu {
+                    let lbl = item.label.clone().unwrap_or_default();
+                    let submenu = build_submenu(&lbl, sub_items, app)?;
+                    builder = builder.item(&submenu);
+                } else {
+                    let enabled = item.enabled.unwrap_or(true);
+                    let lbl = item.label.clone().unwrap_or_default();
+                    let id = item.id.clone();
+                    let menu_item = tauri::menu::MenuItemBuilder::new(&lbl)
+                        .id(&id)
+                        .enabled(enabled)
+                        .build(app)?;
+                    builder = builder.item(&menu_item);
+                }
+            }
+        }
+    }
+    builder.build()
+}
+
 fn build_menu_items<R: Runtime>(
     items: &[MenuItem],
     app: &AppHandle<R>,
@@ -121,7 +170,7 @@ fn build_menu_items<R: Runtime>(
             Some("separator") => {
                 builder = builder.separator();
             }
-            Some("checkbox") => {
+            Some("checkbox") | Some("radio") => {
                 let checked = item.checked.unwrap_or(false);
                 let enabled = item.enabled.unwrap_or(true);
                 let label = item.label.clone().unwrap_or_default();
@@ -136,17 +185,22 @@ fn build_menu_items<R: Runtime>(
                 builder = builder.item(&check_item);
             }
             _ => {
-                // Regular menu item (submenus not supported in context menus for simplicity)
-                let enabled = item.enabled.unwrap_or(true);
-                let label = item.label.clone().unwrap_or_default();
-                let id = item.id.clone();
+                if let Some(sub_items) = &item.submenu {
+                    let label = item.label.clone().unwrap_or_default();
+                    let submenu = build_submenu(&label, sub_items, app)?;
+                    builder = builder.item(&submenu);
+                } else {
+                    let enabled = item.enabled.unwrap_or(true);
+                    let label = item.label.clone().unwrap_or_default();
+                    let id = item.id.clone();
 
-                let menu_item = tauri::menu::MenuItemBuilder::new(&label)
-                    .id(&id)
-                    .enabled(enabled)
-                    .build(app)?;
+                    let menu_item = tauri::menu::MenuItemBuilder::new(&label)
+                        .id(&id)
+                        .enabled(enabled)
+                        .build(app)?;
 
-                builder = builder.item(&menu_item);
+                    builder = builder.item(&menu_item);
+                }
             }
         }
     }
