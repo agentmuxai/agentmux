@@ -191,9 +191,13 @@ pub fn register_controller(block_id: &str, controller: Arc<dyn Controller>) {
     registry.insert(block_id.to_string(), controller);
 }
 
-/// Unregister (delete) a controller by block ID.
+/// Unregister (delete) a controller by block ID, stopping it first.
+/// Removes from the registry before calling stop() so no new callers can reach it.
 pub fn delete_controller(block_id: &str) {
-    CONTROLLER_REGISTRY.write().unwrap().remove(block_id);
+    let ctrl = CONTROLLER_REGISTRY.write().unwrap().remove(block_id);
+    if let Some(ctrl) = ctrl {
+        let _ = ctrl.stop(true, STATUS_DONE);
+    }
 }
 
 /// Get all controllers (snapshot).
