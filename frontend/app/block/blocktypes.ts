@@ -46,7 +46,7 @@ export interface BlockFrameProps {
     nodeModel?: NodeModel;
     viewModel?: ViewModel;
     preview: boolean;
-    numBlocksInTab?: number;
+
     children?: JSX.Element;
     connBtnRef?: { current: HTMLDivElement | null };
 }

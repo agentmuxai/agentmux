@@ -689,7 +689,7 @@ function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
             class={clsx("block", "block-frame-default", "block-" + nodeModel.blockId, {
                 "block-focused": isFocused() || props.preview,
                 "block-preview": props.preview,
-                "block-no-highlight": props.numBlocksInTab === 1,
+
                 "has-agent-color": !!blockAgentColor(),
                 ephemeral: isEphemeral(),
                 magnified: isMagnified(),
@@ -750,10 +750,9 @@ function BlockFrame_Default(props: BlockFrameProps): JSX.Element {
 function BlockFrame(props: BlockFrameProps): JSX.Element {
     const blockId = props.nodeModel.blockId;
     const [blockData] = WOS.useWaveObjectValue<Block>(WOS.makeORef("block", blockId));
-    const numBlocks = () => atoms.tabAtom()?.blockids?.length ?? 0;
     return (
         <Show when={blockId && blockData()}>
-            <BlockFrame_Default {...props} numBlocksInTab={numBlocks()} />
+            <BlockFrame_Default {...props} />
         </Show>
     );
 }

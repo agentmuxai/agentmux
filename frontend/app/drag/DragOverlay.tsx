@@ -13,6 +13,7 @@
 
 import { atoms, getApi } from "@/store/global";
 import { WorkspaceService } from "@/app/store/services";
+import { deleteLayoutModelForTab } from "@/layout/index";
 import { Logger } from "@/util/logger";
 import { createSignal, onCleanup, onMount, Show } from "solid-js";
 import type { JSX } from "solid-js";
@@ -105,6 +106,14 @@ function DragOverlay(): JSX.Element {
                     WorkspaceService.MoveTabToWorkspace(data.payload.tabId, data.sourceWorkspaceId, myWsId).catch((e) => {
                         Logger.error("dnd:overlay", "MoveTabToWorkspace failed", { error: String(e) });
                     });
+                }
+            }
+
+            // Source window: clean up the LayoutModel for a tab that was successfully dragged out.
+            // The model lives in this window's layoutModelMap; the destination window has no model to clean.
+            if (data.result === "drop" && data.sourceWindow === wl && data.targetWindow !== wl) {
+                if (data.dragType === "tab" && data.payload.tabId) {
+                    deleteLayoutModelForTab(data.payload.tabId);
                 }
             }
         }).then((fn) => { unlistenEnd = fn; });

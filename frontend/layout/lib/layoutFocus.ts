@@ -13,6 +13,17 @@ import type { LayoutModel } from "./layoutModel";
  * @param leafOrder The new leaf order array to use when searching for stale nodes in the stack.
  */
 export function validateFocusedNode(model: LayoutModel, leafOrder: LeafOrderEntry[]) {
+    // Bootstrap: first layout computation for a tab with no persisted focus.
+    // The standard guard below is a no-op when both sides are undefined,
+    // leaving all panes unfocused until the user clicks one.
+    if (!model.treeState.focusedNodeId && model.focusedNodeIdStack.length === 0) {
+        if (leafOrder.length > 0) {
+            model.treeState.focusedNodeId = leafOrder[0].nodeid;
+            model.focusedNodeIdStack = [model.treeState.focusedNodeId];
+            model.setter(model.localTreeStateAtom, { ...model.treeState });
+        }
+        return;
+    }
     if (model.treeState.focusedNodeId !== model.focusedNodeId) {
         // Remove duplicates and stale entries from focus stack.
         const newFocusedNodeIdStack: string[] = [];
