@@ -37,9 +37,28 @@ function paneAcceptsInput(blockData: Block): boolean {
 
 // ─── Split ────────────────────────────────────────────────────────────────────
 
+// Agent-specific meta fields that should NOT be inherited when splitting.
+// A split agent pane should open the picker, not re-launch the same agent.
+const agentInheritBlocklist = new Set([
+    "agentId",
+    "agentName",
+    "agentIcon",
+    "agentMode",
+    "agentProvider",
+    "agentCliPath",
+    "agentCliArgs",
+    "agentOutputFormat",
+    "agentBinDir",
+    "cmd",
+    "cmd:args",
+    "cmd:interactive",
+    "cmd:runonstart",
+]);
+
 /**
  * Split the pane in the given direction, spawning a new pane of the same type
  * that inherits the source pane's meta (view, controller, cwd, connection, etc.).
+ * Agent panes strip agent-specific fields so the new pane shows the agent picker.
  */
 export async function handleSplitPane(blockData: Block, direction: SplitDirection): Promise<void> {
     const sourceConn = blockData.meta?.connection;
@@ -49,6 +68,13 @@ export async function handleSplitPane(blockData: Block, direction: SplitDirectio
     // triggers the connection overlay and shows "Disconnected".
     if (!sourceConn || sourceConn === "local") {
         delete meta["connection"];
+    }
+    // Agent panes: drop all agent-specific fields so the new pane shows
+    // the agent picker instead of re-launching the same agent session.
+    if (blockData.meta?.view === "agent") {
+        for (const key of agentInheritBlocklist) {
+            delete meta[key];
+        }
     }
     const blockDef: BlockDef = { meta };
 
