@@ -22,4 +22,7 @@ pub(super) struct CacheEntry {
     pub(super) file: Option<WaveFile>,
     pub(super) data_entries: HashMap<i32, DataCacheEntry>,
     pub(super) dirty: bool,
+    /// Last time this entry was read or written (ms since epoch).
+    /// Used for TTL-based eviction of clean entries.
+    pub(super) last_access_ms: i64,
 }

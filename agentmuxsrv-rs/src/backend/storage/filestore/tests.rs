@@ -3,7 +3,7 @@
 
 //! Tests for FileStore.
 
-use super::core::PART_DATA_SIZE;
+use super::core::{PART_DATA_SIZE, CACHE_TTL_SECS};
 use super::{FileOpts, FileMeta, FileStore, WaveFile};
 use crate::backend::storage::error::StoreError;
 
@@ -253,6 +253,89 @@ fn test_flush_cache_no_dirty() {
     let (files, parts) = store.flush_cache().unwrap();
     assert_eq!(files, 0);
     assert_eq!(parts, 0);
+}
+
+#[test]
+fn test_cache_evicts_stale_clean_entries() {
+    let store = make_store();
+    store
+        .make_file("z1", "f1", FileMeta::new(), FileOpts::default())
+        .unwrap();
+    store.write_file("z1", "f1", b"data").unwrap();
+
+    // Entry should be in cache — stat hits cache (no DB round trip needed, but file is present)
+    assert!(store.stat("z1", "f1").unwrap().is_some());
+
+    // Backdate the cache entry's last_access_ms beyond the TTL
+    {
+        let ttl_ms = (CACHE_TTL_SECS * 1000 + 1000) as i64; // TTL + 1s in the past
+        let now = FileStore::now_ms();
+        let mut cache = store.cache.lock().unwrap();
+        if let Some(entry) = cache.get_mut(&("z1".to_string(), "f1".to_string())) {
+            entry.last_access_ms = now - ttl_ms;
+        }
+    }
+
+    // flush_cache should evict the stale clean entry
+    let (files, parts) = store.flush_cache().unwrap();
+    assert_eq!(files, 0); // no dirty files flushed
+    assert_eq!(parts, 0);
+
+    // Cache should be empty now
+    {
+        let cache = store.cache.lock().unwrap();
+        assert!(!cache.contains_key(&("z1".to_string(), "f1".to_string())),
+            "stale clean entry should have been evicted");
+    }
+
+    // File must still be readable from DB after eviction
+    let data = store.read_file("z1", "f1").unwrap().unwrap();
+    assert_eq!(data, b"data");
+}
+
+#[test]
+fn test_cache_does_not_evict_recently_accessed() {
+    let store = make_store();
+    store
+        .make_file("z1", "f1", FileMeta::new(), FileOpts::default())
+        .unwrap();
+    store.write_file("z1", "f1", b"data").unwrap();
+
+    // Access it (updates last_access_ms to now)
+    store.stat("z1", "f1").unwrap();
+
+    // flush_cache should NOT evict a recently accessed entry
+    store.flush_cache().unwrap();
+
+    {
+        let cache = store.cache.lock().unwrap();
+        assert!(cache.contains_key(&("z1".to_string(), "f1".to_string())),
+            "recently accessed entry should not be evicted");
+    }
+}
+
+#[test]
+fn test_write_file_does_not_cache_data_parts() {
+    let store = make_store();
+    store
+        .make_file("z1", "f1", FileMeta::new(), FileOpts::default())
+        .unwrap();
+
+    let data: Vec<u8> = vec![0xAB; PART_DATA_SIZE * 2];
+    store.write_file("z1", "f1", &data).unwrap();
+
+    // data_entries in the cache entry should be empty — no duplicate data copies in memory
+    {
+        let cache = store.cache.lock().unwrap();
+        if let Some(entry) = cache.get(&("z1".to_string(), "f1".to_string())) {
+            assert!(entry.data_entries.is_empty(),
+                "write_file must not cache data parts (they are already in DB)");
+        }
+    }
+
+    // Data must still be readable from DB
+    let read = store.read_file("z1", "f1").unwrap().unwrap();
+    assert_eq!(read, data);
 }
 
 // ---- write_at tests ----
