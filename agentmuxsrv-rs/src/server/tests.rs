@@ -33,7 +33,7 @@ fn test_state() -> AppState {
         app_path: String::new(),
         wstore,
         filestore,
-        event_bus,
+        event_bus: event_bus.clone(),
         broker,
         reactive_handler,
         poller,
@@ -41,6 +41,8 @@ fn test_state() -> AppState {
         messagebus: Arc::new(crate::backend::messagebus::MessageBus::new()),
         http_client: reqwest::Client::new(),
         local_web_url: String::new(),
+        subagent_watcher: Arc::new(crate::backend::subagent_watcher::SubagentWatcher::new(event_bus)),
+        history_service: Arc::new(crate::backend::history::HistoryService::new()),
     }
 }
 

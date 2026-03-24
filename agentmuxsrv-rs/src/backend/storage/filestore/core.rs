@@ -12,7 +12,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use rusqlite::{params, Connection};
 
-use super::cache::{CacheEntry, DataCacheEntry};
+use super::cache::CacheEntry;
 use super::types::{FileMeta, FileOpts, WaveFile};
 use crate::backend::storage::error::StoreError;
 use crate::backend::storage::migrations::run_filestore_migrations;
@@ -22,6 +22,9 @@ pub(super) const PART_DATA_SIZE: usize = 64 * 1024;
 
 /// Default flush interval in seconds.
 pub const DEFAULT_FLUSH_SECS: u64 = 5;
+
+/// Clean cache entries idle longer than this are evicted during flush.
+pub const CACHE_TTL_SECS: u64 = 60;
 
 /// SQLite-backed file storage with write-through cache.
 pub struct FileStore {
@@ -109,6 +112,7 @@ impl FileStore {
                 file: Some(file),
                 data_entries: HashMap::new(),
                 dirty: false,
+                last_access_ms: now,
             },
         );
 
@@ -170,8 +174,9 @@ impl FileStore {
         // Check cache first
         let key = (zone_id.to_string(), name.to_string());
         {
-            let cache = self.cache.lock().unwrap();
-            if let Some(entry) = cache.get(&key) {
+            let mut cache = self.cache.lock().unwrap();
+            if let Some(entry) = cache.get_mut(&key) {
+                entry.last_access_ms = Self::now_ms();
                 return Ok(entry.file.clone());
             }
         }
@@ -250,24 +255,14 @@ impl FileStore {
         }
         drop(conn);
 
-        // Update cache
+        // Update cache (metadata only — data parts are already in DB, read_file loads from DB)
         let mut cache = self.cache.lock().unwrap();
         if let Some(entry) = cache.get_mut(&key) {
             if let Some(ref mut file) = entry.file {
                 file.size = data.len() as i64;
                 file.modts = now;
             }
-            entry.data_entries.clear();
-            for (idx, part_data) in parts.into_iter().enumerate() {
-                entry.data_entries.insert(
-                    idx as i32,
-                    DataCacheEntry {
-                        part_idx: idx as i32,
-                        data: part_data,
-                    },
-                );
-            }
-            entry.dirty = false;
+            entry.last_access_ms = now;
         }
 
         Ok(())
@@ -403,6 +398,7 @@ impl FileStore {
                 f.size = new_size;
                 f.modts = now;
             }
+            entry.last_access_ms = now;
         }
 
         Ok(())
@@ -451,6 +447,7 @@ impl FileStore {
                 f.meta = new_meta;
                 f.modts = now;
             }
+            entry.last_access_ms = now;
         }
 
         Ok(())
@@ -489,17 +486,36 @@ impl FileStore {
             .map_err(StoreError::Sqlite)
     }
 
-    /// Flush all dirty cache entries to the database.
+    /// Flush dirty cache entries to the database and evict stale clean entries.
     /// Returns (files_flushed, parts_flushed).
     pub fn flush_cache(&self) -> Result<(usize, usize), StoreError> {
-        let dirty_keys: Vec<(String, String)> = {
+        let ttl_ms = (CACHE_TTL_SECS * 1000) as i64;
+        let now = Self::now_ms();
+        let cutoff_ms = now - ttl_ms;
+
+        let (dirty_keys, stale_keys): (Vec<_>, Vec<_>) = {
             let cache = self.cache.lock().unwrap();
-            cache
+            let dirty = cache
                 .iter()
                 .filter(|(_, e)| e.dirty)
                 .map(|(k, _)| k.clone())
-                .collect()
+                .collect();
+            let stale = cache
+                .iter()
+                .filter(|(_, e)| !e.dirty && e.last_access_ms < cutoff_ms)
+                .map(|(k, _)| k.clone())
+                .collect();
+            (dirty, stale)
         };
+
+        // Evict stale clean entries — they're already persisted in DB.
+        if !stale_keys.is_empty() {
+            let mut cache = self.cache.lock().unwrap();
+            for key in &stale_keys {
+                cache.remove(key);
+            }
+            tracing::debug!("filestore cache: evicted {} stale entries", stale_keys.len());
+        }
 
         let mut files_flushed = 0;
         let mut parts_flushed = 0;
