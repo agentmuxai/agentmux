@@ -292,7 +292,7 @@ const QuickTips = (): JSX.Element => {
                         </IconBox>
                         <a
                             target="_blank"
-                            href="https://discord.gg/P5zSGXbP"
+                            href="https://discord.com/invite/96erama9Ar"
                             rel="noopener"
                             class="hover:text-accent-400 hover:underline transition-colors font-medium"
                         >
