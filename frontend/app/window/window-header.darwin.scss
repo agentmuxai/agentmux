@@ -2,8 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // macOS-specific window header styles.
-// CSS zoom divides flex space by zoom factor on WebKit.
-// calc(100vw / var(--zoomfactor, 1)) compensates so the header fills the viewport.
+// On macOS/WebKit, CSS zoom: factor scales children so they see width/factor
+// pixels of layout space. Use width: 100% (parent is full-viewport-width) so
+// children see exactly 100vw/factor — keeping right-pinned buttons at the edge.
+// DO NOT use calc(100vw / var(--zoomfactor, 1)) here — that double-divides:
+// children would see 100vw/factor² and the close/min/max buttons drift left.
 
 .window-header {
     --default-indent: 10px;
@@ -27,7 +30,7 @@
     display: flex;
     flex-direction: row;
     align-items: end;
-    width: calc(100vw / var(--zoomfactor, 1));
+    width: 100%;
     height: 33px;
     zoom: var(--zoomfactor);
     cursor: default;
