@@ -97,7 +97,18 @@ export function DroppableTab(props: DroppableTabProps): JSX.Element {
             },
         });
 
+        // Set effectAllowed = "copy" so Windows OLE shows the plus-sign cursor
+        // when dragging outside the WebView2 window (signals tearoff intent).
+        // Atlaskit registers its dragstart handler on document in capture phase,
+        // so this bubble-phase listener fires after Atlaskit has committed the
+        // drag — effectAllowed is still writable until dragstart returns.
+        const handleNativeDragStart = (e: DragEvent) => {
+            if (e.dataTransfer) e.dataTransfer.effectAllowed = "copy";
+        };
+        tabWrapRef.addEventListener("dragstart", handleNativeDragStart);
+
         onCleanup(() => {
+            tabWrapRef.removeEventListener("dragstart", handleNativeDragStart);
             tabWrapperRefs.delete(props.tabId);
             cleanupDraggable();
         });

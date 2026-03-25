@@ -358,7 +358,7 @@ const DisplayNode = (props: DisplayNodeProps) => {
 
             // New live handle — register draggable on it
             registeredHandle = handle;
-            cleanupFn = draggable({
+            const atlasDragCleanup = draggable({
                 element: handle,
                 canDrag: () => !isEphemeral() && !isMagnified(),
                 getInitialData: () => ({ nodeId: props.node.id, type: tileItemType }),
@@ -387,6 +387,20 @@ const DisplayNode = (props: DisplayNodeProps) => {
                     // out-of-window. Cleared in dropTargetForElements.onDrop instead.
                 },
             });
+
+            // Set effectAllowed = "copy" so Windows OLE shows the plus-sign cursor
+            // when dragging outside the WebView2 window (signals tearoff intent).
+            // Runs in bubble phase — after Atlaskit's capture-phase document handler
+            // has committed the drag — so effectAllowed is still writable.
+            const handleNativeDragStart = (e: DragEvent) => {
+                if (e.dataTransfer) e.dataTransfer.effectAllowed = "copy";
+            };
+            handle.addEventListener("dragstart", handleNativeDragStart);
+
+            cleanupFn = () => {
+                atlasDragCleanup();
+                handle.removeEventListener("dragstart", handleNativeDragStart);
+            };
         };
 
         // Poll every 100ms for the lifetime of this tile. Handles initial load
