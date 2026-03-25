@@ -1,4 +1,5 @@
 use crate::state::AppState;
+use tauri::{Emitter, Manager};
 
 /// Get the backend WebSocket and HTTP endpoints.
 ///
@@ -68,6 +69,60 @@ pub fn get_backend_info(state: tauri::State<'_, AppState>) -> serde_json::Value 
 #[tauri::command]
 pub fn fe_log(msg: String) {
     tracing::info!("[frontend] {}", msg);
+}
+
+/// Restart the agentmuxsrv-rs backend sidecar.
+///
+/// Kills any existing sidecar, waits 500 ms for the OS to release the port,
+/// spawns a fresh one using the same binary/env logic as the initial launch,
+/// updates the stored endpoints in `AppState`, and broadcasts `backend-ready`
+/// to every open window so all frontends reconnect.
+///
+/// Returns the new endpoints on success; the frontend ignores the return value
+/// and relies on the `backend-ready` Tauri event to trigger reconnect.
+#[tauri::command]
+pub async fn restart_backend(app: tauri::AppHandle) -> Result<(), String> {
+    tracing::info!("[restart_backend] user-initiated restart");
+
+    // Kill existing sidecar if still alive
+    {
+        let state = app.state::<AppState>();
+        let mut sidecar = state.sidecar_child.lock().unwrap();
+        if let Some(child) = sidecar.take() {
+            let _ = child.kill();
+            tracing::info!("[restart_backend] killed stale sidecar");
+        }
+    }
+
+    // Small delay — lets the OS release the port before the new process binds it
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+    // Spawn fresh (runs binary resolution, wsh deploy, env vars, ESTART wait)
+    let result = crate::sidecar::spawn_backend(&app).await?;
+
+    // Update stored endpoints
+    {
+        let state = app.state::<AppState>();
+        let mut endpoints = state.backend_endpoints.lock().unwrap();
+        endpoints.ws_endpoint = result.ws_endpoint.clone();
+        endpoints.web_endpoint = result.web_endpoint.clone();
+    }
+
+    // Broadcast to ALL windows — secondary windows also need to reconnect
+    let payload = serde_json::json!({
+        "ws":  result.ws_endpoint,
+        "web": result.web_endpoint,
+    });
+    for window in app.webview_windows().values() {
+        let _ = window.emit("backend-ready", &payload);
+    }
+
+    tracing::info!(
+        "[restart_backend] backend restarted: ws={} web={}",
+        result.ws_endpoint, result.web_endpoint
+    );
+
+    Ok(())
 }
 
 /// Structured log from the frontend with level, module, message, and optional data.

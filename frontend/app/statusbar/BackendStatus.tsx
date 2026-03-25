@@ -1,7 +1,8 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { atoms, backendDeathInfoAtom, getApi } from "@/store/global";
+import { atoms, backendDeathInfoAtom, getApi, setBackendStatusAtom } from "@/store/global";
+import { setRestartInProgress } from "@/store/backendStatus";
 import { waveEventSubscribe } from "@/app/store/wps";
 import { createEffect, createSignal, onCleanup, onMount, Show, type JSX } from "solid-js";
 
@@ -22,6 +23,21 @@ function formatUptime(secs: number): string {
 const BackendStatus = (): JSX.Element => {
     const backendStatus = atoms.backendStatusAtom;
     const [popoverOpen, setPopoverOpen] = createSignal(false);
+    const [restarting, setRestarting] = createSignal(false);
+
+    const handleRestart = () => {
+        setRestarting(true);
+        setRestartInProgress(true); // suppress backend-terminated → crashed during restart
+        setBackendStatusAtom("connecting");
+        setPopoverOpen(false);
+        getApi().restartBackend().catch((e: unknown) => {
+            console.error("[BackendStatus] restart failed:", e);
+            setRestartInProgress(false); // clear flag — restart failed, allow future crash events
+            setBackendStatusAtom("crashed");
+        }).finally(() => {
+            setRestarting(false);
+        });
+    };
     const [startedAt, setStartedAt] = createSignal<number | null>(null);
     const [uptimeSecs, setUptimeSecs] = createSignal(0);
     const [backendInfo, setBackendInfo] = createSignal<{
@@ -186,6 +202,16 @@ const BackendStatus = (): JSX.Element => {
                                     <span class="status-bar-popover-mono">{backendDeathInfoAtom()!.signal}</span>
                                 </div>
                             </Show>
+                            <div class="status-bar-popover-divider" />
+                            <div class="status-bar-popover-row">
+                                <button
+                                    class="status-bar-restart-btn"
+                                    disabled={restarting()}
+                                    onClick={handleRestart}
+                                >
+                                    {restarting() ? "Restarting…" : "Restart Backend"}
+                                </button>
+                            </div>
                         </Show>
                     </div>
                 </Show>

@@ -80,6 +80,7 @@ pub fn run() {
             commands::backend::get_backend_endpoints,
             commands::backend::get_wave_init_opts,
             commands::backend::get_backend_info,
+            commands::backend::restart_backend,
             commands::backend::fe_log,
             commands::backend::fe_log_structured,
             // Devtools commands

@@ -67,6 +67,19 @@ class WSControl {
         this.wsConn.close();
     }
 
+    /// Update the base endpoint and reconnect.  Called after a backend restart
+    /// when the port may have changed.
+    changeEndpoint(newBaseHostPort: string) {
+        this.baseHostPort = newBaseHostPort;
+        this.reconnectTimes = 0;
+        this.noReconnect = false;
+        if (this.wsConn) {
+            this.wsConn.close(); // onclose → reconnect() with updated baseHostPort
+        } else {
+            this.connectNow("changeEndpoint");
+        }
+    }
+
     connectNow(desc: string) {
         if (this.open || this.noReconnect) {
             return;
@@ -229,6 +242,13 @@ class WSControl {
 }
 
 let globalWS: WSControl;
+
+/// Reconnect the global WS to a new endpoint.
+/// Called when `backend-ready` fires after a user-initiated backend restart.
+function reconnectWS(newBaseHostPort: string) {
+    globalWS?.changeEndpoint(newBaseHostPort);
+}
+
 function initGlobalWS(
     baseHostPort: string,
     tabId: string,
@@ -252,6 +272,7 @@ export {
     addWSReconnectHandler,
     globalWS,
     initGlobalWS,
+    reconnectWS,
     removeWSReconnectHandler,
     sendRawRpcMessage,
     sendWSCommand,

@@ -78,6 +78,7 @@ declare global {
         getConfigDir: () => string;
         getAboutModalDetails: () => AboutModalDetails;
         getBackendInfo: () => Promise<{ pid?: number; started_at?: string; web_endpoint?: string; version: string }>;
+        restartBackend: () => Promise<void>;
         getDocsiteUrl: () => string;
         getZoomFactor: () => number;
         showContextMenu: (workspaceId: string, menu?: NativeContextMenuItem[], position?: { x: number; y: number }) => void;

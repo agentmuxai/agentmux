@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { atoms, getApi, windowInstanceNumAtom, windowCountAtom } from "@/store/global";
+import { atoms, getApi, windowInstanceNumAtom, windowCountAtom, backendStatusAtom } from "@/store/global";
 import { Show, type JSX } from "solid-js";
 import { BackendStatus } from "./BackendStatus";
 import { ConfigStatus } from "./ConfigStatus";
@@ -36,16 +36,25 @@ const StatusBar = (): JSX.Element => {
                 <ConfigStatus />
                 <UpdateStatus />
                 <Show when={version}>
-                    <span
-                        class="status-version clickable"
-                        onClick={handleNewWindow}
-                        title="Open New AgentMux Window"
+                    <Show
+                        when={backendStatusAtom() !== "crashed"}
+                        fallback={
+                            <span class="status-version status-version-offline" title="Backend offline">
+                                v{version}
+                            </span>
+                        }
                     >
-                        v{version}
-                        <Show when={windowCount() > 1}>
-                            <span class="instance-num"> ({instanceNum()})</span>
-                        </Show>
-                    </span>
+                        <span
+                            class="status-version clickable"
+                            onClick={handleNewWindow}
+                            title="Open New AgentMux Window"
+                        >
+                            v{version}
+                            <Show when={windowCount() > 1}>
+                                <span class="instance-num"> ({instanceNum()})</span>
+                            </Show>
+                        </span>
+                    </Show>
                 </Show>
             </div>
         </div>

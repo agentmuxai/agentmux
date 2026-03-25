@@ -21,6 +21,14 @@ import { fetch } from "@/util/fetchutil";
 import { setPlatform } from "@/util/platformutil";
 import { deepCompareReturnPrev, fireAndForget, getPrefixedSettings, isBlank } from "@/util/util";
 import { createMemo, createRoot, createSignal } from "solid-js";
+import { reconnectWS } from "./ws";
+import {
+    backendStatusAtom,
+    backendDeathInfoAtom,
+    initBackendStatusListeners,
+    setBackendDeathInfoAtom,
+    setBackendStatusAtom,
+} from "./backendStatus";
 import { modalsModel } from "./modalmodel";
 import { TAB_COLORS } from "@/app/tab/tab";
 import { ClientService, ObjectService, WorkspaceService } from "./services";
@@ -98,17 +106,8 @@ export const [reducedMotionSystemPreference, setReducedMotionSystemPreference] =
 
 export const prefersReducedMotionAtom = createMemo(() => reducedMotionSetting() || reducedMotionSystemPreference());
 
-type BackendStatusState = "connecting" | "running" | "crashed";
-export const [backendStatusAtom, setBackendStatusAtom] = createSignal<BackendStatusState>("running");
-
-export interface BackendDeathInfo {
-    code: number | null;
-    signal: number | null;
-    pid: number;
-    uptime_secs: number | null;
-    died_at: string; // ISO timestamp set by frontend at receipt
-}
-export const [backendDeathInfoAtom, setBackendDeathInfoAtom] = createSignal<BackendDeathInfo | null>(null);
+export type { BackendStatusState, BackendDeathInfo } from "./backendStatus";
+export { backendStatusAtom, setBackendStatusAtom, backendDeathInfoAtom, setBackendDeathInfoAtom };
 
 export const [typeAheadModalAtom, setTypeAheadModalAtom] = createSignal<Record<string, unknown>>({});
 export const [modalOpen, setModalOpen] = createSignal(false);
@@ -232,18 +231,7 @@ function initGlobalSignals(initOpts: GlobalInitOptions) {
     }
 
     try {
-        getApi().listen("backend-terminated", (event) => {
-            const p = (event as { payload?: Partial<BackendDeathInfo> }).payload ?? {};
-            setBackendDeathInfoAtom({
-                code: p.code ?? null,
-                signal: p.signal ?? null,
-                pid: p.pid ?? 0,
-                uptime_secs: p.uptime_secs ?? null,
-                died_at: new Date().toISOString(),
-            });
-            setBackendStatusAtom("crashed");
-        });
-        getApi().listen("backend-ready", () => setBackendStatusAtom("running"));
+        initBackendStatusListeners(getApi(), reconnectWS);
     } catch (_) {}
 
     // Expose atoms on window for wos.ts callBackendService

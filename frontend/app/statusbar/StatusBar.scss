@@ -130,6 +130,12 @@
             }
         }
 
+        &.status-version-offline {
+            opacity: 0.2;
+            cursor: default;
+            pointer-events: none;
+        }
+
         .instance-num {
             opacity: 0.6;
             font-size: 0.9em;
@@ -173,6 +179,27 @@
         border-top: 1px solid var(--border-color);
         margin: 5px 0;
         opacity: 0.4;
+    }
+}
+
+.status-bar-restart-btn {
+    width: 100%;
+    padding: 4px 8px;
+    background: var(--error-color);
+    color: #fff;
+    border: none;
+    border-radius: 3px;
+    cursor: pointer;
+    font-size: 11px;
+    opacity: 0.85;
+
+    &:hover:not(:disabled) {
+        opacity: 1;
+    }
+
+    &:disabled {
+        opacity: 0.4;
+        cursor: default;
     }
 }
 

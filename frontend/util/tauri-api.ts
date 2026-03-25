@@ -147,6 +147,9 @@ export function buildTauriApi(): AppApi {
                 "get_backend_info"
             );
         },
+        restartBackend: async () => {
+            await invoke("restart_backend");
+        },
 
         // --- Context menu ---
         showContextMenu: (workspaceId: string, menu?: NativeContextMenuItem[], position?: { x: number; y: number }) => {
