@@ -3,7 +3,9 @@
 //
 // macOS-specific zoom module.
 // Chrome zoom sets only --zoomfactor. Width compensation is handled
-// purely in CSS: calc(100vw / var(--zoomfactor, 1)) in window-header.scss.
+// purely in CSS: width: 100% in window-header.darwin.scss.
+// DO NOT change to calc(100vw / var(--zoomfactor, 1)) — that double-divides
+// on WebKit and causes the window buttons to drift left on zoom.
 
 // Per-pane zoom — modifies the focused block's term:zoom metadata.
 // Chrome zoom — scales title bar + status bar together via --zoomfactor CSS var.
