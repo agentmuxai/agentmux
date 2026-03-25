@@ -4,7 +4,7 @@
 // Windows-specific TileLayout.
 // dragHandle: undefined — whole-tile drag (pragmatic-dnd dragHandle breaks WebView2).
 
-import { getSettingsKeyAtom } from "@/app/store/global";
+import { getApi, getSettingsKeyAtom } from "@/app/store/global";
 import { draggable, dropTargetForElements, monitorForElements } from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
 import clsx from "clsx";
 import { toPng } from "html-to-image";
@@ -377,12 +377,14 @@ const DisplayNode = (props: DisplayNodeProps) => {
                     props.layoutModel.activeDrag._set(true);
                     setIsDragging(true);
                     setCurrentDragPayload({ kind: "tile", node: props.node });
+                    getApi().setDragCursor().catch(() => {});
                 },
                 onDrop: () => {
                     globalDragNodeId = null;
                     globalDragLayoutModel = null;
                     props.layoutModel.activeDrag._set(false);
                     setIsDragging(false);
+                    getApi().restoreDragCursor().catch(() => {});
                     // Do NOT clear currentDragPayload here — fires for ALL drops including
                     // out-of-window. Cleared in dropTargetForElements.onDrop instead.
                 },

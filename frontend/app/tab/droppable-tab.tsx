@@ -79,6 +79,7 @@ export function DroppableTab(props: DroppableTabProps): JSX.Element {
                 setIsDragging(true);
                 setCurrentDragPayload({ kind: "tab", tabId: props.tabId, workspaceId: props.workspaceId, isPinned: props.isPinned });
                 getApi().setJsDragActive(true).catch(() => {});
+                getApi().setDragCursor().catch(() => {});
                 Logger.info("dnd", "tab-drag started", {
                     tabId: props.tabId,
                     workspaceId: props.workspaceId,
@@ -90,6 +91,7 @@ export function DroppableTab(props: DroppableTabProps): JSX.Element {
                 setGlobalDragTabId(null);
                 setIsDragging(false);
                 getApi().setJsDragActive(false).catch(() => {});
+                getApi().restoreDragCursor().catch(() => {});
                 // Do NOT clear currentDragPayload here — this fires for ALL drops including
                 // out-of-window. Payload is cleared in the monitorForElements onDrop in
                 // tabbar.tsx (only fires for valid in-window drops) so the CrossWindowDragMonitor

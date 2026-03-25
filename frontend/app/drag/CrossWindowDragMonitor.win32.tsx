@@ -88,6 +88,7 @@ function CrossWindowDragMonitor(): JSX.Element {
             _currentDragPayload = null;
             Logger.info("dnd:cross", "drag fallback fired: button released outside window (OLE dragend not received)");
             getApi().releaseDragCapture().catch(() => {});
+            getApi().restoreDragCursor().catch(() => {});
             await handleCrossWindowDragEnd(payload, windowLabelRef);
         };
 
@@ -122,6 +123,7 @@ function CrossWindowDragMonitor(): JSX.Element {
             // Release WebView2 mouse capture immediately — IDropSource may leave it active
             // after an out-of-window HTML5 drag, breaking subsequent mousedown delivery.
             getApi().releaseDragCapture().catch(() => {});
+            getApi().restoreDragCursor().catch(() => {});
 
             await new Promise((r) => setTimeout(r, 50));
             await handleCrossWindowDragEnd(payload, windowLabelRef);
