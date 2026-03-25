@@ -3,7 +3,7 @@
 **Status:** Ready to implement
 **Author:** AgentA
 **Date:** 2026-03-21
-**Depends on:** spec-sidecar-isolation.md
+**Depends on:** [sidecar-isolation.md](sidecar-isolation.md)
 
 ---
 

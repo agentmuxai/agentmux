@@ -12,7 +12,7 @@
 
 The file is not too large to navigate, and four of its seven functions are already self-contained and well-named. The real problem is a single function: `spawn_backend` (lines 155–438, ~283 lines) doing ten sequential concerns in one body. That's the one to break up. Everything else can stay in `sidecar.rs` and work fine.
 
-The second motivator for modularization is the restart loop from `BACKEND_RESILIENCE_SPEC.md` Phase 2. The event loop inside `spawn_backend` (`tokio::spawn`, lines 341–414) is where the restart trigger must live — and it's currently tangled inside the startup orchestrator. Extracting that loop is the prerequisite for implementing restart without turning `spawn_backend` into spaghetti.
+The second motivator for modularization is the restart loop from [`BACKEND_RESILIENCE_SPEC`](../specs/backend-resilience.md) Phase 2. The event loop inside `spawn_backend` (`tokio::spawn`, lines 341–414) is where the restart trigger must live — and it's currently tangled inside the startup orchestrator. Extracting that loop is the prerequisite for implementing restart without turning `spawn_backend` into spaghetti.
 
 ---
 
@@ -112,7 +112,7 @@ Revisit Option B if:
 
 ## Where Phase 2 Restart Hooks In
 
-The `BACKEND_RESILIENCE_SPEC.md` Phase 2 requires:
+The [`BACKEND_RESILIENCE_SPEC`](../specs/backend-resilience.md) Phase 2 requires:
 
 1. `restart_backend` Tauri command → calls a new `respawn_backend(app)` function
 2. `respawn_backend` reuses the binary resolution + spawn logic from `spawn_backend`

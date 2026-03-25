@@ -7,7 +7,7 @@
 
 ## Executive Summary
 
-The codebase has been mostly cleaned up from the Wave Terminal → AgentMux migration, but several categories of dead code and legacy naming remain. The AI panel (`aipanel/`) is **DEAD CODE** — the sidebar AI chat is not used. The agent pane (`view/agent/`) handles all AI agent interactions. See `specs/remove-aipanel-sidebar.md` for full removal plan.
+The codebase has been mostly cleaned up from the Wave Terminal → AgentMux migration, but several categories of dead code and legacy naming remain. The AI panel (`aipanel/`) is **DEAD CODE** — the sidebar AI chat is not used. The agent pane (`view/agent/`) handles all AI agent interactions. See `specs/archive/remove-aipanel-sidebar.md` for full removal plan.
 
 **Actionable items:** 2,575-line aipanel/ removal (see spec), ~400-line onboarding/ removal, 3 dead SVG assets, 7 unused npm deps, legacy branding across 327 files.
 
@@ -98,7 +98,7 @@ Primarily in:
 
 14 files, 2,575 lines. **Not used** — the sidebar AI chat assistant is a legacy Wave Terminal feature. AgentMux uses the agent pane (`view/agent/`) for all AI interactions.
 
-Removal touches 12+ files across workspace layout, focus manager, keyboard shortcuts, and RPC layer. Full removal spec: `specs/remove-aipanel-sidebar.md`
+Removal touches 12+ files across workspace layout, focus manager, keyboard shortcuts, and RPC layer. Full removal spec: `specs/archive/remove-aipanel-sidebar.md`
 
 ### Onboarding (`frontend/app/onboarding/`) — REMOVE
 

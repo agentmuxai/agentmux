@@ -214,9 +214,9 @@ Focus on `FileStore`, `WaveStore`, and the `UpdateObjectMeta` call path — this
 
 `frontend/app/store/ws.ts` has a WS reconnect loop (exponential backoff `[0,0,2,5,10,10,30,60]s`, max 20 retries). This handles transient network blips. However, when the backend **process** dies, there is nothing to reconnect to. The `"backend-terminated"` Tauri event fires in parallel, permanently setting the atom to `"crashed"` — so the WS reconnect loop becomes moot. The two paths (WS drop vs. process death) are not coordinated.
 
-### Gap 6: `BACKEND_RESILIENCE_SPEC.md` exists but is unimplemented
+### Gap 6: [`BACKEND_RESILIENCE_SPEC`](../specs/backend-resilience.md) exists but is unimplemented
 
-`docs/BACKEND_RESILIENCE_SPEC.md` is a draft spec for:
+[`BACKEND_RESILIENCE_SPEC`](../specs/backend-resilience.md) is a draft spec for:
 - `"connecting"` as an initial state (currently: `"running"` is the initial)
 - A "Restart Backend" button in the popover
 - A `restart_backend` Tauri command
