@@ -85,6 +85,7 @@ export class TermWrap {
     lastUpdated: number;
     private rafBuffer: Uint8Array[] = [];
     private rafPending: boolean = false;
+    private writeInFlight: boolean = false;
 
     // ── Phase 1: CONSTRUCT (sync) ──────────────────────────────────────
 
@@ -294,7 +295,8 @@ export class TermWrap {
         }
     }
 
-    // Tier-3 scroll fix: RAF-batched writes.
+    // Tier-3 scroll fix: RAF-batched writes with sequential drain.
+    //
     // PTY data arrives as separate WebSocket messages. Each doTerminalWrite() call
     // triggers an xterm.js viewport sync. When Ink's cursor-up chunk and content chunk
     // land in back-to-back messages, the viewport snaps up then back down — two flashes
@@ -305,9 +307,18 @@ export class TermWrap {
     // one terminal.write() call so xterm.js only updates the viewport once, to the final
     // cursor position (back at bottom). Latency added: ≤ 16ms — imperceptible during
     // streaming output.
+    //
+    // writeInFlight ensures no second RAF fires while a slow write (large scrollback buffer)
+    // is still in progress. Without this guard, rafPending resets before doTerminalWrite
+    // resolves, letting a concurrent write race and causing the same flash at high bufLines.
     private scheduleRafWrite(data: Uint8Array) {
         this.rafBuffer.push(data);
-        if (this.rafPending) return;
+        this.armRaf();
+    }
+
+    // Schedule a RAF flush if one isn't already pending and no write is in flight.
+    private armRaf() {
+        if (this.rafPending || this.writeInFlight) return;
         this.rafPending = true;
         requestAnimationFrame(() => {
             this.rafPending = false;
@@ -320,7 +331,12 @@ export class TermWrap {
                 offset += chunk.length;
             }
             this.rafBuffer = [];
-            this.doTerminalWrite(merged, null);
+            this.writeInFlight = true;
+            this.doTerminalWrite(merged, null).then(() => {
+                this.writeInFlight = false;
+                // Drain any data that arrived while the write was in progress.
+                if (this.rafBuffer.length > 0) this.armRaf();
+            });
         });
     }
 
