@@ -1039,46 +1039,41 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
 
                 if is_npm_install {
                     // Verify npm is available before attempting install.
-                    // On Windows, npm ships as npm.cmd — resolve the full path so we
-                    // can invoke it directly without relying on cmd.exe extension resolution.
-                    let npm_path = {
-                        let which_cmd = if cfg!(windows) { "where" } else { "which" };
-                        tokio::process::Command::new(which_cmd)
-                            .arg("npm")
-                            .output()
-                            .await
-                            .ok()
-                            .filter(|o| o.status.success())
-                            .and_then(|o| {
-                                String::from_utf8(o.stdout).ok()
-                                    .map(|s| s.lines().next().unwrap_or("").trim().to_string())
-                            })
-                            .filter(|s| !s.is_empty())
+                    let npm_available = if cfg!(windows) {
+                        tokio::process::Command::new("where").arg("npm").output().await
+                            .map(|o| o.status.success()).unwrap_or(false)
+                    } else {
+                        tokio::process::Command::new("which").arg("npm").output().await
+                            .map(|o| o.status.success()).unwrap_or(false)
                     };
-                    let Some(npm_exe) = npm_path else {
+                    if !npm_available {
                         return Err(format!(
                             "{} requires Node.js/npm to install. \
                             Install Node.js from https://nodejs.org then restart AgentMux.",
                             cmd.cli_command
                         ));
-                    };
+                    }
 
                     // Use `npm install --prefix <dir> <pkg>@<ver>` to avoid cd+chaining issues.
                     // On Windows, normalize the prefix path to backslashes so npm handles it correctly.
+                    // npm.cmd must be invoked via cmd /C on Windows — it's a batch script, not an exe.
                     let prefix_dir = if cfg!(windows) {
                         provider_dir.replace('/', "\\")
                     } else {
                         provider_dir.clone()
                     };
-                    let install_output = tokio::process::Command::new(&npm_exe)
-                        .args([
-                            "install",
-                            "--prefix",
-                            &prefix_dir,
-                            &format!("{}@{}", cmd.npm_package, cmd.pinned_version),
-                        ])
-                        .output()
-                        .await;
+                    let package_arg = format!("{}@{}", cmd.npm_package, cmd.pinned_version);
+                    let install_output = if cfg!(windows) {
+                        tokio::process::Command::new("cmd")
+                            .args(["/C", "npm", "install", "--prefix", &prefix_dir, &package_arg])
+                            .output()
+                            .await
+                    } else {
+                        tokio::process::Command::new("npm")
+                            .args(["install", "--prefix", &prefix_dir, &package_arg])
+                            .output()
+                            .await
+                    };
 
                     let install_output = install_output.map_err(|e| {
                         format!("failed to run npm install: {e}")
