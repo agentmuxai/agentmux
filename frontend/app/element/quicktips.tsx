@@ -338,6 +338,49 @@ const QuickTips = (): JSX.Element => {
                             Full Documentation
                         </a>
                     </div>
+                    <div class="flex items-center gap-3 p-3 rounded-md bg-black/20 hover:bg-black/30 transition-colors cursor-pointer">
+                        <IconBox variant="secondary">
+                            <i class="fa-solid fa-sharp fa-bug fa-fw" />
+                        </IconBox>
+                        <a
+                            target="_blank"
+                            href="https://github.com/agentmuxai/agentmux/issues/new"
+                            rel="noopener"
+                            class="hover:text-accent-400 hover:underline transition-colors font-medium"
+                        >
+                            Report Bugs &amp; Issues
+                        </a>
+                    </div>
+                </div>
+            </div>
+
+            <div class="flex flex-col gap-4 p-5 bg-gradient-to-br from-amber-900/20 to-transparent rounded-lg border border-amber-500/20">
+                <div class="flex items-center gap-2 text-xl font-bold">
+                    <div class="w-1 h-6 bg-amber-400 rounded-full" />
+                    <span class="text-foreground">Alpha Software &amp; AI Content</span>
+                </div>
+                <div class="flex flex-col gap-2 text-secondary text-sm">
+                    <p>
+                        AgentMux is in <b class="text-amber-300">early alpha</b>. Features may be incomplete, unstable, or change between releases.
+                        AI agents generate code, text, and other outputs that may be <b>inaccurate, incomplete, or inappropriate</b>.
+                        Always review agent outputs before using them.
+                    </p>
+                    <p>
+                        To report bugs, request features, or flag issues with AI-generated content:
+                    </p>
+                    <div class="flex items-center gap-3 p-3 rounded-md bg-black/20 hover:bg-black/30 transition-colors cursor-pointer mt-1">
+                        <IconBox variant="secondary">
+                            <i class="fa-brands fa-github fa-fw" />
+                        </IconBox>
+                        <a
+                            target="_blank"
+                            href="https://github.com/agentmuxai/agentmux/issues/new"
+                            rel="noopener"
+                            class="hover:text-accent-400 hover:underline transition-colors font-medium"
+                        >
+                            Open an Issue on GitHub
+                        </a>
+                    </div>
                 </div>
             </div>
         </div>
