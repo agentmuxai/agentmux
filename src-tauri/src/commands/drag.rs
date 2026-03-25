@@ -356,32 +356,54 @@ fn hit_test_windows(app: &tauri::AppHandle, screen_x: f64, screen_y: f64) -> Opt
     None
 }
 
-/// Replace the system no-drop cursor with a crosshair while a drag is active.
-/// This makes the cursor show "+" instead of the circle-slash when dragging
-/// outside the webview window.
+/// Whether the cursor-override thread should keep running.
+#[cfg(target_os = "windows")]
+static DRAG_CURSOR_ACTIVE: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// Start a cursor-override thread that calls SetCursor(IDC_CROSS) every 2ms.
+///
+/// # Why a thread instead of SetSystemCursor
+///
+/// OLE's IDropSource::GiveFeedback caches its LoadCursor(NULL, IDC_NO) handle on the first
+/// call (per drag session). SetSystemCursor called afterwards doesn't retroactively update
+/// that cached handle. Windows Explorer also handles WM_SETCURSOR using its own cursor
+/// resources, not the system cursor table. So there is no static replacement that works
+/// reliably across all drop targets.
+///
+/// A 2ms polling thread wins every race when the mouse is stationary (the common case for
+/// "am I over a valid drop target?"). During rapid mouse movement WM_SETCURSOR may fire in
+/// between our calls, causing a brief flicker — but at 500Hz vs typical 125–250Hz mouse
+/// polling, the crosshair dominates.
 #[tauri::command]
 pub async fn set_drag_cursor() -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
-        use windows_sys::Win32::UI::WindowsAndMessaging::{
-            CopyIcon, LoadCursorW, SetSystemCursor, IDC_CROSS, OCR_NO,
-        };
-        unsafe {
-            let cross = LoadCursorW(std::ptr::null_mut(), IDC_CROSS);
-            if cross.is_null() {
-                return Err("LoadCursorW(IDC_CROSS) failed".to_string());
-            }
-            // CopyCursor is a macro that expands to CopyIcon
-            let copy = CopyIcon(cross);
-            if copy.is_null() {
-                return Err("CopyIcon (CopyCursor) failed".to_string());
-            }
-            let ok = SetSystemCursor(copy, OCR_NO);
-            if ok == 0 {
-                return Err("SetSystemCursor failed".to_string());
-            }
+        use std::sync::atomic::Ordering;
+        use windows_sys::Win32::UI::WindowsAndMessaging::{LoadCursorW, SetCursor, IDC_CROSS};
+
+        // Prevent spawning multiple threads if called more than once
+        if DRAG_CURSOR_ACTIVE.swap(true, Ordering::Relaxed) {
+            return Ok(());
         }
-        tracing::debug!("[dnd:tauri] set_drag_cursor: replaced OCR_NO with IDC_CROSS");
+
+        let hcursor = unsafe { LoadCursorW(std::ptr::null_mut(), IDC_CROSS) };
+        if hcursor.is_null() {
+            DRAG_CURSOR_ACTIVE.store(false, Ordering::Relaxed);
+            return Err("LoadCursorW(IDC_CROSS) failed".to_string());
+        }
+        // Raw pointers are not Send; cast to usize to move across the thread boundary.
+        // The handle is a shared system resource valid for the process lifetime.
+        let hcursor_usize = hcursor as usize;
+
+        std::thread::spawn(move || {
+            while DRAG_CURSOR_ACTIVE.load(Ordering::Relaxed) {
+                unsafe { SetCursor(hcursor_usize as _) };
+                std::thread::sleep(std::time::Duration::from_millis(2));
+            }
+        });
+
+        tracing::debug!("[dnd:tauri] set_drag_cursor: cursor override thread started");
     }
     Ok(())
 }
@@ -476,22 +498,15 @@ pub async fn set_js_drag_active(active: bool) -> Result<(), String> {
     Ok(())
 }
 
-/// Restore all system cursors to their defaults.
+/// Stop the cursor-override thread and restore the normal cursor.
 /// Must be called when a drag ends (drop, tear-off, or cancel).
 #[tauri::command]
 pub async fn restore_drag_cursor() -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
-        use windows_sys::Win32::UI::WindowsAndMessaging::{
-            SystemParametersInfoW, SPI_SETCURSORS,
-        };
-        unsafe {
-            let ok = SystemParametersInfoW(SPI_SETCURSORS, 0, std::ptr::null_mut(), 0);
-            if ok == 0 {
-                return Err("SystemParametersInfoW(SPI_SETCURSORS) failed".to_string());
-            }
-        }
-        tracing::debug!("[dnd:tauri] restore_drag_cursor: system cursors restored");
+        use std::sync::atomic::Ordering;
+        DRAG_CURSOR_ACTIVE.store(false, Ordering::Relaxed);
+        tracing::debug!("[dnd:tauri] restore_drag_cursor: cursor override thread stopped");
     }
     Ok(())
 }
