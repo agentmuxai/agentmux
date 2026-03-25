@@ -1996,28 +1996,6 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
     );
 }
 
-fn check_network_error(combined_output: &str, cli_command: &str, install_cmd: &str) -> String {
-    let lower = combined_output.to_lowercase();
-    if lower.contains("could not resolve host")
-        || lower.contains("network")
-        || lower.contains("timeout")
-        || lower.contains("connection refused")
-        || lower.contains("no internet")
-        || lower.contains("getaddrinfo")
-        || lower.contains("enotfound")
-    {
-        format!(
-            "no internet connection — cannot install {}. \
-             Connect to the internet and try again, or install manually:\n  {}",
-            cli_command, install_cmd
-        )
-    } else {
-        format!(
-            "install failed: {}",
-            combined_output.chars().take(500).collect::<String>()
-        )
-    }
-}
 
 /// Create a Command for a CLI binary, transparently wrapping Windows `.cmd` batch scripts
 /// with `cmd.exe /C` so they can be spawned via the Win32 API.
