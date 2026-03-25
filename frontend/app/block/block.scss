@@ -85,6 +85,7 @@
                 gap: 8px;
                 font: var(--header-font);
                 zoom: var(--zoomfactor, 1);
+                transition: zoom var(--zoom-transition-dur, 0ms) ease-out;
                 border-bottom: 1px solid var(--border-color);
                 border-radius: var(--block-border-radius) var(--block-border-radius) 0 0;
 

@@ -9,6 +9,7 @@
     flex-shrink: 0;
     font-size: 11px;
     zoom: var(--zoomfactor);
+    transition: zoom var(--zoom-transition-dur, 0ms) ease-out;
     background: rgba(0, 0, 0, 0.35);
     border-top: 1px solid var(--border-color);
     color: var(--secondary-text-color);

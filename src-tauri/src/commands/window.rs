@@ -303,6 +303,7 @@ pub fn set_window_transparency(
         tracing::info!("Applied macOS vibrancy (HudWindow)");
     }
 
+    // Windows: apply Mica (Win11) or Acrylic (Win10) when blur is requested.
     #[cfg(target_os = "windows")]
     if blur {
         // Try Mica first (Windows 11), fall back to Acrylic (Windows 10)

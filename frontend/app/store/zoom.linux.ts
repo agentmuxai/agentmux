@@ -154,6 +154,11 @@ function setChromeZoom(factor: number): void {
 }
 
 export function initChromeZoom(): void {
+    // Set the zoom transition duration CSS variable for Linux.
+    // This enables a short transition on all zoom: var(--zoomfactor) elements, which
+    // forces WebKitGTK's animation engine to invalidate the vacated pixels when an
+    // element shrinks — fixing the ghost-pixel artifact on zoom-out.
+    document.documentElement.style.setProperty("--zoom-transition-dur", "80ms");
     applyChromeZoomCSS(DEFAULT_ZOOM);
 }
 

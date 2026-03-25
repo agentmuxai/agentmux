@@ -30,6 +30,7 @@
     width: 100vw;
     height: 33px;
     zoom: var(--zoomfactor);
+    transition: zoom 80ms ease-out;
     cursor: default;
 
     .window-drag {
