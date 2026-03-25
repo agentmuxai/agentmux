@@ -894,9 +894,11 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
     // Each AgentMux version gets its own isolated CLI install at:
     //   ~/.agentmux/<AGENTMUX_VERSION>/cli/<provider>/
     // Never falls back to system PATH.
+    let broker_resolve = state.broker.clone();
     engine.register_handler(
         COMMAND_RESOLVE_CLI,
-        Box::new(|data, _ctx| {
+        Box::new(move |data, _ctx| {
+            let broker = broker_resolve.clone();
             Box::pin(async move {
                 const AGENTMUX_VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -1063,33 +1065,66 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                         provider_dir.clone()
                     };
                     let package_arg = format!("{}@{}", cmd.npm_package, cmd.pinned_version);
-                    let install_output = if cfg!(windows) {
+                    tracing::info!(package = %package_arg, prefix = %prefix_dir, "running npm install");
+
+                    let mut child = if cfg!(windows) {
                         tokio::process::Command::new("cmd")
-                            .args(["/C", "npm", "install", "--prefix", &prefix_dir, &package_arg])
-                            .output()
-                            .await
+                            .args(["/C", "npm", "install", "--loglevel=http", "--no-audit", "--no-fund", "--prefix", &prefix_dir, &package_arg])
+                            .stdout(std::process::Stdio::piped())
+                            .stderr(std::process::Stdio::piped())
+                            .spawn()
                     } else {
                         tokio::process::Command::new("npm")
-                            .args(["install", "--prefix", &prefix_dir, &package_arg])
-                            .output()
-                            .await
-                    };
+                            .args(["install", "--loglevel=http", "--no-audit", "--no-fund", "--prefix", &prefix_dir, &package_arg])
+                            .stdout(std::process::Stdio::piped())
+                            .stderr(std::process::Stdio::piped())
+                            .spawn()
+                    }.map_err(|e| format!("failed to spawn npm install: {e}"))?;
 
-                    let install_output = install_output.map_err(|e| {
-                        format!("failed to run npm install: {e}")
-                    })?;
+                    // Stream stdout + stderr into the block's output subject in real time
+                    let block_id_install = cmd.block_id.clone();
+                    let broker_npm = broker.clone();
+                    let stdout_pipe = child.stdout.take();
+                    let stderr_pipe = child.stderr.take();
 
-                    let stdout_str = String::from_utf8_lossy(&install_output.stdout);
-                    let stderr_str = String::from_utf8_lossy(&install_output.stderr);
-                    tracing::info!(
-                        exit_code = install_output.status.code().unwrap_or(-1),
-                        "npm install completed"
+                    let bid1 = block_id_install.clone();
+                    let bid2 = block_id_install.clone();
+                    let brk1 = broker_npm.clone();
+                    let brk2 = broker_npm.clone();
+                    let (_, _, exit_status) = tokio::join!(
+                        async move {
+                            if let Some(p) = stdout_pipe {
+                                use tokio::io::AsyncBufReadExt;
+                                let mut reader = tokio::io::BufReader::new(p).lines();
+                                while let Ok(Some(line)) = reader.next_line().await {
+                                    tracing::info!(line = %line, "npm stdout");
+                                    if !bid1.is_empty() {
+                                        crate::backend::wps::publish_install_progress(&brk1, &bid1, &line);
+                                    }
+                                }
+                            }
+                        },
+                        async move {
+                            if let Some(p) = stderr_pipe {
+                                use tokio::io::AsyncBufReadExt;
+                                let mut reader = tokio::io::BufReader::new(p).lines();
+                                while let Ok(Some(line)) = reader.next_line().await {
+                                    tracing::info!(line = %line, "npm stderr");
+                                    if !bid2.is_empty() {
+                                        crate::backend::wps::publish_install_progress(&brk2, &bid2, &line);
+                                    }
+                                }
+                            }
+                        },
+                        child.wait(),
                     );
+                    let exit_status = exit_status.map_err(|e| format!("npm install wait failed: {e}"))?;
+                    tracing::info!(exit_code = exit_status.code().unwrap_or(-1), "npm install completed");
 
-                    if !install_output.status.success() {
-                        let combined = format!("{}{}", stdout_str, stderr_str);
-                        return Err(check_network_error(
-                            &combined, &cmd.cli_command, install_cmd,
+                    if !exit_status.success() {
+                        return Err(format!(
+                            "npm install failed (exit {}). Check the output above for details.",
+                            exit_status.code().unwrap_or(-1)
                         ));
                     }
 
@@ -1110,37 +1145,68 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                     ));
                 }
 
-                // Official installer (Claude): run installer with 120s timeout
-                let install_future = if cfg!(windows) {
+                // Official installer (Claude): run installer streaming output to block
+                let mut child_installer = if cfg!(windows) {
                     tokio::process::Command::new("powershell")
                         .args(["-NoProfile", "-Command", install_cmd])
-                        .output()
+                        .stdout(std::process::Stdio::piped())
+                        .stderr(std::process::Stdio::piped())
+                        .spawn()
                 } else {
                     tokio::process::Command::new("bash")
                         .args(["-c", install_cmd])
-                        .output()
-                };
+                        .stdout(std::process::Stdio::piped())
+                        .stderr(std::process::Stdio::piped())
+                        .spawn()
+                }.map_err(|e| format!("failed to spawn installer: {e}"))?;
 
-                let install_output = tokio::time::timeout(
+                let block_id_inst = cmd.block_id.clone();
+                let broker_inst = broker.clone();
+                let stdout_inst = child_installer.stdout.take();
+                let stderr_inst = child_installer.stderr.take();
+
+                let block_id_inst2 = cmd.block_id.clone();
+                let broker_inst2 = broker.clone();
+                let (_, _, install_exit) = tokio::time::timeout(
                     std::time::Duration::from_secs(120),
-                    install_future,
-                ).await
-                    .map_err(|_| format!("install timed out after 120s — try manually:\n  {}", install_cmd))?
-                    .map_err(|e| format!("failed to run install command: {e}"))?;
+                    async move {
+                        tokio::join!(
+                            async move {
+                                if let Some(p) = stdout_inst {
+                                    use tokio::io::AsyncBufReadExt;
+                                    let mut reader = tokio::io::BufReader::new(p).lines();
+                                    while let Ok(Some(line)) = reader.next_line().await {
+                                        tracing::info!(line = %line, "installer stdout");
+                                        if !block_id_inst.is_empty() {
+                                            crate::backend::wps::publish_install_progress(&broker_inst, &block_id_inst, &line);
+                                        }
+                                    }
+                                }
+                            },
+                            async move {
+                                if let Some(p) = stderr_inst {
+                                    use tokio::io::AsyncBufReadExt;
+                                    let mut reader = tokio::io::BufReader::new(p).lines();
+                                    while let Ok(Some(line)) = reader.next_line().await {
+                                        tracing::info!(line = %line, "installer stderr");
+                                        if !block_id_inst2.is_empty() {
+                                            crate::backend::wps::publish_install_progress(&broker_inst2, &block_id_inst2, &line);
+                                        }
+                                    }
+                                }
+                            },
+                            child_installer.wait(),
+                        )
+                    }
+                ).await.map_err(|_| format!("install timed out after 120s — try manually:\n  {}", install_cmd))?;
 
-                let stdout_str = String::from_utf8_lossy(&install_output.stdout);
-                let stderr_str = String::from_utf8_lossy(&install_output.stderr);
-                tracing::info!(
-                    exit_code = install_output.status.code().unwrap_or(-1),
-                    stdout_len = stdout_str.len(),
-                    stderr_len = stderr_str.len(),
-                    "official installer completed"
-                );
+                let install_exit = install_exit.map_err(|e| format!("installer wait failed: {e}"))?;
+                tracing::info!(exit_code = install_exit.code().unwrap_or(-1), "official installer completed");
 
-                if !install_output.status.success() {
-                    let combined = format!("{}{}", stdout_str, stderr_str);
-                    return Err(check_network_error(
-                        &combined, &cmd.cli_command, install_cmd,
+                if !install_exit.success() {
+                    return Err(format!(
+                        "installer failed (exit {}). Check output above for details.",
+                        install_exit.code().unwrap_or(-1)
                     ));
                 }
 
@@ -1281,7 +1347,7 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                 let output = tokio::time::timeout(
                     std::time::Duration::from_secs(25),
                     {
-                        let mut check_cmd = tokio::process::Command::new(&cmd.cli_path);
+                        let mut check_cmd = make_cli_cmd(&cmd.cli_path);
                         check_cmd.args(&cmd.auth_check_args);
                         for (k, v) in &cmd.auth_env {
                             check_cmd.env(k, v);
@@ -1340,7 +1406,7 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                 // block-buffered when piped so we can't reliably read it in real-time.
                 // Strategy: inherit stdout/stderr so the CLI can open the browser normally,
                 // then return immediately — the frontend polls auth status until done.
-                let mut child = tokio::process::Command::new(&cmd.cli_path)
+                let mut child = make_cli_cmd(&cmd.cli_path)
                     .args(&cmd.login_args)
                     .envs(&cmd.auth_env)
                     .stdout(std::process::Stdio::null())
@@ -1953,8 +2019,20 @@ fn check_network_error(combined_output: &str, cli_command: &str, install_cmd: &s
     }
 }
 
+/// Create a Command for a CLI binary, transparently wrapping Windows `.cmd` batch scripts
+/// with `cmd.exe /C` so they can be spawned via the Win32 API.
+pub fn make_cli_cmd(cli_path: &str) -> tokio::process::Command {
+    #[cfg(windows)]
+    if cli_path.ends_with(".cmd") || cli_path.ends_with(".bat") {
+        let mut c = tokio::process::Command::new("cmd.exe");
+        c.args(["/C", cli_path]);
+        return c;
+    }
+    tokio::process::Command::new(cli_path)
+}
+
 async fn get_cli_version(cli_path: &str) -> String {
-    match tokio::process::Command::new(cli_path)
+    match make_cli_cmd(cli_path)
         .arg("--version")
         .output()
         .await

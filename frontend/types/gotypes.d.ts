@@ -1595,6 +1595,7 @@ declare global {
         pinned_version: string;
         windows_install_command: string;
         unix_install_command: string;
+        block_id?: string;
     };
 
     // wshrpc.ResolveCliResult

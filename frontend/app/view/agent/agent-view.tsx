@@ -219,6 +219,21 @@ async function runLaunchFlow(
 
     // Phase 1: CLI Detection / Installation
     log("cli", `checking for ${provider.cliCommand}...`);
+    if (provider.pinnedVersion) {
+        log("cli", `if not found locally, will install ${provider.npmPackage}@${provider.pinnedVersion} via npm (this may take 1-2 minutes)...`);
+    }
+
+    // Subscribe to install progress events — backend streams npm/installer output line-by-line
+    const installScope = WOS.makeORef("block", blockId);
+    const unsubInstall = waveEventSubscribe({
+        eventType: "install_progress",
+        scope: installScope,
+        handler: (event: any) => {
+            const msg: string = event?.data?.message ?? "";
+            if (msg) log("install", msg);
+        },
+    });
+
     let cliResult: ResolveCliResult;
     try {
         cliResult = await RpcApi.ResolveCliCommand(TabRpcClient, {
@@ -228,13 +243,16 @@ async function runLaunchFlow(
             pinned_version: provider.pinnedVersion,
             windows_install_command: provider.windowsInstallCommand,
             unix_install_command: provider.unixInstallCommand,
-        }, { timeout: 120000 });
+            block_id: blockId,
+        }, { timeout: 300000 });
     } catch (err: any) {
+        unsubInstall();
         const msg = err?.message ?? String(err);
         log("cli", msg, "error");
         log("error", `${provider.cliCommand} not available — install manually or check your internet connection`, "error");
         return "fatal";
     }
+    unsubInstall();
 
     if (cliResult.source === "installed") {
         log("cli", `installed ${provider.npmPackage} (${cliResult.version})`);

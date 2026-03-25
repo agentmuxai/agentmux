@@ -36,7 +36,7 @@ use crate::backend::storage::wstore::WaveStore;
 use crate::backend::wps;
 
 /// WPS file subject name for subprocess output (replaces "term" from PTY).
-const SUBPROCESS_OUTPUT_SUBJECT: &str = "output";
+pub const SUBPROCESS_OUTPUT_SUBJECT: &str = "output";
 
 /// Controller type constant.
 pub const BLOCK_CONTROLLER_SUBPROCESS: &str = "subprocess";
@@ -208,9 +208,24 @@ impl SubprocessController {
         self.publish_status();
         self.health_monitor.set_active_turn(true);
 
-        // Build command
-        let mut cmd = Command::new(&config.cli_command);
-        cmd.args(&args);
+        // Build command — on Windows, .cmd batch scripts must be run via cmd.exe /C
+        #[cfg(windows)]
+        let mut cmd = if config.cli_command.ends_with(".cmd") || config.cli_command.ends_with(".bat") {
+            let mut c = Command::new("cmd.exe");
+            c.args(["/C", &config.cli_command]);
+            c.args(&args);
+            c
+        } else {
+            let mut c = Command::new(&config.cli_command);
+            c.args(&args);
+            c
+        };
+        #[cfg(not(windows))]
+        let mut cmd = {
+            let mut c = Command::new(&config.cli_command);
+            c.args(&args);
+            c
+        };
         if !config.working_dir.is_empty() {
             // Expand ~ to home directory (cross-platform)
             let expanded_dir = if config.working_dir.starts_with("~/") || config.working_dir == "~" {

@@ -480,6 +480,9 @@ pub struct CommandResolveCliData {
     /// Unix install command (e.g. "curl -fsSL https://claude.ai/install.sh | bash")
     #[serde(default)]
     pub unix_install_command: String,
+    /// Block ID to stream install output into (optional — if empty, no streaming)
+    #[serde(default)]
+    pub block_id: String,
 }
 
 /// Result from ResolveCliCommand
