@@ -848,6 +848,9 @@ declare global {
         agentCliArgs?: string[];
         agentOutputFormat?: string;
         agentBinDir?: string;
+        "agent:resume_flag"?: string;
+        "agent:session_id_field"?: string;
+        "agent:sessionid"?: string;
         "subagent:*"?: boolean;
         "subagent:id"?: string;
         "subagent:slug"?: string;

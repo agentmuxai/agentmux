@@ -46,7 +46,7 @@ pub const BLOCK_CONTROLLER_SUBPROCESS: &str = "subprocess";
 pub struct SubprocessSpawnConfig {
     /// CLI executable (e.g., "claude").
     pub cli_command: String,
-    /// CLI arguments (e.g., ["-p", "--input-format", "stream-json", "--output-format", "stream-json"]).
+    /// CLI arguments (e.g., ["-p", "--output-format", "stream-json", ...]).
     pub cli_args: Vec<String>,
     /// Working directory for the subprocess.
     pub working_dir: String,
@@ -54,6 +54,12 @@ pub struct SubprocessSpawnConfig {
     pub env_vars: HashMap<String, String>,
     /// The user's JSON message to write to stdin.
     pub message: String,
+    /// Flag used to resume a previous session, e.g. "--resume" (Claude), "-r" (Gemini).
+    /// Empty string means this provider does not support simple-flag resume.
+    pub resume_flag: String,
+    /// JSON field name in the CLI's init event that contains the session/thread ID.
+    /// e.g. "session_id" (Claude/Gemini) or "thread_id" (Codex).
+    pub session_id_field: String,
 }
 
 /// Inner state protected by mutex.
@@ -182,13 +188,15 @@ impl SubprocessController {
             return Err("subprocess is already running a turn".to_string());
         }
 
-        // Build CLI args, appending --resume if we have a session_id
+        // Build CLI args, appending resume flag + session_id if we have one and the provider supports it
         let mut args = config.cli_args.clone();
         {
             let inner = self.inner.lock().unwrap();
             if let Some(ref sid) = inner.session_id {
-                args.push("--resume".to_string());
-                args.push(sid.clone());
+                if !config.resume_flag.is_empty() {
+                    args.push(config.resume_flag.clone());
+                    args.push(sid.clone());
+                }
             }
         }
 
@@ -294,6 +302,7 @@ impl SubprocessController {
         let wstore_read = self.wstore.clone();
         let event_bus_read = self.event_bus.clone();
         let health_read = Arc::clone(&self.health_monitor);
+        let session_id_field = config.session_id_field.clone();
         tokio::spawn(async move {
             let reader = BufReader::new(stdout);
             let mut lines = reader.lines();
@@ -313,17 +322,21 @@ impl SubprocessController {
                     }
                 }
 
-                // Try to capture session_id from system/init message
+                // Try to capture session/thread ID from the provider's init event.
+                // Claude: {"type":"system","subtype":"init","session_id":"..."}
+                // Gemini: {"type":"init","session_id":"..."}
+                // Codex:  {"type":"thread.started","thread_id":"..."}
                 if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(trimmed) {
-                    if parsed.get("type").and_then(|t| t.as_str()) == Some("system")
-                        && parsed.get("subtype").and_then(|t| t.as_str()) == Some("init")
-                    {
-                        if let Some(sid) = parsed.get("session_id").and_then(|v| v.as_str()) {
-                            let sid_string = sid.to_string();
+                    if let Some(sid) = parsed.get(&session_id_field).and_then(|v| v.as_str()) {
+                        let sid_string = sid.to_string();
+                        // Only capture once (first occurrence in the output)
+                        let already_captured = inner_read.lock().unwrap().session_id.is_some();
+                        if !already_captured {
                             tracing::info!(
                                 block_id = %block_id_read,
+                                field = %session_id_field,
                                 session_id = %sid_string,
-                                "captured session_id from system/init"
+                                "captured session id"
                             );
                             {
                                 let mut inner = inner_read.lock().unwrap();

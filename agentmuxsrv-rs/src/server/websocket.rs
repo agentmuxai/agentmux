@@ -736,6 +736,8 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                     working_dir: cmd.working_dir,
                     env_vars: cmd.env_vars,
                     message: cmd.message,
+                    resume_flag: "--resume".to_string(),
+                    session_id_field: "session_id".to_string(),
                 };
                 subprocess_ctrl.spawn_turn(config)?;
                 Ok(None)
@@ -776,6 +778,7 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                         .iter()
                         .filter_map(|v| v.as_str().map(|s| s.to_string()))
                         .collect(),
+                    // Fallback: Claude-style args for blocks created before launchArgs was added
                     _ => vec![
                         "-p".to_string(),
                         "--input-format".to_string(),
@@ -794,6 +797,12 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                         .collect(),
                     _ => std::collections::HashMap::new(),
                 };
+                let resume_flag = crate::backend::waveobj::meta_get_string(
+                    &block.meta, "agent:resume_flag", "--resume",
+                );
+                let session_id_field = crate::backend::waveobj::meta_get_string(
+                    &block.meta, "agent:session_id_field", "session_id",
+                );
 
                 let config = blockcontroller::subprocess::SubprocessSpawnConfig {
                     cli_command,
@@ -801,6 +810,8 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                     working_dir,
                     env_vars,
                     message: cmd.message,
+                    resume_flag,
+                    session_id_field,
                 };
                 subprocess_ctrl.spawn_turn(config)?;
                 Ok(None)
@@ -1027,39 +1038,47 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                 let is_npm_install = install_cmd.contains("npm install");
 
                 if is_npm_install {
-                    // Verify npm is available before attempting install
-                    let npm_check = if cfg!(windows) {
-                        tokio::process::Command::new("where").arg("npm").output().await
-                    } else {
-                        tokio::process::Command::new("which").arg("npm").output().await
+                    // Verify npm is available before attempting install.
+                    // On Windows, npm ships as npm.cmd — resolve the full path so we
+                    // can invoke it directly without relying on cmd.exe extension resolution.
+                    let npm_path = {
+                        let which_cmd = if cfg!(windows) { "where" } else { "which" };
+                        tokio::process::Command::new(which_cmd)
+                            .arg("npm")
+                            .output()
+                            .await
+                            .ok()
+                            .filter(|o| o.status.success())
+                            .and_then(|o| {
+                                String::from_utf8(o.stdout).ok()
+                                    .map(|s| s.lines().next().unwrap_or("").trim().to_string())
+                            })
+                            .filter(|s| !s.is_empty())
                     };
-                    let npm_available = npm_check
-                        .map(|o| o.status.success())
-                        .unwrap_or(false);
-                    if !npm_available {
+                    let Some(npm_exe) = npm_path else {
                         return Err(format!(
                             "{} requires Node.js/npm to install. \
                             Install Node.js from https://nodejs.org then restart AgentMux.",
                             cmd.cli_command
                         ));
-                    }
-
-                    // npm-based providers (codex, gemini): install directly into versioned dir
-                    let npm_init = format!(
-                        "cd \"{}\" && npm init -y && npm install {}@{}",
-                        provider_dir, cmd.npm_package, cmd.pinned_version
-                    );
-                    let install_output = if cfg!(windows) {
-                        tokio::process::Command::new("cmd")
-                            .args(["/C", &npm_init])
-                            .output()
-                            .await
-                    } else {
-                        tokio::process::Command::new("bash")
-                            .args(["-c", &npm_init])
-                            .output()
-                            .await
                     };
+
+                    // Use `npm install --prefix <dir> <pkg>@<ver>` to avoid cd+chaining issues.
+                    // On Windows, normalize the prefix path to backslashes so npm handles it correctly.
+                    let prefix_dir = if cfg!(windows) {
+                        provider_dir.replace('/', "\\")
+                    } else {
+                        provider_dir.clone()
+                    };
+                    let install_output = tokio::process::Command::new(&npm_exe)
+                        .args([
+                            "install",
+                            "--prefix",
+                            &prefix_dir,
+                            &format!("{}@{}", cmd.npm_package, cmd.pinned_version),
+                        ])
+                        .output()
+                        .await;
 
                     let install_output = install_output.map_err(|e| {
                         format!("failed to run npm install: {e}")

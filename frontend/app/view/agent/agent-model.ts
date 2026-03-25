@@ -62,15 +62,15 @@ export class AgentViewModel implements ViewModel {
 
         Logger.info("agent", `Launching agent ${agentId} (v${version})`, {
             agentId,
-            styledArgs: provider.styledArgs,
+            launchArgs: provider.launchArgs,
             outputFormat: provider.styledOutputFormat,
         });
 
         const oref = WOS.makeORef("block", this.blockId);
         const blockId = this.blockId;
 
-        // Build CLI args: -p for non-interactive, plus provider's streaming flags
-        const cliArgs = ["-p", ...provider.styledArgs];
+        // Build CLI args from provider's launch args (provider-specific, not hardcoded -p)
+        const cliArgs = [...provider.launchArgs];
 
         // Build env vars: unset nested-session guards by setting them empty
         const envVars: Record<string, string> = {};
@@ -99,6 +99,8 @@ export class AgentViewModel implements ViewModel {
                     cmd: cliBin,
                     "cmd:args": cliArgs,
                     "cmd:env": envVars,
+                    "agent:resume_flag": provider.resumeFlag ?? "",
+                    "agent:session_id_field": provider.sessionIdField,
                 },
             });
 
@@ -167,8 +169,8 @@ export class AgentViewModel implements ViewModel {
         // Determine working directory
         const workDir = agent.working_directory || `~/.agentmux/agents/${agent.name.toLowerCase().replace(/[^a-z0-9-_]/g, "-")}`;
 
-        // Build CLI args: -p for non-interactive, plus provider's streaming flags, plus forge flags
-        const cliArgs = ["-p", ...provider.styledArgs];
+        // Build CLI args from provider's launch args (provider-specific, not hardcoded -p)
+        const cliArgs = [...provider.launchArgs];
         if (agent.provider_flags) {
             cliArgs.push(...agent.provider_flags.split(/\s+/).filter(Boolean));
         }
@@ -230,6 +232,8 @@ export class AgentViewModel implements ViewModel {
                     "cmd:args": cliArgs,
                     "cmd:cwd": workDir,
                     "cmd:env": envVars,
+                    "agent:resume_flag": provider.resumeFlag ?? "",
+                    "agent:session_id_field": provider.sessionIdField,
                 },
             });
 
