@@ -64,6 +64,7 @@ class TermViewModel implements ViewModel {
     shellProcStatusUnsubFn: () => void;
     isCmdController: () => boolean;
     isRestarting: SignalAtom<boolean>;
+    agentRuntimeLabel: () => string | null;
     searchAtoms?: SearchAtoms;
 
     constructor(blockId: string, nodeModel: BlockNodeModel) {
@@ -99,6 +100,19 @@ class TermViewModel implements ViewModel {
         this.shellProcStatus = createMemo(() => {
             const fullStatus = this.shellProcFullStatus();
             return fullStatus?.shellprocstatus ?? "init";
+        });
+
+        this.agentRuntimeLabel = createMemo(() => {
+            const fullStatus = this.shellProcFullStatus();
+            if (!fullStatus?.is_agent_pane) return null;
+            if (fullStatus.shellprocstatus !== "running") return null;
+            if (!fullStatus.spawn_ts_ms) return null;
+            const elapsedMs = Date.now() - fullStatus.spawn_ts_ms;
+            const elapsedHours = elapsedMs / 3_600_000;
+            if (elapsedHours < 1) return null;
+            const h = Math.floor(elapsedHours);
+            const m = Math.floor((elapsedMs % 3_600_000) / 60_000);
+            return `${h}h ${m}m`;
         });
 
         this.viewText = createMemo(() => {

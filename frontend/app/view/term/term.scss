@@ -186,3 +186,18 @@
         }
     }
 }
+
+.agent-runtime-badge {
+    position: absolute;
+    top: 6px;
+    right: 10px;
+    z-index: 10;
+    pointer-events: none;
+    font-size: 10px;
+    font-family: var(--termfontfamily, monospace);
+    padding: 2px 6px;
+    border-radius: 4px;
+    background: rgba(200, 120, 0, 0.75);
+    color: #fff;
+    opacity: 0.85;
+}

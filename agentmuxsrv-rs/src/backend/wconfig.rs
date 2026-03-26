@@ -129,6 +129,16 @@ pub struct SettingsType {
     #[serde(rename = "term:shiftenternewline", default, skip_serializing_if = "Option::is_none")]
     pub term_shift_enter_newline: Option<bool>,
 
+    /// Maximum runtime in hours before the watchdog kills an agent pane.
+    /// 0 (default) disables the limit.
+    #[serde(rename = "term:agentmaxruntimehours", default, skip_serializing_if = "is_zero_f64")]
+    pub term_agent_max_runtime_hours: f64,
+
+    /// Minutes of PTY silence before the watchdog kills an idle agent pane.
+    /// 0 (default) disables the limit.
+    #[serde(rename = "term:agentidletimeoutmins", default, skip_serializing_if = "is_zero_f64")]
+    pub term_agent_idle_timeout_mins: f64,
+
     // -- Command settings --
     #[serde(rename = "cmd:env", default, skip_serializing_if = "HashMap::is_empty")]
     pub cmd_env: HashMap<String, String>,

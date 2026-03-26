@@ -336,6 +336,11 @@ function TerminalView(props: ViewComponentProps<TermViewModel>): JSX.Element {
             <TermResyncHandler blockId={blockId} model={model} />
             <TermThemeUpdater blockId={blockId} model={model} termRef={model.termRef} />
             <TermStickers config={stickerConfig()} />
+            <Show when={model.agentRuntimeLabel()}>
+                <div class="agent-runtime-badge" title="Agent running time">
+                    {model.agentRuntimeLabel()}
+                </div>
+            </Show>
             <div class="term-connectelem" ref={connectElemRef!}>
                 <div class="term-scrollbar-show-observer" onPointerOver={onScrollbarShowObserver} />
                 <div

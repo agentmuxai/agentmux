@@ -20,6 +20,7 @@ use std::io::Read as _;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 #[cfg(unix)]
 use libc;
@@ -91,6 +92,12 @@ struct ShellControllerInner {
     input_rx: Option<mpsc::Receiver<BlockInputUnion>>,
     /// OS PID of the running child process, kept for signal delivery in stop().
     child_pid: Option<u32>,
+    /// Unix timestamp (ms) when the process was spawned; None until first spawn.
+    spawn_ts_ms: Option<i64>,
+    /// Monotonic instant of the most recent PTY read; None until first output.
+    last_pty_output: Option<Instant>,
+    /// True if this pane is running an agent CLI (e.g. claude).
+    is_agent_pane: bool,
 }
 
 /// Factory function type for creating ConnInterface instances.
@@ -144,6 +151,9 @@ impl ShellController {
                 input_tx: None,
                 input_rx: None,
                 child_pid: None,
+                spawn_ts_ms: None,
+                last_pty_output: None,
+                is_agent_pane: false,
             })),
             conn_factory: Mutex::new(None),
             broker,
@@ -184,7 +194,19 @@ impl ShellController {
             shellprocstatus: inner.proc_status.clone(),
             shellprocconnname: inner.conn_name.clone(),
             shellprocexitcode: inner.proc_exit_code,
+            spawn_ts_ms: inner.spawn_ts_ms,
+            is_agent_pane: inner.is_agent_pane,
         }
+    }
+
+    /// Seconds since last PTY output, or None if no output yet.
+    pub fn last_output_secs_ago(&self) -> Option<u64> {
+        self.inner.lock().unwrap().last_pty_output.map(|t| t.elapsed().as_secs())
+    }
+
+    /// True if this pane is running an agent CLI.
+    pub fn is_agent_pane(&self) -> bool {
+        self.inner.lock().unwrap().is_agent_pane
     }
 
     /// Check block meta for whether to run on start.
@@ -531,10 +553,25 @@ impl Controller for ShellController {
         })?;
         tracing::info!(block_id = %self.block_id, "process spawned successfully");
 
-        // Register PID for per-pane metrics collection and signal delivery.
-        if let Some(pid) = child.process_id() {
-            super::pidregistry::register(&self.block_id, pid);
-            self.inner.lock().unwrap().child_pid = Some(pid);
+        // Detect agent pane: cmd contains a known agent CLI or has AGENTMUX_AGENT_ID set.
+        let is_agent = agent_id_for_jekt.is_some()
+            || cmd_str.to_lowercase().contains("claude")
+            || cmd_str.to_lowercase().contains("codex")
+            || cmd_str.to_lowercase().contains("gemini");
+
+        // Register PID and record spawn metadata.
+        let spawn_ts_ms = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0);
+        {
+            let mut inner = self.inner.lock().unwrap();
+            if let Some(pid) = child.process_id() {
+                super::pidregistry::register(&self.block_id, pid);
+                inner.child_pid = Some(pid);
+            }
+            inner.spawn_ts_ms = Some(spawn_ts_ms);
+            inner.is_agent_pane = is_agent;
         }
 
         // Auto-register with jekt if AGENTMUX_AGENT_ID was set in the block env.
@@ -660,6 +697,7 @@ impl Controller for ShellController {
         // Spawn PTY read task (blocking I/O → spawn_blocking)
         let block_id_read = self.block_id.clone();
         let broker_read = self.broker.clone();
+        let inner_read = self.inner.clone();
         tokio::task::spawn_blocking(move || {
             let mut reader = reader;
             let mut buf = [0u8; PTY_READ_BUF_SIZE];
@@ -667,6 +705,7 @@ impl Controller for ShellController {
                 match reader.read(&mut buf) {
                     Ok(0) => break, // EOF
                     Ok(n) => {
+                        inner_read.lock().unwrap().last_pty_output = Some(Instant::now());
                         if let Some(ref broker) = broker_read {
                             handle_append_block_file(
                                 broker,
@@ -776,6 +815,8 @@ impl Controller for ShellController {
                         shellprocstatus: inner.proc_status.clone(),
                         shellprocconnname: inner.conn_name.clone(),
                         shellprocexitcode: inner.proc_exit_code,
+                        spawn_ts_ms: inner.spawn_ts_ms,
+                        is_agent_pane: inner.is_agent_pane,
                     }
                 };
                 super::publish_controller_status(broker, &status);

@@ -70,6 +70,8 @@ declare global {
         shellprocstatus?: string;
         shellprocconnname?: string;
         shellprocexitcode: number;
+        spawn_ts_ms?: number;
+        is_agent_pane?: boolean;
     };
 
     // waveobj.BlockDef
