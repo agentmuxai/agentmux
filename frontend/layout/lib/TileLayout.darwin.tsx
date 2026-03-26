@@ -110,12 +110,30 @@ function TileLayoutComponent(props: TileLayoutProps) {
     });
     onCleanup(() => {
         window.removeEventListener("dragover", onWindowDragOver);
+        document.body.style.cursor = "";
+    });
+
+    // WKWebView hit-tests cursor using the pre-transform layout position, so
+    // mouseenter/pointerenter never fire over a translated resize handle's visual
+    // region. document.elementsFromPoint() uses the composited (real) position.
+    // Listen on the non-transformed tile-layout container and update body cursor
+    // based on what elementsFromPoint reports under the pointer.
+    const updateResizeCursor = throttle(16, (x: number, y: number) => {
+        if (isResizing()) return; // pointer capture is managing the cursor
+        const handle = document.elementsFromPoint(x, y).find((el) => el.classList.contains("resize-handle"));
+        if (handle) {
+            document.body.style.cursor = handle.classList.contains("flex-row") ? "ew-resize" : "ns-resize";
+        } else {
+            document.body.style.cursor = "";
+        }
     });
 
     return (
         <div
             class={clsx("tile-layout", props.contents.className, { animate: animate() && !isResizing() })}
             style={tileStyle()}
+            onMouseMove={(e) => updateResizeCursor(e.clientX, e.clientY)}
+            onMouseLeave={() => { if (!isResizing()) document.body.style.cursor = ""; }}
         >
             <div
                 ref={(el) => {
@@ -580,8 +598,6 @@ const ResizeHandle = (props: ResizeHandleComponentProps) => {
             onPointerDown={onPointerDown}
             onGotPointerCapture={onPointerCapture}
             onLostPointerCapture={onPointerRelease}
-            onPointerEnter={() => { document.body.style.cursor = cursorStyle(); }}
-            onPointerLeave={() => { document.body.style.cursor = ""; }}
             style={{
                 ...props.resizeHandleProps.transform as JSX.CSSProperties,
                 cursor: cursorStyle(),
