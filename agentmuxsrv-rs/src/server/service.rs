@@ -113,11 +113,10 @@ fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType {
                 Ok(v) => v,
                 Err(e) => return WebReturnType::error(e),
             };
-            // Stop the block controller before removing from DB so the PTY
-            // and child process are torn down regardless of DB outcome.
-            if let Err(e) = blockcontroller::stop_block_controller(&block_id) {
-                tracing::warn!(block_id = %block_id, error = %e, "stop_block_controller failed during DeleteBlock");
-            }
+            // Stop and remove the block controller before removing from DB so the PTY
+            // and child process are torn down and the registry entry is cleared
+            // regardless of DB outcome.
+            blockcontroller::delete_controller(&block_id);
             match wcore::delete_block(store, &tab_id, &block_id) {
                 Ok(()) => WebReturnType::success_empty(),
                 Err(e) => WebReturnType::error(e.to_string()),
