@@ -924,9 +924,11 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                 );
                 let bin_dir = format!("{}/bin", provider_dir);
 
-                // Expected binary path
+                // Expected binary path.
+                // On Windows, Node.js CLIs installed by npm are .cmd batch wrappers, not .exe.
+                // Use .cmd so make_cli_cmd() routes them through cmd.exe /C correctly.
                 let cli_bin = if cfg!(windows) {
-                    format!("{}/{}.exe", bin_dir, cmd.cli_command)
+                    format!("{}/{}.cmd", bin_dir, cmd.cli_command)
                 } else {
                     format!("{}/{}", bin_dir, cmd.cli_command)
                 };
@@ -987,7 +989,30 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                             let path = String::from_utf8_lossy(&output.stdout)
                                 .lines().next().unwrap_or("").trim().to_string();
                             if !path.is_empty() && std::path::Path::new(&path).exists() {
-                                system_bin = Some(path);
+                                // On Windows, npm CLIs ship as both a bare script (no ext) and a
+                                // .cmd batch wrapper. Prefer the .cmd sibling so make_cli_cmd()
+                                // routes it through cmd.exe /C correctly.  If the path already
+                                // has .cmd/.bat/.exe we use it as-is.
+                                #[cfg(windows)]
+                                {
+                                    let p = std::path::Path::new(&path);
+                                    let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("");
+                                    if ext.eq_ignore_ascii_case("cmd") || ext.eq_ignore_ascii_case("bat") || ext.eq_ignore_ascii_case("exe") {
+                                        system_bin = Some(path);
+                                    } else {
+                                        let cmd_sibling = p.with_extension("cmd").to_string_lossy().to_string();
+                                        if std::path::Path::new(&cmd_sibling).exists() {
+                                            tracing::info!(script = %path, cmd = %cmd_sibling, "preferring .cmd sibling over bare script");
+                                            system_bin = Some(cmd_sibling);
+                                        } else {
+                                            system_bin = Some(path);
+                                        }
+                                    }
+                                }
+                                #[cfg(not(windows))]
+                                {
+                                    system_bin = Some(path);
+                                }
                             }
                         }
                     }
@@ -2013,17 +2038,19 @@ pub fn make_cli_cmd(cli_path: &str) -> tokio::process::Command {
 }
 
 async fn get_cli_version(cli_path: &str) -> String {
-    match make_cli_cmd(cli_path)
-        .arg("--version")
-        .output()
-        .await
-    {
-        Ok(output) if output.status.success() => {
-            String::from_utf8_lossy(&output.stdout)
-                .trim()
-                .to_string()
+    let result = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        make_cli_cmd(cli_path).arg("--version").output(),
+    ).await;
+    match result {
+        Ok(Ok(output)) if output.status.success() => {
+            String::from_utf8_lossy(&output.stdout).trim().to_string()
         }
-        _ => "unknown".to_string(),
+        Ok(_) => "unknown".to_string(),
+        Err(_) => {
+            tracing::warn!(cli_path = %cli_path, "get_cli_version timed out after 5s");
+            "unknown".to_string()
+        }
     }
 }
 
