@@ -848,6 +848,9 @@ declare global {
         agentCliArgs?: string[];
         agentOutputFormat?: string;
         agentBinDir?: string;
+        "agent:resume_flag"?: string;
+        "agent:session_id_field"?: string;
+        "agent:sessionid"?: string;
         "subagent:*"?: boolean;
         "subagent:id"?: string;
         "subagent:slug"?: string;
@@ -1592,6 +1595,7 @@ declare global {
         pinned_version: string;
         windows_install_command: string;
         unix_install_command: string;
+        block_id?: string;
     };
 
     // wshrpc.ResolveCliResult
