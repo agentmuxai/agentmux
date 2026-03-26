@@ -317,10 +317,27 @@ pub fn set_window_transparency(
     }
 
     #[cfg(target_os = "linux")]
-    if blur {
-        // Linux blur is compositor-dependent; CSS backdrop-filter is the primary fallback.
-        // No reliable cross-compositor API exists.
-        tracing::info!("Linux blur requested — using CSS fallback (no native API)");
+    {
+        if blur {
+            // Linux blur is compositor-dependent; CSS backdrop-filter is the primary fallback.
+            // No reliable cross-compositor API exists.
+            tracing::info!("Linux blur requested — using CSS fallback (no native API)");
+        }
+
+        // Apply window-level opacity via GTK so the compositor composites the window
+        // at the requested transparency level. Without this the opacity value is ignored
+        // and the window renders fully opaque regardless of the CSS setting.
+        use gtk::prelude::*;
+        window.with_webview(move |webview| {
+            let gtk_win = webview.inner()
+                .parent()
+                .and_then(|p| p.parent())
+                .and_then(|w| w.dynamic_cast::<gtk::Window>().ok());
+            if let Some(win) = gtk_win {
+                win.set_opacity(opacity);
+                tracing::info!("Linux: set GTK window opacity={}", opacity);
+            }
+        }).ok();
     }
 
     Ok(())

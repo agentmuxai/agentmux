@@ -172,7 +172,7 @@ pub async fn spawn_backend(app: &tauri::AppHandle) -> Result<BackendSpawnResult,
 
     // 2. Cleanup stale processes/files ------------------------------------
     #[cfg(unix)]
-    cleanup_stale_backends(current_version);
+    cleanup_stale_backends(current_version, &data_dir);
     cleanup_stale_endpoints(&config_dir);
 
     // 3. Ensure directory tree --------------------------------------------
@@ -261,10 +261,15 @@ pub async fn spawn_backend(app: &tauri::AppHandle) -> Result<BackendSpawnResult,
 ///
 /// When the frontend crashes or is force-killed, the backend process may survive.
 /// On the next launch we find all running agentmuxsrv-rs processes, inspect their
-/// `--instance` argument, and kill any whose version differs from `current_version`.
+/// `--instance` and `--wavedata` arguments, and kill any whose version differs from
+/// `current_version` AND whose wavedata path is under our `data_dir`.
+///
+/// Scoping by `data_dir` prevents dev instances from killing production instances
+/// (and vice versa) — each app identifier has its own isolated data directory.
 #[cfg(unix)]
-fn cleanup_stale_backends(current_version: &str) {
+fn cleanup_stale_backends(current_version: &str, data_dir: &std::path::Path) {
     let current_instance = format!("v{}", current_version);
+    let data_dir_str = data_dir.to_string_lossy().to_string();
     let my_pid = std::process::id();
 
     tracing::info!(
@@ -368,7 +373,40 @@ fn cleanup_stale_backends(current_version: &str) {
             }
         };
 
-        // Step 4: Compare versions — skip if it matches the current version
+        // Step 4a: Check --wavedata — only kill backends sharing our data dir.
+        // Dev instances use ai.agentmux.app.dev/..., production uses ai.agentmux.app.vX-Y-Z/...
+        // We must not kill backends belonging to a different app identifier.
+        let wavedata_path = cmdline
+            .split_whitespace()
+            .collect::<Vec<&str>>()
+            .windows(2)
+            .find_map(|pair| {
+                if pair[0] == "--wavedata" {
+                    Some(pair[1].to_string())
+                } else {
+                    None
+                }
+            });
+
+        match &wavedata_path {
+            Some(wavedata) if !wavedata.starts_with(&data_dir_str) => {
+                tracing::info!(
+                    "cleanup_stale_backends: PID {} has different data dir (wavedata={}), skipping",
+                    pid, wavedata
+                );
+                continue;
+            }
+            None => {
+                tracing::info!(
+                    "cleanup_stale_backends: PID {} has no --wavedata arg, skipping",
+                    pid
+                );
+                continue;
+            }
+            _ => {}
+        }
+
+        // Step 4b: Compare versions — skip if it matches the current version
         if instance_version == current_instance {
             tracing::info!(
                 "cleanup_stale_backends: PID {} is current version ({}), keeping",
