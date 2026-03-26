@@ -12,6 +12,7 @@ import "./StatusBar.scss";
 
 const StatusBar = (): JSX.Element => {
     const version = getApi().getAboutModalDetails()?.version ?? "";
+    const hostname = getApi().getHostName();
     const instanceNum = windowInstanceNumAtom;
     const windowCount = windowCountAtom;
 
@@ -35,6 +36,11 @@ const StatusBar = (): JSX.Element => {
                 <ConnectionStatus />
                 <ConfigStatus />
                 <UpdateStatus />
+                <Show when={hostname && hostname !== "unknown"}>
+                    <span class="status-hostname" title={`Host: ${hostname}`}>
+                        {hostname}
+                    </span>
+                </Show>
                 <Show when={version}>
                     <Show
                         when={backendStatusAtom() !== "crashed"}
