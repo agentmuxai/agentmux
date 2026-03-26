@@ -1099,8 +1099,10 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                     // available after the process exits. We run in spawn_blocking and publish all
                     // lines at once when done; users see the full install log after it completes.
                     let block_id_install = cmd.block_id.clone();
+                    // Quote prefix_dir so paths with spaces (e.g. C:\Users\John Doe\...)
+                    // are not split by cmd.exe's argument tokenizer.
                     let npm_cmd_str = format!(
-                        "npm install --loglevel=http --no-audit --no-fund --no-progress --prefix {} {}",
+                        "npm install --loglevel=http --no-audit --no-fund --no-progress --prefix \"{}\" {}",
                         prefix_dir, package_arg
                     );
                     tracing::info!(block_id = %block_id_install, cmd = %npm_cmd_str, "running npm install");
