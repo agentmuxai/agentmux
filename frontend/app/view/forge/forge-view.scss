@@ -2,8 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 .forge-pane {
+    container-type: inline-size;
+    container-name: forge-pane;
+    position: relative;
     display: flex;
     flex-direction: column;
+    width: 100%;
     height: 100%;
     overflow: hidden;
     padding: 6px;
@@ -68,10 +72,12 @@
 
 .forge-list {
     display: flex;
-    flex-direction: column;
+    flex-wrap: wrap;
+    flex: 1;
     gap: 4px;
     overflow-y: auto;
-    flex: 1;
+    overflow-x: hidden;
+    align-content: start;
 }
 
 .forge-list-footer {
@@ -93,6 +99,9 @@
     border: 1px solid var(--border-color);
     border-radius: 6px;
     cursor: pointer;
+    flex: 1 1 280px;
+    max-width: 400px;
+    min-width: 0;
 
     &:hover {
         border-color: var(--highlight-bg-color);
@@ -274,6 +283,19 @@
     &:hover {
         background: var(--highlight-bg-color);
         border-color: var(--accent-color, #a78bfa);
+    }
+
+    &.forge-new-btn-primary {
+        margin-left: auto;
+        background: #2ea043;
+        border-color: #2ea043;
+        color: #fff;
+        font-weight: 500;
+
+        &:hover {
+            background: #3fb950;
+            border-color: #3fb950;
+        }
     }
 }
 
@@ -565,10 +587,11 @@
 
 .forge-skills-list {
     display: flex;
-    flex-direction: column;
-    gap: 6px;
+    flex-wrap: wrap;
     flex: 1;
+    gap: 6px;
     overflow-y: auto;
+    align-content: start;
 }
 
 .forge-skills-footer {
@@ -587,6 +610,9 @@
     background: var(--block-bg-color);
     border: 1px solid var(--border-color);
     border-radius: 4px;
+    flex: 1 1 260px;
+    max-width: 380px;
+    min-width: 0;
 }
 
 .forge-skill-card-info {
@@ -718,7 +744,7 @@
 // ── Import overlay ──────────────────────────────────────────────────────────
 
 .forge-import-overlay {
-    position: fixed;
+    position: absolute;
     inset: 0;
     background: rgba(0, 0, 0, 0.5);
     display: flex;
@@ -732,7 +758,6 @@
     border: 1px solid var(--border-color);
     border-radius: 8px;
     padding: 16px;
-    min-width: 400px;
     max-width: 500px;
 
     form {
@@ -756,6 +781,8 @@
     letter-spacing: 0.5px;
     padding: 8px 0 2px;
     margin-top: 4px;
+    flex-basis: 100%;
+    width: 100%;
 
     &:first-child {
         margin-top: 0;
@@ -809,6 +836,304 @@
     &:hover {
         border-color: var(--error-color, #e55);
         color: var(--error-color, #e55);
+    }
+}
+
+// ── Responsive: Wide pane — cap form input width for readability ─────────────
+
+@container forge-pane (min-width: 600px) {
+    .forge-form-input {
+        max-width: 400px;
+    }
+}
+
+// ── Responsive: Medium pane (250–399px) ─────────────────────────────────────
+
+@container forge-pane (max-width: 399px) {
+    // List view
+    .forge-card {
+        gap: 6px;
+        padding: 5px 6px;
+    }
+
+    .forge-card-btn {
+        padding: 2px 6px;
+        font-size: 10px;
+    }
+
+    .forge-card-desc {
+        display: none;
+    }
+
+    .forge-list-footer {
+        gap: 4px;
+    }
+
+    .forge-new-btn {
+        padding: 4px 8px;
+        font-size: 11px;
+    }
+
+    // Detail view
+    .forge-detail-header {
+        gap: 6px;
+    }
+
+    .forge-detail-icon {
+        font-size: 18px;
+    }
+
+    .forge-detail-name {
+        font-size: 13px;
+    }
+
+    .forge-section-tab {
+        padding: 4px 10px;
+        font-size: 11px;
+    }
+
+    .forge-content-tab {
+        padding: 4px 8px;
+        font-size: 11px;
+    }
+
+    // Form view
+    .forge-form-label {
+        width: 70px;
+        font-size: 11px;
+    }
+
+    .forge-form-input-icon {
+        width: 50px;
+    }
+
+    .forge-form-provider-cmd {
+        font-size: 10px;
+        word-break: break-all;
+    }
+
+    // Import dialog
+    .forge-import-dialog {
+        min-width: unset;
+        max-width: unset;
+        width: calc(100% - 32px);
+        margin: 0 16px;
+    }
+
+    // History panel
+    .forge-history-time {
+        min-width: 50px;
+        font-size: 10px;
+    }
+
+    // Skills panel
+    .forge-skill-card {
+        gap: 6px;
+        padding: 6px 8px;
+    }
+}
+
+// ── Responsive: Narrow pane (150–249px) ─────────────────────────────────────
+
+@container forge-pane (max-width: 249px) {
+    // List view: stack card actions below
+    .forge-card {
+        flex-wrap: wrap;
+    }
+
+    .forge-card-actions {
+        width: 100%;
+        justify-content: flex-end;
+        margin-top: 2px;
+    }
+
+    .forge-card-icon {
+        font-size: 16px;
+        width: 22px;
+    }
+
+    .forge-list-footer {
+        flex-direction: column;
+    }
+
+    .forge-new-btn {
+        width: 100%;
+        text-align: center;
+    }
+
+    // Detail view: wrap header, scroll tabs
+    .forge-detail-header {
+        flex-wrap: wrap;
+    }
+
+    .forge-detail-info {
+        min-width: 0;
+        width: calc(100% - 70px);
+    }
+
+    .forge-section-tabs {
+        overflow-x: auto;
+        flex-wrap: nowrap;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    .forge-section-tab {
+        flex-shrink: 0;
+        padding: 4px 8px;
+        font-size: 11px;
+    }
+
+    .forge-content-tabs {
+        overflow-x: auto;
+        flex-wrap: nowrap;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    .forge-content-tab {
+        flex-shrink: 0;
+        padding: 3px 6px;
+        font-size: 10px;
+    }
+
+    // Form view: stack labels above inputs
+    .forge-form-row {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 4px;
+    }
+
+    .forge-form-label {
+        width: auto;
+    }
+
+    .forge-form-input-icon {
+        width: 100%;
+        text-align: left;
+    }
+
+    .forge-form-provider-label {
+        min-width: unset;
+    }
+
+    .forge-form-provider-cmd {
+        display: none;
+    }
+
+    .forge-form-actions {
+        flex-direction: column;
+    }
+
+    // Import dialog
+    .forge-import-dialog {
+        width: calc(100% - 16px);
+        margin: 0 8px;
+        padding: 12px;
+    }
+
+    // History panel: stack time above text
+    .forge-history-entry {
+        flex-direction: column;
+        gap: 2px;
+    }
+
+    .forge-history-time {
+        min-width: unset;
+    }
+
+    // Skills panel
+    .forge-skill-card {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .forge-skill-type-badge {
+        font-size: 9px;
+    }
+
+    // Fix: form inputs stretch to full width in vertical layout
+    .forge-form-input {
+        width: 100%;
+        box-sizing: border-box;
+    }
+
+    // Fix: remove horizontal margins when buttons stack
+    .forge-import-btn,
+    .forge-reseed-btn {
+        margin-left: 0;
+    }
+
+    // Fix: checkbox row stays horizontal
+    .forge-form-row:has(.forge-form-checkbox-label) {
+        flex-direction: row;
+        align-items: center;
+    }
+
+    // Fix: skill content textarea shrinks
+    .forge-skill-content {
+        min-height: 70px;
+        max-height: 140px;
+    }
+}
+
+// ── Responsive: Very narrow pane (< 150px) ──────────────────────────────────
+
+@container forge-pane (max-width: 149px) {
+    // List view: minimal card
+    .forge-card-provider {
+        display: none;
+    }
+
+    .forge-card-actions {
+        .forge-card-btn {
+            padding: 2px 4px;
+            font-size: 9px;
+        }
+    }
+
+    .forge-agent-type-badge {
+        display: none;
+    }
+
+    // Detail view
+    .forge-detail-icon {
+        display: none;
+    }
+
+    .forge-detail-sub {
+        display: none;
+    }
+
+    .forge-back-btn {
+        padding: 2px 6px;
+        font-size: 11px;
+    }
+
+    // Form view
+    .forge-form-row {
+        gap: 2px;
+    }
+
+    .forge-form-label {
+        font-size: 10px;
+    }
+
+    .forge-form-input {
+        font-size: 12px;
+        padding: 4px 6px;
+    }
+
+    .forge-btn-primary,
+    .forge-btn-secondary {
+        padding: 5px 10px;
+        font-size: 12px;
+        width: 100%;
+        text-align: center;
+    }
+
+    // Fix: skill content textarea further shrinks
+    .forge-skill-content {
+        min-height: 50px;
+        max-height: 100px;
     }
 }
 
