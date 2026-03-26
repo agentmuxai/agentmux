@@ -907,6 +907,7 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                 tracing::info!(
                     provider = %cmd.provider_id,
                     cli = %cmd.cli_command,
+                    block_id = %cmd.block_id,
                     agentmux_version = AGENTMUX_VERSION,
                     "ResolveCli"
                 );
@@ -1067,58 +1068,60 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                     let package_arg = format!("{}@{}", cmd.npm_package, cmd.pinned_version);
                     tracing::info!(package = %package_arg, prefix = %prefix_dir, "running npm install");
 
-                    let mut child = if cfg!(windows) {
-                        tokio::process::Command::new("cmd")
-                            .args(["/C", "npm", "install", "--loglevel=http", "--no-audit", "--no-fund", "--prefix", &prefix_dir, &package_arg])
-                            .stdout(std::process::Stdio::piped())
-                            .stderr(std::process::Stdio::piped())
-                            .spawn()
-                    } else {
-                        tokio::process::Command::new("npm")
-                            .args(["install", "--loglevel=http", "--no-audit", "--no-fund", "--prefix", &prefix_dir, &package_arg])
-                            .stdout(std::process::Stdio::piped())
-                            .stderr(std::process::Stdio::piped())
-                            .spawn()
-                    }.map_err(|e| format!("failed to spawn npm install: {e}"))?;
-
-                    // Stream stdout + stderr into the block's output subject in real time
+                    // Collect all npm output after completion via .output().
+                    // Pipe-based streaming (both async IOCP and sync blocking) does not receive
+                    // data from cmd.exe /C batch script children on Windows — output only becomes
+                    // available after the process exits. We run in spawn_blocking and publish all
+                    // lines at once when done; users see the full install log after it completes.
                     let block_id_install = cmd.block_id.clone();
-                    let broker_npm = broker.clone();
-                    let stdout_pipe = child.stdout.take();
-                    let stderr_pipe = child.stderr.take();
-
-                    let bid1 = block_id_install.clone();
-                    let bid2 = block_id_install.clone();
-                    let brk1 = broker_npm.clone();
-                    let brk2 = broker_npm.clone();
-                    let (_, _, exit_status) = tokio::join!(
-                        async move {
-                            if let Some(p) = stdout_pipe {
-                                use tokio::io::AsyncBufReadExt;
-                                let mut reader = tokio::io::BufReader::new(p).lines();
-                                while let Ok(Some(line)) = reader.next_line().await {
-                                    tracing::info!(line = %line, "npm stdout");
-                                    if !bid1.is_empty() {
-                                        crate::backend::wps::publish_install_progress(&brk1, &bid1, &line);
-                                    }
-                                }
-                            }
-                        },
-                        async move {
-                            if let Some(p) = stderr_pipe {
-                                use tokio::io::AsyncBufReadExt;
-                                let mut reader = tokio::io::BufReader::new(p).lines();
-                                while let Ok(Some(line)) = reader.next_line().await {
-                                    tracing::info!(line = %line, "npm stderr");
-                                    if !bid2.is_empty() {
-                                        crate::backend::wps::publish_install_progress(&brk2, &bid2, &line);
-                                    }
-                                }
-                            }
-                        },
-                        child.wait(),
+                    let npm_cmd_str = format!(
+                        "npm install --loglevel=http --no-audit --no-fund --no-progress --prefix {} {}",
+                        prefix_dir, package_arg
                     );
-                    let exit_status = exit_status.map_err(|e| format!("npm install wait failed: {e}"))?;
+                    tracing::info!(block_id = %block_id_install, cmd = %npm_cmd_str, "running npm install");
+
+                    let broker_npm = broker.clone();
+                    let exit_status = tokio::task::spawn_blocking(move || {
+                        let result = if cfg!(windows) {
+                            std::process::Command::new("cmd")
+                                .args(["/C", &npm_cmd_str])
+                                .env("CI", "true")
+                                .env("FORCE_COLOR", "0")
+                                .output()
+                        } else {
+                            std::process::Command::new("npm")
+                                .args(["install", "--loglevel=http", "--no-audit", "--no-fund", "--no-progress", "--prefix", &prefix_dir, &package_arg])
+                                .env("CI", "true")
+                                .env("FORCE_COLOR", "0")
+                                .output()
+                        };
+                        match result {
+                            Ok(out) => {
+                                tracing::info!(exit_code = out.status.code().unwrap_or(-1), stdout_bytes = out.stdout.len(), stderr_bytes = out.stderr.len(), "npm install output collected");
+                                // Publish stderr first (npm writes progress/errors there), then stdout
+                                for line in String::from_utf8_lossy(&out.stderr).lines() {
+                                    if !line.trim().is_empty() {
+                                        tracing::info!(line = %line, "npm stderr");
+                                        if !block_id_install.is_empty() {
+                                            crate::backend::wps::publish_install_progress(&broker_npm, &block_id_install, line);
+                                        }
+                                    }
+                                }
+                                for line in String::from_utf8_lossy(&out.stdout).lines() {
+                                    if !line.trim().is_empty() {
+                                        tracing::info!(line = %line, "npm stdout");
+                                        if !block_id_install.is_empty() {
+                                            crate::backend::wps::publish_install_progress(&broker_npm, &block_id_install, line);
+                                        }
+                                    }
+                                }
+                                Ok(out.status)
+                            }
+                            Err(e) => Err(format!("failed to run npm install: {e}")),
+                        }
+                    }).await
+                        .map_err(|e| format!("npm spawn_blocking panicked: {e}"))?
+                        .map_err(|e| e)?;
                     tracing::info!(exit_code = exit_status.code().unwrap_or(-1), "npm install completed");
 
                     if !exit_status.success() {

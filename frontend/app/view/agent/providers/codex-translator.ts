@@ -64,6 +64,13 @@ export class CodexTranslator implements OutputTranslator {
         const itemType: string = item.type ?? "";
 
         switch (itemType) {
+            case "agent_message": {
+                // Flat format observed in practice: {"type":"agent_message","text":"..."}
+                const text: string = item.text ?? "";
+                if (!text) return [];
+                return [{ type: "text", content: text }];
+            }
+
             case "message": {
                 if (item.role !== "assistant") return [];
                 const content: any[] = item.content ?? [];

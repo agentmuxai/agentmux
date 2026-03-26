@@ -381,9 +381,10 @@ fn remove_from_all_scopes(map: &mut HashMap<String, Vec<String>>, route_id: &str
 /// The frontend subscribes to `install_progress` events scoped to `block:{block_id}`
 /// and displays each message as a log line in the agent presentation view.
 pub fn publish_install_progress(broker: &Broker, block_id: &str, message: &str) {
+    let scope = format!("block:{}", block_id);
     broker.publish(WaveEvent {
         event: EVENT_INSTALL_PROGRESS.to_string(),
-        scopes: vec![format!("block:{}", block_id)],
+        scopes: vec![scope],
         sender: String::new(),
         persist: 0,
         data: Some(serde_json::json!({ "message": message })),
