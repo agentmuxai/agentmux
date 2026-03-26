@@ -23,6 +23,7 @@ use serde_json::json;
 use tower_http::cors::{Any, CorsLayer};
 
 use crate::backend::eventbus::EventBus;
+use crate::backend::lan_discovery::LanDiscovery;
 use crate::backend::messagebus::MessageBus;
 use crate::backend::reactive::{Poller, ReactiveHandler};
 use crate::backend::storage::filestore::FileStore;
@@ -49,6 +50,7 @@ pub struct AppState {
     pub messagebus: Arc<MessageBus>,
     pub subagent_watcher: Arc<SubagentWatcher>,
     pub history_service: Arc<HistoryService>,
+    pub lan_discovery: Option<Arc<LanDiscovery>>,
     /// Local HTTP URL of this instance (e.g. "http://127.0.0.1:PORT").
     /// Used for cross-instance inject forwarding and file registry entries.
     pub local_web_url: String,
@@ -117,6 +119,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/post-chat-message", get(stub_501).post(stub_501))
         .route("/docsite/*path", get(files::handle_docsite))
         .route("/schema/*path", get(files::handle_schema))
+        .route("/api/lan-instances", get(handle_lan_instances))
         .merge(bus_routes)
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
@@ -141,6 +144,15 @@ async fn health_handler(State(state): State<AppState>) -> Json<serde_json::Value
         "status": "ok",
         "version": state.version,
     }))
+}
+
+async fn handle_lan_instances(State(state): State<AppState>) -> Json<serde_json::Value> {
+    let instances = state
+        .lan_discovery
+        .as_ref()
+        .map(|d| d.get_instances())
+        .unwrap_or_default();
+    Json(json!(instances))
 }
 
 async fn stub_501() -> impl IntoResponse {

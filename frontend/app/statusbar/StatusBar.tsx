@@ -6,6 +6,7 @@ import { Show, type JSX } from "solid-js";
 import { BackendStatus } from "./BackendStatus";
 import { ConfigStatus } from "./ConfigStatus";
 import { ConnectionStatus } from "./ConnectionStatus";
+import { LanStatus } from "./LanStatus";
 import { SystemStats } from "./SystemStats";
 import { UpdateStatus } from "./UpdateStatus";
 import "./StatusBar.scss";
@@ -30,6 +31,7 @@ const StatusBar = (): JSX.Element => {
                 <BackendStatus />
                 <span class="stat-separator">|</span>
                 <SystemStats />
+                <LanStatus />
             </div>
             <div class="status-bar-center" />
             <div class="status-bar-right">

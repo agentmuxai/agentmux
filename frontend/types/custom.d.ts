@@ -36,6 +36,18 @@ declare global {
         reinitVersion: Accessor<number>;
         isTermMultiInput: Accessor<boolean>;
         backendStatusAtom: Accessor<"connecting" | "running" | "crashed">;
+        lanInstancesAtom: Accessor<LanInstance[]>;
+    };
+
+    type LanInstance = {
+        instance_id: string;
+        hostname: string;
+        version: string;
+        address: string;
+        port: number;
+        agents: string[];
+        first_seen: number;
+        last_seen: number;
     };
 
     type WritableWaveObjectAtom<T extends WaveObj> = SignalAtom<T>;

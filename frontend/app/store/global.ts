@@ -128,6 +128,7 @@ export const [isTermMultiInput, setIsTermMultiInput] = createSignal(false);
 
 export const [windowInstanceNumAtom, setWindowInstanceNumAtom] = createSignal(0);
 export const [windowCountAtom, setWindowCountAtom] = createSignal(1);
+export const [lanInstancesAtom, setLanInstancesAtom] = createSignal<LanInstance[]>([]);
 
 // ---------------------------------------------------------------------------
 // GlobalAtomsType-compatible export (used in wos.ts callBackendService)
@@ -158,6 +159,7 @@ export const atoms = {
     reinitVersion: reinitVersion,
     isTermMultiInput: isTermMultiInput,
     backendStatusAtom: backendStatusAtom,
+    lanInstancesAtom: lanInstancesAtom,
 };
 
 // ---------------------------------------------------------------------------
@@ -268,6 +270,13 @@ export function initGlobalEventSubs(initOpts: AgentMuxInitOpts) {
                 const fileData: WSFileEventData = event.data;
                 const fileSubject = getFileSubject(fileData.zoneid, fileData.filename);
                 if (fileSubject != null) fileSubject.next(fileData);
+            },
+        },
+        {
+            eventType: "laninstances",
+            handler: (event) => {
+                const instances: LanInstance[] = event.data ?? [];
+                setLanInstancesAtom(instances);
             },
         },
     );

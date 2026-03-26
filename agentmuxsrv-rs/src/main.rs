@@ -372,6 +372,22 @@ async fn main() {
     // instead of routing through the cloud agentbus.
     std::env::set_var("AGENTMUX_LOCAL_URL", &local_web_url);
 
+    // LAN discovery via mDNS — advertise this instance and browse for peers
+    let hostname = whoami::fallible::hostname().unwrap_or_else(|_| "unknown".to_string());
+    let lan_discovery = match backend::lan_discovery::LanDiscovery::start(
+        config.instance_id.clone(),
+        hostname,
+        version.clone(),
+        web_addr.port(),
+        event_bus.clone(),
+    ) {
+        Ok(d) => Some(d),
+        Err(e) => {
+            tracing::warn!("LAN discovery unavailable: {e}");
+            None
+        }
+    };
+
     // Clean up stale cross-instance agent registry entries (entries older than 4h).
     backend::reactive::registry::cleanup_stale(
         &wavebase::get_wave_data_dir(),
@@ -392,6 +408,7 @@ async fn main() {
         messagebus,
         subagent_watcher,
         history_service,
+        lan_discovery,
         local_web_url: local_web_url.clone(),
         http_client: reqwest::Client::new(),
     };
