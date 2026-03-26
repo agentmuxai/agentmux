@@ -257,11 +257,109 @@ pub async fn spawn_backend(app: &tauri::AppHandle) -> Result<BackendSpawnResult,
     Ok(result)
 }
 
+/// Returns true if `pid` (an agentmuxsrv-rs process) has no live agentmux parent,
+/// meaning it is safe to kill as an orphan.
+///
+/// When a Tauri frontend spawns the backend, the backend's OS-level PPID is the
+/// frontend's PID. If the frontend dies (SIGKILL, crash, force-quit), the kernel
+/// reparents the backend to launchd (PID 1). We use this to distinguish a truly
+/// orphaned backend (frontend gone) from a live backend serving an active frontend
+/// (multi-version coexistence scenario).
+#[cfg(unix)]
+fn is_orphaned_backend(pid: u32) -> bool {
+    // Get the backend's PPID from the OS process table.
+    let ppid_output = match std::process::Command::new("ps")
+        .args(["-p", &pid.to_string(), "-o", "ppid="])
+        .output()
+    {
+        Ok(o) => o,
+        Err(e) => {
+            tracing::warn!(
+                "cleanup_stale_backends: ppid lookup failed for PID {}: {}, treating as orphaned",
+                pid, e
+            );
+            return true;
+        }
+    };
+
+    if !ppid_output.status.success() {
+        // Process vanished between pgrep and now — nothing to kill.
+        tracing::info!("cleanup_stale_backends: PID {} vanished during ppid lookup", pid);
+        return true;
+    }
+
+    let ppid: u32 = match String::from_utf8_lossy(&ppid_output.stdout)
+        .trim()
+        .parse()
+    {
+        Ok(p) => p,
+        Err(_) => {
+            tracing::warn!(
+                "cleanup_stale_backends: could not parse ppid for PID {}, treating as orphaned",
+                pid
+            );
+            return true;
+        }
+    };
+
+    // ppid <= 1 means reparented to launchd — frontend is definitely dead.
+    if ppid <= 1 {
+        tracing::info!(
+            "cleanup_stale_backends: PID {} is orphaned (ppid={})",
+            pid, ppid
+        );
+        return true;
+    }
+
+    // Check whether the parent process is still alive.
+    let parent_alive = unsafe { libc::kill(ppid as i32, 0) } == 0;
+    if !parent_alive {
+        tracing::info!(
+            "cleanup_stale_backends: PID {} is orphaned (ppid={} dead)",
+            pid, ppid
+        );
+        return true;
+    }
+
+    // Parent is alive — verify it's actually an agentmux frontend, not a recycled PID.
+    let comm_output = std::process::Command::new("ps")
+        .args(["-p", &ppid.to_string(), "-o", "comm="])
+        .output();
+
+    match comm_output {
+        Ok(o) if o.status.success() => {
+            let comm = String::from_utf8_lossy(&o.stdout).trim().to_string();
+            if comm.contains("agentmux") {
+                tracing::info!(
+                    "cleanup_stale_backends: PID {} has live parent {} (ppid={}), skipping — multi-version coexistence",
+                    pid, comm, ppid
+                );
+                false // NOT orphaned — leave it alone
+            } else {
+                tracing::warn!(
+                    "cleanup_stale_backends: PID {} has unexpected parent '{}' (ppid={}), treating as orphaned",
+                    pid, comm, ppid
+                );
+                true
+            }
+        }
+        _ => {
+            tracing::warn!(
+                "cleanup_stale_backends: comm lookup failed for ppid={}, treating PID {} as orphaned",
+                ppid, pid
+            );
+            true
+        }
+    }
+}
+
 /// Find and kill stale agentmuxsrv-rs processes left behind by previous versions.
 ///
 /// When the frontend crashes or is force-killed, the backend process may survive.
 /// On the next launch we find all running agentmuxsrv-rs processes, inspect their
 /// `--instance` argument, and kill any whose version differs from `current_version`.
+/// A version-mismatched backend is only killed if it is truly orphaned (no live
+/// agentmux parent) — see `is_orphaned_backend`.
 #[cfg(unix)]
 fn cleanup_stale_backends(current_version: &str) {
     let current_instance = format!("v{}", current_version);
@@ -377,8 +475,14 @@ fn cleanup_stale_backends(current_version: &str) {
             continue;
         }
 
+        // Step 4b: Only kill if the backend is truly orphaned (no live agentmux parent).
+        // If the old frontend is still running, this is multi-version coexistence — leave it alone.
+        if !is_orphaned_backend(pid) {
+            continue;
+        }
+
         tracing::info!(
-            "cleanup_stale_backends: PID {} is stale (instance={}, current={}), terminating",
+            "cleanup_stale_backends: PID {} is stale (instance={}, current={}) and orphaned, terminating",
             pid, instance_version, current_instance
         );
 
