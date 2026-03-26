@@ -403,7 +403,7 @@ impl SubprocessController {
 
                 // Publish the NDJSON line as a WPS blockfile event on the "output" subject
                 if let Some(ref broker) = broker_read {
-                    tracing::debug!(block_id = %block_id_read, line = %trimmed, "subprocess stdout → blockfile");
+                    tracing::info!(block_id = %block_id_read, line = %trimmed, "subprocess stdout → blockfile");
                     // Include the newline so the frontend line splitter works correctly
                     let line_with_newline = format!("{}\n", trimmed);
                     super::shell::handle_append_block_file(
