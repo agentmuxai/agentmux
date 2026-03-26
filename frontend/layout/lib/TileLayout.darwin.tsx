@@ -580,8 +580,8 @@ const ResizeHandle = (props: ResizeHandleComponentProps) => {
             onPointerDown={onPointerDown}
             onGotPointerCapture={onPointerCapture}
             onLostPointerCapture={onPointerRelease}
-            onMouseEnter={() => { document.body.style.cursor = cursorStyle(); }}
-            onMouseLeave={() => { document.body.style.cursor = ""; }}
+            onPointerEnter={() => { document.body.style.cursor = cursorStyle(); }}
+            onPointerLeave={() => { document.body.style.cursor = ""; }}
             style={{
                 ...props.resizeHandleProps.transform as JSX.CSSProperties,
                 cursor: cursorStyle(),
