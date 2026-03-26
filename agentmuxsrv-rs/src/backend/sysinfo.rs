@@ -229,7 +229,13 @@ pub async fn run_sysinfo_loop(broker: Arc<Broker>, config_watcher: Arc<ConfigWat
             );
 
             // Aggregate per block and publish.
+            // After Pass 2 (remove_dead=true), sys.process() returns None for any
+            // PID that no longer exists — use this to detect orphaned registry entries.
+            let mut dead_block_ids: Vec<String> = Vec::new();
+
             for (block_id, pids) in &mut block_trees {
+                // collect_descendants() always puts the root PID first.
+                let root_pid = pids.first().copied().unwrap_or(Pid::from(0usize));
                 let mut total_cpu: f64 = 0.0;
                 let mut total_mem: u64 = 0;
                 let mut live_count: u32 = 0;
@@ -240,6 +246,14 @@ pub async fn run_sysinfo_loop(broker: Arc<Broker>, config_watcher: Arc<ConfigWat
                         total_mem += proc.memory();
                         live_count += 1;
                     }
+                }
+
+                // Root process is gone — evict from registry.  This is the last-resort
+                // cleanup for processes that exit without normal wait-task teardown
+                // (SIGKILL by the OS, unexpected crash, or stop() race).
+                if sys.process(root_pid).is_none() {
+                    dead_block_ids.push(block_id.clone());
+                    continue; // skip publishing stale stats for a dead block
                 }
 
                 let mut block_values = HashMap::new();
@@ -259,6 +273,14 @@ pub async fn run_sysinfo_loop(broker: Arc<Broker>, config_watcher: Arc<ConfigWat
                     data: serde_json::to_value(&block_ts).ok(),
                 };
                 broker.publish(block_event);
+            }
+
+            for block_id in &dead_block_ids {
+                pidregistry::unregister(block_id);
+                tracing::warn!(
+                    block_id = %block_id,
+                    "sysinfo: evicted dead root PID — process exited without normal cleanup"
+                );
             }
         }
     }

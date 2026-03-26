@@ -21,6 +21,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::sync::Mutex;
 
+#[cfg(unix)]
+use libc;
+
 use base64::Engine as _;
 use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 use tokio::sync::mpsc;
@@ -70,6 +73,9 @@ fn detect_local_shell_path_windows() -> String {
 const PTY_READ_BUF_SIZE: usize = 4096;
 
 /// Inner state protected by mutex.
+/// Grace period (seconds) between SIGTERM and SIGKILL during stop().
+const KILL_GRACE_SECS: u64 = 5;
+
 struct ShellControllerInner {
     /// Current process status.
     proc_status: String,
@@ -83,6 +89,8 @@ struct ShellControllerInner {
     input_tx: Option<mpsc::Sender<BlockInputUnion>>,
     /// Input channel receiver (consumed by the PTY input loop).
     input_rx: Option<mpsc::Receiver<BlockInputUnion>>,
+    /// OS PID of the running child process, kept for signal delivery in stop().
+    child_pid: Option<u32>,
 }
 
 /// Factory function type for creating ConnInterface instances.
@@ -135,6 +143,7 @@ impl ShellController {
                 conn_name: String::new(),
                 input_tx: None,
                 input_rx: None,
+                child_pid: None,
             })),
             conn_factory: Mutex::new(None),
             broker,
@@ -522,9 +531,10 @@ impl Controller for ShellController {
         })?;
         tracing::info!(block_id = %self.block_id, "process spawned successfully");
 
-        // Register PID for per-pane metrics collection
+        // Register PID for per-pane metrics collection and signal delivery.
         if let Some(pid) = child.process_id() {
             super::pidregistry::register(&self.block_id, pid);
+            self.inner.lock().unwrap().child_pid = Some(pid);
         }
 
         // Auto-register with jekt if AGENTMUX_AGENT_ID was set in the block env.
@@ -780,18 +790,34 @@ impl Controller for ShellController {
     }
 
     fn stop(&self, _graceful: bool, new_status: &str) -> Result<(), String> {
-        let mut inner = self.inner.lock().unwrap();
+        // Extract what we need from the lock, release it before any async work.
+        let pid_to_kill = {
+            let mut inner = self.inner.lock().unwrap();
+            if inner.proc_status == new_status {
+                return Ok(());
+            }
+            let pid = inner.child_pid;
+            // Drop the input channel — closes PTY writer → delivers EOF/SIGHUP as
+            // belt-and-suspenders in case signal delivery fails on the platform.
+            inner.input_tx = None;
+            Self::set_status(&mut inner, new_status);
+            pid
+        };
 
-        // If already in the target state, nothing to do
-        if inner.proc_status == new_status {
-            return Ok(());
+        // Send SIGTERM to the process group so that child processes spawned by
+        // the shell (e.g. `claude --dangerously-skip-permissions` and its subtree)
+        // are also signalled. Negative pid targets the whole process group.
+        // Schedule SIGKILL after KILL_GRACE_SECS as a backstop for processes
+        // that ignore or delay on SIGTERM.
+        #[cfg(unix)]
+        if let Some(pid) = pid_to_kill {
+            // SAFETY: kill() is a well-defined POSIX syscall.
+            unsafe { libc::kill(-(pid as libc::pid_t), libc::SIGTERM) };
+            tokio::spawn(async move {
+                tokio::time::sleep(tokio::time::Duration::from_secs(KILL_GRACE_SECS)).await;
+                unsafe { libc::kill(-(pid as libc::pid_t), libc::SIGKILL) };
+            });
         }
-
-        // Drop the input channel to signal shutdown
-        inner.input_tx = None;
-
-        // Update status
-        Self::set_status(&mut inner, new_status);
 
         Ok(())
     }

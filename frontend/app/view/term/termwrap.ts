@@ -111,7 +111,13 @@ export class TermWrap {
         //   read scrollback while the PTY is active (xterm.js >= 5.1.0).
         // smoothScrollDuration: 0 — disables animated scrolling, which makes cursor-tracking
         //   viewport jumps (caused by Ink's erase-and-redraw pattern) more disorienting.
-        this.terminal = new Terminal({ ...options, scrollOnUserInput: false, smoothScrollDuration: 0 });
+        // cursorBlink: false — disable blink by default so the xterm.js requestAnimationFrame
+        //   cursor loop doesn't run on non-focused panes. Without this, every visible terminal
+        //   pane runs a 60–120 Hz rAF loop solely for cursor blinking, keeping WKWebView's
+        //   CoreAnimation observer firing continuously and driving sustained ~190% host CPU
+        //   even when no PTY output is arriving. Focus/blur listeners re-enable blink only
+        //   for the active pane.
+        this.terminal = new Terminal({ ...options, cursorBlink: false, scrollOnUserInput: false, smoothScrollDuration: 0 });
         this.fitAddon = new FitAddon();
         this.fitAddon.noScrollbar = PLATFORM === PlatformMacOS;
         this.serializeAddon = new SerializeAddon();
@@ -177,6 +183,16 @@ export class TermWrap {
     async init() {
         // Mount terminal to DOM
         this.terminal.open(this.connectElem);
+
+        // Enable cursor blink only while this pane is focused.  The textarea is
+        // available after open(); focus/blur fire naturally as the user switches panes.
+        this.terminal.textarea?.addEventListener("focus", () => {
+            this.terminal.options.cursorBlink = true;
+        });
+        this.terminal.textarea?.addEventListener("blur", () => {
+            this.terminal.options.cursorBlink = false;
+        });
+
         this.setupPasteHandler();
 
         // Register input handlers
