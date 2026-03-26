@@ -1,4 +1,4 @@
-// Copyright 2025, Command Line Inc.
+// Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
 //! OpenAI AI backend: compatible with OpenAI, Perplexity, and local APIs.
