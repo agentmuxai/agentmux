@@ -74,10 +74,17 @@ class WSControl {
         this.reconnectTimes = 0;
         this.noReconnect = false;
         if (this.wsConn) {
-            this.wsConn.close(); // onclose → reconnect() with updated baseHostPort
-        } else {
-            this.connectNow("changeEndpoint");
+            // Detach the onclose handler before closing — the socket may already be
+            // CLOSED (dead sidecar, gave up reconnecting) so calling .close() won't
+            // fire onclose again, and even if it does, the open/opening guard would
+            // skip reconnect(). Go straight to connectNow() instead.
+            this.wsConn.onclose = null;
+            this.wsConn.close();
+            this.wsConn = null;
         }
+        this.open = false;
+        this.opening = false;
+        this.connectNow("changeEndpoint");
     }
 
     connectNow(desc: string) {
