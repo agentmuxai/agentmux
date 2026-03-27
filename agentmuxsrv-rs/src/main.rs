@@ -323,6 +323,12 @@ async fn main() {
         sysinfo::run_sysinfo_loop(sysinfo_broker, sysinfo_config, "local".to_string()).await;
     });
 
+    // Start agent process watchdog (kills panes that exceed max-runtime or idle-output limits)
+    let watchdog_config = config_watcher.clone();
+    tokio::spawn(async move {
+        backend::blockcontroller::watchdog::run_watchdog_loop(watchdog_config).await;
+    });
+
     // Reactive handler (global singleton) + poller
     let reactive_handler = reactive::get_global_handler();
     reactive_handler.set_input_sender(Arc::new(|block_id: &str, data: &[u8]| {

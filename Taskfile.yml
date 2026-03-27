@@ -194,7 +194,7 @@ tasks:
                 APP=target/release/bundle/macos/AgentMux.app
                 OUT=target/release/bundle/macos/AgentMux_${VERSION}_aarch64.dmg
                 echo "Creating DMG from $APP..."
-                hdiutil create -volname "AgentMux" -srcfolder "$APP" -ov -format UDZO "$OUT"
+                hdiutil create -volname "AgentMux-${VERSION}" -srcfolder "$APP" -ov -format UDZO "$OUT"
                 echo "✓ DMG created: $OUT"
                 if [ -d "$HOME/Desktop" ]; then
                   cp "$OUT" "$HOME/Desktop/"

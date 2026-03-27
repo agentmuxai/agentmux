@@ -17,6 +17,7 @@ pub mod pidregistry;
 pub mod process_tree;
 pub mod shell;
 pub mod subprocess;
+pub mod watchdog;
 
 use std::any::Any;
 use std::collections::HashMap;
@@ -115,6 +116,10 @@ impl BlockInputUnion {
     }
 }
 
+fn is_false(v: &bool) -> bool {
+    !v
+}
+
 // ---- Runtime status (matches Go's BlockControllerRuntimeStatus) ----
 
 /// Runtime status of a block controller, sent to the UI.
@@ -129,6 +134,12 @@ pub struct BlockControllerRuntimeStatus {
     pub shellprocconnname: String,
     #[serde(default)]
     pub shellprocexitcode: i32,
+    /// Unix timestamp (ms) when the process was spawned; None until first spawn.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spawn_ts_ms: Option<i64>,
+    /// True if this pane is running an agent CLI (e.g. claude, codex, gemini).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub is_agent_pane: bool,
 }
 
 // ---- Controller trait ----
@@ -428,6 +439,7 @@ mod tests {
             shellprocstatus: STATUS_RUNNING.to_string(),
             shellprocconnname: "local".to_string(),
             shellprocexitcode: 0,
+            ..Default::default()
         };
         let json = serde_json::to_string(&status).unwrap();
         assert!(json.contains("\"blockid\":\"block-123\""));
