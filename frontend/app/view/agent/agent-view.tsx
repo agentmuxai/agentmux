@@ -194,11 +194,11 @@ async function runLaunchFlow(
 
     const oref = WOS.makeORef("block", blockId);
 
-    // Phase 0: Container agents require Docker
+    // Phase 0: Container agents require a container runtime
     const blockData = WOS.getWaveObjectAtom<Block>(oref)();
     const agentMode = blockData?.meta?.agentMode ?? "host";
     if (agentMode === "container") {
-        log("docker", "container agent — checking for Docker...");
+        log("docker", "container agent — checking for container runtime...");
         try {
             const dockerResult = await RpcApi.ResolveCliCommand(TabRpcClient, {
                 provider_id: "docker",
@@ -210,9 +210,8 @@ async function runLaunchFlow(
             }, { timeout: 10000 });
             log("docker", `found: ${dockerResult.cli_path} (${dockerResult.version})`);
         } catch {
-            log("docker", "Docker is not installed", "error");
-            log("docker", "Container agents require Docker Desktop to run.", "error");
-            log("docker", "Install from: https://www.docker.com/products/docker-desktop/", "error");
+            log("docker", "Container runtime not found", "error");
+            log("docker", "Container agents require a compatible container runtime (e.g. Docker) to run.", "error");
             return "fatal";
         }
     }
