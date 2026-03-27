@@ -1,6 +1,8 @@
 mod backend;
 mod config;
 mod server;
+#[cfg(windows)]
+mod crash_monitor;
 
 use std::future::IntoFuture;
 use std::sync::Arc;
@@ -209,6 +211,15 @@ fn start_parent_watcher(parent_pid: u32) {
 
 #[tokio::main]
 async fn main() {
+    // -1. Crash monitor branch — must be checked before any other initialization.
+    //     The monitor process runs a blocking minidumper::Server and exits when the
+    //     main process disconnects. It does not run any backend logic.
+    #[cfg(windows)]
+    if std::env::args().any(|a| a == "--crash-monitor") {
+        crash_monitor::run_monitor();
+        return;
+    }
+
     // 0. Start parent process watcher BEFORE tokio runtime does real work (Linux/macOS only).
     // On Windows, the frontend uses a Job Object with KILL_ON_JOB_CLOSE instead.
     // Uses getppid() to get the parent PID, then kqueue/pidfd to watch it (event-driven,
@@ -223,6 +234,14 @@ async fn main() {
             start_parent_watcher(ppid);
         }
     }
+
+    // 0b. Attach out-of-process crash dump handler (Windows only).
+    //     Spawns self with --crash-monitor and installs a VEH handler.
+    //     _crash_guard must stay alive — dropping it uninstalls the VEH handler.
+    //     Non-fatal: if the monitor fails to start, the process continues normally
+    //     and WER LocalDumps still captures __fastfail crashes independently.
+    #[cfg(windows)]
+    let _crash_guard = crash_monitor::spawn_and_attach();
 
     // 1. Init tracing (stderr + rolling file)
     let _log_guard = init_logging();

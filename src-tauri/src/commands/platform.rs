@@ -52,17 +52,19 @@ pub fn get_data_dir(app: tauri::AppHandle) -> Result<String, String> {
 ///
 /// Auth dirs live under {app_data_dir}/auth/{provider_id}/. The app data dir
 /// already includes the AgentMux version in its identifier (ai.agentmux.app.vX-Y-Z),
-/// so each version gets naturally isolated auth storage.
+/// Auth is isolated per provider but shared across AgentMux versions.
+/// Using app_data_dir() would make auth version-specific (different Tauri identifier
+/// per version = different data dir), forcing re-auth on every upgrade.
+/// Instead we use ~/.agentmux/auth/<provider_id>/ which is stable across versions.
 ///
 /// Codex requires the dir to exist before it is set as CODEX_HOME — this command
 /// handles pre-creation for all providers uniformly.
 #[tauri::command]
-pub fn ensure_auth_dir(app: tauri::AppHandle, provider_id: String) -> Result<String, String> {
-    let data_dir = app.path()
-        .app_data_dir()
-        .map_err(|e| format!("Failed to get data dir: {}", e))?;
+pub fn ensure_auth_dir(_app: tauri::AppHandle, provider_id: String) -> Result<String, String> {
+    let home_dir = dirs::home_dir()
+        .ok_or_else(|| "Failed to determine home directory".to_string())?;
 
-    let auth_dir = data_dir.join("auth").join(&provider_id);
+    let auth_dir = home_dir.join(".agentmux").join("auth").join(&provider_id);
     std::fs::create_dir_all(&auth_dir)
         .map_err(|e| format!("Failed to create auth dir for {}: {}", provider_id, e))?;
 
