@@ -350,18 +350,25 @@ export class TermWrap {
             this.rafBuffer = [];
             this.writeInFlight = true;
             const t0 = performance.now();
-            this.doTerminalWrite(merged, null).then(() => {
-                this.writeInFlight = false;
-                const elapsed = performance.now() - t0;
-                const bufLines = this.terminal.buffer.active.length;
-                if (elapsed > 8) {
-                    console.warn(`[raf-write] SLOW chunks=${chunkCount} bytes=${totalLen} elapsed=${elapsed.toFixed(1)}ms bufLines=${bufLines}`);
-                } else {
-                    console.log(`[raf-write] chunks=${chunkCount} bytes=${totalLen} elapsed=${elapsed.toFixed(1)}ms bufLines=${bufLines}`);
-                }
-                // Drain any data that arrived while the write was in progress.
-                if (this.rafBuffer.length > 0) this.armRaf();
-            });
+            this.doTerminalWrite(merged, null)
+                .then(() => {
+                    this.writeInFlight = false;
+                    const elapsed = performance.now() - t0;
+                    const bufLines = this.terminal.buffer.active.length;
+                    if (elapsed > 8) {
+                        console.warn(`[raf-write] SLOW chunks=${chunkCount} bytes=${totalLen} elapsed=${elapsed.toFixed(1)}ms bufLines=${bufLines}`);
+                    } else {
+                        console.log(`[raf-write] chunks=${chunkCount} bytes=${totalLen} elapsed=${elapsed.toFixed(1)}ms bufLines=${bufLines}`);
+                    }
+                    // Drain any data that arrived while the write was in progress.
+                    if (this.rafBuffer.length > 0) this.armRaf();
+                })
+                .catch((e: unknown) => {
+                    // Reset the guard so the terminal doesn't stop rendering permanently.
+                    this.writeInFlight = false;
+                    console.warn("[raf-write] doTerminalWrite rejected:", e);
+                    if (this.rafBuffer.length > 0) this.armRaf();
+                });
         });
     }
 
