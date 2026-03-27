@@ -426,17 +426,21 @@ impl Controller for ShellController {
             };
 
             let shell_type = crate::backend::shellintegration::detect_shell_type(&shell_path);
-            let wave_data_dir = crate::backend::wavebase::get_wave_data_dir();
 
-            // Deploy integration scripts (no-op if already up-to-date)
-            crate::backend::shellintegration::deploy_scripts(&wave_data_dir);
+            // Deploy shell integration scripts to ~/.agentmux/ (the user's home-based
+            // data dir) instead of AGENTMUX_DATA_HOME.  MSIX packages virtualise writes
+            // to %LocalAppData%, so files written by the packaged backend aren't visible
+            // to child processes (pwsh, bash, etc.) spawned via ConPTY.  The home dir is
+            // never virtualised, so the scripts are always reachable at their literal path.
+            let shell_home = crate::backend::wavebase::get_home_dir().join(".agentmux");
+            crate::backend::shellintegration::deploy_scripts(&shell_home);
 
             tracing::info!(block_id = %self.block_id, shell = %shell_path, shell_type = ?shell_type, "interactive shell path");
 
             let mut c = CommandBuilder::new(&shell_path);
 
             // Apply shell-specific startup args (--rcfile, -File, etc.)
-            if let Some(startup) = crate::backend::shellintegration::get_shell_startup(shell_type, &wave_data_dir) {
+            if let Some(startup) = crate::backend::shellintegration::get_shell_startup(shell_type, &shell_home) {
                 for arg in &startup.extra_args {
                     c.arg(arg);
                 }
