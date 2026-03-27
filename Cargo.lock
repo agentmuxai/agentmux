@@ -10,7 +10,7 @@ checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
 name = "agentmux"
-version = "0.32.92"
+version = "0.32.93"
 dependencies = [
  "chrono",
  "dirs 5.0.1",
@@ -46,7 +46,7 @@ dependencies = [
 
 [[package]]
 name = "agentmuxsrv-rs"
-version = "0.32.92"
+version = "0.32.93"
 dependencies = [
  "async-stream",
  "axum",
@@ -651,9 +651,9 @@ dependencies = [
 
 [[package]]
 name = "cc"
-version = "1.2.57"
+version = "1.2.58"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7a0dd1ca384932ff3641c8718a02769f1698e7563dc6974ffd03346116310423"
+checksum = "e1e928d4b69e3077709075a938a05ffbedfa53a84c8f766efbf8220bb1ff60e1"
 dependencies = [
  "find-msvc-tools",
  "shlex",
@@ -7245,7 +7245,7 @@ dependencies = [
 
 [[package]]
 name = "wsh-rs"
-version = "0.32.92"
+version = "0.32.93"
 dependencies = [
  "base64 0.22.1",
  "clap",
