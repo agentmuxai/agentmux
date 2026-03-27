@@ -1099,28 +1099,41 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                     // available after the process exits. We run in spawn_blocking and publish all
                     // lines at once when done; users see the full install log after it completes.
                     let block_id_install = cmd.block_id.clone();
-                    // Quote prefix_dir so paths with spaces (e.g. C:\Users\John Doe\...)
-                    // are not split by cmd.exe's argument tokenizer.
-                    let npm_cmd_str = format!(
-                        "npm install --loglevel=http --no-audit --no-fund --no-progress --prefix \"{}\" {}",
-                        prefix_dir, package_arg
-                    );
-                    tracing::info!(block_id = %block_id_install, cmd = %npm_cmd_str, "running npm install");
+                    tracing::info!(block_id = %block_id_install, package = %package_arg, prefix = %prefix_dir, "running npm install");
 
                     let broker_npm = broker.clone();
                     let exit_status = tokio::task::spawn_blocking(move || {
-                        let result = if cfg!(windows) {
-                            std::process::Command::new("cmd")
-                                .args(["/C", &npm_cmd_str])
-                                .env("CI", "true")
-                                .env("FORCE_COLOR", "0")
-                                .output()
-                        } else {
-                            std::process::Command::new("npm")
-                                .args(["install", "--loglevel=http", "--no-audit", "--no-fund", "--no-progress", "--prefix", &prefix_dir, &package_arg])
-                                .env("CI", "true")
-                                .env("FORCE_COLOR", "0")
-                                .output()
+                        let result = {
+                            #[cfg(windows)]
+                            {
+                                // npm on Windows is a .cmd batch script — must be invoked via cmd.exe /C.
+                                // Use raw_arg to pass the command string WITHOUT Rust's CreateProcess
+                                // quoting. With .args(["/C", str]), Rust wraps str in outer quotes and
+                                // escapes inner quotes as \", which cmd.exe treats as literal backslash+quote,
+                                // corrupting paths: CWD + \"C:\path\" → ENOENT.
+                                // raw_arg passes the string verbatim; cmd.exe sees:
+                                //   cmd /C npm install ... --prefix "C:\path with spaces\..." pkg
+                                // and tokenizes "..." as a quoted path correctly.
+                                use std::os::windows::process::CommandExt;
+                                let npm_cmd_str = format!(
+                                    "npm install --loglevel=http --no-audit --no-fund --no-progress --prefix \"{}\" {}",
+                                    prefix_dir, package_arg
+                                );
+                                std::process::Command::new("cmd")
+                                    .arg("/C")
+                                    .raw_arg(&npm_cmd_str)
+                                    .env("CI", "true")
+                                    .env("FORCE_COLOR", "0")
+                                    .output()
+                            }
+                            #[cfg(not(windows))]
+                            {
+                                std::process::Command::new("npm")
+                                    .args(["install", "--loglevel=http", "--no-audit", "--no-fund", "--no-progress", "--prefix", &prefix_dir, &package_arg])
+                                    .env("CI", "true")
+                                    .env("FORCE_COLOR", "0")
+                                    .output()
+                            }
                         };
                         match result {
                             Ok(out) => {
