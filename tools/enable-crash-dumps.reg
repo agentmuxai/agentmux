@@ -1,0 +1,25 @@
+Windows Registry Editor Version 5.00
+
+; Enable WER crash dumps for agentmuxsrv-rs.exe
+; Includes ForceDumpsEnabled so __fastfail (0xC0000409) also triggers WER
+;
+; BEFORE importing, create the dump folder:
+;   mkdir C:\CrashDumps\agentmuxsrv
+;
+; To import (as Administrator):
+;   reg import enable-crash-dumps.reg
+;   net start WerSvc
+
+[HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps\agentmuxsrv-rs.exe]
+"DumpType"=dword:00000002
+"DumpCount"=dword:0000000a
+"DumpFolder"="C:\\CrashDumps\\agentmuxsrv"
+
+; ForceDumpsEnabled: makes the kernel invoke WER even for __fastfail / STATUS_STACK_BUFFER_OVERRUN
+; Supported on Windows 10 build 17763 (1809) and later
+[HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\CrashControl]
+"ForceDumpsEnabled"=dword:00000001
+
+; Change WerSvc from demand-start (3) to automatic (2) so it is running at crash time
+[HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\WerSvc]
+"Start"=dword:00000002

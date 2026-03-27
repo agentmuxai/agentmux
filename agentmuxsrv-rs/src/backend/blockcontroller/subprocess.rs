@@ -425,7 +425,7 @@ impl SubprocessController {
             let mut lines = reader.lines();
             while let Ok(Some(line)) = lines.next_line().await {
                 if !line.trim().is_empty() {
-                    tracing::debug!(
+                    tracing::info!(
                         block_id = %block_id_err,
                         stderr = %line,
                         "subprocess stderr"
