@@ -392,7 +392,7 @@ const ActionWidgets = (): JSX.Element => {
                     >
                         <i class="fa-solid fa-ellipsis" />
                         <Show when={!iconOnly()}>
-                            <span class="action-widget-more-label">More</span>
+                            <span class="action-widget-more-label">more</span>
                         </Show>
                         <i
                             class={`fa-solid ${moreOpen() ? "fa-chevron-up" : "fa-chevron-down"} action-widget-more-chevron`}

@@ -55,6 +55,22 @@ AgentMux is built on **Tauri v2** with a **100% Rust backend**:
 
 **Important:** All Go and Electron code has been removed. Only Rust + Tauri is supported.
 
+### Widgets
+
+Widgets are defined in `agentmuxsrv-rs/src/config/widgets.json`. These are the **only** widget types — do not invent or reference widgets that don't exist here.
+
+| Widget Key | View | Label | Opens in Pane? |
+|------------|------|-------|----------------|
+| `defwidget@agent` | `agent` | agent | Yes |
+| `defwidget@forge` | `forge` | forge | Yes |
+| `defwidget@identity` | `identity` | identity | Yes |
+| `defwidget@swarm` | `swarm` | swarm | Yes (hidden by default) |
+| `defwidget@terminal` | `term` | terminal | Yes |
+| `defwidget@sysinfo` | `sysinfo` | sysinfo | Yes |
+| `defwidget@help` | `help` | help | Yes |
+| `defwidget@settings` | `settings` | settings | No — opens external editor |
+| `defwidget@devtools` | `devtools` | devtools | No — toggles browser inspector |
+
 ---
 
 ## Version Management

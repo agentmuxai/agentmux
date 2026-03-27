@@ -6,7 +6,7 @@
  * Used from both handleHeaderContextMenu (header) and onContextMenu (body) in blockframe.tsx.
  */
 
-import { createBlockSplitHorizontally, createBlockSplitVertically } from "@/app/store/global";
+import { atoms, createBlockSplitHorizontally, createBlockSplitVertically, replaceBlock } from "@/app/store/global";
 import { readText as clipboardReadText, writeText as clipboardWriteText } from "@/util/clipboard";
 
 type SplitDirection = "up" | "down" | "left" | "right";
@@ -98,6 +98,46 @@ export async function handleSplitPane(blockData: Block, direction: SplitDirectio
     }
 }
 
+// ─── Replace With submenu ─────────────────────────────────────────────────────
+
+/** Non-pane widget views that should be excluded from the Replace submenu. */
+const nonPaneViews = new Set(["devtools", "settings"]);
+
+/**
+ * Build a "Replace With..." submenu listing all pane-based widgets.
+ * Returns an array with the submenu item + a trailing separator, or empty
+ * array if no replacement widgets are available.
+ */
+function buildReplaceSubmenu(blockData: Block): ContextMenuItem[] {
+    const fullConfig = atoms.fullConfigAtom();
+    const widgets = fullConfig?.widgets ?? {};
+    const currentView = blockData?.meta?.view;
+
+    const items: ContextMenuItem[] = Object.values(widgets)
+        .filter((w) => {
+            const view = w.blockdef?.meta?.view;
+            if (!view || nonPaneViews.has(view)) return false;
+            if (view === currentView) return false;
+            return true;
+        })
+        .sort((a, b) => {
+            const orderA = a["display:order"] ?? 0;
+            const orderB = b["display:order"] ?? 0;
+            if (orderA !== orderB) return orderA - orderB;
+            return (a.label ?? "").localeCompare(b.label ?? "");
+        })
+        .map((widget) => ({
+            label: widget.label ?? "Unnamed",
+            click: () => void replaceBlock(blockData.oid, widget.blockdef, true),
+        }));
+
+    if (items.length === 0) return [];
+    return [
+        { label: "Replace With...", type: "submenu" as const, submenu: items },
+        { type: "separator" as const },
+    ];
+}
+
 // ─── Menu builder ─────────────────────────────────────────────────────────────
 
 export interface PaneContextMenuOpts {
@@ -158,6 +198,7 @@ export function buildPaneContextMenu(
         { label: "Split Left",  click: () => void handleSplitPane(blockData, "left") },
         { label: "Split Right", click: () => void handleSplitPane(blockData, "right") },
         { type: "separator" },
+        ...buildReplaceSubmenu(blockData),
         {
             label: opts.magnified ? "Un-Magnify Block" : "Magnify Block",
             click: opts.onMagnifyToggle,
