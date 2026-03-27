@@ -1,4 +1,4 @@
-// Copyright 2025, Command Line Inc.
+// Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
 //! RPC message router: acts like a network switch, routing messages between

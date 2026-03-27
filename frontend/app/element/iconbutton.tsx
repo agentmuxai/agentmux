@@ -1,4 +1,4 @@
-// Copyright 2023, Command Line Inc.
+// Copyright 2023-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
 import { useLongClick } from "@/app/hook/useLongClick";
