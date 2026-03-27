@@ -3,6 +3,7 @@
 
 import { Search, useSearch } from "@/app/element/search";
 import { atoms, getOverrideConfigAtom, getSettingsPrefixAtom, globalStore, pushNotification, WOS } from "@/store/global";
+import { backendStatusAtom } from "@/store/backendStatus";
 import { fireAndForget } from "@/util/util";
 import { computeBgStyleFromMeta } from "@/util/waveutil";
 import { ISearchOptions } from "@xterm/addon-search";
@@ -20,10 +21,13 @@ import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 
 // TermResyncHandler: watches connection status changes and resyncs the terminal controller.
+// Also resyncs when the backend restarts — local terminals have no connStatus change on restart,
+// so without this the existing PTY stays dead after reconnect even though "running" is shown.
 function TermResyncHandler(props: { blockId: string; model: TermViewModel }): JSX.Element {
     const connStatus = createMemo(() => props.model.connStatus());
 
     let lastConnStatus: ConnStatus = connStatus();
+    let lastBackendStatus = backendStatusAtom();
 
     createEffect(() => {
         const cs = connStatus();
@@ -41,6 +45,17 @@ function TermResyncHandler(props: { blockId: string; model: TermViewModel }): JS
         }
         props.model.termRef.current?.resyncController("resync handler");
         lastConnStatus = cs;
+    });
+
+    // Resync when backend transitions to "running" after a restart.
+    // Catches the case where the sidecar crashed and came back — the PTY is gone
+    // but connStatus for local terminals never changes, so the effect above never fires.
+    createEffect(() => {
+        const bs = backendStatusAtom();
+        if (bs === "running" && lastBackendStatus !== "running") {
+            props.model.termRef.current?.resyncController("backend-restart");
+        }
+        lastBackendStatus = bs;
     });
 
     return null;
