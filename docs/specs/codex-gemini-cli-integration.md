@@ -274,3 +274,74 @@ const OAUTH_URL_PATTERNS: Record<string, RegExp> = {
 3. Should API keys be stored in the Forge database or in a system keychain?
 4. Do we need provider-specific stream parsers, or is raw terminal output acceptable for v1?
 5. Codex `--full-auto` and Gemini `--yolo` flags — are these the right defaults for AgentMux's use case?
+
+---
+
+## Edge Cases: Account & Access Errors
+
+### No Account (User Has Never Signed Up)
+
+When a user runs `codex login` or `gemini auth login` without an account:
+
+**Codex:** OpenAI sign-in page is shown in the browser. If the user doesn't have an account,
+they can create one — but Codex CLI access requires ChatGPT Plus or Pro. Even after creating
+an account, `codex login status` may still return failure until the subscription is active.
+
+**Gemini:** Google sign-in page is shown. Gemini CLI requires a Google Cloud project with the
+Gemini API enabled and billing configured. A fresh Google account with no API access will
+cause `gemini auth status` to fail even after login.
+
+**What should happen:**
+- After login returns exit_code=0 but `CheckCliAuth` still returns "not authenticated": surface
+  a clear message explaining the CLI requires a paid plan / API access, with a link to the
+  provider's sign-up / billing page.
+- Do NOT leave the user in a perpetual polling loop if repeated auth checks all fail after
+  a successful login callback.
+
+**Implementation:**
+- After `run_cli_login` exits with code 0, do one final `CheckCliAuth`. If it fails,
+  transition to `auth_failed` state immediately (don't continue polling).
+- Show a provider-specific message:
+  - Codex: "Codex CLI requires a ChatGPT Plus or Pro subscription. Visit openai.com/codex."
+  - Gemini: "Gemini CLI requires a Google Cloud account with the Gemini API enabled."
+
+### Has Account But No Codex / Gemini Access
+
+OpenAI has gated Codex CLI access. A user with a free or basic ChatGPT account may:
+1. Successfully complete OAuth login (browser opens, they approve)
+2. `codex login status` exits 0 (credentials stored)
+3. `codex exec --json ...` fails immediately with a 403/access error or empty output
+
+**What should happen:**
+- Monitor subprocess exit_code: if codex exits with a non-zero code on the first turn,
+  check stderr for access-denied patterns: `"Access denied"`, `"Forbidden"`, `"403"`,
+  `"not authorized"`, `"requires access"`.
+- Surface a clear pane-level error: "Your OpenAI account doesn't have Codex CLI access.
+  Check your ChatGPT plan or join the waitlist at openai.com."
+
+**Implementation:**
+- In `subprocess.rs` stderr reader: log stderr lines at WARN level.
+- After subprocess exits with non-zero code on the FIRST turn (session_id is None),
+  check if any captured stderr line matches an access-denied pattern, and publish a
+  user-visible error event so the frontend can show a helpful message.
+
+### Rate Limits and Quota Exhaustion
+
+Both Codex and Gemini can hit API rate limits or quota caps mid-session:
+- Codex: OpenAI API rate limits apply per tier
+- Gemini: Google Cloud API quotas and billing caps apply
+
+**What should happen:**
+- Parse rate limit errors from subprocess output (e.g. `{"type":"error","message":"Rate limit exceeded"}`)
+- The `CodexTranslator` and `GeminiTranslator` should already handle `error` event types — verify
+  the message reaches the frontend as a visible error node.
+- Do NOT auto-retry immediately — let the user decide when to retry.
+
+### Summary of New Error States to Handle
+
+| Scenario | Detection | User-facing message |
+|----------|-----------|---------------------|
+| Login succeeds but auth still fails | exit_code=0 from login; CheckCliAuth still fails | "Account doesn't have {provider} access. Check subscription." |
+| First turn exits non-zero with 403/access error | exit_code≠0, stderr matches access pattern | "Access denied — check your {provider} plan." |
+| Rate limit / quota | `error` event in output stream | Shown inline in pane as error node (existing behavior) |
+| Browser login closed without completing | login child exits non-zero | "Login cancelled or failed. Click Retry." (already handled via canRetry) |

@@ -25,6 +25,7 @@ pub const EVENT_SYS_INFO: &str = "sysinfo";
 pub const EVENT_CONTROLLER_STATUS: &str = "controllerstatus";
 pub const EVENT_WAVE_OBJ_UPDATE: &str = "waveobj:update";
 pub const EVENT_BLOCK_FILE: &str = "blockfile";
+pub const EVENT_INSTALL_PROGRESS: &str = "install_progress";
 pub const EVENT_CONFIG: &str = "config";
 pub const EVENT_USER_INPUT: &str = "userinput";
 pub const EVENT_ROUTE_GONE: &str = "route:gone";
@@ -374,6 +375,20 @@ fn remove_from_all_scopes(map: &mut HashMap<String, Vec<String>>, route_id: &str
     for scope in empty_scopes {
         map.remove(&scope);
     }
+}
+
+/// Publish a single install-progress line to the frontend for a given block.
+/// The frontend subscribes to `install_progress` events scoped to `block:{block_id}`
+/// and displays each message as a log line in the agent presentation view.
+pub fn publish_install_progress(broker: &Broker, block_id: &str, message: &str) {
+    let scope = format!("block:{}", block_id);
+    broker.publish(WaveEvent {
+        event: EVENT_INSTALL_PROGRESS.to_string(),
+        scopes: vec![scope],
+        sender: String::new(),
+        persist: 0,
+        data: Some(serde_json::json!({ "message": message })),
+    });
 }
 
 // ====================================================================
