@@ -26,7 +26,11 @@ import * as services from "@/store/services";
 import * as keyutil from "@/util/keyutil";
 import { boundNumber, createSignalAtom, stringToBase64 } from "@/util/util";
 import type { SignalAtom } from "@/util/util";
-import { createMemo } from "solid-js";
+import { createMemo, createSignal } from "solid-js";
+
+// Ticks every 60 s so agentRuntimeLabel memos re-evaluate without waiting for a status event.
+const [nowMinute, setNowMinute] = createSignal(Math.floor(Date.now() / 60_000));
+setInterval(() => setNowMinute(Math.floor(Date.now() / 60_000)), 60_000);
 import { computeTheme, DefaultTermTheme } from "./termutil";
 import { TermWrap } from "./termwrap";
 import { buildSettingsMenuItems } from "./termSettingsMenu";
@@ -103,6 +107,7 @@ class TermViewModel implements ViewModel {
         });
 
         this.agentRuntimeLabel = createMemo(() => {
+            nowMinute(); // re-evaluate every 60 s even without a status event
             const fullStatus = this.shellProcFullStatus();
             if (!fullStatus?.is_agent_pane) return null;
             if (fullStatus.shellprocstatus !== "running") return null;

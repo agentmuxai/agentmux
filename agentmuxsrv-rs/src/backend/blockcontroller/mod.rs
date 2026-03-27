@@ -439,6 +439,7 @@ mod tests {
             shellprocstatus: STATUS_RUNNING.to_string(),
             shellprocconnname: "local".to_string(),
             shellprocexitcode: 0,
+            ..Default::default()
         };
         let json = serde_json::to_string(&status).unwrap();
         assert!(json.contains("\"blockid\":\"block-123\""));
