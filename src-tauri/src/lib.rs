@@ -50,6 +50,7 @@ pub fn run() {
             commands::platform::ensure_auth_dir,
             commands::platform::run_cli_login,
             commands::platform::cancel_cli_login,
+            commands::platform::write_cli_login_stdin,
             commands::platform::get_config_dir,
             commands::platform::ensure_settings_file,
             commands::platform::open_in_editor,

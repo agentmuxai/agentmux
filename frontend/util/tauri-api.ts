@@ -393,6 +393,9 @@ export function buildTauriApi(): AppApi {
         cancelCliLogin: async () => {
             await invoke("cancel_cli_login");
         },
+        writeCliLoginStdin: async (code: string) => {
+            await invoke("write_cli_login_stdin", { code });
+        },
 
         listen: async (event: string, callback: (event: any) => void) => {
             const unlisten = await listen(event, callback);

@@ -104,6 +104,18 @@
         &:hover { opacity: 0.85; }
     }
 
+    .agent-auth-code-input {
+        flex: 1;
+        padding: 3px 8px;
+        font-size: 11px;
+        background: var(--input-bg-color, rgba(0,0,0,0.3));
+        color: var(--main-text-color, #fff);
+        border: 1px solid var(--border-color, rgba(255,255,255,0.2));
+        border-radius: 3px;
+        outline: none;
+        &:focus { border-color: var(--accent-color, #4a9eff); }
+    }
+
     // === Retry Login Bar ===
     .agent-retry-bar {
         flex-shrink: 0;

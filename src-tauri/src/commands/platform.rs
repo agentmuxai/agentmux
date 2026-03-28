@@ -263,7 +263,9 @@ pub async fn run_cli_login(
     let mut cmd = tokio::process::Command::new(&cli_path);
     cmd.args(&login_args)
         .envs(&auth_env)
-        .stdin(std::process::Stdio::null())
+        // Pipe stdin so write_cli_login_stdin can forward an auth code if the
+        // user has to paste one manually (e.g. when the localhost redirect fails).
+        .stdin(std::process::Stdio::piped())
         // Pipe stdout+stderr so we can extract the OAuth URL.
         // The CLI always prints the URL (browser open or not) — we capture it,
         // return it to the frontend, and also try to open the browser ourselves.
@@ -284,10 +286,28 @@ pub async fn run_cli_login(
 
     // Register cancellation channel so cancel_cli_login() can kill this child.
     let (cancel_tx, cancel_rx) = tokio::sync::oneshot::channel::<()>();
+
+    // Spawn a background task that owns ChildStdin and forwards auth codes sent
+    // via write_cli_login_stdin(). ChildStdin is not Send, so it must stay in
+    // the task that spawned it — we communicate via an mpsc channel.
+    let (stdin_tx, mut stdin_rx) = tokio::sync::mpsc::channel::<String>(4);
     {
         let state = app.state::<crate::state::AppState>();
         let mut stored = state.cli_login_cancel.lock().unwrap();
         *stored = Some(cancel_tx);
+        let mut tx_stored = state.cli_login_stdin_tx.lock().unwrap();
+        *tx_stored = Some(stdin_tx);
+    }
+
+    if let Some(mut stdin) = child.stdin.take() {
+        tokio::spawn(async move {
+            use tokio::io::AsyncWriteExt;
+            while let Some(code) = stdin_rx.recv().await {
+                let line = format!("{}\n", code.trim());
+                if stdin.write_all(line.as_bytes()).await.is_err() { break; }
+                let _ = stdin.flush().await;
+            }
+        });
     }
 
     // Extract the first https:// URL from a line that looks like an auth URL.
@@ -377,6 +397,25 @@ pub async fn run_cli_login(
     });
 
     Ok(captured_url)
+}
+
+/// Write an auth code to the stdin of the in-progress CLI login process.
+/// Called when the user manually pastes an authentication code from the browser.
+#[tauri::command]
+pub async fn write_cli_login_stdin(app: tauri::AppHandle, code: String) -> Result<(), String> {
+    let state = app.state::<crate::state::AppState>();
+    let sender = {
+        let tx_stored = state.cli_login_stdin_tx.lock().unwrap();
+        tx_stored.clone()
+    };
+    if let Some(tx) = sender {
+        tx.send(code).await
+            .map_err(|e| format!("write_cli_login_stdin: send failed: {e}"))?;
+        tracing::info!("write_cli_login_stdin: auth code forwarded to stdin task");
+    } else {
+        return Err("no active CLI login process".to_string());
+    }
+    Ok(())
 }
 
 /// Kill the in-progress CLI login process spawned by run_cli_login.

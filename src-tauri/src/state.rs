@@ -147,6 +147,10 @@ pub struct AppState {
     /// Sending on this channel signals the background task to kill the child.
     pub cli_login_cancel: Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
 
+    /// Channel sender for forwarding auth codes to the in-progress CLI login stdin.
+    /// The background task in run_cli_login owns the ChildStdin and reads from this channel.
+    pub cli_login_stdin_tx: Mutex<Option<tokio::sync::mpsc::Sender<String>>>,
+
     /// Windows Job Object handle — keeps backend alive until frontend exits.
     /// When this handle is closed (including on crash), Windows kills all assigned processes.
     #[cfg(target_os = "windows")]
@@ -175,6 +179,7 @@ impl Default for AppState {
             window_instance_registry: Mutex::new(WindowInstanceRegistry::new()),
             active_drag: Mutex::new(None),
             cli_login_cancel: Mutex::new(None),
+            cli_login_stdin_tx: Mutex::new(None),
             #[cfg(target_os = "windows")]
             job_handle: Mutex::new(None),
         }

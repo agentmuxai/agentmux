@@ -8,6 +8,7 @@
  */
 
 import { createEffect, For, Show, type Accessor, type JSX, onCleanup } from "solid-js";
+import { getApi } from "@/app/store/global";
 import type { SignalPair } from "../state";
 import type { DocumentNode, DocumentState, SubagentLinkNode } from "../types";
 import { AgentMessageBlock } from "./AgentMessageBlock";
@@ -105,21 +106,52 @@ export const AgentDocumentView = ({ documentAtom, documentStateAtom, logLines, a
                         )}
                     </For>
                     <Show when={authUrl?.()}>
-                        {(url) => (
-                            <div class="agent-auth-url-box">
-                                <div class="agent-auth-url-label">Login URL (if browser didn't open):</div>
-                                <div class="agent-auth-url-row">
-                                    <span class="agent-auth-url-text">{url()}</span>
-                                    <button
-                                        class="agent-auth-url-copy"
-                                        onClick={() => navigator.clipboard.writeText(url())}
-                                        title="Copy URL"
-                                    >
-                                        Copy
-                                    </button>
+                        {(url) => {
+                            let codeInput: HTMLInputElement | undefined;
+                            return (
+                                <div class="agent-auth-url-box">
+                                    <div class="agent-auth-url-label">Login URL (if browser didn't open):</div>
+                                    <div class="agent-auth-url-row">
+                                        <span class="agent-auth-url-text">{url()}</span>
+                                        <button
+                                            class="agent-auth-url-copy"
+                                            onClick={() => navigator.clipboard.writeText(url())}
+                                            title="Copy URL"
+                                        >
+                                            Copy
+                                        </button>
+                                    </div>
+                                    <div class="agent-auth-url-label" style={{ "margin-top": "8px" }}>
+                                        Authentication Code (paste here if prompted):
+                                    </div>
+                                    <div class="agent-auth-url-row">
+                                        <input
+                                            ref={codeInput}
+                                            class="agent-auth-code-input"
+                                            type="text"
+                                            placeholder="Paste authentication code..."
+                                            onKeyDown={(e) => {
+                                                if (e.key === "Enter" && codeInput?.value) {
+                                                    getApi().writeCliLoginStdin(codeInput.value).catch(() => {});
+                                                    codeInput.value = "";
+                                                }
+                                            }}
+                                        />
+                                        <button
+                                            class="agent-auth-url-copy"
+                                            onClick={() => {
+                                                if (codeInput?.value) {
+                                                    getApi().writeCliLoginStdin(codeInput.value).catch(() => {});
+                                                    codeInput.value = "";
+                                                }
+                                            }}
+                                        >
+                                            Submit
+                                        </button>
+                                    </div>
                                 </div>
-                            </div>
-                        )}
+                            );
+                        }}
                     </Show>
                 </div>
             </Show>
