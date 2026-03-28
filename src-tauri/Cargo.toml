@@ -1,6 +1,6 @@
 [package]
 name = "agentmux"
-version = "0.32.100"
+version = "0.32.101"
 description = "AgentMux - AI-Native Terminal"
 authors = ["AgentMux Corp"]
 edition = "2021"
@@ -39,6 +39,7 @@ chrono = "0.4"
 url = "2"
 dirs = "5"
 window-vibrancy = "0.5"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-sys = { version = "0.59", features = [
@@ -48,6 +49,8 @@ windows-sys = { version = "0.59", features = [
     "Win32_Security",
     "Win32_UI_WindowsAndMessaging",
     "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_System_Registry",
+    "Win32_Storage_Packaging_Appx",
 ] }
 
 [target.'cfg(unix)'.dependencies]

@@ -6,9 +6,11 @@ import { Show, type JSX } from "solid-js";
 
 const UpdateStatus = (): JSX.Element => {
     const updaterStatus = atoms.updaterStatusAtom;
+    const updaterVersion = atoms.updaterVersionAtom;
 
     const icon = () => {
         switch (updaterStatus()) {
+            case "available": return "●";
             case "downloading": return "↓";
             case "ready": return "↑";
             case "installing": return "⟳";
@@ -19,6 +21,7 @@ const UpdateStatus = (): JSX.Element => {
 
     const color = () => {
         switch (updaterStatus()) {
+            case "available": return "var(--success-color)";
             case "downloading": return "var(--warning-color)";
             case "ready": return "var(--accent-color)";
             case "installing": return "var(--warning-color)";
@@ -29,6 +32,10 @@ const UpdateStatus = (): JSX.Element => {
 
     const label = () => {
         switch (updaterStatus()) {
+            case "available": {
+                const ver = updaterVersion();
+                return ver ? `Update ${ver} available` : "Update available";
+            }
             case "downloading": return "Downloading update…";
             case "ready": return "Restart to update";
             case "installing": return "Installing…";
@@ -37,10 +44,10 @@ const UpdateStatus = (): JSX.Element => {
         }
     };
 
-    const clickable = () => updaterStatus() === "ready";
+    const clickable = () => updaterStatus() === "ready" || updaterStatus() === "available";
 
     const handleClick = () => {
-        if (updaterStatus() === "ready") {
+        if (updaterStatus() === "ready" || updaterStatus() === "available") {
             getApi().installAppUpdate();
         }
     };

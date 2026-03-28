@@ -31,6 +31,7 @@ import {
     setWindowCountAtom,
     setReinitVersion,
     setUpdaterStatusAtom,
+    setUpdaterVersionAtom,
     setFullConfigAtom,
 } from "@/app/store/global";
 import * as WOS from "@/app/store/wos";
@@ -516,6 +517,7 @@ async function reinitWave() {
     getApi().setWindowInitStatus("wave-ready");
     setReinitVersion((v) => v + 1);
     setUpdaterStatusAtom(getApi().getUpdaterStatus());
+    setUpdaterVersionAtom(getApi().getUpdaterVersion());
     setTimeout(() => {
         globalRefocus();
     }, 50);

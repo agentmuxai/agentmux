@@ -28,6 +28,7 @@ let cachedValues: {
     docsiteUrl: string;
     zoomFactor: number;
     updaterStatus: UpdaterStatus;
+    updaterVersion: string | null;
     updaterChannel: string;
     aboutDetails: AboutModalDetails;
 } | null = null;
@@ -102,6 +103,7 @@ export async function initTauriApi(): Promise<void> {
         zoomFactor,
         aboutDetails,
         updaterStatus: "up-to-date" as UpdaterStatus,
+        updaterVersion: null,
         updaterChannel: "latest",
     };
 }
@@ -204,12 +206,19 @@ export function buildTauriApi(): AppApi {
 
         // --- Updater ---
         getUpdaterStatus: () => cachedValues!.updaterStatus,
+        getUpdaterVersion: () => cachedValues!.updaterVersion,
         getUpdaterChannel: () => cachedValues!.updaterChannel,
         onUpdaterStatusChange: (callback: (status: UpdaterStatus) => void) => {
-            listen<UpdaterStatus>("app-update-status", (event) => {
-                cachedValues!.updaterStatus = event.payload;
-                callback(event.payload);
-            });
+            listen<{ status: string; version?: string; releaseUrl?: string; installType?: string }>(
+                "app-update-status",
+                (event) => {
+                    const payload = event.payload;
+                    const status = payload.status as UpdaterStatus;
+                    cachedValues!.updaterStatus = status;
+                    cachedValues!.updaterVersion = payload.version ?? null;
+                    callback(status);
+                }
+            );
         },
         installAppUpdate: () => {
             invoke("install_update").catch(console.error);

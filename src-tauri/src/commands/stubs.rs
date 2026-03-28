@@ -71,7 +71,4 @@ pub fn set_window_init_status(
     *state.window_init_status.lock().unwrap() = status;
 }
 
-#[tauri::command]
-pub fn install_update() {
-    tracing::debug!("stub: install_update");
-}
+// install_update moved to updater.rs

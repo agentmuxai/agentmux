@@ -100,6 +100,7 @@ export const hasCustomAIPresetsAtom = createMemo<boolean>(() => {
 export const [isFullScreen, setIsFullScreen] = createSignal(false);
 export const [controlShiftDelayAtom, setControlShiftDelayAtom] = createSignal(false);
 export const [updaterStatusAtom, setUpdaterStatusAtom] = createSignal<UpdaterStatus>("up-to-date");
+export const [updaterVersionAtom, setUpdaterVersionAtom] = createSignal<string | null>(null);
 
 export const reducedMotionSetting = createMemo(() => settingsAtom()?.["window:reducedmotion"]);
 export const [reducedMotionSystemPreference, setReducedMotionSystemPreference] = createSignal(false);
@@ -149,6 +150,7 @@ export const atoms = {
     isFullScreen: isFullScreen,
     controlShiftDelayAtom: controlShiftDelayAtom,
     updaterStatusAtom: updaterStatusAtom,
+    updaterVersionAtom: updaterVersionAtom,
     prefersReducedMotionAtom: prefersReducedMotionAtom,
     typeAheadModalAtom: typeAheadModalAtom,
     modalOpen: modalOpen,
@@ -221,7 +223,11 @@ function initGlobalSignals(initOpts: GlobalInitOptions) {
 
     try {
         setUpdaterStatusAtom(getApi().getUpdaterStatus());
-        getApi().onUpdaterStatusChange((status) => setUpdaterStatusAtom(status));
+        setUpdaterVersionAtom(getApi().getUpdaterVersion());
+        getApi().onUpdaterStatusChange((status) => {
+            setUpdaterStatusAtom(status);
+            setUpdaterVersionAtom(getApi().getUpdaterVersion());
+        });
     } catch (_) {}
 
     if (globalThis.window != null) {

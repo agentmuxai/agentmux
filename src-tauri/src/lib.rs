@@ -6,6 +6,7 @@ mod menu;
 pub mod platform;
 mod sidecar;
 mod state;
+mod updater;
 // mod tray; // Tray now managed by backend (cmd/server/tray.go)
 
 use tauri::Emitter;
@@ -100,7 +101,7 @@ pub fn run() {
             commands::stubs::create_tab,
             commands::stubs::close_tab,
             commands::stubs::set_window_init_status,
-            commands::stubs::install_update,
+            updater::install_update,
             // Provider commands
             commands::providers::detect_installed_clis,
             commands::providers::get_provider_config,
@@ -220,6 +221,9 @@ pub fn run() {
                                 "web": endpoints.web_endpoint.clone(),
                             }));
                         }
+
+                        // Spawn one-shot update check (10s delayed)
+                        updater::spawn_update_check(handle.clone());
                     }
                     Err(e) => {
                         tracing::error!("Failed to start backend: {}", e);

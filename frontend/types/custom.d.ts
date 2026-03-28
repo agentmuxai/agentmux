@@ -104,6 +104,7 @@ declare global {
         setZoomFactor: (zoomFactor: number) => void;
         onUpdaterStatusChange: (callback: (status: UpdaterStatus) => void) => void;
         getUpdaterStatus: () => UpdaterStatus;
+        getUpdaterVersion: () => string | null;
         getUpdaterChannel: () => string;
         installAppUpdate: () => void;
         onMenuItemAbout: (callback: () => void) => void;
@@ -357,7 +358,7 @@ declare global {
         dispose?: () => void;
     }
 
-    type UpdaterStatus = "up-to-date" | "checking" | "downloading" | "ready" | "error" | "installing";
+    type UpdaterStatus = "up-to-date" | "checking" | "available" | "downloading" | "ready" | "error" | "installing";
 
     interface Dimensions {
         width: number;
