@@ -925,10 +925,18 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                 );
                 let bin_dir = format!("{}/bin", provider_dir);
 
-                // Expected binary path.
-                // On Windows, Node.js CLIs installed by npm are .cmd batch wrappers, not .exe.
-                // Use .cmd so make_cli_cmd() routes them through cmd.exe /C correctly.
-                let cli_bin = if cfg!(windows) {
+                // On Windows, CLIs come in two flavours:
+                //   .exe  — native binary from a full package installer (e.g. claude)
+                //   .cmd  — batch wrapper from an npm install (e.g. codex, gemini)
+                // We keep separate candidate paths for each so Step 1 finds either,
+                // and the fast-path copy preserves the source extension rather than
+                // forcing .cmd (which would produce a PE binary named .cmd — broken).
+                let cli_bin_exe = if cfg!(windows) {
+                    format!("{}/{}.exe", bin_dir, cmd.cli_command)
+                } else {
+                    format!("{}/{}", bin_dir, cmd.cli_command)
+                };
+                let cli_bin_cmd = if cfg!(windows) {
                     format!("{}/{}.cmd", bin_dir, cmd.cli_command)
                 } else {
                     format!("{}/{}", bin_dir, cmd.cli_command)
@@ -942,7 +950,7 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                 };
 
                 // Step 1: Check if already installed in versioned directory
-                for candidate in [&cli_bin, &npm_bin] {
+                for candidate in [&cli_bin_exe, &cli_bin_cmd, &npm_bin] {
                     if std::path::Path::new(candidate).exists() {
                         let version = get_cli_version(candidate).await;
                         tracing::info!(
@@ -1024,19 +1032,36 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                     format!("failed to create {}: {e}", bin_dir)
                 })?;
 
-                // Fast path: copy existing binary to versioned dir (no network needed)
+                // Fast path: copy existing binary to versioned dir (no network needed).
+                // Derive the destination filename from the source extension so we never
+                // copy a native .exe into a .cmd path (which breaks cmd.exe invocation).
                 if let Some(ref source) = system_bin {
+                    let dest = {
+                        #[cfg(windows)]
+                        {
+                            let src_ext = std::path::Path::new(source)
+                                .extension()
+                                .and_then(|e| e.to_str())
+                                .unwrap_or("exe")
+                                .to_ascii_lowercase();
+                            format!("{}/{}.{}", bin_dir, cmd.cli_command, src_ext)
+                        }
+                        #[cfg(not(windows))]
+                        {
+                            format!("{}/{}", bin_dir, cmd.cli_command)
+                        }
+                    };
                     tracing::info!(
-                        source = %source, target = %cli_bin,
+                        source = %source, target = %dest,
                         "copying existing CLI binary to versioned directory"
                     );
-                    std::fs::copy(source, &cli_bin).map_err(|e| {
-                        format!("failed to copy {} → {}: {e}", source, cli_bin)
+                    std::fs::copy(source, &dest).map_err(|e| {
+                        format!("failed to copy {} → {}: {e}", source, dest)
                     })?;
-                    let version = get_cli_version(&cli_bin).await;
-                    tracing::info!(path = %cli_bin, version = %version, "CLI copied to versioned dir");
+                    let version = get_cli_version(&dest).await;
+                    tracing::info!(path = %dest, version = %version, "CLI copied to versioned dir");
                     return Ok(Some(serde_json::to_value(&ResolveCliResult {
-                        cli_path: cli_bin,
+                        cli_path: dest,
                         version,
                         source: "local_install".to_string(),
                     }).unwrap()));
@@ -1289,20 +1314,21 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                     cmd.cli_command, search_paths
                 ))?;
 
-                // Copy binary to versioned directory
+                // Copy binary to versioned directory.
+                // npm always produces .cmd wrappers on Windows, so use cli_bin_cmd here.
                 tracing::info!(
                     source = %source_path,
-                    target = %cli_bin,
+                    target = %cli_bin_cmd,
                     "copying CLI binary to versioned directory"
                 );
-                std::fs::copy(&source_path, &cli_bin).map_err(|e| {
-                    format!("failed to copy {} → {}: {e}", source_path, cli_bin)
+                std::fs::copy(&source_path, &cli_bin_cmd).map_err(|e| {
+                    format!("failed to copy {} → {}: {e}", source_path, cli_bin_cmd)
                 })?;
 
-                let version = get_cli_version(&cli_bin).await;
-                tracing::info!(path = %cli_bin, version = %version, "CLI installed successfully");
+                let version = get_cli_version(&cli_bin_cmd).await;
+                tracing::info!(path = %cli_bin_cmd, version = %version, "CLI installed successfully");
                 Ok(Some(serde_json::to_value(&ResolveCliResult {
-                    cli_path: cli_bin,
+                    cli_path: cli_bin_cmd,
                     version,
                     source: "installed".to_string(),
                 }).unwrap()))
