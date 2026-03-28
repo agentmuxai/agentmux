@@ -41,13 +41,19 @@ function Global:_agentmux_si_agent_env {
     if (_agentmux_si_blocked) { return }
     $current_agent = ""
     if ($env:AGENTMUX_AGENT_ID) {
-        $current_agent = "AGENTMUX_AGENT_ID:$($env:AGENTMUX_AGENT_ID)"
+        $current_agent = "AGENTMUX_AGENT_ID:$($env:AGENTMUX_AGENT_ID):COLOR:$($env:AGENTMUX_AGENT_COLOR)"
     }
     if ($current_agent -ne $Global:_AGENTMUX_SI_LAST_AGENT) {
         $Global:_AGENTMUX_SI_LAST_AGENT = $current_agent
         if ($env:AGENTMUX_AGENT_ID) {
             $escaped = _agentmux_si_json_escape $env:AGENTMUX_AGENT_ID
-            Write-Host -NoNewline "${ESC}]16162;E;{`"AGENTMUX_AGENT_ID`":`"$escaped`"}`a"
+            $payload = "{`"AGENTMUX_AGENT_ID`":`"$escaped`""
+            if ($env:AGENTMUX_AGENT_COLOR) {
+                $colorEscaped = _agentmux_si_json_escape $env:AGENTMUX_AGENT_COLOR
+                $payload += ",`"AGENTMUX_AGENT_COLOR`":`"$colorEscaped`""
+            }
+            $payload += "}"
+            Write-Host -NoNewline "${ESC}]16162;E;${payload}`a"
         } else {
             Write-Host -NoNewline "${ESC}]16162;E;{}`a"
         }

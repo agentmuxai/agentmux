@@ -28,7 +28,7 @@ const AGENT_TEXT_COLOR_ENV_VAR = "AGENTMUX_AGENT_TEXT_COLOR" as const;
  */
 const DEFAULT_AGENT_COLORS: Record<string, string> = {
     AgentA: "#1e3a5f",  // Dark blue
-    AgentX: "#8b5cf6",  // Purple
+    AgentX: "#ef4444",  // Red (matches claw assignment)
     AgentY: "#eab308",  // Yellow/Gold
     AgentG: "#f59e0b",  // Amber
     Agent1: "#3b82f6",  // Blue
@@ -44,7 +44,7 @@ const DEFAULT_AGENT_COLORS: Record<string, string> = {
  */
 const DEFAULT_AGENT_TEXT_COLORS: Record<string, string> = {
     AgentA: "#ffffff",  // White on dark blue
-    AgentX: "#ffffff",  // White on purple
+    AgentX: "#ffffff",  // White on red
     AgentY: "#000000",  // Black on yellow/gold
     AgentG: "#000000",  // Black on amber
     Agent1: "#ffffff",  // White on blue

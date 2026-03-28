@@ -526,15 +526,17 @@ impl Controller for ShellController {
                 }
             }
 
-            // Backward compat: bridge WAVEMUX_AGENT_ID → AGENTMUX_AGENT_ID
-            // only if not already set by settings or block metadata above
+            // Strip host-inherited agent identity unless explicitly configured
+            // in settings.cmd_env or block cmd:env metadata.
+            // This also supersedes the old WAVEMUX backward-compat bridge —
+            // both AGENTMUX_* and WAVEMUX_* vars are removed so new panes
+            // start as plain "Terminal".
             if !has_agent_id {
-                if let Ok(val) = std::env::var("WAVEMUX_AGENT_ID") {
-                    c.env("AGENTMUX_AGENT_ID", &val);
-                }
-                if let Ok(val) = std::env::var("WAVEMUX_AGENT_COLOR") {
-                    c.env("AGENTMUX_AGENT_COLOR", &val);
-                }
+                c.env_remove("AGENTMUX_AGENT_ID");
+                c.env_remove("AGENTMUX_AGENT_COLOR");
+                c.env_remove("AGENTMUX_AGENT_TEXT_COLOR");
+                c.env_remove("WAVEMUX_AGENT_ID");
+                c.env_remove("WAVEMUX_AGENT_COLOR");
             }
 
             c

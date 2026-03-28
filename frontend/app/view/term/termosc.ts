@@ -273,6 +273,17 @@ export function handleOsc16162Command(data: string, blockId: string, loaded: boo
                 const agentId = cmd.data["AGENTMUX_AGENT_ID"] as string | undefined;
                 const tabId = atoms.staticTabId();
                 handleAgentIdChange(blockId, agentId, tabId);
+            } else {
+                // Empty payload: clear agent identity
+                setTimeout(() => {
+                    fireAndForget(async () => {
+                        await RpcApi.SetMetaCommand(TabRpcClient, {
+                            oref: WOS.makeORef("block", blockId),
+                            meta: { "cmd:env": null },
+                        }).catch((e) => console.log("error clearing cmd:env", e));
+                    });
+                }, 0);
+                handleAgentIdChange(blockId, undefined, atoms.staticTabId());
             }
             break;
         case "X":
