@@ -603,6 +603,11 @@ class RpcApiType {
         return client.wshRpcCall("runclilogin", data, opts);
     }
 
+    // command "installsysdep" [call]
+    InstallSysdepCommand(client: WshClient, data: CommandInstallSysdepData, opts?: RpcOpts): Promise<InstallSysdepResult> {
+        return client.wshRpcCall("installsysdep", data, opts);
+    }
+
 }
 
 export const RpcApi = new RpcApiType();

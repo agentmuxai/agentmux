@@ -1,6 +1,19 @@
 // Copyright 2025, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+/** A system-level dependency that must be present before an agent session can run. */
+export interface SystemDepSpec {
+    /** Binary name as passed to installsysdep: "git" | "npm" | "gh" */
+    name: string;
+    /**
+     * If true: missing dep (after auto-install attempt) blocks launch with a fatal error.
+     * If false: missing dep shows a warning but launch continues — tool calls will fail later.
+     */
+    fatal: boolean;
+    /** Shown to user explaining why this dep is needed. */
+    reason: string;
+}
+
 export interface ProviderDefinition {
     id: string;
     displayName: string;
@@ -31,6 +44,9 @@ export interface ProviderDefinition {
     resumeFlag: string | null;
     // JSON field name containing the session/thread ID in the CLI's init event.
     sessionIdField: string;
+    // System dependencies required before this provider can run useful agent sessions.
+    // Checked and auto-installed (where possible) in Phase 1.5 of the launch flow.
+    requiredSystemDeps: SystemDepSpec[];
 }
 
 export const PROVIDERS: Record<string, ProviderDefinition> = {
@@ -57,6 +73,18 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         launchArgs: ["-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--dangerously-skip-permissions"],
         resumeFlag: "--resume",
         sessionIdField: "session_id",
+        requiredSystemDeps: [
+            {
+                name: "git",
+                fatal: true,
+                reason: "Claude Code uses git for all repository operations (diff, log, status, commit, push). Without git, nearly all coding tasks will fail.",
+            },
+            {
+                name: "npm",
+                fatal: false,
+                reason: "Claude Code executes npm commands as tools (install, run, test). Without npm, any task involving Node.js package operations will fail.",
+            },
+        ],
     },
     codex: {
         id: "codex",
@@ -83,6 +111,13 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         // Multi-turn is handled by re-running exec; null disables automatic --resume append.
         resumeFlag: null,
         sessionIdField: "thread_id",
+        requiredSystemDeps: [
+            {
+                name: "git",
+                fatal: true,
+                reason: "Codex CLI uses git for repository operations (diff, log, commit, push).",
+            },
+        ],
     },
     gemini: {
         id: "gemini",
@@ -109,6 +144,13 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         launchArgs: ["--output-format", "stream-json", "--yolo", "-p", ""],
         resumeFlag: "-r",
         sessionIdField: "session_id",
+        requiredSystemDeps: [
+            {
+                name: "git",
+                fatal: true,
+                reason: "Gemini CLI uses git for repository operations (diff, log, commit, push).",
+            },
+        ],
     },
 };
 

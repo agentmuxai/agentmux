@@ -1635,6 +1635,22 @@ declare global {
         raw_output: string;
     };
 
+    // wshrpc.CommandInstallSysdepData
+    type CommandInstallSysdepData = {
+        dep: string;
+        block_id?: string;
+    };
+
+    // wshrpc.InstallSysdepResult
+    type InstallSysdepResult = {
+        found: boolean;
+        path: string;
+        version: string;
+        // "present" | "installed" | "not_found"
+        source: string;
+        install_hint: string;
+    };
+
 }
 
 export {}

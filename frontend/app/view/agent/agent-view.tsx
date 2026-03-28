@@ -267,6 +267,83 @@ async function runLaunchFlow(
         meta: { cmd: cliResult.cli_path },
     });
 
+    // Phase 1.5: System Dependency Checks
+    // Verify (and auto-install where possible) runtime tools the agent needs: git, npm, gh.
+    // Each dep is checked independently. Fatal deps block launch if install fails.
+    // Non-fatal deps show a warning but launch continues — tool calls will fail naturally later.
+    if (provider.requiredSystemDeps && provider.requiredSystemDeps.length > 0) {
+        log("deps", "checking system dependencies...");
+
+        // Subscribe to install progress events for dep installers (same channel as CLI install)
+        const depInstallScope = WOS.makeORef("block", blockId);
+        const unsubDepInstall = waveEventSubscribe({
+            eventType: "install_progress",
+            scope: depInstallScope,
+            handler: (event: any) => {
+                const msg: string = event?.data?.message ?? "";
+                if (msg) log("deps", `  ${msg}`);
+            },
+        });
+
+        try {
+            for (const dep of provider.requiredSystemDeps) {
+                if (isCancelled()) break;
+                log(dep.name, `checking ${dep.name}...`);
+                let result: InstallSysdepResult;
+                try {
+                    result = await RpcApi.InstallSysdepCommand(TabRpcClient, {
+                        dep: dep.name,
+                        block_id: blockId,
+                    }, { timeout: 360000 }); // 6 min — winget can be slow
+                } catch (err: any) {
+                    // RPC-level error (backend crashed, timeout) — treat as not found
+                    result = {
+                        found: false,
+                        path: "",
+                        version: "",
+                        source: "not_found",
+                        install_hint: "",
+                    };
+                    log(dep.name, `check failed: ${err?.message ?? String(err)}`, "warn");
+                }
+
+                if (result.found) {
+                    if (result.source === "installed") {
+                        log(dep.name, `installed ${dep.name} ${result.version} at ${result.path}`);
+                    } else {
+                        log(dep.name, `found: ${result.path}${result.version ? ` (${result.version})` : ""}`);
+                    }
+                } else {
+                    // Dep is missing — compose a verbose, actionable message
+                    const lines: string[] = [
+                        `${dep.name} not found${dep.fatal ? " — this is required" : " — optional but recommended"}`,
+                        `why needed: ${dep.reason}`,
+                    ];
+                    if (result.install_hint) {
+                        lines.push(`install: ${result.install_hint}`);
+                    }
+                    if (dep.fatal) {
+                        lines.push("restart AgentMux after installing and try again");
+                    } else {
+                        lines.push("launch will continue, but tool calls requiring this dep will fail");
+                    }
+
+                    const level = dep.fatal ? "error" : "warn";
+                    for (const line of lines) {
+                        log(dep.name, line, level);
+                    }
+
+                    if (dep.fatal) {
+                        unsubDepInstall();
+                        return "fatal";
+                    }
+                }
+            }
+        } finally {
+            unsubDepInstall();
+        }
+    }
+
     // Phase 2: Auth Check → auto-login if not authenticated
     log("auth", `checking ${provider.cliCommand} authentication...`);
     let needsLogin = false;
@@ -291,14 +368,27 @@ async function runLaunchFlow(
     if (needsLogin) {
         log("auth", "not authenticated — starting login flow...");
         try {
-            // Run from Tauri host (GUI process) so the browser opens correctly on Windows.
-            // Returns immediately after spawning — browser opens, frontend polls for completion.
-            await getApi().runCliLogin(
+            log("auth", "opening browser for authentication...");
+            // run_cli_login: spawns `claude auth login`, waits up to 15s for the OAuth URL
+            // in CLI output, opens the browser from the host process, then returns the URL.
+            // Returns null if the URL wasn't captured (e.g. CLI exited early).
+            const loginUrl = await getApi().runCliLogin(
                 cliResult.cli_path,
                 provider.authLoginCommand,
                 authEnv ?? {},
             );
-            log("auth", "a browser window should have opened — complete login there");
+
+            if (loginUrl) {
+                // Show URL in the launch panel with a copy button (setAuthUrl renders the box).
+                // Also open via openExternal as a redundant second attempt in case the host
+                // process opener failed (e.g. no default browser registered on this machine).
+                setAuthUrl(loginUrl);
+                getApi().openExternal(loginUrl);
+                log("auth", "browser opened — if it did not appear, use the URL shown below");
+            } else {
+                log("auth", "browser should have opened — if it did not, run:", "warn");
+                log("auth", `  ${provider.cliCommand} ${provider.authLoginCommand.join(" ")}`, "warn");
+            }
 
             // Poll until authenticated, cancelled, or timed out (5 minutes)
             log("auth", "waiting for login to complete...");

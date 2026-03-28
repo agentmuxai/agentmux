@@ -264,22 +264,25 @@ pub async fn run_cli_login(
     cmd.args(&login_args)
         .envs(&auth_env)
         .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null());
+        // Pipe stdout+stderr so we can extract the OAuth URL.
+        // The CLI always prints the URL (browser open or not) — we capture it,
+        // return it to the frontend, and also try to open the browser ourselves.
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
 
-    // No console window for the child process on Windows
+    // No console window on Windows
     #[cfg(windows)]
     cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
 
     let mut child = cmd.spawn()
         .map_err(|e| format!("failed to spawn {cli_path}: {e}"))?;
 
-    tracing::info!(cli = %cli_path, "run_cli_login: spawned, browser should open");
+    tracing::info!(cli = %cli_path, "run_cli_login: spawned");
 
-    // Register a cancellation channel so cancel_cli_login() can kill this child.
-    // If a previous login is still pending its cancel sender gets dropped here,
-    // which is harmless (the old oneshot receiver will see a disconnect error and
-    // the background task will just wait for child.wait() instead).
+    let stdout_pipe = child.stdout.take();
+    let stderr_pipe = child.stderr.take();
+
+    // Register cancellation channel so cancel_cli_login() can kill this child.
     let (cancel_tx, cancel_rx) = tokio::sync::oneshot::channel::<()>();
     {
         let state = app.state::<crate::state::AppState>();
@@ -287,32 +290,93 @@ pub async fn run_cli_login(
         *stored = Some(cancel_tx);
     }
 
-    // Background task: wait for child to exit normally, or kill it on cancel.
+    // Extract the first https:// URL from a line that looks like an auth URL.
+    fn extract_auth_url(line: &str) -> Option<String> {
+        let start = line.find("https://")?;
+        let url: String = line[start..]
+            .chars()
+            .take_while(|c| !c.is_whitespace())
+            .collect();
+        if url.contains("oauth") || url.contains("authorize") || url.contains("claude.ai") {
+            Some(url)
+        } else {
+            None
+        }
+    }
+
+    // Spawn concurrent readers that forward each line to a channel; the first
+    // OAuth URL found wins and is sent on url_tx.
+    let (url_tx, url_rx) = tokio::sync::oneshot::channel::<String>();
+    let url_tx = std::sync::Arc::new(std::sync::Mutex::new(Some(url_tx)));
+
+    let tx1 = url_tx.clone();
     tokio::spawn(async move {
-        tokio::select! {
-            result = child.wait() => {
-                match result {
-                    Ok(status) => tracing::info!(
-                        exit_code = status.code(),
-                        "run_cli_login: child exited"
-                    ),
-                    Err(e) => tracing::warn!(
-                        error = %e,
-                        "run_cli_login: child wait error"
-                    ),
+        if let Some(pipe) = stdout_pipe {
+            use tokio::io::AsyncBufReadExt;
+            let mut r = tokio::io::BufReader::new(pipe).lines();
+            while let Ok(Some(line)) = r.next_line().await {
+                tracing::debug!(line = %line, "run_cli_login stdout");
+                if let Some(url) = extract_auth_url(&line) {
+                    let _ = tx1.lock().unwrap().take().map(|tx| tx.send(url));
+                    break;
                 }
             }
+        }
+    });
+
+    let tx2 = url_tx.clone();
+    tokio::spawn(async move {
+        if let Some(pipe) = stderr_pipe {
+            use tokio::io::AsyncBufReadExt;
+            let mut r = tokio::io::BufReader::new(pipe).lines();
+            while let Ok(Some(line)) = r.next_line().await {
+                tracing::debug!(line = %line, "run_cli_login stderr");
+                if let Some(url) = extract_auth_url(&line) {
+                    let _ = tx2.lock().unwrap().take().map(|tx| tx.send(url));
+                    break;
+                }
+            }
+        }
+    });
+
+    // Wait up to 15 seconds for the URL to appear in CLI output.
+    // The CLI prints it almost immediately after startup (before the browser opens).
+    let captured_url = tokio::time::timeout(
+        std::time::Duration::from_secs(15),
+        url_rx,
+    )
+    .await
+    .ok()          // timeout → None
+    .and_then(|r| r.ok()); // channel dropped → None
+
+    if let Some(ref url) = captured_url {
+        tracing::info!(url = %url, "run_cli_login: OAuth URL captured, opening browser");
+        // Open the browser from the host process.
+        // This runs regardless of whether the CLI's own open attempt succeeded,
+        // making it a reliable fallback when the CLI's browser open fails.
+        use tauri_plugin_opener::OpenerExt;
+        if let Err(e) = app.opener().open_url(url, None::<&str>) {
+            tracing::warn!(error = %e, "run_cli_login: browser open failed");
+        }
+    } else {
+        tracing::warn!("run_cli_login: no OAuth URL found in CLI output within 15s");
+    }
+
+    // Keep the child alive in the background — it has an HTTP server listening
+    // for the OAuth redirect callback. Kill it on cancel signal.
+    tokio::spawn(async move {
+        tokio::select! {
+            status = child.wait() => {
+                tracing::info!(exit_code = status.ok().and_then(|s| s.code()), "run_cli_login: child exited");
+            }
             _ = cancel_rx => {
-                tracing::info!("run_cli_login: cancel signal received, killing child");
+                tracing::info!("run_cli_login: cancel received, killing child");
                 let _ = child.kill().await;
             }
         }
     });
 
-    // Return None immediately — URL capture is not feasible when the browser
-    // opens successfully (the CLI only prints the URL as a fallback when the
-    // browser fails to open, and does so only after the process exits).
-    Ok(None)
+    Ok(captured_url)
 }
 
 /// Kill the in-progress CLI login process spawned by run_cli_login.

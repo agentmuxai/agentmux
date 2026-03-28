@@ -156,6 +156,7 @@ pub const COMMAND_AGENT_STOP: &str = "agentstop";
 pub const COMMAND_WRITE_AGENT_CONFIG: &str = "writeagentconfig";
 pub const COMMAND_RESOLVE_CLI: &str = "resolvecli";
 pub const COMMAND_CHECK_CLI_AUTH: &str = "checkcliauth";
+pub const COMMAND_INSTALL_SYSDEP: &str = "installsysdep";
 
 // Block commands
 pub const COMMAND_MKDIR: &str = "mkdir";
@@ -535,6 +536,31 @@ pub struct RunCliLoginResult {
     /// OAuth URL extracted from the CLI's output (open in browser)
     pub auth_url: Option<String>,
     pub raw_output: String,
+}
+
+/// Data for InstallSysdepCommand — check and auto-install a system dependency.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommandInstallSysdepData {
+    /// Dependency name: "git", "npm", "gh"
+    pub dep: String,
+    /// Block ID for streaming install progress (optional — empty = no streaming)
+    #[serde(default)]
+    pub block_id: String,
+}
+
+/// Result from InstallSysdepCommand
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InstallSysdepResult {
+    /// Whether the dep is usable after this call
+    pub found: bool,
+    /// Absolute path to the binary (empty if not found)
+    pub path: String,
+    /// Version string (empty if not found)
+    pub version: String,
+    /// "present" — already installed | "installed" — we installed it | "not_found" — missing
+    pub source: String,
+    /// Manual install instructions shown to user when auto-install is unavailable or fails
+    pub install_hint: String,
 }
 
 /// Matches Go's `FileDataAt`

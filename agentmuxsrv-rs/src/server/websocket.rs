@@ -37,10 +37,11 @@ use crate::backend::rpc_types::{
     CommandAppendForgeHistoryData, CommandListForgeHistoryData, CommandSearchForgeHistoryData,
     CommandImportForgeFromClawData,
     COMMAND_SUBPROCESS_SPAWN, COMMAND_AGENT_INPUT, COMMAND_AGENT_STOP, COMMAND_WRITE_AGENT_CONFIG,
-    COMMAND_RESOLVE_CLI, COMMAND_CHECK_CLI_AUTH,
+    COMMAND_RESOLVE_CLI, COMMAND_CHECK_CLI_AUTH, COMMAND_INSTALL_SYSDEP,
     CommandSubprocessSpawnData, CommandAgentInputData, CommandAgentStopData, CommandWriteAgentConfigData,
     CommandResolveCliData, ResolveCliResult, CommandCheckCliAuthData, CheckCliAuthResult,
     CommandRunCliLoginData, RunCliLoginResult,
+    CommandInstallSysdepData, InstallSysdepResult,
 };
 use crate::backend::storage::{ForgeAgent, ForgeContent, ForgeSkill};
 use crate::backend::waveobj::{Block, TermSize, WaveObjUpdate, wave_obj_to_value};
@@ -1462,6 +1463,354 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
 
                 let result = RunCliLoginResult { auth_url: None, raw_output: String::new() };
                 Ok(Some(serde_json::to_value(&result).unwrap()))
+            })
+        }),
+    );
+
+    // installsysdep → check and auto-install a system dependency (git, npm, gh).
+    // Streams install output line-by-line via WPS install_progress events.
+    // On Windows uses winget; macOS uses brew; Linux warns-only (shows manual instructions).
+    let broker_sysdep = state.broker.clone();
+    engine.register_handler(
+        COMMAND_INSTALL_SYSDEP,
+        Box::new(move |data, _ctx| {
+            let broker = broker_sysdep.clone();
+            Box::pin(async move {
+                let cmd: CommandInstallSysdepData = serde_json::from_value(data)
+                    .map_err(|e| format!("installsysdep: {e}"))?;
+                tracing::info!(dep = %cmd.dep, "InstallSysdep");
+
+                // Helper: publish a progress line to the frontend log panel.
+                let publish = {
+                    let broker = broker.clone();
+                    let block_id = cmd.block_id.clone();
+                    move |msg: &str| {
+                        if !block_id.is_empty() {
+                            crate::backend::wps::publish_install_progress(&broker, &block_id, msg);
+                        }
+                    }
+                };
+
+                // ── Step 1: Check PATH first ───────────────────────────────────────────────
+                let which_exe = if cfg!(windows) { "where" } else { "which" };
+                // On Windows, npm is a .cmd script — `where npm` returns npm.cmd path.
+                let path_found = tokio::process::Command::new(which_exe)
+                    .arg(&cmd.dep)
+                    .output()
+                    .await
+                    .ok()
+                    .filter(|o| o.status.success())
+                    .and_then(|o| {
+                        let raw = String::from_utf8_lossy(&o.stdout);
+                        // `where` can return multiple lines; take the first non-empty one
+                        raw.lines()
+                            .map(|l| l.trim().to_string())
+                            .find(|l| !l.is_empty() && std::path::Path::new(l).exists())
+                    });
+
+                if let Some(path) = path_found {
+                    let version = get_cli_version(&path).await;
+                    tracing::info!(dep = %cmd.dep, path = %path, version = %version, "sysdep found in PATH");
+                    return Ok(Some(serde_json::to_value(&InstallSysdepResult {
+                        found: true, path, version,
+                        source: "present".to_string(),
+                        install_hint: String::new(),
+                    }).unwrap()));
+                }
+
+                // ── Step 2: Check known install locations (post-install PATH not refreshed) ─
+                // winget installs to fixed locations; PATH update only takes effect after
+                // shell restart. Check the known target paths directly so we can detect a
+                // previously-completed silent install without requiring a restart.
+                let known: Vec<&str> = {
+                    #[cfg(windows)]
+                    match cmd.dep.as_str() {
+                        "git" => vec![
+                            r"C:\Program Files\Git\cmd\git.exe",
+                            r"C:\Program Files (x86)\Git\cmd\git.exe",
+                        ],
+                        "npm" | "node" => vec![
+                            r"C:\Program Files\nodejs\npm.cmd",
+                            r"C:\Program Files\nodejs\node.exe",
+                        ],
+                        "gh" => vec![
+                            r"C:\Program Files\GitHub CLI\gh.exe",
+                        ],
+                        _ => vec![],
+                    }
+                    #[cfg(not(windows))]
+                    match cmd.dep.as_str() {
+                        "git"  => vec!["/usr/bin/git", "/usr/local/bin/git", "/opt/homebrew/bin/git"],
+                        "npm"  => vec!["/usr/local/bin/npm", "/opt/homebrew/bin/npm"],
+                        "gh"   => vec!["/usr/local/bin/gh", "/opt/homebrew/bin/gh"],
+                        _ => vec![],
+                    }
+                };
+                for path in &known {
+                    if std::path::Path::new(path).exists() {
+                        let version = get_cli_version(path).await;
+                        tracing::info!(dep = %cmd.dep, path = %path, version = %version, "sysdep found at known path");
+                        return Ok(Some(serde_json::to_value(&InstallSysdepResult {
+                            found: true,
+                            path: path.to_string(),
+                            version,
+                            source: "present".to_string(),
+                            install_hint: String::new(),
+                        }).unwrap()));
+                    }
+                }
+
+                // ── Step 3: Not found — attempt auto-install ──────────────────────────────
+                publish(&format!("not found — attempting automatic install of {}...", cmd.dep));
+
+                // Per-platform install config
+                struct DepInstallConfig {
+                    /// Command + args to run the installer
+                    install_args: Vec<String>,
+                    /// Executable for the installer process
+                    installer_exe: String,
+                    /// Expected binary path after install (to verify success)
+                    post_install_path: String,
+                    /// Manual instructions shown when auto-install is unavailable/fails
+                    hint: String,
+                }
+
+                #[cfg(windows)]
+                let install_cfg: Option<DepInstallConfig> = {
+                    // Check winget is available — it ships with Windows 10 1809+ via App Installer
+                    let winget_available = tokio::process::Command::new("winget")
+                        .arg("--version")
+                        .output()
+                        .await
+                        .map(|o| o.status.success())
+                        .unwrap_or(false);
+
+                    if !winget_available {
+                        publish("winget not available — cannot auto-install");
+                        None
+                    } else {
+                        match cmd.dep.as_str() {
+                            "git" => Some(DepInstallConfig {
+                                installer_exe: "winget".to_string(),
+                                install_args: vec![
+                                    "install".to_string(), "--id".to_string(), "Git.Git".to_string(),
+                                    "-e".to_string(), "--silent".to_string(),
+                                    "--accept-package-agreements".to_string(),
+                                    "--accept-source-agreements".to_string(),
+                                ],
+                                post_install_path: r"C:\Program Files\Git\cmd\git.exe".to_string(),
+                                hint: "Install manually: winget install Git.Git  OR  https://git-scm.com/download/win".to_string(),
+                            }),
+                            "npm" | "node" => Some(DepInstallConfig {
+                                installer_exe: "winget".to_string(),
+                                install_args: vec![
+                                    "install".to_string(), "--id".to_string(), "OpenJS.NodeJS.LTS".to_string(),
+                                    "-e".to_string(), "--silent".to_string(),
+                                    "--accept-package-agreements".to_string(),
+                                    "--accept-source-agreements".to_string(),
+                                ],
+                                post_install_path: r"C:\Program Files\nodejs\npm.cmd".to_string(),
+                                hint: "Install manually: winget install OpenJS.NodeJS.LTS  OR  https://nodejs.org".to_string(),
+                            }),
+                            "gh" => Some(DepInstallConfig {
+                                installer_exe: "winget".to_string(),
+                                install_args: vec![
+                                    "install".to_string(), "--id".to_string(), "GitHub.cli".to_string(),
+                                    "-e".to_string(), "--silent".to_string(),
+                                    "--accept-package-agreements".to_string(),
+                                    "--accept-source-agreements".to_string(),
+                                ],
+                                post_install_path: r"C:\Program Files\GitHub CLI\gh.exe".to_string(),
+                                hint: "Install manually: winget install GitHub.cli  OR  https://cli.github.com".to_string(),
+                            }),
+                            _ => None,
+                        }
+                    }
+                };
+
+                #[cfg(target_os = "macos")]
+                let install_cfg: Option<DepInstallConfig> = {
+                    let brew_path = ["/usr/local/bin/brew", "/opt/homebrew/bin/brew"]
+                        .iter()
+                        .find(|p| std::path::Path::new(p).exists())
+                        .map(|s| s.to_string());
+
+                    if let Some(brew) = brew_path {
+                        match cmd.dep.as_str() {
+                            "git" => Some(DepInstallConfig {
+                                installer_exe: brew.clone(),
+                                install_args: vec!["install".to_string(), "git".to_string()],
+                                post_install_path: "/usr/local/bin/git".to_string(),
+                                hint: "Install manually: brew install git  OR  xcode-select --install".to_string(),
+                            }),
+                            "npm" | "node" => Some(DepInstallConfig {
+                                installer_exe: brew.clone(),
+                                install_args: vec!["install".to_string(), "node".to_string()],
+                                post_install_path: "/usr/local/bin/npm".to_string(),
+                                hint: "Install manually: brew install node  OR  https://nodejs.org".to_string(),
+                            }),
+                            "gh" => Some(DepInstallConfig {
+                                installer_exe: brew,
+                                install_args: vec!["install".to_string(), "gh".to_string()],
+                                post_install_path: "/usr/local/bin/gh".to_string(),
+                                hint: "Install manually: brew install gh  OR  https://cli.github.com".to_string(),
+                            }),
+                            _ => None,
+                        }
+                    } else {
+                        publish("Homebrew not found — cannot auto-install");
+                        None
+                    }
+                };
+
+                #[cfg(all(not(windows), not(target_os = "macos")))]
+                let install_cfg: Option<DepInstallConfig> = {
+                    // Linux: auto-install is too distro-specific; surface clear manual instructions
+                    let hint = match cmd.dep.as_str() {
+                        "git"       => "sudo apt-get install -y git  OR  sudo dnf install -y git",
+                        "npm"|"node"=> "sudo apt-get install -y nodejs npm  OR  https://nodejs.org",
+                        "gh"        => "https://github.com/cli/cli/blob/trunk/docs/install_linux.md",
+                        _           => "see your distribution's package manager",
+                    };
+                    publish(&format!("auto-install not supported on Linux — install manually:\n  {}", hint));
+                    None
+                };
+
+                let Some(cfg) = install_cfg else {
+                    let hint = match cmd.dep.as_str() {
+                        "git"        => "https://git-scm.com/downloads",
+                        "npm"|"node" => "https://nodejs.org",
+                        "gh"         => "https://cli.github.com",
+                        _            => "",
+                    };
+                    return Ok(Some(serde_json::to_value(&InstallSysdepResult {
+                        found: false, path: String::new(), version: String::new(),
+                        source: "not_found".to_string(),
+                        install_hint: hint.to_string(),
+                    }).unwrap()));
+                };
+
+                // Run the installer, streaming output line-by-line to the frontend
+                publish(&format!("running: {} {}", cfg.installer_exe, cfg.install_args.join(" ")));
+                tracing::info!(dep = %cmd.dep, installer = %cfg.installer_exe, args = ?cfg.install_args, "running installer");
+
+                let mut child = tokio::process::Command::new(&cfg.installer_exe)
+                    .args(&cfg.install_args)
+                    .stdout(std::process::Stdio::piped())
+                    .stderr(std::process::Stdio::piped())
+                    .spawn()
+                    .map_err(|e| format!("failed to spawn installer for {}: {e}", cmd.dep))?;
+
+                let stdout_pipe = child.stdout.take();
+                let stderr_pipe = child.stderr.take();
+
+                let (_, _, wait_result) = tokio::time::timeout(
+                    std::time::Duration::from_secs(300),
+                    async {
+                        let publish_out = {
+                            let broker = broker.clone();
+                            let block_id = cmd.block_id.clone();
+                            move |msg: String| {
+                                if !block_id.is_empty() {
+                                    crate::backend::wps::publish_install_progress(&broker, &block_id, &msg);
+                                }
+                                tracing::info!(line = %msg, "sysdep installer stdout");
+                            }
+                        };
+                        let publish_err = {
+                            let broker = broker.clone();
+                            let block_id = cmd.block_id.clone();
+                            move |msg: String| {
+                                if !block_id.is_empty() {
+                                    crate::backend::wps::publish_install_progress(&broker, &block_id, &msg);
+                                }
+                                tracing::info!(line = %msg, "sysdep installer stderr");
+                            }
+                        };
+                        tokio::join!(
+                            async move {
+                                if let Some(p) = stdout_pipe {
+                                    use tokio::io::AsyncBufReadExt;
+                                    let mut r = tokio::io::BufReader::new(p).lines();
+                                    while let Ok(Some(line)) = r.next_line().await {
+                                        if !line.trim().is_empty() { publish_out(line); }
+                                    }
+                                }
+                            },
+                            async move {
+                                if let Some(p) = stderr_pipe {
+                                    use tokio::io::AsyncBufReadExt;
+                                    let mut r = tokio::io::BufReader::new(p).lines();
+                                    while let Ok(Some(line)) = r.next_line().await {
+                                        if !line.trim().is_empty() { publish_err(line); }
+                                    }
+                                }
+                            },
+                            child.wait(),
+                        )
+                    },
+                ).await.map_err(|_| format!("installer for {} timed out after 5 minutes", cmd.dep))?;
+
+                let exit = wait_result.map_err(|e| format!("installer wait failed: {e}"))?;
+                let exit_code = exit.code().unwrap_or(-1);
+                tracing::info!(dep = %cmd.dep, exit_code = exit_code, "installer finished");
+
+                if !exit.success() {
+                    publish(&format!("install failed (exit {exit_code}) — install manually:"));
+                    publish(&format!("  {}", cfg.hint));
+                    return Ok(Some(serde_json::to_value(&InstallSysdepResult {
+                        found: false, path: String::new(), version: String::new(),
+                        source: "not_found".to_string(),
+                        install_hint: cfg.hint,
+                    }).unwrap()));
+                }
+
+                // ── Step 4: Verify install at known path ──────────────────────────────────
+                if std::path::Path::new(&cfg.post_install_path).exists() {
+                    let version = get_cli_version(&cfg.post_install_path).await;
+                    publish(&format!("installed {} {} at {}", cmd.dep, version, cfg.post_install_path));
+                    tracing::info!(dep = %cmd.dep, path = %cfg.post_install_path, version = %version, "sysdep installed");
+                    return Ok(Some(serde_json::to_value(&InstallSysdepResult {
+                        found: true,
+                        path: cfg.post_install_path,
+                        version,
+                        source: "installed".to_string(),
+                        install_hint: String::new(),
+                    }).unwrap()));
+                }
+
+                // Installer exited 0 but binary not at expected path — try PATH again
+                let path_retry = tokio::process::Command::new(which_exe)
+                    .arg(&cmd.dep)
+                    .output()
+                    .await
+                    .ok()
+                    .filter(|o| o.status.success())
+                    .and_then(|o| {
+                        String::from_utf8_lossy(&o.stdout)
+                            .lines()
+                            .map(|l| l.trim().to_string())
+                            .find(|l| !l.is_empty() && std::path::Path::new(l).exists())
+                    });
+
+                if let Some(path) = path_retry {
+                    let version = get_cli_version(&path).await;
+                    publish(&format!("installed {} {} at {}", cmd.dep, version, path));
+                    return Ok(Some(serde_json::to_value(&InstallSysdepResult {
+                        found: true, path, version,
+                        source: "installed".to_string(),
+                        install_hint: String::new(),
+                    }).unwrap()));
+                }
+
+                // Install succeeded but binary not locatable — PATH refresh needed
+                publish(&format!("{} was installed but is not yet in PATH.", cmd.dep));
+                publish("Restart AgentMux after install to pick up the updated PATH.");
+                Ok(Some(serde_json::to_value(&InstallSysdepResult {
+                    found: false, path: String::new(), version: String::new(),
+                    source: "not_found".to_string(),
+                    install_hint: format!("{} — restart AgentMux to apply PATH changes", cfg.hint),
+                }).unwrap()))
             })
         }),
     );

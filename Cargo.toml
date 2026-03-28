@@ -4,8 +4,8 @@ members = ["src-tauri", "agentmuxsrv-rs", "wsh-rs"]
 
 [profile.release]
 strip = true
-lto = true
-codegen-units = 1
+lto = "thin"
+codegen-units = 4
 opt-level = "s"
 
 # Fast release profile for testing (much faster compile, slightly larger binary)
