@@ -227,6 +227,25 @@ class SysinfoViewModel implements ViewModel {
         return fullMenu;
     }
 
+    getBodyContextMenuItems(): ContextMenuItem[] {
+        const plotData = this.dataAtom();
+        if (plotData.length === 0) return [];
+
+        const currentlySelected = this.plotTypeSelectedAtom();
+        return Object.keys(PlotTypes).map((plotType): ContextMenuItem => ({
+            label: plotType,
+            type: "radio",
+            checked: currentlySelected === plotType,
+            click: async () => {
+                const dataTypes = PlotTypes[plotType](plotData[plotData.length - 1]);
+                await RpcApi.SetMetaCommand(TabRpcClient, {
+                    oref: WOS.makeORef("block", this.blockId),
+                    meta: { "graph:metrics": dataTypes, "sysinfo:type": plotType },
+                });
+            },
+        }));
+    }
+
     getDefaultData(): DataItem[] {
         const numPoints = this.numPoints();
         const intervalSecs = this.getConfiguredInterval();

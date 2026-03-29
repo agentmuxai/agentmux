@@ -353,6 +353,7 @@ declare global {
         viewComponent: ViewComponent<any>;
         isBasicTerm?: () => boolean;
         getSettingsMenuItems?: () => ContextMenuItem[];
+        getBodyContextMenuItems?: () => ContextMenuItem[];
         giveFocus?: () => boolean;
         keyDownHandler?: (e: WaveKeyboardEvent) => boolean;
         dispose?: () => void;

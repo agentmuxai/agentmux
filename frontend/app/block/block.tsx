@@ -251,14 +251,16 @@ function Block(props: BlockProps): JSX.Element {
     counterInc("render-Block-" + props.nodeModel?.blockId?.substring(0, 8));
     const [blockData, loading] = useWaveObjectValue<Block>(makeORef("block", props.nodeModel.blockId));
 
-    // Reactively create/update the viewModel when blockData loads or view type changes.
-    // In SolidJS the component body runs once, so we use createEffect to handle async data.
+    // Track only the view type (not the full blockData) so the effect only re-runs
+    // when the view changes (e.g. "Replace With..."), not on every meta update.
+    // This prevents Solid.js from disposing ViewModel createMemo computations
+    // that are owned by the effect when unrelated meta fields change.
+    const viewType = createMemo(() => blockData()?.meta?.view);
     const [viewModel, setViewModel] = createSignal<ViewModel>(null);
 
     createEffect(() => {
-        const bd = blockData();
-        const view = bd?.meta?.view;
-        if (!bd || !view) return;
+        const view = viewType();
+        if (!view) return;
         const bcm = getBlockComponentModel(props.nodeModel.blockId);
         let vm = bcm?.viewModel;
         if (vm == null || vm.viewType !== view) {
@@ -290,12 +292,12 @@ function SubBlock(props: SubBlockProps): JSX.Element {
     counterInc("render-Block-" + props.nodeModel?.blockId?.substring(0, 8));
     const [blockData, loading] = useWaveObjectValue<Block>(makeORef("block", props.nodeModel.blockId));
 
+    const viewType = createMemo(() => blockData()?.meta?.view);
     const [viewModel, setViewModel] = createSignal<ViewModel>(null);
 
     createEffect(() => {
-        const bd = blockData();
-        const view = bd?.meta?.view;
-        if (!bd || !view) return;
+        const view = viewType();
+        if (!view) return;
         const bcm = getBlockComponentModel(props.nodeModel.blockId);
         let vm = bcm?.viewModel;
         if (vm == null || vm.viewType !== view) {
