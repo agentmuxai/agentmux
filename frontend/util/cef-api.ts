@@ -391,24 +391,11 @@ export function buildCefApi(): AppApi {
         setWindowTransparency: (transparent: boolean, blur: boolean, opacity: number) => {
             invokeCommand("set_window_transparency", { transparent, blur, opacity }).catch(console.error);
         },
-        toggleDevtools: async () => {
+        toggleDevtools: () => {
             // CEF host.show_dev_tools() crashes from IPC thread (wrap_task! broken
-            // in CEF Rust bindings v146). Open DevTools in the system browser via
-            // the remote debugging protocol (port 9222).
-            try {
-                const resp = await fetch("http://127.0.0.1:9222/json");
-                const targets = await resp.json();
-                const page = targets.find((t: any) => t.type === "page");
-                if (page?.id) {
-                    // Use Chrome's built-in DevTools frontend with the remote WS target
-                    const dtUrl = `devtools://devtools/bundled/inspector.html?ws=127.0.0.1:9222/devtools/page/${page.id}`;
-                    invokeCommand("open_external", { url: dtUrl }).catch(console.error);
-                } else {
-                    invokeCommand("open_external", { url: "http://127.0.0.1:9222" }).catch(console.error);
-                }
-            } catch {
-                invokeCommand("open_external", { url: "http://127.0.0.1:9222" }).catch(console.error);
-            }
+            // in CEF Rust bindings v146). Open the remote debugging target list in
+            // the system browser — user clicks the "inspect" link to get full DevTools.
+            invokeCommand("open_external", { url: "http://127.0.0.1:9222" }).catch(console.error);
         },
         getWindowLabel: async () => {
             return await invokeCommand<string>("get_window_label");
