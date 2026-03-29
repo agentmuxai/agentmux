@@ -232,7 +232,7 @@ export class TermWrap {
 
         // NOW fit and tell backend to start/resync the shell controller.
         // At this point we are fully subscribed and ready to receive data.
-        this.fitAddon.fit();
+        this.customFit();
         this.sendTermSize();
         await this.resyncController("init");
         this.hasResized = true;
@@ -385,7 +385,7 @@ export class TermWrap {
     handleResize() {
         const oldRows = this.terminal.rows;
         const oldCols = this.terminal.cols;
-        this.fitAddon.fit();
+        this.customFit();
         if (oldRows !== this.terminal.rows || oldCols !== this.terminal.cols) {
             this.sendTermSize();
         }
@@ -393,6 +393,24 @@ export class TermWrap {
     }
 
     // ── Private helpers ────────────────────────────────────────────────
+
+    // FitAddon v0.11.0 subtracts `overviewRuler.width || 14` from available width
+    // whenever scrollback > 0. We don't use the overview ruler or Monaco-style scrollbar —
+    // our CSS webkit scrollbar is 6px and overlaps the content. This corrects for the
+    // 8px discrepancy so the terminal fills the pane correctly.
+    private customFit() {
+        const dims = this.fitAddon.proposeDimensions();
+        if (!dims) return;
+        const core = (this.terminal as any)._core;
+        const cellWidth: number = core?._renderService?.dimensions?.css?.cell?.width ?? 0;
+        if (cellWidth > 0) {
+            dims.cols = Math.max(2, dims.cols + Math.floor(8 / cellWidth));
+        }
+        if (this.terminal.rows !== dims.rows || this.terminal.cols !== dims.cols) {
+            core?._renderService?.clear?.();
+            this.terminal.resize(dims.cols, dims.rows);
+        }
+    }
 
     private loadRendererAddon(useWebGl: boolean) {
         // WebKitGTK's WebGL2 implementation has systemic rendering issues —
