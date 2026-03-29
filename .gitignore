@@ -46,6 +46,10 @@ backend-test/
 src-tauri/gen/schemas/
 test/screenshots/
 
+# CEF binaries (downloaded at build time by cef-dll-sys)
+agentmux-cef/cef_binary/
+agentmux-cef/resources/
+
 # Screenshots (development artifacts)
 ss-*.png
 ss2.png

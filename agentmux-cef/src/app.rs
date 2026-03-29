@@ -1,0 +1,196 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+//
+// CefApp and BrowserProcessHandler implementations for AgentMux CEF host.
+// Creates a browser window loading the frontend URL on context initialization.
+
+use cef::*;
+use std::cell::RefCell;
+
+use crate::client::*;
+
+// ---------------------------------------------------------------------------
+// Window & BrowserView delegates (CEF Views framework)
+// ---------------------------------------------------------------------------
+
+wrap_window_delegate! {
+    pub struct AgentMuxWindowDelegate {
+        browser_view: RefCell<Option<BrowserView>>,
+    }
+
+    impl ViewDelegate {
+        fn preferred_size(&self, _view: Option<&mut View>) -> Size {
+            Size {
+                width: 1200,
+                height: 800,
+            }
+        }
+    }
+
+    impl PanelDelegate {}
+
+    impl WindowDelegate {
+        fn on_window_created(&self, window: Option<&mut Window>) {
+            let browser_view = self.browser_view.borrow();
+            let (Some(window), Some(browser_view)) = (window, browser_view.as_ref()) else {
+                return;
+            };
+            let mut view = View::from(browser_view);
+            window.add_child_view(Some(&mut view));
+            window.show();
+        }
+
+        fn on_window_destroyed(&self, _window: Option<&mut Window>) {
+            let mut browser_view = self.browser_view.borrow_mut();
+            *browser_view = None;
+        }
+
+        fn can_close(&self, _window: Option<&mut Window>) -> i32 {
+            let browser_view = self.browser_view.borrow();
+            let browser_view = browser_view.as_ref().expect("BrowserView is None");
+            if let Some(browser) = browser_view.browser() {
+                let browser_host = browser.host().expect("BrowserHost is None");
+                browser_host.try_close_browser()
+            } else {
+                1
+            }
+        }
+
+        fn initial_show_state(&self, _window: Option<&mut Window>) -> ShowState {
+            ShowState::NORMAL
+        }
+
+        fn window_runtime_style(&self) -> RuntimeStyle {
+            RuntimeStyle::ALLOY
+        }
+    }
+}
+
+wrap_browser_view_delegate! {
+    pub struct AgentMuxBrowserViewDelegate {
+        runtime_style: RuntimeStyle,
+    }
+
+    impl ViewDelegate {}
+
+    impl BrowserViewDelegate {
+        fn on_popup_browser_view_created(
+            &self,
+            _browser_view: Option<&mut BrowserView>,
+            popup_browser_view: Option<&mut BrowserView>,
+            _is_devtools: i32,
+        ) -> i32 {
+            // Create a new top-level window for popups (e.g., devtools).
+            let mut window_delegate = AgentMuxWindowDelegate::new(
+                RefCell::new(popup_browser_view.cloned()),
+            );
+            window_create_top_level(Some(&mut window_delegate));
+            1
+        }
+
+        fn browser_runtime_style(&self) -> RuntimeStyle {
+            self.runtime_style
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// CefApp + BrowserProcessHandler
+// ---------------------------------------------------------------------------
+
+wrap_app! {
+    pub struct AgentMuxApp;
+
+    impl App {
+        fn browser_process_handler(&self) -> Option<BrowserProcessHandler> {
+            Some(AgentMuxBrowserProcessHandler::new(RefCell::new(None)))
+        }
+    }
+}
+
+wrap_browser_process_handler! {
+    pub struct AgentMuxBrowserProcessHandler {
+        client: RefCell<Option<Client>>,
+    }
+
+    impl BrowserProcessHandler {
+        fn on_context_initialized(&self) {
+            debug_assert_ne!(currently_on(ThreadId::UI), 0);
+
+            // Create the client (browser-level callbacks).
+            {
+                let mut client = self.client.borrow_mut();
+                *client = Some(AgentMuxClient::new(AgentMuxHandler::new()));
+            }
+
+            // Browser settings.
+            let settings = BrowserSettings {
+                windowless_frame_rate: 60,
+                ..Default::default()
+            };
+
+            // Determine the URL to load.
+            // Priority: --url=<url> CLI arg > default dev server URL.
+            let command_line = command_line_get_global().expect("Failed to get command line");
+            let url_switch = CefString::from("url");
+            let url = if command_line.has_switch(Some(&url_switch)) != 0 {
+                CefString::from(&command_line.switch_value(Some(&url_switch))).to_string()
+            } else {
+                String::new()
+            };
+            let url = if url.is_empty() {
+                "http://localhost:5173"
+            } else {
+                url.as_str()
+            };
+            let url = CefString::from(url);
+
+            tracing::info!("Loading URL: {}", CefString::to_string(&url));
+
+            // Check if --use-native flag is set (bypasses CEF Views).
+            let use_native = command_line.has_switch(Some(&CefString::from("use-native"))) != 0;
+
+            if use_native {
+                // Native window mode: CEF creates its own platform window.
+                let window_info = WindowInfo {
+                    runtime_style: RuntimeStyle::ALLOY,
+                    ..Default::default()
+                };
+
+                #[cfg(target_os = "windows")]
+                let window_info = window_info.set_as_popup(Default::default(), "AgentMux");
+
+                let mut client = self.default_client();
+                browser_host_create_browser(
+                    Some(&window_info),
+                    client.as_mut(),
+                    Some(&url),
+                    Some(&settings),
+                    None,
+                    None,
+                );
+            } else {
+                // CEF Views mode: cross-platform window management.
+                let mut client = self.default_client();
+                let mut delegate = AgentMuxBrowserViewDelegate::new(RuntimeStyle::ALLOY);
+                let browser_view = browser_view_create(
+                    client.as_mut(),
+                    Some(&url),
+                    Some(&settings),
+                    None,
+                    None,
+                    Some(&mut delegate),
+                );
+
+                let mut window_delegate = AgentMuxWindowDelegate::new(
+                    RefCell::new(browser_view),
+                );
+                window_create_top_level(Some(&mut window_delegate));
+            }
+        }
+
+        fn default_client(&self) -> Option<Client> {
+            self.client.borrow().clone()
+        }
+    }
+}

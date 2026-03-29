@@ -700,6 +700,131 @@ tasks:
                 echo "Copied wsh to bin/ for backend deployment"
                 {{end}}
 
+    # ========================================
+    # CEF Host Build Tasks
+    # ========================================
+
+    cef:build:
+        desc: Build the CEF host binary for the current platform.
+        cmds:
+            - task: cef:build:{{OS}}
+
+    cef:build:windows:
+        internal: true
+        platforms: [windows]
+        cmds:
+            - cargo build --release -p agentmux-cef
+            - cmd: powershell -Command "New-Item -ItemType Directory -Force -Path dist/cef | Out-Null; Copy-Item target/release/agentmux-cef.exe dist/cef/agentmux-cef.exe -Force"
+            - echo "✓ Built agentmux-cef for Windows"
+
+    cef:build:darwin:
+        internal: true
+        platforms: [darwin]
+        cmds:
+            - bash -c 'source "$HOME/.cargo/env" 2>/dev/null; PATH="$HOME/.cargo/bin:$PATH" cargo build --release -p agentmux-cef'
+            - mkdir -p dist/cef
+            - cp target/release/agentmux-cef dist/cef/agentmux-cef
+            - echo "✓ Built agentmux-cef for macOS"
+
+    cef:build:linux:
+        internal: true
+        platforms: [linux]
+        cmds:
+            - bash -c 'source "$HOME/.cargo/env" 2>/dev/null; PATH="$HOME/.cargo/bin:$PATH" cargo build --release -p agentmux-cef'
+            - mkdir -p dist/cef
+            - cp target/release/agentmux-cef dist/cef/agentmux-cef
+            - echo "✓ Built agentmux-cef for Linux"
+
+    cef:bundle:
+        desc: Bundle CEF binaries alongside the agentmux-cef executable.
+        cmds:
+            - task: cef:bundle:{{OS}}
+
+    cef:bundle:windows:
+        internal: true
+        platforms: [windows]
+        cmds:
+            - cmd: |
+                powershell -Command "
+                  $cefDir = (Get-ChildItem -Recurse -Filter 'libcef.dll' -Path 'target' -ErrorAction SilentlyContinue | Select-Object -First 1).DirectoryName
+                  if (-not $cefDir) {
+                    Write-Host '❌ libcef.dll not found in target/ — build agentmux-cef first'
+                    exit 1
+                  }
+                  Write-Host 'Found CEF binaries in:' $cefDir
+                  New-Item -ItemType Directory -Force -Path dist/cef | Out-Null
+                  # Copy CEF DLLs
+                  Copy-Item -Force (Join-Path $cefDir 'libcef.dll') dist/cef/
+                  Copy-Item -Force (Join-Path $cefDir 'chrome_elf.dll') dist/cef/ -ErrorAction SilentlyContinue
+                  Copy-Item -Force (Join-Path $cefDir 'd3dcompiler_47.dll') dist/cef/ -ErrorAction SilentlyContinue
+                  Copy-Item -Force (Join-Path $cefDir 'vk_swiftshader.dll') dist/cef/ -ErrorAction SilentlyContinue
+                  # Copy CEF data files
+                  Copy-Item -Force (Join-Path $cefDir 'icudtl.dat') dist/cef/ -ErrorAction SilentlyContinue
+                  Copy-Item -Force (Join-Path $cefDir 'v8_context_snapshot.bin') dist/cef/ -ErrorAction SilentlyContinue
+                  Copy-Item -Force (Join-Path $cefDir 'snapshot_blob.bin') dist/cef/ -ErrorAction SilentlyContinue
+                  Copy-Item -Force (Join-Path $cefDir '*.pak') dist/cef/ -ErrorAction SilentlyContinue
+                  # Copy locales
+                  if (Test-Path (Join-Path $cefDir 'locales')) {
+                    New-Item -ItemType Directory -Force -Path dist/cef/locales | Out-Null
+                    Copy-Item -Recurse -Force (Join-Path $cefDir 'locales/*') dist/cef/locales/
+                  }
+                  Write-Host '✓ Bundled CEF binaries to dist/cef/'
+                "
+            - echo "CEF bundle complete"
+
+    cef:bundle:darwin:
+        internal: true
+        platforms: [darwin]
+        cmds:
+            - echo "macOS CEF bundling not yet implemented"
+
+    cef:bundle:linux:
+        internal: true
+        platforms: [linux]
+        cmds:
+            - echo "Linux CEF bundling not yet implemented"
+
+    cef:dev:
+        desc: Build and run the CEF host in development mode (loads Vite dev server).
+        cmds:
+            - task: cef:build
+            - task: cef:bundle
+            - task: cef:run
+        deps:
+            - build:backend
+        env:
+            AGENTMUX_ENVFILE: "{{.ROOT_DIR}}/.env"
+
+    cef:run:
+        desc: Run the CEF host (must be built and bundled first).
+        cmds:
+            - task: cef:run:{{OS}}
+
+    cef:run:windows:
+        internal: true
+        platforms: [windows]
+        cmd: cmd /c "cd dist\\cef && agentmux-cef.exe --url=http://localhost:5173 --use-alloy-style"
+
+    cef:run:darwin:
+        internal: true
+        platforms: [darwin]
+        cmd: cd dist/cef && ./agentmux-cef --url=http://localhost:5173 --use-alloy-style
+
+    cef:run:linux:
+        internal: true
+        platforms: [linux]
+        cmd: cd dist/cef && ./agentmux-cef --url=http://localhost:5173 --use-alloy-style
+
+    cef:clean:
+        desc: Clean CEF build artifacts.
+        cmds:
+            - cmd: '{{.RMRF}} "dist/cef"'
+              ignore_error: true
+
+    # ========================================
+    # End CEF Tasks
+    # ========================================
+
     test:e2e:macos:
         desc: Run E2E tests on macOS (frontend-only with mocked Tauri IPC)
         platforms: [darwin]

@@ -22,6 +22,11 @@
       "path": "package.version"
     },
     {
+      "file": "agentmux-cef/Cargo.toml",
+      "type": "toml",
+      "path": "package.version"
+    },
+    {
       "file": "src-tauri/tauri.conf.json",
       "type": "json",
       "path": "version"
@@ -60,7 +65,8 @@
       "src-tauri/Cargo.toml",
       "src-tauri/tauri.conf.json",
       "agentmuxsrv-rs/Cargo.toml",
-      "wsh-rs/Cargo.toml"
+      "wsh-rs/Cargo.toml",
+      "agentmux-cef/Cargo.toml"
     ],
     "commitMessage": "chore: bump version to {{version}}"
   }
