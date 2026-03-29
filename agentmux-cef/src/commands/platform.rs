@@ -423,9 +423,9 @@ pub fn open_external(args: &serde_json::Value) -> Result<serde_json::Value, Stri
         .and_then(|v| v.as_str())
         .ok_or_else(|| "Missing url".to_string())?;
 
-    // Only allow http/https URLs for safety
-    if !url.starts_with("http://") && !url.starts_with("https://") {
-        return Err(format!("Refusing to open non-HTTP URL: {}", url));
+    // Only allow safe URL schemes
+    if !url.starts_with("http://") && !url.starts_with("https://") && !url.starts_with("devtools://") {
+        return Err(format!("Refusing to open URL with unsupported scheme: {}", url));
     }
 
     #[cfg(target_os = "windows")]

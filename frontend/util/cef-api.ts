@@ -396,17 +396,18 @@ export function buildCefApi(): AppApi {
             // in CEF Rust bindings v146). Open DevTools in the system browser via
             // the remote debugging protocol (port 9222).
             try {
-                const resp = await fetch("http://localhost:9222/json");
+                const resp = await fetch("http://127.0.0.1:9222/json");
                 const targets = await resp.json();
                 const page = targets.find((t: any) => t.type === "page");
-                if (page?.devtoolsFrontendUrl) {
-                    // Use appspot URL — works in any Chrome/Edge browser
-                    invokeCommand("open_external", { url: page.devtoolsFrontendUrl }).catch(console.error);
+                if (page?.id) {
+                    // Use Chrome's built-in DevTools frontend with the remote WS target
+                    const dtUrl = `devtools://devtools/bundled/inspector.html?ws=127.0.0.1:9222/devtools/page/${page.id}`;
+                    invokeCommand("open_external", { url: dtUrl }).catch(console.error);
                 } else {
-                    invokeCommand("open_external", { url: "http://localhost:9222" }).catch(console.error);
+                    invokeCommand("open_external", { url: "http://127.0.0.1:9222" }).catch(console.error);
                 }
             } catch {
-                invokeCommand("open_external", { url: "http://localhost:9222" }).catch(console.error);
+                invokeCommand("open_external", { url: "http://127.0.0.1:9222" }).catch(console.error);
             }
         },
         getWindowLabel: async () => {
