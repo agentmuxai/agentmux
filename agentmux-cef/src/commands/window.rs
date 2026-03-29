@@ -8,9 +8,10 @@
 
 use std::sync::Arc;
 
-use cef::{ImplBrowser, ImplBrowserHost};
+use cef::{ImplBrowser, ImplBrowserHost, post_task, ThreadId};
 
 use crate::state::AppState;
+use crate::ui_tasks;
 
 /// Get the current zoom factor.
 pub fn get_zoom_factor(state: &Arc<AppState>) -> serde_json::Value {
@@ -35,12 +36,9 @@ pub fn set_zoom_factor(state: &Arc<AppState>, args: &serde_json::Value) -> Resul
     // So: zoom_level = log(zoom_factor) / log(1.2)
     let zoom_level = factor.ln() / 1.2_f64.ln();
 
-    let browser = state.browser.lock().unwrap();
-    if let Some(ref browser) = *browser {
-        if let Some(host) = browser.host() {
-            host.set_zoom_level(zoom_level);
-        }
-    }
+    // Post to UI thread — host.set_zoom_level() deadlocks from IPC thread
+    let mut task = ui_tasks::SetZoomLevelTask::new(state.clone(), zoom_level);
+    post_task(ThreadId::UI, Some(&mut task));
 
     // Emit zoom-factor-change event
     crate::events::emit_event_from_state(state, "zoom-factor-change", &serde_json::json!(factor));
@@ -137,18 +135,9 @@ pub fn get_window_count(state: &Arc<AppState>) -> serde_json::Value {
 }
 
 /// Toggle devtools.
+/// Posted to UI thread — host.show_dev_tools() deadlocks from IPC thread.
 pub fn toggle_devtools(state: &Arc<AppState>) -> Result<serde_json::Value, String> {
-    let browser = state.browser.lock().unwrap();
-    if let Some(ref browser) = *browser {
-        if let Some(host) = browser.host() {
-            // CEF doesn't have an is_devtools_open check, so we just toggle
-            // by calling show_dev_tools which opens devtools in a new window
-            let window_info = cef::WindowInfo {
-                runtime_style: cef::RuntimeStyle::ALLOY,
-                ..Default::default()
-            };
-            host.show_dev_tools(Some(&window_info), None, None, None);
-        }
-    }
+    let mut task = ui_tasks::ShowDevToolsTask::new(state.clone());
+    post_task(ThreadId::UI, Some(&mut task));
     Ok(serde_json::Value::Null)
 }

@@ -434,12 +434,9 @@ export async function initBare() {
     setKeyUtilPlatform(platform);
     loadFonts();
     // Reset window zoom to 1.0 (per-pane zoom is handled via block metadata,
-    // chrome zoom via CSS custom properties).
-    // SKIP in CEF: set_zoom_factor calls host.set_zoom_level() from the IPC
-    // thread, which deadlocks the CEF message loop and freezes all timers/promises.
-    // TODO(cef): post set_zoom_level to CEF UI thread via CefPostTask.
+    // chrome zoom via CSS custom properties)
     const api = getApi();
-    if (isTauriHost() && api && typeof api.setZoomFactor === "function") {
+    if (api && typeof api.setZoomFactor === "function") {
         api.setZoomFactor(1.0);
     }
 

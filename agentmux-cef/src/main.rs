@@ -28,6 +28,7 @@ mod events;
 mod ipc;
 mod sidecar;
 mod state;
+mod ui_tasks;
 
 use std::sync::Arc;
 
