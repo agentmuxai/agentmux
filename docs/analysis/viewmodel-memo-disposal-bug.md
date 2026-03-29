@@ -150,35 +150,45 @@ context the constructor runs in.
 
 ## The Fix
 
-### Applied: `createRoot` wrapper in `block.tsx`
+### Applied: Narrow effect dependency via `viewType` memo in `block.tsx`
 
-Wrap `makeViewModel()` in `createRoot` so the ViewModel's reactive computations
-are owned by an independent root, not by the `createEffect`:
+The root issue is that `createEffect` tracked `blockData()`, which changes on
+ANY meta update. Extract a `viewType` memo so the effect only re-runs when
+`meta.view` actually changes (e.g. "Replace With..." menu), not on unrelated
+meta writes like `sysinfo:type`:
 
 ```typescript
-// BEFORE (broken)
-if (vm == null || vm.viewType !== view) {
-    vm = makeViewModel(blockId, view, nodeModel);
-    registerBlockComponentModel(blockId, { viewModel: vm });
-}
+// BEFORE (broken) — effect tracks blockData(), re-runs on every meta update
+createEffect(() => {
+    const bd = blockData();          // ← tracks entire block object
+    const view = bd?.meta?.view;
+    if (!bd || !view) return;
+    ...
+});
 
-// AFTER (fixed)
-if (vm == null || vm.viewType !== view) {
-    vmRootDispose?.();
-    createRoot((dispose) => {
-        vmRootDispose = dispose;
-        vm = makeViewModel(blockId, view, nodeModel);
-    });
-    registerBlockComponentModel(blockId, { viewModel: vm });
-}
+// AFTER (fixed) — effect tracks only the view type string
+const viewType = createMemo(() => blockData()?.meta?.view);
+
+createEffect(() => {
+    const view = viewType();         // ← tracks only meta.view changes
+    if (!view) return;
+    ...
+});
 ```
 
-`vmRootDispose` is called in:
-- The `if` branch (when ViewModel is replaced due to view type change)
-- `onCleanup` (when the Block component unmounts)
+The `viewType` memo absorbs all `blockData()` changes and only propagates when
+`meta.view` actually differs. The effect no longer re-runs on `sysinfo:type`,
+`term:theme`, `pane-title`, or any other meta field — so the ViewModel memos
+it created on the first run are never disposed.
 
-This gives every ViewModel its own stable reactive root. The memos survive
-`createEffect` re-runs because they are no longer children of the effect.
+### Why not `createRoot`?
+
+An earlier attempt used `createRoot` inside the `createEffect` to isolate
+ViewModel memos. However, in Solid.js v1.9, `createRoot` called inside an
+effect inherits the effect as its owner (`detachedOwner` defaults to current
+Owner). The root is still disposed when the effect re-runs. Only passing
+`null` as the second argument truly detaches, but narrowing the dependency
+is simpler and more correct.
 
 ### Scope of Fix
 
@@ -191,7 +201,7 @@ Applied to both `Block` (line 258) and `SubBlock` (line 294) components in
 
 | File | Change |
 |------|--------|
-| `frontend/app/block/block.tsx` | `createRoot` wrapper in Block + SubBlock |
+| `frontend/app/block/block.tsx` | `viewType` memo + narrowed effect dependency (Block + SubBlock) |
 | `frontend/app/block/blockframe.tsx` | `getBodyContextMenuItems` injected into body menu |
 | `frontend/app/view/sysinfo/sysinfo-model.ts` | Added `getBodyContextMenuItems()` method |
 | `frontend/types/custom.d.ts` | Added `getBodyContextMenuItems?()` to ViewModel interface |
