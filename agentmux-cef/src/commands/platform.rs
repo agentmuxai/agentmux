@@ -416,6 +416,43 @@ fn merge_into_template(
     result
 }
 
+/// Open a URL in the system's default browser.
+pub fn open_external(args: &serde_json::Value) -> Result<serde_json::Value, String> {
+    let url = args
+        .get("url")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "Missing url".to_string())?;
+
+    // Only allow http/https URLs for safety
+    if !url.starts_with("http://") && !url.starts_with("https://") {
+        return Err(format!("Refusing to open non-HTTP URL: {}", url));
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        let _ = std::process::Command::new("cmd")
+            .args(["/C", "start", "", url])
+            .spawn()
+            .map_err(|e| format!("Failed to open URL: {}", e))?;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let _ = std::process::Command::new("open")
+            .arg(url)
+            .spawn()
+            .map_err(|e| format!("Failed to open URL: {}", e))?;
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let _ = std::process::Command::new("xdg-open")
+            .arg(url)
+            .spawn()
+            .map_err(|e| format!("Failed to open URL: {}", e))?;
+    }
+
+    Ok(serde_json::Value::Null)
+}
+
 fn extract_commented_setting_key(line: &str) -> Option<&str> {
     let trimmed = line.trim_start();
     let rest = trimmed.strip_prefix("//")?;

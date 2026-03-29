@@ -195,6 +195,7 @@ async fn route_command(
         "get_instance_number" => Ok(commands::window::get_instance_number(state)),
         "get_window_count" => Ok(commands::window::get_window_count(state)),
         "get_env" => Ok(commands::platform::get_env(args)),
+        "open_external" => commands::platform::open_external(args),
         "toggle_devtools" => commands::window::toggle_devtools(state),
         "show_context_menu" => {
             // Stub for now — CEF has native context menu support

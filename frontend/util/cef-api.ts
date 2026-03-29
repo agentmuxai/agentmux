@@ -392,24 +392,21 @@ export function buildCefApi(): AppApi {
             invokeCommand("set_window_transparency", { transparent, blur, opacity }).catch(console.error);
         },
         toggleDevtools: async () => {
-            // CEF host.show_dev_tools() crashes from IPC thread. Use remote
-            // debugging protocol instead — fetch the DevTools frontend URL
-            // from the debug endpoint and open it in a new CEF popup.
+            // CEF host.show_dev_tools() crashes from IPC thread (wrap_task! broken
+            // in CEF Rust bindings v146). Open DevTools in the system browser via
+            // the remote debugging protocol (port 9222).
             try {
                 const resp = await fetch("http://localhost:9222/json");
                 const targets = await resp.json();
                 const page = targets.find((t: any) => t.type === "page");
                 if (page?.devtoolsFrontendUrl) {
-                    const dtUrl = page.devtoolsFrontendUrl.replace(
-                        "https://chrome-devtools-frontend.appspot.com/serve_rev/",
-                        "devtools://devtools/bundled/"
-                    );
-                    window.open(dtUrl, "_blank");
+                    // Use appspot URL — works in any Chrome/Edge browser
+                    invokeCommand("open_external", { url: page.devtoolsFrontendUrl }).catch(console.error);
                 } else {
-                    window.open("http://localhost:9222", "_blank");
+                    invokeCommand("open_external", { url: "http://localhost:9222" }).catch(console.error);
                 }
             } catch {
-                window.open("http://localhost:9222", "_blank");
+                invokeCommand("open_external", { url: "http://localhost:9222" }).catch(console.error);
             }
         },
         getWindowLabel: async () => {
