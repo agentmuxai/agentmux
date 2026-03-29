@@ -103,7 +103,7 @@ pub async fn spawn_backend(state: &Arc<AppState>) -> Result<BackendSpawnResult, 
     )
     .env("WCLOUD_ENDPOINT", "https://api.agentmux.ai/central")
     .env("WCLOUD_WS_ENDPOINT", "wss://wsapi.agentmux.ai/")
-    .stdin(std::process::Stdio::null())
+    .stdin(std::process::Stdio::piped())
     .stdout(std::process::Stdio::piped())
     .stderr(std::process::Stdio::piped());
 
@@ -285,26 +285,29 @@ fn resolve_backend_binary(
         return Ok(dev_binary);
     }
 
-    // Check dist/bin/ in the workspace
-    let dist_binary = exe_dir
-        .parent()
-        .and_then(|p| p.parent())
-        .map(|workspace| {
-            workspace
-                .join("dist")
-                .join("bin")
-                .join(format!("{}{}", backend_name, exe_suffix))
-        });
-    if let Some(ref dist) = dist_binary {
-        if dist.exists() {
-            tracing::info!("Using dist {} at: {:?}", backend_name, dist);
-            return Ok(dist.clone());
+    // Check dist/bin/ in the workspace (try both plain and .x64 variants)
+    if let Some(workspace) = exe_dir.parent().and_then(|p| p.parent()) {
+        let dist_bin = workspace.join("dist").join("bin");
+
+        // Try {name}.x64{exe} first (Taskfile convention)
+        let dist_x64 = dist_bin.join(format!("{}.x64{}", backend_name, exe_suffix));
+        if dist_x64.exists() {
+            tracing::info!("Using dist {} at: {:?}", backend_name, dist_x64);
+            return Ok(dist_x64);
+        }
+
+        // Then try {name}{exe}
+        let dist_plain = dist_bin.join(format!("{}{}", backend_name, exe_suffix));
+        if dist_plain.exists() {
+            tracing::info!("Using dist {} at: {:?}", backend_name, dist_plain);
+            return Ok(dist_plain);
         }
     }
 
     Err(format!(
-        "Backend binary '{}' not found. Searched:\n  - {:?}\n  - {:?}\n  - {:?}",
-        backend_name, portable_binary, dev_binary, dist_binary
+        "Backend binary '{}' not found. Searched:\n  - {:?}\n  - {:?}\n  - dist/bin/{}.x64{}\n  - dist/bin/{}{}",
+        backend_name, portable_binary, dev_binary,
+        backend_name, exe_suffix, backend_name, exe_suffix
     ))
 }
 
