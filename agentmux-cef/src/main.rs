@@ -152,7 +152,9 @@ fn main() {
     let settings = Settings {
         // Disable Chromium sandbox (simplifies deployment, we're loading localhost).
         no_sandbox: 1,
-        // Use Alloy runtime style for a more traditional browser appearance.
+        // Dark background to match app theme — prevents white bleed-through
+        // when terminal panes use transparency.
+        background_color: 0xFF000000, // ARGB: opaque black
         ..Default::default()
     };
 
