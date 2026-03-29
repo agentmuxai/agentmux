@@ -183,14 +183,29 @@ wrap_browser_process_handler! {
             let use_native = command_line.has_switch(Some(&CefString::from("use-native"))) != 0;
 
             if use_native {
-                // Native window mode: CEF creates its own platform window.
+                // Native window mode: frameless popup (WS_POPUP, no title bar).
+                // HTML5 DnD works in native mode (CEF Views intercepts drag events).
+                #[cfg(target_os = "windows")]
+                let window_info = {
+                    use windows_sys::Win32::UI::WindowsAndMessaging::*;
+                    WindowInfo {
+                        runtime_style: RuntimeStyle::ALLOY,
+                        window_name: CefString::from("AgentMux"),
+                        style: WS_POPUP | WS_CLIPCHILDREN | WS_CLIPSIBLINGS | WS_VISIBLE | WS_THICKFRAME,
+                        bounds: cef::Rect {
+                            x: CW_USEDEFAULT,
+                            y: CW_USEDEFAULT,
+                            width: 1200,
+                            height: 800,
+                        },
+                        ..Default::default()
+                    }
+                };
+                #[cfg(not(target_os = "windows"))]
                 let window_info = WindowInfo {
                     runtime_style: RuntimeStyle::ALLOY,
                     ..Default::default()
                 };
-
-                #[cfg(target_os = "windows")]
-                let window_info = window_info.set_as_popup(Default::default(), "AgentMux");
 
                 let mut client = self.default_client();
                 browser_host_create_browser(

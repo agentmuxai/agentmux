@@ -416,6 +416,18 @@ export function buildCefApi(): AppApi {
             return await invokeCommand<number>("get_window_count");
         },
 
+        // --- Drag & Drop (stubs — cross-window drag is Phase 3) ---
+        setJsDragActive: async (_active: boolean) => {},
+        startCrossDrag: async () => "",
+        updateCrossDrag: async (_dragId: string, _screenX: number, _screenY: number) => null as string | null,
+        completeCrossDrag: async () => {},
+        cancelCrossDrag: async (_dragId: string) => {},
+        openWindowAtPosition: async () => "",
+        setDragCursor: async () => {},
+        restoreDragCursor: async () => {},
+        releaseDragCapture: async () => {},
+        getMouseButtonState: async () => false,
+
         // --- Workspace & Tabs ---
         createWorkspace: () => {
             invokeCommand("create_workspace").catch(console.error);
