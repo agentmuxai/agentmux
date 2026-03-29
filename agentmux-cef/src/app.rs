@@ -170,7 +170,7 @@ wrap_browser_process_handler! {
             );
             let url = CefString::from(url_with_ipc.as_str());
 
-            tracing::info!("Loading URL: {}", CefString::to_string(&url));
+            tracing::info!("Loading URL: {}{}ipc_port={}&ipc_token=<redacted>", base_url, separator, self.ipc_port);
 
             // Check if --use-native flag is set (bypasses CEF Views).
             let use_native = command_line.has_switch(Some(&CefString::from("use-native"))) != 0;
