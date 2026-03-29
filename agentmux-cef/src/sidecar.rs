@@ -334,7 +334,8 @@ fn deploy_wsh(app_path: &std::path::Path) {
         return;
     }
 
-    let bundled_wsh = app_path.join("wsh");
+    let wsh_src_name = if cfg!(windows) { "wsh.exe" } else { "wsh" };
+    let bundled_wsh = app_path.join(wsh_src_name);
     if !bundled_wsh.exists() {
         // Not an error in dev mode — wsh may not be available
         tracing::debug!("Bundled wsh not found at: {}", bundled_wsh.display());
@@ -371,7 +372,8 @@ fn deploy_wsh(app_path: &std::path::Path) {
         )
     };
 
-    let wsh_name = format!("wsh-{}-{}.{}", version, goos, goarch);
+    let exe_suffix = if cfg!(windows) { ".exe" } else { "" };
+    let wsh_name = format!("wsh-{}-{}.{}{}", version, goos, goarch, exe_suffix);
     let dest = bin_dir.join(&wsh_name);
 
     if dest.exists() {

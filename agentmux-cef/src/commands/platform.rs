@@ -65,6 +65,18 @@ pub fn ensure_auth_dir(args: &serde_json::Value) -> Result<serde_json::Value, St
         .and_then(|v| v.as_str())
         .ok_or_else(|| "Missing provider_id".to_string())?;
 
+    // Reject path traversal attempts in provider_id
+    if provider_id.contains('/')
+        || provider_id.contains('\\')
+        || provider_id.contains("..")
+        || provider_id.is_empty()
+    {
+        return Err(format!(
+            "Invalid provider_id '{}': must not contain path separators or '..'",
+            provider_id
+        ));
+    }
+
     let home_dir = dirs::home_dir()
         .ok_or_else(|| "Failed to determine home directory".to_string())?;
 
@@ -127,11 +139,9 @@ pub fn open_in_editor(args: &serde_json::Value) -> Result<serde_json::Value, Str
 
     #[cfg(target_os = "windows")]
     {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x08000000;
-        std::process::Command::new("cmd")
-            .args(["/C", "start", "", path])
-            .creation_flags(CREATE_NO_WINDOW)
+        // Use explorer.exe directly instead of cmd /C start to avoid shell injection.
+        std::process::Command::new("explorer")
+            .arg(path)
             .spawn()
             .map_err(|e| format!("Failed to open file: {}", e))?;
         return Ok(serde_json::Value::Null);
