@@ -149,17 +149,26 @@ wrap_browser_process_handler! {
             // Determine the URL to load.
             let command_line = command_line_get_global().expect("Failed to get command line");
             let url_switch = CefString::from("url");
-            let url = if command_line.has_switch(Some(&url_switch)) != 0 {
+            let base_url = if command_line.has_switch(Some(&url_switch)) != 0 {
                 CefString::from(&command_line.switch_value(Some(&url_switch))).to_string()
             } else {
                 String::new()
             };
-            let url = if url.is_empty() {
-                "http://localhost:5173"
+            let base_url = if base_url.is_empty() {
+                "http://localhost:5173".to_string()
             } else {
-                url.as_str()
+                base_url
             };
-            let url = CefString::from(url);
+
+            // Append IPC port and token as URL query parameters so the frontend
+            // can detect CEF mode and connect to the IPC server immediately,
+            // before on_load_end fires.
+            let separator = if base_url.contains('?') { "&" } else { "?" };
+            let url_with_ipc = format!(
+                "{}{}ipc_port={}&ipc_token={}",
+                base_url, separator, self.ipc_port, self.state.ipc_token
+            );
+            let url = CefString::from(url_with_ipc.as_str());
 
             tracing::info!("Loading URL: {}", CefString::to_string(&url));
 

@@ -40,21 +40,35 @@ import { setKeyUtilPlatform } from "@/util/keyutil";
 import { render } from "solid-js/web";
 import { benchMark, benchDump } from "@/util/startup-bench";
 import { ContextMenuModel } from "@/app/store/contextmenu";
-// Static import — avoids dynamic import() hang in WebKitGTK over tauri:// protocol.
-import { getCurrentWindow } from "@tauri-apps/api/window";
 
 // Deferred — assigned inside initBare() after window.api is ready.
 // Do NOT call getApi() at module level: this file is statically imported by
-// tauri-bootstrap.ts before setupTauriApi() runs, so window.api does not exist yet.
+// tauri-bootstrap.ts before setupTauriApi()/setupCefApi() runs, so window.api
+// does not exist yet.
 let platform: NodeJS.Platform;
 let appVersion: string;
 let savedInitOpts: AgentMuxInitOpts = null;
 
+/**
+ * Detect whether we're running in a host app (Tauri or CEF).
+ * Both host apps own the backend sidecar and need to query it for
+ * client/window/tab state. Non-host mode waits for an `agentmux-init` event.
+ */
+function isHostApp(): boolean {
+    return typeof (window as any).__TAURI_INTERNALS__ !== "undefined"
+        || typeof (window as any).__AGENTMUX_IPC_PORT__ !== "undefined";
+}
+
+/** Whether running specifically in Tauri (not CEF). */
+function isTauriHost(): boolean {
+    return typeof (window as any).__TAURI_INTERNALS__ !== "undefined";
+}
+
 // Update window title with instance ID if running in multi-instance mode
 async function updateWindowTitleWithInstanceID() {
     try {
-        // Only in Tauri
-        if (!(window as any).__TAURI_INTERNALS__) {
+        // Only in Tauri (uses tauri-plugin-fs for file access)
+        if (!isTauriHost()) {
             return;
         }
 
@@ -75,8 +89,9 @@ async function updateWindowTitleWithInstanceID() {
                 document.title = newTitle;
 
                 // Also update Tauri window title
-                const window = getCurrentWindow();
-                await window.setTitle(newTitle);
+                const { getCurrentWindow } = await import("@tauri-apps/api/window");
+                const currentWindow = getCurrentWindow();
+                await currentWindow.setTitle(newTitle);
 
                 console.log(`[multi-instance] Running as: ${instanceID.trim()}`);
             }
@@ -162,9 +177,10 @@ async function initInstanceTracking(): Promise<void> {
         setWindowCountAtom(windowCount);
 
         // Keep count in sync whenever any window opens or closes.
-        const { listen } = await import("@tauri-apps/api/event");
-        await listen<number>("window-instances-changed", (event) => {
-            setWindowCountAtom(event.payload);
+        // Uses the platform-agnostic listen from AppApi (works in both Tauri and CEF).
+        await getApi().listen("window-instances-changed", (event: any) => {
+            const payload = event?.payload ?? event;
+            setWindowCountAtom(typeof payload === "number" ? payload : 0);
         });
     } catch (e) {
         console.warn("[initInstanceTracking] failed:", e);
@@ -172,11 +188,11 @@ async function initInstanceTracking(): Promise<void> {
 }
 
 /**
- * Initialize AgentMux in Tauri mode by fetching client/window/workspace/tab data
- * from backend, verifying objects exist, and creating missing ones if needed.
- * Handles first-window and new-window creation.
+ * Initialize AgentMux in host app mode (Tauri or CEF) by fetching
+ * client/window/workspace/tab data from backend, verifying objects exist,
+ * and creating missing ones if needed.
  */
-async function initTauriWave(): Promise<void> {
+async function initHostWave(): Promise<void> {
     const t0 = performance.now();
     const tlog = (label: string, since: number) => {
         const ms = (performance.now() - since).toFixed(1);
@@ -256,37 +272,44 @@ async function initTauriWave(): Promise<void> {
         // Initialize instance tracking (must come after initWaveWrap so globalStore is ready)
         await initInstanceTracking();
 
-        // Show the window now that it's fully initialized (Tauri starts hidden)
-        try {
-            const currentWindow = getCurrentWindow();
-            benchMark("window-show");
-            await currentWindow.show();
-            if (platform === "linux") {
-                await currentWindow.center();
+        // Show the window now that it's fully initialized (Tauri starts hidden).
+        // In CEF, the window is already visible — these calls are no-ops.
+        if (isTauriHost()) {
+            try {
+                const { getCurrentWindow } = await import("@tauri-apps/api/window");
+                const currentWindow = getCurrentWindow();
+                benchMark("window-show");
+                await currentWindow.show();
+                if (platform === "linux") {
+                    await currentWindow.center();
+                }
+                await currentWindow.setFocus();
+            } catch (showError) {
+                console.warn("[initHostWave] Failed to show window:", showError);
             }
-            await currentWindow.setFocus();
-            benchDump(); // emit full startup timeline to log
-        } catch (showError) {
-            console.warn("[initTauriWave] Failed to show window:", showError);
         }
+        benchDump(); // emit full startup timeline to log
 
     } catch (error) {
-        console.error("[initTauriWave] Initialization failed:", error);
-        getApi().sendLog(`[initTauriWave] ERROR: ${error}`);
+        console.error("[initHostWave] Initialization failed:", error);
+        getApi().sendLog(`[initHostWave] ERROR: ${error}`);
         showStartupError(String(error));
-        // Show window even on error so user can see the error message
-        try {
-            await getCurrentWindow().show();
-        } catch {}
+        // Show Tauri window even on error so user can see the error message
+        if (isTauriHost()) {
+            try {
+                const { getCurrentWindow } = await import("@tauri-apps/api/window");
+                await getCurrentWindow().show();
+            } catch {}
+        }
     }
 }
 
 /**
- * Initialize a new (non-main) Tauri window by creating new backend objects.
- * Unlike initTauriWave() which reuses existing Window/Workspace/Tab,
+ * Initialize a new (non-main) host window by creating new backend objects.
+ * Unlike initHostWave() which reuses existing Window/Workspace/Tab,
  * this creates a fresh set for the new window.
  */
-async function initTauriNewWindow(): Promise<void> {
+async function initHostNewWindow(): Promise<void> {
     const t0 = performance.now();
     const tlog = (label: string, since: number) => {
         const ms = (performance.now() - since).toFixed(1);
@@ -354,29 +377,36 @@ async function initTauriNewWindow(): Promise<void> {
         await initInstanceTracking();
 
         // Show the window now that it's initialized
-        try {
-            const currentWindow = getCurrentWindow();
-            await currentWindow.show();
-            await currentWindow.setFocus();
-            getApi().sendLog("[initTauriNewWindow] Window shown and focused");
-        } catch (showError) {
-            console.warn("[initTauriNewWindow] Failed to show window:", showError);
+        if (isTauriHost()) {
+            try {
+                const { getCurrentWindow } = await import("@tauri-apps/api/window");
+                const currentWindow = getCurrentWindow();
+                await currentWindow.show();
+                await currentWindow.setFocus();
+                getApi().sendLog("[initHostNewWindow] Window shown and focused");
+            } catch (showError) {
+                console.warn("[initHostNewWindow] Failed to show window:", showError);
+            }
         }
 
     } catch (error) {
-        console.error("[initTauriNewWindow] Initialization failed:", error);
-        try { getApi().sendLog(`[initTauriNewWindow] ❌ Error: ${error}`); } catch {}
+        console.error("[initHostNewWindow] Initialization failed:", error);
+        try { getApi().sendLog(`[initHostNewWindow] Error: ${error}`); } catch {}
         showStartupError("New window: " + String(error));
         // Show Tauri window so user sees the error
-        try {
-            await getCurrentWindow().show();
-        } catch {}
+        if (isTauriHost()) {
+            try {
+                const { getCurrentWindow } = await import("@tauri-apps/api/window");
+                await getCurrentWindow().show();
+            } catch {}
+        }
     }
 }
 
 export async function initBare() {
-    // window.api is guaranteed to exist here — tauri-bootstrap.ts calls setupTauriApi()
-    // before calling initBare(). Assign deferred module-level values now.
+    // window.api is guaranteed to exist here — tauri-bootstrap.ts calls
+    // setupTauriApi() or setupCefApi() before calling initBare().
+    // Assign deferred module-level values now.
     platform = getApi().getPlatform();
     appVersion = getApi().getAboutModalDetails().version;
     document.title = `AgentMux ${appVersion}`;
@@ -391,18 +421,19 @@ export async function initBare() {
     document.body.style.opacity = "0";
     document.body.classList.add("is-transparent");
 
-    // Check if we're in Tauri mode
-    const isTauri = typeof (window as any).__TAURI_INTERNALS__ !== "undefined";
-    getApi().sendLog(`Init Bare - Tauri mode: ${isTauri}`);
+    // Check if we're in a host app (Tauri or CEF) that owns the backend sidecar.
+    // Host apps query the backend for client/window/tab state.
+    // Non-host mode waits for an agentmux-init event from the host.
+    const hostApp = isHostApp();
+    getApi().sendLog(`Init Bare - Host app mode: ${hostApp}`);
 
-    // Tauri uses onAgentMuxInit callback (backend emits wave-init event)
-    // Tauri handles initialization in frontend after backend is ready
-    if (!isTauri) {
+    if (!hostApp) {
+        // Non-host: wait for the host to emit agentmux-init with IDs
         getApi().onAgentMuxInit(initWaveWrap);
     }
     setKeyUtilPlatform(platform);
     loadFonts();
-    // Reset Tauri window zoom to 1.0 (per-pane zoom is handled via block metadata,
+    // Reset window zoom to 1.0 (per-pane zoom is handled via block metadata,
     // chrome zoom via CSS custom properties)
     const api = getApi();
     if (api && typeof api.setZoomFactor === "function") {
@@ -415,7 +446,6 @@ export async function initBare() {
     });
 
     // Use Promise.race to add a timeout fallback for fonts.ready
-    // In Tauri, fonts.ready might not resolve promptly
     const fontsPromise = document.fonts.ready;
     const timeoutPromise = new Promise(resolve => setTimeout(resolve, 2000));
 
@@ -427,9 +457,9 @@ export async function initBare() {
         getApi().sendLog("Init Bare Done");
         getApi().setWindowInitStatus("ready");
 
-        // In Tauri mode, handle initialization in frontend
-        if (isTauri) {
-            getApi().sendLog("Starting Tauri initialization");
+        // In host app mode, handle initialization in frontend
+        if (hostApp) {
+            getApi().sendLog("Starting host app initialization");
             try {
                 // Check if this is a new window or the main window
                 benchMark("isMainWindow-start");
@@ -439,16 +469,16 @@ export async function initBare() {
                 benchMark("isMainWindow-done");
                 if (isMain) {
                     // Main window with freshly spawned backend: standard initialization
-                    await initTauriWave();
+                    await initHostWave();
                 } else {
                     // New window: create new backend window objects
                     const label = await getApi().getWindowLabel();
                     getApi().sendLog(`Initializing as new window: ${label}`);
-                    await initTauriNewWindow();
+                    await initHostNewWindow();
                 }
             } catch (error) {
-                console.error("[initBare] Tauri initialization failed:", error);
-                getApi().sendLog(`Tauri init error: ${error}`);
+                console.error("[initBare] Host initialization failed:", error);
+                getApi().sendLog(`Host init error: ${error}`);
                 showStartupError(String(error));
             }
         }
@@ -467,9 +497,10 @@ export async function initBare() {
 }
 
 // tauri-bootstrap.ts calls initBare() directly (static import).
-// This self-start path is kept only for non-Tauri/dev environments where
-// tauri-bootstrap is not the entry point.
-if (typeof (window as any).__TAURI_INTERNALS__ === "undefined") {
+// This self-start path is kept only for dev environments where the
+// bootstrap entry point is not used. Skip if running in Tauri or CEF
+// since the bootstrap handles setup (window.api) before calling initBare().
+if (!isHostApp()) {
     if (document.readyState === "loading") {
         document.addEventListener("DOMContentLoaded", initBare);
     } else {
