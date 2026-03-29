@@ -122,12 +122,15 @@ pub fn set_window_transparency(state: &Arc<AppState>, args: &serde_json::Value) 
     #[cfg(target_os = "windows")]
     {
         unsafe {
-            // In CEF Views mode, window_handle() returns NULL. Find the top-level
-            // window owned by this process using GetForegroundWindow or EnumWindows.
             let hwnd = find_own_top_level_window();
             if !hwnd.is_null() {
                 tracing::info!("set_window_transparency: found hwnd={:?}", hwnd);
-                apply_window_effects(hwnd, transparent || blur, blur);
+                if blur {
+                    apply_window_effects(hwnd, true, true);
+                }
+                if transparent {
+                    apply_window_opacity(hwnd, _opacity);
+                }
             } else {
                 tracing::warn!("set_window_transparency: could not find top-level window");
             }
@@ -215,6 +218,27 @@ unsafe fn apply_window_effects(hwnd: *mut std::ffi::c_void, transparent: bool, b
         apply_win10_acrylic(hwnd, transparent);
     } else {
         tracing::info!("Applied DWM backdrop type {} to window", backdrop_type);
+    }
+}
+
+/// Apply window-level opacity via WS_EX_LAYERED + SetLayeredWindowAttributes.
+/// This makes the entire window semi-transparent (content + chrome).
+#[cfg(target_os = "windows")]
+unsafe fn apply_window_opacity(hwnd: *mut std::ffi::c_void, opacity: f64) {
+    use windows_sys::Win32::UI::WindowsAndMessaging::*;
+
+    let alpha = (opacity.clamp(0.0, 1.0) * 255.0) as u8;
+
+    // Add WS_EX_LAYERED extended style
+    let ex_style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+    SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex_style | WS_EX_LAYERED as isize);
+
+    // LWA_ALPHA = 0x02
+    let result = SetLayeredWindowAttributes(hwnd, 0, alpha, 0x02);
+    if result != 0 {
+        tracing::info!("Applied window opacity: {} (alpha={})", opacity, alpha);
+    } else {
+        tracing::warn!("SetLayeredWindowAttributes failed");
     }
 }
 
