@@ -111,6 +111,136 @@ export async function initCefApi(): Promise<void> {
     };
 }
 
+// Context menu click callback — registered by onContextMenuClick, called by showJsContextMenu.
+let contextMenuClickCallback: ((id: string) => void) | null = null;
+
+/**
+ * Render a context menu as a positioned HTML overlay.
+ * Fires the callback with the clicked item's id, then removes the overlay.
+ */
+function showJsContextMenu(
+    items: NativeContextMenuItem[],
+    position: { x: number; y: number },
+    onClick: ((id: string) => void) | null
+) {
+    // Remove any existing menu
+    document.getElementById("cef-context-menu-overlay")?.remove();
+
+    const overlay = document.createElement("div");
+    overlay.id = "cef-context-menu-overlay";
+    Object.assign(overlay.style, {
+        position: "fixed", inset: "0", zIndex: "99999",
+    });
+    overlay.addEventListener("mousedown", (e) => {
+        if (e.target === overlay) { overlay.remove(); }
+    });
+
+    const menuEl = document.createElement("div");
+    Object.assign(menuEl.style, {
+        position: "absolute",
+        left: `${position.x}px`,
+        top: `${position.y}px`,
+        background: "var(--main-bg-color, #222)",
+        border: "1px solid var(--border-color, #444)",
+        borderRadius: "6px",
+        padding: "4px 0",
+        minWidth: "160px",
+        boxShadow: "0 4px 16px rgba(0,0,0,0.4)",
+        fontFamily: "var(--termfontfamily, sans-serif)",
+        fontSize: "13px",
+        color: "var(--main-text-color, #ddd)",
+        maxHeight: "80vh",
+        overflowY: "auto",
+    });
+
+    function renderItems(container: HTMLElement, itemList: NativeContextMenuItem[]) {
+        for (const item of itemList) {
+            if (item.type === "separator") {
+                const sep = document.createElement("div");
+                Object.assign(sep.style, {
+                    height: "1px", margin: "4px 8px",
+                    background: "var(--border-color, #444)",
+                });
+                container.appendChild(sep);
+                continue;
+            }
+            if (item.visible === false) continue;
+
+            const row = document.createElement("div");
+            Object.assign(row.style, {
+                padding: "6px 24px 6px 12px",
+                cursor: item.enabled === false ? "default" : "pointer",
+                opacity: item.enabled === false ? "0.4" : "1",
+                display: "flex",
+                alignItems: "center",
+                gap: "8px",
+                whiteSpace: "nowrap",
+                position: "relative",
+            });
+            if (item.enabled !== false) {
+                row.addEventListener("mouseenter", () => { row.style.background = "var(--accent-color, #335)"; });
+                row.addEventListener("mouseleave", () => { row.style.background = ""; });
+            }
+
+            // Radio/checkbox indicator
+            if (item.type === "radio" || item.type === "checkbox") {
+                const check = document.createElement("span");
+                check.style.width = "14px";
+                check.style.display = "inline-block";
+                check.textContent = item.checked ? "●" : "";
+                if (item.type === "checkbox" && item.checked) check.textContent = "✓";
+                row.appendChild(check);
+            }
+
+            const label = document.createElement("span");
+            label.textContent = item.label ?? "";
+            row.appendChild(label);
+
+            if (item.submenu && item.submenu.length > 0) {
+                const arrow = document.createElement("span");
+                arrow.textContent = "▸";
+                arrow.style.marginLeft = "auto";
+                row.appendChild(arrow);
+
+                const sub = document.createElement("div");
+                Object.assign(sub.style, {
+                    display: "none", position: "absolute",
+                    left: "100%", top: "0",
+                    background: "var(--main-bg-color, #222)",
+                    border: "1px solid var(--border-color, #444)",
+                    borderRadius: "6px", padding: "4px 0",
+                    minWidth: "140px",
+                    boxShadow: "0 4px 16px rgba(0,0,0,0.4)",
+                });
+                renderItems(sub, item.submenu);
+                row.appendChild(sub);
+                row.addEventListener("mouseenter", () => { sub.style.display = "block"; });
+                row.addEventListener("mouseleave", () => { sub.style.display = "none"; });
+            } else if (item.enabled !== false) {
+                row.addEventListener("click", () => {
+                    overlay.remove();
+                    if (item.id && onClick) onClick(item.id);
+                });
+            }
+
+            container.appendChild(row);
+        }
+    }
+
+    renderItems(menuEl, items);
+
+    // Clamp to viewport
+    overlay.appendChild(menuEl);
+    document.body.appendChild(overlay);
+    const rect = menuEl.getBoundingClientRect();
+    if (rect.right > window.innerWidth) {
+        menuEl.style.left = `${Math.max(0, window.innerWidth - rect.width - 4)}px`;
+    }
+    if (rect.bottom > window.innerHeight) {
+        menuEl.style.top = `${Math.max(0, window.innerHeight - rect.height - 4)}px`;
+    }
+}
+
 /**
  * Build the AppApi-compatible shim backed by CEF IPC.
  */
@@ -152,14 +282,13 @@ export function buildCefApi(): AppApi {
             await invokeCommand("restart_backend");
         },
 
-        // --- Context menu ---
-        showContextMenu: (workspaceId: string, menu?: NativeContextMenuItem[], position?: { x: number; y: number }) => {
-            invokeCommand("show_context_menu", { workspaceId, menu, position }).catch(console.error);
+        // --- Context menu (JS overlay for CEF — no native menu API) ---
+        showContextMenu: (_workspaceId: string, menu?: NativeContextMenuItem[], position?: { x: number; y: number }) => {
+            if (!menu || menu.length === 0) return;
+            showJsContextMenu(menu, position ?? { x: 0, y: 0 }, contextMenuClickCallback);
         },
         onContextMenuClick: (callback: (id: string) => void) => {
-            listenEvent<string>("context-menu-click", (payload) => {
-                callback(payload);
-            });
+            contextMenuClickCallback = callback;
         },
 
         // --- Navigation ---
