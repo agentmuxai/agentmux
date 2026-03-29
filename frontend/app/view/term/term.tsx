@@ -293,35 +293,71 @@ function TerminalView(props: ViewComponentProps<TermViewModel>): JSX.Element {
     const [isDragOver, setIsDragOver] = createSignal(false);
 
     onMount(() => {
-        // Tauri-only: file drop via window-level event (HTML5 drag events don't fire for OS drops in WebView2)
-        if (detectHost() !== "tauri") return;
-        let unlisten: (() => void) | null = null;
-        import("@tauri-apps/api/webview").then(({ getCurrentWebview }) => {
-            getCurrentWebview().onDragDropEvent((event) => {
-                const type = event.payload.type;
-                const pos = (event.payload as any).position as { x: number; y: number } | undefined;
-                const isOverEl = () => {
-                    if (!pos || !viewRef) return false;
-                    const rect = viewRef.getBoundingClientRect();
-                    return pos.x >= rect.left && pos.x <= rect.right && pos.y >= rect.top && pos.y <= rect.bottom;
-                };
-                if (type === "over") {
-                    setIsDragOver(isOverEl());
-                } else if (type === "drop") {
-                    setIsDragOver(false);
-                    if (!isOverEl()) return;
-                    const paths = (event.payload as any).paths as string[] | undefined;
-                    if (paths && paths.length > 0) {
-                        handleFilesDropped(paths);
+        if (detectHost() === "tauri") {
+            // Tauri: file drop via window-level event (HTML5 drag events don't fire in WebView2)
+            let unlisten: (() => void) | null = null;
+            import("@tauri-apps/api/webview").then(({ getCurrentWebview }) => {
+                getCurrentWebview().onDragDropEvent((event) => {
+                    const type = event.payload.type;
+                    const pos = (event.payload as any).position as { x: number; y: number } | undefined;
+                    const isOverEl = () => {
+                        if (!pos || !viewRef) return false;
+                        const rect = viewRef.getBoundingClientRect();
+                        return pos.x >= rect.left && pos.x <= rect.right && pos.y >= rect.top && pos.y <= rect.bottom;
+                    };
+                    if (type === "over") {
+                        setIsDragOver(isOverEl());
+                    } else if (type === "drop") {
+                        setIsDragOver(false);
+                        if (!isOverEl()) return;
+                        const paths = (event.payload as any).paths as string[] | undefined;
+                        if (paths && paths.length > 0) {
+                            handleFilesDropped(paths);
+                        }
+                    } else if (type === "leave" || (type as string) === "cancel") {
+                        setIsDragOver(false);
                     }
-                } else if (type === "leave" || (type as string) === "cancel") {
-                    setIsDragOver(false);
-                }
-            }).then((fn) => {
-                unlisten = fn;
+                }).then((fn) => {
+                    unlisten = fn;
+                });
             });
-        });
-        onCleanup(() => unlisten?.());
+            onCleanup(() => unlisten?.());
+        } else if (detectHost() === "cef") {
+            // CEF: HTML5 drag events work natively (unlike WebView2)
+            if (!viewRef) return;
+            const onDragOver = (e: DragEvent) => {
+                e.preventDefault();
+                setIsDragOver(true);
+            };
+            const onDragLeave = () => setIsDragOver(false);
+            const onDrop = (e: DragEvent) => {
+                e.preventDefault();
+                setIsDragOver(false);
+                // HTML5 File API doesn't expose full paths — CEF needs CefDragHandler for that.
+                // For now, log the file names as a placeholder.
+                const files = e.dataTransfer?.files;
+                if (files && files.length > 0) {
+                    const names = Array.from(files).map(f => f.name);
+                    console.log("[term-drop] CEF drop:", names.join(", "), "(full path copy not yet implemented)");
+                    pushNotification({
+                        icon: "fa-info-circle",
+                        title: "File drop",
+                        message: `Dropped ${files.length} file(s). Full path copy requires CefDragHandler integration.`,
+                        timestamp: new Date().toISOString(),
+                        type: "info",
+                        expiration: Date.now() + 5000,
+                    });
+                }
+            };
+            viewRef.addEventListener("dragover", onDragOver);
+            viewRef.addEventListener("dragleave", onDragLeave);
+            viewRef.addEventListener("drop", onDrop);
+            onCleanup(() => {
+                viewRef.removeEventListener("dragover", onDragOver);
+                viewRef.removeEventListener("dragleave", onDragLeave);
+                viewRef.removeEventListener("drop", onDrop);
+            });
+        }
     });
 
     const dropMessage = createMemo(() => {

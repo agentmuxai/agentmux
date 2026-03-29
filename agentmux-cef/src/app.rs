@@ -64,6 +64,10 @@ wrap_window_delegate! {
             ShowState::NORMAL
         }
 
+        fn is_frameless(&self, _window: Option<&mut Window>) -> i32 {
+            1 // Frameless — AgentMux uses its own custom title bar
+        }
+
         fn window_runtime_style(&self) -> RuntimeStyle {
             RuntimeStyle::ALLOY
         }
