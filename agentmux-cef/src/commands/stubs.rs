@@ -53,8 +53,6 @@ pub fn is_stub_command(cmd: &str) -> bool {
             | "list_windows"
             | "focus_window"
             | "open_window_at_position"
-            // Window effects
-            | "set_window_transparency"
             // Legacy stubs
             | "open_claude_code_auth"
             | "get_claude_code_auth"

@@ -109,6 +109,162 @@ pub fn maximize_window(_state: &Arc<AppState>) -> Result<serde_json::Value, Stri
     Ok(serde_json::Value::Null)
 }
 
+/// Set window transparency/blur effects.
+/// Uses DWM Mica/Acrylic on Win11, or SetWindowCompositionAttribute on Win10.
+pub fn set_window_transparency(state: &Arc<AppState>, args: &serde_json::Value) -> Result<serde_json::Value, String> {
+    let transparent = args.get("transparent").and_then(|v| v.as_bool()).unwrap_or(false);
+    let blur = args.get("blur").and_then(|v| v.as_bool()).unwrap_or(false);
+    let _opacity = args.get("opacity").and_then(|v| v.as_f64()).unwrap_or(0.8);
+    tracing::info!("set_window_transparency: transparent={} blur={}", transparent, blur);
+    #[cfg(not(target_os = "windows"))]
+    tracing::info!("set_window_transparency: not windows, skipping");
+
+    #[cfg(target_os = "windows")]
+    {
+        unsafe {
+            // In CEF Views mode, window_handle() returns NULL. Find the top-level
+            // window owned by this process using GetForegroundWindow or EnumWindows.
+            let hwnd = find_own_top_level_window();
+            if !hwnd.is_null() {
+                tracing::info!("set_window_transparency: found hwnd={:?}", hwnd);
+                apply_window_effects(hwnd, transparent || blur, blur);
+            } else {
+                tracing::warn!("set_window_transparency: could not find top-level window");
+            }
+        }
+    }
+    let _ = (state, transparent, blur);
+    Ok(serde_json::Value::Null)
+}
+
+/// Find the top-level window belonging to this process.
+/// In CEF Views mode, browser.host().window_handle() returns NULL,
+/// so we enumerate windows and find ours by process ID.
+#[cfg(target_os = "windows")]
+unsafe fn find_own_top_level_window() -> *mut std::ffi::c_void {
+    use windows_sys::Win32::UI::WindowsAndMessaging::*;
+    use windows_sys::Win32::System::Threading::GetCurrentProcessId;
+
+    let pid = GetCurrentProcessId();
+    let mut result: *mut std::ffi::c_void = std::ptr::null_mut();
+
+    unsafe extern "system" fn enum_callback(
+        hwnd: *mut std::ffi::c_void,
+        lparam: isize,
+    ) -> i32 {
+        use windows_sys::Win32::System::Threading::GetCurrentProcessId;
+        let mut window_pid: u32 = 0;
+        GetWindowThreadProcessId(hwnd, &mut window_pid);
+        if window_pid == GetCurrentProcessId() && IsWindowVisible(hwnd) != 0 {
+            // Store the HWND in the pointer passed via lparam
+            let result_ptr = lparam as *mut *mut std::ffi::c_void;
+            *result_ptr = hwnd;
+            return 0; // Stop enumeration
+        }
+        1 // Continue
+    }
+
+    let _ = pid; // Used inside callback via GetCurrentProcessId()
+    EnumWindows(
+        Some(enum_callback),
+        &mut result as *mut _ as isize,
+    );
+    result
+}
+
+#[cfg(target_os = "windows")]
+unsafe fn apply_window_effects(hwnd: *mut std::ffi::c_void, transparent: bool, blur: bool) {
+    use windows_sys::Win32::Graphics::Dwm::*;
+
+    if !transparent && !blur {
+        // Disable: set backdrop to NONE
+        let backdrop_type: i32 = 1; // DWMSBT_NONE
+        DwmSetWindowAttribute(
+            hwnd,
+            38, // DWMWA_SYSTEMBACKDROP_TYPE
+            &backdrop_type as *const _ as *const std::ffi::c_void,
+            std::mem::size_of::<i32>() as u32,
+        );
+        return;
+    }
+
+    // Try Win11 DWM backdrop first (Mica or Acrylic)
+    // DWMWA_SYSTEMBACKDROP_TYPE = 38
+    // DWMSBT_MAINWINDOW (Mica) = 2, DWMSBT_TRANSIENTWINDOW (Acrylic) = 3, DWMSBT_TABBEDWINDOW = 4
+    let backdrop_type: i32 = if blur { 3 } else { 2 }; // Acrylic for blur, Mica otherwise
+
+    // Enable immersive dark mode first (required for Mica/Acrylic to look correct on dark themes)
+    let dark_mode: i32 = 1;
+    DwmSetWindowAttribute(
+        hwnd,
+        20, // DWMWA_USE_IMMERSIVE_DARK_MODE
+        &dark_mode as *const _ as *const std::ffi::c_void,
+        std::mem::size_of::<i32>() as u32,
+    );
+
+    let result = DwmSetWindowAttribute(
+        hwnd,
+        38, // DWMWA_SYSTEMBACKDROP_TYPE
+        &backdrop_type as *const _ as *const std::ffi::c_void,
+        std::mem::size_of::<i32>() as u32,
+    );
+
+    if result != 0 {
+        // Win11 API failed (probably Win10) — try SetWindowCompositionAttribute
+        tracing::debug!("DWM backdrop failed (hr={:#x}), trying Win10 acrylic", result);
+        apply_win10_acrylic(hwnd, transparent);
+    } else {
+        tracing::info!("Applied DWM backdrop type {} to window", backdrop_type);
+    }
+}
+
+/// Win10 acrylic blur via undocumented SetWindowCompositionAttribute API.
+#[cfg(target_os = "windows")]
+unsafe fn apply_win10_acrylic(hwnd: *mut std::ffi::c_void, enable: bool) {
+    #[repr(C)]
+    struct AccentPolicy {
+        accent_state: u32,
+        accent_flags: u32,
+        gradient_color: u32,
+        animation_id: u32,
+    }
+
+    #[repr(C)]
+    struct WindowCompositionAttribData {
+        attrib: u32, // WCA_ACCENT_POLICY = 19
+        data: *mut std::ffi::c_void,
+        size: usize,
+    }
+
+    // ACCENT_ENABLE_ACRYLICBLURBEHIND = 4, ACCENT_DISABLED = 0
+    let mut policy = AccentPolicy {
+        accent_state: if enable { 4 } else { 0 },
+        accent_flags: 2, // ACCENT_FLAG_DRAW_ALL
+        gradient_color: 0x01000000, // Nearly transparent black
+        animation_id: 0,
+    };
+
+    let mut data = WindowCompositionAttribData {
+        attrib: 19, // WCA_ACCENT_POLICY
+        data: &mut policy as *mut _ as *mut std::ffi::c_void,
+        size: std::mem::size_of::<AccentPolicy>(),
+    };
+
+    let user32 = windows_sys::Win32::System::LibraryLoader::LoadLibraryA(b"user32.dll\0".as_ptr());
+    if !user32.is_null() {
+        let proc = windows_sys::Win32::System::LibraryLoader::GetProcAddress(
+            user32,
+            b"SetWindowCompositionAttribute\0".as_ptr(),
+        );
+        if let Some(func) = proc {
+            let func: extern "system" fn(*mut std::ffi::c_void, *mut WindowCompositionAttribData) -> i32 =
+                std::mem::transmute(func);
+            func(hwnd, &mut data);
+            tracing::info!("Applied Win10 acrylic blur to window");
+        }
+    }
+}
+
 /// Get the current window label.
 /// In Phase 2 (single window), always returns "main".
 pub fn get_window_label() -> serde_json::Value {
