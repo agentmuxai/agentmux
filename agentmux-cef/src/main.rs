@@ -155,6 +155,8 @@ fn main() {
         // Dark background to match app theme — prevents white bleed-through
         // when terminal panes use transparency.
         background_color: 0xFF000000, // ARGB: opaque black
+        // Enable remote debugging — open chrome://inspect or http://localhost:9222
+        remote_debugging_port: 9222,
         ..Default::default()
     };
 

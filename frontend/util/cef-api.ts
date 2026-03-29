@@ -392,7 +392,9 @@ export function buildCefApi(): AppApi {
             invokeCommand("set_window_transparency", { transparent, blur, opacity }).catch(console.error);
         },
         toggleDevtools: () => {
-            invokeCommand("toggle_devtools").catch(console.error);
+            // CEF: host.show_dev_tools() deadlocks when called from IPC thread.
+            // Use remote debugging instead (port 9222 enabled in CEF settings).
+            window.open("http://localhost:9222", "_blank");
         },
         getWindowLabel: async () => {
             return await invokeCommand<string>("get_window_label");
