@@ -199,13 +199,15 @@ Ensure `frontend/wave.ts` uses `getApi().getAboutModalDetails().version`
 `dist/schema/` is wiped by `task clean` but automatically recreated by the
 `copy:schema` dependency in `dev`, `start`, `quickdev`, and `package` tasks.
 
-### Backspace broken in terminal on Linux (WebGL renderer)
-**DO NOT remove the Linux Canvas renderer override in `termwrap.ts:loadRendererAddon`.**
-xterm.js's WebGL renderer does not correctly handle control sequences (`\x08` backspace,
-`ESC[K` erase-in-line) on WebKitGTK — the PTY round-trip is correct but WebGL fails to
-display the result. Fix: force Canvas renderer on Linux (`PLATFORM === PlatformLinux`
-check at the top of `loadRendererAddon`). WebGL is still used on macOS/Windows.
-This has regressed multiple times — the check must stay.
+### Terminal rendering issues on Linux
+**DO NOT enable WebGL as the default renderer on Linux.**
+WebKitGTK's WebGL2 implementation has systemic rendering issues — the texture atlas
+doesn't redraw after control sequences (`\x08` backspace, `ESC[K` erase-in-line).
+This is a WebKitGTK upstream bug (Tauri #6559, WebKit Bug 228268), not an xterm.js bug.
+Fix: use the DOM renderer on Linux (default when no renderer addon is loaded).
+WebGL is used on macOS/Windows. Users can opt into WebGL on Linux via
+`term:disablewebgl=false` if their GPU/driver supports it.
+This has regressed multiple times — the Linux check must stay.
 
 ### AppImage shows cog/gear icon instead of app icon
 `appimagetool` creates `.DirIcon` inside the AppImage as an **absolute symlink** to the

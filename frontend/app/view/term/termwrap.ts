@@ -13,7 +13,7 @@ import { base64ToArray, fireAndForget } from "@/util/util";
 import { SearchAddon } from "@xterm/addon-search";
 import { SerializeAddon } from "@xterm/addon-serialize";
 import { WebLinksAddon } from "@xterm/addon-web-links";
-import { CanvasAddon } from "@xterm/addon-canvas";
+
 import { UnicodeGraphemesAddon } from "@xterm/addon-unicode-graphemes";
 import { WebglAddon } from "@xterm/addon-webgl";
 import * as TermTypes from "@xterm/xterm";
@@ -21,7 +21,7 @@ import { Terminal } from "@xterm/xterm";
 import debug from "debug";
 import { debounce } from "throttle-debounce";
 import { FilePathLinkProvider, makeFilePathHandler } from "./filelinkprovider";
-import { FitAddon } from "./fitaddon";
+import { FitAddon } from "@xterm/addon-fit";
 import { registeredAgentsByBlock, unregisterAgent } from "./termagent";
 import { handleOsc7Command, handleOsc16162Command, handleOscTitleCommand, handleOscWaveCommand } from "./termosc";
 
@@ -120,7 +120,6 @@ export class TermWrap {
         //   for the active pane.
         this.terminal = new Terminal({ ...options, cursorBlink: false, scrollOnUserInput: false, smoothScrollDuration: 0 });
         this.fitAddon = new FitAddon();
-        this.fitAddon.noScrollbar = PLATFORM === PlatformMacOS;
         this.serializeAddon = new SerializeAddon();
         this.searchAddon = new SearchAddon();
         this.terminal.loadAddon(this.searchAddon);
@@ -396,13 +395,16 @@ export class TermWrap {
     // ── Private helpers ────────────────────────────────────────────────
 
     private loadRendererAddon(useWebGl: boolean) {
-        // WebKitGTK's WebGL renderer does not correctly handle control sequences
-        // (backspace \x08, erase-in-line ESC[K) — force Canvas on Linux.
-        if (PLATFORM === PlatformLinux) {
-            const canvasAddon = new CanvasAddon();
-            this.toDispose.push(canvasAddon);
-            this.terminal.loadAddon(canvasAddon);
-            return;
+        // WebKitGTK's WebGL2 implementation has systemic rendering issues —
+        // texture atlas doesn't redraw after control sequences (backspace, erase-in-line).
+        // This is a WebKitGTK bug, not xterm.js (Tauri #6559, WebKit Bug 228268).
+        // Default to DOM renderer on Linux; WebGL opt-in via term:disablewebgl=false.
+        if (PLATFORM === PlatformLinux && !useWebGl) {
+            if (!loggedWebGL) {
+                console.log("linux: using DOM renderer (WebKitGTK WebGL workaround)");
+                loggedWebGL = true;
+            }
+            return; // DOM renderer is the default when no renderer addon is loaded
         }
         if (WebGLSupported && useWebGl) {
             try {
@@ -410,10 +412,8 @@ export class TermWrap {
                 this.toDispose.push(
                     webglAddon.onContextLoss(() => {
                         webglAddon.dispose();
-                        console.warn("WebGL context lost, falling back to Canvas renderer");
-                        const canvasAddon = new CanvasAddon();
-                        this.toDispose.push(canvasAddon);
-                        this.terminal.loadAddon(canvasAddon);
+                        console.warn("WebGL context lost, falling back to DOM renderer");
+                        // DOM renderer is active by default when no addon is loaded
                     })
                 );
                 this.terminal.loadAddon(webglAddon);
@@ -422,12 +422,9 @@ export class TermWrap {
                     loggedWebGL = true;
                 }
             } catch (e) {
-                console.warn("WebGL renderer unavailable, using Canvas renderer:", e);
-                const canvasAddon = new CanvasAddon();
-                this.toDispose.push(canvasAddon);
-                this.terminal.loadAddon(canvasAddon);
+                console.warn("WebGL renderer unavailable, using DOM renderer:", e);
                 if (!loggedWebGL) {
-                    console.log("loaded canvas renderer (webgl fallback)!");
+                    console.log("loaded DOM renderer (webgl fallback)!");
                     loggedWebGL = true;
                 }
             }

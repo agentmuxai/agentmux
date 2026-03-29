@@ -232,13 +232,16 @@ function TerminalView(props: ViewComponentProps<TermViewModel>): JSX.Element {
     });
 
     const onScrollbarShowObserver = () => {
-        const termViewport = viewRef.getElementsByClassName("xterm-viewport")[0] as HTMLDivElement;
+        // xterm v6 reworked the viewport/scrollbar — try both old and new class names
+        const termViewport = (viewRef.getElementsByClassName("xterm-viewport")[0] ??
+            viewRef.getElementsByClassName("xterm-scroll-area")[0]) as HTMLDivElement;
         if (termViewport) termViewport.style.zIndex = "var(--zindex-xterm-viewport-overlay)";
         if (scrollbarHideObserverRef) scrollbarHideObserverRef.style.display = "block";
     };
 
     const onScrollbarHideObserver = () => {
-        const termViewport = viewRef.getElementsByClassName("xterm-viewport")[0] as HTMLDivElement;
+        const termViewport = (viewRef.getElementsByClassName("xterm-viewport")[0] ??
+            viewRef.getElementsByClassName("xterm-scroll-area")[0]) as HTMLDivElement;
         if (termViewport) termViewport.style.zIndex = "auto";
         if (scrollbarHideObserverRef) scrollbarHideObserverRef.style.display = "none";
     };
