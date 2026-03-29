@@ -60,7 +60,7 @@ function isHostApp(): boolean {
 }
 
 /** Whether running specifically in Tauri (not CEF). */
-function isTauriHost(): boolean {
+export function isTauriHost(): boolean {
     return typeof (window as any).__TAURI_INTERNALS__ !== "undefined";
 }
 

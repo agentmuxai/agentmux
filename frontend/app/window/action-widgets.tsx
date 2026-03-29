@@ -18,7 +18,7 @@ import { RpcApi } from "@/app/store/wshclientapi";
 import { TabRpcClient } from "@/app/store/wshrpcutil";
 import { atoms, createBlock, getApi } from "@/store/global";
 import { fireAndForget, isBlank, makeIconClass } from "@/util/util";
-import { invoke } from "@tauri-apps/api/core";
+import { invokeCommand } from "@/app/platform/ipc";
 import { createEffect, createSignal, For, onCleanup, Show, type JSX } from "solid-js";
 import { Portal } from "solid-js/web";
 import "./action-widgets.scss";
@@ -80,8 +80,8 @@ async function handleWidgetSelect(widget: WidgetConfigType) {
     }
     if (widget.blockdef?.meta?.view === "settings") {
         try {
-            const path = await invoke<string>("ensure_settings_file");
-            await invoke("open_in_editor", { path });
+            const path = await invokeCommand<string>("ensure_settings_file");
+            await invokeCommand("open_in_editor", { path });
         } catch (e) {
             console.error("Failed to open settings:", e);
         }

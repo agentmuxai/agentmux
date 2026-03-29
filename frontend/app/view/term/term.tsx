@@ -17,8 +17,7 @@ import { makeTerminalModel, setTerminalViewComponent, TermViewModel } from "./te
 import { TermWrap } from "./termwrap";
 import "./xterm.css";
 import { DragOverlay } from "@/app/element/dragoverlay";
-import { invoke } from "@tauri-apps/api/core";
-import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { detectHost } from "@/app/platform/ipc";
 
 // TermResyncHandler: watches connection status changes and resyncs the terminal controller.
 // Also resyncs when the backend restarts — local terminals have no connStatus change on restart,
@@ -272,7 +271,7 @@ function TerminalView(props: ViewComponentProps<TermViewModel>): JSX.Element {
         }
         for (const filePath of paths) {
             const fileName = filePath.split(/[\\/]/).pop() ?? filePath;
-            invoke("copy_file_to_dir", { sourcePath: filePath, targetDir: cwd })
+            import("@tauri-apps/api/core").then(({ invoke }) => invoke("copy_file_to_dir", { sourcePath: filePath, targetDir: cwd }))
                 .then((destPath: any) => {
                     console.log(`[term-drop] copied ${fileName} → ${destPath}`);
                 })
@@ -294,29 +293,33 @@ function TerminalView(props: ViewComponentProps<TermViewModel>): JSX.Element {
     const [isDragOver, setIsDragOver] = createSignal(false);
 
     onMount(() => {
+        // Tauri-only: file drop via window-level event (HTML5 drag events don't fire for OS drops in WebView2)
+        if (detectHost() !== "tauri") return;
         let unlisten: (() => void) | null = null;
-        getCurrentWebview().onDragDropEvent((event) => {
-            const type = event.payload.type;
-            const pos = (event.payload as any).position as { x: number; y: number } | undefined;
-            const isOverEl = () => {
-                if (!pos || !viewRef) return false;
-                const rect = viewRef.getBoundingClientRect();
-                return pos.x >= rect.left && pos.x <= rect.right && pos.y >= rect.top && pos.y <= rect.bottom;
-            };
-            if (type === "over") {
-                setIsDragOver(isOverEl());
-            } else if (type === "drop") {
-                setIsDragOver(false);
-                if (!isOverEl()) return;
-                const paths = (event.payload as any).paths as string[] | undefined;
-                if (paths && paths.length > 0) {
-                    handleFilesDropped(paths);
+        import("@tauri-apps/api/webview").then(({ getCurrentWebview }) => {
+            getCurrentWebview().onDragDropEvent((event) => {
+                const type = event.payload.type;
+                const pos = (event.payload as any).position as { x: number; y: number } | undefined;
+                const isOverEl = () => {
+                    if (!pos || !viewRef) return false;
+                    const rect = viewRef.getBoundingClientRect();
+                    return pos.x >= rect.left && pos.x <= rect.right && pos.y >= rect.top && pos.y <= rect.bottom;
+                };
+                if (type === "over") {
+                    setIsDragOver(isOverEl());
+                } else if (type === "drop") {
+                    setIsDragOver(false);
+                    if (!isOverEl()) return;
+                    const paths = (event.payload as any).paths as string[] | undefined;
+                    if (paths && paths.length > 0) {
+                        handleFilesDropped(paths);
+                    }
+                } else if (type === "leave" || (type as string) === "cancel") {
+                    setIsDragOver(false);
                 }
-            } else if (type === "leave" || (type as string) === "cancel") {
-                setIsDragOver(false);
-            }
-        }).then((fn) => {
-            unlisten = fn;
+            }).then((fn) => {
+                unlisten = fn;
+            });
         });
         onCleanup(() => unlisten?.());
     });
