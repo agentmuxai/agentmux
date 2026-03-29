@@ -267,7 +267,7 @@ the first meta update. The `createRoot` fix in `block.tsx` protects all of them.
 
 3. **Use `untrack` around `blockData()` in the effect** — Would prevent the
    effect from re-running on meta changes. But the effect NEEDS to track
-   `blockData()` to detect view type changes (e.g., "Replace With..." menu).
+   view type changes (e.g., "Replace With..." menu).
 
-The `createRoot` wrapper is the correct fix: minimal change, protects all
-ViewModels, no behavior change for the effect's view-type-change detection.
+The `viewType` memo extraction is the correct fix: minimal change, protects all
+ViewModels, and preserves the effect's ability to detect view type changes.
