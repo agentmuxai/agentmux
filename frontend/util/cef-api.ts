@@ -391,8 +391,26 @@ export function buildCefApi(): AppApi {
         setWindowTransparency: (transparent: boolean, blur: boolean, opacity: number) => {
             invokeCommand("set_window_transparency", { transparent, blur, opacity }).catch(console.error);
         },
-        toggleDevtools: () => {
-            invokeCommand("toggle_devtools").catch(console.error);
+        toggleDevtools: async () => {
+            // CEF host.show_dev_tools() crashes from IPC thread. Use remote
+            // debugging protocol instead — fetch the DevTools frontend URL
+            // from the debug endpoint and open it in a new CEF popup.
+            try {
+                const resp = await fetch("http://localhost:9222/json");
+                const targets = await resp.json();
+                const page = targets.find((t: any) => t.type === "page");
+                if (page?.devtoolsFrontendUrl) {
+                    const dtUrl = page.devtoolsFrontendUrl.replace(
+                        "https://chrome-devtools-frontend.appspot.com/serve_rev/",
+                        "devtools://devtools/bundled/"
+                    );
+                    window.open(dtUrl, "_blank");
+                } else {
+                    window.open("http://localhost:9222", "_blank");
+                }
+            } catch {
+                window.open("http://localhost:9222", "_blank");
+            }
         },
         getWindowLabel: async () => {
             return await invokeCommand<string>("get_window_label");

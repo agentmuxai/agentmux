@@ -1,57 +1,14 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// CEF UI thread tasks — wraps host method calls so they can be safely
-// dispatched from non-UI threads (e.g., the axum IPC handler).
+// CEF UI thread tasks — placeholder for future post_task integration.
 //
-// CEF browser host methods must be called on the UI thread. Calling them
-// from other threads deadlocks the CEF message loop. Use post_task(ThreadId::UI)
-// to marshal the call.
+// NOTE: The wrap_task! + post_task(ThreadId::UI) approach crashes with the
+// current CEF Rust bindings (v146). The Browser handle doesn't survive the
+// cross-thread dispatch correctly. Until this is fixed upstream, host method
+// calls that need the UI thread are handled via alternative approaches:
+//
+// - DevTools: opened via remote debugging protocol (port 9222)
+// - Zoom: skipped in CEF, applied via CSS instead
+// - Window ops (minimize/maximize): use Win32 APIs directly (safe from any thread)
 
-use cef::*;
-use std::sync::Arc;
-
-use crate::state::AppState;
-
-// ── DevTools ──────────────────────────────────────────────────────────────
-
-wrap_task! {
-    pub struct ShowDevToolsTask {
-        state: Arc<AppState>,
-    }
-
-    impl Task {
-        fn execute(&self) {
-            let browser = self.state.browser.lock().unwrap();
-            if let Some(ref browser) = *browser {
-                if let Some(host) = browser.host() {
-                    let window_info = WindowInfo {
-                        runtime_style: RuntimeStyle::ALLOY,
-                        ..Default::default()
-                    };
-                    host.show_dev_tools(Some(&window_info), None, None, None);
-                }
-            }
-        }
-    }
-}
-
-// ── Zoom ──────────────────────────────────────────────────────────────────
-
-wrap_task! {
-    pub struct SetZoomLevelTask {
-        state: Arc<AppState>,
-        zoom_level: f64,
-    }
-
-    impl Task {
-        fn execute(&self) {
-            let browser = self.state.browser.lock().unwrap();
-            if let Some(ref browser) = *browser {
-                if let Some(host) = browser.host() {
-                    host.set_zoom_level(self.zoom_level);
-                }
-            }
-        }
-    }
-}
