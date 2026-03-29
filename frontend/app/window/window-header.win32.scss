@@ -32,6 +32,12 @@
     height: 33px;
     zoom: var(--zoomfactor);
     cursor: default;
+    -webkit-app-region: drag; // CEF: makes the header a drag region (Tauri ignores this)
+
+    // Interactive elements must opt out of the drag region
+    button, input, .tab, .tabs-wrapper, .system-status, .wave-iconbutton {
+        -webkit-app-region: no-drag;
+    }
 
     .window-drag {
         height: 100%;
