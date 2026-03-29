@@ -3,42 +3,60 @@
 //
 // Windows-specific window drag hook.
 // Tauri: data-tauri-drag-region is handled at the WebView/OS level.
-// CEF: document-level mousedown checks for drag regions and triggers IPC.
+// CEF: JS-driven window move — track mouse delta, set window position via IPC.
+// WM_NCLBUTTONDOWN doesn't work because the async IPC roundtrip loses mouse state.
 
 import { detectHost, invokeCommand } from "@/app/platform/ipc";
 
 let cefDragListenerInstalled = false;
 
+function isInDragRegion(target: HTMLElement | null): boolean {
+    let el = target;
+    while (el) {
+        const attr = el.getAttribute("data-tauri-drag-region");
+        if (attr === "false") return false;
+        if (attr === "true" || attr === "") return true;
+        el = el.parentElement;
+    }
+    return false;
+}
+
 function installCefDragListener() {
     if (cefDragListenerInstalled || detectHost() !== "cef") return;
     cefDragListenerInstalled = true;
 
+    let dragging = false;
+    let startScreenX = 0;
+    let startScreenY = 0;
+
     document.addEventListener("mousedown", (e: MouseEvent) => {
         if (e.button !== 0) return;
+        if (!isInDragRegion(e.target as HTMLElement)) return;
 
-        // Walk up from the click target to find if we're in a drag region.
-        // data-tauri-drag-region="true" means draggable (set on header, status bar).
-        // data-tauri-drag-region="false" means NOT draggable (buttons, tabs, inputs).
-        let el = e.target as HTMLElement | null;
-        let inDragRegion = false;
-        while (el) {
-            const attr = el.getAttribute("data-tauri-drag-region");
-            if (attr === "false") {
-                // Explicitly opted out — don't drag
-                return;
-            }
-            if (attr === "true" || attr === "") {
-                inDragRegion = true;
-                break;
-            }
-            el = el.parentElement;
-        }
+        dragging = true;
+        startScreenX = e.screenX;
+        startScreenY = e.screenY;
+        e.preventDefault();
 
-        if (inDragRegion) {
-            e.preventDefault();
-            invokeCommand("start_window_drag").catch(() => {});
-        }
-    }, true); // capture phase — fires before bubbling
+        // Get initial window position
+        invokeCommand<{ x: number; y: number }>("get_window_position").catch(() => {
+            dragging = false;
+        });
+    }, true);
+
+    document.addEventListener("mousemove", (e: MouseEvent) => {
+        if (!dragging) return;
+        const dx = e.screenX - startScreenX;
+        const dy = e.screenY - startScreenY;
+        if (dx === 0 && dy === 0) return;
+        startScreenX = e.screenX;
+        startScreenY = e.screenY;
+        invokeCommand("move_window_by", { dx, dy }).catch(() => {});
+    });
+
+    document.addEventListener("mouseup", () => {
+        dragging = false;
+    });
 }
 
 export function useWindowDrag(): { dragProps: Record<string, unknown> } {

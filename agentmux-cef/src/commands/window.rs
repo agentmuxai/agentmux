@@ -46,36 +46,26 @@ pub fn set_zoom_factor(state: &Arc<AppState>, args: &serde_json::Value) -> Resul
 }
 
 /// Close the window.
-pub fn close_window(state: &Arc<AppState>) -> Result<serde_json::Value, String> {
-    let browser = state.browser.lock().unwrap();
-    if let Some(ref browser) = *browser {
-        if let Some(host) = browser.host() {
-            host.try_close_browser();
+pub fn close_window(_state: &Arc<AppState>) -> Result<serde_json::Value, String> {
+    #[cfg(target_os = "windows")]
+    unsafe {
+        use windows_sys::Win32::UI::WindowsAndMessaging::*;
+        let hwnd = find_own_top_level_window();
+        if !hwnd.is_null() {
+            PostMessageW(hwnd, WM_CLOSE, 0, 0);
         }
     }
     Ok(serde_json::Value::Null)
 }
 
 /// Minimize the window.
-/// Note: CEF Views Window.minimize() would be needed here.
-/// For now, use platform-specific APIs.
 pub fn minimize_window(_state: &Arc<AppState>) -> Result<serde_json::Value, String> {
     #[cfg(target_os = "windows")]
-    {
-        // Find our process's main window and minimize it
-        let browser = _state.browser.lock().unwrap();
-        if let Some(ref browser) = *browser {
-            if let Some(host) = browser.host() {
-                let hwnd = host.window_handle();
-                if !hwnd.0.is_null() {
-                    unsafe {
-                        windows_sys::Win32::UI::WindowsAndMessaging::ShowWindow(
-                            hwnd.0 as *mut std::ffi::c_void,
-                            windows_sys::Win32::UI::WindowsAndMessaging::SW_MINIMIZE,
-                        );
-                    }
-                }
-            }
+    unsafe {
+        use windows_sys::Win32::UI::WindowsAndMessaging::*;
+        let hwnd = find_own_top_level_window();
+        if !hwnd.is_null() {
+            ShowWindow(hwnd, SW_MINIMIZE);
         }
     }
     Ok(serde_json::Value::Null)
@@ -84,26 +74,82 @@ pub fn minimize_window(_state: &Arc<AppState>) -> Result<serde_json::Value, Stri
 /// Maximize/unmaximize the window (toggle).
 pub fn maximize_window(_state: &Arc<AppState>) -> Result<serde_json::Value, String> {
     #[cfg(target_os = "windows")]
-    {
-        let browser = _state.browser.lock().unwrap();
-        if let Some(ref browser) = *browser {
-            if let Some(host) = browser.host() {
-                let hwnd = host.window_handle();
-                if !hwnd.0.is_null() {
-                    unsafe {
-                        use windows_sys::Win32::UI::WindowsAndMessaging::*;
-                        let hwnd_ptr = hwnd.0 as *mut std::ffi::c_void;
-                        let mut placement: WINDOWPLACEMENT = std::mem::zeroed();
-                        placement.length = std::mem::size_of::<WINDOWPLACEMENT>() as u32;
-                        GetWindowPlacement(hwnd_ptr, &mut placement);
-                        if placement.showCmd == SW_MAXIMIZE as u32 {
-                            ShowWindow(hwnd_ptr, SW_RESTORE);
-                        } else {
-                            ShowWindow(hwnd_ptr, SW_MAXIMIZE);
-                        }
-                    }
-                }
+    unsafe {
+        use windows_sys::Win32::UI::WindowsAndMessaging::*;
+        let hwnd = find_own_top_level_window();
+        if !hwnd.is_null() {
+            let mut placement: WINDOWPLACEMENT = std::mem::zeroed();
+            placement.length = std::mem::size_of::<WINDOWPLACEMENT>() as u32;
+            GetWindowPlacement(hwnd, &mut placement);
+            if placement.showCmd == SW_MAXIMIZE as u32 {
+                ShowWindow(hwnd, SW_RESTORE);
+            } else {
+                ShowWindow(hwnd, SW_MAXIMIZE);
             }
+        }
+    }
+    Ok(serde_json::Value::Null)
+}
+
+/// Get the current window position on screen.
+pub fn get_window_position() -> Result<serde_json::Value, String> {
+    #[cfg(target_os = "windows")]
+    unsafe {
+        use windows_sys::Win32::UI::WindowsAndMessaging::*;
+        use windows_sys::Win32::Foundation::RECT;
+        let hwnd = find_own_top_level_window();
+        if !hwnd.is_null() {
+            let mut rect: RECT = std::mem::zeroed();
+            GetWindowRect(hwnd, &mut rect);
+            return Ok(serde_json::json!({ "x": rect.left, "y": rect.top }));
+        }
+    }
+    Ok(serde_json::json!({ "x": 0, "y": 0 }))
+}
+
+/// Move the window by a delta (dx, dy) from its current position.
+pub fn move_window_by(args: &serde_json::Value) -> Result<serde_json::Value, String> {
+    let dx = args.get("dx").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+    let dy = args.get("dy").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+
+    #[cfg(target_os = "windows")]
+    unsafe {
+        use windows_sys::Win32::UI::WindowsAndMessaging::*;
+        use windows_sys::Win32::Foundation::RECT;
+        let hwnd = find_own_top_level_window();
+        if !hwnd.is_null() {
+            let mut rect: RECT = std::mem::zeroed();
+            GetWindowRect(hwnd, &mut rect);
+            let width = rect.right - rect.left;
+            let height = rect.bottom - rect.top;
+            SetWindowPos(
+                hwnd,
+                std::ptr::null_mut(), // no z-order change
+                rect.left + dx,
+                rect.top + dy,
+                width,
+                height,
+                0x0014, // SWP_NOZORDER | SWP_NOSIZE
+            );
+        }
+    }
+    let _ = (dx, dy);
+    Ok(serde_json::Value::Null)
+}
+
+/// Initiate window drag (for frameless windows).
+/// Sends WM_NCLBUTTONDOWN to the title bar hit-test area, which tells Windows
+/// to start a window move operation.
+pub fn start_window_drag() -> Result<serde_json::Value, String> {
+    #[cfg(target_os = "windows")]
+    unsafe {
+        use windows_sys::Win32::UI::WindowsAndMessaging::*;
+        use windows_sys::Win32::UI::Input::KeyboardAndMouse::ReleaseCapture;
+        let hwnd = find_own_top_level_window();
+        if !hwnd.is_null() {
+            ReleaseCapture();
+            // HTCAPTION = 2 — tells Windows "user clicked the title bar"
+            SendMessageW(hwnd, WM_NCLBUTTONDOWN, 2 /* HTCAPTION */, 0);
         }
     }
     Ok(serde_json::Value::Null)
