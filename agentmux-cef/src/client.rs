@@ -141,9 +141,10 @@ impl AgentMuxHandler {
             return;
         }
 
+        let ipc_token = &self.state.ipc_token;
         let js = format!(
-            "window.__AGENTMUX_IPC_PORT__ = {};",
-            self.ipc_port
+            "window.__AGENTMUX_IPC_PORT__ = {}; window.__AGENTMUX_IPC_TOKEN__ = '{}';",
+            self.ipc_port, ipc_token
         );
         let code = CefString::from(js.as_str());
         let url = CefString::from("");

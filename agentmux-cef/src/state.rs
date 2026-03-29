@@ -131,6 +131,10 @@ pub struct AppState {
     /// IPC HTTP server port
     pub ipc_port: Mutex<u16>,
 
+    /// IPC bearer token — injected into the page alongside the port.
+    /// Verified on every IPC request to prevent unauthorized local access.
+    pub ipc_token: String,
+
     /// CEF Browser handle for execute_javascript (Rust -> JS events)
     pub browser: Mutex<Option<Browser>>,
 
@@ -155,6 +159,7 @@ impl Default for AppState {
             window_instance_registry: Mutex::new(WindowInstanceRegistry::new()),
             cli_login_cancel: Mutex::new(None),
             ipc_port: Mutex::new(0),
+            ipc_token: uuid::Uuid::new_v4().to_string(),
             browser: Mutex::new(None),
             #[cfg(target_os = "windows")]
             job_handle: Mutex::new(None),

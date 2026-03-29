@@ -44,12 +44,16 @@ export async function invokeCommand<T = any>(cmd: string, args?: Record<string, 
 
         case "cef": {
             const port = (window as any).__AGENTMUX_IPC_PORT__;
+            const token = (window as any).__AGENTMUX_IPC_TOKEN__;
             if (!port) {
                 throw new Error("IPC port not injected by CEF host");
             }
             const resp = await fetch(`http://127.0.0.1:${port}/ipc`, {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
+                headers: {
+                    "Content-Type": "application/json",
+                    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+                },
                 body: JSON.stringify({ cmd, args: args ?? {} }),
             });
             if (!resp.ok) {

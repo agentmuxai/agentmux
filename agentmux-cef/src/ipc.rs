@@ -20,7 +20,7 @@ use std::sync::Arc;
 
 use axum::{
     extract::State,
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     routing::{get, post},
     Json, Router,
 };
@@ -96,10 +96,33 @@ async fn health() -> Json<HealthResponse> {
 }
 
 /// Main IPC handler — routes commands to the appropriate handler.
+///
+/// Requires `Authorization: Bearer {ipc_token}` header to prevent
+/// unauthorized local processes from accessing the IPC server.
 async fn handle_ipc(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Json(req): Json<IpcRequest>,
 ) -> (StatusCode, Json<IpcResponse>) {
+    // Verify IPC token
+    let authorized = headers
+        .get("authorization")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .map(|token| token == state.ipc_token)
+        .unwrap_or(false);
+
+    if !authorized {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(IpcResponse {
+                success: false,
+                data: None,
+                error: Some("Unauthorized: invalid or missing IPC token".to_string()),
+            }),
+        );
+    }
+
     tracing::debug!("IPC request: cmd={} args={}", req.cmd, req.args);
 
     let result = route_command(&state, &req.cmd, &req.args).await;
