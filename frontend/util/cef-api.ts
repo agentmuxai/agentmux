@@ -149,8 +149,6 @@ function showJsContextMenu(
         fontFamily: "var(--termfontfamily, sans-serif)",
         fontSize: "13px",
         color: "var(--main-text-color, #ddd)",
-        maxHeight: "80vh",
-        overflowY: "auto",
     });
 
     function renderItems(container: HTMLElement, itemList: NativeContextMenuItem[]) {
@@ -205,7 +203,7 @@ function showJsContextMenu(
                 const sub = document.createElement("div");
                 Object.assign(sub.style, {
                     display: "none", position: "absolute",
-                    left: "100%", top: "0",
+                    left: "100%", top: "0", zIndex: "100000",
                     background: "var(--main-bg-color, #222)",
                     border: "1px solid var(--border-color, #444)",
                     borderRadius: "6px", padding: "4px 0",
