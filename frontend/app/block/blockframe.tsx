@@ -676,11 +676,17 @@ function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
         if (!blockData() || props.preview) return;
         e.preventDefault();
         e.stopPropagation();
-        const menu = buildPaneContextMenu(blockData(), {
+        const menu: ContextMenuItem[] = [];
+        const bodyItems = props.viewModel?.getBodyContextMenuItems?.();
+
+        if (bodyItems && bodyItems.length > 0) {
+            menu.push(...bodyItems, { type: "separator" });
+        }
+        menu.push(...buildPaneContextMenu(blockData(), {
             magnified: isMagnified(),
             onMagnifyToggle: nodeModel.toggleMagnify,
             onClose: nodeModel.onClose,
-        }, props.viewModel);
+        }, props.viewModel));
         ContextMenuModel.showContextMenu(menu, e);
     };
 
