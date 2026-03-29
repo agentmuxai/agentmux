@@ -3,52 +3,202 @@
 //
 // IPC bridge between frontend JavaScript and Rust backend.
 //
-// Phase 2 implementation: This module will provide a cefQuery-based message
-// router that replaces Tauri's invoke()/emit() pattern.
+// Phase 2: Embedded HTTP server (axum) on localhost with a random port.
 //
 // Architecture:
-//   JS: window.cefQuery({ request, onSuccess, onFailure })
-//   →  CEF MessageRouter (C++ layer)
-//   →  Rust handler (this module)
-//   →  Response back to JS callback
+//   JS -> Rust:  fetch("http://127.0.0.1:{port}/ipc", { method: "POST", body: JSON.stringify({cmd, args}) })
+//   Rust -> JS:  frame.execute_javascript("window.dispatchEvent(new CustomEvent('agentmux-event', {detail: ...}))")
 //
-// For Phase 1 (POC), this module is a placeholder. The frontend connects
-// directly to agentmuxsrv-rs via WebSocket for terminal RPC.
+// Why HTTP over CEF ProcessMessage:
+//   - cef-rs does not wrap CefMessageRouter (C++ convenience class)
+//   - Building a custom ProcessMessage router requires RenderProcessHandler + V8 bindings
+//   - fetch() is natural for async/await frontend code
+//   - Easy to debug: curl http://127.0.0.1:PORT/ipc -d '{"cmd":"get_platform"}'
+//   - axum is already in the tokio ecosystem
+
+use std::sync::Arc;
+
+use axum::{
+    extract::State,
+    http::StatusCode,
+    routing::{get, post},
+    Json, Router,
+};
+use tower_http::cors::CorsLayer;
+
+use crate::commands;
+use crate::state::AppState;
 
 /// IPC command request from the frontend.
 #[derive(Debug, serde::Deserialize)]
-#[allow(dead_code)]
 pub struct IpcRequest {
     /// Command name (maps to Tauri command names).
     pub cmd: String,
     /// Command arguments as JSON.
+    #[serde(default)]
     pub args: serde_json::Value,
 }
 
 /// IPC response back to the frontend.
 #[derive(Debug, serde::Serialize)]
-#[allow(dead_code)]
 pub struct IpcResponse {
     /// Whether the command succeeded.
     pub success: bool,
-    /// Result data (on success) or error message (on failure).
-    pub data: serde_json::Value,
+    /// Result data (on success).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub data: Option<serde_json::Value>,
+    /// Error message (on failure).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }
 
-/// Handle an IPC request from the frontend.
-///
-/// Phase 2: This will be called by the CEF message router when a
-/// cefQuery message arrives from JavaScript.
-#[allow(dead_code)]
-pub fn handle_ipc_request(request: &IpcRequest) -> IpcResponse {
-    tracing::debug!("IPC request: cmd={} args={}", request.cmd, request.args);
+/// Health check response.
+#[derive(Debug, serde::Serialize)]
+struct HealthResponse {
+    status: String,
+    version: String,
+}
 
-    // Phase 2: Route to appropriate handler based on cmd name.
-    // For now, return an error indicating the IPC bridge is not yet implemented.
-    IpcResponse {
-        success: false,
-        data: serde_json::json!({
-            "error": format!("IPC command '{}' not yet implemented (Phase 2)", request.cmd)
-        }),
+/// Start the IPC HTTP server on a random localhost port.
+/// Returns the port number.
+pub async fn start_ipc_server(state: Arc<AppState>) -> u16 {
+    let app = Router::new()
+        .route("/ipc", post(handle_ipc))
+        .route("/health", get(health))
+        .layer(CorsLayer::permissive()) // localhost-only, permissive is fine
+        .with_state(state);
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("Failed to bind IPC server");
+    let port = listener
+        .local_addr()
+        .expect("Failed to get local address")
+        .port();
+
+    tracing::info!("IPC HTTP server started on 127.0.0.1:{}", port);
+
+    tokio::spawn(async move {
+        axum::serve(listener, app)
+            .await
+            .expect("IPC server error");
+    });
+
+    port
+}
+
+/// Health check endpoint.
+async fn health() -> Json<HealthResponse> {
+    Json(HealthResponse {
+        status: "ok".to_string(),
+        version: env!("CARGO_PKG_VERSION").to_string(),
+    })
+}
+
+/// Main IPC handler — routes commands to the appropriate handler.
+async fn handle_ipc(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<IpcRequest>,
+) -> (StatusCode, Json<IpcResponse>) {
+    tracing::debug!("IPC request: cmd={} args={}", req.cmd, req.args);
+
+    let result = route_command(&state, &req.cmd, &req.args).await;
+
+    match result {
+        Ok(data) => (
+            StatusCode::OK,
+            Json(IpcResponse {
+                success: true,
+                data: Some(data),
+                error: None,
+            }),
+        ),
+        Err(error) => (
+            StatusCode::OK, // Return 200 even on errors — frontend checks success field
+            Json(IpcResponse {
+                success: false,
+                data: None,
+                error: Some(error),
+            }),
+        ),
+    }
+}
+
+/// Route a command to the appropriate handler.
+///
+/// Command names use snake_case to match the Tauri command names.
+/// The frontend sends these exact names via invokeCommand().
+async fn route_command(
+    state: &Arc<AppState>,
+    cmd: &str,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    // Check stubs first
+    if commands::stubs::is_stub_command(cmd) {
+        return Ok(commands::stubs::handle_stub(cmd, args));
+    }
+
+    match cmd {
+        // ---- Tier 1: Bootstrap (must work for frontend to load) ----
+        "get_platform" => Ok(commands::platform::get_platform()),
+        "get_auth_key" => {
+            let key = state.auth_key.lock().unwrap().clone();
+            tracing::debug!("Frontend requested auth key: {}...", &key[..8.min(key.len())]);
+            Ok(serde_json::json!(key))
+        }
+        "get_is_dev" => Ok(commands::platform::get_is_dev()),
+        "get_user_name" => Ok(commands::platform::get_user_name()),
+        "get_host_name" => Ok(commands::platform::get_host_name()),
+        "get_data_dir" => commands::platform::get_data_dir(),
+        "get_config_dir" => commands::platform::get_config_dir(),
+        "get_docsite_url" => Ok(commands::platform::get_docsite_url(state)),
+        "get_zoom_factor" => Ok(commands::window::get_zoom_factor(state)),
+        "get_about_modal_details" => Ok(commands::platform::get_about_modal_details(state)),
+        "get_backend_endpoints" => commands::backend::get_backend_endpoints(state),
+        "get_wave_init_opts" => commands::backend::get_wave_init_opts(state),
+        "set_window_init_status" => Ok(commands::backend::set_window_init_status(state, args)),
+        "fe_log" => Ok(commands::backend::fe_log(args)),
+        "fe_log_structured" => Ok(commands::backend::fe_log_structured(args)),
+
+        // ---- Tier 2: Core functionality ----
+        "get_backend_info" => Ok(commands::backend::get_backend_info(state)),
+        "restart_backend" => commands::backend::restart_backend(state.clone()).await,
+        "close_window" => commands::window::close_window(state),
+        "minimize_window" => commands::window::minimize_window(state),
+        "maximize_window" => commands::window::maximize_window(state),
+        "set_zoom_factor" => commands::window::set_zoom_factor(state, args),
+        "is_main_window" => Ok(commands::window::is_main_window()),
+        "get_window_label" => Ok(commands::window::get_window_label()),
+        "get_instance_number" => Ok(commands::window::get_instance_number(state)),
+        "get_window_count" => Ok(commands::window::get_window_count(state)),
+        "get_env" => Ok(commands::platform::get_env(args)),
+        "toggle_devtools" => commands::window::toggle_devtools(state),
+        "show_context_menu" => {
+            // Stub for now — CEF has native context menu support
+            tracing::debug!("show_context_menu: stubbed in CEF (native menu used)");
+            Ok(serde_json::Value::Null)
+        }
+
+        // ---- Tier 3: Provider/CLI management ----
+        "detect_installed_clis" => commands::providers::detect_installed_clis().await,
+        "get_provider_config" => commands::providers::get_provider_config(),
+        "save_provider_config" => commands::providers::save_provider_config(args),
+        "get_provider_install_info" => commands::providers::get_provider_install_info(args),
+        "set_provider_auth" => commands::providers::set_provider_auth(args),
+        "clear_provider_auth" => commands::providers::clear_provider_auth(args),
+        "get_provider_auth_status" => commands::providers::get_provider_auth_status(args),
+        "check_cli_auth_status" => commands::providers::check_cli_auth_status(args).await,
+        "install_cli" => commands::providers::install_cli(args).await,
+        "get_cli_path" => commands::providers::get_cli_path(args),
+        "check_nodejs_available" => commands::providers::check_nodejs_available().await,
+        "ensure_auth_dir" => commands::platform::ensure_auth_dir(args),
+        "run_cli_login" => commands::platform::run_cli_login(state.clone(), args).await,
+        "cancel_cli_login" => commands::platform::cancel_cli_login(state),
+        "ensure_settings_file" => commands::platform::ensure_settings_file(),
+        "open_in_editor" => commands::platform::open_in_editor(args),
+        "copy_file_to_dir" => commands::providers::copy_file_to_dir(args),
+
+        // ---- Unknown command ----
+        _ => Err(format!("Unknown command: {}", cmd)),
     }
 }

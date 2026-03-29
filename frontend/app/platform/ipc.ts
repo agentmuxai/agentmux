@@ -4,12 +4,12 @@
 // Platform IPC abstraction layer.
 //
 // Provides a unified interface for frontend-to-host communication that works
-// with both the Tauri host (invoke/listen) and the CEF host (cefQuery).
+// with both the Tauri host (invoke/listen) and the CEF host (HTTP fetch).
 // The frontend calls these functions without knowing which host it's running in.
 //
-// Phase 1: Tauri path is fully functional, CEF path is a placeholder.
-// Phase 2: CEF path will use window.cefQuery() for JS→Rust and
-//          window.dispatchEvent() for Rust→JS.
+// Tauri: uses @tauri-apps/api invoke()/listen().
+// CEF:   uses HTTP POST to localhost IPC server for commands (JS→Rust),
+//        and CustomEvent dispatch for events (Rust→JS).
 
 /**
  * Detect the current host environment.
@@ -20,7 +20,7 @@ export function detectHost(): HostType {
     if (typeof (window as any).__TAURI_INTERNALS__ !== "undefined") {
         return "tauri";
     }
-    if (typeof (window as any).cefQuery !== "undefined") {
+    if (typeof (window as any).__AGENTMUX_IPC_PORT__ !== "undefined") {
         return "cef";
     }
     return "browser";
@@ -30,7 +30,7 @@ export function detectHost(): HostType {
  * Invoke a host command and return the result.
  *
  * In Tauri: delegates to @tauri-apps/api/core invoke().
- * In CEF: sends a cefQuery message to the Rust handler (Phase 2).
+ * In CEF: sends HTTP POST to the local IPC server.
  * In browser: throws an error (no host available).
  */
 export async function invokeCommand<T = any>(cmd: string, args?: Record<string, any>): Promise<T> {
@@ -43,32 +43,23 @@ export async function invokeCommand<T = any>(cmd: string, args?: Record<string, 
         }
 
         case "cef": {
-            return new Promise<T>((resolve, reject) => {
-                const cefQuery = (window as any).cefQuery;
-                if (!cefQuery) {
-                    reject(new Error("cefQuery not available"));
-                    return;
-                }
-                cefQuery({
-                    request: JSON.stringify({ cmd, args: args ?? {} }),
-                    onSuccess: (response: string) => {
-                        try {
-                            const parsed = JSON.parse(response);
-                            if (parsed.success) {
-                                resolve(parsed.data as T);
-                            } else {
-                                reject(new Error(parsed.data?.error ?? "Unknown error"));
-                            }
-                        } catch {
-                            // If response isn't JSON, return it as-is
-                            resolve(response as unknown as T);
-                        }
-                    },
-                    onFailure: (_code: number, message: string) => {
-                        reject(new Error(message));
-                    },
-                });
+            const port = (window as any).__AGENTMUX_IPC_PORT__;
+            if (!port) {
+                throw new Error("IPC port not injected by CEF host");
+            }
+            const resp = await fetch(`http://127.0.0.1:${port}/ipc`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ cmd, args: args ?? {} }),
             });
+            if (!resp.ok) {
+                throw new Error(`IPC HTTP error: ${resp.status} ${resp.statusText}`);
+            }
+            const parsed = await resp.json();
+            if (parsed.success) {
+                return parsed.data as T;
+            }
+            throw new Error(parsed.error ?? "IPC error");
         }
 
         case "browser":

@@ -7,8 +7,7 @@
 // (renderer, GPU, utility). Subprocess mode is detected via the --type
 // command-line argument injected by CEF.
 //
-// Phase 1 (POC): Uses CEF Views for window management. Loads the Vite
-// dev server URL and verifies terminal rendering without character reordering.
+// Phase 2: Includes IPC HTTP server, sidecar management, and command routing.
 //
 // Usage:
 //   agentmux-cef                         # Load default URL (http://localhost:5173)
@@ -24,7 +23,13 @@
 
 mod app;
 mod client;
+mod commands;
+mod events;
 mod ipc;
+mod sidecar;
+mod state;
+
+use std::sync::Arc;
 
 use cef::*;
 
@@ -93,16 +98,57 @@ fn main() {
 
     tracing::info!("Initializing CEF browser process");
 
-    // Create the App handler.
-    let mut cef_app = app::AgentMuxApp::new();
+    // Create shared application state.
+    let app_state = Arc::new(state::AppState::default());
+
+    // Start tokio runtime for async operations (IPC server, sidecar management).
+    let runtime = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
+
+    // Start the IPC HTTP server and get the assigned port.
+    let ipc_port = runtime.block_on(ipc::start_ipc_server(app_state.clone()));
+    *app_state.ipc_port.lock().unwrap() = ipc_port;
+
+    tracing::info!("IPC server started on port {}", ipc_port);
+
+    // Spawn the backend sidecar asynchronously.
+    let state_for_sidecar = app_state.clone();
+    runtime.spawn(async move {
+        match sidecar::spawn_backend(&state_for_sidecar).await {
+            Ok(result) => {
+                // Store endpoints in state
+                {
+                    let mut endpoints = state_for_sidecar.backend_endpoints.lock().unwrap();
+                    endpoints.ws_endpoint = result.ws_endpoint.clone();
+                    endpoints.web_endpoint = result.web_endpoint.clone();
+                }
+
+                // Emit backend-ready event to frontend
+                let payload = serde_json::json!({
+                    "ws": result.ws_endpoint,
+                    "web": result.web_endpoint,
+                });
+                events::emit_event_from_state(&state_for_sidecar, "backend-ready", &payload);
+
+                tracing::info!(
+                    "Backend ready: ws={} web={}",
+                    result.ws_endpoint,
+                    result.web_endpoint
+                );
+            }
+            Err(e) => {
+                tracing::error!("Failed to spawn backend: {}", e);
+            }
+        }
+    });
+
+    // Create the App handler with state.
+    let mut cef_app = app::AgentMuxApp::new(app_state.clone(), ipc_port);
 
     // Configure CEF settings.
     let settings = Settings {
         // Disable Chromium sandbox (simplifies deployment, we're loading localhost).
         no_sandbox: 1,
         // Use Alloy runtime style for a more traditional browser appearance.
-        // Chrome style enables the full Chrome UI which we don't want.
-        // Note: Chrome style is the default in newer CEF versions.
         ..Default::default()
     };
 
@@ -123,8 +169,20 @@ fn main() {
 
     tracing::info!("CEF message loop exited, shutting down");
 
+    // Kill the backend sidecar on shutdown.
+    {
+        let mut sidecar = app_state.sidecar_child.lock().unwrap();
+        if let Some(ref mut child) = *sidecar {
+            tracing::info!("Killing backend sidecar");
+            let _ = child.kill();
+        }
+    }
+
     // Clean shutdown.
     shutdown();
+
+    // Drop the tokio runtime after CEF shutdown.
+    drop(runtime);
 
     tracing::info!("AgentMux CEF host shutdown complete");
 }

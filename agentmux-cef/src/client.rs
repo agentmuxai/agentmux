@@ -3,21 +3,29 @@
 //
 // CefClient and associated handler implementations.
 // Manages browser lifecycle, display updates, and load errors.
+//
+// Phase 2: Stores browser ref in AppState and injects IPC port on page load.
 
 use cef::*;
 use std::sync::{Arc, Mutex};
+
+use crate::state::AppState;
 
 /// Core handler state shared across all CEF callback interfaces.
 pub struct AgentMuxHandler {
     browser_list: Vec<Browser>,
     is_closing: bool,
+    state: Arc<AppState>,
+    ipc_port: u16,
 }
 
 impl AgentMuxHandler {
-    pub fn new() -> Arc<Mutex<Self>> {
+    pub fn new(state: Arc<AppState>, ipc_port: u16) -> Arc<Mutex<Self>> {
         Arc::new(Mutex::new(Self {
             browser_list: Vec::new(),
             is_closing: false,
+            state,
+            ipc_port,
         }))
     }
 
@@ -60,6 +68,17 @@ impl AgentMuxHandler {
 
         let browser = browser.cloned().expect("Browser is None");
         tracing::info!("Browser created (total: {})", self.browser_list.len() + 1);
+
+        // Store the browser handle in AppState for IPC event emission.
+        // Only store the first (main) browser.
+        {
+            let mut state_browser = self.state.browser.lock().unwrap();
+            if state_browser.is_none() {
+                *state_browser = Some(browser.clone());
+                tracing::info!("Stored main browser handle in AppState");
+            }
+        }
+
         self.browser_list.push(browser);
     }
 
@@ -77,6 +96,18 @@ impl AgentMuxHandler {
         debug_assert_ne!(currently_on(ThreadId::UI), 0);
 
         let mut browser = browser.cloned().expect("Browser is None");
+
+        // Clear the browser handle from AppState if this is the main browser.
+        {
+            let mut state_browser = self.state.browser.lock().unwrap();
+            if let Some(ref stored) = *state_browser {
+                if stored.is_same(Some(&mut browser)) != 0 {
+                    *state_browser = None;
+                    tracing::info!("Cleared main browser handle from AppState");
+                }
+            }
+        }
+
         if let Some(index) = self
             .browser_list
             .iter()
@@ -94,6 +125,38 @@ impl AgentMuxHandler {
             // All browsers closed — quit the message loop.
             quit_message_loop();
         }
+    }
+
+    fn on_load_end(
+        &mut self,
+        browser: Option<&mut Browser>,
+        frame: Option<&mut Frame>,
+        _http_status_code: i32,
+    ) {
+        // Inject the IPC port into the page after it finishes loading.
+        // Only inject into the main frame (not iframes).
+        let Some(frame) = frame else { return };
+
+        if frame.is_main() != 1 {
+            return;
+        }
+
+        let js = format!(
+            "window.__AGENTMUX_IPC_PORT__ = {};",
+            self.ipc_port
+        );
+        let code = CefString::from(js.as_str());
+        let url = CefString::from("");
+        frame.execute_java_script(Some(&code), Some(&url), 0);
+
+        let url_str = browser
+            .and_then(|b| b.main_frame().map(|f| CefString::from(&f.url()).to_string()))
+            .unwrap_or_default();
+        tracing::info!(
+            "Injected IPC port {} into page: {}",
+            self.ipc_port,
+            url_str
+        );
     }
 
     fn on_load_error(
@@ -255,7 +318,7 @@ wrap_life_span_handler! {
 }
 
 // ---------------------------------------------------------------------------
-// LoadHandler — load errors
+// LoadHandler — load events and errors
 // ---------------------------------------------------------------------------
 
 wrap_load_handler! {
@@ -264,6 +327,16 @@ wrap_load_handler! {
     }
 
     impl LoadHandler {
+        fn on_load_end(
+            &self,
+            browser: Option<&mut Browser>,
+            frame: Option<&mut Frame>,
+            http_status_code: i32,
+        ) {
+            let mut inner = self.inner.lock().expect("Failed to lock handler");
+            inner.on_load_end(browser, frame, http_status_code);
+        }
+
         fn on_load_error(
             &self,
             browser: Option<&mut Browser>,
