@@ -434,9 +434,12 @@ export async function initBare() {
     setKeyUtilPlatform(platform);
     loadFonts();
     // Reset window zoom to 1.0 (per-pane zoom is handled via block metadata,
-    // chrome zoom via CSS custom properties)
+    // chrome zoom via CSS custom properties).
+    // SKIP in CEF: set_zoom_factor calls host.set_zoom_level() from the IPC
+    // thread, which deadlocks the CEF message loop and freezes all timers/promises.
+    // TODO(cef): post set_zoom_level to CEF UI thread via CefPostTask.
     const api = getApi();
-    if (api && typeof api.setZoomFactor === "function") {
+    if (isTauriHost() && api && typeof api.setZoomFactor === "function") {
         api.setZoomFactor(1.0);
     }
 
@@ -449,51 +452,53 @@ export async function initBare() {
     const fontsPromise = document.fonts.ready;
     const timeoutPromise = new Promise(resolve => setTimeout(resolve, 2000));
 
-    Promise.race([fontsPromise, timeoutPromise]).then(async () => {
-        benchMark("fonts-ready");
-        const fontsMsg = `[startup-perf] initBare (fonts ready): ${(performance.now() - bareStart).toFixed(1)}ms`;
-        console.log(fontsMsg);
-        try { getApi().sendLog(fontsMsg); } catch {}
-        getApi().sendLog("Init Bare Done");
-        getApi().setWindowInitStatus("ready");
+    try {
+        await Promise.race([fontsPromise, timeoutPromise]);
+    } catch (fontErr) {
+        getApi().sendLog(`initBare: font wait error (non-fatal): ${fontErr}`);
+    }
+    benchMark("fonts-ready");
+    const fontsMsg = `[startup-perf] initBare (fonts ready): ${(performance.now() - bareStart).toFixed(1)}ms`;
+    try { getApi().sendLog(fontsMsg); } catch {}
+    getApi().sendLog("Init Bare Done");
+    getApi().setWindowInitStatus("ready");
 
-        // In host app mode, handle initialization in frontend
-        if (hostApp) {
-            getApi().sendLog("Starting host app initialization");
-            try {
-                // Check if this is a new window or the main window
-                benchMark("isMainWindow-start");
-                const isMain = await getApi().isMainWindow();
-                getApi().sendLog(`Window type: ${isMain ? "main" : "new window"}`);
+    // In host app mode, handle initialization in frontend
+    if (hostApp) {
+        getApi().sendLog("Starting host app initialization");
+        try {
+            // Check if this is a new window or the main window
+            benchMark("isMainWindow-start");
+            const isMain = await getApi().isMainWindow();
+            getApi().sendLog(`Window type: ${isMain ? "main" : "new window"}`);
 
-                benchMark("isMainWindow-done");
-                if (isMain) {
-                    // Main window with freshly spawned backend: standard initialization
-                    await initHostWave();
-                } else {
-                    // New window: create new backend window objects
-                    const label = await getApi().getWindowLabel();
-                    getApi().sendLog(`Initializing as new window: ${label}`);
-                    await initHostNewWindow();
-                }
-            } catch (error) {
-                console.error("[initBare] Host initialization failed:", error);
-                getApi().sendLog(`Host init error: ${error}`);
-                showStartupError(String(error));
+            benchMark("isMainWindow-done");
+            if (isMain) {
+                // Main window with freshly spawned backend: standard initialization
+                await initHostWave();
+            } else {
+                // New window: create new backend window objects
+                const label = await getApi().getWindowLabel();
+                getApi().sendLog(`Initializing as new window: ${label}`);
+                await initHostNewWindow();
             }
+        } catch (error) {
+            console.error("[initBare] Host initialization failed:", error);
+            getApi().sendLog(`Host init error: ${error}`);
+            showStartupError(String(error));
         }
+    }
 
-        // Safety net: if body is still hidden after 30s, force it visible
-        setTimeout(() => {
-            if (document.body.style.visibility === "hidden") {
-                console.warn("[initBare] Safety timeout: forcing body visible after 30s");
-                getApi().sendLog("[initBare] Safety timeout: forcing body visible after 30s");
-                document.body.style.visibility = "visible";
-                document.body.style.opacity = "1";
-                document.body.classList.remove("is-transparent");
-            }
-        }, 30_000);
-    });
+    // Safety net: if body is still hidden after 30s, force it visible
+    setTimeout(() => {
+        if (document.body.style.visibility === "hidden") {
+            console.warn("[initBare] Safety timeout: forcing body visible after 30s");
+            getApi().sendLog("[initBare] Safety timeout: forcing body visible after 30s");
+            document.body.style.visibility = "visible";
+            document.body.style.opacity = "1";
+            document.body.classList.remove("is-transparent");
+        }
+    }, 30_000);
 }
 
 // tauri-bootstrap.ts calls initBare() directly (static import).
