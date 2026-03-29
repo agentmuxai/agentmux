@@ -137,6 +137,10 @@ fn main() {
             }
             Err(e) => {
                 tracing::error!("Failed to spawn backend: {}", e);
+                let payload = serde_json::json!({
+                    "error": format!("{}", e),
+                });
+                events::emit_event_from_state(&state_for_sidecar, "backend-spawn-error", &payload);
             }
         }
     });

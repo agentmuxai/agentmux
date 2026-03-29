@@ -46,10 +46,18 @@ export async function initCefApi(): Promise<void> {
     } catch (e) {
         benchMark("backend-wait-start");
         console.log("[cef-api] Backend not ready yet, waiting for backend-ready event...");
-        backendEndpoints = await new Promise<{ ws: string; web: string }>((resolve) => {
+        backendEndpoints = await new Promise<{ ws: string; web: string }>((resolve, reject) => {
+            const timeout = setTimeout(() => {
+                reject(new Error("[cef-api] Backend failed to start within 30s"));
+            }, 30_000);
             listenEvent<{ ws: string; web: string }>("backend-ready", (payload) => {
+                clearTimeout(timeout);
                 console.log("[cef-api] Backend ready:", payload);
                 resolve(payload);
+            });
+            listenEvent<{ error: string }>("backend-spawn-error", (payload) => {
+                clearTimeout(timeout);
+                reject(new Error(`[cef-api] Backend spawn failed: ${payload.error}`));
             });
         });
         benchMark("backend-ready-received");
