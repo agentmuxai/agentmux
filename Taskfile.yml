@@ -23,7 +23,14 @@ vars:
 
 tasks:
     dev:
-        desc: Run the Tauri application in development mode (hot reload enabled).
+        desc: Run AgentMux in development mode (CEF host + Vite hot reload).
+        cmds:
+            - task: cef:dev
+        env:
+            AGENTMUX_ENVFILE: "{{.ROOT_DIR}}/.env"
+
+    dev:tauri:
+        desc: "[DEPRECATED] Run the Tauri application in development mode."
         cmd: npx tauri dev --config src-tauri/tauri.dev.conf.json
         deps:
             - npm:install
@@ -745,38 +752,34 @@ tasks:
         platforms: [windows]
         cmds:
             - cmd: |
-                powershell -Command "
-                  $cefDir = (Get-ChildItem -Recurse -Filter 'libcef.dll' -Path 'target' -ErrorAction SilentlyContinue | Select-Object -First 1).DirectoryName
-                  if (-not $cefDir) {
-                    Write-Host '❌ libcef.dll not found in target/ — build agentmux-cef first'
-                    exit 1
-                  }
-                  Write-Host 'Found CEF binaries in:' $cefDir
-                  New-Item -ItemType Directory -Force -Path dist/cef | Out-Null
-                  # Core CEF DLLs (required)
-                  Copy-Item -Force (Join-Path $cefDir 'libcef.dll') dist/cef/
-                  Copy-Item -Force (Join-Path $cefDir 'chrome_elf.dll') dist/cef/ -ErrorAction SilentlyContinue
-                  # GPU support (required — ANGLE + D3D compiler)
-                  Copy-Item -Force (Join-Path $cefDir 'libEGL.dll') dist/cef/ -ErrorAction SilentlyContinue
-                  Copy-Item -Force (Join-Path $cefDir 'libGLESv2.dll') dist/cef/ -ErrorAction SilentlyContinue
-                  Copy-Item -Force (Join-Path $cefDir 'd3dcompiler_47.dll') dist/cef/ -ErrorAction SilentlyContinue
-                  # CEF data files (required)
-                  Copy-Item -Force (Join-Path $cefDir 'icudtl.dat') dist/cef/ -ErrorAction SilentlyContinue
-                  Copy-Item -Force (Join-Path $cefDir 'v8_context_snapshot.bin') dist/cef/ -ErrorAction SilentlyContinue
-                  Copy-Item -Force (Join-Path $cefDir '*.pak') dist/cef/ -ErrorAction SilentlyContinue
-                  # Locales — en-US only (saves ~18 MB)
-                  New-Item -ItemType Directory -Force -Path dist/cef/locales | Out-Null
-                  if (Test-Path (Join-Path $cefDir 'locales/en-US.pak')) {
-                    Copy-Item -Force (Join-Path $cefDir 'locales/en-US.pak') dist/cef/locales/
-                  }
-                  # SKIPPED (not needed, saves ~18 MB):
-                  #   vk_swiftshader.dll, vulkan-1.dll, vk_swiftshader_icd.json (SwiftShader — deprecated upstream)
-                  #   dxil.dll, dxcompiler.dll (WebGPU — not used)
-                  #   snapshot_blob.bin (removed in CEF 133+)
-                  #   49 non-English locale .pak files
-                  Write-Host '✓ Bundled CEF binaries to dist/cef/ (optimized: GPU kept, SwiftShader/WebGPU/extra locales stripped)'
-                "
-            - echo "CEF bundle complete"
+                cefDir=$(find target/release -name 'libcef.dll' 2>/dev/null | head -1)
+                [ -z "$cefDir" ] && cefDir=$(find target -name 'libcef.dll' 2>/dev/null | head -1)
+                if [ -z "$cefDir" ]; then
+                  echo "❌ libcef.dll not found in target/ — build agentmux-cef first"
+                  exit 1
+                fi
+                cefDir=$(dirname "$cefDir")
+                echo "Found CEF binaries in: $cefDir"
+                mkdir -p dist/cef/locales
+                # Core CEF DLLs (required)
+                cp -f "$cefDir/libcef.dll" dist/cef/
+                cp -f "$cefDir/chrome_elf.dll" dist/cef/ 2>/dev/null || true
+                # GPU support (required — ANGLE + D3D compiler)
+                cp -f "$cefDir/libEGL.dll" dist/cef/ 2>/dev/null || true
+                cp -f "$cefDir/libGLESv2.dll" dist/cef/ 2>/dev/null || true
+                cp -f "$cefDir/d3dcompiler_47.dll" dist/cef/ 2>/dev/null || true
+                # CEF data files (required)
+                cp -f "$cefDir/icudtl.dat" dist/cef/ 2>/dev/null || true
+                cp -f "$cefDir/v8_context_snapshot.bin" dist/cef/ 2>/dev/null || true
+                cp -f "$cefDir"/*.pak dist/cef/ 2>/dev/null || true
+                # Locales — en-US only (saves ~18 MB)
+                [ -f "$cefDir/locales/en-US.pak" ] && cp -f "$cefDir/locales/en-US.pak" dist/cef/locales/
+                # SKIPPED (not needed, saves ~18 MB):
+                #   vk_swiftshader.dll, vulkan-1.dll, vk_swiftshader_icd.json (SwiftShader — deprecated upstream)
+                #   dxil.dll, dxcompiler.dll (WebGPU — not used)
+                #   snapshot_blob.bin (removed in CEF 133+)
+                #   49 non-English locale .pak files
+                echo "✓ Bundled CEF binaries to dist/cef/ (optimized: GPU kept, SwiftShader/WebGPU/extra locales stripped)"
 
     cef:bundle:darwin:
         internal: true
@@ -791,15 +794,38 @@ tasks:
             - echo "Linux CEF bundling not yet implemented"
 
     cef:dev:
-        desc: Build and run the CEF host in development mode (loads Vite dev server).
+        desc: Build and run the CEF host in development mode (starts Vite + CEF host).
         cmds:
             - task: cef:build
             - task: cef:bundle
-            - task: cef:run
+            - task: cef:dev:serve
         deps:
+            - npm:install
             - build:backend
+            - copy:schema
         env:
             AGENTMUX_ENVFILE: "{{.ROOT_DIR}}/.env"
+            AGENTMUX_DEV: "1"
+
+    cef:dev:serve:
+        internal: true
+        desc: Start Vite dev server and CEF host concurrently.
+        cmds:
+            - cmd: |
+                npx vite --config vite.config.tauri.ts --port 5173 &
+                VITE_PID=$!
+                trap "kill $VITE_PID 2>/dev/null" EXIT
+                echo "Waiting for Vite on port 5173 (pid $VITE_PID)..."
+                for i in $(seq 1 30); do
+                  curl -s http://localhost:5173 > /dev/null 2>&1 && break
+                  sleep 1
+                done
+                if ! curl -s http://localhost:5173 > /dev/null 2>&1; then
+                  echo "❌ Vite failed to start within 30 seconds"
+                  exit 1
+                fi
+                echo "Vite ready."
+                cd dist/cef && ./agentmux-cef{{exeExt}} --url=http://localhost:5173
 
     cef:run:
         desc: Run the CEF host (must be built and bundled first).
