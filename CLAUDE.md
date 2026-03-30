@@ -15,11 +15,11 @@
 
 | Command | Use When | Auto-Updates? |
 |---------|----------|---------------|
-| `task dev` | **Development** (normal work) | Yes - hot reload |
-| `task start` | Standalone testing (rare) | No |
-| `task package` | **Final release builds ONLY** | No |
+| `task dev` | **Development** (CEF host + Vite hot reload) | Yes - hot reload |
+| `task cef:package:portable` | **Portable release builds** | No |
+| `task dev:tauri` | [DEPRECATED] Tauri dev mode | Yes - hot reload |
 
-**Note:** Never launch from `make/` during development - it's stale.
+**Note:** The Tauri host is deprecated. All development uses the CEF host.
 
 ### Build System
 
@@ -29,10 +29,11 @@
 - Run `task --list` to see all available commands
 
 **Common Tasks:**
-- `task dev` - Development mode
-- `task package` - Production installer
-- `task package:portable` - Portable ZIP
-- `task build:backend` - Rust binaries (agentmuxsrv-rs + wsh-rs)
+- `task dev` - Development mode (CEF + Vite)
+- `task cef:build` - Build CEF host binary
+- `task cef:bundle` - Bundle CEF runtime DLLs
+- `task cef:package:portable` - Portable ZIP
+- `task build:backend` - Rust sidecar binaries (agentmuxsrv-rs + wsh-rs)
 - `task build:frontend` - Frontend only
 - `task test` - Run tests
 - `task clean` - Clean artifacts
@@ -43,17 +44,18 @@
 
 - **TypeScript/SolidJS** - Auto-reloads in `task dev`
 - **Rust backend** - `task build:backend` then restart `task dev`
-- **Test package** - `task package` then extract/install artifact
+- **Test package** - `task cef:package:portable` then extract ZIP
 
 ### Architecture
 
-AgentMux is built on **Tauri v2** with a **100% Rust backend**:
+AgentMux uses a **CEF (Chromium Embedded Framework)** host with a **100% Rust backend**:
 
-- **agentmux** = Tauri app (Rust + single webview)
+- **agentmux-cef** = CEF host app (Rust, IPC bridge, window management, bundled Chromium)
+- **agentmux-launcher** = 325 KB launcher exe (sets DLL path, spawns CEF host from `runtime/`)
 - **agentmuxsrv-rs** = Rust backend sidecar (auto-spawned, don't run manually)
 - **wsh** = Rust shell integration binary (wsh-rs crate, must be versioned correctly)
 
-**Important:** All Go and Electron code has been removed. Only Rust + Tauri is supported.
+**Important:** The Tauri host (`src-tauri/`) is deprecated. CEF is the primary host. All Go and Electron code has been removed.
 
 ### Widgets
 
@@ -175,10 +177,11 @@ npm run build:dev    # Development build
 npm run build:prod   # Production build
 ```
 
-### Package Release
+### Package Release (CEF)
 ```bash
-task package             # Distributable package
-task package:portable    # Portable ZIP (Windows)
+task cef:build              # Build CEF host binary
+task cef:bundle             # Bundle CEF runtime DLLs
+task cef:package:portable   # Portable ZIP (Windows)
 ```
 
 ---
