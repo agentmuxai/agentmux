@@ -30,7 +30,7 @@ const HostPopover = (): JSX.Element => {
 
     const lanInstances = lanInstancesAtom;
     const lanCount = () => lanInstances().length;
-    const lanDiscoveryEnabled = () => !!(settingsAtom() as any)?.["network:lan_discovery"];
+    const lanDiscoveryEnabled = () => !!settingsAtom()?.["network:lan_discovery"];
 
     const handleClick = async () => {
         if (popoverOpen()) {
