@@ -68,13 +68,7 @@ pub async fn start_ipc_server(state: Arc<AppState>) -> u16 {
         .ok()
         .and_then(|p| p.parent().map(|d| d.to_path_buf()))
         .unwrap_or_else(|| std::env::current_dir().unwrap());
-    // Check runtime/frontend/ (portable layout) then frontend/ (flat layout)
-    let runtime_dir = exe_dir.join("runtime");
-    let frontend_dir = if runtime_dir.join("frontend/index.html").exists() {
-        runtime_dir.join("frontend")
-    } else {
-        exe_dir.join("frontend")
-    };
+    let frontend_dir = exe_dir.join("frontend");
     let has_frontend = frontend_dir.join("index.html").exists();
     if has_frontend {
         tracing::info!("Serving static frontend from: {}", frontend_dir.display());

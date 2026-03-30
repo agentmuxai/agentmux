@@ -287,6 +287,13 @@ fn resolve_backend_binary(
         return Ok(portable_binary);
     }
 
+    // Flat portable: {name}.x64.exe adjacent to the host binary
+    let flat_x64 = exe_dir.join(format!("{}.x64{}", backend_name, exe_suffix));
+    if flat_x64.exists() {
+        tracing::info!("Using flat portable {} at: {:?}", backend_name, flat_x64);
+        return Ok(flat_x64);
+    }
+
     // Dev mode: {name}(.exe) adjacent to the host binary
     let dev_binary = exe_dir.join(format!("{}{}", backend_name, exe_suffix));
     if dev_binary.exists() {
