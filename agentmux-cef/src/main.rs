@@ -35,6 +35,24 @@ use std::sync::Arc;
 use cef::*;
 
 fn main() {
+    // Add runtime/ subdirectory to DLL search path so CEF can find libcef.dll
+    // in the portable layout (agentmux.exe in root, libcef.dll in runtime/).
+    #[cfg(target_os = "windows")]
+    {
+        if let Ok(exe) = std::env::current_exe() {
+            if let Some(dir) = exe.parent() {
+                let runtime_dir = dir.join("runtime");
+                if runtime_dir.exists() {
+                    unsafe {
+                        use std::os::windows::ffi::OsStrExt;
+                        let wide: Vec<u16> = runtime_dir.as_os_str().encode_wide().chain(Some(0)).collect();
+                        windows_sys::Win32::System::LibraryLoader::SetDllDirectoryW(wide.as_ptr());
+                    }
+                }
+            }
+        }
+    }
+
     // Initialize tracing (stderr + optional env filter).
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -149,15 +167,32 @@ fn main() {
     // Create the App handler with state.
     let mut cef_app = app::AgentMuxApp::new(app_state.clone(), ipc_port);
 
+    // Resolve runtime directory for portable layout (resources in runtime/ subdir)
+    let exe_dir = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.to_path_buf()))
+        .unwrap_or_default();
+    let runtime_dir = exe_dir.join("runtime");
+    let (resources_dir, locales_dir) = if runtime_dir.exists() {
+        (
+            CefString::from(runtime_dir.to_str().unwrap_or("")),
+            CefString::from(runtime_dir.join("locales").to_str().unwrap_or("")),
+        )
+    } else {
+        (CefString::default(), CefString::default())
+    };
+
     // Configure CEF settings.
     let settings = Settings {
-        // Disable Chromium sandbox (simplifies deployment, we're loading localhost).
         no_sandbox: 1,
-        // Dark background to match app theme — prevents white bleed-through
-        // when terminal panes use transparency.
-        background_color: 0xFF000000, // ARGB: opaque black
-        // Enable remote debugging — open chrome://inspect or http://localhost:9222
+        background_color: 0xFF000000,
         remote_debugging_port: 9222,
+        resources_dir_path: resources_dir,
+        locales_dir_path: locales_dir,
+        // CEF subprocess (renderer, GPU) uses the same exe
+        browser_subprocess_path: CefString::from(
+            std::env::current_exe().unwrap().to_str().unwrap_or("")
+        ),
         ..Default::default()
     };
 

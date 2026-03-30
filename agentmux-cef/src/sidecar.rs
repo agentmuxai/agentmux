@@ -265,6 +265,15 @@ fn resolve_backend_binary(
         .map_err(|e| format!("Failed to get current exe: {}", e))?;
     let exe_dir = exe_path.parent().unwrap();
 
+    // Portable layout: runtime/{name}.x64.exe
+    let runtime_binary = exe_dir
+        .join("runtime")
+        .join(format!("{}.x64{}", backend_name, exe_suffix));
+    if runtime_binary.exists() {
+        tracing::info!("Using runtime {} at: {:?}", backend_name, runtime_binary);
+        return Ok(runtime_binary);
+    }
+
     // Portable release: bin/{name}.x64.exe next to the app exe
     let portable_binary = exe_dir
         .join("bin")
