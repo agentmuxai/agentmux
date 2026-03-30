@@ -81,18 +81,60 @@ With file stripping applied (locales, SwiftShader, WebGPU): CEF drops to ~335 MB
 This is the fundamental trade-off: 12x larger distribution for faster startup
 and lower memory.
 
+## Rendering Performance (via CDP)
+
+Measured with `bench-cdp.mjs` — injects a `requestAnimationFrame` counter and
+dispatches key events via Chrome DevTools Protocol.
+
+CEF exposes CDP on port 9222 by default. Tauri/WebView2 enabled via
+`WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS="--remote-debugging-port=9223"`.
+
+### Input Latency (50 keystrokes, key → 2 rAF cycles)
+
+| Metric | Tauri | CEF | Delta |
+|--------|-------|-----|-------|
+| P50 | 33.3 ms | 33.1 ms | -0.2 ms |
+| P95 | 33.9 ms | 34.1 ms | +0.2 ms |
+| P99 | 35.3 ms | 34.3 ms | -1.0 ms |
+| Min | 32.7 ms | 19.9 ms | -12.8 ms |
+| Max | 35.3 ms | 34.3 ms | -1.0 ms |
+| Mean | 33.4 ms | 33.1 ms | -0.3 ms |
+
+**Verdict:** Identical. Both locked at ~33 ms (2 frames at 60 Hz).
+CEF has lower min (19.9 ms) suggesting occasional 1-frame roundtrip.
+Tauri is tighter (less variance).
+
+### Scroll FPS (seq 1 50000 — 50K lines of output)
+
+| Metric | Tauri | CEF |
+|--------|-------|-----|
+| Frames | 602 | 602 |
+| Duration | 10.0 s | 10.0 s |
+| FPS | 60.0 | 60.0 |
+
+**Verdict:** Identical. Both maintain 60 FPS during heavy terminal scroll.
+No frame drops detected.
+
+### JS Heap
+
+| State | Tauri | CEF |
+|-------|-------|-----|
+| Baseline | 12 MB | 11 MB |
+| Post-scroll | 12 MB | 11 MB |
+
+**Verdict:** Both stable at ~11-12 MB. No memory leaks from scroll output.
+
 ## Notes
 
 - Warm-start measurements (not cold boot)
 - Memory measured 8s after sidecar ready (UI fully loaded)
 - All processes matching each build's patterns captured via `tasklist`
 - Backend sidecar is identical binary in both builds (28 MB)
-- CEF exposes CDP on port 9222 (DevTools available for FPS measurement)
+- CDP benchmarks run via Node.js WebSocket (scripts/bench-cdp.mjs)
+- Input latency includes CDP wire roundtrip overhead (~15-20ms)
 
 ## Next Steps
 
 - [ ] Per-terminal memory scaling (1, 2, 4, 8 terminals)
-- [ ] Terminal scroll FPS (seq 100000) via CDP
-- [ ] Input latency via CDP
 - [ ] Cold start (after reboot)
 - [ ] 4-hour stability soak test
