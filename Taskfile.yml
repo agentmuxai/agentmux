@@ -842,37 +842,59 @@ tasks:
 
                   Write-Host 'Packaging AgentMux CEF' $$version 'Portable...' -ForegroundColor Cyan
 
-                  # Create portable directory
+                  # Create portable directory with runtime/ subdirectory
                   New-Item -ItemType Directory -Force -Path $$portableDir | Out-Null
-                  New-Item -ItemType Directory -Force -Path (Join-Path $$portableDir 'locales') | Out-Null
+                  $$runtimeDir = Join-Path $$portableDir 'runtime'
+                  New-Item -ItemType Directory -Force -Path $$runtimeDir | Out-Null
+                  New-Item -ItemType Directory -Force -Path (Join-Path $$runtimeDir 'locales') | Out-Null
 
-                  # Host binary (rename to agentmux.exe for end users)
+                  # Host binary in root (rename to agentmux.exe for end users)
                   Copy-Item 'dist/cef/agentmux-cef.exe' (Join-Path $$portableDir 'agentmux.exe') -Force
 
-                  # Sidecar (flat layout — adjacent to host binary)
-                  Copy-Item 'dist/bin/agentmuxsrv-rs.x64.exe' $$portableDir -Force
+                  # README in root
+                  @`"
+AgentMux v$$version - Portable Edition
+
+Quick Start:
+  1. Extract this ZIP to any folder
+  2. Run agentmux.exe
+
+Requirements:
+  - Windows 10/11 x64
+  - No installation needed
+  - No admin rights required
+
+The runtime/ folder contains application internals.
+Do not modify or delete files in it.
+
+Build Date: $$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
+`"@ | Out-File (Join-Path $$portableDir 'README.txt') -Encoding UTF8
+
+                  # Everything else goes into runtime/
+                  # Sidecar
+                  Copy-Item 'dist/bin/agentmuxsrv-rs.x64.exe' $$runtimeDir -Force
 
                   # Frontend
-                  Copy-Item -Recurse 'dist/frontend' (Join-Path $$portableDir 'frontend') -Force
+                  Copy-Item -Recurse 'dist/frontend' (Join-Path $$runtimeDir 'frontend') -Force
 
                   # CEF core (required)
-                  Copy-Item 'dist/cef/libcef.dll' $$portableDir -Force
-                  Copy-Item 'dist/cef/chrome_elf.dll' $$portableDir -Force
-                  Copy-Item 'dist/cef/icudtl.dat' $$portableDir -Force
-                  Copy-Item 'dist/cef/v8_context_snapshot.bin' $$portableDir -Force -ErrorAction SilentlyContinue
+                  Copy-Item 'dist/cef/libcef.dll' $$runtimeDir -Force
+                  Copy-Item 'dist/cef/chrome_elf.dll' $$runtimeDir -Force
+                  Copy-Item 'dist/cef/icudtl.dat' $$runtimeDir -Force
+                  Copy-Item 'dist/cef/v8_context_snapshot.bin' $$runtimeDir -Force -ErrorAction SilentlyContinue
 
                   # GPU support (required — ANGLE + D3D)
-                  Copy-Item 'dist/cef/libEGL.dll' $$portableDir -Force -ErrorAction SilentlyContinue
-                  Copy-Item 'dist/cef/libGLESv2.dll' $$portableDir -Force -ErrorAction SilentlyContinue
-                  Copy-Item 'dist/cef/d3dcompiler_47.dll' $$portableDir -Force -ErrorAction SilentlyContinue
+                  Copy-Item 'dist/cef/libEGL.dll' $$runtimeDir -Force -ErrorAction SilentlyContinue
+                  Copy-Item 'dist/cef/libGLESv2.dll' $$runtimeDir -Force -ErrorAction SilentlyContinue
+                  Copy-Item 'dist/cef/d3dcompiler_47.dll' $$runtimeDir -Force -ErrorAction SilentlyContinue
 
                   # Resource paks
-                  Copy-Item 'dist/cef/chrome_100_percent.pak' $$portableDir -Force -ErrorAction SilentlyContinue
-                  Copy-Item 'dist/cef/chrome_200_percent.pak' $$portableDir -Force -ErrorAction SilentlyContinue
-                  Copy-Item 'dist/cef/resources.pak' $$portableDir -Force -ErrorAction SilentlyContinue
+                  Copy-Item 'dist/cef/chrome_100_percent.pak' $$runtimeDir -Force -ErrorAction SilentlyContinue
+                  Copy-Item 'dist/cef/chrome_200_percent.pak' $$runtimeDir -Force -ErrorAction SilentlyContinue
+                  Copy-Item 'dist/cef/resources.pak' $$runtimeDir -Force -ErrorAction SilentlyContinue
 
                   # Locale — en-US only
-                  Copy-Item 'dist/cef/locales/en-US.pak' (Join-Path $$portableDir 'locales') -Force
+                  Copy-Item 'dist/cef/locales/en-US.pak' (Join-Path $$runtimeDir 'locales') -Force
 
                   # ZIP it
                   Write-Host '  Creating ZIP...' -ForegroundColor Gray

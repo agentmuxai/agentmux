@@ -67,6 +67,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "agentmux-launcher"
+version = "0.32.110"
+dependencies = [
+ "windows-sys 0.59.0",
+ "winres",
+]
+
+[[package]]
 name = "agentmuxsrv-rs"
 version = "0.32.110"
 dependencies = [
