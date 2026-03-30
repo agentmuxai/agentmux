@@ -852,23 +852,8 @@ tasks:
                   Copy-Item 'dist/cef/agentmux-cef.exe' (Join-Path $$portableDir 'agentmux.exe') -Force
 
                   # README in root
-                  @`"
-AgentMux v$$version - Portable Edition
-
-Quick Start:
-  1. Extract this ZIP to any folder
-  2. Run agentmux.exe
-
-Requirements:
-  - Windows 10/11 x64
-  - No installation needed
-  - No admin rights required
-
-The runtime/ folder contains application internals.
-Do not modify or delete files in it.
-
-Build Date: $$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
-`"@ | Out-File (Join-Path $$portableDir 'README.txt') -Encoding UTF8
+                  $$readme = 'AgentMux v' + $$version + ' - Portable Edition' + [Environment]::NewLine + [Environment]::NewLine + 'Quick Start:' + [Environment]::NewLine + '  1. Extract this ZIP to any folder' + [Environment]::NewLine + '  2. Run agentmux.exe' + [Environment]::NewLine + [Environment]::NewLine + 'Requirements:' + [Environment]::NewLine + '  - Windows 10/11 x64' + [Environment]::NewLine + '  - No installation needed' + [Environment]::NewLine + '  - No admin rights required' + [Environment]::NewLine + [Environment]::NewLine + 'The runtime/ folder contains application internals.' + [Environment]::NewLine + 'Do not modify or delete files in it.'
+                  $$readme | Out-File (Join-Path $$portableDir 'README.txt') -Encoding UTF8
 
                   # Everything else goes into runtime/
                   # Sidecar

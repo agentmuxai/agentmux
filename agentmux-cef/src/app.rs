@@ -68,6 +68,18 @@ wrap_window_delegate! {
             1 // Frameless — AgentMux uses its own custom title bar
         }
 
+        fn can_resize(&self, _window: Option<&mut Window>) -> i32 {
+            1
+        }
+
+        fn can_maximize(&self, _window: Option<&mut Window>) -> i32 {
+            1
+        }
+
+        fn can_minimize(&self, _window: Option<&mut Window>) -> i32 {
+            1
+        }
+
         fn window_runtime_style(&self) -> RuntimeStyle {
             RuntimeStyle::ALLOY
         }
