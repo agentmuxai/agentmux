@@ -69,14 +69,22 @@ impl AgentMuxHandler {
         let browser = browser.cloned().expect("Browser is None");
         tracing::info!("Browser created (total: {})", self.browser_list.len() + 1);
 
-        // Store the browser handle in AppState for IPC event emission.
-        // Only store the first (main) browser.
+        // Register browser in the multi-window map.
+        // First browser is "main"; additional browsers get labels from their URL params.
         {
-            let mut state_browser = self.state.browser.lock().unwrap();
-            if state_browser.is_none() {
-                *state_browser = Some(browser.clone());
-                tracing::info!("Stored main browser handle in AppState");
-            }
+            let mut browsers = self.state.browsers.lock().unwrap();
+            let label = if browsers.is_empty() {
+                "main".to_string()
+            } else {
+                // Extract windowLabel from the URL query params if available
+                let url = browser.main_frame()
+                    .map(|f| { let u = f.url(); CefString::from(&u).to_string() })
+                    .unwrap_or_default();
+                extract_query_param(&url, "windowLabel")
+                    .unwrap_or_else(|| format!("window-{}", uuid::Uuid::new_v4()))
+            };
+            tracing::info!("Registered browser: label={} (total: {})", label, browsers.len() + 1);
+            browsers.insert(label, browser.clone());
         }
 
         // For native frameless windows: extend the client area into the frame
@@ -109,14 +117,15 @@ impl AgentMuxHandler {
 
         let mut browser = browser.cloned().expect("Browser is None");
 
-        // Clear the browser handle from AppState if this is the main browser.
+        // Unregister browser from the multi-window map.
         {
-            let mut state_browser = self.state.browser.lock().unwrap();
-            if let Some(ref stored) = *state_browser {
-                if stored.is_same(Some(&mut browser)) != 0 {
-                    *state_browser = None;
-                    tracing::info!("Cleared main browser handle from AppState");
-                }
+            let mut browsers = self.state.browsers.lock().unwrap();
+            let label = browsers.iter()
+                .find(|(_, b)| b.is_same(Some(&mut browser)) != 0)
+                .map(|(k, _)| k.clone());
+            if let Some(label) = label {
+                browsers.remove(&label);
+                tracing::info!("Unregistered browser: label={} (remaining: {})", label, browsers.len());
             }
         }
 
@@ -383,4 +392,16 @@ unsafe fn setup_native_frameless(hwnd: *mut std::ffi::c_void) {
     } else {
         tracing::warn!("DwmExtendFrameIntoClientArea failed: hr={:#x}", result);
     }
+}
+
+/// Extract a query parameter value from a URL string.
+fn extract_query_param(url: &str, key: &str) -> Option<String> {
+    let query = url.split('?').nth(1)?;
+    for pair in query.split('&') {
+        let mut kv = pair.splitn(2, '=');
+        if kv.next()? == key {
+            return kv.next().map(|v| v.to_string());
+        }
+    }
+    None
 }

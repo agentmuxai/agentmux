@@ -9,6 +9,36 @@ use std::sync::Mutex;
 
 use cef::Browser;
 
+// ── Cross-window drag types (ported from src-tauri/src/state.rs) ─────────
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DragType {
+    Pane,
+    Tab,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DragPayload {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub block_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tab_id: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DragSession {
+    pub drag_id: String,
+    pub drag_type: DragType,
+    pub source_window: String,
+    pub source_workspace_id: String,
+    pub source_tab_id: String,
+    pub payload: DragPayload,
+    pub started_at: u64,
+}
+
 /// Tracks a stable sequential instance number for each open window.
 /// Main window is always 1. Additional windows get 2, 3, ... in creation order.
 /// Numbers are never reused within a session.
@@ -135,8 +165,12 @@ pub struct AppState {
     /// Verified on every IPC request to prevent unauthorized local access.
     pub ipc_token: String,
 
-    /// CEF Browser handle for execute_javascript (Rust -> JS events)
-    pub browser: Mutex<Option<Browser>>,
+    /// CEF Browser handles keyed by window label (multi-window support).
+    /// "main" is the primary window; tear-off windows get "window-{UUID}" labels.
+    pub browsers: Mutex<HashMap<String, Browser>>,
+
+    /// Active cross-window drag session (at most one at a time).
+    pub active_drag: Mutex<Option<DragSession>>,
 
     /// Windows Job Object handle -- keeps backend alive until frontend exits
     #[cfg(target_os = "windows")]
@@ -160,7 +194,8 @@ impl Default for AppState {
             cli_login_cancel: Mutex::new(None),
             ipc_port: Mutex::new(0),
             ipc_token: uuid::Uuid::new_v4().to_string(),
-            browser: Mutex::new(None),
+            browsers: Mutex::new(HashMap::new()),
+            active_drag: Mutex::new(None),
             #[cfg(target_os = "windows")]
             job_handle: Mutex::new(None),
         }
