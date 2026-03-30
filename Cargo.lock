@@ -10,7 +10,7 @@ checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
 name = "agentmux"
-version = "0.32.111"
+version = "0.32.112"
 dependencies = [
  "chrono",
  "dirs 5.0.1",
@@ -47,7 +47,7 @@ dependencies = [
 
 [[package]]
 name = "agentmux-cef"
-version = "0.32.111"
+version = "0.32.112"
 dependencies = [
  "axum 0.8.8",
  "cef",
@@ -76,7 +76,7 @@ dependencies = [
 
 [[package]]
 name = "agentmuxsrv-rs"
-version = "0.32.111"
+version = "0.32.112"
 dependencies = [
  "async-stream",
  "axum 0.7.9",
@@ -6231,7 +6231,7 @@ dependencies = [
  "indexmap 2.13.0",
  "toml_datetime 1.1.0+spec-1.1.0",
  "toml_parser",
- "winnow 1.0.0",
+ "winnow 1.0.1",
 ]
 
 [[package]]
@@ -6240,7 +6240,7 @@ version = "1.1.0+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2334f11ee363607eb04df9b8fc8a13ca1715a72ba8662a26ac285c98aabb4011"
 dependencies = [
- "winnow 1.0.0",
+ "winnow 1.0.1",
 ]
 
 [[package]]
@@ -7671,9 +7671,9 @@ dependencies = [
 
 [[package]]
 name = "winnow"
-version = "1.0.0"
+version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a90e88e4667264a994d34e6d1ab2d26d398dcdca8b7f52bec8668957517fc7d8"
+checksum = "09dac053f1cd375980747450bfc7250c264eaae0583872e845c0c7cd578872b5"
 dependencies = [
  "memchr",
 ]
@@ -7864,7 +7864,7 @@ dependencies = [
 
 [[package]]
 name = "wsh-rs"
-version = "0.32.111"
+version = "0.32.112"
 dependencies = [
  "base64 0.22.1",
  "clap",
