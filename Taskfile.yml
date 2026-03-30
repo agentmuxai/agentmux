@@ -752,7 +752,8 @@ tasks:
         platforms: [windows]
         cmds:
             - cmd: |
-                cefDir=$(find target -name 'libcef.dll' 2>/dev/null | head -1)
+                cefDir=$(find target/release -name 'libcef.dll' 2>/dev/null | head -1)
+                [ -z "$cefDir" ] && cefDir=$(find target -name 'libcef.dll' 2>/dev/null | head -1)
                 if [ -z "$cefDir" ]; then
                   echo "❌ libcef.dll not found in target/ — build agentmux-cef first"
                   exit 1
@@ -804,6 +805,7 @@ tasks:
             - copy:schema
         env:
             AGENTMUX_ENVFILE: "{{.ROOT_DIR}}/.env"
+            AGENTMUX_DEV: "1"
 
     cef:dev:serve:
         internal: true
@@ -812,7 +814,7 @@ tasks:
             - cmd: |
                 npx vite --config vite.config.tauri.ts --port 5173 &
                 VITE_PID=$!
-                trap "kill $VITE_PID 2>/dev/null" EXIT INT TERM
+                trap "kill $VITE_PID 2>/dev/null" EXIT
                 echo "Waiting for Vite on port 5173 (pid $VITE_PID)..."
                 for i in $(seq 1 30); do
                   curl -s http://localhost:5173 > /dev/null 2>&1 && break

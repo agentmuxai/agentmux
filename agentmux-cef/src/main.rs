@@ -173,20 +173,34 @@ fn main() {
         .and_then(|p| p.parent().map(|d| d.to_path_buf()))
         .unwrap_or_default();
     let runtime_dir = exe_dir.join("runtime");
-    let (resources_dir, locales_dir) = if runtime_dir.exists() {
-        (
-            CefString::from(runtime_dir.to_str().unwrap_or("")),
-            CefString::from(runtime_dir.join("locales").to_str().unwrap_or("")),
-        )
+    let base_dir = if runtime_dir.exists() {
+        runtime_dir
     } else {
-        (CefString::default(), CefString::default())
+        // Dev mode: resources are flat alongside the exe in dist/cef/
+        exe_dir.clone()
+    };
+    let resources_dir = CefString::from(base_dir.to_str().unwrap_or(""));
+    let locales_dir = CefString::from(base_dir.join("locales").to_str().unwrap_or(""));
+
+    // Resolve cache path — dev mode uses a separate cache to avoid singleton conflict
+    // with any running portable build.
+    let is_dev = std::env::var("AGENTMUX_DEV").is_ok();
+    let cache_dir = if is_dev {
+        let dir = dirs::data_dir()
+            .unwrap_or_else(|| std::path::PathBuf::from("."))
+            .join("ai.agentmux.cef.dev");
+        std::fs::create_dir_all(&dir).ok();
+        CefString::from(dir.to_str().unwrap_or(""))
+    } else {
+        CefString::default()
     };
 
     // Configure CEF settings.
     let settings = Settings {
         no_sandbox: 1,
         background_color: 0xFF000000,
-        remote_debugging_port: 9222,
+        remote_debugging_port: if is_dev { 9223 } else { 9222 },
+        root_cache_path: cache_dir,
         resources_dir_path: resources_dir,
         locales_dir_path: locales_dir,
         // CEF subprocess (renderer, GPU) uses the same exe
