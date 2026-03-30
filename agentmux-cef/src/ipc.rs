@@ -202,10 +202,21 @@ async fn route_command(
         "move_window_by" => commands::window::move_window_by(args),
         "toggle_devtools" => commands::window::toggle_devtools(state),
         "show_context_menu" => {
-            // Stub for now — CEF has native context menu support
-            tracing::debug!("show_context_menu: stubbed in CEF (native menu used)");
+            tracing::debug!("show_context_menu: handled in JS overlay");
             Ok(serde_json::Value::Null)
         }
+
+        // ---- Cross-window drag ----
+        "start_cross_drag" => commands::drag::start_cross_drag(state, args),
+        "update_cross_drag" => commands::drag::update_cross_drag(state, args),
+        "complete_cross_drag" => commands::drag::complete_cross_drag(state, args),
+        "cancel_cross_drag" => commands::drag::cancel_cross_drag(state, args),
+        "get_cursor_point" => commands::drag::get_cursor_point(),
+        "get_mouse_button_state" => commands::drag::get_mouse_button_state(),
+        "set_drag_cursor" => commands::drag::set_drag_cursor(),
+        "restore_drag_cursor" => commands::drag::restore_drag_cursor(),
+        "release_drag_capture" => commands::drag::release_drag_capture(state),
+        "set_js_drag_active" => commands::drag::set_js_drag_active(args),
 
         // ---- Tier 3: Provider/CLI management ----
         "detect_installed_clis" => commands::providers::detect_installed_clis().await,

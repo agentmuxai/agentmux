@@ -37,21 +37,8 @@ pub fn handle_stub(cmd: &str, args: &serde_json::Value) -> serde_json::Value {
 pub fn is_stub_command(cmd: &str) -> bool {
     matches!(
         cmd,
-        // Cross-window drag (Phase 3)
-        "start_cross_drag"
-            | "update_cross_drag"
-            | "complete_cross_drag"
-            | "cancel_cross_drag"
-            | "set_drag_cursor"
-            | "restore_drag_cursor"
-            | "release_drag_capture"
-            | "get_cursor_point"
-            | "get_mouse_button_state"
-            | "set_js_drag_active"
-            // Multi-window (Phase 3)
-            | "open_new_window"
-            | "list_windows"
-            | "focus_window"
+        // Multi-window (Phase 4)
+        "open_new_window"
             | "open_window_at_position"
             // Legacy stubs
             | "open_claude_code_auth"

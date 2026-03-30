@@ -190,7 +190,7 @@ pub fn set_window_transparency(state: &Arc<AppState>, args: &serde_json::Value) 
 /// In CEF Views mode, browser.host().window_handle() returns NULL,
 /// so we enumerate windows and find ours by process ID.
 #[cfg(target_os = "windows")]
-unsafe fn find_own_top_level_window() -> *mut std::ffi::c_void {
+pub(crate) unsafe fn find_own_top_level_window() -> *mut std::ffi::c_void {
     use windows_sys::Win32::UI::WindowsAndMessaging::*;
     use windows_sys::Win32::System::Threading::GetCurrentProcessId;
 

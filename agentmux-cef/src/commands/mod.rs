@@ -8,4 +8,5 @@ pub mod platform;
 pub mod window;
 pub mod backend;
 pub mod providers;
+pub mod drag;
 pub mod stubs;
