@@ -1042,6 +1042,7 @@ declare global {
         "conn:*"?: boolean;
         "conn:askbeforewshinstall"?: boolean;
         "conn:wshenabled"?: boolean;
+        "network:lan_discovery"?: boolean;
     };
 
     // waveobj.StickerClickOptsType
