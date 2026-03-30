@@ -753,22 +753,28 @@ tasks:
                   }
                   Write-Host 'Found CEF binaries in:' $cefDir
                   New-Item -ItemType Directory -Force -Path dist/cef | Out-Null
-                  # Copy CEF DLLs
+                  # Core CEF DLLs (required)
                   Copy-Item -Force (Join-Path $cefDir 'libcef.dll') dist/cef/
                   Copy-Item -Force (Join-Path $cefDir 'chrome_elf.dll') dist/cef/ -ErrorAction SilentlyContinue
+                  # GPU support (required — ANGLE + D3D compiler)
+                  Copy-Item -Force (Join-Path $cefDir 'libEGL.dll') dist/cef/ -ErrorAction SilentlyContinue
+                  Copy-Item -Force (Join-Path $cefDir 'libGLESv2.dll') dist/cef/ -ErrorAction SilentlyContinue
                   Copy-Item -Force (Join-Path $cefDir 'd3dcompiler_47.dll') dist/cef/ -ErrorAction SilentlyContinue
-                  Copy-Item -Force (Join-Path $cefDir 'vk_swiftshader.dll') dist/cef/ -ErrorAction SilentlyContinue
-                  # Copy CEF data files
+                  # CEF data files (required)
                   Copy-Item -Force (Join-Path $cefDir 'icudtl.dat') dist/cef/ -ErrorAction SilentlyContinue
                   Copy-Item -Force (Join-Path $cefDir 'v8_context_snapshot.bin') dist/cef/ -ErrorAction SilentlyContinue
-                  Copy-Item -Force (Join-Path $cefDir 'snapshot_blob.bin') dist/cef/ -ErrorAction SilentlyContinue
                   Copy-Item -Force (Join-Path $cefDir '*.pak') dist/cef/ -ErrorAction SilentlyContinue
-                  # Copy locales
-                  if (Test-Path (Join-Path $cefDir 'locales')) {
-                    New-Item -ItemType Directory -Force -Path dist/cef/locales | Out-Null
-                    Copy-Item -Recurse -Force (Join-Path $cefDir 'locales/*') dist/cef/locales/
+                  # Locales — en-US only (saves ~18 MB)
+                  New-Item -ItemType Directory -Force -Path dist/cef/locales | Out-Null
+                  if (Test-Path (Join-Path $cefDir 'locales/en-US.pak')) {
+                    Copy-Item -Force (Join-Path $cefDir 'locales/en-US.pak') dist/cef/locales/
                   }
-                  Write-Host '✓ Bundled CEF binaries to dist/cef/'
+                  # SKIPPED (not needed, saves ~18 MB):
+                  #   vk_swiftshader.dll, vulkan-1.dll, vk_swiftshader_icd.json (SwiftShader — deprecated upstream)
+                  #   dxil.dll, dxcompiler.dll (WebGPU — not used)
+                  #   snapshot_blob.bin (removed in CEF 133+)
+                  #   49 non-English locale .pak files
+                  Write-Host '✓ Bundled CEF binaries to dist/cef/ (optimized: GPU kept, SwiftShader/WebGPU/extra locales stripped)'
                 "
             - echo "CEF bundle complete"
 
@@ -814,6 +820,79 @@ tasks:
         internal: true
         platforms: [linux]
         cmd: cd dist/cef && ./agentmux-cef --url=http://localhost:5173 --use-alloy-style
+
+    cef:package:portable:
+        desc: Package CEF build as a portable directory (Windows). Includes file stripping optimizations.
+        platforms: [windows]
+        cmds:
+            - cmd: |
+                powershell -Command "
+                  $$version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+                  $$outDir = 'dist'
+                  $$portableDir = Join-Path $$outDir \"agentmux-cef-$$version-x64-portable\"
+                  $$zipPath = Join-Path $$outDir \"agentmux-cef-$$version-x64-portable.zip\"
+
+                  # Verify required files
+                  if (-not (Test-Path 'dist/cef/agentmux-cef.exe')) { throw 'agentmux-cef.exe not found — run task cef:build first' }
+                  if (-not (Test-Path 'dist/cef/libcef.dll')) { throw 'libcef.dll not found — run task cef:bundle first' }
+                  if (-not (Test-Path 'dist/bin/agentmuxsrv-rs.x64.exe')) { throw 'agentmuxsrv-rs.x64.exe not found — run task build:backend first' }
+                  if (-not (Test-Path 'dist/frontend/index.html')) { throw 'frontend not built — run task build:frontend first' }
+
+                  # Clean previous
+                  if (Test-Path $$portableDir) { Remove-Item $$portableDir -Recurse -Force }
+                  if (Test-Path $$zipPath) { Remove-Item $$zipPath -Force }
+
+                  Write-Host 'Packaging AgentMux CEF' $$version 'Portable...' -ForegroundColor Cyan
+
+                  # Create portable directory
+                  New-Item -ItemType Directory -Force -Path $$portableDir | Out-Null
+                  New-Item -ItemType Directory -Force -Path (Join-Path $$portableDir 'locales') | Out-Null
+
+                  # Host binary
+                  Copy-Item 'dist/cef/agentmux-cef.exe' $$portableDir -Force
+
+                  # Sidecar (flat layout — adjacent to host binary)
+                  Copy-Item 'dist/bin/agentmuxsrv-rs.x64.exe' $$portableDir -Force
+
+                  # Frontend
+                  Copy-Item -Recurse 'dist/frontend' (Join-Path $$portableDir 'frontend') -Force
+
+                  # CEF core (required)
+                  Copy-Item 'dist/cef/libcef.dll' $$portableDir -Force
+                  Copy-Item 'dist/cef/chrome_elf.dll' $$portableDir -Force
+                  Copy-Item 'dist/cef/icudtl.dat' $$portableDir -Force
+                  Copy-Item 'dist/cef/v8_context_snapshot.bin' $$portableDir -Force -ErrorAction SilentlyContinue
+
+                  # GPU support (required — ANGLE + D3D)
+                  Copy-Item 'dist/cef/libEGL.dll' $$portableDir -Force -ErrorAction SilentlyContinue
+                  Copy-Item 'dist/cef/libGLESv2.dll' $$portableDir -Force -ErrorAction SilentlyContinue
+                  Copy-Item 'dist/cef/d3dcompiler_47.dll' $$portableDir -Force -ErrorAction SilentlyContinue
+
+                  # Resource paks
+                  Copy-Item 'dist/cef/chrome_100_percent.pak' $$portableDir -Force -ErrorAction SilentlyContinue
+                  Copy-Item 'dist/cef/chrome_200_percent.pak' $$portableDir -Force -ErrorAction SilentlyContinue
+                  Copy-Item 'dist/cef/resources.pak' $$portableDir -Force -ErrorAction SilentlyContinue
+
+                  # Locale — en-US only
+                  Copy-Item 'dist/cef/locales/en-US.pak' (Join-Path $$portableDir 'locales') -Force
+
+                  # ZIP it
+                  Write-Host '  Creating ZIP...' -ForegroundColor Gray
+                  Compress-Archive -Path (Join-Path $$portableDir '*') -DestinationPath $$zipPath -Force
+                  $$zipSize = [math]::Round((Get-Item $$zipPath).Length / 1MB, 1)
+                  $$dirSize = [math]::Round(((Get-ChildItem $$portableDir -Recurse | Measure-Object Length -Sum).Sum) / 1MB, 1)
+
+                  Write-Host ''
+                  Write-Host '[SUCCESS] CEF Portable build:' -ForegroundColor Green
+                  Write-Host \"  Directory: $$portableDir ($$dirSize MB)\" -ForegroundColor White
+                  Write-Host \"  ZIP: $$zipPath ($$zipSize MB)\" -ForegroundColor White
+                  Write-Host ''
+                  Write-Host '  Optimizations applied:' -ForegroundColor Gray
+                  Write-Host '    - SwiftShader removed (deprecated upstream, saves ~6 MB)' -ForegroundColor Gray
+                  Write-Host '    - WebGPU DLLs removed (dxil/dxcompiler, saves ~6.5 MB)' -ForegroundColor Gray
+                  Write-Host '    - 49 non-English locales removed (saves ~18 MB)' -ForegroundColor Gray
+                  Write-Host '    - GPU support preserved (ANGLE + D3D compiler)' -ForegroundColor Gray
+                "
 
     cef:clean:
         desc: Clean CEF build artifacts.
