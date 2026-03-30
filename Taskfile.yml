@@ -809,15 +809,21 @@ tasks:
         internal: true
         desc: Start Vite dev server and CEF host concurrently.
         cmds:
-            - cmd: npx vite --config vite.config.tauri.ts --port 5173 &
             - cmd: |
-                echo "Waiting for Vite on port 5173..."
+                npx vite --config vite.config.tauri.ts --port 5173 &
+                VITE_PID=$!
+                trap "kill $VITE_PID 2>/dev/null" EXIT INT TERM
+                echo "Waiting for Vite on port 5173 (pid $VITE_PID)..."
                 for i in $(seq 1 30); do
                   curl -s http://localhost:5173 > /dev/null 2>&1 && break
                   sleep 1
                 done
+                if ! curl -s http://localhost:5173 > /dev/null 2>&1; then
+                  echo "❌ Vite failed to start within 30 seconds"
+                  exit 1
+                fi
                 echo "Vite ready."
-            - task: cef:run
+                cd dist/cef && ./agentmux-cef.exe --url=http://localhost:5173
 
     cef:run:
         desc: Run the CEF host (must be built and bundled first).
