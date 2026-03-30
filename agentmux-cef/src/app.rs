@@ -42,6 +42,12 @@ wrap_window_delegate! {
             let mut view = View::from(browser_view);
             window.add_child_view(Some(&mut view));
             window.show();
+            // Focus the browser so keyboard input (Ctrl+C/V, typing) works immediately.
+            if let Some(browser) = browser_view.browser() {
+                if let Some(host) = browser.host() {
+                    host.set_focus(1);
+                }
+            }
         }
 
         fn on_window_destroyed(&self, _window: Option<&mut Window>) {
