@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { getApi, lanInstancesAtom } from "@/store/global";
+import { getApi, lanInstancesAtom, settingsAtom } from "@/store/global";
 import { invokeCommand } from "@/app/platform/ipc";
 import { createEffect, createSignal, For, onCleanup, Show, type JSX } from "solid-js";
 
@@ -30,6 +30,7 @@ const HostPopover = (): JSX.Element => {
 
     const lanInstances = lanInstancesAtom;
     const lanCount = () => lanInstances().length;
+    const lanDiscoveryEnabled = () => !!(settingsAtom() as any)?.["network:lan_discovery"];
 
     const handleClick = async () => {
         if (popoverOpen()) {
@@ -128,9 +129,15 @@ const HostPopover = (): JSX.Element => {
                                 </For>
                                 <div class="status-bar-popover-divider" />
                             </Show>
-                            <Show when={lanCount() === 0}>
+                            <Show when={lanCount() === 0 && lanDiscoveryEnabled()}>
                                 <div class="status-bar-popover-row" style={{ opacity: "0.5" }}>
                                     <span>No LAN peers found</span>
+                                </div>
+                                <div class="status-bar-popover-divider" />
+                            </Show>
+                            <Show when={lanCount() === 0 && !lanDiscoveryEnabled()}>
+                                <div class="status-bar-popover-row" style={{ opacity: "0.5" }}>
+                                    <span>LAN discovery disabled</span>
                                 </div>
                                 <div class="status-bar-popover-row" style={{ opacity: "0.4", "font-size": "0.85em" }}>
                                     <span>Enable via "network:lan_discovery": true</span>
