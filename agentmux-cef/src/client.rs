@@ -79,6 +79,18 @@ impl AgentMuxHandler {
             }
         }
 
+        // For native frameless windows: extend the client area into the frame
+        // to hide the visible WS_THICKFRAME resize border while keeping resize.
+        #[cfg(target_os = "windows")]
+        if let Some(host) = browser.host() {
+            let hwnd = host.window_handle();
+            if !hwnd.0.is_null() {
+                unsafe {
+                    setup_native_frameless(hwnd.0 as *mut std::ffi::c_void);
+                }
+            }
+        }
+
         self.browser_list.push(browser);
     }
 
@@ -349,5 +361,26 @@ wrap_load_handler! {
             let mut inner = self.inner.lock().expect("Failed to lock handler");
             inner.on_load_error(browser, frame, error_code, error_text, failed_url);
         }
+    }
+}
+
+/// Set up a native frameless window: extend client area over the thick frame
+/// border so the resize handle is invisible but still functional.
+#[cfg(target_os = "windows")]
+unsafe fn setup_native_frameless(hwnd: *mut std::ffi::c_void) {
+    use windows_sys::Win32::Graphics::Dwm::DwmExtendFrameIntoClientArea;
+    use windows_sys::Win32::UI::Controls::MARGINS;
+
+    let margins = MARGINS {
+        cxLeftWidth: -1,
+        cxRightWidth: -1,
+        cyTopHeight: -1,
+        cyBottomHeight: -1,
+    };
+    let result = DwmExtendFrameIntoClientArea(hwnd, &margins);
+    if result == 0 {
+        tracing::info!("Applied DwmExtendFrameIntoClientArea to hide resize border");
+    } else {
+        tracing::warn!("DwmExtendFrameIntoClientArea failed: hr={:#x}", result);
     }
 }
