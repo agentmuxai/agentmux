@@ -11,7 +11,7 @@ This spec defines how to benchmark the two host/shell variants of AgentMux:
 | | Tauri Build | CEF Build |
 |---|---|---|
 | **WebView engine** | System WebView2 (Edge/Chromium) on Windows; WebKitGTK on Linux | Bundled Chromium (CEF 146, libcef.dll ~251 MB) |
-| **Frontend** | Same React + xterm.js bundle | Same React + xterm.js bundle |
+| **Frontend** | Same SolidJS + xterm.js bundle | Same SolidJS + xterm.js bundle |
 | **Backend** | Same Rust sidecar (agentmuxsrv-rs) | Same Rust sidecar (agentmuxsrv-rs) |
 
 The only variable under test is the host process and its embedded browser engine. Everything else is held constant.
