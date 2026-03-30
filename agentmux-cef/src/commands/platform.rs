@@ -430,8 +430,10 @@ pub fn open_external(args: &serde_json::Value) -> Result<serde_json::Value, Stri
 
     #[cfg(target_os = "windows")]
     {
-        let _ = std::process::Command::new("cmd")
-            .args(["/C", "start", "", url])
+        // Use explorer.exe instead of cmd /C start to avoid command injection
+        // (cmd.exe interprets & and | in URLs as command separators)
+        let _ = std::process::Command::new("explorer")
+            .arg(url)
             .spawn()
             .map_err(|e| format!("Failed to open URL: {}", e))?;
     }
