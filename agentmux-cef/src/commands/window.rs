@@ -336,15 +336,17 @@ unsafe fn apply_win10_acrylic(hwnd: *mut std::ffi::c_void, enable: bool) {
 }
 
 /// Get the current window label.
-/// TODO: per-window label via IPC request header or URL param.
-pub fn get_window_label() -> serde_json::Value {
-    serde_json::json!("main")
+/// The frontend passes its own label (extracted from URL params) as an arg.
+pub fn get_window_label(args: &serde_json::Value) -> serde_json::Value {
+    let label = args.get("label").and_then(|v| v.as_str()).unwrap_or("main");
+    serde_json::json!(label)
 }
 
 /// Check if this is the main window.
-/// TODO: per-window detection via IPC request context.
-pub fn is_main_window() -> serde_json::Value {
-    serde_json::json!(true)
+/// The frontend passes its own label (extracted from URL params) as an arg.
+pub fn is_main_window(args: &serde_json::Value) -> serde_json::Value {
+    let label = args.get("label").and_then(|v| v.as_str()).unwrap_or("main");
+    serde_json::json!(label == "main")
 }
 
 /// List all open window labels.
@@ -395,4 +397,119 @@ pub fn get_window_count(state: &Arc<AppState>) -> serde_json::Value {
 /// Direct host.show_dev_tools() calls crash with current CEF bindings.
 pub fn toggle_devtools(_state: &Arc<AppState>) -> Result<serde_json::Value, String> {
     Ok(serde_json::json!({ "remote_debug_url": "http://localhost:9222" }))
+}
+
+/// Resolve the base URL for the frontend.
+/// Production: IPC server serves static files from `frontend/` next to the exe.
+/// Dev: Vite dev server at `http://localhost:5173`.
+pub(crate) fn resolve_frontend_base_url(ipc_port: u16) -> String {
+    let exe_dir = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.to_path_buf()));
+    let has_frontend = exe_dir
+        .as_ref()
+        .map(|d| d.join("frontend/index.html").exists())
+        .unwrap_or(false);
+    if has_frontend {
+        format!("http://127.0.0.1:{}", ipc_port)
+    } else {
+        "http://localhost:5173".to_string()
+    }
+}
+
+/// Open a new window (Ctrl+Shift+N or StatusBar click).
+/// Creates a new CEF browser window with a unique label and IPC credentials.
+pub fn open_new_window(state: &Arc<AppState>) -> Result<serde_json::Value, String> {
+    let window_id = uuid::Uuid::new_v4();
+    let label = format!("window-{}", window_id.simple());
+
+    let ipc_port = *state.ipc_port.lock().unwrap();
+    let ipc_token = &state.ipc_token;
+    let base_url = resolve_frontend_base_url(ipc_port);
+
+    let separator = if base_url.contains('?') { "&" } else { "?" };
+    let url = format!(
+        "{}{}ipc_port={}&ipc_token={}&windowLabel={}",
+        base_url, separator, ipc_port, ipc_token, label
+    );
+
+    tracing::info!(label = %label, "[window] open_new_window");
+
+    // Position offset from the current window so it's visible
+    let (pos_x, pos_y) = get_offset_position();
+
+    #[cfg(target_os = "windows")]
+    {
+        use windows_sys::Win32::UI::WindowsAndMessaging::*;
+
+        let window_info = cef::WindowInfo {
+            runtime_style: cef::RuntimeStyle::ALLOY,
+            window_name: cef::CefString::from("AgentMux"),
+            style: WS_POPUP | WS_CLIPCHILDREN | WS_CLIPSIBLINGS | WS_VISIBLE | WS_MINIMIZEBOX | WS_MAXIMIZEBOX,
+            bounds: cef::Rect {
+                x: pos_x,
+                y: pos_y,
+                width: 1200,
+                height: 800,
+            },
+            ..Default::default()
+        };
+
+        let settings = cef::BrowserSettings {
+            windowless_frame_rate: 60,
+            background_color: 0xFF000000,
+            ..Default::default()
+        };
+
+        let cef_url = cef::CefString::from(url.as_str());
+        cef::browser_host_create_browser(
+            Some(&window_info),
+            None,
+            Some(&cef_url),
+            Some(&settings),
+            None,
+            None,
+        );
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (pos_x, pos_y, url);
+        return Err("open_new_window not yet implemented on this platform".to_string());
+    }
+
+    // Register instance number
+    {
+        let mut reg = state.window_instance_registry.lock().unwrap();
+        let num = reg.register(&label);
+        tracing::info!(label = %label, instance = %num, "[window] new window registered");
+    }
+
+    // Notify all windows of the count change
+    let count = state.window_instance_registry.lock().unwrap().count();
+    crate::events::emit_event_all_windows(state, "window-instances-changed", &serde_json::json!(count));
+
+    Ok(serde_json::json!(label))
+}
+
+/// Get an offset position for a new window: 30px right and 30px down from the current window.
+fn get_offset_position() -> (i32, i32) {
+    #[cfg(target_os = "windows")]
+    unsafe {
+        use windows_sys::Win32::UI::WindowsAndMessaging::*;
+        use windows_sys::Win32::Foundation::RECT;
+        let hwnd = find_own_top_level_window();
+        if !hwnd.is_null() {
+            let mut rect: RECT = std::mem::zeroed();
+            GetWindowRect(hwnd, &mut rect);
+            return (rect.left + 30, rect.top + 30);
+        }
+    }
+    #[cfg(target_os = "windows")]
+    {
+        use windows_sys::Win32::UI::WindowsAndMessaging::CW_USEDEFAULT;
+        return (CW_USEDEFAULT, CW_USEDEFAULT);
+    }
+    #[cfg(not(target_os = "windows"))]
+    (100, 100)
 }

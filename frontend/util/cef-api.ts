@@ -398,10 +398,12 @@ export function buildCefApi(): AppApi {
             invokeCommand("open_external", { url: "http://127.0.0.1:9222" }).catch(console.error);
         },
         getWindowLabel: async () => {
-            return await invokeCommand<string>("get_window_label");
+            const params = new URLSearchParams(window.location.search);
+            return params.get("windowLabel") ?? "main";
         },
         isMainWindow: async () => {
-            return await invokeCommand<boolean>("is_main_window");
+            const params = new URLSearchParams(window.location.search);
+            return !params.has("windowLabel");
         },
         listWindows: async () => {
             return await invokeCommand<string[]>("list_windows");

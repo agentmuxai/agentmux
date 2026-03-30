@@ -291,9 +291,11 @@ pub fn open_window_at_position(state: &Arc<AppState>, args: &serde_json::Value) 
     // Build URL with IPC credentials and tear-off params
     let ipc_port = *state.ipc_port.lock().unwrap();
     let ipc_token = &state.ipc_token;
+    let base_url = super::window::resolve_frontend_base_url(ipc_port);
+    let separator = if base_url.contains('?') { "&" } else { "?" };
     let mut url = format!(
-        "http://localhost:5173?ipc_port={}&ipc_token={}&windowLabel={}",
-        ipc_port, ipc_token, label
+        "{}{}ipc_port={}&ipc_token={}&windowLabel={}",
+        base_url, separator, ipc_port, ipc_token, label
     );
     if !workspace_id.is_empty() {
         url.push_str(&format!("&workspaceId={}", workspace_id));
