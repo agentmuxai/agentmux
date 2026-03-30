@@ -37,10 +37,8 @@ pub fn handle_stub(cmd: &str, args: &serde_json::Value) -> serde_json::Value {
 pub fn is_stub_command(cmd: &str) -> bool {
     matches!(
         cmd,
-        // Multi-window (Phase 4)
-        "open_new_window"
-            // Legacy stubs
-            | "open_claude_code_auth"
+        // Legacy stubs
+        "open_claude_code_auth"
             | "get_claude_code_auth"
             | "disconnect_claude_code"
             // Existing stubs

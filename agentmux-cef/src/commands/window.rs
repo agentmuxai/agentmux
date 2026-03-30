@@ -418,7 +418,7 @@ pub(crate) fn resolve_frontend_base_url(ipc_port: u16) -> String {
 }
 
 /// Open a new window (Ctrl+Shift+N or StatusBar click).
-/// Creates a new CEF browser window with a unique label and IPC credentials.
+/// Creates a new CEF Views window with the same frameless style as the main window.
 pub fn open_new_window(state: &Arc<AppState>) -> Result<serde_json::Value, String> {
     let window_id = uuid::Uuid::new_v4();
     let label = format!("window-{}", window_id.simple());
@@ -435,7 +435,16 @@ pub fn open_new_window(state: &Arc<AppState>) -> Result<serde_json::Value, Strin
 
     tracing::info!(label = %label, "[window] open_new_window");
 
-    // Position offset from the current window so it's visible
+    // Create a native browser window (not CEF Views — that requires the UI thread).
+    // Secondary windows use standard OS chrome (title bar + resize borders).
+    // The main window uses CEF Views for the frameless look, but secondary windows
+    // work fine with native decorations and can be created from any thread.
+    let settings = cef::BrowserSettings {
+        windowless_frame_rate: 60,
+        background_color: 0xFF000000,
+        ..Default::default()
+    };
+
     let (pos_x, pos_y) = get_offset_position();
 
     #[cfg(target_os = "windows")]
@@ -445,19 +454,13 @@ pub fn open_new_window(state: &Arc<AppState>) -> Result<serde_json::Value, Strin
         let window_info = cef::WindowInfo {
             runtime_style: cef::RuntimeStyle::ALLOY,
             window_name: cef::CefString::from("AgentMux"),
-            style: WS_POPUP | WS_CLIPCHILDREN | WS_CLIPSIBLINGS | WS_VISIBLE | WS_MINIMIZEBOX | WS_MAXIMIZEBOX,
+            style: WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN | WS_CLIPSIBLINGS | WS_VISIBLE,
             bounds: cef::Rect {
                 x: pos_x,
                 y: pos_y,
                 width: 1200,
                 height: 800,
             },
-            ..Default::default()
-        };
-
-        let settings = cef::BrowserSettings {
-            windowless_frame_rate: 60,
-            background_color: 0xFF000000,
             ..Default::default()
         };
 
@@ -474,7 +477,7 @@ pub fn open_new_window(state: &Arc<AppState>) -> Result<serde_json::Value, Strin
 
     #[cfg(not(target_os = "windows"))]
     {
-        let _ = (pos_x, pos_y, url);
+        let _ = (pos_x, pos_y, url, settings);
         return Err("open_new_window not yet implemented on this platform".to_string());
     }
 
