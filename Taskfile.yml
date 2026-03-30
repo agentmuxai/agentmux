@@ -825,7 +825,7 @@ tasks:
                   exit 1
                 fi
                 echo "Vite ready."
-                cd dist/cef && ./agentmux-cef.exe --url=http://localhost:5173
+                cd dist/cef && ./agentmux-cef{{exeExt}} --url=http://localhost:5173
 
     cef:run:
         desc: Run the CEF host (must be built and bundled first).
