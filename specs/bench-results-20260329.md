@@ -14,7 +14,7 @@
 |--------|-----------------|---------------|-------|--------|
 | **Disk size** | 30 MB | 365 MB | +335 MB | Tauri |
 | **File count** | 4 | 307 | +303 | Tauri |
-| **Startup (median)** | 5,506 ms | 5,174 ms | -332 ms | CEF |
+| **Startup (to sidecar ready)** | 593 ms | 130 ms | -463 ms (4.5x) | CEF |
 | **Baseline RSS** | 424 MB | 350 MB | -74 MB | CEF |
 
 ## Process Breakdown (baseline, 0 terminals open)
@@ -39,10 +39,12 @@
 ## Analysis
 
 ### Startup
-CEF is ~330 ms faster to first-UI. Likely because:
-- CEF loads from a local DLL (no system WebView2 discovery/handshake)
-- No WebView2 UDF (User Data Folder) initialization overhead
-- Single process model vs WebView2's broker → renderer spawn chain
+CEF is **4.5x faster** (130 ms vs 593 ms to sidecar ready). The ~460 ms
+Tauri overhead comes from:
+- WebView2 runtime discovery and handshake
+- WebView2 UDF (User Data Folder) initialization
+- WebView2 broker → renderer process spawn chain
+- CEF loads from a local DLL with no system discovery step
 
 ### Memory
 CEF uses **74 MB less** than Tauri at baseline. This is surprising — CEF bundles its own
@@ -63,7 +65,7 @@ CEF bundles everything. This is the fundamental trade-off.
 ## Notes
 
 - Both builds use the same backend sidecar (28 MB RSS, identical across runs)
-- Startup times include a fixed 5s UI settle period (subtract for raw startup: ~500 ms Tauri, ~170 ms CEF)
+- Startup times measured to sidecar process appearing (no artificial sleep)
 - These are warm-start measurements (not first-boot cold start)
 - Memory measurements capture all processes matching each app's pattern
 - CEF subprocesses (GPU, renderer) are child processes of `agentmux-cef.exe` and captured
