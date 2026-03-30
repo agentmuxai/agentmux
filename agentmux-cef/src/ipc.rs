@@ -25,6 +25,7 @@ use axum::{
     Json, Router,
 };
 use tower_http::cors::CorsLayer;
+use tower_http::services::ServeDir;
 
 use crate::commands;
 use crate::state::AppState;
@@ -62,11 +63,27 @@ struct HealthResponse {
 /// Start the IPC HTTP server on a random localhost port.
 /// Returns the port number.
 pub async fn start_ipc_server(state: Arc<AppState>) -> u16 {
-    let app = Router::new()
+    // Determine frontend static files directory (next to the executable)
+    let exe_dir = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.to_path_buf()))
+        .unwrap_or_else(|| std::env::current_dir().unwrap());
+    let frontend_dir = exe_dir.join("frontend");
+    let has_frontend = frontend_dir.join("index.html").exists();
+    if has_frontend {
+        tracing::info!("Serving static frontend from: {}", frontend_dir.display());
+    }
+
+    let mut app = Router::new()
         .route("/ipc", post(handle_ipc))
         .route("/health", get(health))
-        .layer(CorsLayer::permissive()) // localhost-only, permissive is fine
+        .layer(CorsLayer::permissive())
         .with_state(state);
+
+    // Serve built frontend as static files (for portable/production builds)
+    if has_frontend {
+        app = app.fallback_service(ServeDir::new(&frontend_dir));
+    }
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await

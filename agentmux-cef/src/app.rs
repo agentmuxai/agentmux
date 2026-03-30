@@ -161,8 +161,22 @@ wrap_browser_process_handler! {
             } else {
                 String::new()
             };
+            // If no URL specified, check if a built frontend exists next to the exe.
+            // If so, load from the IPC server (which serves static files).
+            // Otherwise, fall back to Vite dev server.
             let base_url = if base_url.is_empty() {
-                "http://localhost:5173".to_string()
+                let exe_dir = std::env::current_exe()
+                    .ok()
+                    .and_then(|p| p.parent().map(|d| d.to_path_buf()));
+                let has_frontend = exe_dir
+                    .as_ref()
+                    .map(|d| d.join("frontend/index.html").exists())
+                    .unwrap_or(false);
+                if has_frontend {
+                    format!("http://127.0.0.1:{}", self.ipc_port)
+                } else {
+                    "http://localhost:5173".to_string()
+                }
             } else {
                 base_url
             };
