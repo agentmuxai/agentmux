@@ -39,7 +39,6 @@ pub fn is_stub_command(cmd: &str) -> bool {
         cmd,
         // Multi-window (Phase 4)
         "open_new_window"
-            | "open_window_at_position"
             // Legacy stubs
             | "open_claude_code_auth"
             | "get_claude_code_auth"

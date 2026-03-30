@@ -217,6 +217,9 @@ async fn route_command(
         "restore_drag_cursor" => commands::drag::restore_drag_cursor(),
         "release_drag_capture" => commands::drag::release_drag_capture(state),
         "set_js_drag_active" => commands::drag::set_js_drag_active(args),
+        "open_window_at_position" => commands::drag::open_window_at_position(state, args),
+        "list_windows" => Ok(commands::window::list_windows(state)),
+        "focus_window" => commands::window::focus_window(state, args),
 
         // ---- Tier 3: Provider/CLI management ----
         "detect_installed_clis" => commands::providers::detect_installed_clis().await,

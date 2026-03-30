@@ -336,15 +336,46 @@ unsafe fn apply_win10_acrylic(hwnd: *mut std::ffi::c_void, enable: bool) {
 }
 
 /// Get the current window label.
-/// In Phase 2 (single window), always returns "main".
+/// TODO: per-window label via IPC request header or URL param.
 pub fn get_window_label() -> serde_json::Value {
     serde_json::json!("main")
 }
 
 /// Check if this is the main window.
-/// In Phase 2 (single window), always true.
+/// TODO: per-window detection via IPC request context.
 pub fn is_main_window() -> serde_json::Value {
     serde_json::json!(true)
+}
+
+/// List all open window labels.
+pub fn list_windows(state: &Arc<AppState>) -> serde_json::Value {
+    let browsers = state.browsers.lock().unwrap();
+    let labels: Vec<&String> = browsers.keys().collect();
+    serde_json::json!(labels)
+}
+
+/// Focus a specific window by label.
+pub fn focus_window(state: &Arc<AppState>, args: &serde_json::Value) -> Result<serde_json::Value, String> {
+    let label = args.get("label").and_then(|v| v.as_str()).unwrap_or("main");
+
+    #[cfg(target_os = "windows")]
+    {
+        let browsers = state.browsers.lock().unwrap();
+        if let Some(browser) = browsers.get(label) {
+            if let Some(host) = browser.host() {
+                let hwnd = host.window_handle();
+                if !hwnd.0.is_null() {
+                    unsafe {
+                        windows_sys::Win32::UI::WindowsAndMessaging::SetForegroundWindow(
+                            hwnd.0 as *mut std::ffi::c_void,
+                        );
+                    }
+                }
+            }
+        }
+    }
+    let _ = (state, label);
+    Ok(serde_json::Value::Null)
 }
 
 /// Get the instance number for the current window.

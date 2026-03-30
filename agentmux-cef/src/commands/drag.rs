@@ -265,6 +265,97 @@ pub fn release_drag_capture(state: &Arc<AppState>) -> Result<serde_json::Value, 
     Ok(serde_json::Value::Null)
 }
 
+/// Open a new window at a specific screen position (tear-off).
+/// Creates a new CEF browser window positioned so the cursor lands in the title bar.
+pub fn open_window_at_position(state: &Arc<AppState>, args: &serde_json::Value) -> Result<serde_json::Value, String> {
+    let screen_x = args.get("screenX").and_then(|v| v.as_f64()).unwrap_or(0.0);
+    let screen_y = args.get("screenY").and_then(|v| v.as_f64()).unwrap_or(0.0);
+    let workspace_id = args.get("workspaceId").and_then(|v| v.as_str()).unwrap_or("").to_string();
+
+    let window_id = uuid::Uuid::new_v4();
+    let label = format!("window-{}", window_id.simple());
+
+    let win_w = 1200i32;
+    let win_h = 800i32;
+
+    // Position so cursor lands near top-center of title bar
+    let pos_x = ((screen_x - win_w as f64 / 2.0).max(0.0)) as i32;
+    let pos_y = ((screen_y - 16.0).max(0.0)) as i32;
+
+    tracing::info!(
+        label = %label, pos_x = %pos_x, pos_y = %pos_y,
+        workspace_id = %workspace_id,
+        "[dnd:cef] open_window_at_position"
+    );
+
+    // Build URL with IPC credentials and tear-off params
+    let ipc_port = *state.ipc_port.lock().unwrap();
+    let ipc_token = &state.ipc_token;
+    let mut url = format!(
+        "http://localhost:5173?ipc_port={}&ipc_token={}&windowLabel={}",
+        ipc_port, ipc_token, label
+    );
+    if !workspace_id.is_empty() {
+        url.push_str(&format!("&workspaceId={}", workspace_id));
+    }
+
+    // Create a new browser window
+    #[cfg(target_os = "windows")]
+    {
+        use windows_sys::Win32::UI::WindowsAndMessaging::*;
+
+        let window_info = cef::WindowInfo {
+            runtime_style: cef::RuntimeStyle::ALLOY,
+            window_name: cef::CefString::from("AgentMux"),
+            #[cfg(target_os = "windows")]
+            style: WS_POPUP | WS_CLIPCHILDREN | WS_CLIPSIBLINGS | WS_VISIBLE | WS_MINIMIZEBOX | WS_MAXIMIZEBOX,
+            bounds: cef::Rect {
+                x: pos_x,
+                y: pos_y,
+                width: win_w,
+                height: win_h,
+            },
+            ..Default::default()
+        };
+
+        let settings = cef::BrowserSettings {
+            windowless_frame_rate: 60,
+            background_color: 0xFF000000,
+            ..Default::default()
+        };
+
+        let cef_url = cef::CefString::from(url.as_str());
+
+        // browser_host_create_browser is async-safe — it internally posts to the UI thread.
+        // We pass None for client — the existing AgentMuxClient registered at app init handles
+        // all new browsers via on_after_created.
+        //
+        // Actually, we need to pass the client so callbacks work. Get it from an existing browser.
+        // CEF's browser_host_create_browser with None client still routes to the app's default client.
+        cef::browser_host_create_browser(
+            Some(&window_info),
+            None, // Uses the app's default client (AgentMuxClient)
+            Some(&cef_url),
+            Some(&settings),
+            None, // extra_info
+            None, // request_context
+        );
+    }
+
+    // Register instance number
+    {
+        let mut reg = state.window_instance_registry.lock().unwrap();
+        let num = reg.register(&label);
+        tracing::info!(label = %label, instance = %num, "[dnd:cef] tear-off window registered");
+    }
+
+    // Notify all windows
+    let count = state.window_instance_registry.lock().unwrap().count();
+    events::emit_event_all_windows(state, "window-instances-changed", &serde_json::json!(count));
+
+    Ok(serde_json::json!(label))
+}
+
 /// Signal that a JS-level drag is starting or ending (Linux GTK guard).
 pub fn set_js_drag_active(_args: &serde_json::Value) -> Result<serde_json::Value, String> {
     // No-op on Windows/macOS. Linux would need an atomic flag.
