@@ -169,6 +169,12 @@ pub struct AppState {
     /// "main" is the primary window; tear-off windows get "window-{UUID}" labels.
     pub browsers: Mutex<HashMap<String, Browser>>,
 
+    /// Version-specific data directory (e.g. ai.agentmux.cef.v0-32-111/)
+    pub version_data_dir: Mutex<Option<String>>,
+
+    /// Version-specific config directory
+    pub version_config_dir: Mutex<Option<String>>,
+
     /// Active cross-window drag session (at most one at a time).
     pub active_drag: Mutex<Option<DragSession>>,
 
@@ -195,6 +201,8 @@ impl Default for AppState {
             ipc_port: Mutex::new(0),
             ipc_token: uuid::Uuid::new_v4().to_string(),
             browsers: Mutex::new(HashMap::new()),
+            version_data_dir: Mutex::new(None),
+            version_config_dir: Mutex::new(None),
             active_drag: Mutex::new(None),
             #[cfg(target_os = "windows")]
             job_handle: Mutex::new(None),

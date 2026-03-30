@@ -37,28 +37,30 @@ pub fn get_is_dev() -> serde_json::Value {
     serde_json::json!(cfg!(debug_assertions))
 }
 
-/// Get the app data directory path.
-pub fn get_data_dir() -> Result<serde_json::Value, String> {
-    dirs::data_dir()
-        .map(|p| {
-            let dir = p.join("ai.agentmux.cef");
-            serde_json::json!(dir.to_string_lossy())
-        })
-        .ok_or_else(|| "Failed to get data dir".to_string())
+/// Get the app data directory path (version-specific).
+pub fn get_data_dir(state: &Arc<AppState>) -> Result<serde_json::Value, String> {
+    let dir = state.version_data_dir.lock().unwrap();
+    match dir.as_ref() {
+        Some(d) => Ok(serde_json::json!(d)),
+        None => Err("Data dir not initialized yet".to_string()),
+    }
 }
 
-/// Get the app config directory path.
-pub fn get_config_dir() -> Result<serde_json::Value, String> {
-    dirs::config_dir()
-        .map(|p| {
-            let dir = p.join("ai.agentmux.cef");
-            serde_json::json!(dir.to_string_lossy())
-        })
-        .ok_or_else(|| "Failed to get config dir".to_string())
+/// Get the app config directory path (version-specific).
+pub fn get_config_dir(state: &Arc<AppState>) -> Result<serde_json::Value, String> {
+    let dir = state.version_config_dir.lock().unwrap();
+    match dir.as_ref() {
+        Some(d) => Ok(serde_json::json!(d)),
+        None => Err("Config dir not initialized yet".to_string()),
+    }
 }
 
 /// Ensure a provider auth directory exists and return its absolute path.
-pub fn ensure_auth_dir(args: &serde_json::Value) -> Result<serde_json::Value, String> {
+/// Auth dirs are version-isolated under the version-specific config dir.
+pub fn ensure_auth_dir(
+    state: &Arc<AppState>,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, String> {
     let provider_id = args
         .get("provider_id")
         .or_else(|| args.get("providerId"))
@@ -77,10 +79,14 @@ pub fn ensure_auth_dir(args: &serde_json::Value) -> Result<serde_json::Value, St
         ));
     }
 
-    let home_dir = dirs::home_dir()
-        .ok_or_else(|| "Failed to determine home directory".to_string())?;
+    let config_dir = state.version_config_dir.lock().unwrap();
+    let config_dir = config_dir
+        .as_ref()
+        .ok_or_else(|| "Config dir not initialized yet".to_string())?;
 
-    let auth_dir = home_dir.join(".agentmux").join("auth").join(provider_id);
+    let auth_dir = std::path::PathBuf::from(config_dir)
+        .join("auth")
+        .join(provider_id);
     std::fs::create_dir_all(&auth_dir)
         .map_err(|e| format!("Failed to create auth dir for {}: {}", provider_id, e))?;
 
@@ -179,10 +185,14 @@ pub fn open_in_editor(args: &serde_json::Value) -> Result<serde_json::Value, Str
 }
 
 /// Ensure settings.json exists in the config directory with the latest template.
-pub fn ensure_settings_file() -> Result<serde_json::Value, String> {
-    let config_dir = dirs::config_dir()
-        .ok_or_else(|| "Failed to get config dir".to_string())?
-        .join("ai.agentmux.cef");
+pub fn ensure_settings_file(state: &Arc<AppState>) -> Result<serde_json::Value, String> {
+    let config_dir_str = state
+        .version_config_dir
+        .lock()
+        .unwrap()
+        .clone()
+        .ok_or_else(|| "Config dir not initialized yet".to_string())?;
+    let config_dir = std::path::PathBuf::from(&config_dir_str);
 
     std::fs::create_dir_all(&config_dir)
         .map_err(|e| format!("Failed to create config dir: {}", e))?;

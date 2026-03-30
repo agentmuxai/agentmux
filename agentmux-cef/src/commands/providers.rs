@@ -8,8 +8,31 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::sync::Arc;
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
+
+use crate::state::AppState;
+
+/// Helper to extract the version-specific config dir from AppState.
+fn get_config_dir(state: &Arc<AppState>) -> Result<String, String> {
+    state
+        .version_config_dir
+        .lock()
+        .unwrap()
+        .clone()
+        .ok_or_else(|| "Config dir not initialized yet".to_string())
+}
+
+/// Helper to extract the version-specific data dir from AppState.
+fn get_data_dir(state: &Arc<AppState>) -> Result<String, String> {
+    state
+        .version_data_dir
+        .lock()
+        .unwrap()
+        .clone()
+        .ok_or_else(|| "Data dir not initialized yet".to_string())
+}
 
 // ---- Types ----
 
@@ -89,17 +112,15 @@ impl Default for ProviderConfig {
 
 // ---- File-based config storage (replaces tauri-plugin-store) ----
 
-fn config_path() -> Result<std::path::PathBuf, String> {
-    let config_dir = dirs::config_dir()
-        .ok_or_else(|| "Failed to get config dir".to_string())?
-        .join("ai.agentmux.cef");
-    std::fs::create_dir_all(&config_dir)
+fn config_path(config_dir: &str) -> Result<std::path::PathBuf, String> {
+    let dir = std::path::PathBuf::from(config_dir);
+    std::fs::create_dir_all(&dir)
         .map_err(|e| format!("Failed to create config dir: {e}"))?;
-    Ok(config_dir.join("provider-config.json"))
+    Ok(dir.join("provider-config.json"))
 }
 
-fn load_config() -> Result<ProviderConfig, String> {
-    let path = config_path()?;
+fn load_config(config_dir: &str) -> Result<ProviderConfig, String> {
+    let path = config_path(config_dir)?;
     if !path.exists() {
         return Ok(ProviderConfig::default());
     }
@@ -109,8 +130,8 @@ fn load_config() -> Result<ProviderConfig, String> {
         .map_err(|e| format!("Failed to parse provider config: {e}"))
 }
 
-fn save_config(config: &ProviderConfig) -> Result<(), String> {
-    let path = config_path()?;
+fn save_config(config_dir: &str, config: &ProviderConfig) -> Result<(), String> {
+    let path = config_path(config_dir)?;
     let content = serde_json::to_string_pretty(config)
         .map_err(|e| format!("Failed to serialize provider config: {e}"))?;
     std::fs::write(&path, content)
@@ -173,19 +194,14 @@ const CLAUDE_VERSION: &str = "latest";
 const CODEX_VERSION: &str = "0.107.0";
 const GEMINI_VERSION: &str = "0.31.0";
 
-fn get_provider_install_dir(provider: &str) -> Result<std::path::PathBuf, String> {
-    let home = dirs::home_dir().ok_or("Could not determine home directory")?;
-    let version = env!("CARGO_PKG_VERSION");
-    Ok(home
-        .join(".agentmux")
-        .join("instances")
-        .join(format!("v{}", version))
+fn get_provider_install_dir(data_dir: &str, provider: &str) -> Result<std::path::PathBuf, String> {
+    Ok(std::path::PathBuf::from(data_dir)
         .join("cli")
         .join(provider))
 }
 
-fn get_local_cli_bin_path(provider: &str) -> Result<std::path::PathBuf, String> {
-    let install_dir = get_provider_install_dir(provider)?;
+fn get_local_cli_bin_path(data_dir: &str, provider: &str) -> Result<std::path::PathBuf, String> {
+    let install_dir = get_provider_install_dir(data_dir, provider)?;
     let bin_name = match provider {
         "claude" => "claude",
         "codex" => "codex",
@@ -248,13 +264,13 @@ pub async fn detect_installed_clis() -> Result<serde_json::Value, String> {
 }
 
 /// Get the persisted provider configuration.
-pub fn get_provider_config() -> Result<serde_json::Value, String> {
-    let config = load_config()?;
+pub fn get_provider_config(state: &Arc<AppState>) -> Result<serde_json::Value, String> {
+    let config = load_config(&get_config_dir(state)?)?;
     serde_json::to_value(&config).map_err(|e| format!("Serialize error: {e}"))
 }
 
 /// Save the provider configuration.
-pub fn save_provider_config(args: &serde_json::Value) -> Result<serde_json::Value, String> {
+pub fn save_provider_config(state: &Arc<AppState>, args: &serde_json::Value) -> Result<serde_json::Value, String> {
     let config: ProviderConfig = serde_json::from_value(
         args.get("config").cloned().unwrap_or(args.clone()),
     )
@@ -265,7 +281,7 @@ pub fn save_provider_config(args: &serde_json::Value) -> Result<serde_json::Valu
         config.default_provider,
         config.setup_complete
     );
-    save_config(&config)?;
+    save_config(&get_config_dir(state)?, &config)?;
     Ok(serde_json::Value::Null)
 }
 
@@ -299,7 +315,7 @@ pub fn get_provider_install_info(args: &serde_json::Value) -> Result<serde_json:
 }
 
 /// Store an auth token for a provider.
-pub fn set_provider_auth(args: &serde_json::Value) -> Result<serde_json::Value, String> {
+pub fn set_provider_auth(state: &Arc<AppState>, args: &serde_json::Value) -> Result<serde_json::Value, String> {
     let provider = args
         .get("provider")
         .and_then(|v| v.as_str())
@@ -310,7 +326,8 @@ pub fn set_provider_auth(args: &serde_json::Value) -> Result<serde_json::Value, 
         .ok_or_else(|| "Missing token".to_string())?;
 
     tracing::info!("Setting auth token for provider: {}", provider);
-    let mut config = load_config()?;
+    let cfg_dir = get_config_dir(state)?;
+    let mut config = load_config(&cfg_dir)?;
 
     let settings = config
         .providers
@@ -326,37 +343,38 @@ pub fn set_provider_auth(args: &serde_json::Value) -> Result<serde_json::Value, 
     settings.auth_token = Some(token.to_string());
     settings.auth_status = "authenticated".to_string();
 
-    save_config(&config)?;
+    save_config(&cfg_dir, &config)?;
     Ok(serde_json::Value::Null)
 }
 
 /// Clear auth token for a provider.
-pub fn clear_provider_auth(args: &serde_json::Value) -> Result<serde_json::Value, String> {
+pub fn clear_provider_auth(state: &Arc<AppState>, args: &serde_json::Value) -> Result<serde_json::Value, String> {
     let provider = args
         .get("provider")
         .and_then(|v| v.as_str())
         .ok_or_else(|| "Missing provider".to_string())?;
 
     tracing::info!("Clearing auth token for provider: {}", provider);
-    let mut config = load_config()?;
+    let cfg_dir = get_config_dir(state)?;
+    let mut config = load_config(&cfg_dir)?;
 
     if let Some(settings) = config.providers.get_mut(provider) {
         settings.auth_token = None;
         settings.auth_status = "none".to_string();
     }
 
-    save_config(&config)?;
+    save_config(&cfg_dir, &config)?;
     Ok(serde_json::Value::Null)
 }
 
 /// Get auth status for a provider.
-pub fn get_provider_auth_status(args: &serde_json::Value) -> Result<serde_json::Value, String> {
+pub fn get_provider_auth_status(state: &Arc<AppState>, args: &serde_json::Value) -> Result<serde_json::Value, String> {
     let provider = args
         .get("provider")
         .and_then(|v| v.as_str())
         .ok_or_else(|| "Missing provider".to_string())?;
 
-    let config = load_config()?;
+    let config = load_config(&get_config_dir(state)?)?;
     let status = config
         .providers
         .get(provider)
@@ -476,13 +494,13 @@ fn check_gemini_auth(cli_cmd: &str) -> Result<CliAuthStatus, String> {
 }
 
 /// Get CLI path from isolated install directory.
-pub fn get_cli_path(args: &serde_json::Value) -> Result<serde_json::Value, String> {
+pub fn get_cli_path(state: &Arc<AppState>, args: &serde_json::Value) -> Result<serde_json::Value, String> {
     let provider = args
         .get("provider")
         .and_then(|v| v.as_str())
         .ok_or_else(|| "Missing provider".to_string())?;
 
-    let local_path = get_local_cli_bin_path(provider)?;
+    let local_path = get_local_cli_bin_path(&get_data_dir(state)?, provider)?;
     if local_path.exists() {
         tracing::info!("Found {} in isolated install: {}", provider, local_path.display());
         return Ok(serde_json::json!(local_path.to_string_lossy()));
@@ -493,14 +511,15 @@ pub fn get_cli_path(args: &serde_json::Value) -> Result<serde_json::Value, Strin
 }
 
 /// Install a provider CLI via npm.
-pub async fn install_cli(args: &serde_json::Value) -> Result<serde_json::Value, String> {
+pub async fn install_cli(state: &Arc<AppState>, args: &serde_json::Value) -> Result<serde_json::Value, String> {
     let provider = args
         .get("provider")
         .and_then(|v| v.as_str())
         .ok_or_else(|| "Missing provider".to_string())?
         .to_string();
 
-    let local_path = get_local_cli_bin_path(&provider)?;
+    let data_dir = get_data_dir(state)?;
+    let local_path = get_local_cli_bin_path(&data_dir, &provider)?;
     if local_path.exists() {
         tracing::info!("CLI already installed for {}: {}", provider, local_path.display());
         let result = CliInstallResult {
@@ -513,10 +532,11 @@ pub async fn install_cli(args: &serde_json::Value) -> Result<serde_json::Value, 
     }
 
     let provider_clone = provider.clone();
+    let data_dir_clone = data_dir.clone();
     let result = tokio::task::spawn_blocking(move || {
         let npm_package = get_npm_package(&provider_clone)?;
         let pinned_version = get_pinned_version(&provider_clone)?;
-        let install_dir = get_provider_install_dir(&provider_clone)?;
+        let install_dir = get_provider_install_dir(&data_dir_clone, &provider_clone)?;
 
         let npm_cmd = if cfg!(windows) { "npm.cmd" } else { "npm" };
 
@@ -557,7 +577,7 @@ pub async fn install_cli(args: &serde_json::Value) -> Result<serde_json::Value, 
             return Err(format!("npm install failed: {stderr}"));
         }
 
-        let cli_path = get_local_cli_bin_path(&provider_clone)?;
+        let cli_path = get_local_cli_bin_path(&data_dir_clone, &provider_clone)?;
         if !cli_path.exists() {
             return Err(format!(
                 "Installation completed but CLI binary not found at {}",

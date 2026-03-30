@@ -23,33 +23,40 @@ pub struct BackendSpawnResult {
 pub async fn spawn_backend(state: &Arc<AppState>) -> Result<BackendSpawnResult, String> {
     tracing::info!("spawn_backend() called");
 
-    // 1. Resolve directories
+    // 1. Resolve directories — per-version top-level dir (matches Tauri pattern)
+    //    Tauri uses: ai.agentmux.app.v0-31-100/
+    //    CEF uses:   ai.agentmux.cef.v0-32-111/
+    //    Dev uses:   ai.agentmux.cef.dev/
+    let current_version = env!("CARGO_PKG_VERSION");
+    let version_instance_id = format!("v{}", current_version);
+
+    let is_dev = cfg!(debug_assertions);
+    let dir_name = if is_dev {
+        "ai.agentmux.cef.dev".to_string()
+    } else {
+        let version_slug = current_version.replace('.', "-");
+        format!("ai.agentmux.cef.v{}", version_slug)
+    };
+
     let data_dir = dirs::data_dir()
         .ok_or_else(|| "Failed to get data dir".to_string())?
-        .join("ai.agentmux.cef");
+        .join(&dir_name);
     let config_dir = dirs::config_dir()
         .ok_or_else(|| "Failed to get config dir".to_string())?
-        .join("ai.agentmux.cef");
+        .join(&dir_name);
 
     tracing::info!("Using config_dir: {}", config_dir.display());
     tracing::info!("Using data_dir: {}", data_dir.display());
 
-    let current_version = env!("CARGO_PKG_VERSION");
-    let version_instance_id = format!("v{}", current_version);
-
-    // 2. Ensure directory tree
-    std::fs::create_dir_all(&data_dir)
+    // 2. Ensure directory tree (flat — no instances/ subdirectory)
+    std::fs::create_dir_all(data_dir.join("db"))
         .map_err(|e| format!("Failed to create data dir: {}", e))?;
     std::fs::create_dir_all(&config_dir)
         .map_err(|e| format!("Failed to create config dir: {}", e))?;
 
-    let version_data_home = data_dir.join("instances").join(&version_instance_id);
-    let version_config_home = config_dir.join("instances").join(&version_instance_id);
-
-    std::fs::create_dir_all(version_data_home.join("db"))
-        .map_err(|e| format!("Failed to create version instance data dir: {}", e))?;
-    std::fs::create_dir_all(&version_config_home)
-        .map_err(|e| format!("Failed to create version instance config dir: {}", e))?;
+    // Store version-specific paths in AppState for frontend IPC commands
+    *state.version_data_dir.lock().unwrap() = Some(data_dir.to_string_lossy().to_string());
+    *state.version_config_dir.lock().unwrap() = Some(config_dir.to_string_lossy().to_string());
 
     // 3. Resolve the backend binary path
     let backend_name = "agentmuxsrv-rs";
@@ -79,18 +86,18 @@ pub async fn spawn_backend(state: &Arc<AppState>) -> Result<BackendSpawnResult, 
     let mut cmd = std::process::Command::new(&backend_path);
     cmd.args([
         "--wavedata",
-        &version_data_home.to_string_lossy(),
+        &data_dir.to_string_lossy(),
         "--instance",
         &version_instance_id,
     ])
     .env("AGENTMUX_AUTH_KEY", &auth_key)
     .env(
         "AGENTMUX_CONFIG_HOME",
-        version_config_home.to_string_lossy().to_string(),
+        config_dir.to_string_lossy().to_string(),
     )
     .env(
         "AGENTMUX_DATA_HOME",
-        version_data_home.to_string_lossy().to_string(),
+        data_dir.to_string_lossy().to_string(),
     )
     .env(
         "AGENTMUX_SETTINGS_DIR",
