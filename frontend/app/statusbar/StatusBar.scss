@@ -193,6 +193,11 @@
     }
 }
 
+.status-bar-popover.host-popover {
+    left: auto;
+    right: 0;
+}
+
 .status-bar-restart-btn {
     width: 100%;
     padding: 4px 8px;
