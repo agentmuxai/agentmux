@@ -11,7 +11,7 @@ export class DroneViewModel implements ViewModel {
     blockId: string;
     nodeModel: BlockNodeModel;
 
-    viewIcon: Accessor<string> = () => "drone";
+    viewIcon: Accessor<string> = () => "robot";
     viewName: Accessor<string> = () => "Drone";
     noPadding: Accessor<boolean> = () => true;
 

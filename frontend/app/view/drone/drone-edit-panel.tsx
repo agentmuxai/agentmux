@@ -42,10 +42,25 @@ export function DroneEditPanel(props: EditPanelProps): JSX.Element {
     function updateTrigger(idx: number, patch: Partial<DroneTrigger>) {
         const cur = drone();
         if (!cur) return;
-        const triggers = cur.triggers.map((t, i) =>
-            i === idx ? ({ ...t, ...patch } as DroneTrigger) : t
-        );
+        const triggers = cur.triggers.map((t, i) => {
+            if (i !== idx) return t;
+            // If the type is changing, reset to a clean trigger of the new type
+            // to avoid stale type-specific fields (e.g. `expr` after switching from cron)
+            if (patch.type && patch.type !== t.type) {
+                return makeTriggerOfType(patch.type as DroneTrigger["type"]);
+            }
+            return { ...t, ...patch } as DroneTrigger;
+        });
         update({ triggers });
+    }
+
+    function makeTriggerOfType(type: DroneTrigger["type"]): DroneTrigger {
+        switch (type) {
+            case "cron":       return { type: "cron", expr: "0 9 * * 1-5" };
+            case "event":      return { type: "event", eventName: "" };
+            case "dependency": return { type: "dependency", droneId: "", on: "success" };
+            case "manual":     return { type: "manual" };
+        }
     }
 
     return (
