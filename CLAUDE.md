@@ -41,7 +41,7 @@
 
 ### After Code Changes
 
-- **TypeScript/React** - Auto-reloads in `task dev`
+- **TypeScript/SolidJS** - Auto-reloads in `task dev`
 - **Rust backend** - `task build:backend` then restart `task dev`
 - **Test package** - `task package` then extract/install artifact
 
@@ -169,7 +169,7 @@ task build:backend:rust   # Backend server only
 task build:wsh            # wsh only
 ```
 
-### Frontend (TypeScript/React)
+### Frontend (TypeScript/SolidJS)
 ```bash
 npm run build:dev    # Development build
 npm run build:prod   # Production build

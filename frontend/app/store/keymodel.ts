@@ -472,6 +472,12 @@ function registerGlobalKeys() {
         handleCmdN();
         return true;
     });
+    globalKeyMap.set("Ctrl:Shift:n", () => {
+        getApi().openNewWindow().catch((e: unknown) => {
+            console.error("[keymodel] Failed to open new window:", e);
+        });
+        return true;
+    });
     globalKeyMap.set("Cmd:d", () => {
         handleSplitHorizontal("after");
         return true;

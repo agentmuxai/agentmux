@@ -1,0 +1,51 @@
+[package]
+name = "agentmux-cef"
+version = "0.33.0"
+description = "AgentMux CEF Host — Pinned Chromium renderer replacing system WebView2"
+authors = ["AgentMux Corp"]
+edition = "2021"
+rust-version = "1.77"
+
+[[bin]]
+name = "agentmux-cef"
+path = "src/main.rs"
+
+[features]
+default = []
+# Enable sandbox mode (requires bootstrap.exe on Windows)
+sandbox = ["cef/sandbox"]
+
+[package.metadata.cef.bundle]
+# No helper needed without sandbox
+resources_path = "resources"
+
+[dependencies]
+cef = { version = "146", default-features = false, features = ["build-util"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+uuid = { version = "1", features = ["v4"] }
+dirs = "5"
+chrono = "0.4"
+# Phase 2: IPC bridge
+axum = "0.8"
+tower-http = { version = "0.6", features = ["cors", "fs"] }
+tokio = { version = "1", features = ["full"] }
+whoami = "1"
+json_comments = "0.2"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-sys = { version = "0.59", features = [
+    "Win32_Foundation",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_System_LibraryLoader",
+    "Win32_System_JobObjects",
+    "Win32_System_Threading",
+    "Win32_Graphics_Dwm",
+    "Win32_UI_Controls",
+] }
+
+[target.'cfg(target_os = "windows")'.build-dependencies]
+winres = "0.1"

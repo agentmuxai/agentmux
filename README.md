@@ -23,7 +23,7 @@ Knowledge workers running AI agents across long-horizon tasks are blind while it
 
 AgentMux is an open-source desktop application that surfaces what agents are doing in real time: tool calls, reasoning steps, source citations, output streams, and conflicts between agents. The human role is observer and supervisor, not driver.
 
-Cross-platform (Windows, macOS, Linux). 100% Rust backend (Tokio + Axum). Tauri v2. Apache 2.0.
+Cross-platform (Windows, macOS, Linux). 100% Rust backend (Tokio + Axum). Dual host: Tauri v2 or bundled CEF. Apache 2.0.
 
 - **Live agent monitoring** — Watch every tool call and decision step as it happens. Catch an agent undoing correct work mid-task and redirect it before the damage compounds.
 - **Multi-agent orchestration** — Run parallel agents and see all of them at once. Spot conflicts before synthesis. Redirect any agent without killing the others.
@@ -84,27 +84,77 @@ Available from the top bar (right side) or the window header right-click menu:
 ## Architecture
 
 ```
-AgentMux          (Tauri v2 — Rust + platform WebView)
- └── agentmuxsrv-rs   (Rust async backend — Tokio + Axum + SQLite, auto-spawned sidecar)
-      └── wsh-rs       (Rust shell integration CLI, deployed to remotes)
+                    ┌─────────────────────────────────┐
+                    │           Frontend               │
+                    │   SolidJS + xterm.js + Jotai     │
+                    │    (single build, shared)         │
+                    └──────────┬──────────┬────────────┘
+                               │          │
+                    ┌──────────▼──┐  ┌────▼───────────┐
+                    │  Tauri Host  │  │   CEF Host     │
+                    │  WebView2 /  │  │  Bundled       │
+                    │  WebKitGTK   │  │  Chromium 146  │
+                    │  ~30 MB      │  │  ~311 MB       │
+                    └──────────┬──┘  └────┬───────────┘
+                               │          │
+                    ┌──────────▼──────────▼────────────┐
+                    │       Backend Sidecar             │
+                    │   agentmuxsrv-rs (Rust)           │
+                    │   Tokio + Axum + SQLite           │
+                    │   terminals, WebSocket, RPC       │
+                    └──────────────┬───────────────────┘
+                                   │
+                    ┌──────────────▼───────────────────┐
+                    │          wsh-rs                   │
+                    │   Shell integration CLI           │
+                    └──────────────────────────────────┘
 ```
+
+AgentMux ships two host variants from the same codebase:
+
+| | Tauri Build | CEF Build |
+|---|---|---|
+| **WebView** | System WebView2 (Windows) / WebKitGTK (Linux) | Bundled Chromium (CEF 146) |
+| **Distribution size** | ~30 MB | ~311 MB (148 MB ZIP) |
+| **Startup time** | ~550 ms | ~150 ms |
+| **Baseline memory** | ~412 MB | ~352 MB |
+| **Dev command** | `task dev` | `task cef:dev` |
+| **Package command** | `task package:portable` | `task cef:package:portable` |
+
+The frontend auto-detects which host is running and uses the appropriate API layer (`tauri-api.ts` or `cef-api.ts`). The backend sidecar is identical in both builds.
 
 **Stack:**
 - **Frontend:** SolidJS + TypeScript + Vite + Jotai
 - **Backend:** Rust (Tokio + Axum + SQLite + portable-pty)
-- **Desktop:** Tauri v2
+- **Desktop (Tauri):** Tauri v2 — uses system WebView
+- **Desktop (CEF):** CEF 146 via cef-rs — bundles its own Chromium
 - **Terminal:** xterm.js
 
 ## Build Commands
+
+### Tauri Build (system WebView)
 
 | Command | Description |
 |---------|-------------|
 | `task dev` | Development mode with hot reload |
 | `task quickdev` | Fast dev (skips wsh build) |
 | `task package` | Production installer for current platform |
-| `task package:macos` | macOS .app + .dmg |
 | `task package:portable` | Windows portable ZIP |
 | `task package:portable:linux` | Linux AppImage |
+
+### CEF Build (bundled Chromium)
+
+| Command | Description |
+|---------|-------------|
+| `task cef:dev` | Development mode (Vite + CEF host) |
+| `task cef:build` | Build the CEF host binary |
+| `task cef:bundle` | Bundle CEF runtime DLLs |
+| `task cef:package:portable` | Windows portable ZIP with launcher |
+
+### Shared
+
+| Command | Description |
+|---------|-------------|
 | `task build:backend` | Build agentmuxsrv-rs + wsh-rs |
 | `task build:frontend` | Build frontend only |
 | `task test` | Run tests (vitest) |
@@ -112,11 +162,11 @@ AgentMux          (Tauri v2 — Rust + platform WebView)
 
 ### Build Outputs
 
-| Platform | Artifact |
-|----------|----------|
-| **macOS** | `target/release/bundle/macos/AgentMux_*_aarch64.dmg` |
-| **Windows** | `src-tauri/target/release/bundle/nsis/AgentMux_*.exe` |
-| **Linux** | `target/release/bundle/appimage/AgentMux_*_amd64.AppImage` |
+| Platform | Tauri | CEF |
+|----------|-------|-----|
+| **Windows** | `src-tauri/target/release/bundle/nsis/AgentMux_*.exe` | `dist/agentmux-cef-*-x64-portable.zip` |
+| **macOS** | `target/release/bundle/macos/AgentMux_*_aarch64.dmg` | — |
+| **Linux** | `target/release/bundle/appimage/AgentMux_*_amd64.AppImage` | — |
 
 ## Version Management
 

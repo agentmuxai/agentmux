@@ -1,17 +1,15 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// Tauri bootstrap with verbose logging.
-// This is the true entry point for Tauri builds.
+// Application bootstrap with verbose logging.
+// This is the true entry point for both Tauri and CEF builds.
 
 import { initLogPipe } from "./log/log-pipe";
 import { setupTauriApi } from "./tauri-init";
+import { setupCefApi } from "./cef-init";
 // Static import — avoids the dynamic import() hang in WebKitGTK over tauri:// protocol.
-// setupTauriApi() must be called before initBare() so window.api exists.
+// setupTauriApi()/setupCefApi() must be called before initBare() so window.api exists.
 import { initBare } from "./wave";
-import { invoke } from "@tauri-apps/api/core";
-import { getCurrentWindow } from "@tauri-apps/api/window";
-import { readTextFile, exists } from "@tauri-apps/plugin-fs";
 import { benchMark } from "@/util/startup-bench";
 
 // Pipe all console.log/warn/error to the Rust host log file.
@@ -23,7 +21,9 @@ initLogPipe();
 // The #startup-loading overlay stays visible until initWave() finishes rendering.
 // window.show() is a no-op if the window is already visible.
 if (typeof (window as any).__TAURI_INTERNALS__ !== "undefined") {
-    getCurrentWindow().show().catch(() => {});
+    import("@tauri-apps/api/window").then(({ getCurrentWindow }) => {
+        getCurrentWindow().show().catch(() => {});
+    }).catch(() => {});
     benchMark("window-show-early");
 }
 
@@ -58,6 +58,9 @@ const log = (level: string, ...args: any[]) => {
  */
 async function checkBackendStartupError(): Promise<boolean> {
     try {
+        const { invoke } = await import("@tauri-apps/api/core");
+        const { readTextFile, exists } = await import("@tauri-apps/plugin-fs");
+
         const dataDir = await invoke<string>("get_data_dir");
         // Use platform-agnostic path joining
         const errorFilePath = dataDir.endsWith("/") || dataDir.endsWith("\\")
@@ -103,6 +106,7 @@ async function checkBackendStartupError(): Promise<boolean> {
                 // Close window after 5 seconds
                 setTimeout(async () => {
                     try {
+                        const { getCurrentWindow } = await import("@tauri-apps/api/window");
                         const window = getCurrentWindow();
                         await window.close();
                     } catch (e) {
@@ -138,16 +142,17 @@ async function bootstrap() {
             console.warn("%c[PRODUCTION BUILD] Loading from dist/frontend — source changes will NOT hot-reload!", "color: red; font-size: 14px; font-weight: bold");
         }
 
-        // Check if we're in Tauri
+        // Detect host runtime
         const isTauriRuntime = typeof (window as any).__TAURI_INTERNALS__ !== "undefined";
-        log("INFO", "Is Tauri:", isTauriRuntime);
+        const isCefRuntime = new URLSearchParams(window.location.search).has("ipc_port");
+        log("INFO", "Is Tauri:", isTauriRuntime, "Is CEF:", isCefRuntime);
 
         if (isTauriRuntime) {
             log("INFO", "Initializing Tauri API...");
             benchMark("setupTauriApi-start");
             await setupTauriApi();
             benchMark("setupTauriApi-done");
-            log("INFO", "✅ Tauri API initialized successfully");
+            log("INFO", "Tauri API initialized successfully");
             log("INFO", "window.api available:", !!(window as any).api);
 
             // Verify critical methods exist
@@ -167,8 +172,15 @@ async function bootstrap() {
                 return; // Don't load main app if backend failed
             }
             log("INFO", "No backend startup errors detected");
+        } else if (isCefRuntime) {
+            log("INFO", "Initializing CEF API...");
+            benchMark("setupCefApi-start");
+            await setupCefApi();
+            benchMark("setupCefApi-done");
+            log("INFO", "CEF API initialized successfully");
+            log("INFO", "window.api available:", !!(window as any).api);
         } else {
-            log("INFO", "Not running in Tauri, skipping Tauri init");
+            log("INFO", "Not running in Tauri or CEF, skipping host init");
         }
 
         // Call initBare() — imported statically above.

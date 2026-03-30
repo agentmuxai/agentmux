@@ -1,0 +1,515 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+//
+// Window management commands for the CEF host.
+// Ported from src-tauri/src/commands/window.rs.
+//
+// Phase 2: Single-window only. Multi-window commands are stubbed.
+
+use std::sync::Arc;
+
+use cef::{ImplBrowser, ImplBrowserHost};
+
+use crate::state::AppState;
+
+/// Get the current zoom factor.
+pub fn get_zoom_factor(state: &Arc<AppState>) -> serde_json::Value {
+    let factor = *state.zoom_factor.lock().unwrap();
+    serde_json::json!(factor)
+}
+
+/// Set the zoom factor.
+/// CEF zoom uses a logarithmic scale: zoom_level = log2(zoom_factor)
+/// So factor 1.0 = level 0, factor 2.0 = level 1, factor 0.5 = level -1
+pub fn set_zoom_factor(state: &Arc<AppState>, args: &serde_json::Value) -> Result<serde_json::Value, String> {
+    let factor = args
+        .get("factor")
+        .and_then(|v| v.as_f64())
+        .ok_or_else(|| "Missing factor".to_string())?;
+
+    let factor = factor.clamp(0.5, 3.0);
+    *state.zoom_factor.lock().unwrap() = factor;
+
+    // Convert to CEF zoom level (log base 1.2)
+    // CEF uses: zoom_factor = 1.2 ^ zoom_level
+    // So: zoom_level = log(zoom_factor) / log(1.2)
+    let zoom_level = factor.ln() / 1.2_f64.ln();
+
+    // NOTE: host.set_zoom_level() deadlocks from IPC thread, and post_task
+    // crashes with current CEF bindings. Zoom is applied via CSS on the frontend.
+    // The zoom_factor state is stored for get_zoom_factor queries.
+
+    // Emit zoom-factor-change event
+    crate::events::emit_event_from_state(state, "zoom-factor-change", &serde_json::json!(factor));
+
+    Ok(serde_json::Value::Null)
+}
+
+/// Close the window.
+pub fn close_window(_state: &Arc<AppState>) -> Result<serde_json::Value, String> {
+    #[cfg(target_os = "windows")]
+    unsafe {
+        use windows_sys::Win32::UI::WindowsAndMessaging::*;
+        let hwnd = find_own_top_level_window();
+        if !hwnd.is_null() {
+            PostMessageW(hwnd, WM_CLOSE, 0, 0);
+        }
+    }
+    Ok(serde_json::Value::Null)
+}
+
+/// Minimize the window.
+pub fn minimize_window(_state: &Arc<AppState>) -> Result<serde_json::Value, String> {
+    #[cfg(target_os = "windows")]
+    unsafe {
+        use windows_sys::Win32::UI::WindowsAndMessaging::*;
+        let hwnd = find_own_top_level_window();
+        if !hwnd.is_null() {
+            ShowWindow(hwnd, SW_MINIMIZE);
+        }
+    }
+    Ok(serde_json::Value::Null)
+}
+
+/// Maximize/unmaximize the window (toggle).
+pub fn maximize_window(_state: &Arc<AppState>) -> Result<serde_json::Value, String> {
+    #[cfg(target_os = "windows")]
+    unsafe {
+        use windows_sys::Win32::UI::WindowsAndMessaging::*;
+        let hwnd = find_own_top_level_window();
+        if !hwnd.is_null() {
+            let mut placement: WINDOWPLACEMENT = std::mem::zeroed();
+            placement.length = std::mem::size_of::<WINDOWPLACEMENT>() as u32;
+            GetWindowPlacement(hwnd, &mut placement);
+            if placement.showCmd == SW_MAXIMIZE as u32 {
+                ShowWindow(hwnd, SW_RESTORE);
+            } else {
+                ShowWindow(hwnd, SW_MAXIMIZE);
+            }
+        }
+    }
+    Ok(serde_json::Value::Null)
+}
+
+/// Get the current window position on screen.
+pub fn get_window_position() -> Result<serde_json::Value, String> {
+    #[cfg(target_os = "windows")]
+    unsafe {
+        use windows_sys::Win32::UI::WindowsAndMessaging::*;
+        use windows_sys::Win32::Foundation::RECT;
+        let hwnd = find_own_top_level_window();
+        if !hwnd.is_null() {
+            let mut rect: RECT = std::mem::zeroed();
+            GetWindowRect(hwnd, &mut rect);
+            return Ok(serde_json::json!({ "x": rect.left, "y": rect.top }));
+        }
+    }
+    Ok(serde_json::json!({ "x": 0, "y": 0 }))
+}
+
+/// Move the window by a delta (dx, dy) from its current position.
+pub fn move_window_by(args: &serde_json::Value) -> Result<serde_json::Value, String> {
+    let dx = args.get("dx").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+    let dy = args.get("dy").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+
+    #[cfg(target_os = "windows")]
+    unsafe {
+        use windows_sys::Win32::UI::WindowsAndMessaging::*;
+        use windows_sys::Win32::Foundation::RECT;
+        let hwnd = find_own_top_level_window();
+        if !hwnd.is_null() {
+            let mut rect: RECT = std::mem::zeroed();
+            GetWindowRect(hwnd, &mut rect);
+            let width = rect.right - rect.left;
+            let height = rect.bottom - rect.top;
+            SetWindowPos(
+                hwnd,
+                std::ptr::null_mut(), // no z-order change
+                rect.left + dx,
+                rect.top + dy,
+                width,
+                height,
+                0x0014, // SWP_NOZORDER | SWP_NOSIZE
+            );
+        }
+    }
+    let _ = (dx, dy);
+    Ok(serde_json::Value::Null)
+}
+
+/// Initiate window drag (for frameless windows).
+/// Sends WM_NCLBUTTONDOWN to the title bar hit-test area, which tells Windows
+/// to start a window move operation.
+pub fn start_window_drag() -> Result<serde_json::Value, String> {
+    #[cfg(target_os = "windows")]
+    unsafe {
+        use windows_sys::Win32::UI::WindowsAndMessaging::*;
+        use windows_sys::Win32::UI::Input::KeyboardAndMouse::ReleaseCapture;
+        let hwnd = find_own_top_level_window();
+        if !hwnd.is_null() {
+            ReleaseCapture();
+            // HTCAPTION = 2 — tells Windows "user clicked the title bar"
+            SendMessageW(hwnd, WM_NCLBUTTONDOWN, 2 /* HTCAPTION */, 0);
+        }
+    }
+    Ok(serde_json::Value::Null)
+}
+
+/// Set window transparency/blur effects.
+/// Uses DWM Mica/Acrylic on Win11, or SetWindowCompositionAttribute on Win10.
+pub fn set_window_transparency(state: &Arc<AppState>, args: &serde_json::Value) -> Result<serde_json::Value, String> {
+    let transparent = args.get("transparent").and_then(|v| v.as_bool()).unwrap_or(false);
+    let blur = args.get("blur").and_then(|v| v.as_bool()).unwrap_or(false);
+    let _opacity = args.get("opacity").and_then(|v| v.as_f64()).unwrap_or(0.8);
+    tracing::info!("set_window_transparency: transparent={} blur={}", transparent, blur);
+    #[cfg(not(target_os = "windows"))]
+    tracing::info!("set_window_transparency: not windows, skipping");
+
+    #[cfg(target_os = "windows")]
+    {
+        unsafe {
+            let hwnd = find_own_top_level_window();
+            if !hwnd.is_null() {
+                tracing::info!("set_window_transparency: found hwnd={:?}", hwnd);
+                if blur {
+                    apply_window_effects(hwnd, true, true);
+                }
+                if transparent {
+                    apply_window_opacity(hwnd, _opacity);
+                }
+            } else {
+                tracing::warn!("set_window_transparency: could not find top-level window");
+            }
+        }
+    }
+    let _ = (state, transparent, blur);
+    Ok(serde_json::Value::Null)
+}
+
+/// Find the top-level window belonging to this process.
+/// In CEF Views mode, browser.host().window_handle() returns NULL,
+/// so we enumerate windows and find ours by process ID.
+#[cfg(target_os = "windows")]
+pub(crate) unsafe fn find_own_top_level_window() -> *mut std::ffi::c_void {
+    use windows_sys::Win32::UI::WindowsAndMessaging::*;
+    use windows_sys::Win32::System::Threading::GetCurrentProcessId;
+
+    let pid = GetCurrentProcessId();
+    let mut result: *mut std::ffi::c_void = std::ptr::null_mut();
+
+    unsafe extern "system" fn enum_callback(
+        hwnd: *mut std::ffi::c_void,
+        lparam: isize,
+    ) -> i32 {
+        use windows_sys::Win32::System::Threading::GetCurrentProcessId;
+        let mut window_pid: u32 = 0;
+        GetWindowThreadProcessId(hwnd, &mut window_pid);
+        if window_pid == GetCurrentProcessId() && IsWindowVisible(hwnd) != 0 {
+            // Store the HWND in the pointer passed via lparam
+            let result_ptr = lparam as *mut *mut std::ffi::c_void;
+            *result_ptr = hwnd;
+            return 0; // Stop enumeration
+        }
+        1 // Continue
+    }
+
+    let _ = pid; // Used inside callback via GetCurrentProcessId()
+    EnumWindows(
+        Some(enum_callback),
+        &mut result as *mut _ as isize,
+    );
+    result
+}
+
+#[cfg(target_os = "windows")]
+unsafe fn apply_window_effects(hwnd: *mut std::ffi::c_void, transparent: bool, blur: bool) {
+    use windows_sys::Win32::Graphics::Dwm::*;
+
+    if !transparent && !blur {
+        // Disable: set backdrop to NONE
+        let backdrop_type: i32 = 1; // DWMSBT_NONE
+        DwmSetWindowAttribute(
+            hwnd,
+            38, // DWMWA_SYSTEMBACKDROP_TYPE
+            &backdrop_type as *const _ as *const std::ffi::c_void,
+            std::mem::size_of::<i32>() as u32,
+        );
+        return;
+    }
+
+    // Try Win11 DWM backdrop first (Mica or Acrylic)
+    // DWMWA_SYSTEMBACKDROP_TYPE = 38
+    // DWMSBT_MAINWINDOW (Mica) = 2, DWMSBT_TRANSIENTWINDOW (Acrylic) = 3, DWMSBT_TABBEDWINDOW = 4
+    let backdrop_type: i32 = if blur { 3 } else { 2 }; // Acrylic for blur, Mica otherwise
+
+    // Enable immersive dark mode first (required for Mica/Acrylic to look correct on dark themes)
+    let dark_mode: i32 = 1;
+    DwmSetWindowAttribute(
+        hwnd,
+        20, // DWMWA_USE_IMMERSIVE_DARK_MODE
+        &dark_mode as *const _ as *const std::ffi::c_void,
+        std::mem::size_of::<i32>() as u32,
+    );
+
+    let result = DwmSetWindowAttribute(
+        hwnd,
+        38, // DWMWA_SYSTEMBACKDROP_TYPE
+        &backdrop_type as *const _ as *const std::ffi::c_void,
+        std::mem::size_of::<i32>() as u32,
+    );
+
+    if result != 0 {
+        // Win11 API failed (probably Win10) — try SetWindowCompositionAttribute
+        tracing::debug!("DWM backdrop failed (hr={:#x}), trying Win10 acrylic", result);
+        apply_win10_acrylic(hwnd, transparent);
+    } else {
+        tracing::info!("Applied DWM backdrop type {} to window", backdrop_type);
+    }
+}
+
+/// Apply window-level opacity via WS_EX_LAYERED + SetLayeredWindowAttributes.
+/// This makes the entire window semi-transparent (content + chrome).
+#[cfg(target_os = "windows")]
+unsafe fn apply_window_opacity(hwnd: *mut std::ffi::c_void, opacity: f64) {
+    use windows_sys::Win32::UI::WindowsAndMessaging::*;
+
+    let alpha = (opacity.clamp(0.0, 1.0) * 255.0) as u8;
+
+    // Add WS_EX_LAYERED extended style
+    let ex_style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+    SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex_style | WS_EX_LAYERED as isize);
+
+    // LWA_ALPHA = 0x02
+    let result = SetLayeredWindowAttributes(hwnd, 0, alpha, 0x02);
+    if result != 0 {
+        tracing::info!("Applied window opacity: {} (alpha={})", opacity, alpha);
+    } else {
+        tracing::warn!("SetLayeredWindowAttributes failed");
+    }
+}
+
+/// Win10 acrylic blur via undocumented SetWindowCompositionAttribute API.
+#[cfg(target_os = "windows")]
+unsafe fn apply_win10_acrylic(hwnd: *mut std::ffi::c_void, enable: bool) {
+    #[repr(C)]
+    struct AccentPolicy {
+        accent_state: u32,
+        accent_flags: u32,
+        gradient_color: u32,
+        animation_id: u32,
+    }
+
+    #[repr(C)]
+    struct WindowCompositionAttribData {
+        attrib: u32, // WCA_ACCENT_POLICY = 19
+        data: *mut std::ffi::c_void,
+        size: usize,
+    }
+
+    // ACCENT_ENABLE_ACRYLICBLURBEHIND = 4, ACCENT_DISABLED = 0
+    let mut policy = AccentPolicy {
+        accent_state: if enable { 4 } else { 0 },
+        accent_flags: 2, // ACCENT_FLAG_DRAW_ALL
+        gradient_color: 0x01000000, // Nearly transparent black
+        animation_id: 0,
+    };
+
+    let mut data = WindowCompositionAttribData {
+        attrib: 19, // WCA_ACCENT_POLICY
+        data: &mut policy as *mut _ as *mut std::ffi::c_void,
+        size: std::mem::size_of::<AccentPolicy>(),
+    };
+
+    let user32 = windows_sys::Win32::System::LibraryLoader::LoadLibraryA(b"user32.dll\0".as_ptr());
+    if !user32.is_null() {
+        let proc = windows_sys::Win32::System::LibraryLoader::GetProcAddress(
+            user32,
+            b"SetWindowCompositionAttribute\0".as_ptr(),
+        );
+        if let Some(func) = proc {
+            let func: extern "system" fn(*mut std::ffi::c_void, *mut WindowCompositionAttribData) -> i32 =
+                std::mem::transmute(func);
+            func(hwnd, &mut data);
+            tracing::info!("Applied Win10 acrylic blur to window");
+        }
+    }
+}
+
+/// Get the current window label.
+/// The frontend passes its own label (extracted from URL params) as an arg.
+pub fn get_window_label(args: &serde_json::Value) -> serde_json::Value {
+    let label = args.get("label").and_then(|v| v.as_str()).unwrap_or("main");
+    serde_json::json!(label)
+}
+
+/// Check if this is the main window.
+/// The frontend passes its own label (extracted from URL params) as an arg.
+pub fn is_main_window(args: &serde_json::Value) -> serde_json::Value {
+    let label = args.get("label").and_then(|v| v.as_str()).unwrap_or("main");
+    serde_json::json!(label == "main")
+}
+
+/// List all open window labels.
+pub fn list_windows(state: &Arc<AppState>) -> serde_json::Value {
+    let browsers = state.browsers.lock().unwrap();
+    let labels: Vec<&String> = browsers.keys().collect();
+    serde_json::json!(labels)
+}
+
+/// Focus a specific window by label.
+pub fn focus_window(state: &Arc<AppState>, args: &serde_json::Value) -> Result<serde_json::Value, String> {
+    let label = args.get("label").and_then(|v| v.as_str()).unwrap_or("main");
+
+    #[cfg(target_os = "windows")]
+    {
+        let browsers = state.browsers.lock().unwrap();
+        if let Some(browser) = browsers.get(label) {
+            if let Some(host) = browser.host() {
+                let hwnd = host.window_handle();
+                if !hwnd.0.is_null() {
+                    unsafe {
+                        windows_sys::Win32::UI::WindowsAndMessaging::SetForegroundWindow(
+                            hwnd.0 as *mut std::ffi::c_void,
+                        );
+                    }
+                }
+            }
+        }
+    }
+    let _ = (state, label);
+    Ok(serde_json::Value::Null)
+}
+
+/// Get the instance number for the current window.
+pub fn get_instance_number(state: &Arc<AppState>) -> serde_json::Value {
+    let reg = state.window_instance_registry.lock().unwrap();
+    serde_json::json!(reg.get("main").unwrap_or(1))
+}
+
+/// Get the total window count.
+pub fn get_window_count(state: &Arc<AppState>) -> serde_json::Value {
+    let reg = state.window_instance_registry.lock().unwrap();
+    serde_json::json!(reg.count())
+}
+
+/// Toggle devtools.
+/// Returns the remote debugging URL — the frontend opens it in a new browser tab.
+/// Direct host.show_dev_tools() calls crash with current CEF bindings.
+pub fn toggle_devtools(_state: &Arc<AppState>) -> Result<serde_json::Value, String> {
+    Ok(serde_json::json!({ "remote_debug_url": "http://localhost:9222" }))
+}
+
+/// Resolve the base URL for the frontend.
+/// Production: IPC server serves static files from `frontend/` next to the exe.
+/// Dev: Vite dev server at `http://localhost:5173`.
+pub(crate) fn resolve_frontend_base_url(ipc_port: u16) -> String {
+    let exe_dir = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.to_path_buf()));
+    let has_frontend = exe_dir
+        .as_ref()
+        .map(|d| d.join("frontend/index.html").exists())
+        .unwrap_or(false);
+    if has_frontend {
+        format!("http://127.0.0.1:{}", ipc_port)
+    } else {
+        "http://localhost:5173".to_string()
+    }
+}
+
+/// Open a new window (Ctrl+Shift+N or StatusBar click).
+/// Creates a new CEF browser window with a unique label and IPC credentials.
+pub fn open_new_window(state: &Arc<AppState>) -> Result<serde_json::Value, String> {
+    let window_id = uuid::Uuid::new_v4();
+    let label = format!("window-{}", window_id.simple());
+
+    let ipc_port = *state.ipc_port.lock().unwrap();
+    let ipc_token = &state.ipc_token;
+    let base_url = resolve_frontend_base_url(ipc_port);
+
+    let separator = if base_url.contains('?') { "&" } else { "?" };
+    let url = format!(
+        "{}{}ipc_port={}&ipc_token={}&windowLabel={}",
+        base_url, separator, ipc_port, ipc_token, label
+    );
+
+    tracing::info!(label = %label, "[window] open_new_window");
+
+    // Position offset from the current window so it's visible
+    let (pos_x, pos_y) = get_offset_position();
+
+    #[cfg(target_os = "windows")]
+    {
+        use windows_sys::Win32::UI::WindowsAndMessaging::*;
+
+        let window_info = cef::WindowInfo {
+            runtime_style: cef::RuntimeStyle::ALLOY,
+            window_name: cef::CefString::from("AgentMux"),
+            style: WS_POPUP | WS_CLIPCHILDREN | WS_CLIPSIBLINGS | WS_VISIBLE | WS_MINIMIZEBOX | WS_MAXIMIZEBOX,
+            bounds: cef::Rect {
+                x: pos_x,
+                y: pos_y,
+                width: 1200,
+                height: 800,
+            },
+            ..Default::default()
+        };
+
+        let settings = cef::BrowserSettings {
+            windowless_frame_rate: 60,
+            background_color: 0xFF000000,
+            ..Default::default()
+        };
+
+        let cef_url = cef::CefString::from(url.as_str());
+        cef::browser_host_create_browser(
+            Some(&window_info),
+            None,
+            Some(&cef_url),
+            Some(&settings),
+            None,
+            None,
+        );
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (pos_x, pos_y, url);
+        return Err("open_new_window not yet implemented on this platform".to_string());
+    }
+
+    // Register instance number
+    {
+        let mut reg = state.window_instance_registry.lock().unwrap();
+        let num = reg.register(&label);
+        tracing::info!(label = %label, instance = %num, "[window] new window registered");
+    }
+
+    // Notify all windows of the count change
+    let count = state.window_instance_registry.lock().unwrap().count();
+    crate::events::emit_event_all_windows(state, "window-instances-changed", &serde_json::json!(count));
+
+    Ok(serde_json::json!(label))
+}
+
+/// Get an offset position for a new window: 30px right and 30px down from the current window.
+fn get_offset_position() -> (i32, i32) {
+    #[cfg(target_os = "windows")]
+    unsafe {
+        use windows_sys::Win32::UI::WindowsAndMessaging::*;
+        use windows_sys::Win32::Foundation::RECT;
+        let hwnd = find_own_top_level_window();
+        if !hwnd.is_null() {
+            let mut rect: RECT = std::mem::zeroed();
+            GetWindowRect(hwnd, &mut rect);
+            return (rect.left + 30, rect.top + 30);
+        }
+    }
+    #[cfg(target_os = "windows")]
+    {
+        use windows_sys::Win32::UI::WindowsAndMessaging::CW_USEDEFAULT;
+        return (CW_USEDEFAULT, CW_USEDEFAULT);
+    }
+    #[cfg(not(target_os = "windows"))]
+    (100, 100)
+}

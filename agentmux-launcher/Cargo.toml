@@ -1,0 +1,18 @@
+[package]
+name = "agentmux-launcher"
+version = "0.33.0"
+description = "AgentMux Launcher — tiny exe that sets DLL path then spawns the CEF host"
+authors = ["AgentMux Corp"]
+edition = "2021"
+
+[[bin]]
+name = "agentmux-launcher"
+path = "src/main.rs"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-sys = { version = "0.59", features = [
+    "Win32_System_LibraryLoader",
+] }
+
+[target.'cfg(target_os = "windows")'.build-dependencies]
+winres = "0.1"
