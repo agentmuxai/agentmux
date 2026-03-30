@@ -749,9 +749,3 @@
     opacity: 0.8;
 }
 
-/* ── Running animation ──────────────────────────────────────────────────── */
-
-@keyframes drone-pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.4; }
-}
