@@ -41,8 +41,20 @@
             }
         }
     },
-    "defwidget@swarm": {
+    "defwidget@drone": {
         "display:order": 4,
+        "icon": "robot",
+        "color": "#06b6d4",
+        "label": "drone",
+        "description": "Automated agents triggered by schedules and events",
+        "blockdef": {
+            "meta": {
+                "view": "drone"
+            }
+        }
+    },
+    "defwidget@swarm": {
+        "display:order": 5,
         "display:hidden": true,
         "icon": "bee",
         "color": "#f59e0b",

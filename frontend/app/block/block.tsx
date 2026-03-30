@@ -16,6 +16,7 @@ import { ForgeViewModel } from "@/app/view/forge/forge";
 import { SubagentViewModel } from "@/app/view/subagent/subagent";
 import { SwarmViewModel } from "@/app/view/swarm/swarm";
 import { IdentityViewModel } from "@/app/view/identity/identity";
+import { DroneViewModel } from "@/app/view/drone/drone";
 import { ErrorBoundary } from "@/element/errorboundary";
 import { CenteredDiv } from "@/element/quickelems";
 import { NodeModel, useDebouncedNodeInnerRect } from "@/layout/index";
@@ -48,6 +49,7 @@ BlockRegistry.set("forge", ForgeViewModel as any);
 BlockRegistry.set("subagent", SubagentViewModel as any);
 BlockRegistry.set("swarm", SwarmViewModel as any);
 BlockRegistry.set("identity", IdentityViewModel as any);
+BlockRegistry.set("drone", DroneViewModel as any);
 
 function makeViewModel(blockId: string, blockView: string, nodeModel: NodeModel): ViewModel {
     const ctor = BlockRegistry.get(blockView);
