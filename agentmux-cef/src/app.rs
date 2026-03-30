@@ -191,7 +191,7 @@ wrap_browser_process_handler! {
                     WindowInfo {
                         runtime_style: RuntimeStyle::ALLOY,
                         window_name: CefString::from("AgentMux"),
-                        style: WS_POPUP | WS_CLIPCHILDREN | WS_CLIPSIBLINGS | WS_VISIBLE | WS_THICKFRAME,
+                        style: WS_POPUP | WS_CLIPCHILDREN | WS_CLIPSIBLINGS | WS_VISIBLE | WS_MINIMIZEBOX | WS_MAXIMIZEBOX,
                         bounds: cef::Rect {
                             x: CW_USEDEFAULT,
                             y: CW_USEDEFAULT,
