@@ -200,7 +200,6 @@ async fn route_command(
         "get_docsite_url" => Ok(commands::platform::get_docsite_url(state)),
         "get_zoom_factor" => Ok(commands::window::get_zoom_factor(state)),
         "get_about_modal_details" => Ok(commands::platform::get_about_modal_details(state)),
-        "get_host_info" => Ok(commands::platform::get_host_info(state)),
         "get_backend_endpoints" => commands::backend::get_backend_endpoints(state),
         "get_wave_init_opts" => commands::backend::get_wave_init_opts(state),
         "set_window_init_status" => Ok(commands::backend::set_window_init_status(state, args)),

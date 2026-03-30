@@ -126,55 +126,6 @@ pub fn get_about_modal_details(state: &Arc<AppState>) -> serde_json::Value {
     })
 }
 
-/// Get comprehensive host info for the hostname popover.
-pub fn get_host_info(state: &Arc<AppState>) -> serde_json::Value {
-    let version = env!("CARGO_PKG_VERSION");
-    let endpoints = state.backend_endpoints.lock().unwrap();
-    let ipc_port = *state.ipc_port.lock().unwrap();
-    let data_dir = state.version_data_dir.lock().unwrap().clone().unwrap_or_default();
-    let pid = std::process::id();
-
-    // Resolve primary local IP
-    let local_ip = local_ip_address().unwrap_or_else(|| "127.0.0.1".to_string());
-
-    let os_info = format!("{} {}",
-        match std::env::consts::OS {
-            "windows" => "Windows",
-            "macos" => "macOS",
-            "linux" => "Linux",
-            other => other,
-        },
-        std::env::consts::ARCH
-    );
-
-    serde_json::json!({
-        "hostname": whoami::fallible::hostname().unwrap_or_else(|_| "unknown".to_string()),
-        "os": os_info,
-        "localIp": local_ip,
-        "instanceId": format!("v{}", version),
-        "version": version,
-        "dataDir": data_dir,
-        "hostType": "CEF 146",
-        "pid": pid,
-        "ports": {
-            "ipc": format!("127.0.0.1:{}", ipc_port),
-            "web": endpoints.web_endpoint,
-            "ws": endpoints.ws_endpoint,
-            "devtools": "127.0.0.1:9222",
-        }
-    })
-}
-
-/// Get the primary non-loopback IPv4 address.
-fn local_ip_address() -> Option<String> {
-    // Connect a UDP socket to an external address to determine the local IP
-    // (doesn't actually send data — just resolves the route)
-    let socket = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
-    socket.connect("8.8.8.8:80").ok()?;
-    let addr = socket.local_addr().ok()?;
-    Some(addr.ip().to_string())
-}
-
 /// Get the documentation site URL.
 pub fn get_docsite_url(state: &Arc<AppState>) -> serde_json::Value {
     let endpoints = state.backend_endpoints.lock().unwrap();

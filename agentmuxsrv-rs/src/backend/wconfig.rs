@@ -285,10 +285,6 @@ pub struct SettingsType {
     #[serde(rename = "conn:wshenabled", default, skip_serializing_if = "is_false")]
     pub conn_wsh_enabled: bool,
 
-    // -- Network settings --
-    #[serde(rename = "network:lan_discovery", default, skip_serializing_if = "is_false")]
-    pub network_lan_discovery: bool,
-
     /// Catch-all for unknown/dynamic keys (e.g. `widget:hidden@defwidget@sysinfo`).
     /// These pass through serde unchanged so the frontend can access them as flat settings keys.
     #[serde(flatten, default, skip_serializing_if = "HashMap::is_empty")]

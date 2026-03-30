@@ -397,28 +397,20 @@ async fn main() {
     // instead of routing through the cloud agentbus.
     std::env::set_var("AGENTMUX_LOCAL_URL", &local_web_url);
 
-    // LAN discovery via mDNS — opt-in to avoid Windows Firewall prompt.
-    // mDNS binds 0.0.0.0:5353 UDP which triggers the firewall dialog.
-    // Only start if explicitly enabled in settings.
-    let lan_discovery_enabled = config_watcher.get_settings().network_lan_discovery;
+    // LAN discovery via mDNS — advertise this instance and browse for peers
     let hostname = whoami::fallible::hostname().unwrap_or_else(|_| "unknown".to_string());
-    let lan_discovery = if lan_discovery_enabled {
-        match backend::lan_discovery::LanDiscovery::start(
-            config.instance_id.clone(),
-            hostname,
-            version.clone(),
-            web_addr.port(),
-            event_bus.clone(),
-        ) {
-            Ok(d) => Some(d),
-            Err(e) => {
-                tracing::warn!("LAN discovery unavailable: {e}");
-                None
-            }
+    let lan_discovery = match backend::lan_discovery::LanDiscovery::start(
+        config.instance_id.clone(),
+        hostname,
+        version.clone(),
+        web_addr.port(),
+        event_bus.clone(),
+    ) {
+        Ok(d) => Some(d),
+        Err(e) => {
+            tracing::warn!("LAN discovery unavailable: {e}");
+            None
         }
-    } else {
-        tracing::info!("LAN discovery disabled (enable via network:lan_discovery setting)");
-        None
     };
 
     // Clean up stale cross-instance agent registry entries (entries older than 4h).

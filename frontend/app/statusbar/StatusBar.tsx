@@ -6,13 +6,14 @@ import { Show, type JSX } from "solid-js";
 import { BackendStatus } from "./BackendStatus";
 import { ConfigStatus } from "./ConfigStatus";
 import { ConnectionStatus } from "./ConnectionStatus";
-import { HostPopover } from "./HostPopover";
+import { LanStatus } from "./LanStatus";
 import { SystemStats } from "./SystemStats";
 import { UpdateStatus } from "./UpdateStatus";
 import "./StatusBar.scss";
 
 const StatusBar = (): JSX.Element => {
     const version = getApi().getAboutModalDetails()?.version ?? "";
+    const hostname = getApi().getHostName();
     const instanceNum = windowInstanceNumAtom;
     const windowCount = windowCountAtom;
 
@@ -30,13 +31,18 @@ const StatusBar = (): JSX.Element => {
                 <BackendStatus />
                 <span class="stat-separator">|</span>
                 <SystemStats />
+                <LanStatus />
             </div>
             <div class="status-bar-center" />
             <div class="status-bar-right">
                 <ConnectionStatus />
                 <ConfigStatus />
                 <UpdateStatus />
-                <HostPopover />
+                <Show when={hostname && hostname !== "unknown"}>
+                    <span class="status-hostname" title={`Host: ${hostname}`}>
+                        {hostname}
+                    </span>
+                </Show>
                 <Show when={version}>
                     <Show
                         when={backendStatusAtom() !== "crashed"}
