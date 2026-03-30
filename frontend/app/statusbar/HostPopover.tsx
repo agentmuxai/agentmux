@@ -130,10 +130,10 @@ const HostPopover = (): JSX.Element => {
                             </Show>
                             <Show when={lanCount() === 0}>
                                 <div class="status-bar-popover-row" style={{ opacity: "0.5" }}>
-                                    <span>LAN discovery: enable in settings</span>
+                                    <span>No LAN peers found</span>
                                 </div>
                                 <div class="status-bar-popover-row" style={{ opacity: "0.4", "font-size": "0.85em" }}>
-                                    <span>Set "network:lan_discovery": true</span>
+                                    <span>Enable via "network:lan_discovery": true</span>
                                 </div>
                                 <div class="status-bar-popover-divider" />
                             </Show>
