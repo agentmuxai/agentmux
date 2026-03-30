@@ -8,73 +8,91 @@
 
 ---
 
-## Results
+## Results (3 runs per build, median reported)
 
 | Metric | Tauri (WebView2) | CEF (bundled) | Delta | Winner |
 |--------|-----------------|---------------|-------|--------|
 | **Disk size** | 30 MB | 365 MB | +335 MB | Tauri |
-| **File count** | 4 | 307 | +303 | Tauri |
-| **Startup (to sidecar ready)** | 593 ms | 130 ms | -463 ms (4.5x) | CEF |
-| **Baseline RSS** | 424 MB | 350 MB | -74 MB | CEF |
+| **Startup (to sidecar)** | 548 ms | 152 ms | -396 ms (3.6x) | CEF |
+| **Baseline RSS (1 term)** | 412 MB | 352 MB | -60 MB | CEF |
+| **Process count** | 9 | 8 | -1 | CEF |
 
-## Process Breakdown (baseline, 0 terminals open)
+## Process Breakdown (baseline, 1 default terminal)
+
+### Tauri (9 processes, 412 MB)
+
+| Process | RSS | Count |
+|---------|-----|-------|
+| `agentmux.exe` (Tauri host) | 32 MB | 1 |
+| `agentmuxsrv-rs.x64.exe` (backend + crash monitor) | 28 MB | 2 |
+| `msedgewebview2.exe` (browser, GPU, renderer, crashpad, utility, network) | 352 MB | 6 |
+
+### CEF (8 processes, 352 MB)
+
+| Process | RSS | Count |
+|---------|-----|-------|
+| `agentmux-cef.exe` (host + GPU + renderer + utility + zygote + crashpad) | 326 MB | 6 |
+| `agentmuxsrv-rs.x64.exe` (backend + crash monitor) | 28 MB | 2 |
+
+## Raw Data
 
 ### Tauri
 
-| Process | RSS |
-|---------|-----|
-| `agentmux.exe` (Tauri host) | 32 MB |
-| `agentmuxsrv-rs.x64.exe` (backend) | 28 MB |
-| `msedgewebview2.exe` (5 processes) | 364 MB |
-| **Total** | **424 MB** |
+| Run | Startup | RSS | Processes |
+|-----|---------|-----|-----------|
+| 1 | 548 ms | 415 MB | 9 |
+| 2 | 482 ms | 412 MB | 9 |
+| 3 | 587 ms | 412 MB | 9 |
 
 ### CEF
 
-| Process | RSS |
-|---------|-----|
-| `agentmux-cef.exe` (CEF host + subprocesses) | 320 MB |
-| `agentmuxsrv-rs.x64.exe` (backend) | 28 MB |
-| **Total** | **350 MB** (reported under single process tree) |
+| Run | Startup | RSS | Processes |
+|-----|---------|-----|-----------|
+| 1 | 349 ms | 351 MB | 8 |
+| 2 | 144 ms | 352 MB | 8 |
+| 3 | 152 ms | 354 MB | 8 |
 
 ## Analysis
 
 ### Startup
-CEF is **4.5x faster** (130 ms vs 593 ms to sidecar ready). The ~460 ms
+CEF is **3.6x faster** (152 ms vs 548 ms median to sidecar ready).
+
 Tauri overhead comes from:
-- WebView2 runtime discovery and handshake
+- WebView2 runtime discovery and version handshake
 - WebView2 UDF (User Data Folder) initialization
-- WebView2 broker → renderer process spawn chain
-- CEF loads from a local DLL with no system discovery step
+- WebView2 broker → renderer process spawn chain (6 processes)
+
+CEF loads `libcef.dll` from the local directory with no system discovery step.
+CEF run 1 (349 ms) was slower — likely first-time DLL loading into cache.
 
 ### Memory
-CEF uses **74 MB less** than Tauri at baseline. This is surprising — CEF bundles its own
-Chromium while Tauri shares the system Edge.
-
-Possible explanations:
-- WebView2 spawns 5 separate processes (browser, GPU, renderer, crashpad, utility) with
-  per-process overhead. CEF uses fewer subprocess types for a single-window app.
-- WebView2's shared runtime loads shared state for all WebView2 apps on the system,
-  adding overhead that a single-purpose CEF host doesn't carry.
-- CEF's alloy-style mode may use a lighter process model than WebView2's full Edge.
+CEF uses **60 MB less** at baseline (352 MB vs 412 MB). Both builds spawn
+a similar number of Chromium subprocesses, but:
+- WebView2's 6 processes carry per-process overhead from the shared Edge runtime
+  (profile data, extensions state, telemetry)
+- CEF runs a purpose-built single-app Chromium with no shared runtime state
+- The sidecar is identical (28 MB across both builds)
 
 ### Disk
-Tauri wins massively here — 30 MB vs 365 MB. Tauri relies on the system-installed
-WebView2 runtime (~150-200 MB, but shared across all apps and pre-installed on Win 10/11).
-CEF bundles everything. This is the fundamental trade-off.
+Tauri: 30 MB (relies on system WebView2 runtime, ~150-200 MB pre-installed)
+CEF: 365 MB (bundles everything, including 251 MB libcef.dll)
+
+With file stripping applied (locales, SwiftShader, WebGPU): CEF drops to ~335 MB.
+This is the fundamental trade-off: 12x larger distribution for faster startup
+and lower memory.
 
 ## Notes
 
-- Both builds use the same backend sidecar (28 MB RSS, identical across runs)
-- Startup times measured to sidecar process appearing (no artificial sleep)
-- These are warm-start measurements (not first-boot cold start)
-- Memory measurements capture all processes matching each app's pattern
-- CEF subprocesses (GPU, renderer) are child processes of `agentmux-cef.exe` and captured
-  in its total via tasklist's process tree
+- Warm-start measurements (not cold boot)
+- Memory measured 8s after sidecar ready (UI fully loaded)
+- All processes matching each build's patterns captured via `tasklist`
+- Backend sidecar is identical binary in both builds (28 MB)
+- CEF exposes CDP on port 9222 (DevTools available for FPS measurement)
 
 ## Next Steps
 
-- [ ] Cold start (after reboot) comparison
 - [ ] Per-terminal memory scaling (1, 2, 4, 8 terminals)
-- [ ] Terminal scroll FPS (seq 100000)
+- [ ] Terminal scroll FPS (seq 100000) via CDP
 - [ ] Input latency via CDP
+- [ ] Cold start (after reboot)
 - [ ] 4-hour stability soak test
