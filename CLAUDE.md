@@ -4,7 +4,7 @@
 
 - **Name:** AgentMux
 - **GitHub:** https://github.com/agentmuxai/agentmux
-- **Type:** Tauri v2 terminal application
+- **Type:** CEF desktop application (Tauri host is deprecated)
 - **Build System:** Task (Taskfile.yml)
 
 ---
@@ -17,9 +17,7 @@
 |---------|----------|---------------|
 | `task dev` | **Development** (CEF host + Vite hot reload) | Yes - hot reload |
 | `task cef:package:portable` | **Portable release builds** | No |
-| `task dev:tauri` | [DEPRECATED] Tauri dev mode | Yes - hot reload |
-
-**Note:** The Tauri host is deprecated. All development uses the CEF host.
+**Note:** The Tauri host (`src-tauri/`) is deprecated. All development uses the CEF host. Do not reference Tauri APIs, Tauri identifiers, or Tauri commands in new code.
 
 ### Build System
 
@@ -55,7 +53,15 @@ AgentMux uses a **CEF (Chromium Embedded Framework)** host with a **100% Rust ba
 - **agentmuxsrv-rs** = Rust backend sidecar (auto-spawned, don't run manually)
 - **wsh** = Rust shell integration binary (wsh-rs crate, must be versioned correctly)
 
-**Important:** The Tauri host (`src-tauri/`) is deprecated. CEF is the primary host. All Go and Electron code has been removed.
+**Important:** The Tauri host (`src-tauri/`) is deprecated and must not be used. CEF is the only active host. All Go and Electron code has been removed.
+
+### Dev vs Portable Instance Isolation
+
+`task dev` is safe to run alongside a running portable instance:
+- Dev uses `AGENTMUX_DEV=1` → data dir `~/.agentmux-dev` (separate from `~/.agentmux`)
+- Dev copies CEF binaries to `dist/cef-dev/` so `dist/cef/` is never locked by the running process
+- The portable instance runs from its own extracted folder, not from `target/` or `dist/`
+- No shared HWNDs, no shared processes — they are fully independent
 
 ### Widgets
 
@@ -115,22 +121,10 @@ bump patch -m "Description" --commit
 git push origin <branch>
 ```
 
-### Tauri Version Management
+### Tauri Version Management (deprecated — legacy only)
 
-Tauri versions MUST be synchronized across all packages to prevent build failures.
-
-**Verify before building:**
-```bash
-./scripts/verify-tauri-versions.sh
-```
-
-**Update Tauri:**
-```bash
-./scripts/update-tauri.sh 2.11.0           # Core packages only
-./scripts/update-tauri.sh 2.11.0 --plugins  # Core + plugins
-```
-
-**Version Pinning:** package.json uses exact versions (no `^`), Cargo.toml uses `=MAJOR.MINOR` range.
+Tauri code in `src-tauri/` is deprecated. These scripts exist only if legacy Tauri files need updating:
+`./scripts/verify-tauri-versions.sh`, `./scripts/update-tauri.sh`. Do not use for new work.
 
 ---
 
@@ -202,15 +196,11 @@ Ensure `frontend/wave.ts` uses `getApi().getAboutModalDetails().version`
 `dist/schema/` is wiped by `task clean` but automatically recreated by the
 `copy:schema` dependency in `dev`, `start`, `quickdev`, and `package` tasks.
 
-### Terminal rendering issues on Linux
+### Terminal rendering issues on Linux (Tauri-era, may not apply to CEF)
 **DO NOT enable WebGL as the default renderer on Linux.**
-WebKitGTK's WebGL2 implementation has systemic rendering issues — the texture atlas
-doesn't redraw after control sequences (`\x08` backspace, `ESC[K` erase-in-line).
-This is a WebKitGTK upstream bug (Tauri #6559, WebKit Bug 228268), not an xterm.js bug.
-Fix: use the DOM renderer on Linux (default when no renderer addon is loaded).
-WebGL is used on macOS/Windows. Users can opt into WebGL on Linux via
-`term:disablewebgl=false` if their GPU/driver supports it.
-This has regressed multiple times — the Linux check must stay.
+WebKitGTK's WebGL2 had systemic rendering issues under the old Tauri host.
+CEF bundles its own Chromium so this may be resolved, but the Linux check should
+stay until verified on CEF Linux builds.
 
 ### AppImage shows cog/gear icon instead of app icon
 `appimagetool` creates `.DirIcon` inside the AppImage as an **absolute symlink** to the
@@ -227,10 +217,8 @@ ls -la squashfs-root/.DirIcon   # must be a regular file, not a symlink
 Also clear Nautilus's thumbnail cache if the old icon was cached: `rm -rf ~/.cache/thumbnails/`
 
 ### Wayland app_id and desktop file matching
-The Wayland `xdg_toplevel.app_id` is `"agentmux"` (the binary name), **not** the Tauri
-`identifier` field from `tauri.conf.json`. GNOME matches the running window to
-`agentmux.desktop` only. The old code incorrectly registered a versioned
-`ai.agentmux.app.vX-Y-Z.desktop` which was never matched. Only `agentmux.desktop` is needed.
+The Wayland `xdg_toplevel.app_id` is `"agentmux"` (the binary name). GNOME matches
+the running window to `agentmux.desktop` only. Only `agentmux.desktop` is needed.
 
 ### CRITICAL: Never Kill AgentMux by Image Name
 - **NEVER** use `taskkill //im agentmux-cef.exe` or `taskkill //im agentmuxsrv-rs.x64.exe`
