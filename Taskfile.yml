@@ -885,6 +885,14 @@ tasks:
                   # Sidecar
                   Copy-Item 'dist/bin/agentmuxsrv-rs.x64.exe' $$runtimeDir -Force
 
+                  # wsh shell integration binary (renamed to wsh.exe for deploy_wsh)
+                  $$wshSrc = 'dist/bin/wsh-' + $$version + '-windows.x64.exe'
+                  if (Test-Path $$wshSrc) {
+                    Copy-Item $$wshSrc (Join-Path $$runtimeDir 'wsh.exe') -Force
+                  } else {
+                    Write-Host 'Warning: wsh not found at' $$wshSrc '— run task build:wsh first' -ForegroundColor Yellow
+                  }
+
                   # Frontend
                   Copy-Item -Recurse 'dist/frontend' (Join-Path $$runtimeDir 'frontend') -Force
 

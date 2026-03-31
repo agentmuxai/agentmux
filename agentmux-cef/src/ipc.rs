@@ -217,7 +217,7 @@ async fn route_command(
         "is_main_window" => Ok(commands::window::is_main_window(args)),
         "get_window_label" => Ok(commands::window::get_window_label(args)),
         "open_new_window" => commands::window::open_new_window(state),
-        "get_instance_number" => Ok(commands::window::get_instance_number(state)),
+        "get_instance_number" => Ok(commands::window::get_instance_number(state, args)),
         "get_window_count" => Ok(commands::window::get_window_count(state)),
         "get_env" => Ok(commands::platform::get_env(args)),
         "open_external" => commands::platform::open_external(args),

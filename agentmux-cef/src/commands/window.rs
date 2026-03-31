@@ -381,9 +381,13 @@ pub fn focus_window(state: &Arc<AppState>, args: &serde_json::Value) -> Result<s
 }
 
 /// Get the instance number for the current window.
-pub fn get_instance_number(state: &Arc<AppState>) -> serde_json::Value {
+pub fn get_instance_number(state: &Arc<AppState>, args: &serde_json::Value) -> serde_json::Value {
+    let label = args
+        .get("label")
+        .and_then(|v| v.as_str())
+        .unwrap_or("main");
     let reg = state.window_instance_registry.lock().unwrap();
-    serde_json::json!(reg.get("main").unwrap_or(1))
+    serde_json::json!(reg.get(label).unwrap_or(1))
 }
 
 /// Get the total window count.
@@ -435,10 +439,14 @@ pub fn open_new_window(state: &Arc<AppState>) -> Result<serde_json::Value, Strin
 
     tracing::info!(label = %label, "[window] open_new_window");
 
-    // Create a native browser window (not CEF Views — that requires the UI thread).
-    // Secondary windows use standard OS chrome (title bar + resize borders).
-    // The main window uses CEF Views for the frameless look, but secondary windows
-    // work fine with native decorations and can be created from any thread.
+    // Register instance number BEFORE creating the browser, so the new window's
+    // frontend can query its instance number immediately on load.
+    {
+        let mut reg = state.window_instance_registry.lock().unwrap();
+        let num = reg.register(&label);
+        tracing::info!(label = %label, instance = %num, "[window] new window registered");
+    }
+
     let settings = cef::BrowserSettings {
         windowless_frame_rate: 60,
         background_color: 0xFF000000,
@@ -451,10 +459,15 @@ pub fn open_new_window(state: &Arc<AppState>) -> Result<serde_json::Value, Strin
     {
         use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
+        // Frameless popup — no native title bar, no resize borders.
+        // The frontend's custom title bar provides min/max/close.
+        // Edge resize is not available (requires WS_THICKFRAME which
+        // causes a visible white border). Users resize via maximize/restore.
         let window_info = cef::WindowInfo {
             runtime_style: cef::RuntimeStyle::ALLOY,
             window_name: cef::CefString::from("AgentMux"),
-            style: WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN | WS_CLIPSIBLINGS | WS_VISIBLE,
+            style: WS_POPUP | WS_CLIPCHILDREN | WS_CLIPSIBLINGS | WS_VISIBLE
+                | WS_MINIMIZEBOX | WS_MAXIMIZEBOX,
             bounds: cef::Rect {
                 x: pos_x,
                 y: pos_y,
@@ -465,9 +478,17 @@ pub fn open_new_window(state: &Arc<AppState>) -> Result<serde_json::Value, Strin
         };
 
         let cef_url = cef::CefString::from(url.as_str());
+
+        // Pass the shared client so on_after_created fires (registers browser,
+        // applies DWM frameless, injects IPC port).
+        let browsers = state.browsers.lock().unwrap();
+        let client = browsers.values().next().and_then(|b| b.host().map(|h| h.client()));
+        drop(browsers);
+
+        let mut client_ref = client.flatten();
         cef::browser_host_create_browser(
             Some(&window_info),
-            None,
+            client_ref.as_mut(),
             Some(&cef_url),
             Some(&settings),
             None,
@@ -479,13 +500,6 @@ pub fn open_new_window(state: &Arc<AppState>) -> Result<serde_json::Value, Strin
     {
         let _ = (pos_x, pos_y, url, settings);
         return Err("open_new_window not yet implemented on this platform".to_string());
-    }
-
-    // Register instance number
-    {
-        let mut reg = state.window_instance_registry.lock().unwrap();
-        let num = reg.register(&label);
-        tracing::info!(label = %label, instance = %num, "[window] new window registered");
     }
 
     // Notify all windows of the count change

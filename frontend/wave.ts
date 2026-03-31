@@ -173,6 +173,7 @@ async function initInstanceTracking(): Promise<void> {
             getApi().getInstanceNumber(),
             getApi().getWindowCount(),
         ]);
+        console.log("[initInstanceTracking] instanceNum=", instanceNum, "windowCount=", windowCount, "location.search=", window.location.search);
         setWindowInstanceNumAtom(instanceNum);
         setWindowCountAtom(windowCount);
 
