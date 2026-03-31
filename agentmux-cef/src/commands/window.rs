@@ -46,33 +46,41 @@ pub fn set_zoom_factor(state: &Arc<AppState>, args: &serde_json::Value) -> Resul
 }
 
 /// Close the window.
-pub fn close_window(_state: &Arc<AppState>) -> Result<serde_json::Value, String> {
+pub fn close_window(state: &Arc<AppState>) -> Result<serde_json::Value, String> {
     #[cfg(target_os = "windows")]
     unsafe {
         use windows_sys::Win32::UI::WindowsAndMessaging::*;
         let hwnd = find_own_top_level_window();
         if !hwnd.is_null() {
             PostMessageW(hwnd, WM_CLOSE, 0, 0);
+            return Ok(serde_json::Value::Null);
         }
     }
+    #[cfg(not(target_os = "windows"))]
+    crate::ui_tasks::post_close_window(state, "main");
+    let _ = state;
     Ok(serde_json::Value::Null)
 }
 
 /// Minimize the window.
-pub fn minimize_window(_state: &Arc<AppState>) -> Result<serde_json::Value, String> {
+pub fn minimize_window(state: &Arc<AppState>) -> Result<serde_json::Value, String> {
     #[cfg(target_os = "windows")]
     unsafe {
         use windows_sys::Win32::UI::WindowsAndMessaging::*;
         let hwnd = find_own_top_level_window();
         if !hwnd.is_null() {
             ShowWindow(hwnd, SW_MINIMIZE);
+            return Ok(serde_json::Value::Null);
         }
     }
+    #[cfg(not(target_os = "windows"))]
+    crate::ui_tasks::post_minimize_window(state, "main");
+    let _ = state;
     Ok(serde_json::Value::Null)
 }
 
 /// Maximize/unmaximize the window (toggle).
-pub fn maximize_window(_state: &Arc<AppState>) -> Result<serde_json::Value, String> {
+pub fn maximize_window(state: &Arc<AppState>) -> Result<serde_json::Value, String> {
     #[cfg(target_os = "windows")]
     unsafe {
         use windows_sys::Win32::UI::WindowsAndMessaging::*;
@@ -86,13 +94,17 @@ pub fn maximize_window(_state: &Arc<AppState>) -> Result<serde_json::Value, Stri
             } else {
                 ShowWindow(hwnd, SW_MAXIMIZE);
             }
+            return Ok(serde_json::Value::Null);
         }
     }
+    #[cfg(not(target_os = "windows"))]
+    crate::ui_tasks::post_maximize_window(state, "main");
+    let _ = state;
     Ok(serde_json::Value::Null)
 }
 
 /// Get the current window position on screen.
-pub fn get_window_position() -> Result<serde_json::Value, String> {
+pub fn get_window_position(state: &Arc<AppState>) -> Result<serde_json::Value, String> {
     #[cfg(target_os = "windows")]
     unsafe {
         use windows_sys::Win32::UI::WindowsAndMessaging::*;
@@ -104,11 +116,12 @@ pub fn get_window_position() -> Result<serde_json::Value, String> {
             return Ok(serde_json::json!({ "x": rect.left, "y": rect.top }));
         }
     }
+    let _ = state;
     Ok(serde_json::json!({ "x": 0, "y": 0 }))
 }
 
 /// Move the window by a delta (dx, dy) from its current position.
-pub fn move_window_by(args: &serde_json::Value) -> Result<serde_json::Value, String> {
+pub fn move_window_by(state: &Arc<AppState>, args: &serde_json::Value) -> Result<serde_json::Value, String> {
     let dx = args.get("dx").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
     let dy = args.get("dy").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
 
@@ -124,23 +137,26 @@ pub fn move_window_by(args: &serde_json::Value) -> Result<serde_json::Value, Str
             let height = rect.bottom - rect.top;
             SetWindowPos(
                 hwnd,
-                std::ptr::null_mut(), // no z-order change
+                std::ptr::null_mut(),
                 rect.left + dx,
                 rect.top + dy,
                 width,
                 height,
                 0x0014, // SWP_NOZORDER | SWP_NOSIZE
             );
+            return Ok(serde_json::Value::Null);
         }
     }
-    let _ = (dx, dy);
+    #[cfg(not(target_os = "windows"))]
+    crate::ui_tasks::post_move_window(state, "main", dx, dy);
+    let _ = state;
     Ok(serde_json::Value::Null)
 }
 
 /// Initiate window drag (for frameless windows).
-/// Sends WM_NCLBUTTONDOWN to the title bar hit-test area, which tells Windows
-/// to start a window move operation.
-pub fn start_window_drag() -> Result<serde_json::Value, String> {
+/// Windows: sends WM_NCLBUTTONDOWN/HTCAPTION via Win32.
+/// Linux/macOS: delegates to CEF Views Window::drag_move() on the UI thread.
+pub fn start_window_drag(state: &Arc<AppState>) -> Result<serde_json::Value, String> {
     #[cfg(target_os = "windows")]
     unsafe {
         use windows_sys::Win32::UI::WindowsAndMessaging::*;
@@ -148,10 +164,13 @@ pub fn start_window_drag() -> Result<serde_json::Value, String> {
         let hwnd = find_own_top_level_window();
         if !hwnd.is_null() {
             ReleaseCapture();
-            // HTCAPTION = 2 — tells Windows "user clicked the title bar"
             SendMessageW(hwnd, WM_NCLBUTTONDOWN, 2 /* HTCAPTION */, 0);
+            return Ok(serde_json::Value::Null);
         }
     }
+    #[cfg(not(target_os = "windows"))]
+    crate::ui_tasks::post_start_drag(state, "main");
+    let _ = state;
     Ok(serde_json::Value::Null)
 }
 
@@ -372,10 +391,13 @@ pub fn focus_window(state: &Arc<AppState>, args: &serde_json::Value) -> Result<s
                             hwnd.0 as *mut std::ffi::c_void,
                         );
                     }
+                    return Ok(serde_json::Value::Null);
                 }
             }
         }
     }
+    #[cfg(not(target_os = "windows"))]
+    crate::ui_tasks::post_focus_window(state, label);
     let _ = (state, label);
     Ok(serde_json::Value::Null)
 }

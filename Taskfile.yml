@@ -791,7 +791,23 @@ tasks:
         internal: true
         platforms: [linux]
         cmds:
-            - echo "Linux CEF bundling not yet implemented"
+            - |
+                CEF_DIR=$(find target -name "libcef.so" -path "*/cef-dll-sys*/out/*" -printf '%h' -quit 2>/dev/null)
+                if [ -z "$CEF_DIR" ]; then
+                  echo "❌ libcef.so not found in target/ — build agentmux-cef first"
+                  exit 1
+                fi
+                echo "Found CEF binaries in: $CEF_DIR"
+                mkdir -p dist/cef/locales
+                cp -f "$CEF_DIR/libcef.so" dist/cef/
+                cp -f "$CEF_DIR/libEGL.so" dist/cef/ 2>/dev/null || true
+                cp -f "$CEF_DIR/libGLESv2.so" dist/cef/ 2>/dev/null || true
+                cp -f "$CEF_DIR/chrome-sandbox" dist/cef/ 2>/dev/null || true
+                cp -f "$CEF_DIR/icudtl.dat" dist/cef/
+                cp -f "$CEF_DIR/v8_context_snapshot.bin" dist/cef/ 2>/dev/null || true
+                cp -f "$CEF_DIR"/*.pak dist/cef/
+                cp -f "$CEF_DIR/locales/en-US.pak" dist/cef/locales/ 2>/dev/null || true
+                echo "✓ Bundled CEF runtime for Linux"
 
     cef:dev:
         desc: Build and run the CEF host in development mode (starts Vite + CEF host).
@@ -842,7 +858,7 @@ tasks:
                   exit 1
                 fi
                 echo "Vite ready."
-                cd "$DEV_DIR" && ./agentmux-cef{{exeExt}} --url=http://localhost:5173
+                cd "$DEV_DIR" && LD_LIBRARY_PATH=. ./agentmux-cef{{exeExt}} --url=http://localhost:5173
 
     cef:run:
         desc: Run the CEF host (must be built and bundled first).
@@ -861,7 +877,7 @@ tasks:
     cef:run:linux:
         internal: true
         platforms: [linux]
-        cmd: cd dist/cef && ./agentmux-cef --url=http://localhost:5173
+        cmd: cd dist/cef && LD_LIBRARY_PATH=. ./agentmux-cef --url=http://localhost:5173
     cef:package:portable:
         desc: Package CEF build as a portable directory (Windows). Includes file stripping optimizations.
         platforms: [windows]
