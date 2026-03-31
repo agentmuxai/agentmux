@@ -318,6 +318,15 @@ const AppInner = () => {
     const windowData = atoms.waveWindow;
     const isFullScreen = atoms.isFullScreen;
 
+    // Debug tear-off window rendering gate
+    createEffect(() => {
+        const c = client();
+        const w = windowData();
+        try {
+            (window as any).api?.sendLog?.(`[app-debug] AppInner Show gate: client=${!!c} windowData=${!!w} clientOid=${c?.oid} windowOid=${w?.oid} wsId=${w?.workspaceid}`);
+        } catch {}
+    });
+
     return (
         <Show
             when={client() != null && windowData() != null}

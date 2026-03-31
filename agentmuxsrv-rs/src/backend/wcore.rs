@@ -580,10 +580,28 @@ pub fn tear_off_block(
     // Verify block exists
     let mut block = store.must_get::<Block>(block_id)?;
 
-    // Remove block from source tab
+    // Remove block from source tab's blockids and queue a layout delete action
+    // so the source window's frontend removes the node from its layout tree.
     let mut source_tab = store.must_get::<Tab>(source_tab_id)?;
     source_tab.blockids.retain(|id| id != block_id);
     store.update(&mut source_tab)?;
+
+    let mut source_layout = store.must_get::<LayoutState>(&source_tab.layoutstate)?;
+    let mut actions = source_layout.pendingbackendactions.take().unwrap_or_default();
+    actions.push(LayoutActionData {
+        actiontype: "delete".to_string(),
+        actionid: Uuid::new_v4().to_string(),
+        blockid: block_id.to_string(),
+        nodesize: None,
+        indexarr: None,
+        focused: false,
+        magnified: false,
+        ephemeral: false,
+        targetblockid: String::new(),
+        position: String::new(),
+    });
+    source_layout.pendingbackendactions = Some(actions);
+    store.update(&mut source_layout)?;
 
     // Create new workspace
     let new_ws = create_workspace(store, "", "", "")?;
@@ -609,6 +627,12 @@ pub fn tear_off_block(
         blockid: block_id.to_string(),
     }]);
     store.update(&mut layout)?;
+    tracing::info!(
+        layout_oid = %layout.oid,
+        tab_oid = %new_tab.oid,
+        rootnode = %serde_json::to_string(&layout.rootnode).unwrap_or_default(),
+        "[dnd] tear_off_block: layout rootnode set"
+    );
 
     // Update block's parent reference
     block.parentoref = format!("tab:{}", new_tab.oid);

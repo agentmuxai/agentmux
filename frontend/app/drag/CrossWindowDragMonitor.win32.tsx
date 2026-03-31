@@ -22,6 +22,7 @@
 
 import { atoms, getApi, globalStore } from "@/store/global";
 import { WorkspaceService } from "@/app/store/services";
+import { getLayoutModelForStaticTab, LayoutTreeActionType, LayoutTreeDeleteNodeAction } from "@/layout/index";
 import { invokeCommand } from "@/app/platform/ipc";
 import { Logger } from "@/util/logger";
 import { onCleanup, onMount } from "solid-js";
@@ -221,6 +222,18 @@ async function performTearOff(
     if (dragType === "pane" && payload.blockId) {
         const newWsId = await WorkspaceService.TearOffBlock(payload.blockId, sourceTabId, sourceWsId, true);
         if (newWsId) {
+            // Remove the block's node from the source window's layout tree.
+            // The backend removed it from blockids but the frontend layout is independent.
+            const layoutModel = getLayoutModelForStaticTab();
+            if (layoutModel) {
+                const node = layoutModel.getNodeByBlockId(payload.blockId);
+                if (node) {
+                    layoutModel.treeReducer({
+                        type: LayoutTreeActionType.DeleteNode,
+                        nodeId: node.id,
+                    } as LayoutTreeDeleteNodeAction);
+                }
+            }
             await api.openWindowAtPosition(screenX, screenY, newWsId);
         }
     } else if (dragType === "tab" && payload.tabId) {

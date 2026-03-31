@@ -514,10 +514,13 @@ if (!isHostApp()) {
 
 async function initWaveWrap(initOpts: AgentMuxInitOpts) {
     try {
+        getApi().sendLog(`[initwavewrap] entry: savedInitOpts=${!!savedInitOpts} primaryTabStartup=${initOpts.primaryTabStartup} tabId=${initOpts.tabId}`);
         if (savedInitOpts) {
+            getApi().sendLog("[initwavewrap] taking REINIT path (savedInitOpts is set)");
             await reinitWave();
             return;
         }
+        getApi().sendLog("[initwavewrap] taking FRESH INIT path");
         savedInitOpts = initOpts;
         await initWave(initOpts);
     } catch (e) {
@@ -591,17 +594,7 @@ async function initWave(initOpts: AgentMuxInitOpts) {
     };
 
     getApi().sendLog("Init Wave " + JSON.stringify(initOpts));
-    console.log(
-        "Wave Init",
-        "tabid",
-        initOpts.tabId,
-        "clientid",
-        initOpts.clientId,
-        "windowid",
-        initOpts.windowId,
-        "platform",
-        platform
-    );
+    try { getApi().sendLog("[initwave-trace] step 1: initGlobal"); } catch (e2) { /* swallow */ }
     let t = performance.now();
     initGlobal({
         tabId: initOpts.tabId,
@@ -612,6 +605,7 @@ async function initWave(initOpts: AgentMuxInitOpts) {
     });
     (window as any).globalAtoms = atoms;
     tlog("initGlobal", t);
+    getApi().sendLog("[initwave-trace] step 2: initWshrpc");
 
     // Init WPS event handlers
     t = performance.now();
@@ -619,15 +613,18 @@ async function initWave(initOpts: AgentMuxInitOpts) {
     (window as any).globalWS = globalWS;
     (window as any).TabRpcClient = TabRpcClient;
     tlog("initWshrpc", t);
+    getApi().sendLog("[initwave-trace] step 3: loadConnStatus");
 
     t = performance.now();
     await withTimeout(loadConnStatus(), RPC_TIMEOUT, "loadConnStatus");
     tlog("loadConnStatus", t);
+    getApi().sendLog("[initwave-trace] step 4: initGlobalEventSubs");
 
     t = performance.now();
     initGlobalEventSubs(initOpts);
     subscribeToConnEvents();
     tlog("initEventSubs", t);
+    getApi().sendLog("[initwave-trace] step 5: loadAndPin client/window/tab");
 
     // ensures client/window/workspace are loaded into the cache before rendering
     t = performance.now();
@@ -641,6 +638,7 @@ async function initWave(initOpts: AgentMuxInitOpts) {
         "loadAndPin client/window/tab"
     );
     tlog("loadAndPin client/window/tab", t);
+    getApi().sendLog("[initwave-trace] step 6: loadAndPin workspace/layout");
 
     t = performance.now();
     const [ws, layoutState] = await withTimeout(
@@ -652,6 +650,7 @@ async function initWave(initOpts: AgentMuxInitOpts) {
         "loadAndPin workspace/layout"
     );
     tlog("loadAndPin workspace/layout", t);
+    getApi().sendLog("[initwave-trace] step 7: loadAllWorkspaceTabs + registerKeys + GetFullConfig");
 
     t = performance.now();
     loadAllWorkspaceTabs(ws);
@@ -671,9 +670,13 @@ async function initWave(initOpts: AgentMuxInitOpts) {
     setFullConfigAtom(fullConfig);
 
     t = performance.now();
-    console.log("Wave First Render");
     const elem = document.getElementById("main");
+    getApi().sendLog(`[render-debug] Wave First Render: elem=${!!elem} tagName=${elem?.tagName} childCount=${elem?.childElementCount}`);
+    if (!elem) {
+        getApi().sendLog("[render-debug] ERROR: #main element not found — SolidJS render will be skipped!");
+    }
     render(App, elem);
+    getApi().sendLog(`[render-debug] render() returned, elem.childCount=${elem?.childElementCount}`);
     tlog("SolidJS render", t);
     tlog("TOTAL initWave", t0);
 

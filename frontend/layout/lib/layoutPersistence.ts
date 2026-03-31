@@ -23,6 +23,11 @@ import type { LayoutModel } from "./layoutModel";
  */
 export function initializeFromWaveObject(model: LayoutModel) {
     const waveObjState = model.getter(model.waveObjectAtom);
+    try {
+        const msg = `[layout-debug] initializeFromWaveObject hasWaveObj=${!!waveObjState} hasRootnode=${!!waveObjState?.rootnode} oid=${waveObjState?.oid}`;
+        (window as any).api?.sendLog?.(msg);
+    } catch {}
+
 
     const initialState: LayoutTreeState = {
         rootNode: waveObjState?.rootnode,
@@ -49,12 +54,19 @@ export function initializeFromWaveObject(model: LayoutModel) {
  */
 export function onBackendUpdate(model: LayoutModel) {
     const waveObj = model.getter(model.waveObjectAtom);
+    try {
+        const msg = `[layout-debug] onBackendUpdate hasWaveObj=${!!waveObj} hasModelRootNode=${!!model.treeState.rootNode} hasWaveObjRootnode=${!!waveObj?.rootnode} oid=${waveObj?.oid}`;
+        (window as any).api?.sendLog?.(msg);
+    } catch {}
+
     if (!waveObj) return;
 
     // If the model has no rootNode but the backend does, re-initialize.
     // This handles tear-off windows where the LayoutState wasn't loaded
     // when the LayoutModel was first constructed.
     if (!model.treeState.rootNode && waveObj.rootnode) {
+        try { (window as any).api?.sendLog?.("[layout-debug] RE-INITIALIZING from wave object (tear-off fix)"); } catch {}
+
         initializeFromWaveObject(model);
         return;
     }
