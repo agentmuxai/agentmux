@@ -179,10 +179,12 @@ wrap_browser_process_handler! {
             } else {
                 String::new()
             };
-            // If no URL specified, check if a built frontend exists next to the exe.
-            // If so, load from the IPC server (which serves static files).
-            // Otherwise, fall back to Vite dev server.
+            // If no URL specified, load from the IPC server (which serves static
+            // files from the bundled frontend). Fall back to Vite dev server ONLY
+            // in dev mode — in release builds, localhost:5173 doesn't exist and
+            // would show a raw browser error page.
             let base_url = if base_url.is_empty() {
+                let is_dev = std::env::var("AGENTMUX_DEV").is_ok();
                 let exe_dir = std::env::current_exe()
                     .ok()
                     .and_then(|p| p.parent().map(|d| d.to_path_buf()));
@@ -190,9 +192,11 @@ wrap_browser_process_handler! {
                     .as_ref()
                     .map(|d| d.join("frontend/index.html").exists())
                     .unwrap_or(false);
-                if has_frontend {
+                if has_frontend || !is_dev {
+                    // Production or portable: always use IPC server
                     format!("http://127.0.0.1:{}", self.ipc_port)
                 } else {
+                    // Dev mode only: Vite HMR server
                     "http://localhost:5173".to_string()
                 }
             } else {

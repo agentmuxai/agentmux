@@ -129,40 +129,36 @@ fn main() {
 
     tracing::info!("IPC server started on port {}", ipc_port);
 
-    // Spawn the backend sidecar asynchronously.
-    let state_for_sidecar = app_state.clone();
-    runtime.spawn(async move {
-        match sidecar::spawn_backend(&state_for_sidecar).await {
+    // Spawn the backend sidecar SYNCHRONOUSLY — block until it signals ready
+    // (WAVESRV-ESTART) before creating the browser window. This eliminates the
+    // race condition where CEF loads the frontend before the backend is available,
+    // which causes a "raw browser" appearance on slow machines or first launch.
+    let backend_ready = runtime.block_on(async {
+        match sidecar::spawn_backend(&app_state).await {
             Ok(result) => {
-                // Store endpoints in state
                 {
-                    let mut endpoints = state_for_sidecar.backend_endpoints.lock().unwrap();
+                    let mut endpoints = app_state.backend_endpoints.lock().unwrap();
                     endpoints.ws_endpoint = result.ws_endpoint.clone();
                     endpoints.web_endpoint = result.web_endpoint.clone();
                 }
-
-                // Emit backend-ready event to frontend
-                let payload = serde_json::json!({
-                    "ws": result.ws_endpoint,
-                    "web": result.web_endpoint,
-                });
-                events::emit_event_from_state(&state_for_sidecar, "backend-ready", &payload);
-
                 tracing::info!(
                     "Backend ready: ws={} web={}",
                     result.ws_endpoint,
                     result.web_endpoint
                 );
+                true
             }
             Err(e) => {
                 tracing::error!("Failed to spawn backend: {}", e);
-                let payload = serde_json::json!({
-                    "error": format!("{}", e),
-                });
-                events::emit_event_from_state(&state_for_sidecar, "backend-spawn-error", &payload);
+                false
             }
         }
     });
+
+    if !backend_ready {
+        tracing::error!("Backend failed to start — exiting");
+        std::process::exit(1);
+    }
 
     // Create the App handler with state.
     let mut cef_app = app::AgentMuxApp::new(app_state.clone(), ipc_port);
