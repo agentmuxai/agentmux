@@ -49,6 +49,16 @@ export function initializeFromWaveObject(model: LayoutModel) {
  */
 export function onBackendUpdate(model: LayoutModel) {
     const waveObj = model.getter(model.waveObjectAtom);
+    if (!waveObj) return;
+
+    // If the model has no rootNode but the backend does, re-initialize.
+    // This handles tear-off windows where the LayoutState wasn't loaded
+    // when the LayoutModel was first constructed.
+    if (!model.treeState.rootNode && waveObj.rootnode) {
+        initializeFromWaveObject(model);
+        return;
+    }
+
     const pendingActions = waveObj?.pendingbackendactions;
     if (pendingActions?.length) {
         fireAndForget(() => processPendingBackendActions(model));
