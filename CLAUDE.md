@@ -232,9 +232,17 @@ The Wayland `xdg_toplevel.app_id` is `"agentmux"` (the binary name), **not** the
 `agentmux.desktop` only. The old code incorrectly registered a versioned
 `ai.agentmux.app.vX-Y-Z.desktop` which was never matched. Only `agentmux.desktop` is needed.
 
+### CRITICAL: Never Kill AgentMux by Image Name
+- **NEVER** use `taskkill //im agentmux-cef.exe` or `taskkill //im agentmuxsrv-rs.x64.exe`
+- Multiple AgentMux instances (portable, dev, different versions) share the same binary names
+- Killing by image name kills ALL instances, including the one you are running inside of
+- **Always kill by PID:** `taskkill /PID <pid> /F`
+- If you need to find the PID: `tasklist | grep agentmux` then kill the specific PID
+- `task dev` handles its own lifecycle — you should NEVER need to manually kill AgentMux processes
+
 ### Port Conflicts
-- Dev server port: 1420 (Vite) + backend port (varies)
-- Check: `netstat -ano | grep :1420`
+- Dev server port: 5173 (Vite) + backend port (varies)
+- Check: `netstat -ano | grep :5173`
 - Kill: `taskkill /PID <pid> /F` (Windows)
 
 ---
