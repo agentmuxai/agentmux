@@ -381,9 +381,13 @@ pub fn focus_window(state: &Arc<AppState>, args: &serde_json::Value) -> Result<s
 }
 
 /// Get the instance number for the current window.
-pub fn get_instance_number(state: &Arc<AppState>) -> serde_json::Value {
+pub fn get_instance_number(state: &Arc<AppState>, args: &serde_json::Value) -> serde_json::Value {
+    let label = args
+        .get("label")
+        .and_then(|v| v.as_str())
+        .unwrap_or("main");
     let reg = state.window_instance_registry.lock().unwrap();
-    serde_json::json!(reg.get("main").unwrap_or(1))
+    serde_json::json!(reg.get(label).unwrap_or(1))
 }
 
 /// Get the total window count.
@@ -418,7 +422,7 @@ pub(crate) fn resolve_frontend_base_url(ipc_port: u16) -> String {
 }
 
 /// Open a new window (Ctrl+Shift+N or StatusBar click).
-/// Creates a new CEF browser window with a unique label and IPC credentials.
+/// Creates a new CEF Views window with the same frameless style as the main window.
 pub fn open_new_window(state: &Arc<AppState>) -> Result<serde_json::Value, String> {
     let window_id = uuid::Uuid::new_v4();
     let label = format!("window-{}", window_id.simple());
@@ -435,17 +439,35 @@ pub fn open_new_window(state: &Arc<AppState>) -> Result<serde_json::Value, Strin
 
     tracing::info!(label = %label, "[window] open_new_window");
 
-    // Position offset from the current window so it's visible
+    // Register instance number BEFORE creating the browser, so the new window's
+    // frontend can query its instance number immediately on load.
+    {
+        let mut reg = state.window_instance_registry.lock().unwrap();
+        let num = reg.register(&label);
+        tracing::info!(label = %label, instance = %num, "[window] new window registered");
+    }
+
+    let settings = cef::BrowserSettings {
+        windowless_frame_rate: 60,
+        background_color: 0xFF000000,
+        ..Default::default()
+    };
+
     let (pos_x, pos_y) = get_offset_position();
 
     #[cfg(target_os = "windows")]
     {
         use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
+        // Frameless popup — no native title bar, no resize borders.
+        // The frontend's custom title bar provides min/max/close.
+        // Edge resize is not available (requires WS_THICKFRAME which
+        // causes a visible white border). Users resize via maximize/restore.
         let window_info = cef::WindowInfo {
             runtime_style: cef::RuntimeStyle::ALLOY,
             window_name: cef::CefString::from("AgentMux"),
-            style: WS_POPUP | WS_CLIPCHILDREN | WS_CLIPSIBLINGS | WS_VISIBLE | WS_MINIMIZEBOX | WS_MAXIMIZEBOX,
+            style: WS_POPUP | WS_CLIPCHILDREN | WS_CLIPSIBLINGS | WS_VISIBLE
+                | WS_MINIMIZEBOX | WS_MAXIMIZEBOX,
             bounds: cef::Rect {
                 x: pos_x,
                 y: pos_y,
@@ -455,16 +477,18 @@ pub fn open_new_window(state: &Arc<AppState>) -> Result<serde_json::Value, Strin
             ..Default::default()
         };
 
-        let settings = cef::BrowserSettings {
-            windowless_frame_rate: 60,
-            background_color: 0xFF000000,
-            ..Default::default()
-        };
-
         let cef_url = cef::CefString::from(url.as_str());
+
+        // Pass the shared client so on_after_created fires (registers browser,
+        // applies DWM frameless, injects IPC port).
+        let browsers = state.browsers.lock().unwrap();
+        let client = browsers.values().next().and_then(|b| b.host().map(|h| h.client()));
+        drop(browsers);
+
+        let mut client_ref = client.flatten();
         cef::browser_host_create_browser(
             Some(&window_info),
-            None,
+            client_ref.as_mut(),
             Some(&cef_url),
             Some(&settings),
             None,
@@ -474,15 +498,8 @@ pub fn open_new_window(state: &Arc<AppState>) -> Result<serde_json::Value, Strin
 
     #[cfg(not(target_os = "windows"))]
     {
-        let _ = (pos_x, pos_y, url);
+        let _ = (pos_x, pos_y, url, settings);
         return Err("open_new_window not yet implemented on this platform".to_string());
-    }
-
-    // Register instance number
-    {
-        let mut reg = state.window_instance_registry.lock().unwrap();
-        let num = reg.register(&label);
-        tracing::info!(label = %label, instance = %num, "[window] new window registered");
     }
 
     // Notify all windows of the count change

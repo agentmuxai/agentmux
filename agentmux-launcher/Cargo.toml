@@ -1,6 +1,6 @@
 [package]
 name = "agentmux-launcher"
-version = "0.33.2"
+version = "0.33.4"
 description = "AgentMux Launcher — tiny exe that sets DLL path then spawns the CEF host"
 authors = ["AgentMux Corp"]
 edition = "2021"

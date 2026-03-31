@@ -412,7 +412,9 @@ export function buildCefApi(): AppApi {
             await invokeCommand("focus_window", { label });
         },
         getInstanceNumber: async () => {
-            return await invokeCommand<number>("get_instance_number");
+            const params = new URLSearchParams(window.location.search);
+            const label = params.get("windowLabel") ?? "main";
+            return await invokeCommand<number>("get_instance_number", { label });
         },
         getWindowCount: async () => {
             return await invokeCommand<number>("get_window_count");
