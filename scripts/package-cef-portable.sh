@@ -14,7 +14,7 @@ ZIPPATH="$OUTDIR/agentmux-cef-$VERSION-x64-portable.zip"
 echo "Packaging AgentMux CEF v$VERSION Portable..."
 
 # Verify required files
-for f in dist/cef/agentmux-cef.exe dist/cef/libcef.dll dist/bin/agentmuxsrv-rs.x64.exe dist/frontend/index.html target/release/agentmux-launcher.exe; do
+for f in target/release/agentmux-cef.exe dist/cef/libcef.dll dist/bin/agentmuxsrv-rs.x64.exe dist/frontend/index.html target/release/agentmux-launcher.exe; do
     if [ ! -f "$f" ]; then
         echo "ERROR: $f not found — build first" >&2
         exit 1
