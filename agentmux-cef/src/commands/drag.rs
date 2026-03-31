@@ -328,19 +328,18 @@ pub fn open_window_at_position(state: &Arc<AppState>, args: &serde_json::Value) 
 
         let cef_url = cef::CefString::from(url.as_str());
 
-        // browser_host_create_browser is async-safe — it internally posts to the UI thread.
-        // We pass None for client — the existing AgentMuxClient registered at app init handles
-        // all new browsers via on_after_created.
-        //
-        // Actually, we need to pass the client so callbacks work. Get it from an existing browser.
-        // CEF's browser_host_create_browser with None client still routes to the app's default client.
+        // Each new window needs an isolated RequestContext so it gets its own
+        // renderer process with a separate V8 isolate. Without this, all windows
+        // share module-level JS state (savedInitOpts, document, SolidJS tree).
+        let mut request_context = super::create_isolated_request_context(state, &label);
+
         cef::browser_host_create_browser(
             Some(&window_info),
             None, // Uses the app's default client (AgentMuxClient)
             Some(&cef_url),
             Some(&settings),
             None, // extra_info
-            None, // request_context
+            request_context.as_mut(),
         );
     }
 

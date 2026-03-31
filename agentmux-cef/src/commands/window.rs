@@ -507,6 +507,10 @@ pub fn open_new_window(state: &Arc<AppState>) -> Result<serde_json::Value, Strin
         let client = browsers.values().next().and_then(|b| b.host().map(|h| h.client()));
         drop(browsers);
 
+        // Each new window needs an isolated RequestContext so it gets its own
+        // renderer process with a separate V8 isolate.
+        let mut request_context = super::create_isolated_request_context(state, &label);
+
         let mut client_ref = client.flatten();
         cef::browser_host_create_browser(
             Some(&window_info),
@@ -514,7 +518,7 @@ pub fn open_new_window(state: &Arc<AppState>) -> Result<serde_json::Value, Strin
             Some(&cef_url),
             Some(&settings),
             None,
-            None,
+            request_context.as_mut(),
         );
     }
 
