@@ -879,92 +879,10 @@ tasks:
         platforms: [linux]
         cmd: cd dist/cef && LD_LIBRARY_PATH=. ./agentmux-cef --url=http://localhost:5173
     cef:package:portable:
-        desc: Package CEF build as a portable directory (Windows). Includes file stripping optimizations.
+        desc: Package CEF build as a portable directory + ZIP (Windows). Outputs to ~/Desktop by default.
         platforms: [windows]
         cmds:
-            - cmd: |
-                powershell -Command "
-                  $$version = (Get-Content package.json -Raw | ConvertFrom-Json).version
-                  $$outDir = 'dist'
-                  $$portableDir = Join-Path $$outDir \"agentmux-cef-$$version-x64-portable\"
-                  $$zipPath = Join-Path $$outDir \"agentmux-cef-$$version-x64-portable.zip\"
-
-                  # Verify required files
-                  if (-not (Test-Path 'dist/cef/agentmux-cef.exe')) { throw 'agentmux-cef.exe not found — run task cef:build first' }
-                  if (-not (Test-Path 'dist/cef/libcef.dll')) { throw 'libcef.dll not found — run task cef:bundle first' }
-                  if (-not (Test-Path 'dist/bin/agentmuxsrv-rs.x64.exe')) { throw 'agentmuxsrv-rs.x64.exe not found — run task build:backend first' }
-                  if (-not (Test-Path 'dist/frontend/index.html')) { throw 'frontend not built — run task build:frontend first' }
-
-                  # Clean previous
-                  if (Test-Path $$portableDir) { Remove-Item $$portableDir -Recurse -Force }
-                  if (Test-Path $$zipPath) { Remove-Item $$zipPath -Force }
-
-                  Write-Host 'Packaging AgentMux CEF' $$version 'Portable...' -ForegroundColor Cyan
-
-                  # Create portable directory with runtime/ subdirectory
-                  New-Item -ItemType Directory -Force -Path $$portableDir | Out-Null
-                  $$runtimeDir = Join-Path $$portableDir 'runtime'
-                  New-Item -ItemType Directory -Force -Path $$runtimeDir | Out-Null
-                  New-Item -ItemType Directory -Force -Path (Join-Path $$runtimeDir 'locales') | Out-Null
-
-                  # Host binary in root (rename to agentmux.exe for end users)
-                  Copy-Item 'dist/cef/agentmux-cef.exe' (Join-Path $$portableDir 'agentmux.exe') -Force
-
-                  # README in root
-                  $$readme = 'AgentMux v' + $$version + ' - Portable Edition' + [Environment]::NewLine + [Environment]::NewLine + 'Quick Start:' + [Environment]::NewLine + '  1. Extract this ZIP to any folder' + [Environment]::NewLine + '  2. Run agentmux.exe' + [Environment]::NewLine + [Environment]::NewLine + 'Requirements:' + [Environment]::NewLine + '  - Windows 10/11 x64' + [Environment]::NewLine + '  - No installation needed' + [Environment]::NewLine + '  - No admin rights required' + [Environment]::NewLine + [Environment]::NewLine + 'The runtime/ folder contains application internals.' + [Environment]::NewLine + 'Do not modify or delete files in it.'
-                  $$readme | Out-File (Join-Path $$portableDir 'README.txt') -Encoding UTF8
-
-                  # Everything else goes into runtime/
-                  # Sidecar
-                  Copy-Item 'dist/bin/agentmuxsrv-rs.x64.exe' $$runtimeDir -Force
-
-                  # wsh shell integration binary (renamed to wsh.exe for deploy_wsh)
-                  $$wshSrc = 'dist/bin/wsh-' + $$version + '-windows.x64.exe'
-                  if (Test-Path $$wshSrc) {
-                    Copy-Item $$wshSrc (Join-Path $$runtimeDir 'wsh.exe') -Force
-                  } else {
-                    Write-Host 'Warning: wsh not found at' $$wshSrc '— run task build:wsh first' -ForegroundColor Yellow
-                  }
-
-                  # Frontend
-                  Copy-Item -Recurse 'dist/frontend' (Join-Path $$runtimeDir 'frontend') -Force
-
-                  # CEF core (required)
-                  Copy-Item 'dist/cef/libcef.dll' $$runtimeDir -Force
-                  Copy-Item 'dist/cef/chrome_elf.dll' $$runtimeDir -Force
-                  Copy-Item 'dist/cef/icudtl.dat' $$runtimeDir -Force
-                  Copy-Item 'dist/cef/v8_context_snapshot.bin' $$runtimeDir -Force -ErrorAction SilentlyContinue
-
-                  # GPU support (required — ANGLE + D3D)
-                  Copy-Item 'dist/cef/libEGL.dll' $$runtimeDir -Force -ErrorAction SilentlyContinue
-                  Copy-Item 'dist/cef/libGLESv2.dll' $$runtimeDir -Force -ErrorAction SilentlyContinue
-                  Copy-Item 'dist/cef/d3dcompiler_47.dll' $$runtimeDir -Force -ErrorAction SilentlyContinue
-
-                  # Resource paks
-                  Copy-Item 'dist/cef/chrome_100_percent.pak' $$runtimeDir -Force -ErrorAction SilentlyContinue
-                  Copy-Item 'dist/cef/chrome_200_percent.pak' $$runtimeDir -Force -ErrorAction SilentlyContinue
-                  Copy-Item 'dist/cef/resources.pak' $$runtimeDir -Force -ErrorAction SilentlyContinue
-
-                  # Locale — en-US only
-                  Copy-Item 'dist/cef/locales/en-US.pak' (Join-Path $$runtimeDir 'locales') -Force
-
-                  # ZIP it
-                  Write-Host '  Creating ZIP...' -ForegroundColor Gray
-                  Compress-Archive -Path (Join-Path $$portableDir '*') -DestinationPath $$zipPath -Force
-                  $$zipSize = [math]::Round((Get-Item $$zipPath).Length / 1MB, 1)
-                  $$dirSize = [math]::Round(((Get-ChildItem $$portableDir -Recurse | Measure-Object Length -Sum).Sum) / 1MB, 1)
-
-                  Write-Host ''
-                  Write-Host '[SUCCESS] CEF Portable build:' -ForegroundColor Green
-                  Write-Host \"  Directory: $$portableDir ($$dirSize MB)\" -ForegroundColor White
-                  Write-Host \"  ZIP: $$zipPath ($$zipSize MB)\" -ForegroundColor White
-                  Write-Host ''
-                  Write-Host '  Optimizations applied:' -ForegroundColor Gray
-                  Write-Host '    - SwiftShader removed (deprecated upstream, saves ~6 MB)' -ForegroundColor Gray
-                  Write-Host '    - WebGPU DLLs removed (dxil/dxcompiler, saves ~6.5 MB)' -ForegroundColor Gray
-                  Write-Host '    - 49 non-English locales removed (saves ~18 MB)' -ForegroundColor Gray
-                  Write-Host '    - GPU support preserved (ANGLE + D3D compiler)' -ForegroundColor Gray
-                "
+            - bash scripts/package-cef-portable.sh
 
     cef:clean:
         desc: Clean CEF build artifacts.
