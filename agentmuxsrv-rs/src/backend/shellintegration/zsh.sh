@@ -9,6 +9,11 @@ if [ -n "$AGENTMUX" ] && [ "$AGENTMUX" != "1" ]; then
     unset _agentmux_app_dir
 fi
 
+# Source login profile (Homebrew shellenv and other login-shell setup live here)
+if [ -f ~/.zprofile ]; then
+    source ~/.zprofile
+fi
+
 # Source the user's real ~/.zshrc (since ZDOTDIR overrides it)
 if [ -f ~/.zshrc ]; then
     source ~/.zshrc
