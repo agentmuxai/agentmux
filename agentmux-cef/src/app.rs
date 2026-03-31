@@ -41,6 +41,12 @@ wrap_window_delegate! {
             };
             let mut view = View::from(browser_view);
             window.add_child_view(Some(&mut view));
+
+            // Resize to 70% of the current monitor's work area, centered.
+            if let Some((x, y, w, h)) = get_monitor_centered_70pct(window) {
+                window.set_bounds(Some(&Rect { x, y, width: w, height: h }));
+            }
+
             window.show();
             // Focus the browser so keyboard input (Ctrl+C/V, typing) works immediately.
             if let Some(browser) = browser_view.browser() {
@@ -90,6 +96,69 @@ wrap_window_delegate! {
             RuntimeStyle::ALLOY
         }
     }
+}
+
+/// Compute a centered 70% rect for the monitor the window is currently on.
+/// Returns (x, y, width, height) or None if the monitor can't be determined.
+fn get_monitor_centered_70pct(window: &Window) -> Option<(i32, i32, i32, i32)> {
+    let bounds = window.bounds();
+    let (work_x, work_y, work_w, work_h) = get_monitor_work_area(bounds.x, bounds.y)?;
+    let w = (work_w as f64 * 0.70) as i32;
+    let h = (work_h as f64 * 0.70) as i32;
+    let x = work_x + (work_w - w) / 2;
+    let y = work_y + (work_h - h) / 2;
+    Some((x, y, w, h))
+}
+
+/// Get the work area (excluding taskbar/dock) of the monitor containing (px, py).
+/// Returns (x, y, width, height) of the work area.
+#[cfg(target_os = "windows")]
+pub fn get_monitor_work_area(px: i32, py: i32) -> Option<(i32, i32, i32, i32)> {
+    use windows_sys::Win32::Graphics::Gdi::{
+        MonitorFromPoint, GetMonitorInfoW, MONITORINFO, MONITOR_DEFAULTTOPRIMARY,
+    };
+    unsafe {
+        let point = windows_sys::Win32::Foundation::POINT { x: px, y: py };
+        let hmonitor = MonitorFromPoint(point, MONITOR_DEFAULTTOPRIMARY);
+        if hmonitor.is_null() {
+            return None;
+        }
+        let mut info: MONITORINFO = std::mem::zeroed();
+        info.cbSize = std::mem::size_of::<MONITORINFO>() as u32;
+        if GetMonitorInfoW(hmonitor, &mut info) == 0 {
+            return None;
+        }
+        let rc = info.rcWork;
+        Some((rc.left, rc.top, rc.right - rc.left, rc.bottom - rc.top))
+    }
+}
+
+#[cfg(target_os = "macos")]
+pub fn get_monitor_work_area(_px: i32, _py: i32) -> Option<(i32, i32, i32, i32)> {
+    // CGMainDisplayID + CGDisplayBounds gives the full screen;
+    // NSScreen.main.visibleFrame gives work area minus Dock/menu bar.
+    // For now, use a simple approach via Core Graphics.
+    #[link(name = "CoreGraphics", kind = "framework")]
+    extern "C" {
+        fn CGMainDisplayID() -> u32;
+        fn CGDisplayPixelsWide(display: u32) -> usize;
+        fn CGDisplayPixelsHigh(display: u32) -> usize;
+    }
+    unsafe {
+        let display = CGMainDisplayID();
+        let w = CGDisplayPixelsWide(display) as i32;
+        let h = CGDisplayPixelsHigh(display) as i32;
+        // Approximate: subtract 25px for menu bar, no dock offset
+        Some((0, 25, w, h - 25))
+    }
+}
+
+#[cfg(target_os = "linux")]
+pub fn get_monitor_work_area(_px: i32, _py: i32) -> Option<(i32, i32, i32, i32)> {
+    // X11: XDisplayWidth/XDisplayHeight on the default screen.
+    // This is the full screen, not work area (no taskbar subtraction).
+    // TODO: use _NET_WORKAREA from the root window for proper work area.
+    None // Falls back to 1200x800 default
 }
 
 wrap_browser_view_delegate! {
