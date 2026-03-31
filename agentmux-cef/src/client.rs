@@ -99,6 +99,23 @@ impl AgentMuxHandler {
             }
         }
 
+        // Set the taskbar/title bar icon from the embedded exe resource.
+        #[cfg(target_os = "windows")]
+        {
+            // For native windows, use the browser's HWND; for CEF Views, enumerate.
+            let hwnd = browser.host()
+                .and_then(|h| {
+                    let wh = h.window_handle();
+                    if wh.0.is_null() { None } else { Some(wh.0 as *mut std::ffi::c_void) }
+                })
+                .unwrap_or_else(|| unsafe {
+                    crate::commands::window::find_own_top_level_window()
+                });
+            if !hwnd.is_null() {
+                unsafe { set_window_icon(hwnd); }
+            }
+        }
+
         self.browser_list.push(browser);
     }
 
@@ -391,6 +408,51 @@ unsafe fn setup_native_frameless(hwnd: *mut std::ffi::c_void) {
         tracing::info!("Applied DwmExtendFrameIntoClientArea to hide resize border");
     } else {
         tracing::warn!("DwmExtendFrameIntoClientArea failed: hr={:#x}", result);
+    }
+}
+
+/// Load the app icon from the exe's embedded resource and set it on the window.
+/// This makes the icon appear in the taskbar and Alt+Tab switcher instead of
+/// the default CEF/Chromium icon.
+#[cfg(target_os = "windows")]
+unsafe fn set_window_icon(hwnd: *mut std::ffi::c_void) {
+    use windows_sys::Win32::UI::WindowsAndMessaging::*;
+    use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
+
+    let hinstance = GetModuleHandleW(std::ptr::null());
+    if hinstance.is_null() {
+        tracing::warn!("set_window_icon: GetModuleHandleW returned null");
+        return;
+    }
+
+    // Load the big icon (32x32, for Alt+Tab / taskbar)
+    let icon_big = LoadImageW(
+        hinstance,
+        1 as *const u16, // Resource ID 1 (set by winres)
+        IMAGE_ICON,
+        32, 32,
+        LR_SHARED,
+    );
+    if !icon_big.is_null() {
+        SendMessageW(hwnd, WM_SETICON, ICON_BIG as usize, icon_big as isize);
+    }
+
+    // Load the small icon (16x16, for title bar)
+    let icon_small = LoadImageW(
+        hinstance,
+        1 as *const u16,
+        IMAGE_ICON,
+        16, 16,
+        LR_SHARED,
+    );
+    if !icon_small.is_null() {
+        SendMessageW(hwnd, WM_SETICON, ICON_SMALL as usize, icon_small as isize);
+    }
+
+    if !icon_big.is_null() || !icon_small.is_null() {
+        tracing::info!("Set window icon from embedded resource");
+    } else {
+        tracing::warn!("set_window_icon: no icon found in exe resource");
     }
 }
 

@@ -812,9 +812,26 @@ tasks:
         desc: Start Vite dev server and CEF host concurrently.
         cmds:
             - cmd: |
+                # Gate on successful bundle — don't launch stale binaries
+                if [ ! -f dist/cef/agentmux-cef{{exeExt}} ]; then
+                  echo "❌ dist/cef/agentmux-cef{{exeExt}} not found — build failed?"
+                  exit 1
+                fi
+                if [ ! -f dist/cef/libcef.dll ] && [ "{{OS}}" = "windows" ]; then
+                  echo "❌ dist/cef/libcef.dll not found — bundle failed?"
+                  exit 1
+                fi
+
+                # Copy staging dir to session dir so dist/cef/ is never locked
+                # by the running process. Next build can overwrite dist/cef/ freely.
+                DEV_DIR="dist/cef-dev"
+                rm -rf "$DEV_DIR"
+                cp -r dist/cef "$DEV_DIR"
+                echo "Copied dist/cef → $DEV_DIR (isolation)"
+
                 npx vite --config vite.config.tauri.ts --port 5173 &
                 VITE_PID=$!
-                trap "kill $VITE_PID 2>/dev/null" EXIT
+                trap "kill $VITE_PID 2>/dev/null; rm -rf $DEV_DIR 2>/dev/null" EXIT
                 echo "Waiting for Vite on port 5173 (pid $VITE_PID)..."
                 for i in $(seq 1 30); do
                   curl -s http://localhost:5173 > /dev/null 2>&1 && break
@@ -825,7 +842,7 @@ tasks:
                   exit 1
                 fi
                 echo "Vite ready."
-                cd dist/cef && ./agentmux-cef{{exeExt}} --url=http://localhost:5173
+                cd "$DEV_DIR" && ./agentmux-cef{{exeExt}} --url=http://localhost:5173
 
     cef:run:
         desc: Run the CEF host (must be built and bundled first).
@@ -937,6 +954,8 @@ tasks:
         desc: Clean CEF build artifacts.
         cmds:
             - cmd: '{{.RMRF}} "dist/cef"'
+              ignore_error: true
+            - cmd: '{{.RMRF}} "dist/cef-dev"'
               ignore_error: true
 
     # ========================================

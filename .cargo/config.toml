@@ -1,3 +1,9 @@
+# Stable CEF extraction path — prevents 155MB re-download on every version bump.
+# Update this path when upgrading the cef-dll-sys crate version.
+[env]
+CEF_PATH = "C:/Systems/cef-runtime/cef_146.0.9_windows_x86_64"
+CMAKE_MAKE_PROGRAM = "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe"
+
 # Static CRT linking for Windows MSVC targets.
 # Embeds VCRUNTIME140.dll into the binary so it runs on bare Windows
 # installs without the Visual C++ Redistributable package.
