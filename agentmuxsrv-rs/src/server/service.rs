@@ -43,14 +43,7 @@ fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType {
                 Err(e) => return WebReturnType::error(e),
             };
             match get_object_by_oref(store, &oref_str) {
-                Ok(data) => {
-                    // Debug: log layout objects to verify rootnode
-                    if oref_str.starts_with("layout:") {
-                        let has_rootnode = data.get("rootnode").map(|v| !v.is_null()).unwrap_or(false);
-                        tracing::info!(oref = %oref_str, has_rootnode = %has_rootnode, "[dnd-debug] GetObject layout");
-                    }
-                    WebReturnType::success(data)
-                }
+                Ok(data) => WebReturnType::success(data),
                 Err(e) => WebReturnType::error(e),
             }
         }

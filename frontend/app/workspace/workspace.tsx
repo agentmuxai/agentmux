@@ -15,16 +15,6 @@ function WorkspaceElem(): JSX.Element {
     const tabId = atoms.activeTabId;
     const ws = atoms.workspace;
 
-    // Debug tear-off rendering
-    createMemo(() => {
-        const w = ws();
-        const tid = tabId();
-        const allTabs = w ? [...(w.pinnedtabids ?? []), ...(w.tabids ?? [])] : [];
-        try {
-            (window as any).api?.sendLog?.(`[ws-debug] WorkspaceElem render: activeTabId=${tid} wsOid=${w?.oid} allTabs=${JSON.stringify(allTabs)} activetabid=${w?.activetabid}`);
-        } catch {}
-    });
-
     // All tab IDs (pinned + regular). Keep every tab mounted so terminals
     // preserve their xterm.js instance and scrollback across tab switches.
     // Inactive tabs are hidden via display:none — no unmount/remount.

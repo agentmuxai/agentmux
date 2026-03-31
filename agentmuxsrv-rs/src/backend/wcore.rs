@@ -627,12 +627,6 @@ pub fn tear_off_block(
         blockid: block_id.to_string(),
     }]);
     store.update(&mut layout)?;
-    tracing::info!(
-        layout_oid = %layout.oid,
-        tab_oid = %new_tab.oid,
-        rootnode = %serde_json::to_string(&layout.rootnode).unwrap_or_default(),
-        "[dnd] tear_off_block: layout rootnode set"
-    );
 
     // Update block's parent reference
     block.parentoref = format!("tab:{}", new_tab.oid);

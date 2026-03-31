@@ -420,8 +420,9 @@ export function buildCefApi(): AppApi {
             return await invokeCommand<number>("get_window_count");
         },
 
-        // --- Drag & Drop (see real implementations below) ---
-        setJsDragActive: async (_active: boolean) => {},
+        setJsDragActive: async (active: boolean) => {
+            await invokeCommand("set_js_drag_active", { active });
+        },
 
         // --- Workspace & Tabs ---
         createWorkspace: () => {
