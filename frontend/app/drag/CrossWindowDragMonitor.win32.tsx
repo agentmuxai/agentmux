@@ -22,6 +22,7 @@
 
 import { atoms, getApi, globalStore } from "@/store/global";
 import { WorkspaceService } from "@/app/store/services";
+import { invokeCommand } from "@/app/platform/ipc";
 import { Logger } from "@/util/logger";
 import { onCleanup, onMount } from "solid-js";
 import type { JSX } from "solid-js";
@@ -67,8 +68,7 @@ function CrossWindowDragMonitor(): JSX.Element {
             // Query Windows directly: is the left mouse button still held?
             let isButtonPressed = false;
             try {
-                const { invoke } = await import("@tauri-apps/api/core");
-                isButtonPressed = await invoke<boolean>("get_mouse_button_state");
+                isButtonPressed = await invokeCommand<boolean>("get_mouse_button_state");
             } catch (e) {
                 // If the call fails, be conservative and reschedule rather than
                 // triggering a spurious tearoff.
@@ -144,8 +144,7 @@ function CrossWindowDragMonitor(): JSX.Element {
 async function handleCrossWindowDragEnd(payload: DragItemPayload, sourceWindow: string | null) {
     let cursorPoint: { x: number; y: number };
     try {
-        const { invoke } = await import("@tauri-apps/api/core");
-        cursorPoint = await invoke<{ x: number; y: number }>("get_cursor_point");
+        cursorPoint = await invokeCommand<{ x: number; y: number }>("get_cursor_point");
     } catch (e) {
         Logger.error("dnd:cross", "failed to get cursor position", { error: String(e) });
         return;

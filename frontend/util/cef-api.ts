@@ -420,17 +420,8 @@ export function buildCefApi(): AppApi {
             return await invokeCommand<number>("get_window_count");
         },
 
-        // --- Drag & Drop (stubs — cross-window drag is Phase 3) ---
+        // --- Drag & Drop (see real implementations below) ---
         setJsDragActive: async (_active: boolean) => {},
-        startCrossDrag: async () => "",
-        updateCrossDrag: async (_dragId: string, _screenX: number, _screenY: number) => null as string | null,
-        completeCrossDrag: async () => {},
-        cancelCrossDrag: async (_dragId: string) => {},
-        openWindowAtPosition: async () => "",
-        setDragCursor: async () => {},
-        restoreDragCursor: async () => {},
-        releaseDragCapture: async () => {},
-        getMouseButtonState: async () => false,
 
         // --- Workspace & Tabs ---
         createWorkspace: () => {
@@ -537,7 +528,7 @@ export function buildCefApi(): AppApi {
             return unlisten;
         },
 
-        // --- Cross-window drag (stubbed — Phase 3) ---
+        // --- Cross-window drag ---
         startCrossDrag: async (
             dragType: "pane" | "tab",
             sourceWindow: string,
@@ -567,7 +558,7 @@ export function buildCefApi(): AppApi {
             return await invokeCommand<string>("open_window_at_position", { screenX, screenY, workspaceId: workspaceId ?? "" });
         },
 
-        // --- Drag cursor (stubbed — Phase 3) ---
+        // --- Drag cursor & helpers ---
         setDragCursor: async () => {
             await invokeCommand("set_drag_cursor");
         },
@@ -576,6 +567,9 @@ export function buildCefApi(): AppApi {
         },
         releaseDragCapture: async () => {
             await invokeCommand("release_drag_capture");
+        },
+        getMouseButtonState: async () => {
+            return await invokeCommand<boolean>("get_mouse_button_state");
         },
     };
 
