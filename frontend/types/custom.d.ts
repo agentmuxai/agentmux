@@ -175,6 +175,8 @@ declare global {
         setDragCursor: () => Promise<void>;
         restoreDragCursor: () => Promise<void>;
         releaseDragCapture: () => Promise<void>;
+        getMouseButtonState: () => Promise<boolean>;
+        setJsDragActive: (active: boolean) => Promise<void>;
     };
 
     type NativeContextMenuItem = {

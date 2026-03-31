@@ -24,18 +24,15 @@ function getLayoutModelForTab(tabAtom: () => Tab): LayoutModel {
     }
     const layoutModel = new LayoutModel(tabAtom);
 
-    const activeTabId = atoms.activeTabId();
-    if (tabId === activeTabId) {
-        const layoutStateAtom = getLayoutStateAtomFromTab(tabAtom);
-        // Subscribe to layout state changes via a reactive effect.
-        // createEffect runs in the reactive owner context of the calling component.
-        createEffect(() => {
-            // Reading layoutStateAtom() tracks it reactively; when it changes,
-            // this effect re-runs and calls onBackendUpdate.
-            layoutStateAtom();
-            layoutModel.onBackendUpdate();
-        });
-    }
+    // Subscribe to layout state changes via a reactive effect.
+    // This must run for ALL tabs, not just the active one — tear-off windows
+    // create a LayoutModel before atoms.activeTabId() is synced, so gating
+    // on activeTabId would skip the subscription and leave rootNode undefined.
+    const layoutStateAtom = getLayoutStateAtomFromTab(tabAtom);
+    createEffect(() => {
+        layoutStateAtom();
+        layoutModel.onBackendUpdate();
+    });
 
     layoutModelMap.set(tabId, layoutModel);
     return layoutModel;

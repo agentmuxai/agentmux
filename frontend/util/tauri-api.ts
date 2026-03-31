@@ -443,6 +443,9 @@ export function buildTauriApi(): AppApi {
         releaseDragCapture: async () => {
             await invoke("release_drag_capture");
         },
+        getMouseButtonState: async () => {
+            return await invoke<boolean>("get_mouse_button_state");
+        },
         setJsDragActive: async (active: boolean) => {
             await invoke("set_js_drag_active", { active });
         },

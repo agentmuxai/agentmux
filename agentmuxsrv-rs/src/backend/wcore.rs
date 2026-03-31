@@ -580,10 +580,28 @@ pub fn tear_off_block(
     // Verify block exists
     let mut block = store.must_get::<Block>(block_id)?;
 
-    // Remove block from source tab
+    // Remove block from source tab's blockids and queue a layout delete action
+    // so the source window's frontend removes the node from its layout tree.
     let mut source_tab = store.must_get::<Tab>(source_tab_id)?;
     source_tab.blockids.retain(|id| id != block_id);
     store.update(&mut source_tab)?;
+
+    let mut source_layout = store.must_get::<LayoutState>(&source_tab.layoutstate)?;
+    let mut actions = source_layout.pendingbackendactions.take().unwrap_or_default();
+    actions.push(LayoutActionData {
+        actiontype: "delete".to_string(),
+        actionid: Uuid::new_v4().to_string(),
+        blockid: block_id.to_string(),
+        nodesize: None,
+        indexarr: None,
+        focused: false,
+        magnified: false,
+        ephemeral: false,
+        targetblockid: String::new(),
+        position: String::new(),
+    });
+    source_layout.pendingbackendactions = Some(actions);
+    store.update(&mut source_layout)?;
 
     // Create new workspace
     let new_ws = create_workspace(store, "", "", "")?;
@@ -594,6 +612,21 @@ pub fn tear_off_block(
     let mut new_tab = store.must_get::<Tab>(&new_tab.oid)?;
     new_tab.blockids.push(block_id.to_string());
     store.update(&mut new_tab)?;
+
+    // Set up the layout tree for the new tab with the block as the single root node.
+    // Without this, the frontend renders an empty layout (rootnode: null).
+    let mut layout = store.must_get::<LayoutState>(&new_tab.layoutstate)?;
+    layout.rootnode = Some(serde_json::json!({
+        "id": Uuid::new_v4().to_string(),
+        "data": { "blockId": block_id },
+        "flexDirection": "row",
+        "size": 1
+    }));
+    layout.leaforder = Some(vec![LeafOrderEntry {
+        nodeid: layout.rootnode.as_ref().unwrap()["id"].as_str().unwrap().to_string(),
+        blockid: block_id.to_string(),
+    }]);
+    store.update(&mut layout)?;
 
     // Update block's parent reference
     block.parentoref = format!("tab:{}", new_tab.oid);

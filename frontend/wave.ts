@@ -591,17 +591,6 @@ async function initWave(initOpts: AgentMuxInitOpts) {
     };
 
     getApi().sendLog("Init Wave " + JSON.stringify(initOpts));
-    console.log(
-        "Wave Init",
-        "tabid",
-        initOpts.tabId,
-        "clientid",
-        initOpts.clientId,
-        "windowid",
-        initOpts.windowId,
-        "platform",
-        platform
-    );
     let t = performance.now();
     initGlobal({
         tabId: initOpts.tabId,
@@ -671,7 +660,6 @@ async function initWave(initOpts: AgentMuxInitOpts) {
     setFullConfigAtom(fullConfig);
 
     t = performance.now();
-    console.log("Wave First Render");
     const elem = document.getElementById("main");
     render(App, elem);
     tlog("SolidJS render", t);
