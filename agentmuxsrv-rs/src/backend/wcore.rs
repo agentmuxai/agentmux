@@ -595,6 +595,21 @@ pub fn tear_off_block(
     new_tab.blockids.push(block_id.to_string());
     store.update(&mut new_tab)?;
 
+    // Set up the layout tree for the new tab with the block as the single root node.
+    // Without this, the frontend renders an empty layout (rootnode: null).
+    let mut layout = store.must_get::<LayoutState>(&new_tab.layoutstate)?;
+    layout.rootnode = Some(serde_json::json!({
+        "id": Uuid::new_v4().to_string(),
+        "data": { "blockId": block_id },
+        "flexDirection": "row",
+        "size": 1
+    }));
+    layout.leaforder = Some(vec![LeafOrderEntry {
+        nodeid: layout.rootnode.as_ref().unwrap()["id"].as_str().unwrap().to_string(),
+        blockid: block_id.to_string(),
+    }]);
+    store.update(&mut layout)?;
+
     // Update block's parent reference
     block.parentoref = format!("tab:{}", new_tab.oid);
     store.update(&mut block)?;
