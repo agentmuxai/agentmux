@@ -481,15 +481,15 @@ pub fn open_new_window(state: &Arc<AppState>) -> Result<serde_json::Value, Strin
     {
         use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
-        // Frameless popup — no native title bar, no resize borders.
-        // The frontend's custom title bar provides min/max/close.
-        // Edge resize is not available (requires WS_THICKFRAME which
-        // causes a visible white border). Users resize via maximize/restore.
+        // Frameless popup with resize edges. WS_THICKFRAME provides the
+        // native resize handles; DwmExtendFrameIntoClientArea (applied in
+        // on_after_created → setup_native_frameless) hides the white border.
+        // Window starts hidden to avoid a white-border flash before DWM setup.
         let window_info = cef::WindowInfo {
             runtime_style: cef::RuntimeStyle::ALLOY,
             window_name: cef::CefString::from("AgentMux"),
-            style: WS_POPUP | WS_CLIPCHILDREN | WS_CLIPSIBLINGS | WS_VISIBLE
-                | WS_MINIMIZEBOX | WS_MAXIMIZEBOX,
+            style: WS_POPUP | WS_CLIPCHILDREN | WS_CLIPSIBLINGS
+                | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_THICKFRAME,
             bounds: cef::Rect {
                 x: pos_x,
                 y: pos_y,
