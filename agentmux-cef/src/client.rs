@@ -89,12 +89,16 @@ impl AgentMuxHandler {
 
         // For native frameless windows: extend the client area into the frame
         // to hide the visible WS_THICKFRAME resize border while keeping resize.
+        // Then show the window (created hidden to avoid white-border flash).
         #[cfg(target_os = "windows")]
         if let Some(host) = browser.host() {
             let hwnd = host.window_handle();
             if !hwnd.0.is_null() {
                 unsafe {
                     setup_native_frameless(hwnd.0 as *mut std::ffi::c_void);
+                    // Show window after DWM setup so there's no white border flash.
+                    use windows_sys::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_SHOW};
+                    ShowWindow(hwnd.0 as _, SW_SHOW);
                 }
             }
         }

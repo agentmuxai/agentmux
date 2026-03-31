@@ -23,7 +23,7 @@ Knowledge workers running AI agents across long-horizon tasks are blind while it
 
 AgentMux is an open-source desktop application that surfaces what agents are doing in real time: tool calls, reasoning steps, source citations, output streams, and conflicts between agents. The human role is observer and supervisor, not driver.
 
-Cross-platform (Windows, macOS, Linux). 100% Rust backend (Tokio + Axum). Dual host: Tauri v2 or bundled CEF. Apache 2.0.
+Cross-platform (Windows, macOS, Linux). 100% Rust backend (Tokio + Axum). CEF host (bundled Chromium). Apache 2.0.
 
 - **Live agent monitoring** — Watch every tool call and decision step as it happens. Catch an agent undoing correct work mid-task and redirect it before the damage compounds.
 - **Multi-agent orchestration** — Run parallel agents and see all of them at once. Spot conflicts before synthesis. Redirect any agent without killing the others.
@@ -42,28 +42,28 @@ Cross-platform (Windows, macOS, Linux). 100% Rust backend (Tokio + Axum). Dual h
 | Tool | Version | Purpose |
 |------|---------|---------|
 | **Node.js** | 22 LTS | Frontend build |
-| **Rust** | 1.77+ | Backend + Tauri |
+| **Rust** | 1.77+ | Backend + CEF host |
 | **[Task](https://taskfile.dev/)** | Latest | Build orchestration |
+| **CMake** | 3.20+ | CEF native build (cef-dll-sys) |
+| **Ninja** | 1.10+ | CEF native build (cef-dll-sys) |
 
 Platform-specific:
-- **Windows:** WebView2 (pre-installed on 10/11), Visual Studio Build Tools
-- **macOS:** Xcode Command Line Tools
-- **Linux:** `libwebkit2gtk-4.1-dev`, `libappindicator3-dev`, `librsvg2-dev`
+- **Windows:** Visual Studio Build Tools (CMake + Ninja ship with VS, but Ninja must be on PATH — see CLAUDE.md)
+- **macOS:** Xcode Command Line Tools, `brew install cmake ninja`
+- **Linux:** Build essentials, `apt install cmake ninja-build`
 
 ### Development
 
 ```bash
 npm install        # install frontend dependencies
-task dev           # hot reload — frontend auto-reloads, Tauri rebuilds on Rust changes
+task dev           # CEF host + Vite hot reload
 ```
 
 ### Production Build
 
 ```bash
-task package              # platform installer (NSIS / DMG / AppImage)
-task package:macos        # macOS .app + .dmg (copies to Desktop)
-task package:portable     # Windows portable ZIP
-task package:portable:linux  # Linux AppImage
+task cef:package:portable        # Windows portable ZIP
+task cef:package:portable:linux  # Linux portable (planned)
 ```
 
 ## Widgets
@@ -87,74 +87,43 @@ Available from the top bar (right side) or the window header right-click menu:
                     ┌─────────────────────────────────┐
                     │           Frontend               │
                     │   SolidJS + xterm.js + Jotai     │
-                    │    (single build, shared)         │
-                    └──────────┬──────────┬────────────┘
-                               │          │
-                    ┌──────────▼──┐  ┌────▼───────────┐
-                    │  Tauri Host  │  │   CEF Host     │
-                    │  WebView2 /  │  │  Bundled       │
-                    │  WebKitGTK   │  │  Chromium 146  │
-                    │  ~30 MB      │  │  ~311 MB       │
-                    └──────────┬──┘  └────┬───────────┘
-                               │          │
-                    ┌──────────▼──────────▼────────────┐
+                    └──────────────────┬───────────────┘
+                                       │
+                    ┌──────────────────▼───────────────┐
+                    │           CEF Host                │
+                    │   Bundled Chromium 146 (cef-rs)   │
+                    │   IPC bridge + window management  │
+                    └──────────────────┬───────────────┘
+                                       │
+                    ┌──────────────────▼───────────────┐
                     │       Backend Sidecar             │
                     │   agentmuxsrv-rs (Rust)           │
                     │   Tokio + Axum + SQLite           │
                     │   terminals, WebSocket, RPC       │
-                    └──────────────┬───────────────────┘
-                                   │
-                    ┌──────────────▼───────────────────┐
+                    └──────────────────┬───────────────┘
+                                       │
+                    ┌──────────────────▼───────────────┐
                     │          wsh-rs                   │
                     │   Shell integration CLI           │
                     └──────────────────────────────────┘
 ```
 
-AgentMux ships two host variants from the same codebase:
-
-| | Tauri Build | CEF Build |
-|---|---|---|
-| **WebView** | System WebView2 (Windows) / WebKitGTK (Linux) | Bundled Chromium (CEF 146) |
-| **Distribution size** | ~30 MB | ~311 MB (148 MB ZIP) |
-| **Startup time** | ~550 ms | ~150 ms |
-| **Baseline memory** | ~412 MB | ~352 MB |
-| **Dev command** | `task dev` | `task cef:dev` |
-| **Package command** | `task package:portable` | `task cef:package:portable` |
-
-The frontend auto-detects which host is running and uses the appropriate API layer (`tauri-api.ts` or `cef-api.ts`). The backend sidecar is identical in both builds.
-
 **Stack:**
 - **Frontend:** SolidJS + TypeScript + Vite + Jotai
+- **Desktop:** CEF 146 via cef-rs — bundles its own Chromium (~148 MB ZIP, ~150 ms startup)
 - **Backend:** Rust (Tokio + Axum + SQLite + portable-pty)
-- **Desktop (Tauri):** Tauri v2 — uses system WebView
-- **Desktop (CEF):** CEF 146 via cef-rs — bundles its own Chromium
 - **Terminal:** xterm.js
+
+> **Note:** The Tauri host (`src-tauri/`) is deprecated and no longer maintained. All development uses the CEF host. Tauri code remains in the repo for reference but should not be used.
 
 ## Build Commands
 
-### Tauri Build (system WebView)
-
 | Command | Description |
 |---------|-------------|
-| `task dev` | Development mode with hot reload |
-| `task quickdev` | Fast dev (skips wsh build) |
-| `task package` | Production installer for current platform |
-| `task package:portable` | Windows portable ZIP |
-| `task package:portable:linux` | Linux AppImage |
-
-### CEF Build (bundled Chromium)
-
-| Command | Description |
-|---------|-------------|
-| `task cef:dev` | Development mode (Vite + CEF host) |
+| `task dev` | Development mode (CEF host + Vite hot reload) |
 | `task cef:build` | Build the CEF host binary |
 | `task cef:bundle` | Bundle CEF runtime DLLs |
 | `task cef:package:portable` | Windows portable ZIP with launcher |
-
-### Shared
-
-| Command | Description |
-|---------|-------------|
 | `task build:backend` | Build agentmuxsrv-rs + wsh-rs |
 | `task build:frontend` | Build frontend only |
 | `task test` | Run tests (vitest) |
@@ -162,11 +131,9 @@ The frontend auto-detects which host is running and uses the appropriate API lay
 
 ### Build Outputs
 
-| Platform | Tauri | CEF |
-|----------|-------|-----|
-| **Windows** | `src-tauri/target/release/bundle/nsis/AgentMux_*.exe` | `dist/agentmux-cef-*-x64-portable.zip` |
-| **macOS** | `target/release/bundle/macos/AgentMux_*_aarch64.dmg` | — |
-| **Linux** | `target/release/bundle/appimage/AgentMux_*_amd64.AppImage` | — |
+| Platform | Artifact |
+|----------|----------|
+| **Windows** | `dist/agentmux-cef-*-x64-portable.zip` |
 
 ## Version Management
 
@@ -186,9 +153,9 @@ Releases are built by [`agentmuxai/agentmux-builder`](https://github.com/agentmu
 
 ### How it works
 
-1. The builder's `tauri-build.yml` workflow checks out this repo at the given ref
+1. The builder's workflow checks out this repo at the given ref
 2. Builds run in parallel on `ubuntu-latest`, `macos-latest`, and `windows-latest`
-3. Each job builds Rust backend binaries (agentmuxsrv-rs + wsh-rs), then builds the Tauri app
+3. Each job builds Rust backend binaries (agentmuxsrv-rs + wsh-rs), then builds the CEF host
 4. macOS builds are code-signed and notarized via Apple Developer credentials
 5. Windows builds include both an NSIS installer and a portable ZIP
 6. A final `create-release` job collects all artifacts and creates a GitHub Release on this repo
@@ -196,13 +163,8 @@ Releases are built by [`agentmuxai/agentmux-builder`](https://github.com/agentmu
 ### Triggering a release
 
 ```bash
-# Option 1: Manual workflow dispatch (pass a tag, branch, or SHA)
-gh workflow run tauri-build.yml -R agentmuxai/agentmux-builder -f ref=v0.32.0
-
-# Option 2: Repository dispatch from this repo
-gh api repos/agentmuxai/agentmux-builder/dispatches \
-  -f event_type=build \
-  -f 'client_payload[ref]=v0.32.0'
+# Manual workflow dispatch (pass a tag, branch, or SHA)
+gh workflow run build.yml -R agentmuxai/agentmux-builder -f ref=v0.33.0
 ```
 
 ### Release artifacts
