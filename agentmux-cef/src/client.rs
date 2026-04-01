@@ -216,30 +216,30 @@ impl AgentMuxHandler {
         #[cfg(target_os = "windows")]
         if !self.main_window_shown && self.browser_list.len() == 1 {
             self.main_window_shown = true;
-        if let Some(browser) = browser {
-            if let Some(host) = browser.host() {
-                let hwnd = host.window_handle();
-                if !hwnd.0.is_null() {
-                    unsafe {
-                        use windows_sys::Win32::UI::WindowsAndMessaging::*;
-                        use windows_sys::Win32::Graphics::Dwm::DwmSetWindowAttribute;
+            if let Some(browser) = browser {
+                if let Some(host) = browser.host() {
+                    let hwnd = host.window_handle();
+                    if !hwnd.0.is_null() {
+                        unsafe {
+                            use windows_sys::Win32::UI::WindowsAndMessaging::*;
+                            use windows_sys::Win32::Graphics::Dwm::DwmSetWindowAttribute;
 
-                        let top = GetAncestor(hwnd.0 as _, GA_ROOT);
-                        let target = if !top.is_null() { top } else { hwnd.0 as _ };
+                            let top = GetAncestor(hwnd.0 as _, GA_ROOT);
+                            let target = if !top.is_null() { top } else { hwnd.0 as _ };
 
-                        const DWMWA_CLOAK: u32 = 13;
-                        let cloak_on: u32 = 1;
-                        let cloak_off: u32 = 0;
+                            const DWMWA_CLOAK: u32 = 13;
+                            let cloak_on: u32 = 1;
+                            let cloak_off: u32 = 0;
 
-                        DwmSetWindowAttribute(target, DWMWA_CLOAK, &cloak_on as *const u32 as _, 4);
-                        ShowWindow(target, SW_SHOW);
-                        DwmSetWindowAttribute(target, DWMWA_CLOAK, &cloak_off as *const u32 as _, 4);
-                        SetForegroundWindow(target);
+                            DwmSetWindowAttribute(target, DWMWA_CLOAK, &cloak_on as *const u32 as _, 4);
+                            ShowWindow(target, SW_SHOW);
+                            DwmSetWindowAttribute(target, DWMWA_CLOAK, &cloak_off as *const u32 as _, 4);
+                            SetForegroundWindow(target);
+                        }
                     }
                 }
             }
         }
-        } // main_window_shown guard
     }
 
     fn on_load_error(
