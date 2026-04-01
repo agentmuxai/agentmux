@@ -67,13 +67,19 @@ AgentMux uses a **CEF (Chromium Embedded Framework)** host with a **100% Rust ba
 
 **Important:** The Tauri host (`src-tauri/`) is deprecated and must not be used. CEF is the only active host. All Go and Electron code has been removed.
 
-### Dev vs Portable Instance Isolation
+### Multiple Instances Run in Parallel
 
-`task dev` is safe to run alongside a running portable instance:
-- Dev uses `AGENTMUX_DEV=1` → data dir `~/.agentmux-dev` (separate from `~/.agentmux`)
-- Dev copies CEF binaries to `dist/cef-dev/` so `dist/cef/` is never locked by the running process
-- The portable instance runs from its own extracted folder, not from `target/` or `dist/`
-- No shared HWNDs, no shared processes — they are fully independent
+AgentMux is designed to run multiple instances simultaneously — different versions, dev + portable, or multiple portable copies. Each instance is fully isolated:
+
+- **Separate CEF data dirs:** Each instance uses its own CEF user data directory based on version, so browser state, cookies, and caches never collide.
+- **Separate backend sidecars:** Each instance spawns its own `agentmuxsrv-rs` on a dynamic port. No port conflicts.
+- **Separate binaries:** Portable instances run from their own extracted folder. `task dev` copies to `dist/cef-dev/`. Nothing is shared.
+- **Dev mode isolation:** `AGENTMUX_DEV=1` → data dir `~/.agentmux-dev` (separate from `~/.agentmux`).
+
+This means:
+- You can test v0.33.14 while v0.33.13 is still running.
+- `task dev` is always safe alongside a running portable instance.
+- **NEVER kill by image name** (`taskkill //im agentmux-cef.exe`) — it kills ALL instances. Always kill by PID.
 
 ### Widgets
 

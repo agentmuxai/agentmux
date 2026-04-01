@@ -1,6 +1,6 @@
 [package]
 name = "agentmux-cef"
-version = "0.33.14"
+version = "0.33.15"
 description = "AgentMux CEF Host — Pinned Chromium renderer replacing system WebView2"
 authors = ["AgentMux Corp"]
 edition = "2021"
@@ -44,6 +44,7 @@ windows-sys = { version = "0.59", features = [
     "Win32_System_JobObjects",
     "Win32_System_Threading",
     "Win32_Graphics_Dwm",
+    "Win32_Graphics_Gdi",
     "Win32_UI_Controls",
 ] }
 

@@ -87,18 +87,26 @@ impl AgentMuxHandler {
             browsers.insert(label, browser.clone());
         }
 
-        // For native frameless windows: extend the client area into the frame
-        // to hide the visible WS_THICKFRAME resize border while keeping resize.
-        // Then show the window (created hidden to avoid white-border flash).
+        // For ALL native windows: extend the client area into the frame
+        // to hide the visible WS_THICKFRAME resize border.
+        // For SECONDARY windows only: install WM_NCHITTEST hook for edge resize
+        // and show the window (created hidden to avoid white-border flash).
+        // The main window (CEF Views) handles resize via its delegate — we must
+        // NOT install the WndProc hook on it or it breaks CEF's GWLP_USERDATA.
         #[cfg(target_os = "windows")]
-        if let Some(host) = browser.host() {
-            let hwnd = host.window_handle();
-            if !hwnd.0.is_null() {
-                unsafe {
-                    setup_native_frameless(hwnd.0 as *mut std::ffi::c_void);
-                    // Show window after DWM setup so there's no white border flash.
-                    use windows_sys::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_SHOW};
-                    ShowWindow(hwnd.0 as _, SW_SHOW);
+        {
+            let is_secondary = self.browser_list.len() > 0; // first browser not yet pushed
+            if let Some(host) = browser.host() {
+                let hwnd = host.window_handle();
+                if !hwnd.0.is_null() {
+                    unsafe {
+                        setup_native_frameless(hwnd.0 as *mut std::ffi::c_void);
+                        if is_secondary {
+                            install_frameless_resize_hook(hwnd.0 as *mut std::ffi::c_void);
+                            use windows_sys::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_SHOW};
+                            ShowWindow(hwnd.0 as _, SW_SHOW);
+                        }
+                    }
                 }
             }
         }
@@ -395,7 +403,14 @@ wrap_load_handler! {
 }
 
 /// Set up a native frameless window: extend client area over the thick frame
-/// border so the resize handle is invisible but still functional.
+/// border so the resize handle is invisible, then subclass the window to
+/// handle WM_NCHITTEST for edge resize.
+///
+/// DwmExtendFrameIntoClientArea(-1) makes the entire frame transparent, but
+/// it also removes the non-client hit-test region. Without the subclass,
+/// Windows can't tell which part of the window edge should be a resize handle.
+/// The subclass returns HT{LEFT,RIGHT,TOP,BOTTOM,TOPLEFT,...} when the cursor
+/// is within RESIZE_BORDER pixels of the window edge.
 #[cfg(target_os = "windows")]
 unsafe fn setup_native_frameless(hwnd: *mut std::ffi::c_void) {
     use windows_sys::Win32::Graphics::Dwm::DwmExtendFrameIntoClientArea;
@@ -413,6 +428,89 @@ unsafe fn setup_native_frameless(hwnd: *mut std::ffi::c_void) {
     } else {
         tracing::warn!("DwmExtendFrameIntoClientArea failed: hr={:#x}", result);
     }
+}
+
+/// Map of HWND -> original WndProc for secondary windows with edge resize hooks.
+/// Stored here instead of GWLP_USERDATA to avoid clobbering CEF's data.
+#[cfg(target_os = "windows")]
+static ORIGINAL_WNDPROCS: std::sync::LazyLock<
+    std::sync::Mutex<std::collections::HashMap<usize, isize>>,
+> = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+
+/// Install a WndProc hook on a SECONDARY window that handles:
+/// - WM_NCCALCSIZE: returns 0 to eliminate the non-client area (removes the
+///   wide title bar / top border that WS_THICKFRAME + DWM extension creates)
+/// - WM_NCHITTEST: returns HT{LEFT,RIGHT,...} for resize zones at window edges
+///
+/// MUST NOT be installed on the main CEF Views window — that window handles
+/// resize through its delegate, and hooking it clobbers CEF internals.
+#[cfg(target_os = "windows")]
+unsafe fn install_frameless_resize_hook(hwnd: *mut std::ffi::c_void) {
+    use windows_sys::Win32::UI::WindowsAndMessaging::*;
+
+    const RESIZE_BORDER: i32 = 6;
+
+    unsafe extern "system" fn wndproc_hook(
+        hwnd: *mut std::ffi::c_void,
+        msg: u32,
+        wparam: usize,
+        lparam: isize,
+    ) -> isize {
+        match msg {
+            // Remove the non-client area entirely — this eliminates the wide
+            // top border that WS_THICKFRAME normally reserves for the title bar.
+            WM_NCCALCSIZE if wparam == 1 => {
+                // Returning 0 with wparam=1 tells Windows the client area
+                // fills the entire window rect. No title bar, no borders.
+                return 0;
+            }
+
+            WM_NCHITTEST => {
+                let x = (lparam & 0xFFFF) as i16 as i32;
+                let y = ((lparam >> 16) & 0xFFFF) as i16 as i32;
+
+                let mut rect = std::mem::zeroed::<windows_sys::Win32::Foundation::RECT>();
+                GetWindowRect(hwnd, &mut rect);
+
+                let left = x - rect.left < RESIZE_BORDER;
+                let right = rect.right - x < RESIZE_BORDER;
+                let top = y - rect.top < RESIZE_BORDER;
+                let bottom = rect.bottom - y < RESIZE_BORDER;
+
+                if top && left { return HTTOPLEFT as isize; }
+                if top && right { return HTTOPRIGHT as isize; }
+                if bottom && left { return HTBOTTOMLEFT as isize; }
+                if bottom && right { return HTBOTTOMRIGHT as isize; }
+                if left { return HTLEFT as isize; }
+                if right { return HTRIGHT as isize; }
+                if top { return HTTOP as isize; }
+                if bottom { return HTBOTTOM as isize; }
+                // Not on an edge — fall through to original WndProc.
+            }
+
+            _ => {}
+        }
+
+        // Delegate to the original WndProc.
+        let key = hwnd as usize;
+        let original = ORIGINAL_WNDPROCS
+            .lock()
+            .ok()
+            .and_then(|map| map.get(&key).copied())
+            .unwrap_or(0);
+        if original != 0 {
+            CallWindowProcW(Some(std::mem::transmute(original)), hwnd, msg, wparam, lparam)
+        } else {
+            DefWindowProcW(hwnd, msg, wparam, lparam)
+        }
+    }
+
+    let original = GetWindowLongPtrW(hwnd, GWLP_WNDPROC);
+    if let Ok(mut map) = ORIGINAL_WNDPROCS.lock() {
+        map.insert(hwnd as usize, original);
+    }
+    SetWindowLongPtrW(hwnd, GWLP_WNDPROC, wndproc_hook as isize);
+    tracing::info!("Installed frameless resize hook (WM_NCCALCSIZE + WM_NCHITTEST)");
 }
 
 /// Load the app icon from the exe's embedded resource and set it on the window.

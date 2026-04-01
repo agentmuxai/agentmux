@@ -476,6 +476,7 @@ pub fn open_new_window(state: &Arc<AppState>) -> Result<serde_json::Value, Strin
     };
 
     let (pos_x, pos_y) = get_offset_position();
+    let (win_w, win_h) = get_secondary_window_size(pos_x, pos_y);
 
     #[cfg(target_os = "windows")]
     {
@@ -493,8 +494,8 @@ pub fn open_new_window(state: &Arc<AppState>) -> Result<serde_json::Value, Strin
             bounds: cef::Rect {
                 x: pos_x,
                 y: pos_y,
-                width: 1200,
-                height: 800,
+                width: win_w,
+                height: win_h,
             },
             ..Default::default()
         };
@@ -555,4 +556,17 @@ fn get_offset_position() -> (i32, i32) {
     }
     #[cfg(not(target_os = "windows"))]
     (100, 100)
+}
+
+/// Compute 70% of the monitor's work area for a secondary window at (px, py).
+/// Falls back to 1200x800 if the monitor can't be determined.
+fn get_secondary_window_size(px: i32, py: i32) -> (i32, i32) {
+    #[cfg(target_os = "windows")]
+    {
+        use crate::app::get_monitor_work_area;
+        if let Some((_x, _y, work_w, work_h)) = get_monitor_work_area(px, py) {
+            return ((work_w as f64 * 0.70) as i32, (work_h as f64 * 0.70) as i32);
+        }
+    }
+    (1200, 800)
 }

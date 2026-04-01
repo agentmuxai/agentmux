@@ -34,6 +34,7 @@ Cross-platform (Windows, macOS, Linux). 100% Rust backend (Tokio + Axum). CEF ho
 - **Per-pane zoom** — Independent zoom level per pane, plus global chrome zoom.
 - **Real PTY support** — Authentic terminal emulation via xterm.js and portable-pty.
 - **Shell integration** — `wsh` binary deployable to remote hosts for multiplexed sessions.
+- **Run multiple versions side-by-side** — Each instance is fully isolated (separate CEF data, separate backend sidecar, separate ports). Test a new build while the old one is still running.
 
 ## Quick Start
 
