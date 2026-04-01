@@ -15,6 +15,7 @@ use crate::state::AppState;
 pub struct AgentMuxHandler {
     browser_list: Vec<Browser>,
     is_closing: bool,
+    main_window_shown: bool,
     state: Arc<AppState>,
     ipc_port: u16,
 }
@@ -24,6 +25,7 @@ impl AgentMuxHandler {
         Arc::new(Mutex::new(Self {
             browser_list: Vec::new(),
             is_closing: false,
+            main_window_shown: false,
             state,
             ipc_port,
         }))
@@ -208,9 +210,12 @@ impl AgentMuxHandler {
             url_str
         );
 
-        // Show the main window now that content has loaded and painted.
-        // Cloak→show→uncloak ensures the first visible frame has content.
+        // Show the main window ONCE after the first load.
+        // Only runs for the main window (first browser), and only on the
+        // initial navigation — not on reloads or redirects.
         #[cfg(target_os = "windows")]
+        if !self.main_window_shown && self.browser_list.len() == 1 {
+            self.main_window_shown = true;
         if let Some(browser) = browser {
             if let Some(host) = browser.host() {
                 let hwnd = host.window_handle();
@@ -234,6 +239,7 @@ impl AgentMuxHandler {
                 }
             }
         }
+        } // main_window_shown guard
     }
 
     fn on_load_error(
