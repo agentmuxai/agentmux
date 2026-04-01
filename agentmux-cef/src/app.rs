@@ -188,6 +188,28 @@ wrap_app! {
     }
 
     impl App {
+        fn on_before_command_line_processing(
+            &self,
+            _process_type: Option<&CefString>,
+            command_line: Option<&mut CommandLine>,
+        ) {
+            if let Some(cmd) = command_line {
+                // Prevent empty browser on visibility change (CEF #3638).
+                let key = CefString::from("disable-features");
+                let val = CefString::from("CalculateNativeWinOcclusion");
+                cmd.append_switch_with_value(Some(&key), Some(&val));
+
+                // Disable GPU compositing to prevent white flash on startup.
+                // Software compositing respects background_color from frame 1.
+                cmd.append_switch(Some(&CefString::from("disable-gpu-compositing")));
+
+                // Set initial background color via CLI.
+                let bg_key = CefString::from("background-color");
+                let bg_val = CefString::from("ff222222");
+                cmd.append_switch_with_value(Some(&bg_key), Some(&bg_val));
+            }
+        }
+
         fn browser_process_handler(&self) -> Option<BrowserProcessHandler> {
             Some(AgentMuxBrowserProcessHandler::new(
                 RefCell::new(None),
@@ -272,25 +294,30 @@ wrap_browser_process_handler! {
 
             tracing::info!("Loading URL: {}{}ipc_port={}&ipc_token=<redacted>", base_url, separator, self.ipc_port);
 
-            // Check if --use-native flag is set (bypasses CEF Views).
-            let use_native = command_line.has_switch(Some(&CefString::from("use-native"))) != 0;
+            // Default: native window mode to eliminate white flash.
+            // Window starts hidden (no WS_VISIBLE), shown in on_load_end.
+            // Pass --use-views to use CEF Views instead (has white flash).
+            let use_views = command_line.has_switch(Some(&CefString::from("use-views"))) != 0;
 
-            if use_native {
-                // Native window mode: frameless popup (WS_POPUP, no title bar).
-                // HTML5 DnD works in native mode (CEF Views intercepts drag events).
+            if !use_views {
                 #[cfg(target_os = "windows")]
                 let window_info = {
                     use windows_sys::Win32::UI::WindowsAndMessaging::*;
+                    let (x, y, w, h) = get_monitor_work_area(0, 0)
+                        .map(|(wx, wy, ww, wh)| {
+                            let w = (ww as f64 * 0.70) as i32;
+                            let h = (wh as f64 * 0.70) as i32;
+                            (wx + (ww - w) / 2, wy + (wh - h) / 2, w, h)
+                        })
+                        .unwrap_or((CW_USEDEFAULT, CW_USEDEFAULT, 1200, 800));
                     WindowInfo {
                         runtime_style: RuntimeStyle::ALLOY,
                         window_name: CefString::from("AgentMux"),
-                        style: WS_POPUP | WS_CLIPCHILDREN | WS_CLIPSIBLINGS | WS_VISIBLE | WS_MINIMIZEBOX | WS_MAXIMIZEBOX,
-                        bounds: cef::Rect {
-                            x: CW_USEDEFAULT,
-                            y: CW_USEDEFAULT,
-                            width: 1200,
-                            height: 800,
-                        },
+                        // No WS_VISIBLE — hidden until on_load_end.
+                        // WS_THICKFRAME for resize (border hidden by WndProc hook).
+                        style: WS_POPUP | WS_CLIPCHILDREN | WS_CLIPSIBLINGS
+                            | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_THICKFRAME,
+                        bounds: cef::Rect { x, y, width: w, height: h },
                         ..Default::default()
                     }
                 };
@@ -310,7 +337,7 @@ wrap_browser_process_handler! {
                     None,
                 );
             } else {
-                // CEF Views mode: cross-platform window management.
+                // CEF Views mode (--use-views): cross-platform but has white flash.
                 let mut client = self.default_client();
                 let mut delegate = AgentMuxBrowserViewDelegate::new(RuntimeStyle::ALLOY);
                 let browser_view = browser_view_create(

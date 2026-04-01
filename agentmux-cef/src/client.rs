@@ -15,6 +15,7 @@ use crate::state::AppState;
 pub struct AgentMuxHandler {
     browser_list: Vec<Browser>,
     is_closing: bool,
+    main_window_shown: bool,
     state: Arc<AppState>,
     ipc_port: u16,
 }
@@ -24,6 +25,7 @@ impl AgentMuxHandler {
         Arc::new(Mutex::new(Self {
             browser_list: Vec::new(),
             is_closing: false,
+            main_window_shown: false,
             state,
             ipc_port,
         }))
@@ -87,18 +89,20 @@ impl AgentMuxHandler {
             browsers.insert(label, browser.clone());
         }
 
-        // ALL windows: DWM frameless (hides native frame border).
-        // Secondary windows only: WndProc hook (WM_NCCALCSIZE + WM_NCHITTEST) + show.
+        // Secondary windows: DWM frameless + resize hook + show immediately.
+        // Main window: resize hook only, stays hidden until on_load_end.
+        // DwmExtendFrameIntoClientArea is NOT used on the main window —
+        // it resets the DWM composition surface causing a white flash.
         #[cfg(target_os = "windows")]
         {
-            let is_secondary = self.browser_list.len() > 0; // first browser not yet pushed
+            let is_secondary = self.browser_list.len() > 0;
             if let Some(host) = browser.host() {
                 let hwnd = host.window_handle();
                 if !hwnd.0.is_null() {
                     unsafe {
-                        setup_native_frameless(hwnd.0 as *mut std::ffi::c_void);
+                        install_frameless_resize_hook(hwnd.0 as *mut std::ffi::c_void);
                         if is_secondary {
-                            install_frameless_resize_hook(hwnd.0 as *mut std::ffi::c_void);
+                            setup_native_frameless(hwnd.0 as *mut std::ffi::c_void);
                             use windows_sys::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_SHOW};
                             ShowWindow(hwnd.0 as _, SW_SHOW);
                         }
@@ -197,6 +201,7 @@ impl AgentMuxHandler {
         frame.execute_java_script(Some(&code), Some(&url), 0);
 
         let url_str = browser
+            .as_ref()
             .and_then(|b| b.main_frame().map(|f| CefString::from(&f.url()).to_string()))
             .unwrap_or_default();
         tracing::info!(
@@ -204,6 +209,37 @@ impl AgentMuxHandler {
             self.ipc_port,
             url_str
         );
+
+        // Show the main window ONCE after the first load.
+        // Only runs for the main window (first browser), and only on the
+        // initial navigation — not on reloads or redirects.
+        #[cfg(target_os = "windows")]
+        if !self.main_window_shown && self.browser_list.len() == 1 {
+            self.main_window_shown = true;
+            if let Some(browser) = browser {
+                if let Some(host) = browser.host() {
+                    let hwnd = host.window_handle();
+                    if !hwnd.0.is_null() {
+                        unsafe {
+                            use windows_sys::Win32::UI::WindowsAndMessaging::*;
+                            use windows_sys::Win32::Graphics::Dwm::DwmSetWindowAttribute;
+
+                            let top = GetAncestor(hwnd.0 as _, GA_ROOT);
+                            let target = if !top.is_null() { top } else { hwnd.0 as _ };
+
+                            const DWMWA_CLOAK: u32 = 13;
+                            let cloak_on: u32 = 1;
+                            let cloak_off: u32 = 0;
+
+                            DwmSetWindowAttribute(target, DWMWA_CLOAK, &cloak_on as *const u32 as _, 4);
+                            ShowWindow(target, SW_SHOW);
+                            DwmSetWindowAttribute(target, DWMWA_CLOAK, &cloak_off as *const u32 as _, 4);
+                            SetForegroundWindow(target);
+                        }
+                    }
+                }
+            }
+        }
     }
 
     fn on_load_error(
