@@ -506,10 +506,9 @@ unsafe fn install_frameless_resize_hook(hwnd: *mut std::ffi::c_void) {
     }
 
     let original = GetWindowLongPtrW(hwnd, GWLP_WNDPROC);
-    ORIGINAL_WNDPROCS
-        .lock()
-        .unwrap()
-        .insert(hwnd as usize, original);
+    if let Ok(mut map) = ORIGINAL_WNDPROCS.lock() {
+        map.insert(hwnd as usize, original);
+    }
     SetWindowLongPtrW(hwnd, GWLP_WNDPROC, wndproc_hook as isize);
     tracing::info!("Installed frameless resize hook (WM_NCCALCSIZE + WM_NCHITTEST)");
 }

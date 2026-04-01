@@ -135,22 +135,10 @@ pub fn get_monitor_work_area(px: i32, py: i32) -> Option<(i32, i32, i32, i32)> {
 
 #[cfg(target_os = "macos")]
 pub fn get_monitor_work_area(_px: i32, _py: i32) -> Option<(i32, i32, i32, i32)> {
-    // CGMainDisplayID + CGDisplayBounds gives the full screen;
-    // NSScreen.main.visibleFrame gives work area minus Dock/menu bar.
-    // For now, use a simple approach via Core Graphics.
-    #[link(name = "CoreGraphics", kind = "framework")]
-    extern "C" {
-        fn CGMainDisplayID() -> u32;
-        fn CGDisplayPixelsWide(display: u32) -> usize;
-        fn CGDisplayPixelsHigh(display: u32) -> usize;
-    }
-    unsafe {
-        let display = CGMainDisplayID();
-        let w = CGDisplayPixelsWide(display) as i32;
-        let h = CGDisplayPixelsHigh(display) as i32;
-        // Approximate: subtract 25px for menu bar, no dock offset
-        Some((0, 25, w, h - 25))
-    }
+    // TODO: Use NSScreen.main.visibleFrame for proper work area (minus Dock/menu bar).
+    // CGMainDisplayID only returns the primary display — doesn't support multi-monitor
+    // and hardcoding menu bar height is fragile. Fall back to 1200x800 default.
+    None
 }
 
 #[cfg(target_os = "linux")]
