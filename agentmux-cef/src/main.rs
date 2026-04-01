@@ -178,17 +178,24 @@ fn main() {
     let resources_dir = CefString::from(base_dir.to_str().unwrap_or(""));
     let locales_dir = CefString::from(base_dir.join("locales").to_str().unwrap_or(""));
 
-    // Resolve cache path — dev mode uses a separate cache to avoid singleton conflict
-    // with any running portable build.
+    // Every instance needs a unique root_cache_path — without it CEF uses a
+    // shared default directory and the second launch becomes a process singleton
+    // that opens a bare Chrome browser (Google homepage) instead of our app.
     let is_dev = std::env::var("AGENTMUX_DEV").is_ok();
-    let cache_dir = if is_dev {
+    let cache_dir = {
+        let version = env!("CARGO_PKG_VERSION");
+        let dir_name = if is_dev {
+            "ai.agentmux.cef.dev".to_string()
+        } else {
+            let version_slug = version.replace('.', "-");
+            format!("ai.agentmux.cef.v{}", version_slug)
+        };
         let dir = dirs::data_dir()
             .unwrap_or_else(|| std::path::PathBuf::from("."))
-            .join("ai.agentmux.cef.dev");
+            .join(dir_name);
         std::fs::create_dir_all(&dir).ok();
+        tracing::info!("CEF cache dir: {}", dir.display());
         CefString::from(dir.to_str().unwrap_or(""))
-    } else {
-        CefString::default()
     };
 
     // Configure CEF settings.

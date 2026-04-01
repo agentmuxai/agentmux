@@ -87,12 +87,8 @@ impl AgentMuxHandler {
             browsers.insert(label, browser.clone());
         }
 
-        // For ALL native windows: extend the client area into the frame
-        // to hide the visible WS_THICKFRAME resize border.
-        // For SECONDARY windows only: install WM_NCHITTEST hook for edge resize
-        // and show the window (created hidden to avoid white-border flash).
-        // The main window (CEF Views) handles resize via its delegate — we must
-        // NOT install the WndProc hook on it or it breaks CEF's GWLP_USERDATA.
+        // ALL windows: DWM frameless (hides native frame border).
+        // Secondary windows only: WndProc hook (WM_NCCALCSIZE + WM_NCHITTEST) + show.
         #[cfg(target_os = "windows")]
         {
             let is_secondary = self.browser_list.len() > 0; // first browser not yet pushed
@@ -463,6 +459,12 @@ unsafe fn install_frameless_resize_hook(hwnd: *mut std::ffi::c_void) {
                 // Returning 0 with wparam=1 tells Windows the client area
                 // fills the entire window rect. No title bar, no borders.
                 return 0;
+            }
+
+            // Suppress the DWM activation border — return TRUE without
+            // calling DefWindowProc so Windows doesn't repaint the frame.
+            WM_NCACTIVATE => {
+                return 1; // TRUE = allow activation, but skip default border paint
             }
 
             WM_NCHITTEST => {
