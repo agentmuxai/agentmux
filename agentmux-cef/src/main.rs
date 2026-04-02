@@ -117,6 +117,48 @@ fn main() {
 
     tracing::info!("Initializing CEF browser process");
 
+    // Single-instance check: if another instance of the same version is
+    // running, send it a "new window" request via its IPC server and exit.
+    // Uses a named mutex for detection and a port file for communication.
+    let version = env!("CARGO_PKG_VERSION");
+    let is_dev = std::env::var("AGENTMUX_DEV").is_ok();
+    let version_slug = version.replace('.', "-");
+    let data_dir_name = if is_dev {
+        "ai.agentmux.cef.dev".to_string()
+    } else {
+        format!("ai.agentmux.cef.v{}", version_slug)
+    };
+    let data_dir = dirs::data_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join(&data_dir_name);
+    std::fs::create_dir_all(&data_dir).ok();
+    let port_file = data_dir.join("ipc-port");
+
+    // If port file exists and we can connect, another instance is running.
+    // Send it a "new window" request and exit.
+    if port_file.exists() {
+        if let Ok(contents) = std::fs::read_to_string(&port_file) {
+            let parts: Vec<&str> = contents.trim().splitn(2, ':').collect();
+            if parts.len() == 2 {
+                if let Ok(mut stream) = std::net::TcpStream::connect(
+                    format!("127.0.0.1:{}", parts[0]),
+                ) {
+                    use std::io::Write;
+                    let body = r#"{"cmd":"open_new_window"}"#;
+                    let req = format!(
+                        "POST /ipc HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nAuthorization: Bearer {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                        parts[1], body.len(), body
+                    );
+                    let _ = stream.write_all(req.as_bytes());
+                    tracing::info!("Sent new-window request to existing instance");
+                    std::process::exit(0);
+                }
+                // Connection failed — stale port file, continue with fresh launch
+                tracing::info!("Stale port file (connection refused), launching fresh");
+            }
+        }
+    }
+
     // Create shared application state.
     let app_state = Arc::new(state::AppState::default());
 
@@ -128,6 +170,12 @@ fn main() {
     *app_state.ipc_port.lock().unwrap() = ipc_port;
 
     tracing::info!("IPC server started on port {}", ipc_port);
+
+    // Write port + token to file so a second instance can send commands.
+    let _ = std::fs::write(
+        &port_file,
+        format!("{}:{}", ipc_port, app_state.ipc_token),
+    );
 
     // Spawn the backend sidecar SYNCHRONOUSLY — block until it signals ready
     // (WAVESRV-ESTART) before creating the browser window. This eliminates the
@@ -178,32 +226,15 @@ fn main() {
     let resources_dir = CefString::from(base_dir.to_str().unwrap_or(""));
     let locales_dir = CefString::from(base_dir.join("locales").to_str().unwrap_or(""));
 
-    // Every instance needs a unique root_cache_path — without it CEF uses a
-    // shared default directory and the second launch becomes a process singleton
-    // that opens a bare Chrome browser (Google homepage) instead of our app.
-    let is_dev = std::env::var("AGENTMUX_DEV").is_ok();
-    let cache_dir = {
-        let version = env!("CARGO_PKG_VERSION");
-        let dir_name = if is_dev {
-            "ai.agentmux.cef.dev".to_string()
-        } else {
-            let version_slug = version.replace('.', "-");
-            format!("ai.agentmux.cef.v{}", version_slug)
-        };
-        let dir = dirs::data_dir()
-            .unwrap_or_else(|| std::path::PathBuf::from("."))
-            .join(dir_name);
-        std::fs::create_dir_all(&dir).ok();
-        // Remove stale lockfile from a previous killed run — CEF treats
-        // it as "another instance is running" and opens Chrome instead.
-        let lockfile = dir.join("lockfile");
-        if lockfile.exists() {
-            tracing::warn!("Removing stale CEF lockfile: {}", lockfile.display());
-            let _ = std::fs::remove_file(&lockfile);
-        }
-        tracing::info!("CEF cache dir: {}", dir.display());
-        CefString::from(dir.to_str().unwrap_or(""))
-    };
+    // Reuse data_dir from single-instance check as CEF cache path.
+    // Remove stale lockfile from a previous killed run.
+    let lockfile = data_dir.join("lockfile");
+    if lockfile.exists() {
+        tracing::warn!("Removing stale CEF lockfile: {}", lockfile.display());
+        let _ = std::fs::remove_file(&lockfile);
+    }
+    tracing::info!("CEF cache dir: {}", data_dir.display());
+    let cache_dir = CefString::from(data_dir.to_str().unwrap_or(""));
 
     // Configure CEF settings.
     let settings = Settings {
@@ -251,6 +282,9 @@ fn main() {
 
     // Drop the tokio runtime after CEF shutdown.
     drop(runtime);
+
+    // Clean up port file so stale data doesn't confuse future launches.
+    let _ = std::fs::remove_file(&port_file);
 
     tracing::info!("AgentMux CEF host shutdown complete");
 }
