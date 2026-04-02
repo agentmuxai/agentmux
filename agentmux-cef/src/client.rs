@@ -201,7 +201,7 @@ impl AgentMuxHandler {
         );
 
         // Show the window via cloak→show→uncloak, then add WS_THICKFRAME
-        // for resize. Runs for all windows (main + secondary) on first load.
+        // for resize. Only runs once per window (skips if already visible).
         #[cfg(target_os = "windows")]
         if let Some(browser) = browser {
             if let Some(host) = browser.host() {
@@ -212,6 +212,11 @@ impl AgentMuxHandler {
                         use windows_sys::Win32::Graphics::Dwm::DwmSetWindowAttribute;
 
                         let target = hwnd.0 as *mut std::ffi::c_void;
+
+                        // Skip if window is already visible (page reload/redirect)
+                        if IsWindowVisible(target) != 0 {
+                            return;
+                        }
 
                         const DWMWA_CLOAK: u32 = 13;
                         let cloak_on: u32 = 1;
