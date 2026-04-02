@@ -179,29 +179,39 @@ pub fn start_window_drag(state: &Arc<AppState>) -> Result<serde_json::Value, Str
 pub fn set_window_transparency(state: &Arc<AppState>, args: &serde_json::Value) -> Result<serde_json::Value, String> {
     let transparent = args.get("transparent").and_then(|v| v.as_bool()).unwrap_or(false);
     let blur = args.get("blur").and_then(|v| v.as_bool()).unwrap_or(false);
-    let _opacity = args.get("opacity").and_then(|v| v.as_f64()).unwrap_or(0.8);
-    tracing::info!("set_window_transparency: transparent={} blur={}", transparent, blur);
-    #[cfg(not(target_os = "windows"))]
-    tracing::info!("set_window_transparency: not windows, skipping");
+    let opacity = args.get("opacity").and_then(|v| v.as_f64()).unwrap_or(0.8);
+    tracing::info!("set_window_transparency: transparent={} blur={} opacity={}", transparent, blur, opacity);
 
     #[cfg(target_os = "windows")]
     {
-        unsafe {
-            let hwnd = find_own_top_level_window();
-            if !hwnd.is_null() {
-                tracing::info!("set_window_transparency: found hwnd={:?}", hwnd);
-                if blur {
-                    apply_window_effects(hwnd, true, true);
+        // Apply to ALL windows — iterate browsers instead of finding one HWND.
+        let browsers = state.browsers.lock().unwrap();
+        for (_label, browser) in browsers.iter() {
+            if let Some(host) = browser.host() {
+                let hwnd = host.window_handle();
+                if !hwnd.0.is_null() {
+                    unsafe {
+                        use windows_sys::Win32::UI::WindowsAndMessaging::GetAncestor;
+                        let top = GetAncestor(hwnd.0 as _, 2); // GA_ROOT
+                        let target = if !top.is_null() { top } else { hwnd.0 as _ };
+
+                        // Always set backdrop (clears it when both are false)
+                        apply_window_effects(target, transparent, blur);
+
+                        if transparent {
+                            apply_window_opacity(target, opacity);
+                        } else {
+                            remove_window_opacity(target);
+                        }
+                    }
                 }
-                if transparent {
-                    apply_window_opacity(hwnd, _opacity);
-                }
-            } else {
-                tracing::warn!("set_window_transparency: could not find top-level window");
             }
         }
     }
-    let _ = (state, transparent, blur);
+
+    #[cfg(not(target_os = "windows"))]
+    let _ = (state, transparent, blur, opacity);
+
     Ok(serde_json::Value::Null)
 }
 
@@ -304,6 +314,17 @@ unsafe fn apply_window_opacity(hwnd: *mut std::ffi::c_void, opacity: f64) {
         tracing::info!("Applied window opacity: {} (alpha={})", opacity, alpha);
     } else {
         tracing::warn!("SetLayeredWindowAttributes failed");
+    }
+}
+
+/// Remove window opacity — restore to fully opaque by removing WS_EX_LAYERED.
+#[cfg(target_os = "windows")]
+unsafe fn remove_window_opacity(hwnd: *mut std::ffi::c_void) {
+    use windows_sys::Win32::UI::WindowsAndMessaging::*;
+    let ex_style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+    if (ex_style & WS_EX_LAYERED as isize) != 0 {
+        SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex_style & !(WS_EX_LAYERED as isize));
+        tracing::info!("Removed window opacity (WS_EX_LAYERED cleared)");
     }
 }
 
