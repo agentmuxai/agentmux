@@ -336,9 +336,10 @@ export class TermWrap {
     private static readonly RAF_BYPASS_THRESHOLD = 512; // bytes
 
     private scheduleRafWrite(data: Uint8Array) {
-        if (data.length <= TermWrap.RAF_BYPASS_THRESHOLD) {
-            // Small data: write directly. xterm.js serialises terminal.write() calls
-            // internally, so this is safe even when writeInFlight is true.
+        if (data.length <= TermWrap.RAF_BYPASS_THRESHOLD && this.rafBuffer.length === 0 && !this.writeInFlight) {
+            // Small data with nothing queued: write directly to eliminate echo delay.
+            // Only safe when rafBuffer is empty and no write is in flight, otherwise
+            // the small chunk would be written out of order ahead of pending data.
             this.doTerminalWrite(data, null);
             return;
         }
