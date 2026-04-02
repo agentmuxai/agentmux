@@ -326,7 +326,22 @@ export class TermWrap {
     // writeInFlight ensures no second RAF fires while a slow write (large scrollback buffer)
     // is still in progress. Without this guard, rafPending resets before doTerminalWrite
     // resolves, letting a concurrent write race and causing the same flash at high bufLines.
+    //
+    // Fast path: small chunks (character echo, single completions) bypass RAF entirely.
+    // The scroll-flicker pattern only occurs when Ink emits cursor-up + content as separate
+    // WebSocket messages — that only happens with large multi-chunk outputs. A single
+    // echoed character (1–4 bytes) is never split, so there is no flicker risk.
+    // Bypassing RAF here eliminates the ≤16ms echo delay (and the writeInFlight stall)
+    // that made typing feel sluggish during PTY output.
+    private static readonly RAF_BYPASS_THRESHOLD = 512; // bytes
+
     private scheduleRafWrite(data: Uint8Array) {
+        if (data.length <= TermWrap.RAF_BYPASS_THRESHOLD) {
+            // Small data: write directly. xterm.js serialises terminal.write() calls
+            // internally, so this is safe even when writeInFlight is true.
+            this.doTerminalWrite(data, null);
+            return;
+        }
         this.rafBuffer.push(data);
         this.armRaf();
     }
@@ -355,8 +370,6 @@ export class TermWrap {
                 const bufLines = this.terminal.buffer.active.length;
                 if (elapsed > 8) {
                     console.warn(`[raf-write] SLOW chunks=${chunkCount} bytes=${totalLen} elapsed=${elapsed.toFixed(1)}ms bufLines=${bufLines}`);
-                } else {
-                    console.log(`[raf-write] chunks=${chunkCount} bytes=${totalLen} elapsed=${elapsed.toFixed(1)}ms bufLines=${bufLines}`);
                 }
                 // Drain any data that arrived while the write was in progress.
                 if (this.rafBuffer.length > 0) this.armRaf();
