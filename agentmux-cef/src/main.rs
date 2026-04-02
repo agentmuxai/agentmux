@@ -140,8 +140,10 @@ fn main() {
         if let Ok(contents) = std::fs::read_to_string(&port_file) {
             let parts: Vec<&str> = contents.trim().splitn(2, ':').collect();
             if parts.len() == 2 {
+                let addr: Result<std::net::SocketAddr, _> = format!("127.0.0.1:{}", parts[0]).parse();
+                if let Ok(addr) = addr {
                 if let Ok(mut stream) = std::net::TcpStream::connect_timeout(
-                    &format!("127.0.0.1:{}", parts[0]).parse().unwrap(),
+                    &addr,
                     std::time::Duration::from_secs(2),
                 ) {
                     use std::io::Write;
@@ -157,6 +159,7 @@ fn main() {
                 // Connection failed — stale port file, continue with fresh launch
                 tracing::info!("Stale port file (connection refused), launching fresh");
             }
+            } // addr parse
         }
     }
 
