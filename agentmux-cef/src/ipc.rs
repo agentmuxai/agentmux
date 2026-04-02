@@ -246,6 +246,10 @@ async fn route_command(
         "list_windows" => Ok(commands::window::list_windows(state)),
         "focus_window" => commands::window::focus_window(state, args),
 
+        // ---- Clipboard (CEF can't use navigator.clipboard without permission policy) ----
+        "read_clipboard" => commands::clipboard::read_clipboard(),
+        "write_clipboard" => commands::clipboard::write_clipboard(args),
+
         // ---- Tier 3: Provider/CLI management ----
         "detect_installed_clis" => commands::providers::detect_installed_clis().await,
         "get_provider_config" => commands::providers::get_provider_config(state),
