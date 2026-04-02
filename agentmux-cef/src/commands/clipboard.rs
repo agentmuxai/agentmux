@@ -115,17 +115,24 @@ fn write_clipboard_text(text: &str) -> Result<(), String> {
 }
 
 #[cfg(target_os = "linux")]
+fn is_wayland() -> bool {
+    std::env::var("WAYLAND_DISPLAY").map_or(false, |v| !v.is_empty())
+}
+
+#[cfg(target_os = "linux")]
 fn read_clipboard_text() -> Result<String, String> {
     use std::process::Command;
-    // Try Wayland first (wl-paste), then X11 (xclip, xsel)
-    let output = Command::new("wl-paste")
-        .args(["--no-newline"])
+    if is_wayland() {
+        if let Ok(output) = Command::new("wl-paste").args(["--no-newline"]).output() {
+            if output.status.success() {
+                return Ok(String::from_utf8_lossy(&output.stdout).to_string());
+            }
+        }
+    }
+    // X11 fallback: xclip, then xsel
+    let output = Command::new("xclip")
+        .args(["-selection", "clipboard", "-o"])
         .output()
-        .or_else(|_| {
-            Command::new("xclip")
-                .args(["-selection", "clipboard", "-o"])
-                .output()
-        })
         .or_else(|_| Command::new("xsel").args(["--clipboard", "--output"]).output())
         .map_err(|e| format!("clipboard read failed (install wl-paste, xclip, or xsel): {}", e))?;
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
@@ -135,16 +142,23 @@ fn read_clipboard_text() -> Result<String, String> {
 fn write_clipboard_text(text: &str) -> Result<(), String> {
     use std::io::Write;
     use std::process::{Command, Stdio};
-    // Try Wayland first (wl-copy), then X11 (xclip, xsel)
-    let mut child = Command::new("wl-copy")
+    if is_wayland() {
+        if let Ok(mut child) = Command::new("wl-copy").stdin(Stdio::piped()).spawn() {
+            if let Some(stdin) = child.stdin.as_mut() {
+                let _ = stdin.write_all(text.as_bytes());
+            }
+            if let Ok(status) = child.wait() {
+                if status.success() {
+                    return Ok(());
+                }
+            }
+        }
+    }
+    // X11 fallback: xclip, then xsel
+    let mut child = Command::new("xclip")
+        .args(["-selection", "clipboard"])
         .stdin(Stdio::piped())
         .spawn()
-        .or_else(|_| {
-            Command::new("xclip")
-                .args(["-selection", "clipboard"])
-                .stdin(Stdio::piped())
-                .spawn()
-        })
         .or_else(|_| {
             Command::new("xsel")
                 .args(["--clipboard", "--input"])
@@ -158,6 +172,6 @@ fn write_clipboard_text(text: &str) -> Result<(), String> {
         .unwrap()
         .write_all(text.as_bytes())
         .map_err(|e| format!("clipboard write failed: {}", e))?;
-    child.wait().map_err(|e| format!("clipboard wait failed: {}", e))?;
+    child.wait().map_err(|e| format!("clipboard write failed: {}", e))?;
     Ok(())
 }
