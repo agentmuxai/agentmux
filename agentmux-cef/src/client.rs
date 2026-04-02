@@ -194,7 +194,7 @@ impl AgentMuxHandler {
         let mut browser_cloned = browser.cloned();
         if let Some(bv) = browser_view_get_for_browser(browser_cloned.as_mut()) {
             if let Some(window) = bv.window() {
-                if !window.is_visible() {
+                if window.is_visible() == 0 {
                     window.show();
                     if let Some(ref mut b) = browser_cloned {
                         if let Some(host) = b.host() {

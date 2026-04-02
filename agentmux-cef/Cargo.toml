@@ -1,6 +1,6 @@
 [package]
 name = "agentmux-cef"
-version = "0.33.19"
+version = "0.33.20"
 description = "AgentMux CEF Host — Pinned Chromium renderer replacing system WebView2"
 authors = ["AgentMux Corp"]
 edition = "2021"
