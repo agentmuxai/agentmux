@@ -20,6 +20,7 @@ use crate::state::AppState;
 wrap_window_delegate! {
     pub struct AgentMuxWindowDelegate {
         browser_view: RefCell<Option<BrowserView>>,
+        initial_bounds: Option<(i32, i32, i32, i32)>,
     }
 
     impl ViewDelegate {
@@ -42,8 +43,10 @@ wrap_window_delegate! {
             let mut view = View::from(browser_view);
             window.add_child_view(Some(&mut view));
 
-            // Resize to 70% of the current monitor's work area, centered.
-            if let Some((x, y, w, h)) = get_monitor_centered_70pct(window) {
+            // Position: use explicit bounds if provided, else 70% centered.
+            if let Some((x, y, w, h)) = self.initial_bounds {
+                window.set_bounds(Some(&Rect { x, y, width: w, height: h }));
+            } else if let Some((x, y, w, h)) = get_monitor_centered_70pct(window) {
                 window.set_bounds(Some(&Rect { x, y, width: w, height: h }));
             }
 
@@ -161,6 +164,7 @@ wrap_browser_view_delegate! {
             // Create a new top-level window for popups (e.g., devtools).
             let mut window_delegate = AgentMuxWindowDelegate::new(
                 RefCell::new(popup_browser_view.cloned()),
+                None,
             );
             window_create_top_level(Some(&mut window_delegate));
             1
@@ -302,6 +306,7 @@ wrap_browser_process_handler! {
 
                 let mut window_delegate = AgentMuxWindowDelegate::new(
                     RefCell::new(browser_view),
+                    None,
                 );
                 window_create_top_level(Some(&mut window_delegate));
             }

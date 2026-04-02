@@ -153,3 +153,70 @@ pub fn post_move_window(state: &Arc<AppState>, label: &str, dx: i32, dy: i32) {
     let mut task = MoveWindowTask::new(state.clone(), label.to_string(), dx, dy);
     post_task(ThreadId::UI, Some(&mut task));
 }
+
+// ── Create new window (CEF Views) ───────────────────────────────────────
+
+wrap_task! {
+    pub struct CreateWindowTask {
+        state: Arc<AppState>,
+        url: String,
+        label: String,
+        x: i32,
+        y: i32,
+        w: i32,
+        h: i32,
+    }
+
+    impl Task {
+        fn execute(&self) {
+            use std::cell::RefCell;
+
+            let settings = BrowserSettings {
+                background_color: 0xFF000000,
+                ..Default::default()
+            };
+            let cef_url = CefString::from(self.url.as_str());
+
+            // Get client from an existing browser
+            let browsers = self.state.browsers.lock().unwrap();
+            let client = browsers.values().next()
+                .and_then(|b| b.host().map(|h| h.client()));
+            drop(browsers);
+
+            let mut request_context = crate::commands::create_isolated_request_context(
+                &self.state, &self.label,
+            );
+
+            let mut client_ref = client.flatten();
+            let mut bv_delegate = crate::app::AgentMuxBrowserViewDelegate::new(
+                RuntimeStyle::ALLOY,
+            );
+            let browser_view = browser_view_create(
+                client_ref.as_mut(),
+                Some(&cef_url),
+                Some(&settings),
+                None,
+                request_context.as_mut(),
+                Some(&mut bv_delegate),
+            );
+            let mut wd = crate::app::AgentMuxWindowDelegate::new(
+                RefCell::new(browser_view),
+                Some((self.x, self.y, self.w, self.h)),
+            );
+            window_create_top_level(Some(&mut wd));
+        }
+    }
+}
+
+pub fn post_create_window(
+    state: &Arc<AppState>,
+    url: &str,
+    label: &str,
+    x: i32, y: i32, w: i32, h: i32,
+) {
+    let mut task = CreateWindowTask::new(
+        state.clone(), url.to_string(), label.to_string(),
+        x, y, w, h,
+    );
+    post_task(ThreadId::UI, Some(&mut task));
+}

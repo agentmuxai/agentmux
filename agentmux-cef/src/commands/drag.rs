@@ -301,47 +301,10 @@ pub fn open_window_at_position(state: &Arc<AppState>, args: &serde_json::Value) 
         url.push_str(&format!("&workspaceId={}", workspace_id));
     }
 
-    // Create a new browser window
-    #[cfg(target_os = "windows")]
-    {
-        use windows_sys::Win32::UI::WindowsAndMessaging::*;
-
-        let window_info = cef::WindowInfo {
-            runtime_style: cef::RuntimeStyle::ALLOY,
-            window_name: cef::CefString::from("AgentMux"),
-            #[cfg(target_os = "windows")]
-            style: WS_POPUP | WS_CLIPCHILDREN | WS_CLIPSIBLINGS | WS_VISIBLE | WS_MINIMIZEBOX | WS_MAXIMIZEBOX,
-            bounds: cef::Rect {
-                x: pos_x,
-                y: pos_y,
-                width: win_w,
-                height: win_h,
-            },
-            ..Default::default()
-        };
-
-        let settings = cef::BrowserSettings {
-            windowless_frame_rate: 60,
-            background_color: 0xFF000000,
-            ..Default::default()
-        };
-
-        let cef_url = cef::CefString::from(url.as_str());
-
-        // Each new window needs an isolated RequestContext so it gets its own
-        // renderer process with a separate V8 isolate. Without this, all windows
-        // share module-level JS state (savedInitOpts, document, SolidJS tree).
-        let mut request_context = super::create_isolated_request_context(state, &label);
-
-        cef::browser_host_create_browser(
-            Some(&window_info),
-            None, // Uses the app's default client (AgentMuxClient)
-            Some(&cef_url),
-            Some(&settings),
-            None, // extra_info
-            request_context.as_mut(),
-        );
-    }
+    // Post to CEF UI thread — window_create_top_level must run there.
+    crate::ui_tasks::post_create_window(
+        state, &url, &label, pos_x, pos_y, win_w, win_h,
+    );
 
     // Register instance number
     {
