@@ -47,13 +47,8 @@ wrap_window_delegate! {
                 window.set_bounds(Some(&Rect { x, y, width: w, height: h }));
             }
 
-            window.show();
-            // Focus the browser so keyboard input (Ctrl+C/V, typing) works immediately.
-            if let Some(browser) = browser_view.browser() {
-                if let Some(host) = browser.host() {
-                    host.set_focus(1);
-                }
-            }
+            // Do NOT show here — deferred to on_load_end (client.rs) after
+            // content paints, eliminating the white flash.
         }
 
         fn on_window_destroyed(&self, _window: Option<&mut Window>) {
@@ -290,51 +285,10 @@ wrap_browser_process_handler! {
 
             tracing::info!("Loading URL: {}{}ipc_port={}&ipc_token=<redacted>", base_url, separator, self.ipc_port);
 
-            // Default: native window mode to eliminate white flash.
-            // Window starts hidden (no WS_VISIBLE), shown in on_load_end.
-            // Pass --use-views to use CEF Views instead (has white flash).
-            let use_views = command_line.has_switch(Some(&CefString::from("use-views"))) != 0;
-
-            if !use_views {
-                #[cfg(target_os = "windows")]
-                let window_info = {
-                    use windows_sys::Win32::UI::WindowsAndMessaging::*;
-                    let (x, y, w, h) = get_monitor_work_area(0, 0)
-                        .map(|(wx, wy, ww, wh)| {
-                            let w = (ww as f64 * 0.70) as i32;
-                            let h = (wh as f64 * 0.70) as i32;
-                            (wx + (ww - w) / 2, wy + (wh - h) / 2, w, h)
-                        })
-                        .unwrap_or((CW_USEDEFAULT, CW_USEDEFAULT, 1200, 800));
-                    WindowInfo {
-                        runtime_style: RuntimeStyle::ALLOY,
-                        window_name: CefString::from("AgentMux"),
-                        // No WS_VISIBLE, no WS_THICKFRAME at creation — both
-                        // cause white flash. WS_THICKFRAME added in on_load_end
-                        // after content paints (enables resize without flash).
-                        style: WS_POPUP | WS_CLIPCHILDREN | WS_CLIPSIBLINGS
-                            | WS_MINIMIZEBOX | WS_MAXIMIZEBOX,
-                        bounds: cef::Rect { x, y, width: w, height: h },
-                        ..Default::default()
-                    }
-                };
-                #[cfg(not(target_os = "windows"))]
-                let window_info = WindowInfo {
-                    runtime_style: RuntimeStyle::ALLOY,
-                    ..Default::default()
-                };
-
-                let mut client = self.default_client();
-                browser_host_create_browser(
-                    Some(&window_info),
-                    client.as_mut(),
-                    Some(&url),
-                    Some(&settings),
-                    None,
-                    None,
-                );
-            } else {
-                // CEF Views mode (--use-views): cross-platform but has white flash.
+            // CEF Views mode — window NOT shown until on_load_end.
+            // No DwmExtendFrameIntoClientArea (causes white flash).
+            // CEF Views handles resize, snap, frameless natively.
+            {
                 let mut client = self.default_client();
                 let mut delegate = AgentMuxBrowserViewDelegate::new(RuntimeStyle::ALLOY);
                 let browser_view = browser_view_create(
