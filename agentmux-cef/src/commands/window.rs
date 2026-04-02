@@ -469,12 +469,6 @@ pub fn open_new_window(state: &Arc<AppState>) -> Result<serde_json::Value, Strin
         tracing::info!(label = %label, instance = %num, "[window] new window registered");
     }
 
-    let settings = cef::BrowserSettings {
-        windowless_frame_rate: 60,
-        background_color: 0xFF000000,
-        ..Default::default()
-    };
-
     let (pos_x, pos_y) = get_offset_position();
     let (win_w, win_h) = get_secondary_window_size(pos_x, pos_y);
 

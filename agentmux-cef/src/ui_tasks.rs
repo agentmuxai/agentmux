@@ -172,7 +172,7 @@ wrap_task! {
             use std::cell::RefCell;
 
             let settings = BrowserSettings {
-                background_color: 0xFF222222,
+                background_color: 0xFF000000,
                 ..Default::default()
             };
             let cef_url = CefString::from(self.url.as_str());
