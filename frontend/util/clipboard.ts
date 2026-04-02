@@ -1,12 +1,12 @@
-// Clipboard utilities using Tauri plugin API.
-// Bypasses WebView2's native permission dialog by going through
-// Tauri's IPC bridge to the OS clipboard directly.
-import { readText as tauriReadText, writeText as tauriWriteText } from "@tauri-apps/plugin-clipboard-manager";
+// Clipboard utilities — routes through CEF IPC to the OS clipboard.
+// CEF's Chromium blocks navigator.clipboard.readText() without a
+// Permissions-Policy header, so we use the host process instead.
+import { invokeCommand } from "@/app/platform/ipc";
 
 export async function readText(): Promise<string> {
-    return (await tauriReadText()) ?? "";
+    return invokeCommand<string>("read_clipboard", {});
 }
 
 export async function writeText(text: string): Promise<void> {
-    await tauriWriteText(text);
+    await invokeCommand("write_clipboard", { text });
 }
