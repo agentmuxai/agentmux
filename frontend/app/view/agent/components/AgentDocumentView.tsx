@@ -112,7 +112,7 @@ export const AgentDocumentView = ({ documentAtom, documentStateAtom, logLines, a
                                     <span class="agent-auth-url-text">{url()}</span>
                                     <button
                                         class="agent-auth-url-copy"
-                                        onClick={() => navigator.clipboard.writeText(url())}
+                                        onClick={() => { import("@/util/clipboard").then(c => c.writeText(url())); }}
                                         title="Copy URL"
                                     >
                                         Copy
