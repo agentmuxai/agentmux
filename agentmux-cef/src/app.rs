@@ -199,10 +199,6 @@ wrap_app! {
                 let val = CefString::from("CalculateNativeWinOcclusion");
                 cmd.append_switch_with_value(Some(&key), Some(&val));
 
-                // Disable GPU compositing to prevent white flash on startup.
-                // Software compositing respects background_color from frame 1.
-                cmd.append_switch(Some(&CefString::from("disable-gpu-compositing")));
-
                 // Set initial background color via CLI.
                 let bg_key = CefString::from("background-color");
                 let bg_val = CefString::from("ff222222");
