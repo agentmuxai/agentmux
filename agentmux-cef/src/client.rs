@@ -87,19 +87,8 @@ impl AgentMuxHandler {
             browsers.insert(label, browser.clone());
         }
 
-        // Install frameless resize hook on all windows. No DwmExtendFrameIntoClientArea
-        // (causes white flash). All windows stay hidden until on_load_end.
-        #[cfg(target_os = "windows")]
-        {
-            if let Some(host) = browser.host() {
-                let hwnd = host.window_handle();
-                if !hwnd.0.is_null() {
-                    unsafe {
-                        install_frameless_resize_hook(hwnd.0 as *mut std::ffi::c_void);
-                    }
-                }
-            }
-        }
+        // No DwmExtendFrameIntoClientArea — it causes the white flash.
+        // CEF Views handles frameless + resize via its delegate.
 
         // Set the taskbar/title bar icon from the embedded exe resource.
         #[cfg(target_os = "windows")]
@@ -200,44 +189,41 @@ impl AgentMuxHandler {
             url_str
         );
 
-        // Show the window via cloak→show→uncloak, then add WS_THICKFRAME
-        // for resize. Only runs once per window (skips if already visible).
-        #[cfg(target_os = "windows")]
-        if let Some(browser) = browser {
-            if let Some(host) = browser.host() {
-                let hwnd = host.window_handle();
-                if !hwnd.0.is_null() {
-                    unsafe {
-                        use windows_sys::Win32::UI::WindowsAndMessaging::*;
-                        use windows_sys::Win32::Graphics::Dwm::DwmSetWindowAttribute;
-
-                        let target = hwnd.0 as *mut std::ffi::c_void;
-
-                        // Skip if window is already visible (page reload/redirect)
-                        if IsWindowVisible(target) != 0 {
-                            return;
+        // Show window after content paints. Uses CEF Views API for main
+        // window, Win32 ShowWindow for native secondary windows.
+        let mut browser_cloned = browser.cloned();
+        let shown = if let Some(bv) = browser_view_get_for_browser(browser_cloned.as_mut()) {
+            if let Some(window) = bv.window() {
+                if window.is_visible() == 0 {
+                    window.show();
+                    true
+                } else { false }
+            } else { false }
+        } else {
+            // Native window (secondary) — no BrowserView, use Win32
+            #[cfg(target_os = "windows")]
+            if let Some(ref b) = browser_cloned {
+                if let Some(host) = b.host() {
+                    let hwnd = host.window_handle();
+                    if !hwnd.0.is_null() {
+                        unsafe {
+                            use windows_sys::Win32::UI::WindowsAndMessaging::*;
+                            if IsWindowVisible(hwnd.0 as _) == 0 {
+                                ShowWindow(hwnd.0 as _, SW_SHOW);
+                                SetForegroundWindow(hwnd.0 as _);
+                                true
+                            } else { false }
                         }
-
-                        const DWMWA_CLOAK: u32 = 13;
-                        let cloak_on: u32 = 1;
-                        let cloak_off: u32 = 0;
-
-                        // Cloak → show → uncloak (first visible frame has content)
-                        DwmSetWindowAttribute(target, DWMWA_CLOAK, &cloak_on as *const u32 as _, 4);
-                        ShowWindow(target, SW_SHOW);
-                        DwmSetWindowAttribute(target, DWMWA_CLOAK, &cloak_off as *const u32 as _, 4);
-
-                        // Now add WS_THICKFRAME for resize (content already
-                        // painted, so the border doesn't flash white).
-                        let style = GetWindowLongPtrW(target, GWL_STYLE);
-                        SetWindowLongPtrW(target, GWL_STYLE, style | WS_THICKFRAME as isize);
-                        SetWindowPos(
-                            target, std::ptr::null_mut(), 0, 0, 0, 0,
-                            SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED,
-                        );
-
-                        SetForegroundWindow(target);
-                    }
+                    } else { false }
+                } else { false }
+            } else { false }
+            #[cfg(not(target_os = "windows"))]
+            false
+        };
+        if shown {
+            if let Some(ref mut b) = browser_cloned {
+                if let Some(host) = b.host() {
+                    host.set_focus(1);
                 }
             }
         }

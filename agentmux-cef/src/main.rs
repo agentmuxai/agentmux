@@ -194,6 +194,13 @@ fn main() {
             .unwrap_or_else(|| std::path::PathBuf::from("."))
             .join(dir_name);
         std::fs::create_dir_all(&dir).ok();
+        // Remove stale lockfile from a previous killed run — CEF treats
+        // it as "another instance is running" and opens Chrome instead.
+        let lockfile = dir.join("lockfile");
+        if lockfile.exists() {
+            tracing::warn!("Removing stale CEF lockfile: {}", lockfile.display());
+            let _ = std::fs::remove_file(&lockfile);
+        }
         tracing::info!("CEF cache dir: {}", dir.display());
         CefString::from(dir.to_str().unwrap_or(""))
     };
