@@ -178,41 +178,57 @@ pub fn start_window_drag(state: &Arc<AppState>) -> Result<serde_json::Value, Str
 /// Uses DWM Mica/Acrylic on Win11, or SetWindowCompositionAttribute on Win10.
 pub fn set_window_transparency(state: &Arc<AppState>, args: &serde_json::Value) -> Result<serde_json::Value, String> {
     let transparent = args.get("transparent").and_then(|v| v.as_bool()).unwrap_or(false);
-    let blur = args.get("blur").and_then(|v| v.as_bool()).unwrap_or(false);
     let opacity = args.get("opacity").and_then(|v| v.as_f64()).unwrap_or(0.8);
-    tracing::info!("set_window_transparency: transparent={} blur={} opacity={}", transparent, blur, opacity);
+    tracing::info!("set_window_transparency: transparent={} opacity={}", transparent, opacity);
 
     #[cfg(target_os = "windows")]
     {
-        // Apply to ALL windows — iterate browsers instead of finding one HWND.
-        let browsers = state.browsers.lock().unwrap();
-        for (_label, browser) in browsers.iter() {
-            if let Some(host) = browser.host() {
-                let hwnd = host.window_handle();
-                if !hwnd.0.is_null() {
-                    unsafe {
-                        use windows_sys::Win32::UI::WindowsAndMessaging::GetAncestor;
-                        let top = GetAncestor(hwnd.0 as _, 2); // GA_ROOT
-                        let target = if !top.is_null() { top } else { hwnd.0 as _ };
-
-                        // Always set backdrop (clears it when both are false)
-                        apply_window_effects(target, transparent, blur);
-
-                        if transparent {
-                            apply_window_opacity(target, opacity);
-                        } else {
-                            remove_window_opacity(target);
-                        }
-                    }
+        // Collect all visible HWNDs for this process, then apply opacity.
+        let hwnds = find_all_own_windows();
+        for hwnd in hwnds {
+            unsafe {
+                if transparent {
+                    apply_window_opacity(hwnd, opacity);
+                } else {
+                    remove_window_opacity(hwnd);
                 }
             }
+            tracing::info!("set_window_transparency: applied to {:?}", hwnd);
         }
     }
 
     #[cfg(not(target_os = "windows"))]
-    let _ = (state, transparent, blur, opacity);
+    let _ = (state, transparent, opacity);
 
     Ok(serde_json::Value::Null)
+}
+
+/// Find ALL visible top-level windows belonging to this process.
+#[cfg(target_os = "windows")]
+fn find_all_own_windows() -> Vec<*mut std::ffi::c_void> {
+    use windows_sys::Win32::UI::WindowsAndMessaging::*;
+    use windows_sys::Win32::System::Threading::GetCurrentProcessId;
+
+    let mut results: Vec<*mut std::ffi::c_void> = Vec::new();
+
+    unsafe extern "system" fn enum_callback(
+        hwnd: *mut std::ffi::c_void,
+        lparam: isize,
+    ) -> i32 {
+        use windows_sys::Win32::System::Threading::GetCurrentProcessId;
+        let mut window_pid: u32 = 0;
+        GetWindowThreadProcessId(hwnd, &mut window_pid);
+        if window_pid == GetCurrentProcessId() && IsWindowVisible(hwnd) != 0 {
+            let results = &mut *(lparam as *mut Vec<*mut std::ffi::c_void>);
+            results.push(hwnd);
+        }
+        1 // Continue
+    }
+
+    unsafe {
+        EnumWindows(Some(enum_callback), &mut results as *mut _ as isize);
+    }
+    results
 }
 
 /// Find the top-level window belonging to this process.
