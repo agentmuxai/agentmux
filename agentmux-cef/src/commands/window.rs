@@ -178,31 +178,58 @@ pub fn start_window_drag(state: &Arc<AppState>) -> Result<serde_json::Value, Str
 /// Uses DWM Mica/Acrylic on Win11, or SetWindowCompositionAttribute on Win10.
 pub fn set_window_transparency(state: &Arc<AppState>, args: &serde_json::Value) -> Result<serde_json::Value, String> {
     let transparent = args.get("transparent").and_then(|v| v.as_bool()).unwrap_or(false);
-    let blur = args.get("blur").and_then(|v| v.as_bool()).unwrap_or(false);
-    let _opacity = args.get("opacity").and_then(|v| v.as_f64()).unwrap_or(0.8);
-    tracing::info!("set_window_transparency: transparent={} blur={}", transparent, blur);
-    #[cfg(not(target_os = "windows"))]
-    tracing::info!("set_window_transparency: not windows, skipping");
+    let opacity = args.get("opacity").and_then(|v| v.as_f64()).unwrap_or(0.8);
+    tracing::info!("set_window_transparency: transparent={} opacity={}", transparent, opacity);
 
     #[cfg(target_os = "windows")]
     {
-        unsafe {
-            let hwnd = find_own_top_level_window();
-            if !hwnd.is_null() {
-                tracing::info!("set_window_transparency: found hwnd={:?}", hwnd);
-                if blur {
-                    apply_window_effects(hwnd, true, true);
-                }
+        // Collect all visible HWNDs for this process, then apply opacity.
+        let hwnds = find_all_own_windows();
+        for hwnd in hwnds {
+            unsafe {
                 if transparent {
-                    apply_window_opacity(hwnd, _opacity);
+                    apply_window_opacity(hwnd, opacity);
+                } else {
+                    remove_window_opacity(hwnd);
                 }
-            } else {
-                tracing::warn!("set_window_transparency: could not find top-level window");
             }
+            tracing::info!("set_window_transparency: applied to {:?}", hwnd);
         }
     }
-    let _ = (state, transparent, blur);
+
+    let _ = state;
+    #[cfg(not(target_os = "windows"))]
+    let _ = (transparent, opacity);
+
     Ok(serde_json::Value::Null)
+}
+
+/// Find ALL visible top-level windows belonging to this process.
+#[cfg(target_os = "windows")]
+fn find_all_own_windows() -> Vec<*mut std::ffi::c_void> {
+    use windows_sys::Win32::UI::WindowsAndMessaging::*;
+    use windows_sys::Win32::System::Threading::GetCurrentProcessId;
+
+    let mut results: Vec<*mut std::ffi::c_void> = Vec::new();
+
+    unsafe extern "system" fn enum_callback(
+        hwnd: *mut std::ffi::c_void,
+        lparam: isize,
+    ) -> i32 {
+        use windows_sys::Win32::System::Threading::GetCurrentProcessId;
+        let mut window_pid: u32 = 0;
+        GetWindowThreadProcessId(hwnd, &mut window_pid);
+        if window_pid == GetCurrentProcessId() && IsWindowVisible(hwnd) != 0 {
+            let results = &mut *(lparam as *mut Vec<*mut std::ffi::c_void>);
+            results.push(hwnd);
+        }
+        1 // Continue
+    }
+
+    unsafe {
+        EnumWindows(Some(enum_callback), &mut results as *mut _ as isize);
+    }
+    results
 }
 
 /// Find the top-level window belonging to this process.
@@ -240,52 +267,6 @@ pub(crate) unsafe fn find_own_top_level_window() -> *mut std::ffi::c_void {
     result
 }
 
-#[cfg(target_os = "windows")]
-unsafe fn apply_window_effects(hwnd: *mut std::ffi::c_void, transparent: bool, blur: bool) {
-    use windows_sys::Win32::Graphics::Dwm::*;
-
-    if !transparent && !blur {
-        // Disable: set backdrop to NONE
-        let backdrop_type: i32 = 1; // DWMSBT_NONE
-        DwmSetWindowAttribute(
-            hwnd,
-            38, // DWMWA_SYSTEMBACKDROP_TYPE
-            &backdrop_type as *const _ as *const std::ffi::c_void,
-            std::mem::size_of::<i32>() as u32,
-        );
-        return;
-    }
-
-    // Try Win11 DWM backdrop first (Mica or Acrylic)
-    // DWMWA_SYSTEMBACKDROP_TYPE = 38
-    // DWMSBT_MAINWINDOW (Mica) = 2, DWMSBT_TRANSIENTWINDOW (Acrylic) = 3, DWMSBT_TABBEDWINDOW = 4
-    let backdrop_type: i32 = if blur { 3 } else { 2 }; // Acrylic for blur, Mica otherwise
-
-    // Enable immersive dark mode first (required for Mica/Acrylic to look correct on dark themes)
-    let dark_mode: i32 = 1;
-    DwmSetWindowAttribute(
-        hwnd,
-        20, // DWMWA_USE_IMMERSIVE_DARK_MODE
-        &dark_mode as *const _ as *const std::ffi::c_void,
-        std::mem::size_of::<i32>() as u32,
-    );
-
-    let result = DwmSetWindowAttribute(
-        hwnd,
-        38, // DWMWA_SYSTEMBACKDROP_TYPE
-        &backdrop_type as *const _ as *const std::ffi::c_void,
-        std::mem::size_of::<i32>() as u32,
-    );
-
-    if result != 0 {
-        // Win11 API failed (probably Win10) — try SetWindowCompositionAttribute
-        tracing::debug!("DWM backdrop failed (hr={:#x}), trying Win10 acrylic", result);
-        apply_win10_acrylic(hwnd, transparent);
-    } else {
-        tracing::info!("Applied DWM backdrop type {} to window", backdrop_type);
-    }
-}
-
 /// Apply window-level opacity via WS_EX_LAYERED + SetLayeredWindowAttributes.
 /// This makes the entire window semi-transparent (content + chrome).
 #[cfg(target_os = "windows")]
@@ -307,50 +288,14 @@ unsafe fn apply_window_opacity(hwnd: *mut std::ffi::c_void, opacity: f64) {
     }
 }
 
-/// Win10 acrylic blur via undocumented SetWindowCompositionAttribute API.
+/// Remove window opacity — restore to fully opaque by removing WS_EX_LAYERED.
 #[cfg(target_os = "windows")]
-unsafe fn apply_win10_acrylic(hwnd: *mut std::ffi::c_void, enable: bool) {
-    #[repr(C)]
-    struct AccentPolicy {
-        accent_state: u32,
-        accent_flags: u32,
-        gradient_color: u32,
-        animation_id: u32,
-    }
-
-    #[repr(C)]
-    struct WindowCompositionAttribData {
-        attrib: u32, // WCA_ACCENT_POLICY = 19
-        data: *mut std::ffi::c_void,
-        size: usize,
-    }
-
-    // ACCENT_ENABLE_ACRYLICBLURBEHIND = 4, ACCENT_DISABLED = 0
-    let mut policy = AccentPolicy {
-        accent_state: if enable { 4 } else { 0 },
-        accent_flags: 2, // ACCENT_FLAG_DRAW_ALL
-        gradient_color: 0x01000000, // Nearly transparent black
-        animation_id: 0,
-    };
-
-    let mut data = WindowCompositionAttribData {
-        attrib: 19, // WCA_ACCENT_POLICY
-        data: &mut policy as *mut _ as *mut std::ffi::c_void,
-        size: std::mem::size_of::<AccentPolicy>(),
-    };
-
-    let user32 = windows_sys::Win32::System::LibraryLoader::LoadLibraryA(b"user32.dll\0".as_ptr());
-    if !user32.is_null() {
-        let proc = windows_sys::Win32::System::LibraryLoader::GetProcAddress(
-            user32,
-            b"SetWindowCompositionAttribute\0".as_ptr(),
-        );
-        if let Some(func) = proc {
-            let func: extern "system" fn(*mut std::ffi::c_void, *mut WindowCompositionAttribData) -> i32 =
-                std::mem::transmute(func);
-            func(hwnd, &mut data);
-            tracing::info!("Applied Win10 acrylic blur to window");
-        }
+unsafe fn remove_window_opacity(hwnd: *mut std::ffi::c_void) {
+    use windows_sys::Win32::UI::WindowsAndMessaging::*;
+    let ex_style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+    if (ex_style & WS_EX_LAYERED as isize) != 0 {
+        SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex_style & !(WS_EX_LAYERED as isize));
+        tracing::info!("Removed window opacity (WS_EX_LAYERED cleared)");
     }
 }
 
