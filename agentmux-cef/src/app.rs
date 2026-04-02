@@ -309,10 +309,11 @@ wrap_browser_process_handler! {
                     WindowInfo {
                         runtime_style: RuntimeStyle::ALLOY,
                         window_name: CefString::from("AgentMux"),
-                        // No WS_VISIBLE — hidden until on_load_end.
-                        // WS_THICKFRAME for resize (border hidden by WndProc hook).
+                        // No WS_VISIBLE, no WS_THICKFRAME at creation — both
+                        // cause white flash. WS_THICKFRAME added in on_load_end
+                        // after content paints (enables resize without flash).
                         style: WS_POPUP | WS_CLIPCHILDREN | WS_CLIPSIBLINGS
-                            | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_THICKFRAME,
+                            | WS_MINIMIZEBOX | WS_MAXIMIZEBOX,
                         bounds: cef::Rect { x, y, width: w, height: h },
                         ..Default::default()
                     }
