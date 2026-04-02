@@ -478,35 +478,10 @@ pub fn open_new_window(state: &Arc<AppState>) -> Result<serde_json::Value, Strin
     let (pos_x, pos_y) = get_offset_position();
     let (win_w, win_h) = get_secondary_window_size(pos_x, pos_y);
 
-    let cef_url = cef::CefString::from(url.as_str());
-
-    // Get the shared client from an existing browser.
-    let browsers = state.browsers.lock().unwrap();
-    let client = browsers.values().next().and_then(|b| b.host().map(|h| h.client()));
-    drop(browsers);
-
-    // Each new window needs an isolated RequestContext for renderer isolation.
-    let mut request_context = super::create_isolated_request_context(state, &label);
-
-    // CEF Views: browser_view + window_delegate (same as main window).
-    // Deferred show in on_load_end eliminates white flash.
-    let mut client_ref = client.flatten();
-    let mut bv_delegate = crate::app::AgentMuxBrowserViewDelegate::new(
-        cef::RuntimeStyle::ALLOY,
+    // Post to CEF UI thread — window_create_top_level must run there.
+    crate::ui_tasks::post_create_window(
+        state, &url, &label, pos_x, pos_y, win_w, win_h,
     );
-    let browser_view = cef::browser_view_create(
-        client_ref.as_mut(),
-        Some(&cef_url),
-        Some(&settings),
-        None,
-        request_context.as_mut(),
-        Some(&mut bv_delegate),
-    );
-    let mut window_delegate = crate::app::AgentMuxWindowDelegate::new(
-        std::cell::RefCell::new(browser_view),
-        Some((pos_x, pos_y, win_w, win_h)),
-    );
-    cef::window_create_top_level(Some(&mut window_delegate));
 
     // Notify all windows of the count change
     let count = state.window_instance_registry.lock().unwrap().count();

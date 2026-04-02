@@ -301,31 +301,10 @@ pub fn open_window_at_position(state: &Arc<AppState>, args: &serde_json::Value) 
         url.push_str(&format!("&workspaceId={}", workspace_id));
     }
 
-    // Create via CEF Views (same as main window) — deferred show in on_load_end.
-    let settings = cef::BrowserSettings {
-        windowless_frame_rate: 60,
-        background_color: 0xFF222222,
-        ..Default::default()
-    };
-    let cef_url = cef::CefString::from(url.as_str());
-    let mut request_context = super::create_isolated_request_context(state, &label);
-
-    let mut bv_delegate = crate::app::AgentMuxBrowserViewDelegate::new(
-        cef::RuntimeStyle::ALLOY,
+    // Post to CEF UI thread — window_create_top_level must run there.
+    crate::ui_tasks::post_create_window(
+        state, &url, &label, pos_x, pos_y, win_w, win_h,
     );
-    let browser_view = cef::browser_view_create(
-        None, // Uses the app's default client
-        Some(&cef_url),
-        Some(&settings),
-        None,
-        request_context.as_mut(),
-        Some(&mut bv_delegate),
-    );
-    let mut window_delegate = crate::app::AgentMuxWindowDelegate::new(
-        std::cell::RefCell::new(browser_view),
-        Some((pos_x, pos_y, win_w, win_h)),
-    );
-    cef::window_create_top_level(Some(&mut window_delegate));
 
     // Register instance number
     {
