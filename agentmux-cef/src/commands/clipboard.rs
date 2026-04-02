@@ -57,6 +57,7 @@ fn read_clipboard_text() -> Result<String, String> {
 fn write_clipboard_text(text: &str) -> Result<(), String> {
     use windows_sys::Win32::System::DataExchange::*;
     use windows_sys::Win32::System::Memory::*;
+    use windows_sys::Win32::Foundation::GlobalFree;
     use windows_sys::Win32::System::Ole::CF_UNICODETEXT;
 
     let wide: Vec<u16> = text.encode_utf16().chain(std::iter::once(0)).collect();
@@ -69,14 +70,14 @@ fn write_clipboard_text(text: &str) -> Result<(), String> {
         }
         let ptr = GlobalLock(hmem) as *mut u16;
         if ptr.is_null() {
-            // hmem will be freed by the OS when the process exits
+            GlobalFree(hmem);
             return Err("Failed to lock clipboard memory".into());
         }
         std::ptr::copy_nonoverlapping(wide.as_ptr(), ptr, wide.len());
         GlobalUnlock(hmem);
 
         if OpenClipboard(std::ptr::null_mut()) == 0 {
-            // hmem will be freed by the OS when the process exits
+            GlobalFree(hmem);
             return Err("Failed to open clipboard".into());
         }
         EmptyClipboard();
@@ -116,12 +117,17 @@ fn write_clipboard_text(text: &str) -> Result<(), String> {
 #[cfg(target_os = "linux")]
 fn read_clipboard_text() -> Result<String, String> {
     use std::process::Command;
-    // Try xclip first, then xsel
-    let output = Command::new("xclip")
-        .args(["-selection", "clipboard", "-o"])
+    // Try Wayland first (wl-paste), then X11 (xclip, xsel)
+    let output = Command::new("wl-paste")
+        .args(["--no-newline"])
         .output()
+        .or_else(|_| {
+            Command::new("xclip")
+                .args(["-selection", "clipboard", "-o"])
+                .output()
+        })
         .or_else(|_| Command::new("xsel").args(["--clipboard", "--output"]).output())
-        .map_err(|e| format!("clipboard read failed: {}", e))?;
+        .map_err(|e| format!("clipboard read failed (install wl-paste, xclip, or xsel): {}", e))?;
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
 
@@ -129,17 +135,23 @@ fn read_clipboard_text() -> Result<String, String> {
 fn write_clipboard_text(text: &str) -> Result<(), String> {
     use std::io::Write;
     use std::process::{Command, Stdio};
-    let mut child = Command::new("xclip")
-        .args(["-selection", "clipboard"])
+    // Try Wayland first (wl-copy), then X11 (xclip, xsel)
+    let mut child = Command::new("wl-copy")
         .stdin(Stdio::piped())
         .spawn()
+        .or_else(|_| {
+            Command::new("xclip")
+                .args(["-selection", "clipboard"])
+                .stdin(Stdio::piped())
+                .spawn()
+        })
         .or_else(|_| {
             Command::new("xsel")
                 .args(["--clipboard", "--input"])
                 .stdin(Stdio::piped())
                 .spawn()
         })
-        .map_err(|e| format!("clipboard write failed: {}", e))?;
+        .map_err(|e| format!("clipboard write failed (install wl-copy, xclip, or xsel): {}", e))?;
     child
         .stdin
         .as_mut()
