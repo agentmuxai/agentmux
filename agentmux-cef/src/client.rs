@@ -189,18 +189,41 @@ impl AgentMuxHandler {
             url_str
         );
 
-        // Show via CEF Views API after content paints. No Win32 hacks needed.
-        // Skip if already visible (page reload/redirect).
+        // Show window after content paints. Uses CEF Views API for main
+        // window, Win32 ShowWindow for native secondary windows.
         let mut browser_cloned = browser.cloned();
-        if let Some(bv) = browser_view_get_for_browser(browser_cloned.as_mut()) {
+        let shown = if let Some(bv) = browser_view_get_for_browser(browser_cloned.as_mut()) {
             if let Some(window) = bv.window() {
                 if window.is_visible() == 0 {
                     window.show();
-                    if let Some(ref mut b) = browser_cloned {
-                        if let Some(host) = b.host() {
-                            host.set_focus(1);
+                    true
+                } else { false }
+            } else { false }
+        } else {
+            // Native window (secondary) — no BrowserView, use Win32
+            #[cfg(target_os = "windows")]
+            if let Some(ref b) = browser_cloned {
+                if let Some(host) = b.host() {
+                    let hwnd = host.window_handle();
+                    if !hwnd.0.is_null() {
+                        unsafe {
+                            use windows_sys::Win32::UI::WindowsAndMessaging::*;
+                            if IsWindowVisible(hwnd.0 as _) == 0 {
+                                ShowWindow(hwnd.0 as _, SW_SHOW);
+                                SetForegroundWindow(hwnd.0 as _);
+                                true
+                            } else { false }
                         }
-                    }
+                    } else { false }
+                } else { false }
+            } else { false }
+            #[cfg(not(target_os = "windows"))]
+            false
+        };
+        if shown {
+            if let Some(ref mut b) = browser_cloned {
+                if let Some(host) = b.host() {
+                    host.set_focus(1);
                 }
             }
         }
