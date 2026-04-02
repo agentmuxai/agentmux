@@ -140,8 +140,9 @@ fn main() {
         if let Ok(contents) = std::fs::read_to_string(&port_file) {
             let parts: Vec<&str> = contents.trim().splitn(2, ':').collect();
             if parts.len() == 2 {
-                if let Ok(mut stream) = std::net::TcpStream::connect(
-                    format!("127.0.0.1:{}", parts[0]),
+                if let Ok(mut stream) = std::net::TcpStream::connect_timeout(
+                    &format!("127.0.0.1:{}", parts[0]).parse().unwrap(),
+                    std::time::Duration::from_secs(2),
                 ) {
                     use std::io::Write;
                     let body = r#"{"cmd":"open_new_window"}"#;
@@ -170,12 +171,6 @@ fn main() {
     *app_state.ipc_port.lock().unwrap() = ipc_port;
 
     tracing::info!("IPC server started on port {}", ipc_port);
-
-    // Write port + token to file so a second instance can send commands.
-    let _ = std::fs::write(
-        &port_file,
-        format!("{}:{}", ipc_port, app_state.ipc_token),
-    );
 
     // Spawn the backend sidecar SYNCHRONOUSLY — block until it signals ready
     // (WAVESRV-ESTART) before creating the browser window. This eliminates the
@@ -261,6 +256,13 @@ fn main() {
     assert_eq!(init_result, 1, "CEF initialization failed");
 
     tracing::info!("CEF initialized, entering message loop");
+
+    // Write port + token to file AFTER CEF init so a second instance
+    // only connects when we're ready to handle new-window requests.
+    let _ = std::fs::write(
+        &port_file,
+        format!("{}:{}", ipc_port, app_state.ipc_token),
+    );
 
     // Run the CEF message loop. This blocks until quit_message_loop() is called
     // (triggered when all browser windows are closed in client.rs).
