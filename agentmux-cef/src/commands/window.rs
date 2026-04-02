@@ -478,54 +478,35 @@ pub fn open_new_window(state: &Arc<AppState>) -> Result<serde_json::Value, Strin
     let (pos_x, pos_y) = get_offset_position();
     let (win_w, win_h) = get_secondary_window_size(pos_x, pos_y);
 
-    #[cfg(target_os = "windows")]
-    {
-        use windows_sys::Win32::UI::WindowsAndMessaging::*;
+    let cef_url = cef::CefString::from(url.as_str());
 
-        // No WS_THICKFRAME at creation (causes white border flash).
-        // Added in on_load_end after content paints.
-        let window_info = cef::WindowInfo {
-            runtime_style: cef::RuntimeStyle::ALLOY,
-            window_name: cef::CefString::from("AgentMux"),
-            style: WS_POPUP | WS_CLIPCHILDREN | WS_CLIPSIBLINGS
-                | WS_MINIMIZEBOX | WS_MAXIMIZEBOX,
-            bounds: cef::Rect {
-                x: pos_x,
-                y: pos_y,
-                width: win_w,
-                height: win_h,
-            },
-            ..Default::default()
-        };
+    // Get the shared client from an existing browser.
+    let browsers = state.browsers.lock().unwrap();
+    let client = browsers.values().next().and_then(|b| b.host().map(|h| h.client()));
+    drop(browsers);
 
-        let cef_url = cef::CefString::from(url.as_str());
+    // Each new window needs an isolated RequestContext for renderer isolation.
+    let mut request_context = super::create_isolated_request_context(state, &label);
 
-        // Pass the shared client so on_after_created fires (registers browser,
-        // applies DWM frameless, injects IPC port).
-        let browsers = state.browsers.lock().unwrap();
-        let client = browsers.values().next().and_then(|b| b.host().map(|h| h.client()));
-        drop(browsers);
-
-        // Each new window needs an isolated RequestContext so it gets its own
-        // renderer process with a separate V8 isolate.
-        let mut request_context = super::create_isolated_request_context(state, &label);
-
-        let mut client_ref = client.flatten();
-        cef::browser_host_create_browser(
-            Some(&window_info),
-            client_ref.as_mut(),
-            Some(&cef_url),
-            Some(&settings),
-            None,
-            request_context.as_mut(),
-        );
-    }
-
-    #[cfg(not(target_os = "windows"))]
-    {
-        let _ = (pos_x, pos_y, url, settings);
-        return Err("open_new_window not yet implemented on this platform".to_string());
-    }
+    // CEF Views: browser_view + window_delegate (same as main window).
+    // Deferred show in on_load_end eliminates white flash.
+    let mut client_ref = client.flatten();
+    let mut bv_delegate = crate::app::AgentMuxBrowserViewDelegate::new(
+        cef::RuntimeStyle::ALLOY,
+    );
+    let browser_view = cef::browser_view_create(
+        client_ref.as_mut(),
+        Some(&cef_url),
+        Some(&settings),
+        None,
+        request_context.as_mut(),
+        Some(&mut bv_delegate),
+    );
+    let mut window_delegate = crate::app::AgentMuxWindowDelegate::new(
+        std::cell::RefCell::new(browser_view),
+        Some((pos_x, pos_y, win_w, win_h)),
+    );
+    cef::window_create_top_level(Some(&mut window_delegate));
 
     // Notify all windows of the count change
     let count = state.window_instance_registry.lock().unwrap().count();
