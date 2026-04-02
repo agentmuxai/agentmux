@@ -720,7 +720,21 @@ tasks:
         internal: true
         platforms: [windows]
         cmds:
-            - cargo build --release -p agentmux-cef
+            - cmd: |
+                # Auto-detect cached CEF extraction to avoid re-downloading on
+                # every new cef-dll-sys hash. Picks the newest cef_windows_x86_64
+                # dir that has a valid archive.json (written by a prior successful
+                # build). Falls back to no CEF_PATH on first-ever build.
+                cefPath=$(find target/release/build -name "archive.json" \
+                  -path "*/cef_windows_x86_64/*" 2>/dev/null \
+                  | sort | tail -1 | xargs -r dirname 2>/dev/null)
+                if [ -n "$cefPath" ]; then
+                  echo "✓ Using cached CEF: $cefPath"
+                  export CEF_PATH="$(cygpath -w "$cefPath")"
+                else
+                  echo "ℹ No cached CEF found — will download (first build)"
+                fi
+                cargo build --release -p agentmux-cef
             - cmd: powershell -Command "New-Item -ItemType Directory -Force -Path dist/cef | Out-Null; Copy-Item target/release/agentmux-cef.exe dist/cef/agentmux-cef.exe -Force"
             - echo "✓ Built agentmux-cef for Windows"
 
@@ -882,7 +896,7 @@ tasks:
         desc: Package CEF build as a portable directory + ZIP (Windows). Outputs to ~/Desktop by default.
         platforms: [windows]
         cmds:
-            - bash scripts/package-cef-portable.sh
+            - pwsh scripts/package-cef-portable.ps1
 
     cef:clean:
         desc: Clean CEF build artifacts.

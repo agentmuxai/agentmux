@@ -10,7 +10,7 @@ checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
 name = "agentmux"
-version = "0.33.23"
+version = "0.33.24"
 dependencies = [
  "chrono",
  "dirs 5.0.1",
@@ -47,7 +47,7 @@ dependencies = [
 
 [[package]]
 name = "agentmux-cef"
-version = "0.33.23"
+version = "0.33.24"
 dependencies = [
  "axum 0.8.8",
  "cef",
@@ -68,7 +68,7 @@ dependencies = [
 
 [[package]]
 name = "agentmux-launcher"
-version = "0.33.23"
+version = "0.33.24"
 dependencies = [
  "windows-sys 0.59.0",
  "winres",
@@ -76,7 +76,7 @@ dependencies = [
 
 [[package]]
 name = "agentmuxsrv-rs"
-version = "0.33.23"
+version = "0.33.24"
 dependencies = [
  "async-stream",
  "axum 0.7.9",
@@ -798,9 +798,9 @@ dependencies = [
 
 [[package]]
 name = "cef-dll-sys"
-version = "146.3.0+146.0.9"
+version = "146.4.0+146.0.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2a5181dffd79f361801baa0c467f7362f9555a84b413546bc0deda93bc3dcff1"
+checksum = "499f151a1e3347716467771ca23f1b1846348c6aa4bbca76e3b6220ee8a26c48"
 dependencies = [
  "anyhow",
  "cmake",
@@ -7858,7 +7858,7 @@ dependencies = [
 
 [[package]]
 name = "wsh-rs"
-version = "0.33.23"
+version = "0.33.24"
 dependencies = [
  "base64 0.22.1",
  "clap",

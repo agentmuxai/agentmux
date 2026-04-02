@@ -3,8 +3,21 @@
 # Usage: bash scripts/package-cef-portable.sh [output-dir]
 #
 # Default output: ~/Desktop/agentmux-cef-{version}-x64-portable/
+#
+# NOTE: On Windows use scripts/package-cef-portable.ps1 instead.
+# This script is kept for Linux/macOS CI reference only.
+# It is NOT called by 'task cef:package:portable' on Windows.
 
 set -euo pipefail
+
+# Fail loudly if accidentally run on Windows (MSYS2/Git Bash).
+# grep -ao on .exe binaries does not work on Windows bash, causing silent
+# failures in the version verification step below.
+if [[ "${OS:-}" == "Windows_NT" ]]; then
+    echo "ERROR: Run 'task cef:package:portable' or 'pwsh scripts/package-cef-portable.ps1' on Windows." >&2
+    echo "       This bash script is Linux/macOS only." >&2
+    exit 1
+fi
 
 VERSION=$(node -p "require('./package.json').version")
 OUTDIR="${1:-$HOME/Desktop}"
