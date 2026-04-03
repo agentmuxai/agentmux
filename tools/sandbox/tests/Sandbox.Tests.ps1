@@ -42,8 +42,8 @@ Describe "Scripts Exist" {
         Test-Path (Join-Path $ScriptsDir "install-parsec.ps1") | Should -Be $true
     }
 
-    It "Should have clone-wavemux.ps1" {
-        Test-Path (Join-Path $ScriptsDir "clone-wavemux.ps1") | Should -Be $true
+    It "Should have clone-agentmux.ps1" {
+        Test-Path (Join-Path $ScriptsDir "clone-agentmux.ps1") | Should -Be $true
     }
 
     It "Should have sandbox-health-impl.ps1" {
@@ -66,8 +66,8 @@ Describe "Config Files" {
         Test-Path (Join-Path $ConfigDir "parsec-config.json") | Should -Be $true
     }
 
-    It "Should have wavemux-instance.json" {
-        Test-Path (Join-Path $ConfigDir "wavemux-instance.json") | Should -Be $true
+    It "Should have agentmux-instance.json" {
+        Test-Path (Join-Path $ConfigDir "agentmux-instance.json") | Should -Be $true
     }
 
     It "parsec-config.json should be valid JSON" {
@@ -75,8 +75,8 @@ Describe "Config Files" {
         { Get-Content $ConfigPath -Raw | ConvertFrom-Json } | Should -Not -Throw
     }
 
-    It "wavemux-instance.json should be valid JSON" {
-        $ConfigPath = Join-Path $ConfigDir "wavemux-instance.json"
+    It "agentmux-instance.json should be valid JSON" {
+        $ConfigPath = Join-Path $ConfigDir "agentmux-instance.json"
         { Get-Content $ConfigPath -Raw | ConvertFrom-Json } | Should -Not -Throw
     }
 
@@ -87,8 +87,8 @@ Describe "Config Files" {
         $Config.host_virtual_monitor_fallback | Should -Be 1
     }
 
-    It "wavemux-instance.json should specify dev instance" {
-        $ConfigPath = Join-Path $ConfigDir "wavemux-instance.json"
+    It "agentmux-instance.json should specify dev instance" {
+        $ConfigPath = Join-Path $ConfigDir "agentmux-instance.json"
         $Config = Get-Content $ConfigPath -Raw | ConvertFrom-Json
         $Config.instance | Should -Be "dev"
     }
@@ -116,8 +116,8 @@ Describe "Script Syntax" {
         $Errors.Count | Should -Be 0
     }
 
-    It "clone-wavemux.ps1 should have valid PowerShell syntax" {
-        $ScriptPath = Join-Path $ScriptsDir "clone-wavemux.ps1"
+    It "clone-agentmux.ps1 should have valid PowerShell syntax" {
+        $ScriptPath = Join-Path $ScriptsDir "clone-agentmux.ps1"
         $Errors = $null
         $null = [System.Management.Automation.PSParser]::Tokenize((Get-Content $ScriptPath -Raw), [ref]$Errors)
         $Errors.Count | Should -Be 0

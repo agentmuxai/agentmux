@@ -1,7 +1,7 @@
 #!/usr/bin/env pwsh
 <#
 .SYNOPSIS
-    Install development tools required for WaveMux development
+    Install development tools required for AgentMux development
 
 .DESCRIPTION
     Installs Node.js, Go, Zig, Task, Git, and VS Code using winget.
@@ -314,7 +314,7 @@ function Install-Zig {
 
 # Main execution
 Write-Host "==========================================" -ForegroundColor Cyan
-Write-Host "  WaveMux Development Tools Installer" -ForegroundColor Cyan
+Write-Host "  AgentMux Development Tools Installer" -ForegroundColor Cyan
 Write-Host "==========================================" -ForegroundColor Cyan
 Write-Host ""
 

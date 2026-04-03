@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# WaveMux Performance Benchmarking Script (Unix)
+# AgentMux Performance Benchmarking Script (Unix)
 # Measures startup time, memory usage, and bundle size
 # Usage: ./measure-performance.sh [runs]
 
@@ -42,14 +42,14 @@ find_app_binary() {
 
     case "$platform" in
         macos)
-            if [ -d "src-tauri/target/release/bundle/macos/WaveMux.app" ]; then
-                echo "src-tauri/target/release/bundle/macos/WaveMux.app/Contents/MacOS/WaveMux"
+            if [ -d "src-tauri/target/release/bundle/macos/AgentMux.app" ]; then
+                echo "src-tauri/target/release/bundle/macos/AgentMux.app/Contents/MacOS/AgentMux"
             else
-                echo "src-tauri/target/release/wavemux"
+                echo "src-tauri/target/release/agentmux"
             fi
             ;;
         linux)
-            echo "src-tauri/target/release/wavemux"
+            echo "src-tauri/target/release/agentmux"
             ;;
         *)
             echo ""
@@ -153,9 +153,9 @@ measure_bundle_size() {
 
     case "$platform" in
         macos)
-            if [ -d "src-tauri/target/release/bundle/macos/WaveMux.app" ]; then
-                local app_size=$(du -sm "src-tauri/target/release/bundle/macos/WaveMux.app" | cut -f1)
-                echo -e "WaveMux.app: ${GREEN}${app_size} MB${NC}"
+            if [ -d "src-tauri/target/release/bundle/macos/AgentMux.app" ]; then
+                local app_size=$(du -sm "src-tauri/target/release/bundle/macos/AgentMux.app" | cut -f1)
+                echo -e "AgentMux.app: ${GREEN}${app_size} MB${NC}"
             fi
 
             # Check for DMG
@@ -167,10 +167,10 @@ measure_bundle_size() {
             ;;
 
         linux)
-            local bin_path="src-tauri/target/release/wavemux"
+            local bin_path="src-tauri/target/release/agentmux"
             if [ -f "$bin_path" ]; then
                 local bin_size=$(stat -c%s "$bin_path" | awk '{print $1/1024/1024}')
-                echo -e "wavemux binary: ${GREEN}$(printf "%.2f" $bin_size) MB${NC}"
+                echo -e "agentmux binary: ${GREEN}$(printf "%.2f" $bin_size) MB${NC}"
             fi
 
             # Check for AppImage

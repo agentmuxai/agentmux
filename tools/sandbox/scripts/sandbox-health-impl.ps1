@@ -1,13 +1,13 @@
 #!/usr/bin/env pwsh
 <#
 .SYNOPSIS
-    Health check for WaveMux sandbox environment
+    Health check for AgentMux sandbox environment
 
 .DESCRIPTION
     Validates that the sandbox is properly configured:
     - Parsec service and VDA status
     - Development tools installation
-    - WaveMux repository and build status
+    - AgentMux repository and build status
     - Instance isolation
 
 .PARAMETER OutputFormat
@@ -44,9 +44,9 @@ param(
 $ErrorActionPreference = "Stop"
 
 # Constants
-$WaveMuxDir = "D:\Code\sandbox\wavemux"
+$AgentMuxDir = "D:\Code\sandbox\agentmux"
 $InstanceName = "dev"
-$InstanceDir = "$env:USERPROFILE\.wavemux-$InstanceName"
+$InstanceDir = "$env:USERPROFILE\.agentmux-$InstanceName"
 
 # Health data
 $script:HealthData = @{
@@ -175,75 +175,75 @@ function Test-DevTool {
     }
 }
 
-function Test-WaveMuxRepo {
-    if (-not (Test-Path $WaveMuxDir)) {
-        Add-CheckResult -Name "WaveMux Repo" -Status "ERROR" -Message "Not cloned" -Details "Expected at $WaveMuxDir"
+function Test-AgentMuxRepo {
+    if (-not (Test-Path $AgentMuxDir)) {
+        Add-CheckResult -Name "AgentMux Repo" -Status "ERROR" -Message "Not cloned" -Details "Expected at $AgentMuxDir"
         return
     }
 
-    if (-not (Test-Path "$WaveMuxDir\.git")) {
-        Add-CheckResult -Name "WaveMux Repo" -Status "ERROR" -Message "Not a git repo" -Details "$WaveMuxDir exists but is not a git repository"
+    if (-not (Test-Path "$AgentMuxDir\.git")) {
+        Add-CheckResult -Name "AgentMux Repo" -Status "ERROR" -Message "Not a git repo" -Details "$AgentMuxDir exists but is not a git repository"
         return
     }
 
     # Get current branch
-    Push-Location $WaveMuxDir
+    Push-Location $AgentMuxDir
     try {
         $Branch = & git rev-parse --abbrev-ref HEAD 2>&1
         $LastCommit = & git log -1 --format="%h %s" 2>&1
 
-        Add-CheckResult -Name "WaveMux Repo" -Status "OK" -Message "Branch: $Branch" -Details "Last commit: $LastCommit"
+        Add-CheckResult -Name "AgentMux Repo" -Status "OK" -Message "Branch: $Branch" -Details "Last commit: $LastCommit"
     }
     catch {
-        Add-CheckResult -Name "WaveMux Repo" -Status "WARN" -Message "Present but git status failed" -Details $_.Exception.Message
+        Add-CheckResult -Name "AgentMux Repo" -Status "WARN" -Message "Present but git status failed" -Details $_.Exception.Message
     }
     finally {
         Pop-Location
     }
 }
 
-function Test-WaveMuxBuild {
-    if (-not (Test-Path $WaveMuxDir)) {
-        Add-CheckResult -Name "WaveMux Build" -Status "ERROR" -Message "Repo not found" -Details "Cannot check build without repo"
+function Test-AgentMuxBuild {
+    if (-not (Test-Path $AgentMuxDir)) {
+        Add-CheckResult -Name "AgentMux Build" -Status "ERROR" -Message "Repo not found" -Details "Cannot check build without repo"
         return
     }
 
     # Check for built binaries
-    $BinDir = "$WaveMuxDir\dist\bin"
+    $BinDir = "$AgentMuxDir\dist\bin"
     if (-not (Test-Path $BinDir)) {
-        Add-CheckResult -Name "WaveMux Build" -Status "WARN" -Message "Not built" -Details "Run 'task build:backend' to build"
+        Add-CheckResult -Name "AgentMux Build" -Status "WARN" -Message "Not built" -Details "Run 'task build:backend' to build"
         return
     }
 
     $Binaries = Get-ChildItem -Path $BinDir -Filter "agentmux-wsh-*" -ErrorAction SilentlyContinue
 
     if ($Binaries.Count -eq 0) {
-        Add-CheckResult -Name "WaveMux Build" -Status "WARN" -Message "No binaries found" -Details "dist/bin exists but no agentmux-wsh binaries"
+        Add-CheckResult -Name "AgentMux Build" -Status "WARN" -Message "No binaries found" -Details "dist/bin exists but no agentmux-wsh binaries"
         return
     }
 
-    Add-CheckResult -Name "WaveMux Build" -Status "OK" -Message "$($Binaries.Count) binaries" -Details "Found: $($Binaries.Name -join ', ')"
+    Add-CheckResult -Name "AgentMux Build" -Status "OK" -Message "$($Binaries.Count) binaries" -Details "Found: $($Binaries.Name -join ', ')"
 }
 
-function Test-WaveMuxInstance {
+function Test-AgentMuxInstance {
     if (Test-Path $InstanceDir) {
         $Files = Get-ChildItem -Path $InstanceDir -ErrorAction SilentlyContinue
         Add-CheckResult -Name "Dev Instance" -Status "OK" -Message "Configured" -Details "Instance dir: $InstanceDir ($($Files.Count) files)"
     }
     else {
-        Add-CheckResult -Name "Dev Instance" -Status "WARN" -Message "Not initialized" -Details "Instance directory not found. Run WaveMux with --instance=$InstanceName to create."
+        Add-CheckResult -Name "Dev Instance" -Status "WARN" -Message "Not initialized" -Details "Instance directory not found. Run AgentMux with --instance=$InstanceName to create."
     }
 }
 
 function Test-NodeModules {
-    if (-not (Test-Path $WaveMuxDir)) {
+    if (-not (Test-Path $AgentMuxDir)) {
         Add-CheckResult -Name "Dependencies" -Status "ERROR" -Message "Repo not found"
         return
     }
 
-    $NodeModules = "$WaveMuxDir\node_modules"
+    $NodeModules = "$AgentMuxDir\node_modules"
     if (-not (Test-Path $NodeModules)) {
-        Add-CheckResult -Name "Dependencies" -Status "ERROR" -Message "Not installed" -Details "Run 'npm install' in $WaveMuxDir"
+        Add-CheckResult -Name "Dependencies" -Status "ERROR" -Message "Not installed" -Details "Run 'npm install' in $AgentMuxDir"
         return
     }
 
@@ -255,7 +255,7 @@ function Test-NodeModules {
 if ($OutputFormat -eq 'text') {
     Write-Host ""
     Write-Host "==========================================" -ForegroundColor Cyan
-    Write-Host "  WaveMux Sandbox Health Check" -ForegroundColor Cyan
+    Write-Host "  AgentMux Sandbox Health Check" -ForegroundColor Cyan
     Write-Host "==========================================" -ForegroundColor Cyan
     Write-Host "  Host: $env:COMPUTERNAME" -ForegroundColor Gray
     Write-Host "  Time: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')" -ForegroundColor Gray
@@ -286,15 +286,15 @@ Test-DevTool -Name "VS Code" -Command "code" -VersionArg "--version" -MinVersion
 
 if ($OutputFormat -eq 'text') {
     Write-Host ""
-    Write-Host "WaveMux" -ForegroundColor Cyan
+    Write-Host "AgentMux" -ForegroundColor Cyan
     Write-Host "-------" -ForegroundColor Cyan
 }
 
-# WaveMux checks
-Test-WaveMuxRepo
-Test-WaveMuxBuild
+# AgentMux checks
+Test-AgentMuxRepo
+Test-AgentMuxBuild
 Test-NodeModules
-Test-WaveMuxInstance
+Test-AgentMuxInstance
 
 # Output results
 if ($OutputFormat -eq 'json') {

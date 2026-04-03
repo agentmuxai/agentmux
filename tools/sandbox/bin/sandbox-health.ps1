@@ -1,11 +1,11 @@
 #!/usr/bin/env pwsh
 <#
 .SYNOPSIS
-    Health check for WaveMux sandbox environment
+    Health check for AgentMux sandbox environment
 
 .DESCRIPTION
     Validates sandbox configuration including Parsec, development tools,
-    and WaveMux installation.
+    and AgentMux installation.
 
 .PARAMETER OutputFormat
     Output format: 'text' (default) or 'json'
@@ -22,7 +22,7 @@
     JSON output for automation
 
 .NOTES
-    Part of @a5af/sandbox package (located in wavemux/tools/sandbox)
+    Part of @a5af/sandbox package (located in agentmux/tools/sandbox)
 
     Exit Codes:
       0 = All checks passed
@@ -40,17 +40,17 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-# Find sandbox scripts - now located in wavemux repo
+# Find sandbox scripts - now located in agentmux repo
 $HealthScript = $null
 
-# Check wavemux worktrees/checkouts
+# Check agentmux worktrees/checkouts
 $SearchPaths = @(
     # Wavemux worktrees
-    "D:\Code\worktrees\wavemux*\tools\sandbox\scripts\sandbox-health-impl.ps1",
-    # Agent workspace wavemux checkouts
-    "D:\Code\agent-workspaces\*\wavemux\tools\sandbox\scripts\sandbox-health-impl.ps1",
+    "D:\Code\worktrees\agentmux*\tools\sandbox\scripts\sandbox-health-impl.ps1",
+    # Agent workspace agentmux checkouts
+    "D:\Code\agent-workspaces\*\agentmux\tools\sandbox\scripts\sandbox-health-impl.ps1",
     # Sandbox development directory
-    "D:\Code\sandbox\wavemux\tools\sandbox\scripts\sandbox-health-impl.ps1"
+    "D:\Code\sandbox\agentmux\tools\sandbox\scripts\sandbox-health-impl.ps1"
 )
 
 foreach ($Pattern in $SearchPaths) {
@@ -63,7 +63,7 @@ foreach ($Pattern in $SearchPaths) {
 
 if (-not $HealthScript) {
     Write-Host "ERROR: Could not find sandbox-health-impl.ps1" -ForegroundColor Red
-    Write-Host "Expected in: wavemux/tools/sandbox/scripts/" -ForegroundColor Yellow
+    Write-Host "Expected in: agentmux/tools/sandbox/scripts/" -ForegroundColor Yellow
     Write-Host "" -ForegroundColor Yellow
     Write-Host "Searched locations:" -ForegroundColor Yellow
     foreach ($Pattern in $SearchPaths) {

@@ -1,12 +1,12 @@
 #!/usr/bin/env pwsh
-# WaveMux Performance Benchmarking Script
+# AgentMux Performance Benchmarking Script
 # Measures startup time, memory usage, and bundle size
 # Usage: ./measure-performance.ps1 [-Runs 10] [-OutputJson]
 
 param(
     [int]$Runs = 5,
     [switch]$OutputJson,
-    [string]$AppPath = "src-tauri\target\release\WaveMux.exe"
+    [string]$AppPath = "src-tauri\target\release\AgentMux.exe"
 )
 
 $ErrorActionPreference = "Stop"
@@ -129,12 +129,12 @@ function Measure-BundleSize {
     Write-Header "Bundle Size Measurement"
 
     # Tauri release bundle
-    $tauriExe = "src-tauri\target\release\WaveMux.exe"
+    $tauriExe = "src-tauri\target\release\AgentMux.exe"
     $tauriBundle = "src-tauri\target\release\bundle"
 
     if (Test-Path $tauriExe) {
         $exeSize = (Get-Item $tauriExe).Length / 1MB
-        Write-Host "WaveMux.exe:      $([math]::Round($exeSize, 2)) MB" -ForegroundColor Green
+        Write-Host "AgentMux.exe:      $([math]::Round($exeSize, 2)) MB" -ForegroundColor Green
     }
 
     # Check for installer

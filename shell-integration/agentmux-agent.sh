@@ -2,16 +2,19 @@
 # Source this file in your .bashrc or .zshrc to enable per-pane agent colors
 #
 # Usage:
-#   export WAVEMUX_AGENT_ID=AgentA   # Set the agent ID
+#   export AGENTMUX_AGENT_ID=AgentA   # Set the agent ID
 #   The pane title and color will update automatically on each prompt
 #
 # Supported agents: AgentA (blue), AgentB (green), AgentC (orange), AgentD (purple)
+#
+# Note: WAVEMUX_AGENT_ID is accepted as a legacy fallback but AGENTMUX_AGENT_ID is preferred.
 
-# Function to send OSC 16162 E command with current WAVEMUX_AGENT_ID
+# Function to send OSC 16162 E command with current agent identity
 __agentmux_send_agent_env() {
-    if [[ -n "$WAVEMUX_AGENT_ID" ]]; then
+    local agent_id="${AGENTMUX_AGENT_ID:-$WAVEMUX_AGENT_ID}"
+    if [[ -n "$agent_id" ]]; then
         # Send OSC 16162;E;{JSON} to update block's cmd:env metadata
-        printf '\e]16162;E;{"WAVEMUX_AGENT_ID":"%s"}\a' "$WAVEMUX_AGENT_ID"
+        printf '\e]16162;E;{"AGENTMUX_AGENT_ID":"%s"}\a' "$agent_id"
     fi
 }
 
@@ -31,6 +34,6 @@ fi
 
 # Convenience function to set agent and immediately update
 set_agent() {
-    export WAVEMUX_AGENT_ID="$1"
+    export AGENTMUX_AGENT_ID="$1"
     __agentmux_send_agent_env
 }

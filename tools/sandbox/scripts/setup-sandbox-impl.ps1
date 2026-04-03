@@ -1,14 +1,14 @@
 #!/usr/bin/env pwsh
 <#
 .SYNOPSIS
-    Complete sandbox host setup for WaveMux development
+    Complete sandbox host setup for AgentMux development
 
 .DESCRIPTION
-    Orchestrates the complete setup of a Windows machine as a WaveMux
+    Orchestrates the complete setup of a Windows machine as a AgentMux
     development sandbox, including:
     - Development tools (Node.js, Go, Zig, Task, Git, VS Code)
     - Parsec remote desktop with virtual display
-    - WaveMux repository clone and build
+    - AgentMux repository clone and build
     - Instance isolation configuration
 
 .PARAMETER SkipParsec
@@ -17,8 +17,8 @@
 .PARAMETER SkipDevTools
     Skip development tools installation (use if already installed)
 
-.PARAMETER SkipWaveMux
-    Skip WaveMux clone and build
+.PARAMETER SkipAgentMux
+    Skip AgentMux clone and build
 
 .PARAMETER Force
     Force reinstall of all components
@@ -26,8 +26,8 @@
 .PARAMETER Verbose
     Enable verbose output
 
-.PARAMETER WaveMuxBranch
-    WaveMux branch to clone (default: main)
+.PARAMETER AgentMuxBranch
+    AgentMux branch to clone (default: main)
 
 .EXAMPLE
     pwsh scripts/setup-sandbox-impl.ps1
@@ -35,11 +35,11 @@
 
 .EXAMPLE
     pwsh scripts/setup-sandbox-impl.ps1 -SkipParsec -SkipDevTools
-    Only setup WaveMux (tools already installed)
+    Only setup AgentMux (tools already installed)
 
 .EXAMPLE
-    pwsh scripts/setup-sandbox-impl.ps1 -WaveMuxBranch agentx/feature
-    Setup with specific WaveMux branch
+    pwsh scripts/setup-sandbox-impl.ps1 -AgentMuxBranch agentx/feature
+    Setup with specific AgentMux branch
 
 .NOTES
     Part of @agentmuxhq/sandbox package
@@ -56,10 +56,10 @@
 param(
     [switch]$SkipParsec,
     [switch]$SkipDevTools,
-    [switch]$SkipWaveMux,
+    [switch]$SkipAgentMux,
     [switch]$Force,
     [switch]$Verbose,
-    [string]$WaveMuxBranch = "main"
+    [string]$AgentMuxBranch = "main"
 )
 
 $ErrorActionPreference = "Stop"
@@ -71,7 +71,7 @@ $ScriptDir = $PSScriptRoot
 $script:StepResults = @{
     DevTools = @{ Status = "PENDING"; Message = "" }
     Parsec = @{ Status = "PENDING"; Message = "" }
-    WaveMux = @{ Status = "PENDING"; Message = "" }
+    AgentMux = @{ Status = "PENDING"; Message = "" }
 }
 
 function Write-Banner {
@@ -213,52 +213,52 @@ function Install-Parsec {
     }
 }
 
-function Setup-WaveMux {
-    Write-Banner "WaveMux Repository"
+function Setup-AgentMux {
+    Write-Banner "AgentMux Repository"
 
-    if ($SkipWaveMux) {
-        Write-Status "Skipping WaveMux setup" "SKIP"
-        $script:StepResults.WaveMux.Status = "SKIPPED"
+    if ($SkipAgentMux) {
+        Write-Status "Skipping AgentMux setup" "SKIP"
+        $script:StepResults.AgentMux.Status = "SKIPPED"
         return $true
     }
 
-    $WaveMuxScript = Join-Path $ScriptDir "clone-wavemux.ps1"
+    $AgentMuxScript = Join-Path $ScriptDir "clone-agentmux.ps1"
 
-    if (-not (Test-Path $WaveMuxScript)) {
-        Write-Status "clone-wavemux.ps1 not found" "ERROR"
-        $script:StepResults.WaveMux.Status = "FAILED"
-        $script:StepResults.WaveMux.Message = "Script not found"
+    if (-not (Test-Path $AgentMuxScript)) {
+        Write-Status "clone-agentmux.ps1 not found" "ERROR"
+        $script:StepResults.AgentMux.Status = "FAILED"
+        $script:StepResults.AgentMux.Message = "Script not found"
         return $false
     }
 
     $Params = @{
-        Branch = $WaveMuxBranch
+        Branch = $AgentMuxBranch
     }
     if ($Force) { $Params['Force'] = $true }
     if ($Verbose) { $Params['Verbose'] = $true }
 
     try {
-        & $WaveMuxScript @Params
+        & $AgentMuxScript @Params
         $ExitCode = $LASTEXITCODE
 
         if ($ExitCode -eq 0) {
-            $script:StepResults.WaveMux.Status = "OK"
+            $script:StepResults.AgentMux.Status = "OK"
             return $true
         }
         elseif ($ExitCode -eq 1) {
-            $script:StepResults.WaveMux.Status = "WARN"
-            $script:StepResults.WaveMux.Message = "Completed with warnings"
+            $script:StepResults.AgentMux.Status = "WARN"
+            $script:StepResults.AgentMux.Message = "Completed with warnings"
             return $true
         }
         else {
-            $script:StepResults.WaveMux.Status = "FAILED"
-            $script:StepResults.WaveMux.Message = "Exit code: $ExitCode"
+            $script:StepResults.AgentMux.Status = "FAILED"
+            $script:StepResults.AgentMux.Message = "Exit code: $ExitCode"
             return $false
         }
     }
     catch {
-        $script:StepResults.WaveMux.Status = "FAILED"
-        $script:StepResults.WaveMux.Message = $_.Exception.Message
+        $script:StepResults.AgentMux.Status = "FAILED"
+        $script:StepResults.AgentMux.Message = $_.Exception.Message
         return $false
     }
 }
@@ -269,7 +269,7 @@ function Show-Summary {
     $AllOK = $true
     $HasWarnings = $false
 
-    foreach ($Step in @("DevTools", "Parsec", "WaveMux")) {
+    foreach ($Step in @("DevTools", "Parsec", "AgentMux")) {
         $Result = $script:StepResults[$Step]
         $Status = $Result.Status
         $Message = $Result.Message
@@ -297,8 +297,8 @@ function Show-Summary {
         Write-Host "NEXT STEPS:" -ForegroundColor Yellow
         Write-Host "1. Launch Parsec and sign in" -ForegroundColor White
         Write-Host "2. From your main workstation, connect via Parsec" -ForegroundColor White
-        Write-Host "3. Open terminal and run: cd D:\Code\sandbox\wavemux && task dev" -ForegroundColor White
-        Write-Host "4. Test with: wavemux --instance=dev" -ForegroundColor White
+        Write-Host "3. Open terminal and run: cd D:\Code\sandbox\agentmux && task dev" -ForegroundColor White
+        Write-Host "4. Test with: agentmux --instance=dev" -ForegroundColor White
         return 0
     }
     elseif ($AllOK) {
@@ -315,14 +315,14 @@ function Show-Summary {
 
 # Main execution
 Clear-Host
-Write-Banner "WaveMux Sandbox Setup"
+Write-Banner "AgentMux Sandbox Setup"
 
-Write-Host "This script will configure this machine as a WaveMux development sandbox." -ForegroundColor White
+Write-Host "This script will configure this machine as a AgentMux development sandbox." -ForegroundColor White
 Write-Host ""
 Write-Host "Components to install:" -ForegroundColor Cyan
 Write-Host "  - Development tools (Node.js, Go, Zig, Task, Git, VS Code)" -ForegroundColor White
 Write-Host "  - Parsec remote desktop (for low-latency access)" -ForegroundColor White
-Write-Host "  - WaveMux repository (branch: $WaveMuxBranch)" -ForegroundColor White
+Write-Host "  - AgentMux repository (branch: $AgentMuxBranch)" -ForegroundColor White
 Write-Host ""
 
 # Check admin for some operations
@@ -335,7 +335,7 @@ if (-not (Test-IsAdmin)) {
 # Run setup steps
 $DevToolsOK = Install-DevTools
 $ParsecOK = Install-Parsec
-$WaveMuxOK = Setup-WaveMux
+$AgentMuxOK = Setup-AgentMux
 
 # Show summary and exit
 $ExitCode = Show-Summary

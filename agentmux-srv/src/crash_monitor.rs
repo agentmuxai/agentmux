@@ -29,17 +29,17 @@
 //!   kernel which terminates the process before returning to user mode. VEH is bypassed.
 //!   Use WER `LocalDumps` for that (already configured via `enable-wer-dumps.reg`).
 //!
-//! Dump location: `C:\CrashDumps\agentmuxsrv\agentmuxsrv-<unix_ts>-<pid>.dmp`
-//! Socket path:   `C:\CrashDumps\agentmuxsrv\monitor.sock`
+//! Dump location: `C:\CrashDumps\agentmux-srv\agentmux-srv-<unix_ts>-<pid>.dmp`
+//! Socket path:   `C:\CrashDumps\agentmux-srv\monitor.sock`
 
 #![cfg(windows)]
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
-const DUMP_DIR: &str = r"C:\CrashDumps\agentmuxsrv";
+const DUMP_DIR: &str = r"C:\CrashDumps\agentmux-srv";
 /// Unix Domain Socket path used for crash-handler IPC.
-const SOCKET_PATH: &str = r"C:\CrashDumps\agentmuxsrv\monitor.sock";
+const SOCKET_PATH: &str = r"C:\CrashDumps\agentmux-srv\monitor.sock";
 /// Message kind for sending the crashing process's PID before a dump request.
 /// The monitor stores this PID and uses it in the dump filename.
 const MSG_KIND_CRASH_PID: u32 = 0;
@@ -100,9 +100,9 @@ impl minidumper::ServerHandler for CrashDumpHandler {
         // (which would give the monitor's own PID — misleading for diagnosis).
         let pid = self.crash_pid.load(Ordering::Relaxed);
         let filename = if pid != 0 {
-            format!("agentmuxsrv-{}-{}.dmp", ts, pid)
+            format!("agentmux-srv-{}-{}.dmp", ts, pid)
         } else {
-            format!("agentmuxsrv-{}-unknown.dmp", ts)
+            format!("agentmux-srv-{}-unknown.dmp", ts)
         };
         let path = self.dump_dir.join(&filename);
         eprintln!("[crash-monitor] creating dump: {}", path.display());

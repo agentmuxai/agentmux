@@ -1,17 +1,17 @@
 #!/usr/bin/env pwsh
 <#
 .SYNOPSIS
-    Clone and configure WaveMux for sandbox development
+    Clone and configure AgentMux for sandbox development
 
 .DESCRIPTION
-    Clones WaveMux repository, installs dependencies, builds backend,
+    Clones AgentMux repository, installs dependencies, builds backend,
     and configures for isolated instance operation.
 
 .PARAMETER Branch
     Git branch to clone (default: main)
 
 .PARAMETER TargetDir
-    Directory to clone into (default: D:\Code\sandbox\wavemux)
+    Directory to clone into (default: D:\Code\sandbox\agentmux)
 
 .PARAMETER Force
     Remove existing and re-clone
@@ -20,18 +20,18 @@
     Enable verbose output
 
 .EXAMPLE
-    pwsh scripts/clone-wavemux.ps1
+    pwsh scripts/clone-agentmux.ps1
     Clone main branch to default location
 
 .EXAMPLE
-    pwsh scripts/clone-wavemux.ps1 -Branch agentx/feature
+    pwsh scripts/clone-agentmux.ps1 -Branch agentx/feature
     Clone specific branch
 
 .NOTES
     Part of @agentmuxhq/sandbox package
 
     Exit Codes:
-      0 = WaveMux cloned and built successfully
+      0 = AgentMux cloned and built successfully
       1 = Warnings during setup
       2 = Setup failed
 #>
@@ -46,7 +46,7 @@ param(
 $ErrorActionPreference = "Stop"
 
 # Constants
-$WaveMuxRepo = "https://github.com/agentmuxhq/agentmux.git"
+$AgentMuxRepo = "https://github.com/agentmuxhq/agentmux.git"
 $InstanceName = "dev"
 
 function Write-Status {
@@ -114,7 +114,7 @@ function Test-Prerequisites {
 
 function Clone-Repository {
     Write-Host ""
-    Write-Host "=== Cloning WaveMux ===" -ForegroundColor Cyan
+    Write-Host "=== Cloning AgentMux ===" -ForegroundColor Cyan
 
     # Check if already exists
     if (Test-Path $TargetDir) {
@@ -125,7 +125,7 @@ function Clone-Repository {
         else {
             # Check if it's a valid git repo
             if (Test-Path "$TargetDir\.git") {
-                Write-Status "WaveMux already cloned at $TargetDir" "SKIP"
+                Write-Status "AgentMux already cloned at $TargetDir" "SKIP"
 
                 # Update instead
                 Write-Status "Pulling latest changes..." "INFO"
@@ -162,20 +162,20 @@ function Clone-Repository {
     }
 
     # Clone
-    Write-Status "Cloning $WaveMuxRepo (branch: $Branch)..." "INFO"
+    Write-Status "Cloning $AgentMuxRepo (branch: $Branch)..." "INFO"
     try {
-        & git clone --branch $Branch $WaveMuxRepo $TargetDir
+        & git clone --branch $Branch $AgentMuxRepo $TargetDir
 
         if ($LASTEXITCODE -ne 0) {
             # Branch might not exist, try cloning main first
             Write-Status "Branch $Branch not found, cloning main and checking out..." "WARN"
-            & git clone $WaveMuxRepo $TargetDir
+            & git clone $AgentMuxRepo $TargetDir
             Push-Location $TargetDir
             & git checkout -b $Branch
             Pop-Location
         }
 
-        Write-Status "Cloned WaveMux to $TargetDir" "OK"
+        Write-Status "Cloned AgentMux to $TargetDir" "OK"
         return $true
     }
     catch {
@@ -241,25 +241,25 @@ function Create-DesktopShortcut {
     Write-Host "=== Creating Desktop Shortcut ===" -ForegroundColor Cyan
 
     $DesktopPath = [Environment]::GetFolderPath("Desktop")
-    $ShortcutPath = "$DesktopPath\WaveMux-Dev.lnk"
+    $ShortcutPath = "$DesktopPath\AgentMux-Dev.lnk"
 
-    # Find WaveMux executable
-    $WaveMuxExe = $null
+    # Find AgentMux executable
+    $AgentMuxExe = $null
     $PossiblePaths = @(
-        "$TargetDir\make\WaveMux-win32-x64\WaveMux.exe",
-        "$TargetDir\dist\WaveMux-win32-x64\WaveMux.exe",
-        "$TargetDir\out\WaveMux-win32-x64\WaveMux.exe"
+        "$TargetDir\make\AgentMux-win32-x64\AgentMux.exe",
+        "$TargetDir\dist\AgentMux-win32-x64\AgentMux.exe",
+        "$TargetDir\out\AgentMux-win32-x64\AgentMux.exe"
     )
 
     foreach ($Path in $PossiblePaths) {
         if (Test-Path $Path) {
-            $WaveMuxExe = $Path
+            $AgentMuxExe = $Path
             break
         }
     }
 
-    if (-not $WaveMuxExe) {
-        Write-Status "WaveMux executable not found (not packaged yet)" "WARN"
+    if (-not $AgentMuxExe) {
+        Write-Status "AgentMux executable not found (not packaged yet)" "WARN"
         Write-Status "Run 'task package' to create executable, then re-run this script" "INFO"
 
         # Create a shortcut to task dev instead
@@ -271,10 +271,10 @@ function Create-DesktopShortcut {
             $Shortcut.TargetPath = "pwsh"
             $Shortcut.Arguments = "-NoExit -Command `"cd '$TargetDir'; task dev`""
             $Shortcut.WorkingDirectory = $TargetDir
-            $Shortcut.Description = "WaveMux Development Server"
+            $Shortcut.Description = "AgentMux Development Server"
             $Shortcut.Save()
 
-            Write-Status "Created 'WaveMux-Dev' shortcut (runs task dev)" "OK"
+            Write-Status "Created 'AgentMux-Dev' shortcut (runs task dev)" "OK"
         }
         catch {
             Write-Status "Could not create shortcut: $_" "WARN"
@@ -286,13 +286,13 @@ function Create-DesktopShortcut {
     try {
         $WshShell = New-Object -ComObject WScript.Shell
         $Shortcut = $WshShell.CreateShortcut($ShortcutPath)
-        $Shortcut.TargetPath = $WaveMuxExe
+        $Shortcut.TargetPath = $AgentMuxExe
         $Shortcut.Arguments = "--instance=$InstanceName"
-        $Shortcut.WorkingDirectory = Split-Path -Parent $WaveMuxExe
-        $Shortcut.Description = "WaveMux Development Instance"
+        $Shortcut.WorkingDirectory = Split-Path -Parent $AgentMuxExe
+        $Shortcut.Description = "AgentMux Development Instance"
         $Shortcut.Save()
 
-        Write-Status "Created 'WaveMux-Dev' desktop shortcut" "OK"
+        Write-Status "Created 'AgentMux-Dev' desktop shortcut" "OK"
     }
     catch {
         Write-Status "Could not create shortcut: $_" "WARN"
@@ -305,7 +305,7 @@ function Initialize-DevInstance {
     Write-Host ""
     Write-Host "=== Initializing Dev Instance ===" -ForegroundColor Cyan
 
-    $InstanceDir = "$env:USERPROFILE\.wavemux-$InstanceName"
+    $InstanceDir = "$env:USERPROFILE\.agentmux-$InstanceName"
 
     if (Test-Path $InstanceDir) {
         Write-Status "Instance directory already exists: $InstanceDir" "SKIP"
@@ -335,7 +335,7 @@ function Initialize-DevInstance {
 
 # Main execution
 Write-Host "==========================================" -ForegroundColor Cyan
-Write-Host "  WaveMux Sandbox Setup" -ForegroundColor Cyan
+Write-Host "  AgentMux Sandbox Setup" -ForegroundColor Cyan
 Write-Host "==========================================" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "Target: $TargetDir" -ForegroundColor White
@@ -379,12 +379,12 @@ Write-Host "==========================================" -ForegroundColor Cyan
 Write-Host ""
 
 if ($Success) {
-    Write-Status "WaveMux ready for development!" "OK"
+    Write-Status "AgentMux ready for development!" "OK"
     Write-Host ""
     Write-Host "QUICK START:" -ForegroundColor Yellow
     Write-Host "  cd $TargetDir" -ForegroundColor White
     Write-Host "  task dev                    # Start dev server" -ForegroundColor White
-    Write-Host "  wavemux --instance=dev      # Run isolated instance" -ForegroundColor White
+    Write-Host "  agentmux --instance=dev      # Run isolated instance" -ForegroundColor White
     Write-Host ""
     exit 0
 }

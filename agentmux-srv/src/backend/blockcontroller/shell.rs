@@ -401,7 +401,7 @@ impl Controller for ShellController {
         let interactive = Self::is_interactive(&block_meta);
 
         // Resolve effective AGENTMUX_AGENT_ID for jekt auto-registration.
-        // Priority: block metadata > global settings > WAVEMUX_AGENT_ID env compat.
+        // Priority: block metadata > global settings > WAVEMUX_AGENT_ID (legacy compat).
         let agent_id_for_jekt: Option<String> = block_meta
             .get(META_KEY_CMD_ENV)
             .and_then(|m| m.as_object())
