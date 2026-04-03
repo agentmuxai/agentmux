@@ -53,46 +53,8 @@ tasks:
 
     package:
         desc: Package the application for the current platform (CEF).
-        env:
-            VITE_PLATFORM: "{{OS}}"
         cmds:
             - task: cef:package:portable
-            # On Linux: patch the AppImage AppRun after Tauri/linuxdeploy creates it.
-            # linuxdeploy's default AppRun sources a GTK hook that forces GDK_BACKEND=x11
-            # (breaking Wayland) and does NOT set WEBKIT_DISABLE_DMABUF_RENDERER=1
-            # (causing the WebKit window to silently not appear on some systems).
-            - cmd: |
-                if [ "$(uname)" != "Linux" ]; then exit 0; fi
-                APPDIR="target/release/bundle/appimage/AgentMux.AppDir"
-                if [ ! -d "$APPDIR" ]; then
-                  echo "⚠ AppDir not found — skipping AppRun patch (non-AppImage build?)"
-                  exit 0
-                fi
-                # Strip bundled system libs — WebKitGTK and GTK3 must come from the
-                # host system so WebKit can locate its subprocess binaries (WebKitNetworkProcess
-                # etc.) at the correct system paths. Bundling them causes "No such file or
-                # directory" crashes when WebKit tries to spawn subprocesses via relative paths.
-                rm -rf "$APPDIR/usr/lib"
-                echo "✓ Stripped bundled system libraries (using host WebKitGTK)"
-                rm -rf "$APPDIR/apprun-hooks"
-                # Replace .DirIcon symlink with a real file copy so the icon resolves
-                # after distribution (absolute symlinks to the build machine's AppDir path
-                # are broken on any other machine / after the build tree is removed).
-                if [ -L "$APPDIR/.DirIcon" ] || [ ! -f "$APPDIR/.DirIcon" ]; then
-                  rm -f "$APPDIR/.DirIcon"
-                  cp "$APPDIR/AgentMux.png" "$APPDIR/.DirIcon"
-                  echo "✓ Replaced .DirIcon symlink with file copy"
-                fi
-                cp scripts/linux-apprun.sh "$APPDIR/AppRun"
-                chmod +x "$APPDIR/AppRun"
-                echo "✓ Patched AppRun (WEBKIT_DISABLE_DMABUF_RENDERER=1, GDK_BACKEND auto)"
-                VERSION=$(node version.cjs)
-                OUTPUT="target/release/bundle/appimage/AgentMux_${VERSION}_amd64.AppImage"
-                ARCH=x86_64 appimagetool "$APPDIR" "$OUTPUT" 2>&1
-                echo "✅ Repackaged AppImage: $OUTPUT"
-        deps:
-            - clean
-            - npm:install
 
 
     package:portable:
