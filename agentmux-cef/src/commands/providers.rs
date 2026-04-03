@@ -19,7 +19,6 @@ fn get_config_dir(state: &Arc<AppState>) -> Result<String, String> {
     state
         .version_config_dir
         .lock()
-        .unwrap()
         .clone()
         .ok_or_else(|| "Config dir not initialized yet".to_string())
 }
@@ -29,7 +28,6 @@ fn get_data_dir(state: &Arc<AppState>) -> Result<String, String> {
     state
         .version_data_dir
         .lock()
-        .unwrap()
         .clone()
         .ok_or_else(|| "Data dir not initialized yet".to_string())
 }

@@ -55,8 +55,8 @@ pub async fn spawn_backend(state: &Arc<AppState>) -> Result<BackendSpawnResult, 
         .map_err(|e| format!("Failed to create config dir: {}", e))?;
 
     // Store version-specific paths in AppState for frontend IPC commands
-    *state.version_data_dir.lock().unwrap() = Some(data_dir.to_string_lossy().to_string());
-    *state.version_config_dir.lock().unwrap() = Some(config_dir.to_string_lossy().to_string());
+    *state.version_data_dir.lock() = Some(data_dir.to_string_lossy().to_string());
+    *state.version_config_dir.lock() = Some(config_dir.to_string_lossy().to_string());
 
     // 3. Resolve the backend binary path
     let backend_name = "agentmuxsrv-rs";
@@ -77,7 +77,7 @@ pub async fn spawn_backend(state: &Arc<AppState>) -> Result<BackendSpawnResult, 
     deploy_wsh(&app_path);
 
     // 6. Spawn the process
-    let auth_key = state.auth_key.lock().unwrap().clone();
+    let auth_key = state.auth_key.lock().clone();
     tracing::info!(
         "Spawning agentmuxsrv-rs with auth key: {}...",
         &auth_key[..8.min(auth_key.len())]
@@ -128,8 +128,8 @@ pub async fn spawn_backend(state: &Arc<AppState>) -> Result<BackendSpawnResult, 
     tracing::info!("Backend spawned with PID: {}", child_pid);
 
     // 7. Store PID and start time
-    *state.backend_pid.lock().unwrap() = Some(child_pid);
-    *state.backend_started_at.lock().unwrap() = Some(chrono::Utc::now().to_rfc3339());
+    *state.backend_pid.lock() = Some(child_pid);
+    *state.backend_started_at.lock() = Some(chrono::Utc::now().to_rfc3339());
 
     // 8. Windows: Job Object (KILL_ON_JOB_CLOSE)
     #[cfg(target_os = "windows")]
@@ -140,7 +140,7 @@ pub async fn spawn_backend(state: &Arc<AppState>) -> Result<BackendSpawnResult, 
                     "Created Job Object for backend (pid={}), KILL_ON_JOB_CLOSE active",
                     child_pid
                 );
-                *state.job_handle.lock().unwrap() =
+                *state.job_handle.lock() =
                     Some(crate::state::JobHandle::new(job_handle));
             }
             Err(e) => {
@@ -159,7 +159,7 @@ pub async fn spawn_backend(state: &Arc<AppState>) -> Result<BackendSpawnResult, 
     let stdout = child.stdout.take();
 
     // Store the child handle
-    *state.sidecar_child.lock().unwrap() = Some(child);
+    *state.sidecar_child.lock() = Some(child);
 
     // Spawn stdout reader
     if let Some(stdout) = stdout {
@@ -221,7 +221,7 @@ pub async fn spawn_backend(state: &Arc<AppState>) -> Result<BackendSpawnResult, 
         }
 
         // Process exited — emit backend-terminated
-        let pid = state_for_monitor.backend_pid.lock().unwrap().unwrap_or(0);
+        let pid = state_for_monitor.backend_pid.lock().unwrap_or(0);
         if estart_received {
             tracing::error!(
                 "[agentmuxsrv-rs] RUNTIME CRASH — pid={}",

@@ -39,7 +39,7 @@ pub fn get_is_dev() -> serde_json::Value {
 
 /// Get the app data directory path (version-specific).
 pub fn get_data_dir(state: &Arc<AppState>) -> Result<serde_json::Value, String> {
-    let dir = state.version_data_dir.lock().unwrap();
+    let dir = state.version_data_dir.lock();
     match dir.as_ref() {
         Some(d) => Ok(serde_json::json!(d)),
         None => Err("Data dir not initialized yet".to_string()),
@@ -48,7 +48,7 @@ pub fn get_data_dir(state: &Arc<AppState>) -> Result<serde_json::Value, String> 
 
 /// Get the app config directory path (version-specific).
 pub fn get_config_dir(state: &Arc<AppState>) -> Result<serde_json::Value, String> {
-    let dir = state.version_config_dir.lock().unwrap();
+    let dir = state.version_config_dir.lock();
     match dir.as_ref() {
         Some(d) => Ok(serde_json::json!(d)),
         None => Err("Config dir not initialized yet".to_string()),
@@ -79,7 +79,7 @@ pub fn ensure_auth_dir(
         ));
     }
 
-    let config_dir = state.version_config_dir.lock().unwrap();
+    let config_dir = state.version_config_dir.lock();
     let config_dir = config_dir
         .as_ref()
         .ok_or_else(|| "Config dir not initialized yet".to_string())?;
@@ -108,7 +108,7 @@ pub fn get_env(args: &serde_json::Value) -> serde_json::Value {
 /// Get details for the About modal.
 pub fn get_about_modal_details(state: &Arc<AppState>) -> serde_json::Value {
     let version = env!("CARGO_PKG_VERSION");
-    let endpoints = state.backend_endpoints.lock().unwrap();
+    let endpoints = state.backend_endpoints.lock();
 
     serde_json::json!({
         "version": version,
@@ -129,9 +129,9 @@ pub fn get_about_modal_details(state: &Arc<AppState>) -> serde_json::Value {
 /// Get comprehensive host info for the hostname popover.
 pub fn get_host_info(state: &Arc<AppState>) -> serde_json::Value {
     let version = env!("CARGO_PKG_VERSION");
-    let endpoints = state.backend_endpoints.lock().unwrap();
-    let ipc_port = *state.ipc_port.lock().unwrap();
-    let data_dir = state.version_data_dir.lock().unwrap().clone().unwrap_or_default();
+    let endpoints = state.backend_endpoints.lock();
+    let ipc_port = *state.ipc_port.lock();
+    let data_dir = state.version_data_dir.lock().clone().unwrap_or_default();
     let pid = std::process::id();
 
     // Resolve primary local IP
@@ -177,7 +177,7 @@ fn local_ip_address() -> Option<String> {
 
 /// Get the documentation site URL.
 pub fn get_docsite_url(state: &Arc<AppState>) -> serde_json::Value {
-    let endpoints = state.backend_endpoints.lock().unwrap();
+    let endpoints = state.backend_endpoints.lock();
     if !endpoints.web_endpoint.is_empty() {
         serde_json::json!(format!("http://{}/docsite/", endpoints.web_endpoint))
     } else {
@@ -238,7 +238,6 @@ pub fn ensure_settings_file(state: &Arc<AppState>) -> Result<serde_json::Value, 
     let config_dir_str = state
         .version_config_dir
         .lock()
-        .unwrap()
         .clone()
         .ok_or_else(|| "Config dir not initialized yet".to_string())?;
     let config_dir = std::path::PathBuf::from(&config_dir_str);
@@ -313,7 +312,7 @@ pub async fn run_cli_login(
 
     let (cancel_tx, cancel_rx) = tokio::sync::oneshot::channel::<()>();
     {
-        let mut stored = state.cli_login_cancel.lock().unwrap();
+        let mut stored = state.cli_login_cancel.lock();
         *stored = Some(cancel_tx);
     }
 
@@ -344,7 +343,7 @@ pub async fn run_cli_login(
 /// Kill the in-progress CLI login process.
 pub fn cancel_cli_login(state: &Arc<AppState>) -> Result<serde_json::Value, String> {
     let sender = {
-        let mut stored = state.cli_login_cancel.lock().unwrap();
+        let mut stored = state.cli_login_cancel.lock();
         stored.take()
     };
     if let Some(tx) = sender {

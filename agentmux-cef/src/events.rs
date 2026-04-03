@@ -33,7 +33,7 @@ pub fn emit_event(browser: &Browser, event: &str, payload: &serde_json::Value) {
 /// Emit an event to the "main" browser stored in AppState.
 /// This is a convenience wrapper for use from command handlers and background tasks.
 pub fn emit_event_from_state(state: &crate::state::AppState, event: &str, payload: &serde_json::Value) {
-    let browsers = state.browsers.lock().unwrap();
+    let browsers = state.browsers.lock();
     if let Some(browser) = browsers.get("main") {
         emit_event(browser, event, payload);
     } else if let Some((_label, browser)) = browsers.iter().next() {
@@ -46,7 +46,7 @@ pub fn emit_event_from_state(state: &crate::state::AppState, event: &str, payloa
 
 /// Emit an event to ALL browser windows (for cross-window drag broadcasts).
 pub fn emit_event_all_windows(state: &crate::state::AppState, event: &str, payload: &serde_json::Value) {
-    let browsers = state.browsers.lock().unwrap();
+    let browsers = state.browsers.lock();
     if browsers.is_empty() {
         tracing::warn!("Cannot broadcast event '{}': no browsers", event);
         return;

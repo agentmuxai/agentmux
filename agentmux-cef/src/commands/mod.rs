@@ -22,7 +22,7 @@ use crate::state::AppState;
 /// CEF assigns a separate renderer process when the RequestContext has a unique
 /// `cache_path`. We use `<data_dir>/browser-contexts/<label>/` for this.
 pub fn create_isolated_request_context(state: &Arc<AppState>, label: &str) -> Option<cef::RequestContext> {
-    let data_dir = state.version_data_dir.lock().unwrap().clone()
+    let data_dir = state.version_data_dir.lock().clone()
         .unwrap_or_else(|| {
             std::env::temp_dir()
                 .join("agentmux-cef-contexts")

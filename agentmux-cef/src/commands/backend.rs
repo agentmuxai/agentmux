@@ -10,7 +10,7 @@ use crate::state::AppState;
 
 /// Get the backend WebSocket and HTTP endpoints.
 pub fn get_backend_endpoints(state: &Arc<AppState>) -> Result<serde_json::Value, String> {
-    let endpoints = state.backend_endpoints.lock().unwrap();
+    let endpoints = state.backend_endpoints.lock();
 
     if endpoints.ws_endpoint.is_empty() {
         return Err("Backend not ready yet".to_string());
@@ -24,9 +24,9 @@ pub fn get_backend_endpoints(state: &Arc<AppState>) -> Result<serde_json::Value,
 
 /// Get the window initialization options (client/window/tab IDs).
 pub fn get_wave_init_opts(state: &Arc<AppState>) -> Result<serde_json::Value, String> {
-    let client_id = state.client_id.lock().unwrap();
-    let window_id = state.window_id.lock().unwrap();
-    let tab_id = state.active_tab_id.lock().unwrap();
+    let client_id = state.client_id.lock();
+    let window_id = state.window_id.lock();
+    let tab_id = state.active_tab_id.lock();
 
     if client_id.is_none() || window_id.is_none() || tab_id.is_none() {
         return Err("Window state not initialized yet".to_string());
@@ -44,9 +44,9 @@ pub fn get_wave_init_opts(state: &Arc<AppState>) -> Result<serde_json::Value, St
 /// Get backend process info for the status bar popover.
 pub fn get_backend_info(state: &Arc<AppState>) -> serde_json::Value {
     let current_version = env!("CARGO_PKG_VERSION");
-    let endpoints = state.backend_endpoints.lock().unwrap();
-    let pid = *state.backend_pid.lock().unwrap();
-    let started_at = state.backend_started_at.lock().unwrap().clone();
+    let endpoints = state.backend_endpoints.lock();
+    let pid = *state.backend_pid.lock();
+    let started_at = state.backend_started_at.lock().clone();
 
     serde_json::json!({
         "pid": pid,
@@ -88,7 +88,7 @@ pub async fn restart_backend(state: Arc<AppState>) -> Result<serde_json::Value, 
 
     // Kill existing sidecar if still alive
     {
-        let mut sidecar = state.sidecar_child.lock().unwrap();
+        let mut sidecar = state.sidecar_child.lock();
         if let Some(ref mut child) = *sidecar {
             let _ = child.kill();
             tracing::info!("[restart_backend] killed stale sidecar");
@@ -104,7 +104,7 @@ pub async fn restart_backend(state: Arc<AppState>) -> Result<serde_json::Value, 
 
     // Update stored endpoints
     {
-        let mut endpoints = state.backend_endpoints.lock().unwrap();
+        let mut endpoints = state.backend_endpoints.lock();
         endpoints.ws_endpoint = result.ws_endpoint.clone();
         endpoints.web_endpoint = result.web_endpoint.clone();
     }
@@ -132,6 +132,6 @@ pub fn set_window_init_status(state: &Arc<AppState>, args: &serde_json::Value) -
         .and_then(|v| v.as_str())
         .unwrap_or_default();
     tracing::debug!("set_window_init_status status={}", status);
-    *state.window_init_status.lock().unwrap() = status.to_string();
+    *state.window_init_status.lock() = status.to_string();
     serde_json::Value::Null
 }

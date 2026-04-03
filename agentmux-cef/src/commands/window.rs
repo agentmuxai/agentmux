@@ -14,7 +14,7 @@ use crate::state::AppState;
 
 /// Get the current zoom factor.
 pub fn get_zoom_factor(state: &Arc<AppState>) -> serde_json::Value {
-    let factor = *state.zoom_factor.lock().unwrap();
+    let factor = *state.zoom_factor.lock();
     serde_json::json!(factor)
 }
 
@@ -28,7 +28,7 @@ pub fn set_zoom_factor(state: &Arc<AppState>, args: &serde_json::Value) -> Resul
         .ok_or_else(|| "Missing factor".to_string())?;
 
     let factor = factor.clamp(0.5, 3.0);
-    *state.zoom_factor.lock().unwrap() = factor;
+    *state.zoom_factor.lock() = factor;
 
     // Convert to CEF zoom level (log base 1.2)
     // CEF uses: zoom_factor = 1.2 ^ zoom_level
@@ -315,7 +315,7 @@ pub fn is_main_window(args: &serde_json::Value) -> serde_json::Value {
 
 /// List all open window labels.
 pub fn list_windows(state: &Arc<AppState>) -> serde_json::Value {
-    let browsers = state.browsers.lock().unwrap();
+    let browsers = state.browsers.lock();
     let labels: Vec<&String> = browsers.keys().collect();
     serde_json::json!(labels)
 }
@@ -326,7 +326,7 @@ pub fn focus_window(state: &Arc<AppState>, args: &serde_json::Value) -> Result<s
 
     #[cfg(target_os = "windows")]
     {
-        let browsers = state.browsers.lock().unwrap();
+        let browsers = state.browsers.lock();
         if let Some(browser) = browsers.get(label) {
             if let Some(host) = browser.host() {
                 let hwnd = host.window_handle();
@@ -353,13 +353,13 @@ pub fn get_instance_number(state: &Arc<AppState>, args: &serde_json::Value) -> s
         .get("label")
         .and_then(|v| v.as_str())
         .unwrap_or("main");
-    let reg = state.window_instance_registry.lock().unwrap();
+    let reg = state.window_instance_registry.lock();
     serde_json::json!(reg.get(label).unwrap_or(1))
 }
 
 /// Get the total window count.
 pub fn get_window_count(state: &Arc<AppState>) -> serde_json::Value {
-    let reg = state.window_instance_registry.lock().unwrap();
+    let reg = state.window_instance_registry.lock();
     serde_json::json!(reg.count())
 }
 
@@ -394,7 +394,7 @@ pub fn open_new_window(state: &Arc<AppState>) -> Result<serde_json::Value, Strin
     let window_id = uuid::Uuid::new_v4();
     let label = format!("window-{}", window_id.simple());
 
-    let ipc_port = *state.ipc_port.lock().unwrap();
+    let ipc_port = *state.ipc_port.lock();
     let ipc_token = &state.ipc_token;
     let base_url = resolve_frontend_base_url(ipc_port);
 
@@ -409,7 +409,7 @@ pub fn open_new_window(state: &Arc<AppState>) -> Result<serde_json::Value, Strin
     // Register instance number BEFORE creating the browser, so the new window's
     // frontend can query its instance number immediately on load.
     {
-        let mut reg = state.window_instance_registry.lock().unwrap();
+        let mut reg = state.window_instance_registry.lock();
         let num = reg.register(&label);
         tracing::info!(label = %label, instance = %num, "[window] new window registered");
     }
@@ -423,7 +423,7 @@ pub fn open_new_window(state: &Arc<AppState>) -> Result<serde_json::Value, Strin
     );
 
     // Notify all windows of the count change
-    let count = state.window_instance_registry.lock().unwrap().count();
+    let count = state.window_instance_registry.lock().count();
     crate::events::emit_event_all_windows(state, "window-instances-changed", &serde_json::json!(count));
 
     Ok(serde_json::json!(label))

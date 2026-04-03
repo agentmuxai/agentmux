@@ -7,7 +7,8 @@
 // Phase 2: Stores browser ref in AppState and injects IPC port on page load.
 
 use cef::*;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use parking_lot::Mutex;
 
 use crate::state::AppState;
 
@@ -72,7 +73,7 @@ impl AgentMuxHandler {
         // Register browser in the multi-window map.
         // First browser is "main"; additional browsers get labels from their URL params.
         {
-            let mut browsers = self.state.browsers.lock().unwrap();
+            let mut browsers = self.state.browsers.lock();
             let label = if browsers.is_empty() {
                 "main".to_string()
             } else {
@@ -127,7 +128,7 @@ impl AgentMuxHandler {
 
         // Unregister browser from the multi-window map.
         {
-            let mut browsers = self.state.browsers.lock().unwrap();
+            let mut browsers = self.state.browsers.lock();
             let label = browsers.iter()
                 .find(|(_, b)| b.is_same(Some(&mut browser)) != 0)
                 .map(|(k, _)| k.clone());
@@ -331,7 +332,7 @@ wrap_display_handler! {
 
     impl DisplayHandler {
         fn on_title_change(&self, browser: Option<&mut Browser>, title: Option<&CefString>) {
-            let mut inner = self.inner.lock().expect("Failed to lock handler");
+            let mut inner = self.inner.lock();
             inner.on_title_change(browser, title);
         }
     }
@@ -348,17 +349,17 @@ wrap_life_span_handler! {
 
     impl LifeSpanHandler {
         fn on_after_created(&self, browser: Option<&mut Browser>) {
-            let mut inner = self.inner.lock().expect("Failed to lock handler");
+            let mut inner = self.inner.lock();
             inner.on_after_created(browser);
         }
 
         fn do_close(&self, browser: Option<&mut Browser>) -> i32 {
-            let mut inner = self.inner.lock().expect("Failed to lock handler");
+            let mut inner = self.inner.lock();
             inner.do_close(browser).into()
         }
 
         fn on_before_close(&self, browser: Option<&mut Browser>) {
-            let mut inner = self.inner.lock().expect("Failed to lock handler");
+            let mut inner = self.inner.lock();
             inner.on_before_close(browser);
         }
     }
@@ -380,7 +381,7 @@ wrap_load_handler! {
             frame: Option<&mut Frame>,
             http_status_code: i32,
         ) {
-            let mut inner = self.inner.lock().expect("Failed to lock handler");
+            let mut inner = self.inner.lock();
             inner.on_load_end(browser, frame, http_status_code);
         }
 
@@ -392,7 +393,7 @@ wrap_load_handler! {
             error_text: Option<&CefString>,
             failed_url: Option<&CefString>,
         ) {
-            let mut inner = self.inner.lock().expect("Failed to lock handler");
+            let mut inner = self.inner.lock();
             inner.on_load_error(browser, frame, error_code, error_text, failed_url);
         }
     }

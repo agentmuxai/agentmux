@@ -19,7 +19,7 @@ use crate::state::AppState;
 
 /// Get the CEF Views Window for a browser label on the UI thread.
 fn get_window_on_ui(state: &Arc<AppState>, label: &str) -> Option<Window> {
-    let browsers = state.browsers.lock().unwrap();
+    let browsers = state.browsers.lock();
     let mut browser = browsers.get(label)?.clone();
     drop(browsers);
     let browser_view = browser_view_get_for_browser(Some(&mut browser))?;
@@ -178,7 +178,7 @@ wrap_task! {
             let cef_url = CefString::from(self.url.as_str());
 
             // Get client from an existing browser
-            let browsers = self.state.browsers.lock().unwrap();
+            let browsers = self.state.browsers.lock();
             let client = browsers.values().next()
                 .and_then(|b| b.host().map(|h| h.client()));
             drop(browsers);

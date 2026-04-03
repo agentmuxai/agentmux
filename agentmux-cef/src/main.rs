@@ -171,7 +171,7 @@ fn main() {
 
     // Start the IPC HTTP server and get the assigned port.
     let ipc_port = runtime.block_on(ipc::start_ipc_server(app_state.clone()));
-    *app_state.ipc_port.lock().unwrap() = ipc_port;
+    *app_state.ipc_port.lock() = ipc_port;
 
     tracing::info!("IPC server started on port {}", ipc_port);
 
@@ -183,7 +183,7 @@ fn main() {
         match sidecar::spawn_backend(&app_state).await {
             Ok(result) => {
                 {
-                    let mut endpoints = app_state.backend_endpoints.lock().unwrap();
+                    let mut endpoints = app_state.backend_endpoints.lock();
                     endpoints.ws_endpoint = result.ws_endpoint.clone();
                     endpoints.web_endpoint = result.web_endpoint.clone();
                 }
@@ -275,7 +275,7 @@ fn main() {
 
     // Kill the backend sidecar on shutdown.
     {
-        let mut sidecar = app_state.sidecar_child.lock().unwrap();
+        let mut sidecar = app_state.sidecar_child.lock();
         if let Some(ref mut child) = *sidecar {
             tracing::info!("Killing backend sidecar");
             let _ = child.kill();
