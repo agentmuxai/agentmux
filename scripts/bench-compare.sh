@@ -37,8 +37,8 @@ echo ""
 kill_all() {
     taskkill //f //im agentmux.exe //t 2>/dev/null || true
     taskkill //f //im agentmux-cef.exe //t 2>/dev/null || true
-    taskkill //f //im agentmuxsrv-rs.x64.exe //t 2>/dev/null || true
-    taskkill //f //im "agentmuxsrv-rs.x64.exe" //t 2>/dev/null || true
+    taskkill //f //im agentmux-srv.exe //t 2>/dev/null || true
+    taskkill //f //im "agentmux-srv.exe" //t 2>/dev/null || true
     taskkill //f //im msedgewebview2.exe //t 2>/dev/null || true
     sleep $SETTLE
 }
@@ -83,7 +83,7 @@ bench_one() {
 
         # Wait for sidecar
         local waited=0
-        while ! tasklist //fi "IMAGENAME eq agentmuxsrv*" //fo csv //nh 2>/dev/null | grep -qi "agentmuxsrv"; do
+        while ! tasklist //fi "IMAGENAME eq agentmux-srv*" //fo csv //nh 2>/dev/null | grep -qi "agentmux-srv"; do
             sleep 0.2
             waited=$((waited + 1))
             if [ $waited -gt 50 ]; then
@@ -142,11 +142,11 @@ echo ""
 
 # ─── Run Tauri benchmarks ─────────────────────────
 bench_one "TAURI" "$TAURI_EXE" "$TAURI_DIR" \
-    "agentmux.exe" "agentmuxsrv-rs.x64.exe" "msedgewebview2.exe"
+    "agentmux.exe" "agentmux-srv.exe" "msedgewebview2.exe"
 
 # ─── Run CEF benchmarks ──────────────────────────
 bench_one "CEF" "$CEF_EXE" "$CEF_DIR" \
-    "agentmux-cef.exe" "agentmuxsrv-rs.x64.exe"
+    "agentmux-cef.exe" "agentmux-srv.exe"
 
 # ─── Summary ─────────────────────────────────────
 echo "============================================"

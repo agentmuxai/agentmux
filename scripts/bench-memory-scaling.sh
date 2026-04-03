@@ -15,11 +15,11 @@ CEF_DIR="$HOME/Desktop/agentmux-cef-0.32.110-x64-portable"
 if [ "$MODE" = "tauri" ]; then
     APP_DIR="$TAURI_DIR"
     APP_EXE="./agentmux.exe"
-    PATTERNS=("agentmux.exe" "agentmuxsrv-rs.x64.exe" "msedgewebview2.exe")
+    PATTERNS=("agentmux.exe" "agentmux-srv.exe" "msedgewebview2.exe")
 else
     APP_DIR="$CEF_DIR"
     APP_EXE="./agentmux-cef.exe"
-    PATTERNS=("agentmux-cef.exe" "agentmuxsrv-rs.x64.exe")
+    PATTERNS=("agentmux-cef.exe" "agentmux-srv.exe")
 fi
 
 total_rss_kb() {
@@ -60,7 +60,7 @@ echo ""
 # Kill existing
 taskkill //f //im agentmux.exe //t 2>/dev/null || true
 taskkill //f //im agentmux-cef.exe //t 2>/dev/null || true
-taskkill //f //im agentmuxsrv-rs.x64.exe //t 2>/dev/null || true
+taskkill //f //im agentmux-srv.exe //t 2>/dev/null || true
 taskkill //f //im msedgewebview2.exe //t 2>/dev/null || true
 sleep 3
 
@@ -72,7 +72,7 @@ cd - > /dev/null 2>&1 || true
 
 # Wait for sidecar
 echo -n "Waiting for sidecar..."
-while ! tasklist //fi "IMAGENAME eq agentmuxsrv*" //fo csv //nh 2>/dev/null | grep -qi "agentmuxsrv"; do
+while ! tasklist //fi "IMAGENAME eq agentmux-srv*" //fo csv //nh 2>/dev/null | grep -qi "agentmux-srv"; do
     sleep 0.1
 done
 echo " ready"

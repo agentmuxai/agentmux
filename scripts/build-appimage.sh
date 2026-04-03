@@ -32,7 +32,7 @@ if ! command -v appimagetool &>/dev/null; then
     exit 1
 fi
 
-# Step 1: Build Rust backend (agentmuxsrv-rs)
+# Step 1: Build Rust backend (agentmux-srv)
 echo ""
 echo "Step 1: Building Rust backend..."
 task build:backend:rust
