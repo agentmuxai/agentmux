@@ -4,7 +4,6 @@
 //! WaveObj types: Rust equivalents of Go structs from pkg/waveobj/wtype.go.
 //! All `#[serde(rename = "...")]` tags match Go JSON tags for wire compatibility.
 
-#![allow(dead_code)]
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;

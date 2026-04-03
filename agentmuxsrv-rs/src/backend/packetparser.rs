@@ -11,7 +11,6 @@
 //! - Single-line format: `##N{json}\n`
 //! - Multi-line format: `##N{\nmore_data\n...\n`
 
-#![allow(dead_code)]
 
 use std::io::{self, BufRead, Write};
 

@@ -4,7 +4,6 @@
 //! Panic handler with optional telemetry integration.
 //! Port of Go's pkg/panichandler/.
 
-#![allow(dead_code)]
 
 use std::sync::Mutex;
 

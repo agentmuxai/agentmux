@@ -4,7 +4,6 @@
 //! Wave Pub/Sub system: event brokering with scoped subscriptions.
 //! Port of Go's pkg/wps/wps.go + wpstypes.go.
 
-#![allow(dead_code)]
 //!
 //! The Broker supports:
 //! - All-scope subscriptions (receive all events of a type)

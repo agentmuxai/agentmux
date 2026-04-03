@@ -6,7 +6,6 @@
 //!
 //! Provides a line-buffered reader with circular buffer and callbacks.
 
-#![allow(dead_code)]
 
 use std::io::{self, BufRead, BufReader, Read};
 use std::sync::Mutex;

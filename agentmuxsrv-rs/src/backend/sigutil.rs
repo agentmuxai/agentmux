@@ -7,7 +7,6 @@
 //! Installs OS signal handlers (SIGTERM, SIGINT, SIGHUP) that call a
 //! shutdown callback. Uses tokio for async signal handling.
 
-#![allow(dead_code)]
 
 /// Install shutdown signal handlers that call `do_shutdown` with a description.
 ///

@@ -4,7 +4,6 @@
 //! Connection URI parsing and resolution.
 //! Port of Go's pkg/remote/connparse/connparse.go.
 
-#![allow(dead_code)]
 //!
 //! Supports URIs like:
 //! - `wsh://user@host/path`

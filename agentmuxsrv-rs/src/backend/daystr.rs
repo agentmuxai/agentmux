@@ -4,7 +4,6 @@
 //! Day string utilities for YYYY-MM-DD formatted dates.
 //! Port of Go's pkg/util/daystr/.
 
-#![allow(dead_code)]
 
 use chrono::{Datelike, Duration, Local, NaiveDate};
 

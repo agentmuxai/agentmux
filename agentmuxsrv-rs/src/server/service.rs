@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 
 use axum::{extract::State, response::Json};
 use serde_json::json;

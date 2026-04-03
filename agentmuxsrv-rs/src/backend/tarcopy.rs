@@ -7,7 +7,6 @@
 //! Provides path normalization with directory traversal protection
 //! and single-file mode for tar streams.
 
-#![allow(dead_code)]
 
 use std::path::{Path, PathBuf};
 

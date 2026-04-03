@@ -8,7 +8,6 @@
 //! and connection string parsing. Actual SSH transport is deferred until
 //! russh is wired in; this module focuses on type definitions.
 
-#![allow(dead_code)]
 
 use std::collections::HashMap;
 

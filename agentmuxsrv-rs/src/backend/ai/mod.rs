@@ -4,7 +4,6 @@
 //! AI integration layer: multi-provider chat backend with streaming responses.
 //! Port of Go's pkg/waveai/waveai.go + pkg/aiusechat/usechat.go.
 
-#![allow(dead_code)]
 //!
 //! Architecture:
 //! - `AIBackend` trait abstracts provider-specific APIs

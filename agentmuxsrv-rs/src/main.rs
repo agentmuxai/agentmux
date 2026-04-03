@@ -1,3 +1,10 @@
+// Crate-level dead_code allow: the Go→Rust port has ~700 functions, constants,
+// and structs not yet wired into the active code paths. These are the
+// implementation backlog — not garbage. Per-file #![allow(dead_code)] was
+// removed in this commit; this single crate-level allow replaces all 67.
+// TODO: progressively remove as code gets wired up or confirmed dead.
+#![allow(dead_code)]
+
 mod backend;
 mod config;
 mod server;

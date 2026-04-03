@@ -8,7 +8,6 @@
 //! Each service method is a typed function; argument conversion from
 //! `serde_json::Value` is handled at the boundary.
 
-#![allow(dead_code)]
 
 use std::collections::HashMap;
 

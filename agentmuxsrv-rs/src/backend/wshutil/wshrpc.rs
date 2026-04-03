@@ -11,7 +11,6 @@
 //! - Context cancellation propagation
 //! - Auth token injection
 
-#![allow(dead_code)]
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};

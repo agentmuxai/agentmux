@@ -7,7 +7,6 @@
 //! Resolves paths to the bundled documentation site directory
 //! with automatic .html extension fallback.
 
-#![allow(dead_code)]
 
 use std::path::PathBuf;
 use std::sync::OnceLock;

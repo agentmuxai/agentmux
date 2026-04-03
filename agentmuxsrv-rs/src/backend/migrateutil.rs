@@ -7,7 +7,6 @@
 //! Provides simple schema migration using versioned SQL scripts.
 //! Each migration is a `(version, sql)` pair applied in order.
 
-#![allow(dead_code)]
 
 use rusqlite::Connection;
 

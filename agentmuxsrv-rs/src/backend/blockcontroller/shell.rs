@@ -14,7 +14,6 @@
 //! 3. Output/proxy loop: WSH messages → input channel
 //! 4. Wait loop: monitor process exit, update status
 
-#![allow(dead_code)]
 
 use std::io::Read as _;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -838,6 +837,7 @@ impl Controller for ShellController {
 
     fn stop(&self, _graceful: bool, new_status: &str) -> Result<(), String> {
         // Extract what we need from the lock, release it before any async work.
+        #[allow(unused_variables)] // used under #[cfg(unix)] only
         let pid_to_kill = {
             let mut inner = self.inner.lock().unwrap();
             if inner.proc_status == new_status {

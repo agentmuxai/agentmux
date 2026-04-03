@@ -3,7 +3,6 @@
 
 //! FileStore struct and CRUD operations.
 
-#![allow(dead_code)]
 
 use std::collections::HashMap;
 use std::path::Path;

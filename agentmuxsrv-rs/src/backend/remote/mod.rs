@@ -10,7 +10,6 @@
 //! - `conncontroller`: Connection state machine (init→connecting→connected→disconnected)
 //! - `genconn`: Generic ShellClient/ShellProcessController traits
 
-#![allow(dead_code)]
 
 pub mod conncontroller;
 pub mod connparse;

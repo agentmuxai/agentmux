@@ -7,7 +7,6 @@
 //! Parses /etc/environment, /etc/security/pam_env.conf, and ~/.pam_environment
 //! file formats to extract environment variable definitions.
 
-#![allow(dead_code)]
 
 use std::collections::HashMap;
 use std::fs;

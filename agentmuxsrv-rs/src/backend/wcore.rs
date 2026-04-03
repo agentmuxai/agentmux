@@ -6,7 +6,6 @@
 //!
 //! Orchestrates WaveStore mutations with WPS event publishing.
 
-#![allow(dead_code)]
 
 use std::collections::HashMap;
 use uuid::Uuid;

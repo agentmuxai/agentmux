@@ -3,7 +3,6 @@
 
 //! Internal cache structs for FileStore.
 
-#![allow(dead_code)]
 
 use std::collections::HashMap;
 

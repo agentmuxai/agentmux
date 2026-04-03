@@ -4,7 +4,6 @@
 //! Database utility helpers for converting between SQL row maps and Rust types.
 //! Port of Go's `pkg/util/dbutil/dbutil.go`.
 
-#![allow(dead_code)]
 //!
 //! Provides "QuickSet" functions for hydrating struct fields from database result
 //! maps, and "QuickJson" functions for serializing values to JSON strings/bytes

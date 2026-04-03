@@ -17,7 +17,6 @@
 //! 1. stdout_reader: piped stdout → .jsonl persistence + WPS blockfile events on "output" subject
 //! 2. process_waiter: wait for exit, update status, publish lifecycle event
 
-#![allow(dead_code)]
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
