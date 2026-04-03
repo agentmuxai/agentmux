@@ -29,83 +29,6 @@ tasks:
         env:
             AGENTMUX_ENVFILE: "{{.ROOT_DIR}}/.env"
 
-    dev:tauri:
-        desc: "[DEPRECATED] Run the Tauri application in development mode."
-        cmd: npx tauri dev --config src-tauri/tauri.dev.conf.json
-        deps:
-            - npm:install
-            - build:backend
-            - sync:dev:binaries
-            - copy:schema
-        env:
-            AGENTMUX_ENVFILE: "{{.ROOT_DIR}}/.env"
-            WCLOUD_ENDPOINT: "https://api-dev.agentmux.ai/central"
-            WCLOUD_WS_ENDPOINT: "wss://wsapi-dev.agentmux.ai"
-            VITE_PLATFORM: "{{OS}}"
-
-    sync:dev:binaries:
-        desc: Sync built binaries to Tauri dev/release cache (prevents stale binary issues)
-        cmds:
-            - task: sync:dev:binaries:{{OS}}
-
-    sync:dev:binaries:windows:
-        internal: true
-        platforms: [windows]
-        cmds:
-            - powershell Copy-Item -Force dist/bin/agentmuxsrv-rs.x64.exe src-tauri/target/debug/agentmuxsrv-rs.exe -ErrorAction SilentlyContinue
-            - powershell Copy-Item -Force dist/bin/agentmuxsrv-rs.x64.exe src-tauri/target/release/agentmuxsrv-rs.exe -ErrorAction SilentlyContinue
-            - powershell Copy-Item -Force dist/bin/agentmuxsrv-rs.x64.exe src-tauri/binaries/agentmuxsrv-rs-x86_64-pc-windows-msvc.exe -ErrorAction SilentlyContinue
-            - echo "✓ Synced agentmuxsrv-rs to Tauri dev/release cache (Windows)"
-
-    sync:dev:binaries:darwin:
-        internal: true
-        platforms: [darwin]
-        cmds:
-            - mkdir -p src-tauri/target/debug/bin src-tauri/target/release/bin
-            - cp -f dist/bin/agentmuxsrv-rs.arm64 src-tauri/target/debug/agentmuxsrv-rs || true
-            - cp -f dist/bin/agentmuxsrv-rs.arm64 src-tauri/target/release/agentmuxsrv-rs || true
-            - cp -f dist/bin/wsh-{{.VERSION}}-darwin.arm64 src-tauri/target/debug/bin/ || true
-            - cp -f dist/bin/wsh-{{.VERSION}}-darwin.arm64 src-tauri/target/release/bin/ || true
-            - cp -f dist/bin/wsh-{{.VERSION}}-darwin.x64 src-tauri/target/debug/bin/ || true
-            - cp -f dist/bin/wsh-{{.VERSION}}-darwin.x64 src-tauri/target/release/bin/ || true
-            - echo "✓ Synced agentmuxsrv-rs + wsh to Tauri dev/release cache (macOS)"
-
-    sync:dev:binaries:linux:
-        internal: true
-        platforms: [linux]
-        cmds:
-            - mkdir -p src-tauri/target/debug src-tauri/target/release src-tauri/binaries
-            - cp -f dist/bin/agentmuxsrv-rs.x64 src-tauri/target/debug/agentmuxsrv-rs || true
-            - cp -f dist/bin/agentmuxsrv-rs.x64 src-tauri/target/release/agentmuxsrv-rs || true
-            - cp -f dist/bin/agentmuxsrv-rs.x64 src-tauri/binaries/agentmuxsrv-rs-x86_64-unknown-linux-gnu || true
-            - echo "✓ Synced agentmuxsrv-rs to Tauri dev/release cache (Linux)"
-
-    start:
-        desc: Build and run the Tauri application in production mode (no installer).
-        cmd: cd src-tauri && cargo run --release
-        deps:
-            - npm:install
-            - build:backend
-            - copy:schema
-        env:
-            AGENTMUX_ENVFILE: "{{.ROOT_DIR}}/.env"
-            WCLOUD_ENDPOINT: "https://api-dev.agentmux.ai/central"
-            WCLOUD_WS_ENDPOINT: "wss://wsapi-dev.agentmux.ai"
-            VITE_PLATFORM: "{{OS}}"
-
-    quickdev:
-        desc: Run the Tauri application in quick dev mode (no docsite, no wsh).
-        cmd: tauri dev --config src-tauri/tauri.dev.conf.json
-        deps:
-            - npm:install
-            - build:backend:rust
-            - copy:schema
-        env:
-            AGENTMUX_ENVFILE: "{{.ROOT_DIR}}/.env"
-            WCLOUD_ENDPOINT: "https://api-dev.agentmux.ai/central"
-            WCLOUD_WS_ENDPOINT: "wss://wsapi-dev.agentmux.ai/"
-            VITE_PLATFORM: "{{OS}}"
-
     storybook:
         desc: Start the Storybook server.
         cmd: npm run storybook
@@ -121,7 +44,7 @@ tasks:
             - npm:install
 
     copy:schema:
-        desc: Copy schema directory to dist for Tauri bundling
+        desc: Copy schema directory to dist
         cmds:
             - cmd: powershell -Command "New-Item -ItemType Directory -Force -Path dist/schema | Out-Null; Copy-Item schema/* dist/schema/ -Recurse -Force"
               platforms: [windows]
@@ -129,14 +52,11 @@ tasks:
               platforms: [linux, darwin]
 
     package:
-        desc: Package the application for the current platform (Tauri).
+        desc: Package the application for the current platform (CEF).
         env:
             VITE_PLATFORM: "{{OS}}"
         cmds:
-            - task: build:backend
-            - task: tauri:copy-sidecars
-            - task: copy:schema
-            - npx tauri build {{.CLI_ARGS}}
+            - task: cef:package:portable
             # On Linux: patch the AppImage AppRun after Tauri/linuxdeploy creates it.
             # linuxdeploy's default AppRun sources a GTK hook that forces GDK_BACKEND=x11
             # (breaking Wayland) and does NOT set WEBKIT_DISABLE_DMABUF_RENDERER=1
@@ -189,152 +109,21 @@ tasks:
             - powershell -ExecutionPolicy Bypass -File scripts/package-msix.ps1 {{.CLI_ARGS}}
 
     package:macos:
-        desc: Package the application for macOS (creates .app and .dmg).
+        desc: "[TODO] Package the application for macOS (CEF). Not yet implemented."
         platforms: [darwin]
         cmds:
-            - task: build:backend
-            - task: tauri:copy-sidecars
-            - task: copy:schema
-            - bash -c 'source "$HOME/.cargo/env" 2>/dev/null; PATH="$HOME/.cargo/bin:/opt/homebrew/opt/node@20/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$PATH" npx tauri build --bundles app {{.CLI_ARGS}}'
-            - |
-                VERSION=$(node -p "require('./package.json').version")
-                APP=target/release/bundle/macos/AgentMux.app
-                OUT=target/release/bundle/macos/AgentMux_${VERSION}_aarch64.dmg
-                echo "Creating DMG from $APP..."
-                hdiutil create -volname "AgentMux-${VERSION}" -srcfolder "$APP" -ov -format UDZO "$OUT"
-                echo "✓ DMG created: $OUT"
-                if [ -d "$HOME/Desktop" ]; then
-                  cp "$OUT" "$HOME/Desktop/"
-                  echo "✓ Copied to Desktop: AgentMux_${VERSION}_aarch64.dmg"
-                fi
-        deps:
-            - clean
-            - npm:install
+            - echo "macOS CEF packaging not yet implemented. Use cef:package:portable on Windows."
 
 
     package:portable:linux:
-        desc: Package the application as a portable AppImage (Linux only).
+        desc: "[TODO] Package the application as a portable AppImage (Linux, CEF). Not yet implemented."
         platforms: [linux]
         cmds:
-            - task: build:backend
-            - task: tauri:copy-sidecars
-            - task: copy:schema
-            # Tauri prepares the AppDir but linuxdeploy crashes on some systems.
-            # We ignore the linuxdeploy failure and run appimagetool directly.
-            - npx tauri build --bundles appimage {{.CLI_ARGS}} 2>&1 | grep -v "failed to run linuxdeploy" || true
-            - cmd: |
-                APPDIR="target/release/bundle/appimage/AgentMux.AppDir"
-                if [ ! -d "$APPDIR" ]; then
-                  echo "❌ AppDir not found — Tauri build failed before linuxdeploy stage"
-                  exit 1
-                fi
-                # Remove bundled system libraries — WebKitGTK, GTK3, glib, etc. are
-                # system dependencies on Linux and should not be shipped in the AppImage.
-                # Bundling them bloats the image from ~15MB to ~90MB.
-                rm -rf "$APPDIR/usr/lib"
-                echo "✓ Stripped bundled system libraries from AppDir"
-
-                # Remove linuxdeploy GTK hook — it sets GDK_BACKEND=x11 which forces
-                # XWayland and triggers the IBus backspace bug.
-                rm -rf "$APPDIR/apprun-hooks"
-                echo "✓ Removed linuxdeploy hooks (GDK_BACKEND=x11)"
-
-                # Replace AppRun with custom script that sets required env vars
-                # and self-registers icon/desktop for GNOME taskbar icon matching.
-                printf '%s\n' '#!/usr/bin/env bash' \
-                  'set -e' \
-                  'this_dir="$(readlink -f "$(dirname "$0")")"' \
-                  'export APPDIR="$this_dir"' \
-                  'export WEBKIT_DISABLE_DMABUF_RENDERER=1' \
-                  '# Force native Wayland — XWayland + IBus XIM causes Backspace bugs.' \
-                  'export GDK_BACKEND=wayland' \
-                  'export XMODIFIERS=""' \
-                  'export GTK_IM_MODULE=gtk-im-context-simple' \
-                  '# Self-register icon and .desktop for GNOME Shell taskbar icon matching.' \
-                  'if [ -n "$APPIMAGE" ]; then' \
-                  '  _icon_dir="$HOME/.local/share/icons/hicolor/256x256/apps"' \
-                  '  _apps_dir="$HOME/.local/share/applications"' \
-                  '  _desktop="$_apps_dir/agentmux.desktop"' \
-                  '  mkdir -p "$_icon_dir" "$_apps_dir"' \
-                  '  cp -f "$this_dir/AgentMux.png" "$_icon_dir/agentmux.png"' \
-                  '  _cur=$(grep -m1 "^Exec=" "$_desktop" 2>/dev/null | cut -d= -f2- || true)' \
-                  '  if [ "$_cur" != "$APPIMAGE" ]; then' \
-                  '    sed "s|^Exec=.*|Exec=$APPIMAGE|" "$this_dir/AgentMux.desktop" > "$_desktop"' \
-                  '    update-desktop-database "$_apps_dir" 2>/dev/null || true' \
-                  '    gtk-update-icon-cache -f "$HOME/.local/share/icons/hicolor" 2>/dev/null || true' \
-                  '  fi' \
-                  'fi' \
-                  'exec "$this_dir/usr/bin/agentmux" "$@"' \
-                  > "$APPDIR/AppRun"
-                chmod +x "$APPDIR/AppRun"
-                echo "✓ Replaced AppRun with custom script"
-
-                # Ensure lowercase icon exists (desktop file references 'agentmux')
-                [ -f "$APPDIR/agentmux.png" ] || cp "$APPDIR/AgentMux.png" "$APPDIR/agentmux.png"
-
-                # Fix .DirIcon symlink (must point to existing file)
-                rm -f "$APPDIR/.DirIcon"
-                ln -s AgentMux.png "$APPDIR/.DirIcon"
-
-                VERSION=$(node version.cjs)
-                OUTPUT="target/release/bundle/appimage/AgentMux_${VERSION}_amd64.AppImage"
-                ARCH=x86_64 appimagetool "$APPDIR" "$OUTPUT"
-                echo "✅ AppImage created: $OUTPUT"
-        deps:
-            - clean
-            - npm:install
-
-    desktop:
-        desc: Clear desktop and deploy latest AppImage with trusted .desktop launcher.
-        platforms: [linux]
-        cmds:
-            - cmd: |
-                rm -f "$HOME/Desktop"/AgentMux_*
-                echo "✓ Cleared old AppImage files from Desktop"
-                VERSION=$(node version.cjs)
-                SRC="target/release/bundle/appimage/AgentMux_${VERSION}_amd64.AppImage"
-                if [ ! -f "$SRC" ]; then
-                  echo "❌ AppImage not found: $SRC"
-                  exit 1
-                fi
-                cp "$SRC" "$HOME/Desktop/"
-                chmod +x "$HOME/Desktop/AgentMux_${VERSION}_amd64.AppImage"
-                echo "✅ Deployed to Desktop: AgentMux_${VERSION}_amd64.AppImage"
-                # Pre-register icon and desktop files so GNOME shows the correct icon
-                # immediately, before the app is run for the first time.
-                # AppRun repeats this at runtime to keep paths current.
-                APPDIR="target/release/bundle/appimage/AgentMux.AppDir"
-                APPIMAGE_PATH="$HOME/Desktop/AgentMux_${VERSION}_amd64.AppImage"
-                ICON_DIR="$HOME/.local/share/icons/hicolor/256x256/apps"
-                APPS_DIR="$HOME/.local/share/applications"
-                mkdir -p "$ICON_DIR" "$APPS_DIR"
-                if [ -f "$APPDIR/AgentMux.png" ]; then
-                  cp -f "$APPDIR/AgentMux.png" "$ICON_DIR/agentmux.png"
-                  echo "✓ Pre-registered icon in hicolor theme"
-                fi
-                # Register agentmux.desktop — Wayland app_id and X11 WM_CLASS both equal
-                # the binary name "agentmux", so only this one file is needed.
-                _desktop_content=$(sed "s|^Exec=.*|Exec=$APPIMAGE_PATH|" "$APPDIR/AgentMux.desktop")
-                printf '%s\n' "$_desktop_content" > "$APPS_DIR/agentmux.desktop"
-                # Ensure hicolor has an index.theme so gtk-update-icon-cache succeeds
-                if [ ! -f "$HOME/.local/share/icons/hicolor/index.theme" ]; then
-                  cp /usr/share/icons/hicolor/index.theme "$HOME/.local/share/icons/hicolor/index.theme" 2>/dev/null || true
-                fi
-                update-desktop-database "$APPS_DIR" 2>/dev/null || true
-                gtk-update-icon-cache -f "$HOME/.local/share/icons/hicolor" 2>/dev/null || true
-                echo "✓ Registered desktop file: agentmux.desktop"
-                # Create trusted .desktop launcher on Desktop for double-click support
-                DESKTOP_FILE="$HOME/Desktop/AgentMux.desktop"
-                sed "s|^Exec=.*|Exec=$APPIMAGE_PATH|" "$APPDIR/AgentMux.desktop" > "$DESKTOP_FILE"
-                chmod +x "$DESKTOP_FILE"
-                # Trust the .desktop file for GNOME
-                gio set "$DESKTOP_FILE" metadata::trusted true 2>/dev/null || true
-                echo "✅ Created trusted .desktop launcher"
-
+            - echo "Linux CEF AppImage packaging not yet implemented."
 
     build:frontend:
         desc: Build the frontend (production mode).
-        cmd: npx vite build --mode production --config vite.config.tauri.ts
+        cmd: npx vite build --mode production --config vite.config.ts
         deps:
             - npm:install
         env:
@@ -342,7 +131,7 @@ tasks:
 
     build:frontend:dev:
         desc: Build the frontend in development mode.
-        cmd: npx vite build --mode dev --config vite.config.tauri.ts
+        cmd: npx vite build --mode dev --config vite.config.ts
         deps:
             - npm:install
         env:
@@ -440,7 +229,7 @@ tasks:
     artifacts:upload:
         desc: Uploads build artifacts to the staging bucket in S3. To add additional AWS CLI arguments, add them after `--`.
         vars:
-            ORIGIN: "src-tauri/target/release/bundle/"
+            ORIGIN: "target/release/"
             DESTINATION: "{{.ARTIFACTS_BUCKET}}/{{.VERSION}}"
         cmd: aws s3 cp {{.ORIGIN}}/ s3://{{.DESTINATION}}/ --recursive --exclude "*/*" --exclude "builder-*.yml" {{.CLI_ARGS}}
 
@@ -646,66 +435,6 @@ tasks:
         cmd: $(go env GOPATH)/bin/pkgsite -http=:6060
         dir: tsunami
 
-    # ========================================
-    # Tauri Build Tasks
-    # ========================================
-
-    tauri:dev:
-        desc: Run Tauri in development mode
-        cmds:
-            - task: build:backend
-            - task: tauri:copy-sidecars
-            - task: copy:schema
-            - npm run tauri:dev
-        deps:
-            - npm:install
-
-    tauri:build:
-        desc: Build Tauri application for current platform
-        cmds:
-            - task: build:frontend:prod
-            - task: build:backend
-            - task: tauri:copy-sidecars
-            - npx tauri build
-        deps:
-            - npm:install
-
-    tauri:copy-sidecars:
-        desc: Copy agentmuxsrv-rs and wsh binaries to src-tauri/binaries with target-specific names
-        cmds:
-            - mkdir -p src-tauri/binaries
-            - |
-                {{if eq OS "windows"}}
-                powershell -Command "Copy-Item dist/bin/agentmuxsrv-rs.x64.exe src-tauri/binaries/agentmuxsrv-rs-x86_64-pc-windows-msvc.exe -Force; Copy-Item dist/bin/wsh-{{.VERSION}}-windows.x64.exe src-tauri/binaries/wsh-x86_64-pc-windows-msvc.exe -Force; Write-Host 'Copied binaries for x86_64-pc-windows-msvc'"
-                {{else}}
-                TRIPLE=$(rustc -vV | grep host | awk '{print $2}');
-                {{if eq OS "darwin"}}
-                cp dist/bin/agentmuxsrv-rs.arm64 src-tauri/binaries/agentmuxsrv-rs-$TRIPLE 2>/dev/null || cp dist/bin/agentmuxsrv-rs.x64 src-tauri/binaries/agentmuxsrv-rs-$TRIPLE;
-                cp dist/bin/wsh-{{.VERSION}}-darwin.arm64 src-tauri/binaries/wsh-$TRIPLE 2>/dev/null || cp dist/bin/wsh-{{.VERSION}}-darwin.x64 src-tauri/binaries/wsh-$TRIPLE;
-                {{else}}
-                # Remove stale agentmuxsrv (old non-rs binary name) to prevent AppImage bloat
-                rm -f src-tauri/binaries/agentmuxsrv-$TRIPLE;
-                cp dist/bin/agentmuxsrv-rs.x64 src-tauri/binaries/agentmuxsrv-rs-$TRIPLE;
-                cp dist/bin/wsh-{{.VERSION}}-linux.x64 src-tauri/binaries/wsh-$TRIPLE;
-                {{end}}
-                echo "Copied binaries for $TRIPLE"
-                {{end}}
-            # Clear stale wsh binaries then copy only current version (prevents DMG bloat)
-            - |
-                {{if eq OS "windows"}}
-                powershell -Command "New-Item -ItemType Directory -Force -Path src-tauri/binaries/bin | Out-Null; Remove-Item src-tauri/binaries/bin/wsh-* -Force -ErrorAction SilentlyContinue; Copy-Item dist/bin/wsh-{{.VERSION}}-windows.x64.exe src-tauri/binaries/bin/ -Force; Write-Host 'Copied wsh to bin/ for backend deployment'"
-                {{else if eq OS "darwin"}}
-                rm -f src-tauri/binaries/bin/wsh-*;
-                mkdir -p src-tauri/binaries/bin;
-                cp dist/bin/wsh-{{.VERSION}}-darwin.arm64 src-tauri/binaries/bin/ 2>/dev/null || true;
-                cp dist/bin/wsh-{{.VERSION}}-darwin.x64 src-tauri/binaries/bin/ 2>/dev/null || true;
-                echo "Copied wsh to bin/ for backend deployment"
-                {{else}}
-                rm -f src-tauri/binaries/bin/wsh-*;
-                mkdir -p src-tauri/binaries/bin;
-                cp dist/bin/wsh-{{.VERSION}}-linux.* src-tauri/binaries/bin/ 2>/dev/null || true;
-                echo "Copied wsh to bin/ for backend deployment"
-                {{end}}
 
     # ========================================
     # CEF Host Build Tasks
@@ -845,7 +574,7 @@ tasks:
                 cp -r dist/cef "$DEV_DIR"
                 echo "Copied dist/cef → $DEV_DIR (isolation)"
 
-                npx vite --config vite.config.tauri.ts --port 5173 &
+                npx vite --config vite.config.ts --port 5173 &
                 VITE_PID=$!
                 trap "kill $VITE_PID 2>/dev/null; rm -rf $DEV_DIR 2>/dev/null" EXIT
                 echo "Waiting for Vite on port 5173 (pid $VITE_PID)..."
@@ -901,19 +630,11 @@ tasks:
     # ========================================
 
     test:e2e:macos:
-        desc: Run E2E tests on macOS (frontend-only with mocked Tauri IPC)
+        desc: Run E2E tests on macOS (frontend-only with mocked IPC)
         platforms: [darwin]
         deps:
             - npm:install
         cmds:
-            - npx vite --config vite.config.tauri.ts &
+            - npx vite --config vite.config.ts &
             - sleep 5
             - npx wdio run wdio.macos.conf.cjs || EXIT_CODE=$?; kill %1 2>/dev/null; exit ${EXIT_CODE:-0}
-
-    build:frontend:prod:
-        desc: Build the frontend for production (used by Tauri)
-        cmd: npx vite build --mode production --config vite.config.tauri.ts
-        deps:
-            - npm:install
-        env:
-            VITE_PLATFORM: "{{OS}}"

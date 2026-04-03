@@ -7,11 +7,6 @@
       "path": "version"
     },
     {
-      "file": "src-tauri/Cargo.toml",
-      "type": "toml",
-      "path": "package.version"
-    },
-    {
       "file": "agentmuxsrv-rs/Cargo.toml",
       "type": "toml",
       "path": "package.version"
@@ -30,18 +25,6 @@
       "file": "agentmux-launcher/Cargo.toml",
       "type": "toml",
       "path": "package.version"
-    },
-    {
-      "file": "src-tauri/tauri.conf.json",
-      "type": "json",
-      "path": "version"
-    },
-    {
-      "file": "src-tauri/tauri.conf.json",
-      "type": "json",
-      "path": "identifier",
-      "transform": "template",
-      "template": "ai.agentmux.app.v{{version | replace('.', '-')}}"
     }
   ],
   "lockfiles": [
@@ -67,8 +50,6 @@
       "package-lock.json",
       "Cargo.lock",
       "VERSION_HISTORY.md",
-      "src-tauri/Cargo.toml",
-      "src-tauri/tauri.conf.json",
       "agentmuxsrv-rs/Cargo.toml",
       "wsh-rs/Cargo.toml",
       "agentmux-cef/Cargo.toml",
