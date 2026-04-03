@@ -92,35 +92,35 @@ Write-Host "[4/6] Verifying versions..." -ForegroundColor Yellow
 
 $Errors = @()
 
-# Check wsh binary exists with correct version
-$WshBinary = "dist/bin/wsh-$Version-windows.x64.exe"
+# Check agentmux-wsh binary exists with correct version
+$WshBinary = "dist/bin/agentmux-wsh-$Version-windows.x64.exe"
 if (-not (Test-Path $WshBinary)) {
-    $Errors += "wsh binary not found: $WshBinary"
+    $Errors += "agentmux-wsh binary not found: $WshBinary"
 } else {
-    # Verify wsh reports correct version
+    # Verify agentmux-wsh reports correct version
     $WshVersion = & $WshBinary version 2>&1
-    $ExpectedWshVersion = "wsh v$Version"
+    $ExpectedWshVersion = "agentmux-wsh v$Version"
     if ($WshVersion -ne $ExpectedWshVersion) {
-        $Errors += "wsh version mismatch: got '$WshVersion', expected '$ExpectedWshVersion'"
+        $Errors += "agentmux-wsh version mismatch: got '$WshVersion', expected '$ExpectedWshVersion'"
     }
 }
 
-# Check agentmuxsrv exists
-$SrvBinary = "dist/bin/agentmuxsrv.x64.exe"
+# Check agentmux-srv exists
+$SrvBinary = "dist/bin/agentmux-srv-$Version-windows.x64.exe"
 if (-not (Test-Path $SrvBinary)) {
-    $Errors += "agentmuxsrv binary not found: $SrvBinary"
+    $Errors += "agentmux-srv binary not found: $SrvBinary"
 }
 
-# Check all wsh platform variants exist
+# Check all agentmux-wsh platform variants exist
 $Platforms = @(
     "darwin.arm64", "darwin.x64",
     "linux.arm64", "linux.x64", "linux.mips", "linux.mips64",
     "windows.x64.exe", "windows.arm64.exe"
 )
 foreach ($Platform in $Platforms) {
-    $Binary = "dist/bin/wsh-$Version-$Platform"
+    $Binary = "dist/bin/agentmux-wsh-$Version-$Platform"
     if (-not (Test-Path $Binary)) {
-        $Errors += "Missing wsh binary: $Binary"
+        $Errors += "Missing agentmux-wsh binary: $Binary"
     }
 }
 

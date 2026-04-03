@@ -369,7 +369,7 @@ tasks:
         cmds:
             - bash -c 'source "$HOME/.cargo/env" 2>/dev/null; PATH="$HOME/.cargo/bin:$PATH" cargo build --release -p agentmux-srv'
             - mkdir -p dist/bin
-            - cmd: powershell -Command "Remove-Item dist/bin/agentmux-srv-*-darwin.arm64 -Force -ErrorAction SilentlyContinue"
+            - rm -f dist/bin/agentmux-srv-*-darwin.arm64
             - cp target/release/agentmux-srv dist/bin/agentmux-srv-{{.VERSION}}-darwin.arm64
             - echo "✓ Built agentmux-srv-{{.VERSION}} for macOS"
 

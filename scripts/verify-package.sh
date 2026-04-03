@@ -48,30 +48,30 @@ else
     ((ISSUES++))
 fi
 
-# Check agentmuxsrv binary
+# Check agentmux-srv binary
 WAVESRV_PATH="$PACKAGE_DIR/resources/app.asar.unpacked/dist/bin"
 if [[ -d "$WAVESRV_PATH" ]]; then
-    # Check for agentmuxsrv
-    if ls "$WAVESRV_PATH"/agentmuxsrv* 2>/dev/null | grep -q .; then
-        WAVESRV=$(ls "$WAVESRV_PATH"/agentmuxsrv* 2>/dev/null | head -1)
-        success "agentmuxsrv: $(basename "$WAVESRV")"
+    # Check for agentmux-srv
+    if ls "$WAVESRV_PATH"/agentmux-srv* 2>/dev/null | grep -q .; then
+        WAVESRV=$(ls "$WAVESRV_PATH"/agentmux-srv* 2>/dev/null | head -1)
+        success "agentmux-srv: $(basename "$WAVESRV")"
     else
-        error "agentmuxsrv binary missing in: $WAVESRV_PATH"
+        error "agentmux-srv binary missing in: $WAVESRV_PATH"
         ((ISSUES++))
     fi
 
     # Check for wsh with correct version
-    if ls "$WAVESRV_PATH"/wsh-${VERSION}-* 2>/dev/null | grep -q .; then
-        WSH_COUNT=$(ls "$WAVESRV_PATH"/wsh-${VERSION}-* 2>/dev/null | wc -l)
+    if ls "$WAVESRV_PATH"/agentmux-wsh-${VERSION}-* 2>/dev/null | grep -q .; then
+        WSH_COUNT=$(ls "$WAVESRV_PATH"/agentmux-wsh-${VERSION}-* 2>/dev/null | wc -l)
         success "wsh binaries: $WSH_COUNT files for version $VERSION"
-        ls "$WAVESRV_PATH"/wsh-${VERSION}-* 2>/dev/null | while read file; do
+        ls "$WAVESRV_PATH"/agentmux-wsh-${VERSION}-* 2>/dev/null | while read file; do
             echo "    - $(basename "$file")"
         done
     else
         error "wsh binaries missing or wrong version in: $WAVESRV_PATH"
-        error "Expected: wsh-${VERSION}-*"
+        error "Expected: agentmux-wsh-${VERSION}-*"
         echo "  Found:"
-        ls "$WAVESRV_PATH"/wsh-* 2>/dev/null || echo "    (none)"
+        ls "$WAVESRV_PATH"/agentmux-wsh-* 2>/dev/null || echo "    (none)"
         ((ISSUES++))
     fi
 else
@@ -137,11 +137,11 @@ if [[ -d "$SHELL_DIR" ]]; then
     # On Windows, check for PowerShell integration
     if [[ "$EXE_NAME" == "AgentMux.exe" ]]; then
         # wsh must be present for PowerShell integration
-        if ls "$SHELL_DIR"/wsh-${VERSION}-windows*.exe 2>/dev/null | grep -q .; then
-            success "Shell integration: wsh Windows binaries present"
+        if ls "$SHELL_DIR"/agentmux-agentmux-wsh-${VERSION}-windows*.exe 2>/dev/null | grep -q .; then
+            success "Shell integration: agentmux-wsh Windows binaries present"
         else
-            error "Shell integration: wsh Windows binaries missing"
-            error "PowerShell integration will fail without wsh in PATH"
+            error "Shell integration: agentmux-wsh Windows binaries missing"
+            error "Shell integration will fail without agentmux-wsh in PATH"
             ((ISSUES++))
         fi
     fi
