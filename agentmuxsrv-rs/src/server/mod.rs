@@ -1,4 +1,5 @@
 mod ai;
+mod cli_handlers;
 mod files;
 mod messagebus;
 mod reactive;
