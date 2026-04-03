@@ -10,7 +10,7 @@ checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
 name = "agentmux-cef"
-version = "0.33.29"
+version = "0.33.30"
 dependencies = [
  "axum 0.8.8",
  "cef",
@@ -31,7 +31,7 @@ dependencies = [
 
 [[package]]
 name = "agentmux-launcher"
-version = "0.33.29"
+version = "0.33.30"
 dependencies = [
  "windows-sys 0.59.0",
  "winres",
@@ -39,7 +39,7 @@ dependencies = [
 
 [[package]]
 name = "agentmuxsrv-rs"
-version = "0.33.29"
+version = "0.33.30"
 dependencies = [
  "async-stream",
  "axum 0.7.9",
@@ -3861,7 +3861,7 @@ checksum = "1ffae5123b2d3fc086436f8834ae3ab053a283cfac8fe0a0b8eaae044768a4c4"
 
 [[package]]
 name = "wsh-rs"
-version = "0.33.29"
+version = "0.33.30"
 dependencies = [
  "base64",
  "clap",
