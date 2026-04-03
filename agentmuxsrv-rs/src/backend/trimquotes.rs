@@ -4,7 +4,6 @@
 //! Quote handling utilities for CLI argument processing.
 //! Port of Go's pkg/trimquotes/trimquotes.go.
 
-#![allow(dead_code)]
 
 /// Remove surrounding double quotes from a string.
 /// Handles escape sequences within the quoted string.

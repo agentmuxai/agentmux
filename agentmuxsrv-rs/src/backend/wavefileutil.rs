@@ -7,7 +7,6 @@
 //! Provides the bridge between the internal file storage representation
 //! and the wire format used by the RPC protocol.
 
-#![allow(dead_code)]
 
 use serde::{Deserialize, Serialize};
 

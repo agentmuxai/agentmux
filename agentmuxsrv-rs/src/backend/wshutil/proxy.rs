@@ -4,7 +4,6 @@
 //! RPC proxy types for forwarding messages between connections.
 //! Port of Go's `pkg/wshutil/wshproxy.go` and `wshmultiproxy.go`.
 
-#![allow(dead_code)]
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};

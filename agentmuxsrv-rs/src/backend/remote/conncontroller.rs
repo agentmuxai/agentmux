@@ -16,7 +16,6 @@
 //! Actual SSH/WSL transport is deferred; this module implements the
 //! lifecycle management, status tracking, and event emission.
 
-#![allow(dead_code)]
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};

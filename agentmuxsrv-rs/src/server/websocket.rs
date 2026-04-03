@@ -1404,23 +1404,22 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                 let stdout = String::from_utf8_lossy(&output.stdout).to_string();
                 let stderr = String::from_utf8_lossy(&output.stderr).to_string();
 
-                let mut authenticated = false;
                 let mut email = None;
                 let mut auth_method = None;
 
-                if let Ok(json) = serde_json::from_str::<serde_json::Value>(&stdout) {
-                    authenticated = json.get("loggedIn")
-                        .and_then(|v| v.as_bool())
-                        .unwrap_or(false);
+                let authenticated = if let Ok(json) = serde_json::from_str::<serde_json::Value>(&stdout) {
                     email = json.get("email")
                         .and_then(|v| v.as_str())
                         .map(|s| s.to_string());
                     auth_method = json.get("authMethod")
                         .and_then(|v| v.as_str())
                         .map(|s| s.to_string());
+                    json.get("loggedIn")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false)
                 } else {
-                    authenticated = output.status.success();
-                }
+                    output.status.success()
+                };
 
                 let raw_output = if !stdout.is_empty() { stdout } else { stderr };
 

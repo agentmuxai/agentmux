@@ -9,7 +9,6 @@
 //! - PTY (OSC-wrapped) ↔ message channels
 //! - WebSocket (JSON packets) ↔ message channels
 
-#![allow(dead_code)]
 
 use std::io::{BufRead, BufReader, Read, Write};
 use tokio::sync::mpsc;

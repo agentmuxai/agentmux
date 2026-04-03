@@ -5,7 +5,6 @@
 //! and manages request/response lifecycle with timeouts and streaming.
 //! Port of Go's pkg/wshutil/wshrpc.go (WshRpc struct + handler dispatch).
 
-#![allow(dead_code)]
 
 use std::collections::HashMap;
 use std::future::Future;

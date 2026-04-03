@@ -6,7 +6,6 @@
 //!
 //! A `SyncBuffer` wraps a `Vec<u8>` behind a mutex and implements `Write`.
 
-#![allow(dead_code)]
 
 use std::io::{self, Write};
 use std::sync::Mutex;

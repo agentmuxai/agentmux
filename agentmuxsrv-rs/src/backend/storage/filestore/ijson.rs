@@ -3,7 +3,6 @@
 
 //! FileStore IJson (incremental JSON) operations.
 
-#![allow(dead_code)]
 
 use super::core::FileStore;
 use super::types::FileMeta;

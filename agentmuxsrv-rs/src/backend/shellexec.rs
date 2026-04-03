@@ -4,7 +4,6 @@
 //! Shell process execution: PTY management and process lifecycle.
 //! Port of Go's pkg/shellexec/shellexec.go + conninterface.go.
 
-#![allow(dead_code)]
 //!
 //! Uses a trait-based abstraction (`ConnInterface`) so that:
 //! - Real PTY implementations can use `portable-pty` or platform APIs

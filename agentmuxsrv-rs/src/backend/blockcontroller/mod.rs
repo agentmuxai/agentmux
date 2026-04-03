@@ -4,7 +4,6 @@
 //! Block controller: manages lifecycle of each block (terminal, command, web app).
 //! Port of Go's pkg/blockcontroller/blockcontroller.go.
 
-#![allow(dead_code)]
 //!
 //! Architecture:
 //! - Global controller registry maps block_id → Controller

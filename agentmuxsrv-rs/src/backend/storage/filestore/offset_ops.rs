@@ -3,7 +3,6 @@
 
 //! FileStore offset-based read/write operations.
 
-#![allow(dead_code)]
 
 use std::collections::HashMap;
 

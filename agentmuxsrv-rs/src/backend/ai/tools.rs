@@ -4,7 +4,6 @@
 //! AI tool definitions and execution framework.
 //! Port of Go's pkg/aiusechat/uctypes/usechat-types.go (tool types)
 
-#![allow(dead_code)]
 //! and pkg/aiusechat/tools*.go (tool definitions and execution).
 //!
 //! Tools are functions that AI models can call during conversations.

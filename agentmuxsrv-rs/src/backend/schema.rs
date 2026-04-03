@@ -7,7 +7,6 @@
 //! Provides file path resolution for JSON schema files, trying the
 //! exact path first, then falling back to appending `.json`.
 
-#![allow(dead_code)]
 
 use std::path::{Path, PathBuf};
 

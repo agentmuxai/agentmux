@@ -12,7 +12,6 @@
 //! The actual display is handled by the frontend (Tauri webview);
 //! this module defines the wire format and a registry for pending requests.
 
-#![allow(dead_code)]
 
 use std::collections::HashMap;
 use std::sync::Mutex;

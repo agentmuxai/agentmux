@@ -53,4 +53,3 @@ pub mod wslconn;
 pub mod wshutil;
 
 pub use oref::ORef;
-pub use waveobj::MetaMapType;

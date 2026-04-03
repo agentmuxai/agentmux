@@ -5,7 +5,6 @@
 //! Port of Go's `pkg/util/iochan/` — provides streaming reader/writer channels
 //! with SHA256 checksum verification.
 
-#![allow(dead_code)]
 
 use serde::{Deserialize, Serialize};
 
