@@ -4,7 +4,7 @@
 
 - **Name:** AgentMux
 - **GitHub:** https://github.com/agentmuxai/agentmux
-- **Type:** CEF desktop application (Tauri host is deprecated)
+- **Type:** CEF desktop application
 - **Build System:** Task (Taskfile.yml)
 
 ---

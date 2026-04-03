@@ -16,7 +16,7 @@ import tsconfigPaths from "vite-tsconfig-paths";
 /**
  * Maps Taskfile {{OS}} values to Node.js process.platform equivalents.
  * Taskfile: "windows" | "darwin" | "linux"
- * Node/Tauri: "win32" | "darwin" | "linux"
+ * process.platform: "win32" | "darwin" | "linux"
  */
 const TASKFILE_OS_MAP: Record<string, string> = {
     windows: "win32",
@@ -66,8 +66,8 @@ function platformResolve(): Plugin {
 
 /**
  * Strips redundant KaTeX font formats (TTF, WOFF) from the build output.
- * KaTeX CSS lists woff2/woff/ttf as @font-face fallbacks; Tauri's Chromium
- * webview only needs woff2, so the others are dead weight (~876 KB).
+ * KaTeX CSS lists woff2/woff/ttf as @font-face fallbacks; CEF's bundled
+ * Chromium only needs woff2, so the others are dead weight (~876 KB).
  */
 function stripKatexLegacyFonts(): Plugin {
     return {
@@ -112,7 +112,7 @@ export default defineConfig({
     },
     server: {
         port: 5173,
-        strictPort: true, // Fail if port 5173 is already in use (required for Tauri)
+        strictPort: true, // Fail if port 5173 is already in use (CEF dev server expects this port)
         open: false,
         watch: {
             ignored: ["dist/**", "**/*.md", "**/*.json"],
@@ -135,6 +135,5 @@ export default defineConfig({
         stripKatexLegacyFonts(),
     ],
 
-    // Environment variable prefix for Tauri
-    envPrefix: ["VITE_", "TAURI_"],
+    envPrefix: ["VITE_"],
 });
