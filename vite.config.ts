@@ -1,10 +1,9 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// Vite configuration for Tauri development mode.
-// This replaces electron-vite for the Tauri build.
-// Only the renderer (frontend) configuration is needed —
-// Tauri handles the "main process" in Rust.
+// Vite configuration for AgentMux frontend.
+// Builds the SolidJS frontend for both dev mode (Vite HMR) and
+// production (bundled into the CEF portable package).
 
 import tailwindcss from "@tailwindcss/vite";
 import * as fs from "fs";
@@ -105,7 +104,7 @@ export default defineConfig({
             },
             output: {
                 // DISABLED: manualChunks creates static inter-chunk imports that
-                // WebKitGTK cannot resolve over tauri:// protocol, preventing JS from starting.
+                // caused loading issues in the old WebKitGTK host.
                 // All code goes in one bundle. Dynamic imports (mermaid, katex, shiki) are
                 // still lazy-loaded but as inlined chunks, not separate files.
             },
@@ -116,7 +115,7 @@ export default defineConfig({
         strictPort: true, // Fail if port 5173 is already in use (required for Tauri)
         open: false,
         watch: {
-            ignored: ["dist/**", "**/*.md", "**/*.json", "src-tauri/**"],
+            ignored: ["dist/**", "**/*.md", "**/*.json"],
         },
     },
     css: {
