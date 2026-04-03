@@ -40,7 +40,7 @@ if ($Clean) {
     # Kill running processes (ignore if not running)
     $ErrorActionPreference = "SilentlyContinue"
     taskkill /F /IM AgentMux.exe 2>$null | Out-Null
-    taskkill /F /IM agentmuxsrv.x64.exe 2>$null | Out-Null
+    taskkill /F /IM agentmux-srv.exe 2>$null | Out-Null
     $ErrorActionPreference = "Stop"
 
     # Remove stale directories

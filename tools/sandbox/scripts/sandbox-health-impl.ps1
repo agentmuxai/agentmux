@@ -215,10 +215,10 @@ function Test-WaveMuxBuild {
         return
     }
 
-    $Binaries = Get-ChildItem -Path $BinDir -Filter "wsh-*" -ErrorAction SilentlyContinue
+    $Binaries = Get-ChildItem -Path $BinDir -Filter "agentmux-wsh-*" -ErrorAction SilentlyContinue
 
     if ($Binaries.Count -eq 0) {
-        Add-CheckResult -Name "WaveMux Build" -Status "WARN" -Message "No binaries found" -Details "dist/bin exists but no wsh binaries"
+        Add-CheckResult -Name "WaveMux Build" -Status "WARN" -Message "No binaries found" -Details "dist/bin exists but no agentmux-wsh binaries"
         return
     }
 
