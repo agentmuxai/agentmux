@@ -17,7 +17,7 @@
 |---------|----------|---------------|
 | `task dev` | **Development** (CEF host + Vite hot reload) | Yes - hot reload |
 | `task cef:package:portable` | **Portable release builds** | No |
-**Note:** The Tauri host (`src-tauri/`) is deprecated. All development uses the CEF host. Do not reference Tauri APIs, Tauri identifiers, or Tauri commands in new code.
+**Note:** The Tauri host has been removed. All development uses the CEF host.
 
 ### Build System
 
@@ -65,7 +65,7 @@ AgentMux uses a **CEF (Chromium Embedded Framework)** host with a **100% Rust ba
 - **agentmuxsrv-rs** = Rust backend sidecar (auto-spawned, don't run manually)
 - **wsh** = Rust shell integration binary (wsh-rs crate, must be versioned correctly)
 
-**Important:** The Tauri host (`src-tauri/`) is deprecated and must not be used. CEF is the only active host. All Go and Electron code has been removed.
+**Important:** CEF is the only active host. The Tauri host has been removed. All Go and Electron code has been removed.
 
 ### Multiple Instances Run in Parallel
 
@@ -120,7 +120,7 @@ bump patch -m "Description"
 # OR: bump minor / bump major / bump 1.2.3
 ```
 
-This updates: `package.json`, `package-lock.json`, `src-tauri/Cargo.toml`, `Cargo.lock`, `src-tauri/tauri.conf.json`, `agentmuxsrv-rs/Cargo.toml`, `wsh-rs/Cargo.toml`, `VERSION_HISTORY.md`
+This updates: `package.json`, `package-lock.json`, `Cargo.lock`, `agentmuxsrv-rs/Cargo.toml`, `wsh-rs/Cargo.toml`, `agentmux-cef/Cargo.toml`, `agentmux-launcher/Cargo.toml`, `VERSION_HISTORY.md`
 
 **Step 2: Verify consistency**
 ```bash
@@ -138,11 +138,6 @@ task build:backend
 bump patch -m "Description" --commit
 git push origin <branch>
 ```
-
-### Tauri Version Management (deprecated — legacy only)
-
-Tauri code in `src-tauri/` is deprecated. These scripts exist only if legacy Tauri files need updating:
-`./scripts/verify-tauri-versions.sh`, `./scripts/update-tauri.sh`. Do not use for new work.
 
 ---
 

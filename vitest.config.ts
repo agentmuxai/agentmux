@@ -1,5 +1,5 @@
 import { defineConfig, mergeConfig, type UserConfig } from "vitest/config";
-import viteConfig from "./vite.config.tauri";
+import viteConfig from "./vite.config";
 
 export default mergeConfig(
     viteConfig as UserConfig,
