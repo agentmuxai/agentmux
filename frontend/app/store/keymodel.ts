@@ -13,7 +13,6 @@ import {
     getBlockComponentModel,
     getFocusedBlockId,
     getSettingsKeyAtom,
-    globalStore,
     refocusNode,
     replaceBlock,
     setActiveTab,
@@ -619,37 +618,37 @@ function registerGlobalKeys() {
     });
     // Zoom controls - macOS
     globalKeyMap.set("Cmd:=", () => {
-        zoomIn(globalStore);
+        zoomIn();
         return true;
     });
     globalKeyMap.set("Cmd:+", () => {
-        zoomIn(globalStore);
+        zoomIn();
         return true;
     });
     globalKeyMap.set("Cmd:-", () => {
-        zoomOut(globalStore);
+        zoomOut();
         return true;
     });
     globalKeyMap.set("Cmd:0", () => {
-        zoomReset(globalStore);
+        zoomReset();
         return true;
     });
 
     // Zoom controls - Linux/Windows
     globalKeyMap.set("Ctrl:=", () => {
-        zoomIn(globalStore);
+        zoomIn();
         return true;
     });
     globalKeyMap.set("Ctrl:+", () => {
-        zoomIn(globalStore);
+        zoomIn();
         return true;
     });
     globalKeyMap.set("Ctrl:-", () => {
-        zoomOut(globalStore);
+        zoomOut();
         return true;
     });
     globalKeyMap.set("Ctrl:0", () => {
-        zoomReset(globalStore);
+        zoomReset();
         return true;
     });
 

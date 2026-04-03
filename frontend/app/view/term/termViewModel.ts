@@ -17,7 +17,6 @@ import {
     getConnStatusAtom,
     getOverrideConfigAtom,
     getSettingsKeyAtom,
-    globalStore,
     setIsTermMultiInput,
     useBlockAtom,
     WOS,

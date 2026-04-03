@@ -17,7 +17,6 @@ import {
     countersClear,
     countersPrint,
     getApi,
-    globalStore,
     initGlobal,
     initGlobalEventSubs,
     loadConnStatus,
@@ -107,7 +106,6 @@ setTimeout(updateWindowTitleWithInstanceID, 1000);
 
 
 (window as any).WOS = WOS;
-(window as any).globalStore = globalStore;
 (window as any).globalAtoms = atoms;
 (window as any).RpcApi = RpcApi;
 (window as any).isFullScreen = false;
@@ -269,7 +267,7 @@ async function initHostWave(): Promise<void> {
         tlog("initWaveWrap", t);
         tlog("TOTAL initTauriWave", t0);
 
-        // Initialize instance tracking (must come after initWaveWrap so globalStore is ready)
+        // Initialize instance tracking (must come after initWaveWrap so global state is ready)
         await initInstanceTracking();
 
         // Show the window now that it's fully initialized (Tauri starts hidden).
@@ -373,7 +371,7 @@ async function initHostNewWindow(): Promise<void> {
         tlog("initWaveWrap", t);
         tlog("TOTAL initTauriNewWindow", t0);
 
-        // Initialize instance tracking (must come after initWaveWrap so globalStore is ready)
+        // Initialize instance tracking (must come after initWaveWrap so global state is ready)
         await initInstanceTracking();
 
         // Show the window now that it's initialized

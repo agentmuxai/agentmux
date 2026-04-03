@@ -8,7 +8,8 @@
  * the drop occurs over a native app. No OLE fallback needed.
  */
 
-import { atoms, getApi, globalStore } from "@/store/global";
+import { atoms, getApi } from "@/store/global";
+import { invokeCommand } from "@/app/platform/ipc";
 import { WorkspaceService } from "@/app/store/services";
 import { Logger } from "@/util/logger";
 import { onCleanup, onMount } from "solid-js";
@@ -58,8 +59,7 @@ function CrossWindowDragMonitor(): JSX.Element {
 async function handleCrossWindowDragEnd(payload: DragItemPayload, sourceWindow: string | null) {
     let cursorPoint: { x: number; y: number };
     try {
-        const { invoke } = await import("@tauri-apps/api/core");
-        cursorPoint = await invoke<{ x: number; y: number }>("get_cursor_point");
+        cursorPoint = await invokeCommand<{ x: number; y: number }>("get_cursor_point");
     } catch (e) {
         Logger.error("dnd:cross", "failed to get cursor position", { error: String(e) });
         return;

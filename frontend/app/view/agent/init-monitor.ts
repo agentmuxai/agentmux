@@ -12,7 +12,7 @@
  */
 
 import type { Setter } from "solid-js";
-import { globalStore, getApi } from "@/app/store/global";
+import { getApi } from "@/app/store/global";
 import type { InitQuestion, InitState } from "./types";
 
 /**

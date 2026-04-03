@@ -4,7 +4,7 @@
 import { BlockNodeModel } from "@/app/block/blocktypes";
 import { RpcApi } from "@/app/store/wshclientapi";
 import { TabRpcClient } from "@/app/store/wshrpcutil";
-import { atoms, getApi, globalStore, WOS } from "@/app/store/global";
+import { atoms, getApi, WOS } from "@/app/store/global";
 import { SignalAtom } from "@/util/util";
 import { AgentViewWrapper } from "./agent-view";
 import { PROVIDERS, resolveProviderAlias } from "./providers";
@@ -106,7 +106,7 @@ export class AgentViewModel implements ViewModel {
 
             // Create SubprocessController (no-op start — waits for first message)
             await RpcApi.ControllerResyncCommand(TabRpcClient, {
-                tabid: globalStore.get(atoms.staticTabId),
+                tabid: atoms.staticTabId(),
                 blockid: blockId,
                 forcerestart: true,
             });
@@ -247,7 +247,7 @@ export class AgentViewModel implements ViewModel {
 
             // Create SubprocessController (no-op start — waits for first message)
             await RpcApi.ControllerResyncCommand(TabRpcClient, {
-                tabid: globalStore.get(atoms.staticTabId),
+                tabid: atoms.staticTabId(),
                 blockid: blockId,
                 forcerestart: true,
             });

@@ -10,7 +10,6 @@ import {
     getConnStatusAtom,
     getHostName,
     getUserName,
-    globalStore,
     WOS,
 } from "@/app/store/global";
 import { globalRefocusWithTimeout } from "@/app/store/keymodel";

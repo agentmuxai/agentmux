@@ -1,7 +1,7 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { atoms, getApi, globalStore } from "./global";
+import { atoms, getApi } from "./global";
 
 class ContextMenuModelType {
     handlers: Map<string, () => void> = new Map(); // id -> handler

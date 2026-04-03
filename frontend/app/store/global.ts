@@ -165,24 +165,6 @@ export const atoms = {
 };
 
 // ---------------------------------------------------------------------------
-// globalStore shim — used by code not yet migrated to direct signal calls.
-// globalStore.get(accessor) → accessor()
-// globalStore.set(setter, value) → setter(value)
-// ---------------------------------------------------------------------------
-
-export const globalStore = {
-    get<T>(accessor: (() => T) | any): T {
-        if (typeof accessor === "function") return (accessor as () => T)();
-        console.warn("[globalStore.get] non-function:", accessor);
-        return undefined as unknown as T;
-    },
-    set<T>(setter: ((v: T | ((prev: T) => T)) => void) | any, value: T | ((prev: T) => T)) {
-        if (typeof setter === "function") (setter as any)(value);
-        else console.warn("[globalStore.set] non-function setter:", setter);
-    },
-};
-
-// ---------------------------------------------------------------------------
 // globalPrimaryTabStartup
 // ---------------------------------------------------------------------------
 

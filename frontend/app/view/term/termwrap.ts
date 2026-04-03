@@ -5,7 +5,7 @@ import { getFileSubject } from "@/app/store/wps";
 import { sendWSCommand } from "@/app/store/ws";
 import { RpcApi } from "@/app/store/wshclientapi";
 import { TabRpcClient } from "@/app/store/wshrpcutil";
-import { WOS, atoms, fetchWaveFile, getSettingsKeyAtom, globalStore, openLink } from "@/app/store/global";
+import { WOS, atoms, fetchWaveFile, getSettingsKeyAtom, openLink } from "@/app/store/global";
 import * as services from "@/app/store/services";
 import { PLATFORM, PlatformLinux, PlatformMacOS, PlatformWindows } from "@/util/platformutil";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
@@ -202,7 +202,7 @@ export class TermWrap {
         this.toDispose.push(
             this.terminal.onSelectionChange(
                 debounce(50, () => {
-                    if (!globalStore.get(copyOnSelectAtom)) {
+                    if (!copyOnSelectAtom()) {
                         return;
                     }
                     const selectedText = this.terminal.getSelection();

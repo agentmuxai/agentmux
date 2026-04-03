@@ -106,7 +106,7 @@ export function zoomBlockOut(blockId: string, step: number = WHEEL_STEP): void {
     stepZoom(blockId, zoom, step, -1);
 }
 
-export function zoomIn(store: any, step: number = KEYBOARD_STEP): void {
+export function zoomIn(step: number = KEYBOARD_STEP): void {
     const blockId = getFocusedBlockId();
     if (!blockId) return;
     const zoom = getBlockZoom(blockId);
@@ -114,7 +114,7 @@ export function zoomIn(store: any, step: number = KEYBOARD_STEP): void {
     stepZoom(blockId, zoom, step, 1);
 }
 
-export function zoomOut(store: any, step: number = KEYBOARD_STEP): void {
+export function zoomOut(step: number = KEYBOARD_STEP): void {
     const blockId = getFocusedBlockId();
     if (!blockId) return;
     const zoom = getBlockZoom(blockId);
@@ -122,7 +122,7 @@ export function zoomOut(store: any, step: number = KEYBOARD_STEP): void {
     stepZoom(blockId, zoom, step, -1);
 }
 
-export function zoomReset(store: any): void {
+export function zoomReset(): void {
     const blockId = getFocusedBlockId();
     if (!blockId) return;
     setBlockZoom(blockId, DEFAULT_ZOOM);
@@ -173,7 +173,7 @@ export function showZoomIndicator(text: string): void {
     }, 1500);
 }
 
-export function getZoomPercentage(store: any): string {
+export function getZoomPercentage(): string {
     const blockId = getFocusedBlockId();
     if (!blockId) return "100%";
     const zoom = getBlockZoom(blockId);

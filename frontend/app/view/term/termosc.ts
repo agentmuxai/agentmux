@@ -6,7 +6,7 @@
 
 import { RpcApi } from "@/app/store/wshclientapi";
 import { TabRpcClient } from "@/app/store/wshrpcutil";
-import { WOS, atoms, globalStore } from "@/app/store/global";
+import { WOS, atoms } from "@/app/store/global";
 import * as services from "@/app/store/services";
 import { getWebServerEndpoint } from "@/util/endpoints";
 import { fireAndForget } from "@/util/util";

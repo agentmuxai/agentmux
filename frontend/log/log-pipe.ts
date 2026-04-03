@@ -3,11 +3,11 @@
 //
 // Console log pipe: monkey-patches console.log/warn/error/debug/info
 // to forward all messages to the Rust host via the fe_log_structured
-// Tauri command. Original console behavior is preserved.
+// IPC command. Original console behavior is preserved.
 //
 // Usage: call initLogPipe() once at startup, before any other code.
 
-import { invoke } from "@tauri-apps/api/core";
+import { invokeCommand } from "@/app/platform/ipc";
 
 const LEVELS = ["log", "warn", "error", "debug", "info"] as const;
 type LogLevel = (typeof LEVELS)[number];
@@ -37,7 +37,7 @@ export function initLogPipe() {
                     .join(" ");
 
                 // Fire-and-forget — never let logging break the app
-                invoke("fe_log_structured", {
+                invokeCommand("fe_log_structured", {
                     level: level === "log" ? "info" : level,
                     module: "console",
                     message: msg,

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Search, useSearch } from "@/app/element/search";
-import { atoms, getOverrideConfigAtom, getSettingsPrefixAtom, globalStore, pushNotification, WOS } from "@/store/global";
+import { atoms, getOverrideConfigAtom, getSettingsPrefixAtom, pushNotification, WOS } from "@/store/global";
 import { backendStatusAtom } from "@/store/backendStatus";
 import { fireAndForget } from "@/util/util";
 import { computeBgStyleFromMeta } from "@/util/waveutil";
@@ -17,7 +17,7 @@ import { makeTerminalModel, setTerminalViewComponent, TermViewModel } from "./te
 import { TermWrap } from "./termwrap";
 import "./xterm.css";
 import { DragOverlay } from "@/app/element/dragoverlay";
-import { detectHost } from "@/app/platform/ipc";
+import { detectHost, invokeCommand } from "@/app/platform/ipc";
 
 // TermResyncHandler: watches connection status changes and resyncs the terminal controller.
 // Also resyncs when the backend restarts — local terminals have no connStatus change on restart,
@@ -191,8 +191,8 @@ function TerminalView(props: ViewComponentProps<TermViewModel>): JSX.Element {
         });
         rszObs.observe(connectElemRef);
         termWrap.onSearchResultsDidChange = (results: { resultIndex: number; resultCount: number }) => {
-            if (searchProps.resultsIndex) globalStore.set(searchProps.resultsIndex, results.resultIndex);
-            if (searchProps.resultsCount) globalStore.set(searchProps.resultsCount, results.resultCount);
+            if (searchProps.resultsIndex) searchProps.resultsIndex(results.resultIndex);
+            if (searchProps.resultsCount) searchProps.resultsCount(results.resultCount);
         };
         fireAndForget(() => termWrap.init());
         if (wasFocused) {
@@ -271,7 +271,7 @@ function TerminalView(props: ViewComponentProps<TermViewModel>): JSX.Element {
         }
         for (const filePath of paths) {
             const fileName = filePath.split(/[\\/]/).pop() ?? filePath;
-            import("@tauri-apps/api/core").then(({ invoke }) => invoke("copy_file_to_dir", { sourcePath: filePath, targetDir: cwd }))
+            invokeCommand("copy_file_to_dir", { sourcePath: filePath, targetDir: cwd })
                 .then((destPath: any) => {
                     console.log(`[term-drop] copied ${fileName} → ${destPath}`);
                 })

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useOnResize } from "@/app/hook/useDimensions";
-import { atoms, globalStore, WOS } from "@/app/store/global";
+import { atoms, WOS } from "@/app/store/global";
 import { fireAndForget } from "@/util/util";
 import type { Properties as CSSProperties } from "csstype";
 import { createEffect, createMemo, createSignal, onCleanup, onMount, untrack } from "solid-js";
