@@ -333,14 +333,23 @@ fn deploy_wsh(app_path: &std::path::Path) {
     // Versioned source name in portable runtime/
     let wsh_src_name = format!("agentmux-wsh-{}{}", version, exe_suffix);
     let bundled_wsh = app_path.join(&wsh_src_name);
-    if !bundled_wsh.exists() {
-        // Not an error in dev mode — agentmux-wsh may not be available
-        tracing::error!(
-            "FATAL: Bundled agentmux-wsh not found at: {}",
-            bundled_wsh.display()
+
+    // Dev-mode fallback: cargo outputs unversioned agentmux-wsh adjacent to the CEF binary
+    let dev_wsh = app_path.join(format!("agentmux-wsh{}", exe_suffix));
+
+    let bundled_wsh = if bundled_wsh.exists() {
+        bundled_wsh
+    } else if dev_wsh.exists() {
+        tracing::debug!("deploy_wsh: using dev-mode unversioned binary: {}", dev_wsh.display());
+        dev_wsh
+    } else {
+        tracing::debug!(
+            "deploy_wsh: agentmux-wsh not found (versioned: {}, dev: {}) — shell integration unavailable",
+            bundled_wsh.display(),
+            dev_wsh.display()
         );
         return;
-    }
+    };
 
     let arch = if cfg!(target_arch = "aarch64") { "arm64" } else { "x64" };
     let platform = if cfg!(target_os = "macos") {
