@@ -18,7 +18,7 @@ pub struct BackendSpawnResult {
     pub instance_id: String,
 }
 
-/// Spawn the agentmuxsrv-rs backend sidecar and wait for it to signal
+/// Spawn the agentmux-srv backend sidecar and wait for it to signal
 /// readiness via a `WAVESRV-ESTART` line on stderr (30s timeout).
 pub async fn spawn_backend(state: &Arc<AppState>) -> Result<BackendSpawnResult, String> {
     tracing::info!("spawn_backend() called");
@@ -59,7 +59,7 @@ pub async fn spawn_backend(state: &Arc<AppState>) -> Result<BackendSpawnResult, 
     *state.version_config_dir.lock().unwrap() = Some(config_dir.to_string_lossy().to_string());
 
     // 3. Resolve the backend binary path
-    let backend_name = "agentmuxsrv-rs";
+    let backend_name = "agentmux-srv";
     let exe_suffix = if cfg!(windows) { ".exe" } else { "" };
 
     let backend_path = resolve_backend_binary(backend_name, exe_suffix)?;
@@ -79,7 +79,7 @@ pub async fn spawn_backend(state: &Arc<AppState>) -> Result<BackendSpawnResult, 
     // 6. Spawn the process
     let auth_key = state.auth_key.lock().unwrap().clone();
     tracing::info!(
-        "Spawning agentmuxsrv-rs with auth key: {}...",
+        "Spawning agentmux-srv with auth key: {}...",
         &auth_key[..8.min(auth_key.len())]
     );
 
@@ -122,7 +122,7 @@ pub async fn spawn_backend(state: &Arc<AppState>) -> Result<BackendSpawnResult, 
 
     let mut child = cmd
         .spawn()
-        .map_err(|e| format!("Failed to spawn agentmuxsrv-rs: {}", e))?;
+        .map_err(|e| format!("Failed to spawn agentmux-srv: {}", e))?;
 
     let child_pid = child.id();
     tracing::info!("Backend spawned with PID: {}", child_pid);
@@ -167,7 +167,7 @@ pub async fn spawn_backend(state: &Arc<AppState>) -> Result<BackendSpawnResult, 
             let reader = std::io::BufReader::new(stdout);
             for line in reader.lines() {
                 match line {
-                    Ok(l) => tracing::info!("[agentmuxsrv-rs stdout] {}", l),
+                    Ok(l) => tracing::info!("[agentmux-srv stdout] {}", l),
                     Err(_) => break,
                 }
             }
@@ -213,7 +213,7 @@ pub async fn spawn_backend(state: &Arc<AppState>) -> Result<BackendSpawnResult, 
                             );
                         }
                     } else {
-                        tracing::info!("[agentmuxsrv-rs] {}", l);
+                        tracing::info!("[agentmux-srv] {}", l);
                     }
                 }
                 Err(_) => break,
@@ -224,12 +224,12 @@ pub async fn spawn_backend(state: &Arc<AppState>) -> Result<BackendSpawnResult, 
         let pid = state_for_monitor.backend_pid.lock().unwrap().unwrap_or(0);
         if estart_received {
             tracing::error!(
-                "[agentmuxsrv-rs] RUNTIME CRASH — pid={}",
+                "[agentmux-srv] RUNTIME CRASH — pid={}",
                 pid
             );
         } else {
             tracing::error!(
-                "[agentmuxsrv-rs] STARTUP CRASH — terminated before ready (pid={})",
+                "[agentmux-srv] STARTUP CRASH — terminated before ready (pid={})",
                 pid
             );
         }
@@ -247,8 +247,8 @@ pub async fn spawn_backend(state: &Arc<AppState>) -> Result<BackendSpawnResult, 
     // Wait for ESTART with 30s timeout
     let result = tokio::time::timeout(std::time::Duration::from_secs(30), rx.recv())
         .await
-        .map_err(|_| "Timeout waiting for agentmuxsrv-rs to start (30s)".to_string())?
-        .ok_or_else(|| "agentmuxsrv-rs channel closed before sending endpoints".to_string())?;
+        .map_err(|_| "Timeout waiting for agentmux-srv to start (30s)".to_string())?
+        .ok_or_else(|| "agentmux-srv channel closed before sending endpoints".to_string())?;
 
     tracing::info!(
         "Backend successfully started: ws={} web={} version={} instance={}",
@@ -262,8 +262,9 @@ pub async fn spawn_backend(state: &Arc<AppState>) -> Result<BackendSpawnResult, 
 }
 
 /// Resolve the backend binary path.
-/// Checks: portable path (bin/agentmuxsrv-rs.x64.exe), dev mode (adjacent to exe),
-/// and dist/bin/ paths.
+/// Looks for versioned agentmux-srv-{version}{suffix} in the same dir as the CEF host,
+/// or unversioned agentmux-srv{suffix} for dev mode (cargo output).
+/// Hard fails with a directory listing if not found — no fallbacks.
 fn resolve_backend_binary(
     backend_name: &str,
     exe_suffix: &str,
@@ -271,66 +272,32 @@ fn resolve_backend_binary(
     let exe_path = std::env::current_exe()
         .map_err(|e| format!("Failed to get current exe: {}", e))?;
     let exe_dir = exe_path.parent().unwrap();
+    let version = env!("CARGO_PKG_VERSION");
 
-    // Portable layout: runtime/{name}.x64.exe
-    let runtime_binary = exe_dir
-        .join("runtime")
-        .join(format!("{}.x64{}", backend_name, exe_suffix));
-    if runtime_binary.exists() {
-        tracing::info!("Using runtime {} at: {:?}", backend_name, runtime_binary);
-        return Ok(runtime_binary);
+    // Portable layout: agentmux-srv-{version}.exe in the same dir as CEF host
+    let versioned = exe_dir.join(format!("{}-{}{}", backend_name, version, exe_suffix));
+    if versioned.exists() {
+        tracing::info!("Using {} at: {:?}", backend_name, versioned);
+        return Ok(versioned);
     }
 
-    // Portable release: bin/{name}.x64.exe next to the app exe
-    let portable_binary = exe_dir
-        .join("bin")
-        .join(format!("{}.x64{}", backend_name, exe_suffix));
-    if portable_binary.exists() {
-        tracing::info!(
-            "Using portable {} at: {:?}",
-            backend_name,
-            portable_binary
-        );
-        return Ok(portable_binary);
-    }
-
-    // Flat portable: {name}.x64.exe adjacent to the host binary
-    let flat_x64 = exe_dir.join(format!("{}.x64{}", backend_name, exe_suffix));
-    if flat_x64.exists() {
-        tracing::info!("Using flat portable {} at: {:?}", backend_name, flat_x64);
-        return Ok(flat_x64);
-    }
-
-    // Dev mode: {name}(.exe) adjacent to the host binary
+    // Dev mode: agentmux-srv(.exe) adjacent to the host binary (cargo build output)
     let dev_binary = exe_dir.join(format!("{}{}", backend_name, exe_suffix));
     if dev_binary.exists() {
         tracing::info!("Using dev-mode {} at: {:?}", backend_name, dev_binary);
         return Ok(dev_binary);
     }
 
-    // Check dist/bin/ in the workspace (try both plain and .x64 variants)
-    if let Some(workspace) = exe_dir.parent().and_then(|p| p.parent()) {
-        let dist_bin = workspace.join("dist").join("bin");
-
-        // Try {name}.x64{exe} first (Taskfile convention)
-        let dist_x64 = dist_bin.join(format!("{}.x64{}", backend_name, exe_suffix));
-        if dist_x64.exists() {
-            tracing::info!("Using dist {} at: {:?}", backend_name, dist_x64);
-            return Ok(dist_x64);
-        }
-
-        // Then try {name}{exe}
-        let dist_plain = dist_bin.join(format!("{}{}", backend_name, exe_suffix));
-        if dist_plain.exists() {
-            tracing::info!("Using dist {} at: {:?}", backend_name, dist_plain);
-            return Ok(dist_plain);
+    // Hard fail — list directory contents to aid diagnosis
+    let mut listing = String::new();
+    if let Ok(entries) = std::fs::read_dir(exe_dir) {
+        for entry in entries.flatten() {
+            listing.push_str(&format!("\n  {}", entry.file_name().to_string_lossy()));
         }
     }
-
     Err(format!(
-        "Backend binary '{}' not found. Searched:\n  - {:?}\n  - {:?}\n  - dist/bin/{}.x64{}\n  - dist/bin/{}{}",
-        backend_name, portable_binary, dev_binary,
-        backend_name, exe_suffix, backend_name, exe_suffix
+        "FATAL: Backend binary not found.\n  Expected: {:?}\n  Dev mode: {:?}\n  Contents of {:?}:{}",
+        versioned, dev_binary, exe_dir, listing
     ))
 }
 
@@ -352,55 +319,40 @@ fn parse_estart(line: &str) -> BackendSpawnResult {
     }
 }
 
-/// Deploy the bundled wsh binary.
+/// Deploy the bundled agentmux-wsh binary.
 fn deploy_wsh(app_path: &std::path::Path) {
     let bin_dir = app_path.join("bin");
     if let Err(e) = std::fs::create_dir_all(&bin_dir) {
-        tracing::warn!("Failed to create bin dir for wsh: {}", e);
-        return;
-    }
-
-    let wsh_src_name = if cfg!(windows) { "wsh.exe" } else { "wsh" };
-    let bundled_wsh = app_path.join(wsh_src_name);
-    if !bundled_wsh.exists() {
-        // Not an error in dev mode — wsh may not be available
-        tracing::debug!("Bundled wsh not found at: {}", bundled_wsh.display());
+        tracing::warn!("Failed to create bin dir for agentmux-wsh: {}", e);
         return;
     }
 
     let version = env!("CARGO_PKG_VERSION");
-    let (goos, goarch) = if cfg!(target_os = "macos") {
-        (
-            "darwin",
-            if cfg!(target_arch = "aarch64") {
-                "arm64"
-            } else {
-                "x64"
-            },
-        )
+    let exe_suffix = if cfg!(windows) { ".exe" } else { "" };
+
+    // Versioned source name in portable runtime/
+    let wsh_src_name = format!("agentmux-wsh-{}{}", version, exe_suffix);
+    let bundled_wsh = app_path.join(&wsh_src_name);
+    if !bundled_wsh.exists() {
+        // Not an error in dev mode — agentmux-wsh may not be available
+        tracing::error!(
+            "FATAL: Bundled agentmux-wsh not found at: {}",
+            bundled_wsh.display()
+        );
+        return;
+    }
+
+    let arch = if cfg!(target_arch = "aarch64") { "arm64" } else { "x64" };
+    let platform = if cfg!(target_os = "macos") {
+        "darwin"
     } else if cfg!(target_os = "linux") {
-        (
-            "linux",
-            if cfg!(target_arch = "aarch64") {
-                "arm64"
-            } else {
-                "x64"
-            },
-        )
+        "linux"
     } else {
-        (
-            "windows",
-            if cfg!(target_arch = "aarch64") {
-                "arm64"
-            } else {
-                "x64"
-            },
-        )
+        "windows"
     };
 
-    let exe_suffix = if cfg!(windows) { ".exe" } else { "" };
-    let wsh_name = format!("wsh-{}-{}.{}{}", version, goos, goarch, exe_suffix);
-    let dest = bin_dir.join(&wsh_name);
+    let dest_name = format!("agentmux-wsh-{}-{}.{}{}", version, platform, arch, exe_suffix);
+    let dest = bin_dir.join(&dest_name);
 
     if dest.exists() {
         return; // already deployed
@@ -417,7 +369,7 @@ fn deploy_wsh(app_path: &std::path::Path) {
         let _ = std::fs::set_permissions(&dest, std::fs::Permissions::from_mode(0o755));
     }
 
-    tracing::info!("Deployed wsh to: {}", dest.display());
+    tracing::info!("Deployed agentmux-wsh to: {}", dest.display());
 }
 
 /// Create a Windows Job Object and assign the child process to it.

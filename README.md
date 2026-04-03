@@ -98,13 +98,13 @@ Available from the top bar (right side) or the window header right-click menu:
                                        │
                     ┌──────────────────▼───────────────┐
                     │       Backend Sidecar             │
-                    │   agentmuxsrv-rs (Rust)           │
+                    │   agentmux-srv (Rust)             │
                     │   Tokio + Axum + SQLite           │
                     │   terminals, WebSocket, RPC       │
                     └──────────────────┬───────────────┘
                                        │
                     ┌──────────────────▼───────────────┐
-                    │          wsh-rs                   │
+                    │       agentmux-wsh                │
                     │   Shell integration CLI           │
                     └──────────────────────────────────┘
 ```
@@ -125,7 +125,7 @@ Available from the top bar (right side) or the window header right-click menu:
 | `task cef:build` | Build the CEF host binary |
 | `task cef:bundle` | Bundle CEF runtime DLLs |
 | `task cef:package:portable` | Windows portable ZIP with launcher |
-| `task build:backend` | Build agentmuxsrv-rs + wsh-rs |
+| `task build:backend` | Build agentmux-srv + agentmux-wsh |
 | `task build:frontend` | Build frontend only |
 | `task test` | Run tests (vitest) |
 | `task clean` | Clean build artifacts |
@@ -156,7 +156,7 @@ Releases are built by [`agentmuxai/agentmux-builder`](https://github.com/agentmu
 
 1. The builder's workflow checks out this repo at the given ref
 2. Builds run in parallel on `ubuntu-latest`, `macos-latest`, and `windows-latest`
-3. Each job builds Rust backend binaries (agentmuxsrv-rs + wsh-rs), then builds the CEF host
+3. Each job builds Rust backend binaries (agentmux-srv + agentmux-wsh), then builds the CEF host
 4. macOS builds are code-signed and notarized via Apple Developer credentials
 5. Windows builds include both an NSIS installer and a portable ZIP
 6. A final `create-release` job collects all artifacts and creates a GitHub Release on this repo

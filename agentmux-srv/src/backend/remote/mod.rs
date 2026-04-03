@@ -43,7 +43,7 @@ pub const LOCAL_CONN_NAME: &str = "";
 pub const SSH_PROXY_JUMP_MAX_DEPTH: i32 = 10;
 
 /// WSH binary name.
-pub const WSH_BINARY_NAME: &str = "wsh";
+pub const WSH_BINARY_NAME: &str = "agentmux-wsh";
 
 /// Remote domain socket path template.
 pub const REMOTE_DOMAIN_SOCKET_DIR: &str = "/tmp";

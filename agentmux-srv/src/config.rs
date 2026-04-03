@@ -3,7 +3,7 @@
 use clap::Parser;
 
 #[derive(Parser, Debug)]
-#[command(name = "agentmuxsrv-rs", about = "AgentMux Rust backend server")]
+#[command(name = "agentmux-srv", about = "AgentMux backend server")]
 pub struct CliArgs {
     /// Path to wave data directory (overrides AGENTMUX_DATA_HOME)
     #[arg(long = "wavedata")]

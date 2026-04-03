@@ -16,10 +16,10 @@ pub struct VersionArgs {
 
 pub fn cmd_version(args: &VersionArgs) {
     if args.verbose {
-        println!("wsh v{}", VERSION);
+        println!("agentmux-wsh v{}", VERSION);
         println!("built with Rust {}", rustc_version());
     } else {
-        println!("wsh v{}", VERSION);
+        println!("agentmux-wsh v{}", VERSION);
     }
 }
 
@@ -119,5 +119,5 @@ pub async fn cmd_stub(name: &str) -> Result<(), String> {
 }
 
 fn stub(name: &str) -> Result<(), String> {
-    Err(format!("{} not yet implemented in wsh-rs", name))
+    Err(format!("{} not yet implemented in agentmux-wsh", name))
 }

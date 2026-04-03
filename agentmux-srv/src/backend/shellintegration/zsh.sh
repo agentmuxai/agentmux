@@ -2,7 +2,7 @@
 # Deployed to: ~/.agentmux/shell/zsh/.zshrc
 # Loaded via: ZDOTDIR=~/.agentmux/shell/zsh (zsh picks up .zshrc automatically)
 
-# Add wsh to PATH via the AGENTMUX executable path (portable mode support)
+# Add agentmux-wsh to PATH via the AGENTMUX executable path (portable mode support)
 if [ -n "$AGENTMUX" ] && [ "$AGENTMUX" != "1" ]; then
     _agentmux_app_dir="$(dirname "$AGENTMUX")"
     export PATH="$_agentmux_app_dir:$PATH"

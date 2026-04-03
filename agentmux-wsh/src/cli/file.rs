@@ -33,9 +33,9 @@ pub struct ReadfileArgs {
 }
 
 pub async fn cmd_file(_client: &RpcClient, _cmd: FileCommand) -> Result<(), String> {
-    Err("file commands not yet implemented in wsh-rs".into())
+    Err("file commands not yet implemented in agentmux-wsh".into())
 }
 
 pub async fn cmd_readfile(_client: &RpcClient, _args: ReadfileArgs) -> Result<(), String> {
-    Err("readfile not yet implemented in wsh-rs".into())
+    Err("readfile not yet implemented in agentmux-wsh".into())
 }

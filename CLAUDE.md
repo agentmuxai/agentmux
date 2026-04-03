@@ -31,7 +31,7 @@
 - `task cef:build` - Build CEF host binary
 - `task cef:bundle` - Bundle CEF runtime DLLs
 - `task cef:package:portable` - Portable ZIP
-- `task build:backend` - Rust sidecar binaries (agentmuxsrv-rs + wsh-rs)
+- `task build:backend` - Rust sidecar binaries (agentmux-srv + agentmux-wsh)
 - `task build:frontend` - Frontend only
 - `task test` - Run tests
 - `task clean` - Clean artifacts
@@ -62,8 +62,8 @@ AgentMux uses a **CEF (Chromium Embedded Framework)** host with a **100% Rust ba
 
 - **agentmux-cef** = CEF host app (Rust, IPC bridge, window management, bundled Chromium)
 - **agentmux-launcher** = 325 KB launcher exe (sets DLL path, spawns CEF host from `runtime/`)
-- **agentmuxsrv-rs** = Rust backend sidecar (auto-spawned, don't run manually)
-- **wsh** = Rust shell integration binary (wsh-rs crate, must be versioned correctly)
+- **agentmux-srv** = Rust backend sidecar (auto-spawned, don't run manually)
+- **agentmux-wsh** = Rust shell integration binary (must be versioned correctly)
 
 **Important:** The Tauri host (`src-tauri/`) is deprecated and must not be used. CEF is the only active host. All Go and Electron code has been removed.
 
@@ -72,7 +72,7 @@ AgentMux uses a **CEF (Chromium Embedded Framework)** host with a **100% Rust ba
 AgentMux is designed to run multiple instances simultaneously — different versions, dev + portable, or multiple portable copies. Each instance is fully isolated:
 
 - **Separate CEF data dirs:** Each instance uses its own CEF user data directory based on version, so browser state, cookies, and caches never collide.
-- **Separate backend sidecars:** Each instance spawns its own `agentmuxsrv-rs` on a dynamic port. No port conflicts.
+- **Separate backend sidecars:** Each instance spawns its own `agentmux-srv` on a dynamic port. No port conflicts.
 - **Separate binaries:** Portable instances run from their own extracted folder. `task dev` copies to `dist/cef-dev/`. Nothing is shared.
 - **Dev mode isolation:** `AGENTMUX_DEV=1` → data dir `~/.agentmux-dev` (separate from `~/.agentmux`).
 
@@ -83,7 +83,7 @@ This means:
 
 ### Widgets
 
-Widgets are defined in `agentmuxsrv-rs/src/config/widgets.json`. These are the **only** widget types — do not invent or reference widgets that don't exist here.
+Widgets are defined in `agentmux-srv/src/config/widgets.json`. These are the **only** widget types — do not invent or reference widgets that don't exist here.
 
 | Widget Key | View | Label | Opens in Pane? |
 |------------|------|-------|----------------|
@@ -120,7 +120,7 @@ bump patch -m "Description"
 # OR: bump minor / bump major / bump 1.2.3
 ```
 
-This updates: `package.json`, `package-lock.json`, `src-tauri/Cargo.toml`, `Cargo.lock`, `src-tauri/tauri.conf.json`, `agentmuxsrv-rs/Cargo.toml`, `wsh-rs/Cargo.toml`, `VERSION_HISTORY.md`
+This updates: `package.json`, `package-lock.json`, `src-tauri/Cargo.toml`, `Cargo.lock`, `src-tauri/tauri.conf.json`, `agentmux-srv/Cargo.toml`, `agentmux-wsh/Cargo.toml`, `VERSION_HISTORY.md`
 
 **Step 2: Verify consistency**
 ```bash
@@ -239,7 +239,7 @@ The Wayland `xdg_toplevel.app_id` is `"agentmux"` (the binary name). GNOME match
 the running window to `agentmux.desktop` only. Only `agentmux.desktop` is needed.
 
 ### CRITICAL: Never Kill AgentMux by Image Name
-- **NEVER** use `taskkill //im agentmux-cef.exe` or `taskkill //im agentmuxsrv-rs.x64.exe`
+- **NEVER** use `taskkill //im agentmux-cef.exe` or `taskkill //im agentmux-srv.exe`
 - Multiple AgentMux instances (portable, dev, different versions) share the same binary names
 - Killing by image name kills ALL instances, including the one you are running inside of
 - **Always kill by PID:** `taskkill /PID <pid> /F`

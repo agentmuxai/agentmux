@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["src-tauri", "agentmuxsrv-rs", "wsh-rs", "agentmux-cef", "agentmux-launcher"]
+members = ["src-tauri", "agentmux-srv", "agentmux-wsh", "agentmux-cef", "agentmux-launcher"]
 
 [profile.release]
 strip = true

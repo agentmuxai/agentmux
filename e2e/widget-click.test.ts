@@ -41,7 +41,7 @@ async function tryGetReadyPage(): Promise<Page | null> {
 }
 
 test.beforeAll(async () => {
-    // Kill only the Tauri UI process — leave agentmuxsrv-rs running for reuse
+    // Kill only the Tauri UI process — leave agentmux-srv running for reuse
     try {
         execSync("taskkill /F /IM agentmux.exe 2>nul", { shell: "cmd.exe" });
         await new Promise((r) => setTimeout(r, 2000));

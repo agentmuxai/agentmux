@@ -30,17 +30,17 @@ pub struct LaunchArgs {
 }
 
 pub async fn cmd_view(_client: &RpcClient, _args: ViewArgs) -> Result<(), String> {
-    Err("view not yet implemented in wsh-rs".into())
+    Err("view not yet implemented in agentmux-wsh".into())
 }
 
 pub async fn cmd_web(_client: &RpcClient, _args: WebArgs) -> Result<(), String> {
-    Err("web not yet implemented in wsh-rs".into())
+    Err("web not yet implemented in agentmux-wsh".into())
 }
 
 pub async fn cmd_editor(_client: &RpcClient, _args: EditorArgs) -> Result<(), String> {
-    Err("editor not yet implemented in wsh-rs".into())
+    Err("editor not yet implemented in agentmux-wsh".into())
 }
 
 pub async fn cmd_launch(_client: &RpcClient, _args: LaunchArgs) -> Result<(), String> {
-    Err("launch not yet implemented in wsh-rs".into())
+    Err("launch not yet implemented in agentmux-wsh".into())
 }

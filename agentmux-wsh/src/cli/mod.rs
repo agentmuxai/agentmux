@@ -17,7 +17,7 @@ use clap::{Parser, Subcommand};
 use crate::rpc::RpcClient;
 
 #[derive(Parser)]
-#[command(name = "wsh", about = "CLI tool to control AgentMux")]
+#[command(name = "agentmux-wsh", about = "CLI tool to control AgentMux")]
 pub struct Cli {
     /// Block ID to operate on
     #[arg(short, long, global = true)]

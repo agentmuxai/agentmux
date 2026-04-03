@@ -31,7 +31,7 @@ pub const WAVE_DB_DIR: &str = "db";
 pub const CONFIG_DIR: &str = "config";
 pub const REMOTE_WAVE_HOME_DIR_NAME: &str = ".agentmux";
 pub const REMOTE_WSH_BIN_DIR_NAME: &str = "bin";
-pub const REMOTE_FULL_WSH_BIN_PATH: &str = "~/.agentmux/bin/wsh";
+pub const REMOTE_FULL_WSH_BIN_PATH: &str = "~/.agentmux/bin/agentmux-wsh";
 pub const REMOTE_FULL_DOMAIN_SOCKET_PATH: &str = "~/.agentmux/wave-remote.sock";
 
 // ---- Version info (set at startup) ----

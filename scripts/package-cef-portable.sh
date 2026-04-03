@@ -13,10 +13,16 @@ ZIPPATH="$OUTDIR/agentmux-cef-$VERSION-x64-portable.zip"
 
 echo "Packaging AgentMux CEF v$VERSION Portable..."
 
-# Verify required files
-for f in target/release/agentmux-cef.exe dist/cef/libcef.dll dist/bin/agentmuxsrv-rs.x64.exe dist/frontend/index.html target/release/agentmux-launcher.exe; do
+# Verify required files — hard fail, no warnings
+CEF_SRC="dist/cef/agentmux-cef-${VERSION}-windows.x64.exe"
+LAUNCHER_SRC="dist/cef/agentmux-launcher-${VERSION}-windows.x64.exe"
+SRV_SRC="dist/bin/agentmux-srv-${VERSION}-windows.x64.exe"
+WSH_SRC="dist/bin/agentmux-wsh-${VERSION}-windows.x64.exe"
+
+for f in "$CEF_SRC" "$LAUNCHER_SRC" "$SRV_SRC" "$WSH_SRC" dist/cef/libcef.dll dist/frontend/index.html; do
     if [ ! -f "$f" ]; then
         echo "ERROR: $f not found — build first" >&2
+        echo "  Run: task cef:build && task build:backend && task build:frontend:cef" >&2
         exit 1
     fi
 done
@@ -27,8 +33,8 @@ rm -rf "$PORTABLE" "$ZIPPATH"
 # Create structure
 mkdir -p "$PORTABLE/runtime/locales" "$PORTABLE/runtime/frontend"
 
-# Launcher in root
-cp target/release/agentmux-launcher.exe "$PORTABLE/agentmux.exe"
+# Launcher at root (versioned name — visible in Task Manager as agentmux-{VERSION}.exe)
+cp "$LAUNCHER_SRC" "$PORTABLE/agentmux-${VERSION}.exe"
 
 # README
 cat > "$PORTABLE/README.txt" <<READMEEOF
@@ -36,7 +42,7 @@ AgentMux v$VERSION - Portable Edition
 
 Quick Start:
   1. Extract this folder (or ZIP) anywhere
-  2. Run agentmux.exe
+  2. Run agentmux-${VERSION}.exe
 
 Requirements:
   - Windows 10/11 x64
@@ -44,17 +50,10 @@ Requirements:
   - No admin rights required
 READMEEOF
 
-# Runtime binaries
-cp target/release/agentmux-cef.exe "$PORTABLE/runtime/"
-cp dist/bin/agentmuxsrv-rs.x64.exe "$PORTABLE/runtime/"
-
-# wsh
-WSH="dist/bin/wsh-$VERSION-windows.x64.exe"
-if [ -f "$WSH" ]; then
-    cp "$WSH" "$PORTABLE/runtime/wsh.exe"
-else
-    echo "Warning: $WSH not found"
-fi
+# Runtime binaries (versioned names, no platform suffix — discoverable by glob)
+cp "$CEF_SRC" "$PORTABLE/runtime/agentmux-cef-${VERSION}.exe"
+cp "$SRV_SRC" "$PORTABLE/runtime/agentmux-srv-${VERSION}.exe"
+cp "$WSH_SRC" "$PORTABLE/runtime/agentmux-wsh-${VERSION}.exe"
 
 # Frontend
 cp -r dist/frontend/* "$PORTABLE/runtime/frontend/"
@@ -74,13 +73,17 @@ cp dist/cef/chrome_100_percent.pak dist/cef/chrome_200_percent.pak dist/cef/reso
 # Locale (en-US only)
 cp dist/cef/locales/en-US.pak "$PORTABLE/runtime/locales/" 2>/dev/null || true
 
-# Verify versions match
-CEF_VER=$(grep -ao "$VERSION" "$PORTABLE/runtime/agentmux-cef.exe" | head -1)
-SRV_VER=$(grep -ao "$VERSION" "$PORTABLE/runtime/agentmuxsrv-rs.x64.exe" | head -1)
-if [ "$CEF_VER" != "$VERSION" ] || [ "$SRV_VER" != "$VERSION" ]; then
-    echo "ERROR: Binary version mismatch! CEF=$CEF_VER SRV=$SRV_VER expected=$VERSION" >&2
-    exit 1
-fi
+# Verify all versioned binaries are present in the output
+for f in \
+    "$PORTABLE/agentmux-${VERSION}.exe" \
+    "$PORTABLE/runtime/agentmux-cef-${VERSION}.exe" \
+    "$PORTABLE/runtime/agentmux-srv-${VERSION}.exe" \
+    "$PORTABLE/runtime/agentmux-wsh-${VERSION}.exe"; do
+    if [ ! -f "$f" ]; then
+        echo "ERROR: Expected output binary missing: $f" >&2
+        exit 1
+    fi
+done
 
 # Size
 DIR_SIZE=$(du -sh "$PORTABLE" | cut -f1)
@@ -95,3 +98,9 @@ echo ""
 echo "[SUCCESS] CEF Portable v$VERSION"
 echo "  Directory: $PORTABLE ($DIR_SIZE)"
 echo "  ZIP: $ZIPPATH ($ZIP_SIZE)"
+echo ""
+echo "  Binaries:"
+echo "    agentmux-${VERSION}.exe          (launcher)"
+echo "    runtime/agentmux-cef-${VERSION}.exe   (CEF host)"
+echo "    runtime/agentmux-srv-${VERSION}.exe   (backend sidecar)"
+echo "    runtime/agentmux-wsh-${VERSION}.exe   (shell integration)"

@@ -2,7 +2,7 @@
 //
 // This tiny exe lives at the top of the portable directory. It:
 // 1. Adds runtime/ to the DLL search path (so libcef.dll is found)
-// 2. Spawns runtime/agentmux-cef.exe with the same arguments
+// 2. Discovers and spawns runtime/agentmux-cef-{VERSION}.exe with the same arguments
 // 3. Waits for it to exit and forwards the exit code
 //
 // This is needed because libcef.dll is a load-time dependency of the CEF
@@ -13,6 +13,32 @@
     all(not(debug_assertions), target_os = "windows"),
     windows_subsystem = "windows"
 )]
+
+/// Find the versioned agentmux-cef-* binary in the given directory.
+/// Hard fails with a directory listing if not found.
+fn find_cef_binary(runtime_dir: &std::path::Path) -> std::path::PathBuf {
+    let ext = if cfg!(target_os = "windows") { ".exe" } else { "" };
+    if let Ok(entries) = std::fs::read_dir(runtime_dir) {
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let name_str = name.to_string_lossy();
+            if name_str.starts_with("agentmux-cef-") && name_str.ends_with(ext) {
+                return entry.path();
+            }
+        }
+    }
+    // Hard fail with diagnostic
+    eprintln!("FATAL: No agentmux-cef-VERSION{} found in: {}", ext, runtime_dir.display());
+    eprintln!("Contents of runtime/:");
+    if let Ok(entries) = std::fs::read_dir(runtime_dir) {
+        for entry in entries.flatten() {
+            eprintln!("  {}", entry.file_name().to_string_lossy());
+        }
+    } else {
+        eprintln!("  (directory not found or not readable)");
+    }
+    std::process::exit(1);
+}
 
 fn main() {
     let exe_path = std::env::current_exe().expect("cannot resolve exe path");
@@ -33,20 +59,8 @@ fn main() {
         }
     }
 
-    // Resolve the real CEF host binary in runtime/
-    let real_exe = runtime_dir.join(if cfg!(target_os = "windows") {
-        "agentmux-cef.exe"
-    } else {
-        "agentmux-cef"
-    });
-
-    if !real_exe.exists() {
-        eprintln!(
-            "AgentMux runtime not found at: {}\nMake sure the runtime/ folder is intact.",
-            real_exe.display()
-        );
-        std::process::exit(1);
-    }
+    // Discover the versioned CEF host binary in runtime/
+    let real_exe = find_cef_binary(&runtime_dir);
 
     // Forward all CLI arguments
     let args: Vec<String> = std::env::args().skip(1).collect();

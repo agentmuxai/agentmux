@@ -193,7 +193,7 @@ $(foreach ($e in $events) {
 
 ### Primary Bottleneck: Backend Spawn (Windows 11 ~800ms overhead)
 
-The `agentmuxsrv-rs` sidecar takes **~${phasePreBackend}ms** to start on Windows 11.
+The `agentmux-srv` sidecar takes **~${phasePreBackend}ms** to start on Windows 11.
 Breaking this down:
 
 1. **~${jobObjDelay}ms — Process spawn overhead**
@@ -267,7 +267,7 @@ This eliminates most of the ~${jobObjDelay}ms spawn delay after first install.
 
 ### Fix 3: Parallel init in backend (performance — medium effort)
 
-Profile ``agentmuxsrv-rs`` startup. If SQLite migration or I/O initialization
+Profile ``agentmux-srv`` startup. If SQLite migration or I/O initialization
 can be parallelized with the WebSocket server binding, the
 ~${backendInitDelay}ms backend init phase can shrink significantly.
 

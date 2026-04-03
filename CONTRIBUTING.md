@@ -58,8 +58,8 @@ AgentMux is a **Tauri v2** desktop application with a **100% Rust backend**.
 ```
 agentmux/
 ├── src-tauri/          # Tauri v2 shell (Rust + WebView2)
-├── agentmuxsrv-rs/     # Rust async backend server (Tokio + Axum)
-├── wsh-rs/             # Rust shell integration binary
+├── agentmux-srv/       # Rust async backend server (Tokio + Axum)
+├── agentmux-wsh/       # Rust shell integration binary
 ├── frontend/           # React 19 + TypeScript UI (Vite)
 ├── docs/               # Architecture docs, specs, guides
 ├── schema/             # JSON schema definitions
@@ -93,7 +93,7 @@ The native desktop layer — handles window management, system tray, native menu
 
 Changes here do not hot-reload — Tauri auto-rebuilds in `task dev` when Rust files change, but the process restarts.
 
-### Rust Backend (`agentmuxsrv-rs/`)
+### Rust Backend (`agentmux-srv/`)
 
 The async backend server — auto-spawned by Tauri, never launched manually. Handles:
 
@@ -107,7 +107,7 @@ The async backend server — auto-spawned by Tauri, never launched manually. Han
 
 Changes here require `task build:backend` followed by restarting `task dev`.
 
-### Shell Helper (`wsh-rs/`)
+### Shell Helper (`agentmux-wsh/`)
 
 A small Rust binary (1.1 MB) deployed to remote hosts for multiplexed terminal sessions and file streaming. Communicates with the backend via WebSocket.
 
@@ -120,7 +120,7 @@ Frontend (React)
     ↕  Tauri IPC (window/platform commands)
 Tauri Shell (src-tauri)
     ↕  WebSocket / JSON-RPC 2.0
-agentmuxsrv-rs (Rust backend)
+agentmux-srv (Rust backend)
     ↕  WebSocket / wshrpc
-wsh-rs (remote hosts)
+agentmux-wsh (remote hosts)
 ```

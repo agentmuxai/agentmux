@@ -12,12 +12,12 @@
       "path": "package.version"
     },
     {
-      "file": "agentmuxsrv-rs/Cargo.toml",
+      "file": "agentmux-srv/Cargo.toml",
       "type": "toml",
       "path": "package.version"
     },
     {
-      "file": "wsh-rs/Cargo.toml",
+      "file": "agentmux-wsh/Cargo.toml",
       "type": "toml",
       "path": "package.version"
     },
@@ -69,8 +69,8 @@
       "VERSION_HISTORY.md",
       "src-tauri/Cargo.toml",
       "src-tauri/tauri.conf.json",
-      "agentmuxsrv-rs/Cargo.toml",
-      "wsh-rs/Cargo.toml",
+      "agentmux-srv/Cargo.toml",
+      "agentmux-wsh/Cargo.toml",
       "agentmux-cef/Cargo.toml",
       "agentmux-launcher/Cargo.toml"
     ],

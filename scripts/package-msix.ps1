@@ -100,8 +100,8 @@ if (Test-Path $wv2) { Copy-Item $wv2 "$stagingDir\" -Force }
 
 # Sidecar binaries — Tauri strips the target triple when copying to target/release/
 $sidecars = @(
-  @{ src = "$releaseDir\agentmuxsrv-rs.exe"; dst = "agentmuxsrv-rs.exe" },
-  @{ src = "$releaseDir\wsh.exe";            dst = "wsh.exe" }
+  @{ src = "$releaseDir\agentmux-srv.exe"; dst = "agentmux-srv.exe" },
+  @{ src = "$releaseDir\agentmux-wsh.exe"; dst = "agentmux-wsh.exe" }
 )
 foreach ($s in $sidecars) {
   if (Test-Path $s.src) {

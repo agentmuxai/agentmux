@@ -164,34 +164,28 @@ pub fn get_shell_startup(
     }
 }
 
-/// Find the wsh binary deployed alongside the current executable.
-/// Returns the path if found, or None.
+/// Find the agentmux-wsh binary deployed alongside the current executable.
+/// Returns the path if found, or None (non-fatal — shell integration is optional).
 pub fn find_wsh_binary() -> Option<PathBuf> {
     let exe_dir = std::env::current_exe().ok()?.parent()?.to_path_buf();
     let version = env!("CARGO_PKG_VERSION");
 
-    // Try versioned name (matches package-portable.ps1 naming)
+    // Versioned name — only supported layout
     let versioned = if cfg!(windows) {
-        exe_dir.join(format!("wsh-{}-windows.x64.exe", version))
+        exe_dir.join(format!("agentmux-wsh-{}.exe", version))
     } else if cfg!(target_os = "macos") {
-        exe_dir.join(format!("wsh-{}-darwin.arm64", version))
+        exe_dir.join(format!("agentmux-wsh-{}", version))
     } else {
-        exe_dir.join(format!("wsh-{}-linux.amd64", version))
+        exe_dir.join(format!("agentmux-wsh-{}", version))
     };
     if versioned.exists() {
         return Some(versioned);
     }
 
-    // Fallback: plain wsh / wsh.exe
-    let plain = if cfg!(windows) {
-        exe_dir.join("wsh.exe")
-    } else {
-        exe_dir.join("wsh")
-    };
-    if plain.exists() {
-        return Some(plain);
-    }
-
+    tracing::debug!(
+        "agentmux-wsh not found at: {} — shell integration unavailable",
+        versioned.display()
+    );
     None
 }
 
