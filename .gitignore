@@ -38,12 +38,9 @@ docs/build/
 docs/.docusaurus/
 test-results/
 
-# Tauri / Cargo workspace
-src-tauri/target/
+# Cargo workspace
 /target/
-src-tauri/binaries/
 backend-test/
-src-tauri/gen/schemas/
 test/screenshots/
 
 # CEF binaries (downloaded at build time by cef-dll-sys)

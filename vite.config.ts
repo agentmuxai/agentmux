@@ -1,10 +1,9 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// Vite configuration for Tauri development mode.
-// This replaces electron-vite for the Tauri build.
-// Only the renderer (frontend) configuration is needed —
-// Tauri handles the "main process" in Rust.
+// Vite configuration for AgentMux frontend.
+// Builds the SolidJS frontend for both dev mode (Vite HMR) and
+// production (bundled into the CEF portable package).
 
 import tailwindcss from "@tailwindcss/vite";
 import * as fs from "fs";
@@ -17,7 +16,7 @@ import tsconfigPaths from "vite-tsconfig-paths";
 /**
  * Maps Taskfile {{OS}} values to Node.js process.platform equivalents.
  * Taskfile: "windows" | "darwin" | "linux"
- * Node/Tauri: "win32" | "darwin" | "linux"
+ * process.platform: "win32" | "darwin" | "linux"
  */
 const TASKFILE_OS_MAP: Record<string, string> = {
     windows: "win32",
@@ -67,8 +66,8 @@ function platformResolve(): Plugin {
 
 /**
  * Strips redundant KaTeX font formats (TTF, WOFF) from the build output.
- * KaTeX CSS lists woff2/woff/ttf as @font-face fallbacks; Tauri's Chromium
- * webview only needs woff2, so the others are dead weight (~876 KB).
+ * KaTeX CSS lists woff2/woff/ttf as @font-face fallbacks; CEF's bundled
+ * Chromium only needs woff2, so the others are dead weight (~876 KB).
  */
 function stripKatexLegacyFonts(): Plugin {
     return {
@@ -105,7 +104,7 @@ export default defineConfig({
             },
             output: {
                 // DISABLED: manualChunks creates static inter-chunk imports that
-                // WebKitGTK cannot resolve over tauri:// protocol, preventing JS from starting.
+                // caused loading issues in the old WebKitGTK host.
                 // All code goes in one bundle. Dynamic imports (mermaid, katex, shiki) are
                 // still lazy-loaded but as inlined chunks, not separate files.
             },
@@ -113,10 +112,10 @@ export default defineConfig({
     },
     server: {
         port: 5173,
-        strictPort: true, // Fail if port 5173 is already in use (required for Tauri)
+        strictPort: true, // Fail if port 5173 is already in use (CEF dev server expects this port)
         open: false,
         watch: {
-            ignored: ["dist/**", "**/*.md", "**/*.json", "src-tauri/**"],
+            ignored: ["dist/**", "**/*.md", "**/*.json"],
         },
     },
     css: {
@@ -136,6 +135,5 @@ export default defineConfig({
         stripKatexLegacyFonts(),
     ],
 
-    // Environment variable prefix for Tauri
-    envPrefix: ["VITE_", "TAURI_"],
+    envPrefix: ["VITE_"],
 });
