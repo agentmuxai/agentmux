@@ -609,7 +609,7 @@ function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
     let connBtnRef: { current: HTMLDivElement | null } = { current: null };
     const noHeader = util.useAtomValueSafe(props.viewModel?.noHeader);
 
-    // Compute agent color for border styling (matches header color)
+    // Agent color for border — matches header color on agent-loaded terminals
     const blockAgentColor = createMemo(() => {
         if (!props.preview && blockData()?.meta?.view === "term") {
             const blockEnv = blockData()?.meta?.["cmd:env"] as Record<string, string> | undefined;
@@ -714,7 +714,6 @@ function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
             }
             inert={props.preview || undefined}
         >
-            <BlockMask nodeModel={nodeModel} />
             <Show when={!props.preview && props.viewModel != null}>
                 <ConnStatusOverlay
                     nodeModel={nodeModel}
@@ -745,6 +744,9 @@ function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
                     connBtnRef={connBtnRef}
                 />
             </Show>
+            {/* BlockMask is last in DOM so it paints above all block content,
+                including hardware-accelerated WebGL surfaces */}
+            <BlockMask nodeModel={nodeModel} />
         </div>
     );
 }

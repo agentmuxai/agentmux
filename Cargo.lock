@@ -10,7 +10,7 @@ checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
 name = "agentmux"
-version = "0.33.27"
+version = "0.33.28"
 dependencies = [
  "chrono",
  "dirs 5.0.1",
@@ -47,7 +47,7 @@ dependencies = [
 
 [[package]]
 name = "agentmux-cef"
-version = "0.33.27"
+version = "0.33.28"
 dependencies = [
  "axum 0.8.8",
  "cef",
@@ -68,7 +68,7 @@ dependencies = [
 
 [[package]]
 name = "agentmux-launcher"
-version = "0.33.27"
+version = "0.33.28"
 dependencies = [
  "windows-sys 0.59.0",
  "winres",
@@ -76,7 +76,7 @@ dependencies = [
 
 [[package]]
 name = "agentmux-srv"
-version = "0.33.27"
+version = "0.33.28"
 dependencies = [
  "async-stream",
  "axum 0.7.9",
@@ -784,9 +784,9 @@ dependencies = [
 
 [[package]]
 name = "cc"
-version = "1.2.58"
+version = "1.2.59"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e1e928d4b69e3077709075a938a05ffbedfa53a84c8f766efbf8220bb1ff60e1"
+checksum = "b7a4d3ec6524d28a329fc53654bbadc9bdd7b0431f5d65f1a56ffb28a1ee5283"
 dependencies = [
  "find-msvc-tools",
  "shlex",
@@ -794,9 +794,9 @@ dependencies = [
 
 [[package]]
 name = "cef"
-version = "146.4.0+146.0.9"
+version = "146.4.1+146.0.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "17c44f0dc3c369a2692b533d447ecb66ea3167170e1a1785f19fea5938afdff1"
+checksum = "a5dad6495c583fedab04a24f6fc08274c59a28b33967ca87709398e1f11c2ebe"
 dependencies = [
  "anyhow",
  "cargo_metadata 0.23.1",
@@ -814,9 +814,9 @@ dependencies = [
 
 [[package]]
 name = "cef-dll-sys"
-version = "146.4.0+146.0.9"
+version = "146.4.1+146.0.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "499f151a1e3347716467771ca23f1b1846348c6aa4bbca76e3b6220ee8a26c48"
+checksum = "6616217417da12da57bb7650acc3c8be0fc26e7120892ab926d2ba8d84c8c9c2"
 dependencies = [
  "anyhow",
  "cmake",
