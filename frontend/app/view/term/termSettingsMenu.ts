@@ -3,7 +3,7 @@
 
 import { RpcApi } from "@/app/store/wshclientapi";
 import { TabRpcClient } from "@/app/store/wshrpcutil";
-import { atoms, getBlockMetaKeyAtom, getSettingsKeyAtom, globalStore, WOS } from "@/store/global";
+import { atoms, getBlockMetaKeyAtom, getSettingsKeyAtom, WOS } from "@/store/global";
 import type { TermViewModel } from "./termViewModel";
 
 export function buildSettingsMenuItems(model: TermViewModel): ContextMenuItem[] {

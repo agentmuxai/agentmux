@@ -20,7 +20,7 @@
  * was over any native app — even during an active hover with no drop intended.
  */
 
-import { atoms, getApi, globalStore } from "@/store/global";
+import { atoms, getApi } from "@/store/global";
 import { WorkspaceService } from "@/app/store/services";
 import { getLayoutModelForStaticTab, LayoutTreeActionType, LayoutTreeDeleteNodeAction } from "@/layout/index";
 import { invokeCommand } from "@/app/platform/ipc";

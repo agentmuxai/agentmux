@@ -11,7 +11,6 @@ import {
     getBlockComponentModel,
     getConnStatusAtom,
     getSettingsKeyAtom,
-    globalStore,
     recordTEvent,
     useBlockAtom,
     WOS,
