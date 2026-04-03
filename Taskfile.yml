@@ -720,9 +720,9 @@ tasks:
         internal: true
         platforms: [windows]
         cmds:
-            - cargo build --release -p agentmux-cef
+            - cargo build --release -p agentmux-cef -p agentmux-launcher
             - cmd: powershell -Command "New-Item -ItemType Directory -Force -Path dist/cef | Out-Null; Copy-Item target/release/agentmux-cef.exe dist/cef/agentmux-cef.exe -Force"
-            - echo "✓ Built agentmux-cef for Windows"
+            - echo "✓ Built agentmux-cef + agentmux-launcher for Windows"
 
     cef:build:darwin:
         internal: true
@@ -879,9 +879,13 @@ tasks:
         platforms: [linux]
         cmd: cd dist/cef && LD_LIBRARY_PATH=. ./agentmux-cef --url=http://localhost:5173
     cef:package:portable:
-        desc: Package CEF build as a portable directory + ZIP (Windows). Outputs to ~/Desktop by default.
+        desc: Build everything and package as a portable directory + ZIP (Windows). Outputs to ~/Desktop by default.
         platforms: [windows]
         cmds:
+            - task: build:frontend
+            - task: build:backend
+            - task: cef:build
+            - task: cef:bundle
             - bash scripts/package-cef-portable.sh
 
     cef:clean:
