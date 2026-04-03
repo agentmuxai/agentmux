@@ -1,5 +1,7 @@
 mod ai;
+mod cli_handlers;
 mod files;
+mod forge_handlers;
 mod messagebus;
 mod reactive;
 pub(crate) mod service;
