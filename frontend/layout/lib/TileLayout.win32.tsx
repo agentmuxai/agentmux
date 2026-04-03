@@ -68,6 +68,22 @@ function TileLayoutComponent(props: TileLayoutProps) {
             setAnimate(true);
             layoutModel.ready._set(true);
         }, 50);
+
+        // Windows 11 safety net: the browser's dragend event can be swallowed
+        // when snap-layouts or Alt+Tab interrupts a drag, preventing pragmatic-dnd's
+        // onDrop from firing and leaving activeDrag=true permanently (all pane bodies
+        // frozen with pointer-events:none). Listen on window so we catch it even when
+        // it fires on the draggable element after bubbling.
+        // Reset the same state onDrop resets so subsequent drags are not corrupted.
+        const resetDragState = () => {
+            if (globalDragLayoutModel?.activeDrag()) {
+                globalDragNodeId = null;
+                globalDragLayoutModel.activeDrag._set(false);
+                globalDragLayoutModel = null;
+            }
+        };
+        window.addEventListener("dragend", resetDragState);
+        onCleanup(() => window.removeEventListener("dragend", resetDragState));
     });
 
     const gapSizePx = () => layoutModel.gapSizePx();
@@ -274,6 +290,14 @@ const DisplayNode = (props: DisplayNodeProps) => {
     const isMagnified = () => nodeModel.isMagnified();
     const [isDragging, setIsDragging] = createSignal(false);
 
+    // Clear isDragging when activeDrag goes false (handles the Win11 safety-net
+    // path where onDrop never fires and setIsDragging(false) is never called
+    // directly, leaving the tile stuck with the .dragging CSS class).
+    createEffect(() => {
+        if (!props.layoutModel.activeDrag() && isDragging()) {
+            setIsDragging(false);
+        }
+    });
 
     // Drag preview image state
     const [previewImage, setPreviewImage] = createSignal<HTMLImageElement | null>(null);

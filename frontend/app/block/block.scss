@@ -10,6 +10,9 @@
     justify-content: center;
     width: 100%;
     height: 100%;
+    position: relative; // Establish containing block for .block-mask at all times —
+    // prevents a containing-block change (and GPU compositing re-tile) when
+    // .block-focused adds/removes position:relative on Windows 11.
     overflow: hidden;
     min-height: 0;
     border-radius: var(--block-border-radius);
@@ -416,6 +419,12 @@
             pointer-events: none;
             border-radius: var(--block-border-radius);
             z-index: var(--zindex-block-mask-inner);
+            // backdrop-filter guarantees this element composites above all
+            // composited-scroll children (xterm-viewport with overflow-y:scroll).
+            // backdrop-filter elements MUST render above the layers they sample —
+            // unlike will-change:opacity/transform which Chromium may squash or
+            // reorder. 0.1px blur is imperceptible at any DPR.
+            backdrop-filter: blur(0.1px);
 
             &.show-block-mask {
                 user-select: none;
@@ -441,21 +450,28 @@
         }
 
         &.block-focused {
-            position: relative;
-            z-index: 10; // Elevate focused block above adjacent blocks
+            // No z-index here intentionally: adding z-index would create a
+            // stacking context that isolates xterm's overflow-y:scroll GPU layer
+            // from .block-mask's backdrop-filter, making the ring invisible on
+            // terminal panes. Without a stacking context, .block-mask at z-index:50
+            // is in the parent stacking context and backdrop-filter correctly
+            // composites above xterm's scroll layer.
 
             .block-mask {
-                // Focused: accent color by default
-                border: 2px solid var(--accent-color);
-                z-index: calc(var(--zindex-block-mask-inner) + 1);
+                // Focused: switch to accent color border.
+                // backdrop-filter guarantees this ring is visible above xterm's
+                // composited-scroll layer (z-index:50 > xterm's auto in parent ctx).
+                border-color: var(--accent-color);
+                // z-index must exceed any in-block overlay (termstickers = 20)
+                z-index: 50;
             }
 
-            // Agent color takes priority when focused
+            // Agent-loaded terminals show the agent color instead of accent.
+            // Matches the header color for visual consistency.
             &.has-agent-color .block-mask {
                 border-color: var(--block-agent-color);
             }
-
-
         }
+
     }
 }
