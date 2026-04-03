@@ -46,7 +46,7 @@ pub fn start_cross_drag(state: &Arc<AppState>, args: &serde_json::Value) -> Resu
         started_at: now,
     };
 
-    *state.active_drag.lock().unwrap() = Some(session.clone());
+    *state.active_drag.lock() = Some(session.clone());
     events::emit_event_all_windows(state, "cross-drag-start", &serde_json::to_value(&session).unwrap());
 
     Ok(serde_json::json!(drag_id))
@@ -59,7 +59,7 @@ pub fn update_cross_drag(state: &Arc<AppState>, args: &serde_json::Value) -> Res
     let screen_y = args.get("screenY").and_then(|v| v.as_f64()).unwrap_or(0.0);
 
     let session = {
-        let guard = state.active_drag.lock().unwrap();
+        let guard = state.active_drag.lock();
         match guard.as_ref() {
             Some(s) if s.drag_id == drag_id => s.clone(),
             _ => return Err("no active drag session or drag_id mismatch".to_string()),
@@ -89,7 +89,7 @@ pub fn complete_cross_drag(state: &Arc<AppState>, args: &serde_json::Value) -> R
     let screen_y = args.get("screenY").and_then(|v| v.as_f64()).unwrap_or(0.0);
 
     let session = {
-        let mut guard = state.active_drag.lock().unwrap();
+        let mut guard = state.active_drag.lock();
         match guard.take() {
             Some(s) if s.drag_id == drag_id => s,
             Some(s) => { *guard = Some(s); return Err("drag_id mismatch".to_string()); }
@@ -121,7 +121,7 @@ pub fn cancel_cross_drag(state: &Arc<AppState>, args: &serde_json::Value) -> Res
     let drag_id = args.get("dragId").and_then(|v| v.as_str()).unwrap_or("").to_string();
 
     {
-        let mut guard = state.active_drag.lock().unwrap();
+        let mut guard = state.active_drag.lock();
         match guard.as_ref() {
             Some(s) if s.drag_id == drag_id => { *guard = None; }
             _ => return Err("no active drag session or drag_id mismatch".to_string()),
@@ -144,7 +144,7 @@ fn hit_test_windows(state: &Arc<AppState>, screen_x: f64, screen_y: f64) -> Opti
     use windows_sys::Win32::Foundation::RECT;
     use windows_sys::Win32::UI::WindowsAndMessaging::GetWindowRect;
 
-    let browsers = state.browsers.lock().unwrap();
+    let browsers = state.browsers.lock();
     for (label, browser) in browsers.iter() {
         if let Some(host) = browser.host() {
             let hwnd = host.window_handle();
@@ -242,7 +242,7 @@ pub fn release_drag_capture(state: &Arc<AppState>) -> Result<serde_json::Value, 
 
         // Use the main browser's HWND, or find_own_top_level_window as fallback
         let hwnd = {
-            let browsers = state.browsers.lock().unwrap();
+            let browsers = state.browsers.lock();
             browsers.get("main")
                 .and_then(|b| b.host())
                 .map(|h| h.window_handle().0 as *mut std::ffi::c_void)
@@ -289,7 +289,7 @@ pub fn open_window_at_position(state: &Arc<AppState>, args: &serde_json::Value) 
     );
 
     // Build URL with IPC credentials and tear-off params
-    let ipc_port = *state.ipc_port.lock().unwrap();
+    let ipc_port = *state.ipc_port.lock();
     let ipc_token = &state.ipc_token;
     let base_url = super::window::resolve_frontend_base_url(ipc_port);
     let separator = if base_url.contains('?') { "&" } else { "?" };
@@ -308,13 +308,13 @@ pub fn open_window_at_position(state: &Arc<AppState>, args: &serde_json::Value) 
 
     // Register instance number
     {
-        let mut reg = state.window_instance_registry.lock().unwrap();
+        let mut reg = state.window_instance_registry.lock();
         let num = reg.register(&label);
         tracing::info!(label = %label, instance = %num, "[dnd:cef] tear-off window registered");
     }
 
     // Notify all windows
-    let count = state.window_instance_registry.lock().unwrap().count();
+    let count = state.window_instance_registry.lock().count();
     events::emit_event_all_windows(state, "window-instances-changed", &serde_json::json!(count));
 
     Ok(serde_json::json!(label))

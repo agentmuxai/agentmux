@@ -188,7 +188,7 @@ async fn route_command(
         // ---- Tier 1: Bootstrap (must work for frontend to load) ----
         "get_platform" => Ok(commands::platform::get_platform()),
         "get_auth_key" => {
-            let key = state.auth_key.lock().unwrap().clone();
+            let key = state.auth_key.lock().clone();
             tracing::debug!("Frontend requested auth key: {}...", &key[..8.min(key.len())]);
             Ok(serde_json::json!(key))
         }

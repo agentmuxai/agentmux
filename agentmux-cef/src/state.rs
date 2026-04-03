@@ -2,10 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // Shared application state for the CEF host.
-// Ported from src-tauri/src/state.rs with Tauri types replaced by std equivalents.
 
 use std::collections::HashMap;
-use std::sync::Mutex;
+use parking_lot::Mutex;
 
 use cef::Browser;
 
