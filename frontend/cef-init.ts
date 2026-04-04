@@ -26,10 +26,10 @@ export async function setupCefApi(): Promise<void> {
     const port = params.get("ipc_port");
     const token = params.get("ipc_token");
     if (port) {
-        (window as any).__AGENTMUX_IPC_PORT__ = parseInt(port, 10);
+        window.__AGENTMUX_IPC_PORT__ = parseInt(port, 10);
     }
     if (token) {
-        (window as any).__AGENTMUX_IPC_TOKEN__ = token;
+        window.__AGENTMUX_IPC_TOKEN__ = token;
     }
 
     // Pre-fetch all cached values from Rust host via IPC
@@ -37,7 +37,7 @@ export async function setupCefApi(): Promise<void> {
 
     // Build the API shim and install it on window
     const api = buildCefApi();
-    (window as any).api = api;
+    window.api = api;
 
     console.log("[cef-init] window.api installed");
 }

@@ -25,7 +25,7 @@ export async function setupTauriApi(): Promise<void> {
 
     // Build the API shim and install it on window
     const api = buildTauriApi();
-    (window as any).api = api;
+    window.api = api;
 
     console.log("[tauri-init] window.api installed");
 }

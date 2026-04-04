@@ -104,7 +104,7 @@ export function makeFilePathHandler(getCwd: () => string | undefined): (rawPath:
         // Normalize backslashes to forward slashes
         resolved = resolved.replace(/\\/g, "/");
 
-        const api = (window as any).api;
+        const api = window.api;
         if (!api) return;
 
         if (line) {

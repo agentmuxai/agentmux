@@ -62,8 +62,8 @@ export async function initTauriApi(): Promise<void> {
     console.log("[tauri-api] Using backend endpoints:", backendEndpoints);
 
     // Set endpoints as window globals for getEnv() to find
-    (window as any).__WAVE_SERVER_WS_ENDPOINT__ = backendEndpoints.ws;
-    (window as any).__WAVE_SERVER_WEB_ENDPOINT__ = backendEndpoints.web;
+    window.__WAVE_SERVER_WS_ENDPOINT__ = backendEndpoints.ws;
+    window.__WAVE_SERVER_WEB_ENDPOINT__ = backendEndpoints.web;
 
     benchMark("invoke-batch-start");
     const [
@@ -458,5 +458,5 @@ export function buildTauriApi(): AppApi {
  * Detect whether we're running inside Tauri.
  */
 export function isTauri(): boolean {
-    return typeof (window as any).__TAURI_INTERNALS__ !== "undefined";
+    return typeof window.__TAURI_INTERNALS__ !== "undefined";
 }

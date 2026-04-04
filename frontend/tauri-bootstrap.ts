@@ -20,7 +20,7 @@ initLogPipe();
 // instead of staring at a blank screen while the backend starts (~1.4s on Windows 11).
 // The #startup-loading overlay stays visible until initWave() finishes rendering.
 // window.show() is a no-op if the window is already visible.
-if (typeof (window as any).__TAURI_INTERNALS__ !== "undefined") {
+if (typeof window.__TAURI_INTERNALS__ !== "undefined") {
     import("@tauri-apps/api/window").then(({ getCurrentWindow }) => {
         getCurrentWindow().show().catch(() => {});
     }).catch(() => {});
@@ -41,15 +41,15 @@ const log = (level: string, ...args: any[]) => {
 
     // Also log to backend if available
     try {
-        if ((window as any).api?.sendLog) {
-            (window as any).api.sendLog(`[${level}] ${args.join(' ')}`);
+        if (window.api?.sendLog) {
+            window.api.sendLog(`[${level}] ${args.join(' ')}`);
         }
     } catch (e) {
         // Ignore if backend not ready
     }
 };
 
-(window as any).debugLog = log;
+window.debugLog = log;
 
 /**
  * Check for backend startup errors during initialization.
@@ -143,7 +143,7 @@ async function bootstrap() {
         }
 
         // Detect host runtime
-        const isTauriRuntime = typeof (window as any).__TAURI_INTERNALS__ !== "undefined";
+        const isTauriRuntime = typeof window.__TAURI_INTERNALS__ !== "undefined";
         const isCefRuntime = new URLSearchParams(window.location.search).has("ipc_port");
         log("INFO", "Is Tauri:", isTauriRuntime, "Is CEF:", isCefRuntime);
 
@@ -153,10 +153,10 @@ async function bootstrap() {
             await setupTauriApi();
             benchMark("setupTauriApi-done");
             log("INFO", "Tauri API initialized successfully");
-            log("INFO", "window.api available:", !!(window as any).api);
+            log("INFO", "window.api available:", !!window.api);
 
             // Verify critical methods exist
-            const api = (window as any).api;
+            const api = window.api;
             log("INFO", "API methods check:");
             log("INFO", "  - getAuthKey:", typeof api?.getAuthKey);
             log("INFO", "  - onContextMenuClick:", typeof api?.onContextMenuClick);
@@ -178,7 +178,7 @@ async function bootstrap() {
             await setupCefApi();
             benchMark("setupCefApi-done");
             log("INFO", "CEF API initialized successfully");
-            log("INFO", "window.api available:", !!(window as any).api);
+            log("INFO", "window.api available:", !!window.api);
         } else {
             log("INFO", "Not running in Tauri or CEF, skipping host init");
         }

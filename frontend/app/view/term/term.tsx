@@ -184,7 +184,7 @@ function TerminalView(props: ViewComponentProps<TermViewModel>): JSX.Element {
                 sendDataHandler: model.sendDataToController.bind(model),
             }
         );
-        (window as any).term = termWrap;
+        window.term = termWrap;
         model.termRef.current = termWrap;
         const rszObs = new ResizeObserver(() => {
             termWrap.handleResize_debounced();

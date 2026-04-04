@@ -17,10 +17,10 @@
 export type HostType = "tauri" | "cef" | "browser";
 
 export function detectHost(): HostType {
-    if (typeof (window as any).__TAURI_INTERNALS__ !== "undefined") {
+    if (typeof window.__TAURI_INTERNALS__ !== "undefined") {
         return "tauri";
     }
-    if (typeof (window as any).__AGENTMUX_IPC_PORT__ !== "undefined") {
+    if (typeof window.__AGENTMUX_IPC_PORT__ !== "undefined") {
         return "cef";
     }
     return "browser";
@@ -43,8 +43,8 @@ export async function invokeCommand<T = any>(cmd: string, args?: Record<string, 
         }
 
         case "cef": {
-            const port = (window as any).__AGENTMUX_IPC_PORT__;
-            const token = (window as any).__AGENTMUX_IPC_TOKEN__;
+            const port = window.__AGENTMUX_IPC_PORT__;
+            const token = window.__AGENTMUX_IPC_TOKEN__;
             if (!port) {
                 throw new Error("IPC port not injected by CEF host");
             }
