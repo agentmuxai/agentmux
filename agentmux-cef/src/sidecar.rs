@@ -262,12 +262,13 @@ pub async fn spawn_backend(state: &Arc<AppState>) -> Result<BackendSpawnResult, 
 }
 
 /// Resolve the backend binary path.
-/// Search order:
-///   1. Versioned in runtime/ (portable): {name}-{version}.exe
-///   2. Versioned in runtime/ (old layout): {name}-{version}-{os}.{arch}.exe
-///   3. Dev mode: {name}.exe adjacent to host binary
-///   4. Versioned in dist/bin/ (workspace): {name}-{version}-{os}.{arch}.exe
-///   5. Legacy unversioned in dist/bin/: {name}.exe
+///
+/// The CEF host lives in `runtime/` alongside the backend binary in portable builds,
+/// so `exe_dir` IS the runtime directory. Search order:
+///   1. Same dir as CEF host: {name}-{version}-{os}.{arch}.exe (versioned portable)
+///   2. Same dir as CEF host: {name}.exe (dev mode — cargo build output)
+///   3. Workspace dist/bin/: {name}-{version}-{os}.{arch}.exe
+///   4. Workspace dist/bin/: {name}.exe (plain fallback)
 fn resolve_backend_binary(
     backend_name: &str,
     exe_suffix: &str,
@@ -277,6 +278,8 @@ fn resolve_backend_binary(
     let exe_dir = exe_path.parent().unwrap();
     let version = env!("CARGO_PKG_VERSION");
 
+    tracing::info!("resolve_backend_binary: exe_dir={:?}, version={}", exe_dir, version);
+
     let (os_name, arch) = if cfg!(target_os = "macos") {
         ("darwin", if cfg!(target_arch = "aarch64") { "arm64" } else { "x64" })
     } else if cfg!(target_os = "linux") {
@@ -285,32 +288,25 @@ fn resolve_backend_binary(
         ("windows", if cfg!(target_arch = "aarch64") { "arm64" } else { "x64" })
     };
 
-    // 1. Portable layout: runtime/{name}-{version}-{os}.{arch}.exe
-    let versioned_full = exe_dir
-        .join("runtime")
-        .join(format!("{}-{}-{}.{}{}", backend_name, version, os_name, arch, exe_suffix));
-    if versioned_full.exists() {
-        tracing::info!("Using versioned runtime {} at: {:?}", backend_name, versioned_full);
-        return Ok(versioned_full);
+    // 1. Versioned binary in same directory as CEF host (portable layout)
+    //    e.g. runtime/agentmux-srv-0.33.37-windows.x64.exe
+    let versioned = exe_dir.join(format!(
+        "{}-{}-{}.{}{}", backend_name, version, os_name, arch, exe_suffix
+    ));
+    if versioned.exists() {
+        tracing::info!("Using versioned {} at: {:?}", backend_name, versioned);
+        return Ok(versioned);
     }
 
-    // 2. Legacy portable layout: runtime/{name}.x64.exe
-    let runtime_legacy = exe_dir
-        .join("runtime")
-        .join(format!("{}.x64{}", backend_name, exe_suffix));
-    if runtime_legacy.exists() {
-        tracing::info!("Using legacy runtime {} at: {:?}", backend_name, runtime_legacy);
-        return Ok(runtime_legacy);
+    // 2. Plain binary in same directory (dev mode — cargo build output)
+    //    e.g. target/release/agentmux-srv.exe
+    let plain = exe_dir.join(format!("{}{}", backend_name, exe_suffix));
+    if plain.exists() {
+        tracing::info!("Using dev-mode {} at: {:?}", backend_name, plain);
+        return Ok(plain);
     }
 
-    // 3. Dev mode: {name}.exe adjacent to host binary (cargo build output)
-    let dev_binary = exe_dir.join(format!("{}{}", backend_name, exe_suffix));
-    if dev_binary.exists() {
-        tracing::info!("Using dev-mode {} at: {:?}", backend_name, dev_binary);
-        return Ok(dev_binary);
-    }
-
-    // 4. dist/bin/ versioned: {name}-{version}-{os}.{arch}.exe
+    // 3. Workspace dist/bin/ (for `task dev` / `task cef:run`)
     if let Some(workspace) = exe_dir.parent().and_then(|p| p.parent()) {
         let dist_bin = workspace.join("dist").join("bin");
 
@@ -322,7 +318,6 @@ fn resolve_backend_binary(
             return Ok(dist_versioned);
         }
 
-        // 5. dist/bin/ plain: {name}.exe
         let dist_plain = dist_bin.join(format!("{}{}", backend_name, exe_suffix));
         if dist_plain.exists() {
             tracing::info!("Using dist {} at: {:?}", backend_name, dist_plain);
@@ -330,25 +325,24 @@ fn resolve_backend_binary(
         }
     }
 
-    // List runtime/ contents for diagnostic
-    let runtime_dir = exe_dir.join("runtime");
-    let dir_listing = if runtime_dir.exists() {
-        std::fs::read_dir(&runtime_dir)
-            .map(|entries| {
-                entries
-                    .filter_map(|e| e.ok())
-                    .map(|e| e.file_name().to_string_lossy().to_string())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            })
-            .unwrap_or_else(|_| "unreadable".to_string())
-    } else {
-        "directory does not exist".to_string()
-    };
+    // Diagnostic: list exe_dir contents
+    let dir_listing = std::fs::read_dir(exe_dir)
+        .map(|entries| {
+            entries
+                .filter_map(|e| e.ok())
+                .map(|e| e.file_name().to_string_lossy().to_string())
+                .filter(|n| n.contains("agentmux") || n.contains("srv") || n.contains("wsh"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        })
+        .unwrap_or_else(|_| "unreadable".to_string());
 
     Err(format!(
-        "Backend binary '{}' not found (version {}).\nSearched:\n  - {:?}\n  - {:?}\n  - {:?}\nruntime/ contents: [{}]",
-        backend_name, version, versioned_full, runtime_legacy, dev_binary, dir_listing
+        "Backend binary '{}' not found (version {}).\n\
+         exe_dir: {:?}\n\
+         Searched:\n  1. {:?}\n  2. {:?}\n\
+         Relevant files in exe_dir: [{}]",
+        backend_name, version, exe_dir, versioned, plain, dir_listing
     ))
 }
 
