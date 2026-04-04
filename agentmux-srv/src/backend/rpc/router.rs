@@ -75,20 +75,25 @@ pub trait RpcClient: Send + Sync {
 
 /// An RPC client backed by a tokio mpsc channel.
 /// Messages sent via `send_rpc_message` are forwarded to the receiver.
+/// Bounded channel capacity for per-client RPC message buffers.
+const CLIENT_CHANNEL_CAPACITY: usize = 256;
+
 pub struct ChannelRpcClient {
-    tx: mpsc::UnboundedSender<Vec<u8>>,
+    tx: mpsc::Sender<Vec<u8>>,
 }
 
 impl ChannelRpcClient {
-    pub fn new() -> (Self, mpsc::UnboundedReceiver<Vec<u8>>) {
-        let (tx, rx) = mpsc::unbounded_channel();
+    pub fn new() -> (Self, mpsc::Receiver<Vec<u8>>) {
+        let (tx, rx) = mpsc::channel(CLIENT_CHANNEL_CAPACITY);
         (Self { tx }, rx)
     }
 }
 
 impl RpcClient for ChannelRpcClient {
     fn send_rpc_message(&self, msg: &[u8]) {
-        let _ = self.tx.send(msg.to_vec());
+        if let Err(_) = self.tx.try_send(msg.to_vec()) {
+            tracing::warn!("ChannelRpcClient: message dropped (channel full or closed)");
+        }
     }
 }
 
@@ -107,13 +112,16 @@ struct RouterInner {
 /// Port of Go's `WshRouter` from pkg/wshutil/wshrouter.go.
 pub struct WshRouter {
     inner: Mutex<RouterInner>,
-    input_tx: mpsc::UnboundedSender<MsgAndRoute>,
+    input_tx: mpsc::Sender<MsgAndRoute>,
 }
+
+/// Bounded channel capacity for the main router message queue.
+const ROUTER_CHANNEL_CAPACITY: usize = 1000;
 
 impl WshRouter {
     /// Create a new router and spawn the background message loop.
     pub fn new() -> std::sync::Arc<Self> {
-        let (input_tx, input_rx) = mpsc::unbounded_channel();
+        let (input_tx, input_rx) = mpsc::channel(ROUTER_CHANNEL_CAPACITY);
         let router = std::sync::Arc::new(Self {
             inner: Mutex::new(RouterInner {
                 route_map: HashMap::new(),
@@ -132,10 +140,12 @@ impl WshRouter {
 
     /// Inject a message into the router from a given route.
     pub fn inject_message(&self, msg_bytes: Vec<u8>, from_route_id: &str) {
-        let _ = self.input_tx.send(MsgAndRoute {
+        if let Err(_) = self.input_tx.try_send(MsgAndRoute {
             msg_bytes,
             from_route_id: from_route_id.to_string(),
-        });
+        }) {
+            tracing::warn!(from_route = %from_route_id, "router input queue full or closed — message dropped");
+        }
     }
 
     /// Register a route with the router.
@@ -368,7 +378,7 @@ impl WshRouter {
         inner.simple_request_map.remove(req_id);
     }
 
-    async fn run_server(&self, mut input_rx: mpsc::UnboundedReceiver<MsgAndRoute>) {
+    async fn run_server(&self, mut input_rx: mpsc::Receiver<MsgAndRoute>) {
         while let Some(input) = input_rx.recv().await {
             let msg: RpcMessage = match serde_json::from_slice(&input.msg_bytes) {
                 Ok(m) => m,
@@ -435,7 +445,7 @@ impl Default for WshRouter {
     fn default() -> Self {
         // Note: default() creates an unstarted router (no tokio runtime).
         // Use WshRouter::new() to get a properly started router.
-        let (input_tx, _) = mpsc::unbounded_channel();
+        let (input_tx, _) = mpsc::channel(ROUTER_CHANNEL_CAPACITY);
         Self {
             inner: Mutex::new(RouterInner {
                 route_map: HashMap::new(),
