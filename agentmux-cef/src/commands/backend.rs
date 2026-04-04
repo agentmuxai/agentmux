@@ -82,7 +82,7 @@ pub fn fe_log_structured(args: &serde_json::Value) -> serde_json::Value {
     serde_json::Value::Null
 }
 
-/// Restart the agentmuxsrv-rs backend sidecar.
+/// Restart the agentmux-srv backend sidecar.
 pub async fn restart_backend(state: Arc<AppState>) -> Result<serde_json::Value, String> {
     tracing::info!("[restart_backend] user-initiated restart");
 

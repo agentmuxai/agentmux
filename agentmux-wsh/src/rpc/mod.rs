@@ -1,7 +1,7 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! WebSocket RPC client for communicating with agentmuxsrv-rs.
+//! WebSocket RPC client for communicating with agentmux-srv.
 //!
 //! Reads the backend's endpoints JSON file to discover the WebSocket address
 //! and auth key, then establishes a connection for sending RPC commands.
@@ -107,7 +107,7 @@ struct ClientInner {
     >,
 }
 
-/// WebSocket RPC client for agentmuxsrv-rs.
+/// WebSocket RPC client for agentmux-srv.
 pub struct RpcClient {
     inner: Arc<Mutex<ClientInner>>,
     pending: Arc<Mutex<PendingMap>>,

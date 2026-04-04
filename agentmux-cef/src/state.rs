@@ -108,7 +108,7 @@ impl Drop for JobHandle {
     }
 }
 
-/// Backend (agentmuxsrv-rs) connection endpoints.
+/// Backend (agentmux-srv) connection endpoints.
 #[derive(Default, Clone, serde::Serialize)]
 pub struct BackendEndpoints {
     pub ws_endpoint: String,
@@ -124,7 +124,7 @@ pub struct AppState {
     /// Auth key for backend communication
     pub auth_key: Mutex<String>,
 
-    /// Backend (agentmuxsrv-rs) connection endpoints
+    /// Backend (agentmux-srv) connection endpoints
     pub backend_endpoints: Mutex<BackendEndpoints>,
 
     /// Handle to the sidecar child process for graceful shutdown

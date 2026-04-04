@@ -13,7 +13,7 @@ These instructions cover setting up dependencies and building AgentMux from sour
 | Tool | Version | Purpose |
 |------|---------|---------|
 | **Node.js** | v22 LTS | Frontend build (React/Vite) |
-| **Rust** | 1.77+ | Backend (agentmuxsrv-rs, wsh-rs) + Tauri |
+| **Rust** | 1.77+ | Backend (agentmux-srv, agentmux-wsh) + Tauri |
 | **Task** | Latest | Build orchestration |
 
 > **Note:** Go and Zig are no longer required. The backend is 100% Rust since v0.31.0.
@@ -121,7 +121,7 @@ Features:
 
 ### Backend Rebuild
 
-If you modify Rust backend code (`agentmuxsrv-rs/src/` or `wsh-rs/src/`):
+If you modify Rust backend code (`agentmux-srv/src/` or `agentmux-wsh/src/`):
 
 ```bash
 # Rebuild Rust binaries
@@ -132,7 +132,7 @@ task dev
 ```
 
 This rebuilds:
-- `src-tauri/binaries/agentmuxsrv-rs-x86_64-pc-windows-msvc.exe` (backend server)
+- `dist/bin/agentmux-srv-{version}-{platform}.{arch}.exe` (backend server)
 - `dist/bin/wsh-{version}-{platform}.{arch}.exe` (shell integration)
 
 ---
@@ -197,8 +197,8 @@ task dev
 # 4. Make changes to code
 # - Frontend (frontend/): Auto-reloads
 # - Tauri shell (src-tauri/src/): Auto-rebuilds
-# - Rust backend (agentmuxsrv-rs/src/): Run `task build:backend`, restart dev
-# - wsh (wsh-rs/src/): Run `task build:wsh`, restart dev
+# - Rust backend (agentmux-srv/src/): Run `task build:backend`, restart dev
+# - wsh (agentmux-wsh/src/): Run `task build:wsh`, restart dev
 
 # 5. Test changes in running app
 
@@ -223,23 +223,24 @@ gh pr create --title "Feature" --body "Description"
 After building, you'll have:
 
 ```
-src-tauri/binaries/
-├── agentmuxsrv-rs-x86_64-pc-windows-msvc.exe  # Rust backend (sidecar)
-└── bin/
-    └── wsh-{version}-windows.x64.exe           # Shell integration
+dist/bin/
+├── agentmux-srv-{version}-windows.x64.exe       # Rust backend (sidecar)
+└── wsh-{version}-windows.x64.exe                # Shell integration
 
-src-tauri/target/release/
-├── agentmux.exe                                 # Tauri app
-└── bundle/
-    └── nsis/
+target/release/
+├── agentmux-cef.exe                              # CEF host
+└── agentmux-launcher.exe                         # Portable launcher
         └── AgentMux_{version}_x64-setup.exe     # Installer
 
-dist/
-└── agentmux-{version}-x64-portable/            # Portable build
-    ├── agentmux.exe
-    ├── agentmuxsrv-rs.x64.exe
-    └── bin/
-        └── wsh-{version}-windows.x64.exe
+~/Desktop/
+└── agentmux-cef-{version}-x64-portable/        # Portable build
+    ├── agentmux.exe                             # Launcher
+    └── runtime/
+        ├── agentmux-cef.exe                     # CEF host
+        ├── agentmux-srv-{version}-windows.x64.exe  # Backend
+        ├── wsh.exe                              # Shell integration
+        ├── libcef.dll                           # CEF runtime
+        └── frontend/                            # Web UI
 ```
 
 ### Component Sizes (v0.31.0+)
@@ -247,7 +248,7 @@ dist/
 | Component | Size | Purpose |
 |-----------|------|---------|
 | `agentmux.exe` | ~14 MB | Tauri app (Rust + WebView2) |
-| `agentmuxsrv-rs.exe` | ~4 MB | Rust async backend server |
+| `agentmux-srv.exe` | ~4 MB | Rust async backend server |
 | `wsh.exe` | ~1.1 MB | Shell integration binary |
 | **Total runtime** | ~19 MB | All components |
 | **Portable ZIP** | ~18 MB | Compressed (v0.31.10) |
@@ -268,7 +269,7 @@ Logs appear in the Console tab.
 
 ### Backend Logs
 
-Rust backend logs (agentmuxsrv-rs):
+Rust backend logs (agentmux-srv):
 - **Development:** `~/.agentmux-dev/agentmux.log`
 - **Production:** `~/.agentmux/agentmux.log`
 
@@ -300,7 +301,7 @@ Rust/Tauri logs appear in the terminal where you ran `task dev`.
 task build:backend
 
 # Verify binaries exist
-ls -lh src-tauri/binaries/
+ls -lh dist/bin/agentmux-srv-*
 ls -lh dist/bin/wsh-*
 ```
 

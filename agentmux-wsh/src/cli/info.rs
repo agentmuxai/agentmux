@@ -119,5 +119,5 @@ pub async fn cmd_stub(name: &str) -> Result<(), String> {
 }
 
 fn stub(name: &str) -> Result<(), String> {
-    Err(format!("{} not yet implemented in wsh-rs", name))
+    Err(format!("{} not yet implemented in agentmux-wsh", name))
 }

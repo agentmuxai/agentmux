@@ -25,7 +25,7 @@ pub struct AgentEntry {
     /// Local HTTP URL of the owning AgentMux instance (e.g. http://127.0.0.1:PORT).
     pub local_url: String,
     pub block_id: String,
-    /// OS PID of the owning agentmuxsrv-rs process.
+    /// OS PID of the owning agentmux-srv process.
     pub pid: u32,
     /// Unix milliseconds of last update.
     pub updated_at: u64,
