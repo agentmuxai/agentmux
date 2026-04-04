@@ -10,7 +10,7 @@ checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
 name = "agentmux"
-version = "0.33.29"
+version = "0.33.30"
 dependencies = [
  "chrono",
  "dirs 5.0.1",
@@ -47,7 +47,7 @@ dependencies = [
 
 [[package]]
 name = "agentmux-cef"
-version = "0.33.29"
+version = "0.33.30"
 dependencies = [
  "axum 0.8.8",
  "cef",
@@ -68,7 +68,7 @@ dependencies = [
 
 [[package]]
 name = "agentmux-launcher"
-version = "0.33.29"
+version = "0.33.30"
 dependencies = [
  "windows-sys 0.59.0",
  "winres",
@@ -76,7 +76,7 @@ dependencies = [
 
 [[package]]
 name = "agentmuxsrv-rs"
-version = "0.33.29"
+version = "0.33.30"
 dependencies = [
  "async-stream",
  "axum 0.7.9",
@@ -3310,9 +3310,9 @@ dependencies = [
 
 [[package]]
 name = "notify-rust"
-version = "4.12.0"
+version = "4.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "21af20a1b50be5ac5861f74af1a863da53a11c38684d9818d82f1c42f7fdc6c2"
+checksum = "9612133a804b4bc753f9f806de73fc9730b7694eb1bada2dc252cce022638be8"
 dependencies = [
  "futures-lite",
  "log",
@@ -4867,9 +4867,9 @@ dependencies = [
 
 [[package]]
 name = "semver"
-version = "1.0.27"
+version = "1.0.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d767eb0aabc880b29956c35734170f26ed551a859dbd361d140cdbeca61ab1e2"
+checksum = "8a7852d02fc848982e0c167ef163aaff9cd91dc640ba85e263cb1ce46fae51cd"
 dependencies = [
  "serde",
  "serde_core",
@@ -7858,7 +7858,7 @@ dependencies = [
 
 [[package]]
 name = "wsh-rs"
-version = "0.33.29"
+version = "0.33.30"
 dependencies = [
  "base64 0.22.1",
  "clap",
