@@ -34,7 +34,7 @@ export function benchMark(name: string): void {
     console.log(logLine);
     // Forward to backend log if window.api is already installed
     try {
-        const api = (window as any).api;
+        const api = window.api;
         if (api?.sendLog) api.sendLog(logLine);
     } catch {
         // api not ready yet — the log will still appear in the browser console
@@ -66,7 +66,7 @@ export function benchDump(): void {
     const report = lines.join("\n");
     console.log(report);
     try {
-        const api = (window as any).api;
+        const api = window.api;
         if (api?.sendLog) api.sendLog(report);
     } catch {}
 }

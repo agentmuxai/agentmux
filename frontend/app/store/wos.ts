@@ -94,9 +94,9 @@ function wpsSubscribeToObject(oref: string): () => void {
 function callBackendService(service: string, method: string, args: any[], noUIContext?: boolean): Promise<any> {
     const startTs = Date.now();
     let uiContext: UIContext = null;
-    if (!noUIContext && globalThis.window != null && (window as any).globalAtoms) {
+    if (!noUIContext && globalThis.window != null && window.globalAtoms) {
         // During migration, globalAtoms may expose a signal accessor
-        const ga = (window as any).globalAtoms as GlobalAtomsType;
+        const ga = window.globalAtoms as GlobalAtomsType;
         uiContext = typeof ga?.uiContext === "function" ? (ga.uiContext as any)() : null;
     }
     const waveCall: WebCallType = {

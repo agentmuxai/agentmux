@@ -571,6 +571,39 @@ declare global {
         disablePointerEvents: Accessor<boolean>;
         innerRect?: Accessor<{ width: string; height: string }>;
     }
+
+    // Window extensions — eliminates (window as any) casts throughout the codebase
+    interface Window {
+        // Platform API (set by CEF/Tauri bootstrap)
+        api: AppApi;
+        globalAtoms: any; // GlobalAtomsType has a pre-existing type mismatch — fix separately
+
+        // Debug utilities (exposed for console access)
+        RpcApi: any;
+        WOS: any;
+        TabRpcClient: any;
+        globalWS: any;
+        modalsModel: any;
+        term: any;
+        debugLog: (...args: any[]) => void;
+        countersPrint: () => void;
+        countersClear: () => void;
+        getLayoutModelForStaticTab: (tabId: string) => any;
+        isFullScreen: boolean;
+
+        // Notification helpers
+        pushNotification: (notif: NotificationType) => void;
+        pushFlashError: (error: FlashErrorType) => void;
+        removeNotificationById: (id: string) => void;
+
+        // Bootstrap flags (set before app init)
+        __TAURI_INTERNALS__?: any;
+        __AGENTMUX_IPC_PORT__?: number;
+        __AGENTMUX_IPC_TOKEN__?: string;
+        __WAVE_SERVER_WS_ENDPOINT__?: string;
+        __WAVE_SERVER_WEB_ENDPOINT__?: string;
+        __startupPerfStart?: number;
+    }
 }
 
 export {};

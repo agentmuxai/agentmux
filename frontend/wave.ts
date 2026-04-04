@@ -54,13 +54,13 @@ let savedInitOpts: AgentMuxInitOpts = null;
  * client/window/tab state. Non-host mode waits for an `agentmux-init` event.
  */
 function isHostApp(): boolean {
-    return typeof (window as any).__TAURI_INTERNALS__ !== "undefined"
-        || typeof (window as any).__AGENTMUX_IPC_PORT__ !== "undefined";
+    return typeof window.__TAURI_INTERNALS__ !== "undefined"
+        || typeof window.__AGENTMUX_IPC_PORT__ !== "undefined";
 }
 
 /** Whether running specifically in Tauri (not CEF). */
 export function isTauriHost(): boolean {
-    return typeof (window as any).__TAURI_INTERNALS__ !== "undefined";
+    return typeof window.__TAURI_INTERNALS__ !== "undefined";
 }
 
 // Update window title with instance ID if running in multi-instance mode
@@ -105,17 +105,17 @@ async function updateWindowTitleWithInstanceID() {
 setTimeout(updateWindowTitleWithInstanceID, 1000);
 
 
-(window as any).WOS = WOS;
-(window as any).globalAtoms = atoms;
-(window as any).RpcApi = RpcApi;
-(window as any).isFullScreen = false;
-(window as any).countersPrint = countersPrint;
-(window as any).countersClear = countersClear;
-(window as any).getLayoutModelForStaticTab = getLayoutModelForStaticTab;
-(window as any).pushFlashError = pushFlashError;
-(window as any).pushNotification = pushNotification;
-(window as any).removeNotificationById = removeNotificationById;
-(window as any).modalsModel = modalsModel;
+window.WOS = WOS;
+window.globalAtoms = atoms;
+window.RpcApi = RpcApi;
+window.isFullScreen = false;
+window.countersPrint = countersPrint;
+window.countersClear = countersClear;
+window.getLayoutModelForStaticTab = getLayoutModelForStaticTab;
+window.pushFlashError = pushFlashError;
+window.pushNotification = pushNotification;
+window.removeNotificationById = removeNotificationById;
+window.modalsModel = modalsModel;
 
 
 /** Wrap a promise with a timeout. Rejects with a descriptive error if it takes too long. */
@@ -413,7 +413,7 @@ export async function initBare() {
     ContextMenuModel.init();
 
     const bareStart = performance.now();
-    (window as any).__startupPerfStart = bareStart;
+    window.__startupPerfStart = bareStart;
     getApi().sendLog("Init Bare");
     document.body.style.visibility = "hidden";
     document.body.style.opacity = "0";
@@ -597,14 +597,14 @@ async function initWave(initOpts: AgentMuxInitOpts) {
         platform,
         primaryTabStartup: initOpts.primaryTabStartup,
     });
-    (window as any).globalAtoms = atoms;
+    window.globalAtoms = atoms;
     tlog("initGlobal", t);
 
     // Init WPS event handlers
     t = performance.now();
     const globalWS = initWshrpc(initOpts.tabId);
-    (window as any).globalWS = globalWS;
-    (window as any).TabRpcClient = TabRpcClient;
+    window.globalWS = globalWS;
+    window.TabRpcClient = TabRpcClient;
     tlog("initWshrpc", t);
 
     t = performance.now();

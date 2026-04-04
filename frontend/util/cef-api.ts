@@ -65,8 +65,8 @@ export async function initCefApi(): Promise<void> {
     console.log("[cef-api] Using backend endpoints:", backendEndpoints);
 
     // Set endpoints as window globals for getEnv() to find
-    (window as any).__WAVE_SERVER_WS_ENDPOINT__ = backendEndpoints.ws;
-    (window as any).__WAVE_SERVER_WEB_ENDPOINT__ = backendEndpoints.web;
+    window.__WAVE_SERVER_WS_ENDPOINT__ = backendEndpoints.ws;
+    window.__WAVE_SERVER_WEB_ENDPOINT__ = backendEndpoints.web;
 
     benchMark("invoke-batch-start");
     const [
@@ -583,5 +583,5 @@ export function buildCefApi(): AppApi {
  */
 export function isCef(): boolean {
     return new URLSearchParams(window.location.search).has("ipc_port")
-        || typeof (window as any).__AGENTMUX_IPC_PORT__ !== "undefined";
+        || typeof window.__AGENTMUX_IPC_PORT__ !== "undefined";
 }

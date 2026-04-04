@@ -10,7 +10,7 @@ function getProcess(): NodeJS.Process {
 }
 
 function getApi(): AppApi {
-    return (window as any).api;
+    return window.api;
 }
 
 /**

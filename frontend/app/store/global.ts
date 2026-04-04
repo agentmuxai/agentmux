@@ -225,7 +225,7 @@ function initGlobalSignals(initOpts: GlobalInitOptions) {
     } catch (_) {}
 
     // Expose atoms on window for wos.ts callBackendService
-    (window as any).globalAtoms = atoms;
+    window.globalAtoms = atoms;
 }
 
 export function initGlobalEventSubs(initOpts: AgentMuxInitOpts) {
@@ -519,7 +519,7 @@ export function useBlockDataLoaded(blockId: string): boolean {
 // ---------------------------------------------------------------------------
 
 export function getApi(): AppApi {
-    return (window as any).api;
+    return window.api;
 }
 
 // ---------------------------------------------------------------------------

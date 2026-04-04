@@ -62,8 +62,8 @@ export function initBackendStatusListeners(
         const payload = (event as any)?.payload as { ws?: string; web?: string } | null;
         if (payload?.ws) {
             // Update window globals so getWSServerEndpoint() returns the new address
-            (window as any).__WAVE_SERVER_WS_ENDPOINT__ = payload.ws;
-            (window as any).__WAVE_SERVER_WEB_ENDPOINT__ = payload.web ?? "";
+            window.__WAVE_SERVER_WS_ENDPOINT__ = payload.ws;
+            window.__WAVE_SERVER_WEB_ENDPOINT__ = payload.web ?? "";
             // Reconnect the WS client to the new endpoint (port may have changed)
             reconnectWS(`ws://${payload.ws}`);
         }
