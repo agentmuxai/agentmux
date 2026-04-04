@@ -18,6 +18,42 @@ use std::sync::{Arc, Mutex, Once};
 
 use serde::{Deserialize, Serialize};
 
+// ---- Error type ----
+
+/// Errors from shell client operations (process lifecycle, I/O).
+#[derive(Debug, Clone, thiserror::Error)]
+pub enum ShellError {
+    #[error("already started")]
+    AlreadyStarted,
+
+    #[error("already waited")]
+    AlreadyWaited,
+
+    #[error("process not started")]
+    NotStarted,
+
+    #[error("not implemented: {0}")]
+    NotImplemented(String),
+
+    #[error("platform unavailable: {0}")]
+    PlatformUnavailable(String),
+
+    #[error("spawn failed: {0}")]
+    SpawnFailed(String),
+
+    #[error("wait failed: {0}")]
+    WaitFailed(String),
+
+    #[error("{0}")]
+    Other(String),
+}
+
+impl From<String> for ShellError {
+    fn from(s: String) -> Self {
+        ShellError::Other(s)
+    }
+}
+
 // ---- Command specification ----
 
 /// Specification for a command to execute on a remote or local shell.
@@ -44,29 +80,29 @@ pub trait ShellClient: Send + Sync {
     fn make_process_controller(
         &self,
         spec: CommandSpec,
-    ) -> Result<Box<dyn ShellProcessController>, String>;
+    ) -> Result<Box<dyn ShellProcessController>, ShellError>;
 }
 
 /// Trait for controlling a remote/local shell process.
 /// Provides start/wait/kill lifecycle and I/O access.
 pub trait ShellProcessController: Send + Sync {
     /// Start the process.
-    fn start(&mut self) -> Result<(), String>;
+    fn start(&mut self) -> Result<(), ShellError>;
 
     /// Wait for the process to exit. Returns exit code.
-    fn wait(&mut self) -> Result<i32, String>;
+    fn wait(&mut self) -> Result<i32, ShellError>;
 
     /// Kill the process.
     fn kill(&self);
 
     /// Write data to the process stdin.
-    fn write_stdin(&self, data: &[u8]) -> Result<(), String>;
+    fn write_stdin(&self, data: &[u8]) -> Result<(), ShellError>;
 
     /// Read data from the process stdout.
-    fn read_stdout(&self, buf: &mut [u8]) -> Result<usize, String>;
+    fn read_stdout(&self, buf: &mut [u8]) -> Result<usize, ShellError>;
 
     /// Read data from the process stderr.
-    fn read_stderr(&self, buf: &mut [u8]) -> Result<usize, String>;
+    fn read_stderr(&self, buf: &mut [u8]) -> Result<usize, ShellError>;
 
     /// Check if the process has started.
     fn is_started(&self) -> bool;
@@ -159,7 +195,7 @@ fn shell_quote(s: &str) -> String {
 pub fn run_simple_command(
     client: &dyn ShellClient,
     spec: CommandSpec,
-) -> Pin<Box<dyn Future<Output = Result<CommandOutput, String>> + Send + '_>> {
+) -> Pin<Box<dyn Future<Output = Result<CommandOutput, ShellError>> + Send + '_>> {
     Box::pin(async move {
         let mut proc = client.make_process_controller(spec)?;
         proc.start()?;
@@ -214,7 +250,7 @@ impl ShellClient for MockShellClient {
     fn make_process_controller(
         &self,
         spec: CommandSpec,
-    ) -> Result<Box<dyn ShellProcessController>, String> {
+    ) -> Result<Box<dyn ShellProcessController>, ShellError> {
         Ok(Box::new(MockProcessController::new(
             spec,
             self.exit_code,
@@ -260,18 +296,18 @@ impl MockProcessController {
 }
 
 impl ShellProcessController for MockProcessController {
-    fn start(&mut self) -> Result<(), String> {
+    fn start(&mut self) -> Result<(), ShellError> {
         if self.started {
-            return Err("already started".to_string());
+            return Err(ShellError::AlreadyStarted);
         }
         self.started = true;
         Ok(())
     }
 
-    fn wait(&mut self) -> Result<i32, String> {
+    fn wait(&mut self) -> Result<i32, ShellError> {
         let mut waited = self.waited.lock().unwrap();
         if *waited {
-            return Err("already waited".to_string());
+            return Err(ShellError::AlreadyWaited);
         }
         *waited = true;
         Ok(self.exit_code)
@@ -281,17 +317,17 @@ impl ShellProcessController for MockProcessController {
         // No-op for mock
     }
 
-    fn write_stdin(&self, data: &[u8]) -> Result<(), String> {
+    fn write_stdin(&self, data: &[u8]) -> Result<(), ShellError> {
         if !self.started {
-            return Err("not started".to_string());
+            return Err(ShellError::NotStarted);
         }
         self.stdin_data.lock().unwrap().extend_from_slice(data);
         Ok(())
     }
 
-    fn read_stdout(&self, buf: &mut [u8]) -> Result<usize, String> {
+    fn read_stdout(&self, buf: &mut [u8]) -> Result<usize, ShellError> {
         if !self.started {
-            return Err("not started".to_string());
+            return Err(ShellError::NotStarted);
         }
         let mut data = self.stdout_data.lock().unwrap();
         let n = std::cmp::min(buf.len(), data.len());
@@ -302,7 +338,7 @@ impl ShellProcessController for MockProcessController {
         Ok(n)
     }
 
-    fn read_stderr(&self, _buf: &mut [u8]) -> Result<usize, String> {
+    fn read_stderr(&self, _buf: &mut [u8]) -> Result<usize, ShellError> {
         Ok(0) // No stderr in mock
     }
 
@@ -559,7 +595,7 @@ impl SSHShellClient {
 }
 
 impl ShellClient for SSHShellClient {
-    fn make_process_controller(&self, spec: CommandSpec) -> Result<Box<dyn ShellProcessController>, String> {
+    fn make_process_controller(&self, spec: CommandSpec) -> Result<Box<dyn ShellProcessController>, ShellError> {
         Ok(Box::new(SSHProcessController::new(
             self.host.clone(),
             self.port,
@@ -592,10 +628,10 @@ impl SSHProcessController {
 }
 
 impl ShellProcessController for SSHProcessController {
-    fn start(&mut self) -> Result<(), String> {
+    fn start(&mut self) -> Result<(), ShellError> {
         let mut started = self.started.lock().unwrap();
         if *started {
-            return Err("process already started".to_string());
+            return Err(ShellError::AlreadyStarted);
         }
 
         let shell_cmd = build_shell_command(&self.spec);
@@ -610,19 +646,19 @@ impl ShellProcessController for SSHProcessController {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
 
-        let child = cmd.spawn().map_err(|e| format!("failed to spawn ssh: {}", e))?;
+        let child = cmd.spawn().map_err(|e| ShellError::SpawnFailed(format!("ssh: {}", e)))?;
         *self.process.lock().unwrap() = Some(child);
         *started = true;
         Ok(())
     }
 
-    fn wait(&mut self) -> Result<i32, String> {
+    fn wait(&mut self) -> Result<i32, ShellError> {
         let mut process_guard = self.process.lock().unwrap();
         if let Some(child) = process_guard.as_mut() {
-            let status = child.wait().map_err(|e| format!("wait failed: {}", e))?;
+            let status = child.wait().map_err(|e| ShellError::WaitFailed(e.to_string()))?;
             Ok(status.code().unwrap_or(-1))
         } else {
-            Err("process not started".to_string())
+            Err(ShellError::NotStarted)
         }
     }
 
@@ -632,16 +668,16 @@ impl ShellProcessController for SSHProcessController {
         }
     }
 
-    fn write_stdin(&self, _data: &[u8]) -> Result<(), String> {
-        Err("stdin I/O not yet implemented for SSH".to_string())
+    fn write_stdin(&self, _data: &[u8]) -> Result<(), ShellError> {
+        Err(ShellError::NotImplemented("stdin I/O for SSH".into()))
     }
 
-    fn read_stdout(&self, _buf: &mut [u8]) -> Result<usize, String> {
-        Err("stdout I/O not yet implemented for SSH".to_string())
+    fn read_stdout(&self, _buf: &mut [u8]) -> Result<usize, ShellError> {
+        Err(ShellError::NotImplemented("stdout I/O for SSH".into()))
     }
 
-    fn read_stderr(&self, _buf: &mut [u8]) -> Result<usize, String> {
-        Err("stderr I/O not yet implemented for SSH".to_string())
+    fn read_stderr(&self, _buf: &mut [u8]) -> Result<usize, ShellError> {
+        Err(ShellError::NotImplemented("stderr I/O for SSH".into()))
     }
 
     fn is_started(&self) -> bool {
@@ -667,7 +703,7 @@ impl WSLShellClient {
 
 #[cfg(windows)]
 impl ShellClient for WSLShellClient {
-    fn make_process_controller(&self, spec: CommandSpec) -> Result<Box<dyn ShellProcessController>, String> {
+    fn make_process_controller(&self, spec: CommandSpec) -> Result<Box<dyn ShellProcessController>, ShellError> {
         crate::backend::wslconn::get_distro(&self.distro)?;
         Ok(Box::new(WSLProcessController::new(self.distro.clone(), spec)))
     }
@@ -695,10 +731,10 @@ impl WSLProcessController {
 
 #[cfg(windows)]
 impl ShellProcessController for WSLProcessController {
-    fn start(&mut self) -> Result<(), String> {
+    fn start(&mut self) -> Result<(), ShellError> {
         let mut started = self.started.lock().unwrap();
         if *started {
-            return Err("process already started".to_string());
+            return Err(ShellError::AlreadyStarted);
         }
 
         let shell_cmd = build_shell_command(&self.spec);
@@ -713,19 +749,19 @@ impl ShellProcessController for WSLProcessController {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
 
-        let child = cmd.spawn().map_err(|e| format!("failed to spawn wsl: {}", e))?;
+        let child = cmd.spawn().map_err(|e| ShellError::SpawnFailed(format!("wsl: {}", e)))?;
         *self.process.lock().unwrap() = Some(child);
         *started = true;
         Ok(())
     }
 
-    fn wait(&mut self) -> Result<i32, String> {
+    fn wait(&mut self) -> Result<i32, ShellError> {
         let mut process_guard = self.process.lock().unwrap();
         if let Some(child) = process_guard.as_mut() {
-            let status = child.wait().map_err(|e| format!("wait failed: {}", e))?;
+            let status = child.wait().map_err(|e| ShellError::WaitFailed(e.to_string()))?;
             Ok(status.code().unwrap_or(-1))
         } else {
-            Err("process not started".to_string())
+            Err(ShellError::NotStarted)
         }
     }
 
@@ -735,16 +771,16 @@ impl ShellProcessController for WSLProcessController {
         }
     }
 
-    fn write_stdin(&self, _data: &[u8]) -> Result<(), String> {
-        Err("stdin I/O not yet implemented for WSL".to_string())
+    fn write_stdin(&self, _data: &[u8]) -> Result<(), ShellError> {
+        Err(ShellError::NotImplemented("stdin I/O for WSL".into()))
     }
 
-    fn read_stdout(&self, _buf: &mut [u8]) -> Result<usize, String> {
-        Err("stdout I/O not yet implemented for WSL".to_string())
+    fn read_stdout(&self, _buf: &mut [u8]) -> Result<usize, ShellError> {
+        Err(ShellError::NotImplemented("stdout I/O for WSL".into()))
     }
 
-    fn read_stderr(&self, _buf: &mut [u8]) -> Result<usize, String> {
-        Err("stderr I/O not yet implemented for WSL".to_string())
+    fn read_stderr(&self, _buf: &mut [u8]) -> Result<usize, ShellError> {
+        Err(ShellError::NotImplemented("stderr I/O for WSL".into()))
     }
 
     fn is_started(&self) -> bool {
@@ -764,7 +800,7 @@ impl WSLShellClient {
 
 #[cfg(not(windows))]
 impl ShellClient for WSLShellClient {
-    fn make_process_controller(&self, _spec: CommandSpec) -> Result<Box<dyn ShellProcessController>, String> {
-        Err("WSL is only available on Windows".to_string())
+    fn make_process_controller(&self, _spec: CommandSpec) -> Result<Box<dyn ShellProcessController>, ShellError> {
+        Err(ShellError::PlatformUnavailable("WSL is only available on Windows".into()))
     }
 }
