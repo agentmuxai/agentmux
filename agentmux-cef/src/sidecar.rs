@@ -307,9 +307,11 @@ fn resolve_backend_binary(
     }
 
     // 3. Workspace dist/bin/ (for `task dev` / `task cef:run`)
-    if let Some(workspace) = exe_dir.parent().and_then(|p| p.parent()) {
-        let dist_bin = workspace.join("dist").join("bin");
+    let dist_bin = exe_dir.parent()
+        .and_then(|p| p.parent())
+        .map(|ws| ws.join("dist").join("bin"));
 
+    if let Some(ref dist_bin) = dist_bin {
         let dist_versioned = dist_bin.join(format!(
             "{}-{}-{}.{}{}", backend_name, version, os_name, arch, exe_suffix
         ));
@@ -337,12 +339,19 @@ fn resolve_backend_binary(
         })
         .unwrap_or_else(|_| "unreadable".to_string());
 
+    let dist_info = dist_bin
+        .map(|d| format!("dist/bin: {:?}", d))
+        .unwrap_or_else(|| "dist/bin: N/A (no workspace root)".to_string());
+
     Err(format!(
         "Backend binary '{}' not found (version {}).\n\
          exe_dir: {:?}\n\
-         Searched:\n  1. {:?}\n  2. {:?}\n\
+         Searched:\n\
+         \x20 1. {:?} (versioned, same dir)\n\
+         \x20 2. {:?} (plain, dev mode)\n\
+         \x20 3. {}\n\
          Relevant files in exe_dir: [{}]",
-        backend_name, version, exe_dir, versioned, plain, dir_listing
+        backend_name, version, exe_dir, versioned, plain, dist_info, dir_listing
     ))
 }
 

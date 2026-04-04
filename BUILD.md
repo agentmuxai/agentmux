@@ -232,12 +232,15 @@ target/release/
 └── agentmux-launcher.exe                         # Portable launcher
         └── AgentMux_{version}_x64-setup.exe     # Installer
 
-dist/
-└── agentmux-{version}-x64-portable/            # Portable build
-    ├── agentmux.exe
-    ├── agentmux-srv.x64.exe
-    └── bin/
-        └── wsh-{version}-windows.x64.exe
+~/Desktop/
+└── agentmux-cef-{version}-x64-portable/        # Portable build
+    ├── agentmux.exe                             # Launcher
+    └── runtime/
+        ├── agentmux-cef.exe                     # CEF host
+        ├── agentmux-srv-{version}-windows.x64.exe  # Backend
+        ├── wsh.exe                              # Shell integration
+        ├── libcef.dll                           # CEF runtime
+        └── frontend/                            # Web UI
 ```
 
 ### Component Sizes (v0.31.0+)
