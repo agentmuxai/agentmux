@@ -18,7 +18,7 @@ pub struct BackendSpawnResult {
     pub instance_id: String,
 }
 
-/// Spawn the agentmuxsrv-rs backend sidecar and wait for it to signal
+/// Spawn the agentmux-srv backend sidecar and wait for it to signal
 /// readiness via a `WAVESRV-ESTART` line on stderr (30s timeout).
 pub async fn spawn_backend(state: &Arc<AppState>) -> Result<BackendSpawnResult, String> {
     tracing::info!("spawn_backend() called");
@@ -59,7 +59,7 @@ pub async fn spawn_backend(state: &Arc<AppState>) -> Result<BackendSpawnResult, 
     *state.version_config_dir.lock() = Some(config_dir.to_string_lossy().to_string());
 
     // 3. Resolve the backend binary path
-    let backend_name = "agentmuxsrv-rs";
+    let backend_name = "agentmux-srv";
     let exe_suffix = if cfg!(windows) { ".exe" } else { "" };
 
     let backend_path = resolve_backend_binary(backend_name, exe_suffix)?;
@@ -79,7 +79,7 @@ pub async fn spawn_backend(state: &Arc<AppState>) -> Result<BackendSpawnResult, 
     // 6. Spawn the process
     let auth_key = state.auth_key.lock().clone();
     tracing::info!(
-        "Spawning agentmuxsrv-rs with auth key: {}...",
+        "Spawning agentmux-srv with auth key: {}...",
         &auth_key[..8.min(auth_key.len())]
     );
 
@@ -122,7 +122,7 @@ pub async fn spawn_backend(state: &Arc<AppState>) -> Result<BackendSpawnResult, 
 
     let mut child = cmd
         .spawn()
-        .map_err(|e| format!("Failed to spawn agentmuxsrv-rs: {}", e))?;
+        .map_err(|e| format!("Failed to spawn agentmux-srv: {}", e))?;
 
     let child_pid = child.id();
     tracing::info!("Backend spawned with PID: {}", child_pid);
@@ -167,7 +167,7 @@ pub async fn spawn_backend(state: &Arc<AppState>) -> Result<BackendSpawnResult, 
             let reader = std::io::BufReader::new(stdout);
             for line in reader.lines() {
                 match line {
-                    Ok(l) => tracing::info!("[agentmuxsrv-rs stdout] {}", l),
+                    Ok(l) => tracing::info!("[agentmux-srv stdout] {}", l),
                     Err(_) => break,
                 }
             }
@@ -213,7 +213,7 @@ pub async fn spawn_backend(state: &Arc<AppState>) -> Result<BackendSpawnResult, 
                             );
                         }
                     } else {
-                        tracing::info!("[agentmuxsrv-rs] {}", l);
+                        tracing::info!("[agentmux-srv] {}", l);
                     }
                 }
                 Err(_) => break,
@@ -224,12 +224,12 @@ pub async fn spawn_backend(state: &Arc<AppState>) -> Result<BackendSpawnResult, 
         let pid = state_for_monitor.backend_pid.lock().unwrap_or(0);
         if estart_received {
             tracing::error!(
-                "[agentmuxsrv-rs] RUNTIME CRASH — pid={}",
+                "[agentmux-srv] RUNTIME CRASH — pid={}",
                 pid
             );
         } else {
             tracing::error!(
-                "[agentmuxsrv-rs] STARTUP CRASH — terminated before ready (pid={})",
+                "[agentmux-srv] STARTUP CRASH — terminated before ready (pid={})",
                 pid
             );
         }
@@ -247,8 +247,8 @@ pub async fn spawn_backend(state: &Arc<AppState>) -> Result<BackendSpawnResult, 
     // Wait for ESTART with 30s timeout
     let result = tokio::time::timeout(std::time::Duration::from_secs(30), rx.recv())
         .await
-        .map_err(|_| "Timeout waiting for agentmuxsrv-rs to start (30s)".to_string())?
-        .ok_or_else(|| "agentmuxsrv-rs channel closed before sending endpoints".to_string())?;
+        .map_err(|_| "Timeout waiting for agentmux-srv to start (30s)".to_string())?
+        .ok_or_else(|| "agentmux-srv channel closed before sending endpoints".to_string())?;
 
     tracing::info!(
         "Backend successfully started: ws={} web={} version={} instance={}",
@@ -262,8 +262,12 @@ pub async fn spawn_backend(state: &Arc<AppState>) -> Result<BackendSpawnResult, 
 }
 
 /// Resolve the backend binary path.
-/// Checks: portable path (bin/agentmuxsrv-rs.x64.exe), dev mode (adjacent to exe),
-/// and dist/bin/ paths.
+/// Search order:
+///   1. Versioned in runtime/ (portable): {name}-{version}.exe
+///   2. Versioned in runtime/ (old layout): {name}-{version}-{os}.{arch}.exe
+///   3. Dev mode: {name}.exe adjacent to host binary
+///   4. Versioned in dist/bin/ (workspace): {name}-{version}-{os}.{arch}.exe
+///   5. Legacy unversioned in dist/bin/: {name}.exe
 fn resolve_backend_binary(
     backend_name: &str,
     exe_suffix: &str,
@@ -271,55 +275,54 @@ fn resolve_backend_binary(
     let exe_path = std::env::current_exe()
         .map_err(|e| format!("Failed to get current exe: {}", e))?;
     let exe_dir = exe_path.parent().unwrap();
+    let version = env!("CARGO_PKG_VERSION");
 
-    // Portable layout: runtime/{name}.x64.exe
-    let runtime_binary = exe_dir
+    let (os_name, arch) = if cfg!(target_os = "macos") {
+        ("darwin", if cfg!(target_arch = "aarch64") { "arm64" } else { "x64" })
+    } else if cfg!(target_os = "linux") {
+        ("linux", if cfg!(target_arch = "aarch64") { "arm64" } else { "x64" })
+    } else {
+        ("windows", if cfg!(target_arch = "aarch64") { "arm64" } else { "x64" })
+    };
+
+    // 1. Portable layout: runtime/{name}-{version}-{os}.{arch}.exe
+    let versioned_full = exe_dir
+        .join("runtime")
+        .join(format!("{}-{}-{}.{}{}", backend_name, version, os_name, arch, exe_suffix));
+    if versioned_full.exists() {
+        tracing::info!("Using versioned runtime {} at: {:?}", backend_name, versioned_full);
+        return Ok(versioned_full);
+    }
+
+    // 2. Legacy portable layout: runtime/{name}.x64.exe
+    let runtime_legacy = exe_dir
         .join("runtime")
         .join(format!("{}.x64{}", backend_name, exe_suffix));
-    if runtime_binary.exists() {
-        tracing::info!("Using runtime {} at: {:?}", backend_name, runtime_binary);
-        return Ok(runtime_binary);
+    if runtime_legacy.exists() {
+        tracing::info!("Using legacy runtime {} at: {:?}", backend_name, runtime_legacy);
+        return Ok(runtime_legacy);
     }
 
-    // Portable release: bin/{name}.x64.exe next to the app exe
-    let portable_binary = exe_dir
-        .join("bin")
-        .join(format!("{}.x64{}", backend_name, exe_suffix));
-    if portable_binary.exists() {
-        tracing::info!(
-            "Using portable {} at: {:?}",
-            backend_name,
-            portable_binary
-        );
-        return Ok(portable_binary);
-    }
-
-    // Flat portable: {name}.x64.exe adjacent to the host binary
-    let flat_x64 = exe_dir.join(format!("{}.x64{}", backend_name, exe_suffix));
-    if flat_x64.exists() {
-        tracing::info!("Using flat portable {} at: {:?}", backend_name, flat_x64);
-        return Ok(flat_x64);
-    }
-
-    // Dev mode: {name}(.exe) adjacent to the host binary
+    // 3. Dev mode: {name}.exe adjacent to host binary (cargo build output)
     let dev_binary = exe_dir.join(format!("{}{}", backend_name, exe_suffix));
     if dev_binary.exists() {
         tracing::info!("Using dev-mode {} at: {:?}", backend_name, dev_binary);
         return Ok(dev_binary);
     }
 
-    // Check dist/bin/ in the workspace (try both plain and .x64 variants)
+    // 4. dist/bin/ versioned: {name}-{version}-{os}.{arch}.exe
     if let Some(workspace) = exe_dir.parent().and_then(|p| p.parent()) {
         let dist_bin = workspace.join("dist").join("bin");
 
-        // Try {name}.x64{exe} first (Taskfile convention)
-        let dist_x64 = dist_bin.join(format!("{}.x64{}", backend_name, exe_suffix));
-        if dist_x64.exists() {
-            tracing::info!("Using dist {} at: {:?}", backend_name, dist_x64);
-            return Ok(dist_x64);
+        let dist_versioned = dist_bin.join(format!(
+            "{}-{}-{}.{}{}", backend_name, version, os_name, arch, exe_suffix
+        ));
+        if dist_versioned.exists() {
+            tracing::info!("Using dist {} at: {:?}", backend_name, dist_versioned);
+            return Ok(dist_versioned);
         }
 
-        // Then try {name}{exe}
+        // 5. dist/bin/ plain: {name}.exe
         let dist_plain = dist_bin.join(format!("{}{}", backend_name, exe_suffix));
         if dist_plain.exists() {
             tracing::info!("Using dist {} at: {:?}", backend_name, dist_plain);
@@ -327,10 +330,25 @@ fn resolve_backend_binary(
         }
     }
 
+    // List runtime/ contents for diagnostic
+    let runtime_dir = exe_dir.join("runtime");
+    let dir_listing = if runtime_dir.exists() {
+        std::fs::read_dir(&runtime_dir)
+            .map(|entries| {
+                entries
+                    .filter_map(|e| e.ok())
+                    .map(|e| e.file_name().to_string_lossy().to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            })
+            .unwrap_or_else(|_| "unreadable".to_string())
+    } else {
+        "directory does not exist".to_string()
+    };
+
     Err(format!(
-        "Backend binary '{}' not found. Searched:\n  - {:?}\n  - {:?}\n  - dist/bin/{}.x64{}\n  - dist/bin/{}{}",
-        backend_name, portable_binary, dev_binary,
-        backend_name, exe_suffix, backend_name, exe_suffix
+        "Backend binary '{}' not found (version {}).\nSearched:\n  - {:?}\n  - {:?}\n  - {:?}\nruntime/ contents: [{}]",
+        backend_name, version, versioned_full, runtime_legacy, dev_binary, dir_listing
     ))
 }
 

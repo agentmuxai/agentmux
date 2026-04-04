@@ -14,7 +14,7 @@ ZIPPATH="$OUTDIR/agentmux-cef-$VERSION-x64-portable.zip"
 echo "Packaging AgentMux CEF v$VERSION Portable..."
 
 # Verify required files
-for f in target/release/agentmux-cef.exe dist/cef/libcef.dll dist/bin/agentmuxsrv-rs.x64.exe dist/frontend/index.html target/release/agentmux-launcher.exe; do
+for f in target/release/agentmux-cef.exe dist/cef/libcef.dll dist/bin/agentmux-srv-$VERSION-windows.x64.exe dist/frontend/index.html target/release/agentmux-launcher.exe; do
     if [ ! -f "$f" ]; then
         echo "ERROR: $f not found — build first" >&2
         exit 1
@@ -46,7 +46,7 @@ READMEEOF
 
 # Runtime binaries
 cp target/release/agentmux-cef.exe "$PORTABLE/runtime/"
-cp dist/bin/agentmuxsrv-rs.x64.exe "$PORTABLE/runtime/"
+cp dist/bin/agentmux-srv-$VERSION-windows.x64.exe "$PORTABLE/runtime/"
 
 # wsh
 WSH="dist/bin/wsh-$VERSION-windows.x64.exe"
@@ -76,7 +76,7 @@ cp dist/cef/locales/en-US.pak "$PORTABLE/runtime/locales/" 2>/dev/null || true
 
 # Verify versions match
 CEF_VER=$(grep -ao "$VERSION" "$PORTABLE/runtime/agentmux-cef.exe" | head -1)
-SRV_VER=$(grep -ao "$VERSION" "$PORTABLE/runtime/agentmuxsrv-rs.x64.exe" | head -1)
+SRV_VER=$(grep -ao "$VERSION" "$PORTABLE/runtime/agentmux-srv-$VERSION-windows.x64.exe" | head -1)
 if [ "$CEF_VER" != "$VERSION" ] || [ "$SRV_VER" != "$VERSION" ]; then
     echo "ERROR: Binary version mismatch! CEF=$CEF_VER SRV=$SRV_VER expected=$VERSION" >&2
     exit 1

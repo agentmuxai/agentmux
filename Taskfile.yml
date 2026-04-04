@@ -100,7 +100,7 @@ tasks:
             VITE_PLATFORM: "{{OS}}"
 
     build:backend:
-        desc: Build the agentmuxsrv-rs and wsh-rs Rust components.
+        desc: Build the agentmux-srv and agentmux-wsh Rust components.
         cmds:
             - task: build:backend:rust
             - task: build:wsh
@@ -110,7 +110,7 @@ tasks:
     # ========================================
 
     build:backend:rust:
-        desc: Build the agentmuxsrv-rs Rust backend binary.
+        desc: Build the agentmux-srv Rust backend binary.
         cmds:
             - task: build:backend:rust:{{OS}}
 
@@ -118,39 +118,39 @@ tasks:
         internal: true
         platforms: [darwin]
         cmds:
-            - bash -c 'source "$HOME/.cargo/env" 2>/dev/null; PATH="$HOME/.cargo/bin:$PATH" cargo build --release -p agentmuxsrv-rs'
+            - bash -c 'source "$HOME/.cargo/env" 2>/dev/null; PATH="$HOME/.cargo/bin:$PATH" cargo build --release -p agentmux-srv'
             - mkdir -p dist/bin
-            - cp target/release/agentmuxsrv-rs dist/bin/agentmuxsrv-rs.arm64
-            - echo "✓ Built agentmuxsrv-rs for macOS"
+            - cp target/release/agentmux-srv dist/bin/agentmux-srv-{{.VERSION}}-darwin.arm64
+            - echo "✓ Built agentmux-srv for macOS (dist/bin/agentmux-srv-{{.VERSION}}-darwin.arm64)"
 
     build:backend:rust:linux:
         internal: true
         platforms: [linux]
         cmds:
-            - bash -c 'source "$HOME/.cargo/env" 2>/dev/null; PATH="$HOME/.cargo/bin:$PATH" cargo build --release -p agentmuxsrv-rs'
+            - bash -c 'source "$HOME/.cargo/env" 2>/dev/null; PATH="$HOME/.cargo/bin:$PATH" cargo build --release -p agentmux-srv'
             - mkdir -p dist/bin
-            - cp target/release/agentmuxsrv-rs dist/bin/agentmuxsrv-rs.x64
-            - echo "✓ Built agentmuxsrv-rs for Linux"
+            - cp target/release/agentmux-srv dist/bin/agentmux-srv-{{.VERSION}}-linux.x64
+            - echo "✓ Built agentmux-srv for Linux (dist/bin/agentmux-srv-{{.VERSION}}-linux.x64)"
 
     build:backend:rust:windows:
         internal: true
         platforms: [windows]
         cmds:
-            - cargo build --release -p agentmuxsrv-rs
-            - cmd: powershell -Command "New-Item -ItemType Directory -Force -Path dist/bin | Out-Null; Copy-Item target/release/agentmuxsrv-rs.exe dist/bin/agentmuxsrv-rs.x64.exe -Force"
-            - echo "✓ Built agentmuxsrv-rs for Windows"
+            - cargo build --release -p agentmux-srv
+            - cmd: powershell -Command "New-Item -ItemType Directory -Force -Path dist/bin | Out-Null; Copy-Item target/release/agentmux-srv.exe dist/bin/agentmux-srv-{{.VERSION}}-windows.x64.exe -Force"
+            - echo "✓ Built agentmux-srv for Windows (dist/bin/agentmux-srv-{{.VERSION}}-windows.x64.exe)"
 
     # ========================================
-    # wsh-rs (Rust) Build Tasks
+    # agentmux-wsh (Rust) Build Tasks
     # ========================================
 
     build:wsh:
-        desc: Build the wsh-rs component for the current platform.
+        desc: Build the agentmux-wsh component for the current platform.
         cmds:
             - task: build:wsh:{{OS}}
         sources:
-            - "wsh-rs/src/**/*.rs"
-            - "wsh-rs/Cargo.toml"
+            - "agentmux-wsh/src/**/*.rs"
+            - "agentmux-wsh/Cargo.toml"
         generates:
             - "dist/bin/wsh*"
 
@@ -158,27 +158,27 @@ tasks:
         internal: true
         platforms: [windows]
         cmds:
-            - cargo build --release -p wsh-rs
+            - cargo build --release -p agentmux-wsh
             - cmd: powershell -Command "New-Item -ItemType Directory -Force -Path dist/bin | Out-Null; Copy-Item target/release/wsh.exe dist/bin/wsh-{{.VERSION}}-windows.x64.exe -Force"
-            - echo "✓ Built wsh-rs for Windows (dist/bin/wsh-{{.VERSION}}-windows.x64.exe)"
+            - echo "✓ Built agentmux-wsh for Windows (dist/bin/wsh-{{.VERSION}}-windows.x64.exe)"
 
     build:wsh:darwin:
         internal: true
         platforms: [darwin]
         cmds:
-            - bash -c 'source "$HOME/.cargo/env" 2>/dev/null; PATH="$HOME/.cargo/bin:$PATH" cargo build --release -p wsh-rs'
+            - bash -c 'source "$HOME/.cargo/env" 2>/dev/null; PATH="$HOME/.cargo/bin:$PATH" cargo build --release -p agentmux-wsh'
             - mkdir -p dist/bin
             - cp target/release/wsh dist/bin/wsh-{{.VERSION}}-darwin.arm64
-            - echo "✓ Built wsh-rs for macOS (dist/bin/wsh-{{.VERSION}}-darwin.arm64)"
+            - echo "✓ Built agentmux-wsh for macOS (dist/bin/wsh-{{.VERSION}}-darwin.arm64)"
 
     build:wsh:linux:
         internal: true
         platforms: [linux]
         cmds:
-            - bash -c 'source "$HOME/.cargo/env" 2>/dev/null; PATH="$HOME/.cargo/bin:$PATH" cargo build --release -p wsh-rs'
+            - bash -c 'source "$HOME/.cargo/env" 2>/dev/null; PATH="$HOME/.cargo/bin:$PATH" cargo build --release -p agentmux-wsh'
             - mkdir -p dist/bin
             - cp target/release/wsh dist/bin/wsh-{{.VERSION}}-linux.x64
-            - echo "✓ Built wsh-rs for Linux (dist/bin/wsh-{{.VERSION}}-linux.x64)"
+            - echo "✓ Built agentmux-wsh for Linux (dist/bin/wsh-{{.VERSION}}-linux.x64)"
 
     outdated:
         desc: Check for outdated packages using npm-check-updates.
@@ -244,7 +244,7 @@ tasks:
             wingetcreate update {{.WINGET_PACKAGE}} -s -v {{.UP_VERSION}} -u "https://{{.RELEASES_BUCKET}}/{{.APP_NAME}}-win32-x64-{{.UP_VERSION}}.msi" -t {{.GITHUB_TOKEN}}
 
     dev:installwsh:
-        desc: Quick shortcut to rebuild wsh-rs and install for macOS arm64
+        desc: Quick shortcut to rebuild agentmux-wsh and install for macOS arm64
         platforms: [darwin]
         requires:
             vars:

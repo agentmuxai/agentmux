@@ -34,13 +34,13 @@ pub struct WslArgs {
 }
 
 pub async fn cmd_conn(_client: &RpcClient, _cmd: ConnCommand) -> Result<(), String> {
-    Err("conn commands not yet implemented in wsh-rs".into())
+    Err("conn commands not yet implemented in agentmux-wsh".into())
 }
 
 pub async fn cmd_ssh(_client: &RpcClient, _args: SshArgs) -> Result<(), String> {
-    Err("ssh not yet implemented in wsh-rs".into())
+    Err("ssh not yet implemented in agentmux-wsh".into())
 }
 
 pub async fn cmd_wsl(_client: &RpcClient, _args: WslArgs) -> Result<(), String> {
-    Err("wsl not yet implemented in wsh-rs".into())
+    Err("wsl not yet implemented in agentmux-wsh".into())
 }
