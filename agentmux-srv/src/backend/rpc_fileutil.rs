@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Wave file utility: conversion between WaveFile (storage) and FileInfo (RPC).
-//! Port of Go's pkg/util/wavefileutil/wavefileutil.go.
+//! Port of Go's pkg/util/rpc_fileutil/rpc_fileutil.go.
 //!
 //! Provides the bridge between the internal file storage representation
 //! and the wire format used by the RPC protocol.

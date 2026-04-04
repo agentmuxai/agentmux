@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 use super::oref::ORef;
-use super::waveobj::{Block, MetaMapType, Workspace};
+use super::obj::{Block, MetaMapType, Workspace};
 
 // ---- RpcMessage wire format ----
 

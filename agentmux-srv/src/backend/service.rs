@@ -13,7 +13,7 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-use super::waveobj;
+use super::obj;
 
 // ---- Wire types ----
 
@@ -30,7 +30,7 @@ pub struct WebCallType {
 }
 
 /// UI context passed with service calls.
-/// Matches Go's `waveobj.UIContext`.
+/// Matches Go's `obj.UIContext`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UIContext {
     #[serde(default, rename = "activetabid")]
@@ -50,7 +50,7 @@ pub struct WebReturnType {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub data: Option<serde_json::Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub updates: Option<Vec<waveobj::WaveObjUpdate>>,
+    pub updates: Option<Vec<obj::WaveObjUpdate>>,
 }
 
 impl WebReturnType {
@@ -75,7 +75,7 @@ impl WebReturnType {
     }
 
     /// Create a success response with updates.
-    pub fn success_with_updates(updates: Vec<waveobj::WaveObjUpdate>) -> Self {
+    pub fn success_with_updates(updates: Vec<obj::WaveObjUpdate>) -> Self {
         Self {
             success: true,
             error: None,
@@ -91,7 +91,7 @@ impl WebReturnType {
     /// Create a success response with both data and updates.
     pub fn success_data_updates(
         data: serde_json::Value,
-        updates: Vec<waveobj::WaveObjUpdate>,
+        updates: Vec<obj::WaveObjUpdate>,
     ) -> Self {
         Self {
             success: true,
@@ -116,8 +116,8 @@ impl WebReturnType {
     }
 }
 
-// ---- WaveObjUpdate (matches Go's waveobj.WaveObjUpdate) ----
-// This is re-exported from waveobj where it's defined.
+// ---- WaveObjUpdate (matches Go's obj.WaveObjUpdate) ----
+// This is re-exported from obj where it's defined.
 
 // ---- Method metadata (for documentation and code generation) ----
 
@@ -478,7 +478,7 @@ mod tests {
 
     #[test]
     fn test_web_return_type_with_updates() {
-        let updates = vec![waveobj::WaveObjUpdate {
+        let updates = vec![obj::WaveObjUpdate {
             updatetype: "update".into(),
             otype: "tab".into(),
             oid: "123".into(),
@@ -500,7 +500,7 @@ mod tests {
     fn test_web_return_type_serde_roundtrip() {
         let rtn = WebReturnType::success_data_updates(
             serde_json::json!({"id": "block-1"}),
-            vec![waveobj::WaveObjUpdate {
+            vec![obj::WaveObjUpdate {
                 updatetype: "update".into(),
                 otype: "block".into(),
                 oid: "abc".into(),

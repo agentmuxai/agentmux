@@ -15,7 +15,7 @@ use std::io;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::sync::oneshot;
 
-use super::waveobj::TermSize;
+use super::obj::TermSize;
 
 // ---- Constants ----
 
@@ -30,7 +30,7 @@ pub const CONN_TYPE_LOCAL: &str = "local";
 pub const CONN_TYPE_WSL: &str = "wsl";
 pub const CONN_TYPE_SSH: &str = "ssh";
 
-/// Block file name constants (match Go's wavebase.BlockFile_*).
+/// Block file name constants (match Go's base.BlockFile_*).
 pub const BLOCK_FILE_TERM: &str = "term";
 pub const BLOCK_FILE_CACHE: &str = "cache";
 pub const BLOCK_FILE_ENV: &str = "env";

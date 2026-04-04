@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::backend::waveobj::MetaMapType;
+use crate::backend::obj::MetaMapType;
 
 // ---- Serde helpers (used by skip_serializing_if attributes) ----
 

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Wave base utilities: directory management, lock files, environment, platform detection.
-//! Port of Go's pkg/wavebase/.
+//! Port of Go's pkg/base/.
 
 
 use std::env;

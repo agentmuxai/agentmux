@@ -25,7 +25,7 @@ use uuid::Uuid;
 
 use super::storage::wstore::WaveStore;
 use super::storage::StoreError;
-use super::waveobj::*;
+use super::obj::*;
 
 // ---- Workspace defaults (match Go's WorkspaceColors/Icons) ----
 

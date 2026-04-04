@@ -26,7 +26,7 @@ use serde::{Deserialize, Serialize};
 
 use super::eventbus::EventBus;
 use super::storage::wstore::WaveStore;
-use super::waveobj::{Block, MetaMapType, TermSize};
+use super::obj::{Block, MetaMapType, TermSize};
 use super::wps::Broker;
 
 // ---- Controller status constants (match Go) ----
@@ -269,7 +269,7 @@ pub fn resync_controller(
     let block_meta = &block.meta;
 
     // Get controller type from block meta
-    let controller_type = super::waveobj::meta_get_string(block_meta, META_KEY_CONTROLLER, "");
+    let controller_type = super::obj::meta_get_string(block_meta, META_KEY_CONTROLLER, "");
 
     if controller_type.is_empty() {
         // No controller type = web/static block, nothing to manage
@@ -294,7 +294,7 @@ pub fn resync_controller(
             let status = ctrl.get_runtime_status();
             // Check if connection changed
             let new_conn =
-                super::waveobj::meta_get_string(block_meta, META_KEY_CONNECTION, "local");
+                super::obj::meta_get_string(block_meta, META_KEY_CONNECTION, "local");
             status.shellprocconnname != new_conn
         };
 

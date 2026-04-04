@@ -8,7 +8,7 @@ use uuid::Uuid;
 
 use crate::backend::storage::wstore::WaveStore;
 use crate::backend::storage::StoreError;
-use crate::backend::waveobj::*;
+use crate::backend::obj::*;
 
 /// Create a new workspace with name, icon, and color.
 pub fn create_workspace(

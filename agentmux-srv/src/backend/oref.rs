@@ -9,7 +9,7 @@ use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt;
 use uuid::Uuid;
 
-use super::waveobj::VALID_OTYPES;
+use super::obj::VALID_OTYPES;
 
 /// Object reference combining a type name and UUID.
 /// Wire format: `"block:550e8400-e29b-41d4-a716-446655440000"`
