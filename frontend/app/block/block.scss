@@ -419,12 +419,14 @@
             pointer-events: none;
             border-radius: var(--block-border-radius);
             z-index: var(--zindex-block-mask-inner);
-            // backdrop-filter guarantees this element composites above all
-            // composited-scroll children (xterm-viewport with overflow-y:scroll).
-            // backdrop-filter elements MUST render above the layers they sample —
-            // unlike will-change:opacity/transform which Chromium may squash or
-            // reorder. 0.1px blur is imperceptible at any DPR.
+            // Force this element onto its own compositor layer so it renders
+            // above xterm's hardware-accelerated scroll/WebGL surfaces.
+            // Two independent hints — either alone may be optimized away by
+            // Chromium on certain DWM configurations (Win11 vs Win10):
+            //   1. backdrop-filter: spec-required to composite above sampled layers
+            //   2. will-change: transform: forces a dedicated GPU layer
             backdrop-filter: blur(0.1px);
+            will-change: transform;
 
             &.show-block-mask {
                 user-select: none;
