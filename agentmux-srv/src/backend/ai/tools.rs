@@ -13,7 +13,8 @@
 use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use parking_lot::Mutex;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -206,7 +207,7 @@ impl ApprovalRegistry {
     /// Multiple receivers can be created from this via `wait_for_approval()`.
     pub fn register(&self, tool_call_id: &str) -> watch::Receiver<String> {
         let (tx, rx) = watch::channel(String::new());
-        let mut requests = self.requests.lock().unwrap();
+        let mut requests = self.requests.lock();
         requests.insert(
             tool_call_id.to_string(),
             ApprovalRequest {
@@ -221,7 +222,7 @@ impl ApprovalRegistry {
     /// Update approval status for a tool call.
     /// If `keep_alive` is true and approval is empty, extends the timeout.
     pub fn update(&self, tool_call_id: &str, approval: &str) -> Result<(), String> {
-        let mut requests = self.requests.lock().unwrap();
+        let mut requests = self.requests.lock();
         let request = requests
             .get_mut(tool_call_id)
             .ok_or_else(|| format!("no pending approval for {tool_call_id}"))?;
@@ -245,7 +246,7 @@ impl ApprovalRegistry {
     /// without replacing the sender, so all waiters are notified.
     pub async fn wait_for_approval(&self, tool_call_id: &str) -> String {
         let mut rx = {
-            let requests = self.requests.lock().unwrap();
+            let requests = self.requests.lock();
             match requests.get(tool_call_id) {
                 Some(req) if req.done => return req.approval.clone(),
                 Some(req) => req.done_tx.subscribe(),
@@ -272,7 +273,7 @@ impl ApprovalRegistry {
             Ok(approval) => approval,
             Err(_) => {
                 // Timeout — mark as timed out
-                let mut requests = self.requests.lock().unwrap();
+                let mut requests = self.requests.lock();
                 if let Some(req) = requests.get_mut(tool_call_id) {
                     if !req.done {
                         req.approval = APPROVAL_TIMEOUT.to_string();
@@ -289,13 +290,13 @@ impl ApprovalRegistry {
 
     /// Get current approval status without blocking.
     pub fn current_status(&self, tool_call_id: &str) -> Option<String> {
-        let requests = self.requests.lock().unwrap();
+        let requests = self.requests.lock();
         requests.get(tool_call_id).map(|r| r.approval.clone())
     }
 
     /// Clean up a resolved approval request.
     pub fn cleanup(&self, tool_call_id: &str) {
-        self.requests.lock().unwrap().remove(tool_call_id);
+        self.requests.lock().remove(tool_call_id);
     }
 }
 
