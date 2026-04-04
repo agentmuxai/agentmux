@@ -7,7 +7,7 @@ use uuid::Uuid;
 
 use crate::backend::storage::wstore::WaveStore;
 use crate::backend::storage::StoreError;
-use crate::backend::waveobj::*;
+use crate::backend::obj::*;
 
 /// Create a new tab in a workspace.
 /// If `tab_name` is empty, auto-generates "Untitled1", "Untitled2", etc.

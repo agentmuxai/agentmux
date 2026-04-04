@@ -14,7 +14,7 @@ use std::sync::Mutex;
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 
-use crate::backend::waveobj::{wave_obj_from_json, wave_obj_to_json, WaveObj};
+use crate::backend::obj::{wave_obj_from_json, wave_obj_to_json, WaveObj};
 
 use super::error::StoreError;
 use super::migrations::{run_forge_migrations, run_wstore_migrations};
@@ -210,7 +210,7 @@ impl WaveStore {
     /// Delete by otype string and OID (for dynamic dispatch).
     /// Validates `otype` against `VALID_OTYPES` to prevent SQL injection.
     pub fn delete_by_otype(&self, otype: &str, oid: &str) -> Result<(), StoreError> {
-        if !crate::backend::waveobj::VALID_OTYPES.contains(&otype) {
+        if !crate::backend::obj::VALID_OTYPES.contains(&otype) {
             return Err(StoreError::Other(format!("unknown otype: {otype:?}")));
         }
         let conn = self.conn.lock().unwrap();
@@ -889,7 +889,7 @@ fn format_epoch_date(days_since_epoch: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backend::waveobj::*;
+    use crate::backend::obj::*;
 
     fn make_store() -> WaveStore {
         WaveStore::open_in_memory().unwrap()

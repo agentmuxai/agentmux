@@ -5,7 +5,7 @@ use serde_json::json;
 use crate::backend::blockcontroller;
 use crate::backend::service::{self, CloseTabRtnType, WebCallType, WebReturnType};
 use crate::backend::storage::wstore::WaveStore;
-use crate::backend::waveobj::*;
+use crate::backend::obj::*;
 use crate::backend::wcore;
 
 use super::AppState;

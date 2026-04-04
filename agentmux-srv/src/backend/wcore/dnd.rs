@@ -7,7 +7,7 @@ use uuid::Uuid;
 
 use crate::backend::storage::wstore::WaveStore;
 use crate::backend::storage::StoreError;
-use crate::backend::waveobj::*;
+use crate::backend::obj::*;
 
 use super::tab::{create_tab, delete_tab, set_active_tab};
 use super::workspace::create_workspace;

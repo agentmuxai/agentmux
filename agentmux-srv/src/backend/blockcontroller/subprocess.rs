@@ -93,7 +93,7 @@ pub struct SubprocessController {
     inner: Arc<Mutex<SubprocessControllerInner>>,
     /// WPS broker for publishing events (blockfile, controllerstatus).
     broker: Option<Arc<wps::Broker>>,
-    /// Event bus for waveobj:update broadcasts.
+    /// Event bus for obj:update broadcasts.
     event_bus: Option<Arc<EventBus>>,
     /// Wave object store for block metadata persistence.
     wstore: Option<Arc<WaveStore>>,
@@ -363,7 +363,7 @@ impl SubprocessController {
                             if let Some(ref store) = wstore_read {
                                 let oref_str = format!("block:{}", block_id_read);
                                 let mut meta_update =
-                                    crate::backend::waveobj::MetaMapType::new();
+                                    crate::backend::obj::MetaMapType::new();
                                 meta_update.insert(
                                     "agent:sessionid".to_string(),
                                     serde_json::Value::String(sid_string),
@@ -378,19 +378,19 @@ impl SubprocessController {
                                     );
                                 } else if let Some(ref event_bus) = event_bus_read {
                                     // Broadcast metadata update to frontend
-                                    if let Ok(updated_block) = store.must_get::<crate::backend::waveobj::Block>(&block_id_read) {
+                                    if let Ok(updated_block) = store.must_get::<crate::backend::obj::Block>(&block_id_read) {
                                         let update_data = serde_json::to_value(
-                                            &crate::backend::waveobj::WaveObjUpdate {
+                                            &crate::backend::obj::WaveObjUpdate {
                                                 updatetype: "update".into(),
                                                 otype: "block".into(),
                                                 oid: block_id_read.clone(),
-                                                obj: Some(crate::backend::waveobj::wave_obj_to_value(&updated_block)),
+                                                obj: Some(crate::backend::obj::wave_obj_to_value(&updated_block)),
                                             },
                                         )
                                         .ok();
                                         event_bus.broadcast_event(
                                             &crate::backend::eventbus::WSEventType {
-                                                eventtype: "waveobj:update".to_string(),
+                                                eventtype: "obj:update".to_string(),
                                                 oref: oref_str,
                                                 data: update_data,
                                             },
@@ -573,7 +573,7 @@ impl SubprocessController {
 impl Controller for SubprocessController {
     fn start(
         &self,
-        _block_meta: super::super::waveobj::MetaMapType,
+        _block_meta: super::super::obj::MetaMapType,
         _rt_opts: Option<serde_json::Value>,
         _force: bool,
     ) -> Result<(), String> {

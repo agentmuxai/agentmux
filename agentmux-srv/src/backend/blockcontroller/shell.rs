@@ -37,7 +37,7 @@ use super::{
 use crate::backend::eventbus::EventBus;
 use crate::backend::shellexec::{ConnInterface, ShellProc};
 use crate::backend::storage::wstore::WaveStore;
-use crate::backend::waveobj::{self, MetaMapType};
+use crate::backend::obj::{self, MetaMapType};
 use crate::backend::wps;
 
 /// Channel buffer size for shell input (matches Go's 32).
@@ -210,31 +210,31 @@ impl ShellController {
 
     /// Check block meta for whether to run on start.
     fn should_run_on_start(meta: &MetaMapType) -> bool {
-        waveobj::meta_get_bool(meta, META_KEY_CMD_RUN_ON_START, true)
+        obj::meta_get_bool(meta, META_KEY_CMD_RUN_ON_START, true)
     }
 
     /// Check block meta for run-once mode (used in full lifecycle integration).
     #[allow(dead_code)]
     fn should_run_once(meta: &MetaMapType) -> bool {
-        waveobj::meta_get_bool(meta, META_KEY_CMD_RUN_ONCE, false)
+        obj::meta_get_bool(meta, META_KEY_CMD_RUN_ONCE, false)
     }
 
     /// Check block meta for clear-on-start (used in full lifecycle integration).
     #[allow(dead_code)]
     fn should_clear_on_start(meta: &MetaMapType) -> bool {
-        waveobj::meta_get_bool(meta, META_KEY_CMD_CLEAR_ON_START, false)
+        obj::meta_get_bool(meta, META_KEY_CMD_CLEAR_ON_START, false)
     }
 
     /// Check block meta for close-on-exit (used in full lifecycle integration).
     #[allow(dead_code)]
     fn should_close_on_exit(meta: &MetaMapType) -> bool {
-        waveobj::meta_get_bool(meta, META_KEY_CMD_CLOSE_ON_EXIT, false)
+        obj::meta_get_bool(meta, META_KEY_CMD_CLOSE_ON_EXIT, false)
     }
 
     /// Check block meta for force close-on-exit (used in full lifecycle integration).
     #[allow(dead_code)]
     fn should_close_on_exit_force(meta: &MetaMapType) -> bool {
-        waveobj::meta_get_bool(meta, META_KEY_CMD_CLOSE_ON_EXIT_FORCE, false)
+        obj::meta_get_bool(meta, META_KEY_CMD_CLOSE_ON_EXIT_FORCE, false)
     }
 
     /// Get the close-on-exit delay in ms (defaults to 2000, used in full lifecycle integration).
@@ -248,12 +248,12 @@ impl ShellController {
 
     /// Get the connection name from block meta.
     fn get_conn_name(meta: &MetaMapType) -> String {
-        waveobj::meta_get_string(meta, META_KEY_CONNECTION, "local")
+        obj::meta_get_string(meta, META_KEY_CONNECTION, "local")
     }
 
     /// Get the command string from block meta.
     fn get_cmd_str(meta: &MetaMapType) -> String {
-        waveobj::meta_get_string(meta, META_KEY_CMD, "")
+        obj::meta_get_string(meta, META_KEY_CMD, "")
     }
 
     /// Get cmd:args array from block meta.
@@ -269,7 +269,7 @@ impl ShellController {
 
     /// Check if cmd:interactive is set in block meta.
     fn is_interactive(meta: &MetaMapType) -> bool {
-        waveobj::meta_get_bool(meta, "cmd:interactive", false)
+        obj::meta_get_bool(meta, "cmd:interactive", false)
     }
 
     /// Publish current controller status via the WPS broker.
@@ -453,7 +453,7 @@ impl Controller for ShellController {
             // to %LocalAppData%, so files written by the packaged backend aren't visible
             // to child processes (pwsh, bash, etc.) spawned via ConPTY.  The home dir is
             // never virtualised, so the scripts are always reachable at their literal path.
-            let shell_home = crate::backend::wavebase::get_home_dir().join(".agentmux");
+            let shell_home = crate::backend::base::get_home_dir().join(".agentmux");
             crate::backend::shellintegration::deploy_scripts(&shell_home);
 
             tracing::info!(block_id = %self.block_id, shell = %shell_path, shell_type = ?shell_type, "interactive shell path");
@@ -542,7 +542,7 @@ impl Controller for ShellController {
         };
 
         // Set working directory if specified
-        let cwd = waveobj::meta_get_string(&block_meta, super::META_KEY_CMD_CWD, "");
+        let cwd = obj::meta_get_string(&block_meta, super::META_KEY_CMD_CWD, "");
         if !cwd.is_empty() {
             cmd.cwd(&cwd);
         }
@@ -594,7 +594,7 @@ impl Controller for ShellController {
                     );
                     // Also write to cross-instance file registry.
                     if let Ok(local_url) = std::env::var("AGENTMUX_LOCAL_URL") {
-                        let data_dir = crate::backend::wavebase::get_wave_data_dir();
+                        let data_dir = crate::backend::base::get_wave_data_dir();
                         crate::backend::reactive::registry::write(
                             &data_dir,
                             agent_id,
@@ -637,23 +637,23 @@ impl Controller for ShellController {
                     serde_json::Value::String(effective_cwd),
                 );
                 // Only set if not already populated — don't clobber a restored session CWD
-                match store.must_get::<crate::backend::waveobj::Block>(&self.block_id) {
-                    Ok(block) if waveobj::meta_get_string(&block.meta, super::META_KEY_CMD_CWD, "").is_empty() => {
+                match store.must_get::<crate::backend::obj::Block>(&self.block_id) {
+                    Ok(block) if obj::meta_get_string(&block.meta, super::META_KEY_CMD_CWD, "").is_empty() => {
                         match crate::server::service::update_object_meta(store, &oref_str, &meta_update) {
                             Ok(()) => {
-                                // Re-read updated block and broadcast waveobj:update so the
+                                // Re-read updated block and broadcast obj:update so the
                                 // frontend Jotai atom refreshes (update_object_meta only writes
                                 // to SQLite — it does NOT send a WebSocket event on its own).
-                                if let Ok(updated_block) = store.must_get::<crate::backend::waveobj::Block>(&self.block_id) {
+                                if let Ok(updated_block) = store.must_get::<crate::backend::obj::Block>(&self.block_id) {
                                     if let Some(ref event_bus) = self.event_bus {
-                                        let update_data = serde_json::to_value(&waveobj::WaveObjUpdate {
+                                        let update_data = serde_json::to_value(&obj::WaveObjUpdate {
                                             updatetype: "update".into(),
                                             otype: "block".into(),
                                             oid: self.block_id.clone(),
-                                            obj: Some(waveobj::wave_obj_to_value(&updated_block)),
+                                            obj: Some(obj::wave_obj_to_value(&updated_block)),
                                         }).ok();
                                         event_bus.broadcast_event(&crate::backend::eventbus::WSEventType {
-                                            eventtype: "waveobj:update".to_string(),
+                                            eventtype: "obj:update".to_string(),
                                             oref: oref_str.clone(),
                                             data: update_data,
                                         });
@@ -798,7 +798,7 @@ impl Controller for ShellController {
 
             // Also remove from cross-instance file registry.
             if let Some(ref agent_id) = agent_id_wait {
-                let data_dir = crate::backend::wavebase::get_wave_data_dir();
+                let data_dir = crate::backend::base::get_wave_data_dir();
                 crate::backend::reactive::registry::remove(&data_dir, agent_id);
             }
 
@@ -1292,7 +1292,7 @@ mod tests {
 
     #[test]
     fn test_resync_creates_shell_controller() {
-        use crate::backend::waveobj::Block;
+        use crate::backend::obj::Block;
 
         let mut meta = MetaMapType::new();
         meta.insert(

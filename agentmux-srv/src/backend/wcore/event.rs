@@ -5,7 +5,7 @@
 
 use crate::backend::oref::ORef;
 use crate::backend::storage::wstore::WaveStore;
-use crate::backend::waveobj::*;
+use crate::backend::obj::*;
 use crate::backend::wps::{self, Broker, WaveEvent};
 
 /// Publish a WaveObj update event through the broker.

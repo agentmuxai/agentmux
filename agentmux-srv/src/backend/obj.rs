@@ -1,7 +1,7 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! WaveObj types: Rust equivalents of Go structs from pkg/waveobj/wtype.go.
+//! WaveObj types: Rust equivalents of Go structs from pkg/obj/wtype.go.
 //! All `#[serde(rename = "...")]` tags match Go JSON tags for wire compatibility.
 
 
@@ -33,7 +33,7 @@ where
     Option::<MetaMapType>::deserialize(deserializer).map(|opt| opt.unwrap_or_default())
 }
 
-// ---- OType constants (match Go's waveobj.OType_* constants) ----
+// ---- OType constants (match Go's obj.OType_* constants) ----
 
 pub const OTYPE_CLIENT: &str = "client";
 pub const OTYPE_WINDOW: &str = "window";
@@ -294,7 +294,7 @@ pub struct LeafOrderEntry {
 // Core WaveObj types — each matches the Go struct + JSON tags exactly
 // ====================================================================
 
-/// Go: `Client` in pkg/waveobj/wtype.go
+/// Go: `Client` in pkg/obj/wtype.go
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Client {
     pub oid: String,
@@ -313,7 +313,7 @@ pub struct Client {
 
 impl_wave_obj!(Client, OTYPE_CLIENT);
 
-/// Go: `Window` in pkg/waveobj/wtype.go
+/// Go: `Window` in pkg/obj/wtype.go
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Window {
     pub oid: String,
@@ -334,7 +334,7 @@ pub struct Window {
 
 impl_wave_obj!(Window, OTYPE_WINDOW);
 
-/// Go: `Workspace` in pkg/waveobj/wtype.go
+/// Go: `Workspace` in pkg/obj/wtype.go
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Workspace {
     pub oid: String,
@@ -357,7 +357,7 @@ pub struct Workspace {
 
 impl_wave_obj!(Workspace, OTYPE_WORKSPACE);
 
-/// Go: `WorkspaceListEntry` in pkg/waveobj/wtype.go
+/// Go: `WorkspaceListEntry` in pkg/obj/wtype.go
 /// Used by ListWorkspaces — returns just {workspaceid, windowid}, not full workspace objects.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorkspaceListEntry {
@@ -366,7 +366,7 @@ pub struct WorkspaceListEntry {
     pub windowid: String,
 }
 
-/// Go: `Tab` in pkg/waveobj/wtype.go
+/// Go: `Tab` in pkg/obj/wtype.go
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Tab {
     pub oid: String,
@@ -383,7 +383,7 @@ pub struct Tab {
 
 impl_wave_obj!(Tab, OTYPE_TAB);
 
-/// Go: `LayoutState` in pkg/waveobj/wtype.go
+/// Go: `LayoutState` in pkg/obj/wtype.go
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct LayoutState {
     pub oid: String,
@@ -428,7 +428,7 @@ impl WaveObj for LayoutState {
     }
 }
 
-/// Go: `Block` in pkg/waveobj/wtype.go
+/// Go: `Block` in pkg/obj/wtype.go
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Block {
     pub oid: String,
@@ -467,7 +467,7 @@ fn is_zero_i64(v: &i64) -> bool {
 }
 
 /// Serialize any WaveObj to JSON bytes, including the "otype" field.
-/// This matches Go's `waveobj.ToJson()`.
+/// This matches Go's `obj.ToJson()`.
 pub fn wave_obj_to_json<T: WaveObj>(obj: &T) -> Result<Vec<u8>, serde_json::Error> {
     let mut map = serde_json::to_value(obj)?;
     if let Some(m) = map.as_object_mut() {
@@ -477,7 +477,7 @@ pub fn wave_obj_to_json<T: WaveObj>(obj: &T) -> Result<Vec<u8>, serde_json::Erro
 }
 
 /// Serialize any WaveObj to a serde_json::Value, including the "otype" field.
-/// This matches Go's `waveobj.ToJsonMap()` — used by GetObject/GetObjects responses.
+/// This matches Go's `obj.ToJsonMap()` — used by GetObject/GetObjects responses.
 pub fn wave_obj_to_value<T: WaveObj>(obj: &T) -> serde_json::Value {
     let mut map = serde_json::to_value(obj).unwrap_or_default();
     if let Some(m) = map.as_object_mut() {

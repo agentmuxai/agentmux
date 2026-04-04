@@ -26,7 +26,7 @@ use backend::storage::filestore::FileStore;
 use backend::storage::wstore::WaveStore;
 use backend::wps::Broker;
 use backend::wconfig;
-use backend::{docsite, sysinfo, wavebase, wcore};
+use backend::{docsite, sysinfo, base, wcore};
 
 /// Start a ppid polling watchdog on Linux/macOS.
 /// If the parent process dies, getppid() changes (reparented to init/launchd).
@@ -264,11 +264,11 @@ async fn main() {
     let build_time = config.build_time.to_string();
 
     // 4. Initialize backend (matching Go cmd/server/main-server.go:374-590)
-    wavebase::set_version(&version);
-    wavebase::set_build_time(&build_time);
+    base::set_version(&version);
+    base::set_build_time(&build_time);
 
     // Migrate ~/.waveterm → ~/.agentmux if needed (one-time, non-destructive)
-    wavebase::migrate_legacy_data_dir();
+    base::migrate_legacy_data_dir();
 
     // Set up data directory (uses AGENTMUX_DATA_HOME or default)
     if !config.data_home.is_empty() {
@@ -281,26 +281,26 @@ async fn main() {
         std::env::set_var("AGENTMUX_APP_PATH", &config.app_path);
     }
 
-    wavebase::ensure_wave_data_dir().unwrap_or_else(|e| {
+    base::ensure_wave_data_dir().unwrap_or_else(|e| {
         tracing::error!("Failed to ensure data dir: {}", e);
         std::process::exit(1);
     });
-    wavebase::ensure_wave_db_dir().unwrap_or_else(|e| {
+    base::ensure_wave_db_dir().unwrap_or_else(|e| {
         tracing::error!("Failed to ensure db dir: {}", e);
         std::process::exit(1);
     });
 
     // Startup diagnostics
     tracing::info!(
-        data_dir = %wavebase::get_wave_data_dir().display(),
-        db_dir = %wavebase::get_wave_db_dir().display(),
+        data_dir = %base::get_wave_data_dir().display(),
+        db_dir = %base::get_wave_db_dir().display(),
         app_path = %config.app_path,
         instance_id = %config.instance_id,
         "backend directories initialized"
     );
 
     // Open databases
-    let db_dir = wavebase::get_wave_db_dir();
+    let db_dir = base::get_wave_db_dir();
     let wstore = Arc::new(WaveStore::open(&db_dir.join("wave.db")).unwrap_or_else(|e| {
         tracing::error!("Failed to open wave store: {}", e);
         std::process::exit(1);
@@ -373,7 +373,7 @@ async fn main() {
     ));
 
     // Set up docsite directory
-    if let Some(app_path) = wavebase::get_wave_app_path() {
+    if let Some(app_path) = base::get_wave_app_path() {
         let docsite_dir = app_path.join("docsite");
         docsite::set_docsite_dir(docsite_dir);
     }
@@ -430,7 +430,7 @@ async fn main() {
 
     // Clean up stale cross-instance agent registry entries (entries older than 4h).
     backend::reactive::registry::cleanup_stale(
-        &wavebase::get_wave_data_dir(),
+        &base::get_wave_data_dir(),
         4 * 60 * 60 * 1000,
     );
 

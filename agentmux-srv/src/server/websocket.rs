@@ -25,7 +25,7 @@ use crate::backend::rpc_types::{
     COMMAND_SUBPROCESS_SPAWN, COMMAND_AGENT_INPUT, COMMAND_AGENT_STOP, COMMAND_WRITE_AGENT_CONFIG,
     CommandSubprocessSpawnData, CommandAgentInputData, CommandAgentStopData, CommandWriteAgentConfigData,
 };
-use crate::backend::waveobj::{Block, TermSize, WaveObjUpdate, wave_obj_to_value};
+use crate::backend::obj::{Block, TermSize, WaveObjUpdate, wave_obj_to_value};
 use super::service::update_object_meta;
 
 use super::AppState;
@@ -119,8 +119,8 @@ async fn handle_ws_connection(mut socket: WebSocket, state: AppState) {
             // Two sources feed the event bus:
             //   1. WPS Broker (via EventBusBridge) — already wrapped as
             //      { eventtype: "rpc", data: { command: "eventrecv", data: WaveEvent } }
-            //   2. Direct broadcasts (e.g., SetMeta's waveobj:update) — raw
-            //      { eventtype: "waveobj:update", oref: "block:xxx", data: ... }
+            //   2. Direct broadcasts (e.g., SetMeta's obj:update) — raw
+            //      { eventtype: "obj:update", oref: "block:xxx", data: ... }
             // Type 1: forward as-is (already RPC-wrapped).
             // Type 2: wrap as RPC "eventrecv" so the frontend WshRouter routes
             //         it to handleWaveEvent → updateWaveObject → Jotai re-render.
@@ -536,7 +536,7 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                     } else { None }
                 } else { None };
                 event_bus.broadcast_event(&crate::backend::eventbus::WSEventType {
-                    eventtype: "waveobj:update".to_string(),
+                    eventtype: "obj:update".to_string(),
                     oref: oref_str,
                     data: update_data,
                 });
@@ -752,7 +752,7 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                     .map_err(|e| format!("agentinput: load block: {e}"))?
                     .ok_or_else(|| format!("block {} not found", cmd.blockid))?;
 
-                let cli_command = crate::backend::waveobj::meta_get_string(
+                let cli_command = crate::backend::obj::meta_get_string(
                     &block.meta, "cmd", "claude",
                 );
                 let cli_args: Vec<String> = match block.meta.get("cmd:args") {
@@ -769,7 +769,7 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                         "stream-json".to_string(),
                     ],
                 };
-                let working_dir = crate::backend::waveobj::meta_get_string(
+                let working_dir = crate::backend::obj::meta_get_string(
                     &block.meta, "cmd:cwd", "",
                 );
                 let env_vars: std::collections::HashMap<String, String> = match block.meta.get("cmd:env") {
@@ -779,10 +779,10 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                         .collect(),
                     _ => std::collections::HashMap::new(),
                 };
-                let resume_flag = crate::backend::waveobj::meta_get_string(
+                let resume_flag = crate::backend::obj::meta_get_string(
                     &block.meta, "agent:resume_flag", "--resume",
                 );
-                let session_id_field = crate::backend::waveobj::meta_get_string(
+                let session_id_field = crate::backend::obj::meta_get_string(
                     &block.meta, "agent:session_id_field", "session_id",
                 );
 

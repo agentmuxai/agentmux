@@ -8,7 +8,7 @@ use serde_json::json;
 use crate::backend::reactive::InjectionRequest;
 use crate::backend::reactive::registry as agent_registry;
 use crate::backend::subagent_watcher;
-use crate::backend::wavebase;
+use crate::backend::base;
 
 use super::AppState;
 
@@ -37,7 +37,7 @@ pub(super) async fn handle_reactive_inject(
         .unwrap_or(false);
 
     if is_not_found {
-        let data_dir = wavebase::get_wave_data_dir();
+        let data_dir = base::get_wave_data_dir();
         if let Some(entry) = agent_registry::lookup(&data_dir, &req.target_agent) {
             // Guard against self-forwarding loops.
             if entry.local_url != state.local_web_url {
@@ -156,7 +156,7 @@ pub(super) async fn handle_reactive_register(
         Ok(()) => {
             // Also write to cross-instance file registry so other AgentMux
             // instances can forward inject requests to this one.
-            let data_dir = wavebase::get_wave_data_dir();
+            let data_dir = base::get_wave_data_dir();
             agent_registry::write(&data_dir, &req.agent_id, &state.local_web_url, &req.block_id);
 
             // Auto-watch this agent's Claude Code config dir for subagent JSONL files.
@@ -185,7 +185,7 @@ pub(super) async fn handle_reactive_unregister(
 ) -> Json<serde_json::Value> {
     state.reactive_handler.unregister_agent(&req.agent_id);
     // Also remove from cross-instance file registry.
-    let data_dir = wavebase::get_wave_data_dir();
+    let data_dir = base::get_wave_data_dir();
     agent_registry::remove(&data_dir, &req.agent_id);
     Json(json!({"success": true}))
 }
