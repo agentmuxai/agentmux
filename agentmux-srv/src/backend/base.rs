@@ -246,13 +246,19 @@ pub fn is_dev_mode() -> bool {
 }
 
 /// Expand `~` at the start of a path to the home directory.
+/// Rejects `~user/` and paths containing `..` components (path traversal).
 pub fn expand_home_dir(path: &str) -> Result<PathBuf, String> {
+    // Reject paths with .. components regardless of ~ prefix
+    if path.split(['/', '\\']).any(|c| c == "..") {
+        return Err(format!("cannot expand path: '..' traversal in {}", path));
+    }
+
     if let Some(rest) = path.strip_prefix('~') {
         let home = get_home_dir();
         if rest.is_empty() || rest.starts_with('/') || rest.starts_with('\\') {
             Ok(home.join(rest.trim_start_matches(['/', '\\'])))
         } else {
-            Err(format!("cannot expand ~: path traversal in {}", path))
+            Err(format!("cannot expand ~: invalid ~user in {}", path))
         }
     } else {
         Ok(PathBuf::from(path))
@@ -393,6 +399,17 @@ mod tests {
         // ~user should fail (path traversal)
         let result = expand_home_dir("~otheruser/docs");
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_expand_home_dir_dotdot_traversal() {
+        // .. components should fail
+        assert!(expand_home_dir("~/../../etc/passwd").is_err());
+        assert!(expand_home_dir("../../../root").is_err());
+        assert!(expand_home_dir("/tmp/../etc/shadow").is_err());
+        // But normal dots are fine
+        assert!(expand_home_dir("~/.config").is_ok());
+        assert!(expand_home_dir("/tmp/.hidden").is_ok());
     }
 
     #[test]

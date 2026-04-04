@@ -65,10 +65,10 @@ tasks:
             - powershell -ExecutionPolicy Bypass -Command "& ./scripts/package-portable.ps1"
 
     package:msix:
-        desc: Package for Windows Store (MSIX). Run 'task package' first, or pass --Publisher.
+        desc: "[TODO] Package for Windows Store (MSIX). Needs rewrite for CEF."
         platforms: [windows]
         cmds:
-            - powershell -ExecutionPolicy Bypass -File scripts/package-msix.ps1 {{.CLI_ARGS}}
+            - echo "MSIX packaging not yet implemented for CEF host. Old Tauri script was removed."
 
     package:macos:
         desc: "[TODO] Package the application for macOS (CEF). Not yet implemented."
