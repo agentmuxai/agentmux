@@ -3,6 +3,8 @@
 
 import { Search, useSearch } from "@/app/element/search";
 import { atoms, getOverrideConfigAtom, getSettingsPrefixAtom, globalStore, pushNotification, WOS } from "@/store/global";
+import { RpcApi } from "@/app/store/wshclientapi";
+import { TabRpcClient } from "@/app/store/wshrpcutil";
 import { backendStatusAtom } from "@/store/backendStatus";
 import { fireAndForget } from "@/util/util";
 import { computeBgStyleFromMeta } from "@/util/waveutil";
@@ -202,6 +204,27 @@ function TerminalView(props: ViewComponentProps<TermViewModel>): JSX.Element {
             termWrap.dispose();
             rszObs.disconnect();
         });
+    });
+
+    // Ctrl+Wheel zoom: capture phase so we intercept before xterm's bubble-phase
+    // wheel listener. stopPropagation() prevents xterm from scrolling the buffer.
+    // preventDefault() suppresses CEF's native Ctrl+Scroll page zoom.
+    onMount(() => {
+        const handleCtrlWheel = (ev: WheelEvent) => {
+            if (!ev.ctrlKey) return;
+            ev.preventDefault();
+            ev.stopPropagation();
+            const currentZoom = model.termZoomAtom();
+            const STEP = 0.1;
+            const delta = ev.deltaY > 0 ? -STEP : STEP; // scroll down = zoom out
+            const next = Math.max(0.5, Math.min(2.0, Math.round((currentZoom + delta) * 100) / 100));
+            RpcApi.SetMetaCommand(TabRpcClient, {
+                oref: WOS.makeORef("block", blockId),
+                meta: { "term:zoom": next === 1.0 ? null : next },
+            });
+        };
+        viewRef.addEventListener("wheel", handleCtrlWheel, { passive: false, capture: true });
+        onCleanup(() => viewRef.removeEventListener("wheel", handleCtrlWheel, { capture: true }));
     });
 
     // Update font size in-place when zoom changes
