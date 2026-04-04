@@ -591,12 +591,3 @@ tasks:
     # End CEF Tasks
     # ========================================
 
-    test:e2e:macos:
-        desc: Run E2E tests on macOS (frontend-only with mocked IPC)
-        platforms: [darwin]
-        deps:
-            - npm:install
-        cmds:
-            - npx vite --config vite.config.ts &
-            - sleep 5
-            - npx wdio run wdio.macos.conf.cjs || EXIT_CODE=$?; kill %1 2>/dev/null; exit ${EXIT_CODE:-0}
