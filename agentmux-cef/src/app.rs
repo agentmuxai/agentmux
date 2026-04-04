@@ -115,6 +115,7 @@ pub fn get_monitor_work_area(px: i32, py: i32) -> Option<(i32, i32, i32, i32)> {
     use windows_sys::Win32::Graphics::Gdi::{
         MonitorFromPoint, GetMonitorInfoW, MONITORINFO, MONITOR_DEFAULTTOPRIMARY,
     };
+    use windows_sys::Win32::UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
     unsafe {
         let point = windows_sys::Win32::Foundation::POINT { x: px, y: py };
         let hmonitor = MonitorFromPoint(point, MONITOR_DEFAULTTOPRIMARY);
@@ -126,8 +127,21 @@ pub fn get_monitor_work_area(px: i32, py: i32) -> Option<(i32, i32, i32, i32)> {
         if GetMonitorInfoW(hmonitor, &mut info) == 0 {
             return None;
         }
+        // Convert physical pixels → DIP (logical) pixels.
+        // CEF Views set_bounds() expects DIP; GetMonitorInfoW returns physical pixels.
+        // On Windows 10 @ 100%: dpi_x == 96 → scale == 1.0 (no change).
+        // On Windows 11 @ 125%: dpi_x == 120 → divide physical coords by 1.25.
+        let mut dpi_x: u32 = 96;
+        let mut dpi_y: u32 = 96;
+        let _ = GetDpiForMonitor(hmonitor, MDT_EFFECTIVE_DPI, &mut dpi_x, &mut dpi_y);
+        let scale = dpi_x as f64 / 96.0;
         let rc = info.rcWork;
-        Some((rc.left, rc.top, rc.right - rc.left, rc.bottom - rc.top))
+        Some((
+            (rc.left as f64 / scale).round() as i32,
+            (rc.top as f64 / scale).round() as i32,
+            ((rc.right - rc.left) as f64 / scale).round() as i32,
+            ((rc.bottom - rc.top) as f64 / scale).round() as i32,
+        ))
     }
 }
 
