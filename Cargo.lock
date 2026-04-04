@@ -39,7 +39,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "agentmuxsrv-rs"
+name = "agentmux-srv"
 version = "0.33.36"
 dependencies = [
  "async-stream",
@@ -72,6 +72,22 @@ dependencies = [
  "tracing-subscriber",
  "uuid",
  "whoami",
+]
+
+[[package]]
+name = "agentmux-wsh"
+version = "0.33.36"
+dependencies = [
+ "base64",
+ "clap",
+ "dirs",
+ "futures-util",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-tungstenite 0.26.2",
+ "url",
+ "uuid",
 ]
 
 [[package]]
@@ -2376,9 +2392,9 @@ dependencies = [
 
 [[package]]
 name = "semver"
-version = "1.0.27"
+version = "1.0.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d767eb0aabc880b29956c35734170f26ed551a859dbd361d140cdbeca61ab1e2"
+checksum = "8a7852d02fc848982e0c167ef163aaff9cd91dc640ba85e263cb1ce46fae51cd"
 dependencies = [
  "serde",
  "serde_core",
@@ -3859,22 +3875,6 @@ name = "writeable"
 version = "0.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1ffae5123b2d3fc086436f8834ae3ab053a283cfac8fe0a0b8eaae044768a4c4"
-
-[[package]]
-name = "wsh-rs"
-version = "0.33.36"
-dependencies = [
- "base64",
- "clap",
- "dirs",
- "futures-util",
- "serde",
- "serde_json",
- "tokio",
- "tokio-tungstenite 0.26.2",
- "url",
- "uuid",
-]
 
 [[package]]
 name = "xattr"

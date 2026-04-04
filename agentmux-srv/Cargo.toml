@@ -1,11 +1,11 @@
 [package]
-name = "agentmuxsrv-rs"
+name = "agentmux-srv"
 version = "0.33.36"
 edition = "2021"
-description = "AgentMux Rust backend (drop-in replacement for Go agentmuxsrv)"
+description = "AgentMux Rust backend server"
 
 [[bin]]
-name = "agentmuxsrv-rs"
+name = "agentmux-srv"
 path = "src/main.rs"
 
 [dependencies]
