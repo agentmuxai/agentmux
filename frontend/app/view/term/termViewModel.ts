@@ -28,8 +28,11 @@ import type { SignalAtom } from "@/util/util";
 import { createMemo, createSignal } from "solid-js";
 
 // Ticks every 60 s so agentRuntimeLabel memos re-evaluate without waiting for a status event.
+// Singleton timer — stored so HMR doesn't leak duplicate intervals.
 const [nowMinute, setNowMinute] = createSignal(Math.floor(Date.now() / 60_000));
-setInterval(() => setNowMinute(Math.floor(Date.now() / 60_000)), 60_000);
+let _nowMinuteInterval: ReturnType<typeof setInterval> | null = null;
+if (_nowMinuteInterval != null) clearInterval(_nowMinuteInterval);
+_nowMinuteInterval = setInterval(() => setNowMinute(Math.floor(Date.now() / 60_000)), 60_000);
 import { computeTheme, DefaultTermTheme } from "./termutil";
 import { TermWrap } from "./termwrap";
 import { buildSettingsMenuItems } from "./termSettingsMenu";
