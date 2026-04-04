@@ -169,6 +169,7 @@ export class TermWrap {
         // the viewport) to produce "rocket scroll". Blocking events with |deltaY| < 4px
         // eliminates the feedback loop without affecting normal wheel or trackpad scrolling.
         this.terminal.attachCustomWheelEventHandler((ev: WheelEvent) => {
+            if (ev.ctrlKey) return false;           // propagate for Ctrl+Wheel zoom handling
             if (Math.abs(ev.deltaY) < 4) return false;
             return true;
         });
