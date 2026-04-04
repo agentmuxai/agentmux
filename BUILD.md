@@ -132,7 +132,7 @@ task dev
 ```
 
 This rebuilds:
-- `src-tauri/binaries/agentmux-srv-x86_64-pc-windows-msvc.exe` (backend server)
+- `dist/bin/agentmux-srv-{version}-{platform}.{arch}.exe` (backend server)
 - `dist/bin/wsh-{version}-{platform}.{arch}.exe` (shell integration)
 
 ---
@@ -223,15 +223,13 @@ gh pr create --title "Feature" --body "Description"
 After building, you'll have:
 
 ```
-src-tauri/binaries/
-├── agentmux-srv-x86_64-pc-windows-msvc.exe  # Rust backend (sidecar)
-└── bin/
-    └── wsh-{version}-windows.x64.exe           # Shell integration
+dist/bin/
+├── agentmux-srv-{version}-windows.x64.exe       # Rust backend (sidecar)
+└── wsh-{version}-windows.x64.exe                # Shell integration
 
-src-tauri/target/release/
-├── agentmux.exe                                 # Tauri app
-└── bundle/
-    └── nsis/
+target/release/
+├── agentmux-cef.exe                              # CEF host
+└── agentmux-launcher.exe                         # Portable launcher
         └── AgentMux_{version}_x64-setup.exe     # Installer
 
 dist/
@@ -300,7 +298,7 @@ Rust/Tauri logs appear in the terminal where you ran `task dev`.
 task build:backend
 
 # Verify binaries exist
-ls -lh src-tauri/binaries/
+ls -lh dist/bin/agentmux-srv-*
 ls -lh dist/bin/wsh-*
 ```
 

@@ -1,6 +1,6 @@
 Windows Registry Editor Version 5.00
 
-; Enable WER crash dumps for agentmuxsrv-rs.exe
+; Enable WER crash dumps for agentmux-srv.exe
 ; Includes ForceDumpsEnabled so __fastfail (0xC0000409) also triggers WER
 ;
 ; BEFORE importing, create the dump folder:
@@ -10,7 +10,7 @@ Windows Registry Editor Version 5.00
 ;   reg import enable-crash-dumps.reg
 ;   net start WerSvc
 
-[HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps\agentmuxsrv-rs.exe]
+[HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps\agentmux-srv.exe]
 "DumpType"=dword:00000002
 "DumpCount"=dword:0000000a
 "DumpFolder"="C:\\CrashDumps\\agentmuxsrv"
