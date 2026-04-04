@@ -390,7 +390,7 @@ impl SubprocessController {
                                         .ok();
                                         event_bus.broadcast_event(
                                             &crate::backend::eventbus::WSEventType {
-                                                eventtype: "obj:update".to_string(),
+                                                eventtype: "waveobj:update".to_string(),
                                                 oref: oref_str,
                                                 data: update_data,
                                             },

@@ -653,7 +653,7 @@ impl Controller for ShellController {
                                             obj: Some(obj::wave_obj_to_value(&updated_block)),
                                         }).ok();
                                         event_bus.broadcast_event(&crate::backend::eventbus::WSEventType {
-                                            eventtype: "obj:update".to_string(),
+                                            eventtype: "waveobj:update".to_string(),
                                             oref: oref_str.clone(),
                                             data: update_data,
                                         });

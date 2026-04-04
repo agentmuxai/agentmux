@@ -120,7 +120,7 @@ async fn handle_ws_connection(mut socket: WebSocket, state: AppState) {
             //   1. WPS Broker (via EventBusBridge) — already wrapped as
             //      { eventtype: "rpc", data: { command: "eventrecv", data: WaveEvent } }
             //   2. Direct broadcasts (e.g., SetMeta's obj:update) — raw
-            //      { eventtype: "obj:update", oref: "block:xxx", data: ... }
+            //      { eventtype: "waveobj:update", oref: "block:xxx", data: ... }
             // Type 1: forward as-is (already RPC-wrapped).
             // Type 2: wrap as RPC "eventrecv" so the frontend WshRouter routes
             //         it to handleWaveEvent → updateWaveObject → Jotai re-render.
@@ -536,7 +536,7 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                     } else { None }
                 } else { None };
                 event_bus.broadcast_event(&crate::backend::eventbus::WSEventType {
-                    eventtype: "obj:update".to_string(),
+                    eventtype: "waveobj:update".to_string(),
                     oref: oref_str,
                     data: update_data,
                 });
