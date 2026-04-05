@@ -12,21 +12,28 @@ use parking_lot::Mutex;
 
 use crate::state::AppState;
 
-/// Write a timestamped line to %TEMP%\agentmux-close-debug.txt for diagnosing
-/// window-close cleanup in release builds (no console, tracing goes nowhere).
+/// Write a debug line to `%TEMP%\agentmux-close-debug.txt`.
+///
+/// Only active when `AGENTMUX_DEBUG_CLOSE=1` is set in the environment.
+/// In normal production runs the file is never written to.
+/// Always emits at tracing::debug level regardless of the env flag.
 pub fn dlog(msg: &str) {
-    use std::io::Write;
-    let path = std::env::temp_dir().join("agentmux-close-debug.txt");
-    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
-        let _ = writeln!(f, "[{}] {}", chrono_now(), msg);
-    }
-    tracing::info!("[close-debug] {}", msg);
-}
+    use std::sync::OnceLock;
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    let enabled = *ENABLED.get_or_init(|| std::env::var("AGENTMUX_DEBUG_CLOSE").is_ok());
 
-fn chrono_now() -> String {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let ms = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis();
-    format!("{}", ms)
+    tracing::debug!("[close-debug] {}", msg);
+
+    if enabled {
+        use std::io::Write;
+        let path = std::env::temp_dir().join("agentmux-close-debug.txt");
+        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+            use std::time::{SystemTime, UNIX_EPOCH};
+            let ms = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis();
+            let _ = writeln!(f, "[{}] {}", ms, msg);
+        }
+        tracing::info!("[close-debug] {}", msg);
+    }
 }
 
 /// Core handler state shared across all CEF callback interfaces.
@@ -643,10 +650,12 @@ fn backend_close_window(web_endpoint: &str, auth_key: &str, window_id: &str) {
         }
     };
 
-    let body = format!(
-        r#"{{"service":"window","method":"CloseWindow","args":["{}"],"uicontext":null}}"#,
-        window_id
-    );
+    let body = serde_json::json!({
+        "service": "window",
+        "method": "CloseWindow",
+        "args": [window_id],
+        "uicontext": null,
+    }).to_string();
     let request = format!(
         "POST /wave/service?service=window&method=CloseWindow&authkey={} HTTP/1.1\r\n\
          Host: 127.0.0.1\r\n\
@@ -679,16 +688,4 @@ fn backend_close_window(web_endpoint: &str, auth_key: &str, window_id: &str) {
         }
         Err(e) => dlog(&format!("backend_close_window: connect failed to {}: {}", addr, e)),
     }
-}
-
-/// Extract a query parameter value from a URL string.
-fn extract_query_param(url: &str, key: &str) -> Option<String> {
-    let query = url.split('?').nth(1)?;
-    for pair in query.split('&') {
-        let mut kv = pair.splitn(2, '=');
-        if kv.next()? == key {
-            return kv.next().map(|v| v.to_string());
-        }
-    }
-    None
 }
