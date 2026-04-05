@@ -1,12 +1,15 @@
 [package]
 name = "agentmux-wsh"
-version = "0.33.43"
+version = "0.33.44"
 edition = "2021"
 description = "Shell integration CLI for AgentMux"
 
 [[bin]]
 name = "wsh"
 path = "src/main.rs"
+
+[target.'cfg(windows)'.build-dependencies]
+winres = "0.1"
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }

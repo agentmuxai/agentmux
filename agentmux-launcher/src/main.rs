@@ -33,17 +33,16 @@ fn main() {
         }
     }
 
-    // Resolve the real CEF host binary in runtime/
-    let real_exe = runtime_dir.join(if cfg!(target_os = "windows") {
-        "agentmux-cef.exe"
-    } else {
-        "agentmux-cef"
-    });
+    // Resolve the real CEF host binary in runtime/.
+    // Prefer the versioned binary (e.g., agentmux-cef-0.33.43.exe) so that Task Manager,
+    // WER crash dumps, and Event Viewer all show the version in the process/filename.
+    // Falls back to plain name for dev mode.
+    let real_exe = find_cef_binary(&runtime_dir);
 
     if !real_exe.exists() {
         eprintln!(
-            "AgentMux runtime not found at: {}\nMake sure the runtime/ folder is intact.",
-            real_exe.display()
+            "AgentMux runtime not found in: {}\nMake sure the runtime/ folder is intact.",
+            runtime_dir.display()
         );
         std::process::exit(1);
     }
@@ -75,4 +74,33 @@ fn main() {
         eprintln!("Failed to launch AgentMux: {}", err);
         std::process::exit(1);
     }
+}
+
+/// Find the CEF host binary in the runtime directory.
+/// Tries versioned name first (agentmux-cef-X.Y.Z.exe), then plain name (dev mode).
+fn find_cef_binary(runtime_dir: &std::path::Path) -> std::path::PathBuf {
+    let ext = if cfg!(target_os = "windows") { ".exe" } else { "" };
+
+    // 1. Try exact versioned name matching this launcher's version
+    let versioned = format!("agentmux-cef-{}{}", env!("CARGO_PKG_VERSION"), ext);
+    let versioned_path = runtime_dir.join(&versioned);
+    if versioned_path.exists() {
+        return versioned_path;
+    }
+
+    // 2. Scan for any agentmux-cef-*.exe (handles version mismatch between launcher and CEF)
+    if let Ok(entries) = std::fs::read_dir(runtime_dir) {
+        let prefix = format!("agentmux-cef-");
+        let suffix = ext;
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            if name.starts_with(&prefix) && name.ends_with(suffix) && name != format!("agentmux-cef{}", suffix) {
+                return entry.path();
+            }
+        }
+    }
+
+    // 3. Fall back to plain name (dev mode)
+    runtime_dir.join(format!("agentmux-cef{}", ext))
 }

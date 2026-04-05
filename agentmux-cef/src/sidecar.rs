@@ -381,13 +381,12 @@ fn deploy_wsh(app_path: &std::path::Path) {
         return;
     }
 
-    let wsh_src_name = if cfg!(windows) { "wsh.exe" } else { "wsh" };
-    let bundled_wsh = app_path.join(wsh_src_name);
-    if !bundled_wsh.exists() {
-        // Not an error in dev mode — wsh may not be available
-        tracing::debug!("Bundled wsh not found at: {}", bundled_wsh.display());
+    // Try versioned name first (e.g., wsh-0.33.44-windows.x64.exe), then plain name (dev mode)
+    let bundled_wsh = find_wsh_source(app_path);
+    let Some(bundled_wsh) = bundled_wsh else {
+        tracing::debug!("Bundled wsh not found in: {}", app_path.display());
         return;
-    }
+    };
 
     let version = env!("CARGO_PKG_VERSION");
     let (goos, goarch) = if cfg!(target_os = "macos") {
@@ -439,6 +438,40 @@ fn deploy_wsh(app_path: &std::path::Path) {
     }
 
     tracing::info!("Deployed wsh to: {}", dest.display());
+}
+
+/// Find the bundled wsh binary — versioned name first, then plain name for dev mode.
+fn find_wsh_source(app_path: &std::path::Path) -> Option<std::path::PathBuf> {
+    let ext = if cfg!(windows) { ".exe" } else { "" };
+
+    // 1. Try versioned name matching this build's version (e.g., wsh-0.33.44-windows.x64.exe)
+    let version = env!("CARGO_PKG_VERSION");
+    let arch = if cfg!(target_arch = "aarch64") { "arm64" } else { "x64" };
+    let os = if cfg!(target_os = "macos") { "darwin" } else if cfg!(target_os = "linux") { "linux" } else { "windows" };
+    let versioned = format!("wsh-{}-{}.{}{}", version, os, arch, ext);
+    let path = app_path.join(&versioned);
+    if path.exists() {
+        return Some(path);
+    }
+
+    // 2. Scan for any wsh-*.exe
+    if let Ok(entries) = std::fs::read_dir(app_path) {
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            if name.starts_with("wsh-") && name.ends_with(ext) {
+                return Some(entry.path());
+            }
+        }
+    }
+
+    // 3. Plain name (dev mode)
+    let plain = app_path.join(format!("wsh{}", ext));
+    if plain.exists() {
+        return Some(plain);
+    }
+
+    None
 }
 
 /// Create a Windows Job Object and assign the child process to it.
