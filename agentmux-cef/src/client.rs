@@ -12,6 +12,23 @@ use parking_lot::Mutex;
 
 use crate::state::AppState;
 
+/// Write a timestamped line to %TEMP%\agentmux-close-debug.txt for diagnosing
+/// window-close cleanup in release builds (no console, tracing goes nowhere).
+pub fn dlog(msg: &str) {
+    use std::io::Write;
+    let path = std::env::temp_dir().join("agentmux-close-debug.txt");
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+        let _ = writeln!(f, "[{}] {}", chrono_now(), msg);
+    }
+    tracing::info!("[close-debug] {}", msg);
+}
+
+fn chrono_now() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let ms = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis();
+    format!("{}", ms)
+}
+
 /// Core handler state shared across all CEF callback interfaces.
 pub struct AgentMuxHandler {
     browser_list: Vec<Browser>,
@@ -77,14 +94,16 @@ impl AgentMuxHandler {
             let label = if browsers.is_empty() {
                 "main".to_string()
             } else {
-                // Extract windowLabel from the URL query params if available
-                let url = browser.main_frame()
-                    .map(|f| { let u = f.url(); CefString::from(&u).to_string() })
-                    .unwrap_or_default();
-                extract_query_param(&url, "windowLabel")
-                    .unwrap_or_else(|| format!("window-{}", uuid::Uuid::new_v4()))
+                // Pop the label that was queued by open_new_window / open_window_at_position
+                // before posting to the UI thread.  The URL is not yet loaded when
+                // on_after_created fires, so reading it here always returns empty string.
+                let lbl = self.state.pending_window_labels.lock().pop_front()
+                    .unwrap_or_else(|| format!("window-{}", uuid::Uuid::new_v4()));
+                dlog(&format!("on_after_created: popped label={}", lbl));
+                lbl
             };
             tracing::info!("Registered browser: label={} (total: {})", label, browsers.len() + 1);
+            dlog(&format!("on_after_created: registered label={} total={}", label, browsers.len() + 1));
             browsers.insert(label, browser.clone());
         }
 
@@ -124,14 +143,19 @@ impl AgentMuxHandler {
     fn on_before_close(&mut self, browser: Option<&mut Browser>) {
         debug_assert_ne!(currently_on(ThreadId::UI), 0);
 
+        dlog(&format!("on_before_close fired; browser_list.len()={}", self.browser_list.len()));
+
         let mut browser = browser.cloned().expect("Browser is None");
 
         // Unregister browser from the multi-window map and get its label.
         let label = {
             let mut browsers = self.state.browsers.lock();
+            let keys: Vec<String> = browsers.keys().cloned().collect();
+            dlog(&format!("browsers map keys: {:?}", keys));
             let label = browsers.iter()
                 .find(|(_, b)| b.is_same(Some(&mut browser)) != 0)
                 .map(|(k, _)| k.clone());
+            dlog(&format!("label found: {:?}", label));
             if let Some(ref lbl) = label {
                 browsers.remove(lbl);
                 tracing::info!("Unregistered browser: label={} (remaining: {})", lbl, browsers.len());
@@ -142,8 +166,12 @@ impl AgentMuxHandler {
         // Unregister from instance registry; retrieve backend window ID for cleanup.
         let backend_window_id = label.as_deref().and_then(|lbl| {
             self.state.window_instance_registry.lock().unregister(lbl);
-            self.state.window_id_map.lock().remove(lbl)
+            let wid = self.state.window_id_map.lock().remove(lbl);
+            dlog(&format!("window_id_map.remove({:?}) => {:?}", lbl, wid));
+            wid
         });
+
+        dlog(&format!("backend_window_id: {:?}", backend_window_id));
 
         if let Some(index) = self
             .browser_list
@@ -153,12 +181,10 @@ impl AgentMuxHandler {
             self.browser_list.remove(index);
         }
 
-        tracing::info!(
-            "Browser closed (remaining: {})",
-            self.browser_list.len()
-        );
+        dlog(&format!("browser_list after remove: {}", self.browser_list.len()));
 
         if self.browser_list.is_empty() {
+            dlog("last window — calling quit_message_loop");
             // Last window — quit the message loop.
             // The Job Object kills agentmux-srv which kills all shell processes.
             quit_message_loop();
@@ -178,14 +204,17 @@ impl AgentMuxHandler {
             if let Some(window_id) = backend_window_id {
                 let web_endpoint = self.state.backend_endpoints.lock().web_endpoint.clone();
                 let auth_key = self.state.auth_key.lock().clone();
+                dlog(&format!("spawning backend_close_window thread for window_id={}", window_id));
                 std::thread::spawn(move || {
                     backend_close_window(&web_endpoint, &auth_key, &window_id);
                 });
             } else {
-                tracing::warn!(
-                    label = label.as_deref().unwrap_or("?"),
-                    "[on_before_close] no backend window ID registered — shells may orphan"
+                let warn = format!(
+                    "[on_before_close] no backend window ID registered for label={:?} — shells may orphan",
+                    label
                 );
+                dlog(&warn);
+                tracing::warn!("{}", warn);
             }
         }
     }
@@ -629,16 +658,26 @@ fn backend_close_window(web_endpoint: &str, auth_key: &str, window_id: &str) {
         auth_key, body.len(), body
     );
 
-    let timeout = std::time::Duration::from_millis(500);
+    dlog(&format!("backend_close_window: connecting to {} for window_id={}", addr, window_id));
+    let timeout = std::time::Duration::from_millis(2000);
     match std::net::TcpStream::connect_timeout(&addr, timeout) {
         Ok(mut stream) => {
             stream.set_write_timeout(Some(timeout)).ok();
+            stream.set_read_timeout(Some(timeout)).ok();
             match stream.write_all(request.as_bytes()) {
-                Ok(_) => tracing::info!("[backend_close_window] sent CloseWindow for window_id={}", window_id),
-                Err(e) => tracing::warn!("[backend_close_window] write failed: {}", e),
+                Ok(_) => {
+                    dlog(&format!("backend_close_window: sent request for window_id={}", window_id));
+                    // Read response to confirm the backend received it
+                    use std::io::Read;
+                    let mut resp = String::new();
+                    let _ = stream.read_to_string(&mut resp);
+                    let first_line = resp.lines().next().unwrap_or("(empty)").to_string();
+                    dlog(&format!("backend_close_window: response first line: {}", first_line));
+                }
+                Err(e) => dlog(&format!("backend_close_window: write failed: {}", e)),
             }
         }
-        Err(e) => tracing::warn!("[backend_close_window] connect failed: {}", e),
+        Err(e) => dlog(&format!("backend_close_window: connect failed to {}: {}", addr, e)),
     }
 }
 

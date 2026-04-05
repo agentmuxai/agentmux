@@ -301,6 +301,9 @@ pub fn open_window_at_position(state: &Arc<AppState>, args: &serde_json::Value) 
         url.push_str(&format!("&workspaceId={}", workspace_id));
     }
 
+    // Queue the label so on_after_created gets the right key.
+    state.pending_window_labels.lock().push_back(label.clone());
+
     // Post to CEF UI thread — window_create_top_level must run there.
     crate::ui_tasks::post_create_window(
         state, &url, &label, pos_x, pos_y, win_w, win_h,

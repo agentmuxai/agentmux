@@ -3,7 +3,7 @@
 //
 // Shared application state for the CEF host.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use parking_lot::Mutex;
 
 use cef::Browser;
@@ -173,6 +173,12 @@ pub struct AppState {
     /// "main" is the primary window; tear-off windows get "window-{UUID}" labels.
     pub browsers: Mutex<HashMap<String, Browser>>,
 
+    /// FIFO queue of labels for windows that are about to be created.
+    /// Pushed in `open_new_window` / `open_window_at_position` before
+    /// `post_create_window`; popped in `on_after_created` so the browser gets
+    /// the correct label rather than a freshly-generated UUID.
+    pub pending_window_labels: Mutex<VecDeque<String>>,
+
     /// Version-specific data directory (e.g. ai.agentmux.cef.v0-32-111/)
     pub version_data_dir: Mutex<Option<String>>,
 
@@ -206,6 +212,7 @@ impl Default for AppState {
             ipc_port: Mutex::new(0),
             ipc_token: uuid::Uuid::new_v4().to_string(),
             browsers: Mutex::new(HashMap::new()),
+            pending_window_labels: Mutex::new(VecDeque::new()),
             version_data_dir: Mutex::new(None),
             version_config_dir: Mutex::new(None),
             active_drag: Mutex::new(None),
