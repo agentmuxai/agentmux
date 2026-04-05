@@ -1,6 +1,6 @@
 [package]
 name = "agentmux-srv"
-version = "0.33.43"
+version = "0.33.44"
 edition = "2021"
 description = "AgentMux Rust backend server"
 
@@ -44,6 +44,9 @@ mdns-sd = "0.12"
 # __fastfail (0xC0000409) is handled separately by WER LocalDumps.
 crash-handler = "0.7"
 minidumper = "0.9"
+
+[target.'cfg(windows)'.build-dependencies]
+winres = "0.1"
 
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }
