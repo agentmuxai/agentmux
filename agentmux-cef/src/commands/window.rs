@@ -433,14 +433,17 @@ pub fn open_new_window(state: &Arc<AppState>) -> Result<serde_json::Value, Strin
     let (pos_x, pos_y) = get_offset_position();
     let (win_w, win_h) = get_secondary_window_size(pos_x, pos_y);
 
-    // Queue the label so on_after_created gets the right key (URL isn't
-    // loaded yet when on_after_created fires, so URL-parsing is unreliable).
-    state.pending_window_labels.lock().push_back(label.clone());
-
-    // Post to CEF UI thread — window_create_top_level must run there.
-    crate::ui_tasks::post_create_window(
-        state, &url, &label, pos_x, pos_y, win_w, win_h,
-    );
+    // Hold the pending_window_labels lock across post_create_window so that
+    // concurrent open_new_window calls cannot interleave their push+post pairs.
+    // post_task is non-blocking (just enqueues a UI-thread task), so holding
+    // the lock here is safe and keeps the FIFO order consistent.
+    {
+        let mut pending = state.pending_window_labels.lock();
+        pending.push_back(label.clone());
+        crate::ui_tasks::post_create_window(
+            state, &url, &label, pos_x, pos_y, win_w, win_h,
+        );
+    }
 
     // Notify all windows of the count change
     let count = state.window_instance_registry.lock().count();
