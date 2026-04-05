@@ -5,15 +5,21 @@ fn main() {
         std::env::var("TARGET").unwrap()
     );
 
-    // Windows: embed application icon
+    // Windows: embed application icon + version info into PE VERSIONINFO resource.
+    // FileDescription controls the "Name" column in Task Manager's Processes tab.
+    // The actual exe filename controls WER crash dump names and Event Viewer entries.
     #[cfg(target_os = "windows")]
     {
-        // Only embed icon if the resource file exists
+        let version = std::env::var("CARGO_PKG_VERSION").unwrap();
+        let mut res = winres::WindowsResource::new();
+        res.set("FileDescription", &format!("AgentMux CEF v{}", version));
+        res.set("ProductName", "AgentMux");
+        res.set("CompanyName", "AgentMux");
+        res.set("InternalName", "agentmux-cef");
         let icon_path = std::path::Path::new("resources/win/agentmux.ico");
         if icon_path.exists() {
-            let _ = winres::WindowsResource::new()
-                .set_icon(icon_path.to_str().unwrap())
-                .compile();
+            res.set_icon(icon_path.to_str().unwrap());
         }
+        res.compile().expect("winres compile failed");
     }
 }
