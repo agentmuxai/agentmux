@@ -126,17 +126,24 @@ impl AgentMuxHandler {
 
         let mut browser = browser.cloned().expect("Browser is None");
 
-        // Unregister browser from the multi-window map.
-        {
+        // Unregister browser from the multi-window map and get its label.
+        let label = {
             let mut browsers = self.state.browsers.lock();
             let label = browsers.iter()
                 .find(|(_, b)| b.is_same(Some(&mut browser)) != 0)
                 .map(|(k, _)| k.clone());
-            if let Some(label) = label {
-                browsers.remove(&label);
-                tracing::info!("Unregistered browser: label={} (remaining: {})", label, browsers.len());
+            if let Some(ref lbl) = label {
+                browsers.remove(lbl);
+                tracing::info!("Unregistered browser: label={} (remaining: {})", lbl, browsers.len());
             }
-        }
+            label
+        };
+
+        // Unregister from instance registry; retrieve backend window ID for cleanup.
+        let backend_window_id = label.as_deref().and_then(|lbl| {
+            self.state.window_instance_registry.lock().unregister(lbl);
+            self.state.window_id_map.lock().remove(lbl)
+        });
 
         if let Some(index) = self
             .browser_list
@@ -152,8 +159,34 @@ impl AgentMuxHandler {
         );
 
         if self.browser_list.is_empty() {
-            // All browsers closed — quit the message loop.
+            // Last window — quit the message loop.
+            // The Job Object kills agentmux-srv which kills all shell processes.
             quit_message_loop();
+        } else {
+            // Notify remaining windows of the new count.
+            let new_count = self.state.window_instance_registry.lock().count();
+            crate::events::emit_event_all_windows(
+                &self.state,
+                "window-instances-changed",
+                &serde_json::json!(new_count),
+            );
+
+            // Tell the backend to clean up this window's workspace/tabs/shells.
+            // This replaces the JavaScript `beforeunload` handler — running it here
+            // ensures shells die after the CEF browser is gone (not while it's still
+            // alive), so Task Manager keeps them grouped until they exit.
+            if let Some(window_id) = backend_window_id {
+                let web_endpoint = self.state.backend_endpoints.lock().web_endpoint.clone();
+                let auth_key = self.state.auth_key.lock().clone();
+                std::thread::spawn(move || {
+                    backend_close_window(&web_endpoint, &auth_key, &window_id);
+                });
+            } else {
+                tracing::warn!(
+                    label = label.as_deref().unwrap_or("?"),
+                    "[on_before_close] no backend window ID registered — shells may orphan"
+                );
+            }
         }
     }
 
@@ -558,6 +591,54 @@ unsafe fn set_window_icon(hwnd: *mut std::ffi::c_void) {
         tracing::info!("Set window icon from embedded resource");
     } else {
         tracing::warn!("set_window_icon: no icon found in exe resource");
+    }
+}
+
+/// Synchronously tell the backend to close a window's workspace/tabs/shells.
+///
+/// Uses a raw TCP connection so no async runtime or extra crate is needed.
+/// Called from a background thread in `on_before_close` so the CEF UI thread
+/// is not blocked. Fire-and-forget: we write the request and don't read the response.
+fn backend_close_window(web_endpoint: &str, auth_key: &str, window_id: &str) {
+    use std::io::Write;
+
+    // Parse host:port from "http://127.0.0.1:PORT"
+    let addr_str = web_endpoint
+        .trim_start_matches("http://")
+        .trim_start_matches("https://");
+    let addr: std::net::SocketAddr = match addr_str.parse() {
+        Ok(a) => a,
+        Err(e) => {
+            tracing::warn!("[backend_close_window] cannot parse endpoint '{}': {}", web_endpoint, e);
+            return;
+        }
+    };
+
+    let body = format!(
+        r#"{{"service":"window","method":"CloseWindow","args":["{}"],"uicontext":null}}"#,
+        window_id
+    );
+    let request = format!(
+        "POST /wave/service?service=window&method=CloseWindow&authkey={} HTTP/1.1\r\n\
+         Host: 127.0.0.1\r\n\
+         Content-Type: application/json\r\n\
+         Content-Length: {}\r\n\
+         Connection: close\r\n\
+         \r\n\
+         {}",
+        auth_key, body.len(), body
+    );
+
+    let timeout = std::time::Duration::from_millis(500);
+    match std::net::TcpStream::connect_timeout(&addr, timeout) {
+        Ok(mut stream) => {
+            stream.set_write_timeout(Some(timeout)).ok();
+            match stream.write_all(request.as_bytes()) {
+                Ok(_) => tracing::info!("[backend_close_window] sent CloseWindow for window_id={}", window_id),
+                Err(e) => tracing::warn!("[backend_close_window] write failed: {}", e),
+            }
+        }
+        Err(e) => tracing::warn!("[backend_close_window] connect failed: {}", e),
     }
 }
 

@@ -121,6 +121,11 @@ pub struct BackendEndpoints {
 /// `tauri::State<AppState>`. The sidecar child is `std::process::Child` instead
 /// of `tauri_plugin_shell::process::CommandChild`.
 pub struct AppState {
+    /// Maps window label (e.g. "main", "window-{uuid}") to the backend window ID.
+    /// Populated when the frontend calls `register_backend_window` during init.
+    /// Used by `on_before_close` to notify the backend to clean up.
+    pub window_id_map: Mutex<HashMap<String, String>>,
+
     /// Auth key for backend communication
     pub auth_key: Mutex<String>,
 
@@ -185,6 +190,7 @@ pub struct AppState {
 impl Default for AppState {
     fn default() -> Self {
         Self {
+            window_id_map: Mutex::new(HashMap::new()),
             auth_key: Mutex::new(uuid::Uuid::new_v4().to_string()),
             backend_endpoints: Mutex::new(BackendEndpoints::default()),
             sidecar_child: Mutex::new(None),

@@ -401,6 +401,9 @@ export function buildCefApi(): AppApi {
             const params = new URLSearchParams(window.location.search);
             return params.get("windowLabel") ?? "main";
         },
+        registerBackendWindow: (label: string, windowId: string) => {
+            invokeCommand("register_backend_window", { label, window_id: windowId }).catch(() => {});
+        },
         isMainWindow: async () => {
             const params = new URLSearchParams(window.location.search);
             return !params.has("windowLabel");
