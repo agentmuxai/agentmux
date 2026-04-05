@@ -363,8 +363,11 @@ pub fn get_instance_number(state: &Arc<AppState>, args: &serde_json::Value) -> s
 pub fn register_backend_window(state: &Arc<AppState>, args: &serde_json::Value) -> serde_json::Value {
     let label = args.get("label").and_then(|v| v.as_str()).unwrap_or("main");
     let window_id = args.get("window_id").and_then(|v| v.as_str()).unwrap_or("");
+    crate::client::dlog(&format!("register_backend_window: label={} window_id={}", label, window_id));
     if !window_id.is_empty() {
         state.window_id_map.lock().insert(label.to_string(), window_id.to_string());
+        let keys: Vec<String> = state.window_id_map.lock().keys().cloned().collect();
+        crate::client::dlog(&format!("window_id_map now has keys: {:?}", keys));
         tracing::info!(label = %label, window_id = %window_id, "[window] registered backend window ID");
     }
     serde_json::Value::Null
@@ -429,6 +432,10 @@ pub fn open_new_window(state: &Arc<AppState>) -> Result<serde_json::Value, Strin
 
     let (pos_x, pos_y) = get_offset_position();
     let (win_w, win_h) = get_secondary_window_size(pos_x, pos_y);
+
+    // Queue the label so on_after_created gets the right key (URL isn't
+    // loaded yet when on_after_created fires, so URL-parsing is unreliable).
+    state.pending_window_labels.lock().push_back(label.clone());
 
     // Post to CEF UI thread — window_create_top_level must run there.
     crate::ui_tasks::post_create_window(
