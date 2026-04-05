@@ -92,8 +92,13 @@ pub fn delete_tab(
 }
 
 /// Internal: delete a tab's layout and blocks, then the tab itself.
+/// Kills shell processes for all blocks before deleting from the database.
 pub(super) fn delete_tab_inner(store: &WaveStore, tab_id: &str) -> Result<(), StoreError> {
     if let Ok(tab) = store.must_get::<Tab>(tab_id) {
+        // Kill shell processes FIRST — must happen before DB cleanup
+        for block_id in &tab.blockids {
+            crate::backend::blockcontroller::delete_controller(block_id);
+        }
         // Delete layout state
         if !tab.layoutstate.is_empty() {
             let _ = store.delete::<LayoutState>(&tab.layoutstate);
