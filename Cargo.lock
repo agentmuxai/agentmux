@@ -10,7 +10,7 @@ checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
 name = "agentmux-cef"
-version = "0.33.43"
+version = "0.33.44"
 dependencies = [
  "axum 0.8.8",
  "cef",
@@ -32,7 +32,7 @@ dependencies = [
 
 [[package]]
 name = "agentmux-launcher"
-version = "0.33.43"
+version = "0.33.44"
 dependencies = [
  "windows-sys 0.59.0",
  "winres",
@@ -40,7 +40,7 @@ dependencies = [
 
 [[package]]
 name = "agentmux-srv"
-version = "0.33.43"
+version = "0.33.44"
 dependencies = [
  "async-stream",
  "axum 0.7.9",
@@ -72,11 +72,12 @@ dependencies = [
  "tracing-subscriber",
  "uuid",
  "whoami",
+ "winres",
 ]
 
 [[package]]
 name = "agentmux-wsh"
-version = "0.33.43"
+version = "0.33.44"
 dependencies = [
  "base64",
  "clap",
@@ -88,6 +89,7 @@ dependencies = [
  "tokio-tungstenite 0.26.2",
  "url",
  "uuid",
+ "winres",
 ]
 
 [[package]]
@@ -823,9 +825,9 @@ checksum = "7360491ce676a36bf9bb3c56c1aa791658183a54d2744120f27285738d90465a"
 
 [[package]]
 name = "fastrand"
-version = "2.3.0"
+version = "2.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "37909eebbb50d72f9059c3b6d82c0463f2ff062c9e95845c43a6c9c0355411be"
+checksum = "a043dc74da1e37d6afe657061213aa6f425f855399a11d3463c6ecccc4dfda1f"
 
 [[package]]
 name = "filedescriptor"
@@ -2468,9 +2470,9 @@ dependencies = [
 
 [[package]]
 name = "serial2"
-version = "0.2.34"
+version = "0.2.35"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9e1401f562d358cdfdbdf8946e51a7871ede1db68bd0fd99bedc79e400241550"
+checksum = "e66ab7ee258c6456796c6098e1b53a5baa1a5e0637347de59ddb44ee8e20be6e"
 dependencies = [
  "cfg-if",
  "libc",
