@@ -24,7 +24,6 @@ import {
     pushNotification,
     removeNotificationById,
     subscribeToConnEvents,
-    windowCountAtom,
     windowInstanceNumAtom,
     setWindowInstanceNumAtom,
     setWindowCountAtom,
@@ -662,6 +661,18 @@ async function initWave(initOpts: AgentMuxInitOpts) {
     render(App, elem);
     tlog("SolidJS render", t);
     tlog("TOTAL initWave", t0);
+
+    // Register this window's backend ID with the CEF host so on_before_close
+    // can call CloseWindow on the backend when this window is destroyed.
+    // The CEF host handles cleanup at the right time (after the browser commits to
+    // closing), keeping shells grouped under the CEF process in Task Manager.
+    {
+        const wlabel = new URLSearchParams(window.location.search).get("windowLabel") ?? "main";
+        const wid = initOpts.windowId;
+        if (wid) {
+            getApi().registerBackendWindow(wlabel, wid);
+        }
+    }
 
     // Hide startup loading message
     const startupLoading = document.getElementById("startup-loading");

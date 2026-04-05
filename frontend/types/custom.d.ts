@@ -119,6 +119,7 @@ declare global {
         setWindowTransparency: (transparent: boolean, blur: boolean, opacity: number) => void;
         getWindowLabel: () => Promise<string>;
         isMainWindow: () => Promise<boolean>;
+        registerBackendWindow: (label: string, windowId: string) => void;
         listWindows: () => Promise<string[]>;
         focusWindow: (label: string) => Promise<void>;
         getInstanceNumber: () => Promise<number>;

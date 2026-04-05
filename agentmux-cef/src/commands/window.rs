@@ -357,6 +357,19 @@ pub fn get_instance_number(state: &Arc<AppState>, args: &serde_json::Value) -> s
     serde_json::json!(reg.get(label).unwrap_or(1))
 }
 
+/// Register the backend window ID for a window label.
+/// Called by the frontend after it has initialized its backend Window object.
+/// Used by `on_before_close` to notify the backend when a secondary window closes.
+pub fn register_backend_window(state: &Arc<AppState>, args: &serde_json::Value) -> serde_json::Value {
+    let label = args.get("label").and_then(|v| v.as_str()).unwrap_or("main");
+    let window_id = args.get("window_id").and_then(|v| v.as_str()).unwrap_or("");
+    if !window_id.is_empty() {
+        state.window_id_map.lock().insert(label.to_string(), window_id.to_string());
+        tracing::info!(label = %label, window_id = %window_id, "[window] registered backend window ID");
+    }
+    serde_json::Value::Null
+}
+
 /// Get the total window count.
 pub fn get_window_count(state: &Arc<AppState>) -> serde_json::Value {
     let reg = state.window_instance_registry.lock();
