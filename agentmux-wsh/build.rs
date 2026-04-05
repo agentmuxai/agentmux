@@ -3,14 +3,10 @@ fn main() {
     {
         let version = std::env::var("CARGO_PKG_VERSION").unwrap();
         let mut res = winres::WindowsResource::new();
-        res.set("FileDescription", &format!("AgentMux v{}", version));
+        res.set("FileDescription", &format!("AgentMux Shell v{}", version));
         res.set("ProductName", "AgentMux");
         res.set("CompanyName", "AgentMux");
-        res.set("InternalName", "agentmux-launcher");
-        let icon_path = std::path::Path::new("../agentmux-cef/resources/win/agentmux.ico");
-        if icon_path.exists() {
-            res.set_icon(icon_path.to_str().unwrap());
-        }
+        res.set("InternalName", "wsh");
         res.compile().expect("winres compile failed");
     }
 }

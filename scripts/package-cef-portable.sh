@@ -44,14 +44,14 @@ Requirements:
   - No admin rights required
 READMEEOF
 
-# Runtime binaries
-cp target/release/agentmux-cef.exe "$PORTABLE/runtime/"
+# Runtime binaries — versioned filenames so WER dumps & Event Viewer show versions
+cp target/release/agentmux-cef.exe "$PORTABLE/runtime/agentmux-cef-$VERSION.exe"
 cp dist/bin/agentmux-srv-$VERSION-windows.x64.exe "$PORTABLE/runtime/"
 
-# wsh
+# wsh — keep versioned filename for WER/Event Viewer identification
 WSH="dist/bin/wsh-$VERSION-windows.x64.exe"
 if [ -f "$WSH" ]; then
-    cp "$WSH" "$PORTABLE/runtime/wsh.exe"
+    cp "$WSH" "$PORTABLE/runtime/"
 else
     echo "Warning: $WSH not found"
 fi
@@ -75,7 +75,7 @@ cp dist/cef/chrome_100_percent.pak dist/cef/chrome_200_percent.pak dist/cef/reso
 cp dist/cef/locales/en-US.pak "$PORTABLE/runtime/locales/" 2>/dev/null || true
 
 # Verify versions match
-CEF_VER=$(grep -ao "$VERSION" "$PORTABLE/runtime/agentmux-cef.exe" | head -1)
+CEF_VER=$(grep -ao "$VERSION" "$PORTABLE/runtime/agentmux-cef-$VERSION.exe" | head -1)
 SRV_VER=$(grep -ao "$VERSION" "$PORTABLE/runtime/agentmux-srv-$VERSION-windows.x64.exe" | head -1)
 if [ "$CEF_VER" != "$VERSION" ] || [ "$SRV_VER" != "$VERSION" ]; then
     echo "ERROR: Binary version mismatch! CEF=$CEF_VER SRV=$SRV_VER expected=$VERSION" >&2
