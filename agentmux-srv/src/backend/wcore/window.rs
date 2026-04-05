@@ -131,7 +131,24 @@ pub fn create_window_full(
 }
 
 /// Close a window and remove from client's window list.
+/// Cascades cleanup through workspace → tabs → blocks, killing all shell processes.
 pub fn close_window(store: &WaveStore, window_id: &str) -> Result<(), StoreError> {
+    // Cascade: kill all shell processes in this window's workspace
+    if let Ok(window) = store.must_get::<Window>(window_id) {
+        if let Ok(workspace) = store.must_get::<Workspace>(&window.workspaceid) {
+            let all_tab_ids: Vec<String> = workspace
+                .tabids
+                .iter()
+                .chain(workspace.pinnedtabids.iter())
+                .cloned()
+                .collect();
+            for tab_id in &all_tab_ids {
+                let _ = super::tab::delete_tab_inner(store, tab_id);
+            }
+            let _ = store.delete::<Workspace>(&window.workspaceid);
+        }
+    }
+
     let mut client = get_client(store)?;
     client.windowids.retain(|id| id != window_id);
     store.update(&mut client)?;
