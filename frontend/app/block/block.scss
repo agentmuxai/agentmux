@@ -458,18 +458,14 @@
             // composites above xterm's scroll layer.
 
             .block-mask {
-                // Focused: switch to accent color border.
-                // backdrop-filter guarantees this ring is visible above xterm's
-                // composited-scroll layer (z-index:50 > xterm's auto in parent ctx).
-                border-color: var(--accent-color);
+                // IMPORTANT: Remove backdrop-filter when focused. On Win11 CEF,
+                // backdrop-filter triggers a compositor bug that corrupts
+                // border-color to black after the first re-composite (~1s after
+                // terminal init). z-index:50 alone is sufficient for compositing
+                // above xterm's scroll layer when focused.
+                backdrop-filter: none;
                 // z-index must exceed any in-block overlay (termstickers = 20)
                 z-index: 50;
-            }
-
-            // Agent-loaded terminals show the agent color instead of accent.
-            // Matches the header color for visual consistency.
-            &.has-agent-color .block-mask {
-                border-color: var(--block-agent-color);
             }
         }
 

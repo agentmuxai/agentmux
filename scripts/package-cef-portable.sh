@@ -3,32 +3,36 @@
 # Usage: bash scripts/package-cef-portable.sh [output-dir]
 #
 # Default output: ~/Desktop/agentmux-cef-{version}-x64-portable/
+#
+# Note: uses explicit error checks instead of `set -e` because MSYS2 bash
+# intermittently loses stdout FD, which would abort the script on echo.
 
-set -euo pipefail
+set -uo pipefail
 
-VERSION=$(node -p "require('./package.json').version")
+# Log helper — tolerates broken stdout FD on MSYS2/Windows
+log() { echo "$@" 2>/dev/null || true; }
+die() { echo "ERROR: $*" >&2; exit 1; }
+
+VERSION=$(node -p "require('./package.json').version") || die "failed to read version"
 OUTDIR="${1:-$HOME/Desktop}"
 PORTABLE="$OUTDIR/agentmux-cef-$VERSION-x64-portable"
 ZIPPATH="$OUTDIR/agentmux-cef-$VERSION-x64-portable.zip"
 
-echo "Packaging AgentMux CEF v$VERSION Portable..."
+log "Packaging AgentMux CEF v$VERSION Portable..."
 
 # Verify required files
 for f in target/release/agentmux-cef.exe dist/cef/libcef.dll dist/bin/agentmux-srv-$VERSION-windows.x64.exe dist/frontend/index.html target/release/agentmux-launcher.exe; do
-    if [ ! -f "$f" ]; then
-        echo "ERROR: $f not found — build first" >&2
-        exit 1
-    fi
+    [ -f "$f" ] || die "$f not found — build first"
 done
 
 # Clean previous
 rm -rf "$PORTABLE" "$ZIPPATH"
 
 # Create structure
-mkdir -p "$PORTABLE/runtime/locales" "$PORTABLE/runtime/frontend"
+mkdir -p "$PORTABLE/runtime/locales" "$PORTABLE/runtime/frontend" || die "mkdir failed"
 
 # Launcher in root
-cp target/release/agentmux-launcher.exe "$PORTABLE/agentmux.exe"
+cp target/release/agentmux-launcher.exe "$PORTABLE/agentmux.exe" || die "copy launcher failed"
 
 # README
 cat > "$PORTABLE/README.txt" <<READMEEOF
@@ -45,22 +49,22 @@ Requirements:
 READMEEOF
 
 # Runtime binaries
-cp target/release/agentmux-cef.exe "$PORTABLE/runtime/"
-cp dist/bin/agentmux-srv-$VERSION-windows.x64.exe "$PORTABLE/runtime/"
+cp target/release/agentmux-cef.exe "$PORTABLE/runtime/" || die "copy agentmux-cef failed"
+cp dist/bin/agentmux-srv-$VERSION-windows.x64.exe "$PORTABLE/runtime/" || die "copy agentmux-srv failed"
 
 # wsh
 WSH="dist/bin/wsh-$VERSION-windows.x64.exe"
 if [ -f "$WSH" ]; then
-    cp "$WSH" "$PORTABLE/runtime/wsh.exe"
+    cp "$WSH" "$PORTABLE/runtime/wsh.exe" || die "copy wsh failed"
 else
-    echo "Warning: $WSH not found"
+    log "Warning: $WSH not found"
 fi
 
 # Frontend
-cp -r dist/frontend/* "$PORTABLE/runtime/frontend/"
+cp -r dist/frontend/* "$PORTABLE/runtime/frontend/" || die "copy frontend failed"
 
 # CEF core
-cp dist/cef/libcef.dll "$PORTABLE/runtime/"
+cp dist/cef/libcef.dll "$PORTABLE/runtime/" || die "copy libcef.dll failed"
 cp dist/cef/chrome_elf.dll "$PORTABLE/runtime/" 2>/dev/null || true
 cp dist/cef/icudtl.dat "$PORTABLE/runtime/" 2>/dev/null || true
 cp dist/cef/v8_context_snapshot.bin "$PORTABLE/runtime/" 2>/dev/null || true
@@ -78,8 +82,7 @@ cp dist/cef/locales/en-US.pak "$PORTABLE/runtime/locales/" 2>/dev/null || true
 CEF_VER=$(grep -ao "$VERSION" "$PORTABLE/runtime/agentmux-cef.exe" | head -1)
 SRV_VER=$(grep -ao "$VERSION" "$PORTABLE/runtime/agentmux-srv-$VERSION-windows.x64.exe" | head -1)
 if [ "$CEF_VER" != "$VERSION" ] || [ "$SRV_VER" != "$VERSION" ]; then
-    echo "ERROR: Binary version mismatch! CEF=$CEF_VER SRV=$SRV_VER expected=$VERSION" >&2
-    exit 1
+    die "Binary version mismatch! CEF=$CEF_VER SRV=$SRV_VER expected=$VERSION"
 fi
 
 # Size
@@ -88,10 +91,10 @@ DIR_SIZE=$(du -sh "$PORTABLE" | cut -f1)
 # ZIP
 cd "$OUTDIR"
 ZIP_NAME="agentmux-cef-$VERSION-x64-portable.zip"
-powershell -Command "Compress-Archive -Path '$(basename "$PORTABLE")/*' -DestinationPath '$ZIP_NAME' -Force" 2>/dev/null || true
+pwsh -Command "Compress-Archive -Path '$(basename "$PORTABLE")/*' -DestinationPath '$ZIP_NAME' -Force" 2>/dev/null || true
 ZIP_SIZE=$(du -sh "$ZIP_NAME" 2>/dev/null | cut -f1 || echo "N/A")
 
-echo ""
-echo "[SUCCESS] CEF Portable v$VERSION"
-echo "  Directory: $PORTABLE ($DIR_SIZE)"
-echo "  ZIP: $ZIPPATH ($ZIP_SIZE)"
+log ""
+log "[SUCCESS] CEF Portable v$VERSION"
+log "  Directory: $PORTABLE ($DIR_SIZE)"
+log "  ZIP: $ZIPPATH ($ZIP_SIZE)"
