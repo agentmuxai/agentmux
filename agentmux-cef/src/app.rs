@@ -21,6 +21,7 @@ wrap_window_delegate! {
     pub struct AgentMuxWindowDelegate {
         browser_view: RefCell<Option<BrowserView>>,
         initial_bounds: Option<(i32, i32, i32, i32)>,
+        frameless: bool,
     }
 
     impl ViewDelegate {
@@ -75,7 +76,7 @@ wrap_window_delegate! {
         }
 
         fn is_frameless(&self, _window: Option<&mut Window>) -> i32 {
-            1 // Frameless — AgentMux uses its own custom title bar
+            self.frameless as i32
         }
 
         fn can_resize(&self, _window: Option<&mut Window>) -> i32 {
@@ -173,12 +174,17 @@ wrap_browser_view_delegate! {
             &self,
             _browser_view: Option<&mut BrowserView>,
             popup_browser_view: Option<&mut BrowserView>,
-            _is_devtools: i32,
+            is_devtools: i32,
         ) -> i32 {
-            // Create a new top-level window for popups (e.g., devtools).
+            // Create a new top-level window for the popup.
+            // DevTools windows (is_devtools != 0) get a native title bar so the
+            // user can see it's DevTools, move it, and close it with the X button.
+            // Regular popups stay frameless (matching the main window style).
+            let frameless = is_devtools == 0;
             let mut window_delegate = AgentMuxWindowDelegate::new(
                 RefCell::new(popup_browser_view.cloned()),
                 None,
+                frameless,
             );
             window_create_top_level(Some(&mut window_delegate));
             1
@@ -216,6 +222,14 @@ wrap_app! {
                 let bg_key = CefString::from("background-color");
                 let bg_val = CefString::from("ff222222");
                 cmd.append_switch_with_value(Some(&bg_key), Some(&bg_val));
+
+                // Allow the DevTools inspector page (served from the remote
+                // debugging server) to open its own WebSocket connection back
+                // to that same server.  Without this flag Chromium 107+ blocks
+                // cross-origin WebSocket upgrades to the debug port.
+                let ro_key = CefString::from("remote-allow-origins");
+                let ro_val = CefString::from("*");
+                cmd.append_switch_with_value(Some(&ro_key), Some(&ro_val));
             }
         }
 
@@ -321,6 +335,7 @@ wrap_browser_process_handler! {
                 let mut window_delegate = AgentMuxWindowDelegate::new(
                     RefCell::new(browser_view),
                     None,
+                    true, // frameless — main window uses custom title bar
                 );
                 window_create_top_level(Some(&mut window_delegate));
             }
