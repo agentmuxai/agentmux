@@ -204,6 +204,7 @@ wrap_task! {
                 RefCell::new(browser_view),
                 Some((self.x, self.y, self.w, self.h)),
                 self.frameless,
+                RuntimeStyle::ALLOY,
             );
             window_create_top_level(Some(&mut wd));
         }
