@@ -363,6 +363,25 @@ pub fn get_window_count(state: &Arc<AppState>) -> serde_json::Value {
     serde_json::json!(reg.count())
 }
 
+/// Register the backend window ID for a window label.
+/// Called by the frontend after it has initialized its backend Window object.
+/// Used by `on_before_close` to notify the backend when a secondary window closes.
+pub fn register_backend_window(state: &Arc<AppState>, args: &serde_json::Value) -> serde_json::Value {
+    let label = args.get("label").and_then(|v| v.as_str()).unwrap_or("main");
+    let window_id = args.get("window_id").and_then(|v| v.as_str()).unwrap_or("");
+    tracing::info!(label = %label, window_id = %window_id, "[window] register_backend_window received");
+    crate::client::dlog(&format!("register_backend_window: label={} window_id={}", label, window_id));
+    if !window_id.is_empty() {
+        state.window_id_map.lock().insert(label.to_string(), window_id.to_string());
+        let keys: Vec<String> = state.window_id_map.lock().keys().cloned().collect();
+        crate::client::dlog(&format!("window_id_map now has keys: {:?}", keys));
+        tracing::info!(label = %label, window_id = %window_id, "[window] registered backend window ID");
+    } else {
+        tracing::warn!(label = %label, "[window] register_backend_window called with empty window_id — skipped");
+    }
+    serde_json::Value::Null
+}
+
 /// Toggle DevTools for the main window.
 ///
 /// Uses CEF's native show_dev_tools() API, which triggers
