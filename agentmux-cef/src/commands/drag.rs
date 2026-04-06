@@ -301,10 +301,15 @@ pub fn open_window_at_position(state: &Arc<AppState>, args: &serde_json::Value) 
         url.push_str(&format!("&workspaceId={}", workspace_id));
     }
 
-    // Post to CEF UI thread — window_create_top_level must run there.
-    crate::ui_tasks::post_create_window(
-        state, &url, &label, pos_x, pos_y, win_w, win_h,
-    );
+    // Hold the lock across post_create_window to prevent concurrent creation
+    // from interleaving push+post pairs (same pattern as open_new_window).
+    {
+        let mut pending = state.pending_window_labels.lock();
+        pending.push_back(label.clone());
+        crate::ui_tasks::post_create_window(
+            state, &url, &label, pos_x, pos_y, win_w, win_h,
+        );
+    }
 
     // Register instance number
     {
