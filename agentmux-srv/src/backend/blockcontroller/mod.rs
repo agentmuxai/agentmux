@@ -48,10 +48,13 @@ pub const META_KEY_CONTROLLER: &str = "controller";
 pub const META_KEY_CONNECTION: &str = "connection";
 pub const META_KEY_CMD: &str = "cmd";
 pub const META_KEY_CMD_CWD: &str = "cmd:cwd";
+#[allow(dead_code)]
 pub const META_KEY_CMD_SHELL: &str = "cmd:shell";
 pub const META_KEY_CMD_ARGS: &str = "cmd:args";
 pub const META_KEY_CMD_ENV: &str = "cmd:env";
+#[allow(dead_code)]
 pub const META_KEY_CMD_JWT: &str = "cmd:jwt";
+#[allow(dead_code)]
 pub const META_KEY_CMD_NO_WSH: &str = "cmd:nowsh";
 pub const META_KEY_CMD_RUN_ON_START: &str = "cmd:runonstart";
 pub const META_KEY_CMD_RUN_ONCE: &str = "cmd:runonce";
@@ -59,20 +62,29 @@ pub const META_KEY_CMD_CLEAR_ON_START: &str = "cmd:clearonstart";
 pub const META_KEY_CMD_CLOSE_ON_EXIT: &str = "cmd:closeonexit";
 pub const META_KEY_CMD_CLOSE_ON_EXIT_FORCE: &str = "cmd:closeonexitforce";
 pub const META_KEY_CMD_CLOSE_ON_EXIT_DELAY: &str = "cmd:closeonexitdelay";
+#[allow(dead_code)]
 pub const META_KEY_CMD_INIT_SCRIPT: &str = "cmd:initscript";
+#[allow(dead_code)]
 pub const META_KEY_CMD_INIT_SCRIPT_BASH: &str = "cmd:initscript.bash";
+#[allow(dead_code)]
 pub const META_KEY_CMD_INIT_SCRIPT_ZSH: &str = "cmd:initscript.zsh";
+#[allow(dead_code)]
 pub const META_KEY_CMD_INIT_SCRIPT_FISH: &str = "cmd:initscript.fish";
+#[allow(dead_code)]
 pub const META_KEY_CMD_INIT_SCRIPT_PWSH: &str = "cmd:initscript.pwsh";
+#[allow(dead_code)]
 pub const META_KEY_TERM_LOCAL_SHELL_PATH: &str = "term:localshellpath";
+#[allow(dead_code)]
 pub const META_KEY_TERM_LOCAL_SHELL_OPTS: &str = "term:localshellopts";
 
 // ---- Default timeouts ----
 
 /// Default controller operation timeout in milliseconds.
+#[allow(dead_code)]
 pub const DEFAULT_TIMEOUT_MS: u64 = 2000;
 
 /// Grace period before forceful kill in milliseconds.
+#[allow(dead_code)]
 pub const DEFAULT_GRACEFUL_KILL_WAIT_MS: u64 = 400;
 
 // ---- Input union (matches Go's BlockInputUnion) ----
@@ -169,6 +181,7 @@ pub trait Controller: Send + Sync {
     fn controller_type(&self) -> &str;
 
     /// Get the block ID.
+    #[allow(dead_code)]
     fn block_id(&self) -> &str;
 
     /// Downcast support for concrete controller types.
@@ -216,6 +229,7 @@ pub fn get_all_controllers() -> HashMap<String, Arc<dyn Controller>> {
 }
 
 /// Stop all running controllers gracefully.
+#[allow(dead_code)]
 pub fn stop_all_controllers() {
     let controllers = get_all_controllers();
     for (_, ctrl) in controllers {
@@ -232,6 +246,7 @@ pub fn get_block_controller_status(block_id: &str) -> Option<BlockControllerRunt
 }
 
 /// Stop a block's controller gracefully.
+#[allow(dead_code)]
 pub fn stop_block_controller(block_id: &str) -> Result<(), String> {
     match get_controller(block_id) {
         Some(ctrl) => ctrl.stop(true, STATUS_DONE),

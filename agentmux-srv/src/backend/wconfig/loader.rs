@@ -222,6 +222,7 @@ pub(super) fn strip_trailing_commas(input: &str) -> String {
 }
 
 /// Replace `$ENV:VAR_NAME` and `$ENV:VAR_NAME:fallback` in a string.
+#[allow(dead_code)]
 pub fn expand_env_vars(s: &str) -> String {
     let mut result = s.to_string();
     let mut start = 0;

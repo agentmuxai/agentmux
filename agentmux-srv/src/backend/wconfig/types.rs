@@ -301,6 +301,7 @@ pub struct SettingsType {
 
 /// AI-specific settings (used for presets).
 /// Matches Go's `wconfig.AiSettingsType`.
+#[allow(dead_code)]
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AiSettingsType {
     #[serde(rename = "ai:*", default, skip_serializing_if = "is_false")]
@@ -613,6 +614,7 @@ pub struct ConfigError {
 }
 
 /// Webhook integration configuration.
+#[allow(dead_code)]
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct WebhookConfigType {
     #[serde(default)]

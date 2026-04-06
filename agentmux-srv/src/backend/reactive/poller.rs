@@ -35,6 +35,7 @@ impl Poller {
     }
 
     /// Check if the poller is configured (has URL and token).
+    #[allow(dead_code)]
     pub fn is_configured(&self) -> bool {
         let config = self.config.read().unwrap();
         config.agentmux_url.is_some() && config.agentmux_token.is_some()
@@ -89,6 +90,7 @@ impl Poller {
     }
 
     /// Record a successful poll.
+    #[allow(dead_code)]
     pub fn record_poll(&self) {
         *self.poll_count.lock().unwrap() += 1;
         *self.last_poll.lock().unwrap() = Some(now_unix_millis());
@@ -96,16 +98,19 @@ impl Poller {
     }
 
     /// Record a poll error.
+    #[allow(dead_code)]
     pub fn record_error(&self, err: &str) {
         *self.last_error.lock().unwrap() = Some(err.to_string());
     }
 
     /// Record injections delivered.
+    #[allow(dead_code)]
     pub fn record_injections(&self, count: u64) {
         *self.injections_count.lock().unwrap() += count;
     }
 
     /// Set the running state.
+    #[allow(dead_code)]
     pub fn set_running(&self, running: bool) {
         *self.running.lock().unwrap() = running;
     }
