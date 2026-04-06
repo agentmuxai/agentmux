@@ -1,7 +1,7 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-pub mod ai;
+
 pub mod blockcontroller;
 pub mod colprint;
 pub mod config_watcher_fs;
