@@ -40,6 +40,7 @@ impl ConfigWatcher {
     }
 
     /// Update the full config (called when files change).
+    #[allow(dead_code)]
     pub fn set_config(&self, config: FullConfigType) {
         let mut current = self.config.write().unwrap();
         *current = Arc::new(config);

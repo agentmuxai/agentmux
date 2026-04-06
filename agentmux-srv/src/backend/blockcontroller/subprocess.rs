@@ -84,6 +84,7 @@ struct SubprocessControllerInner {
 /// Multi-turn continuity comes from `--resume <session-id>`.
 pub struct SubprocessController {
     /// Parent tab UUID.
+    #[allow(dead_code)]
     tab_id: String,
     /// Block UUID.
     block_id: String,
@@ -174,6 +175,7 @@ impl SubprocessController {
     }
 
     /// Get the stored session ID (if any).
+    #[allow(dead_code)]
     pub fn session_id(&self) -> Option<String> {
         self.inner.lock().unwrap().session_id.clone()
     }

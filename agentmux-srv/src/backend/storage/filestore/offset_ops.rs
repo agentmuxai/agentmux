@@ -14,6 +14,7 @@ use crate::backend::storage::error::StoreError;
 impl FileStore {
     /// Write data at a specific offset.
     /// The offset must be <= current file size.
+    #[allow(dead_code)]
     pub fn write_at(
         &self,
         zone_id: &str,

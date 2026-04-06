@@ -51,6 +51,7 @@ pub type StreamHandler = Box<
 
 enum Handler {
     Call(CommandHandler),
+    #[allow(dead_code)]
     Stream(StreamHandler),
 }
 
@@ -61,6 +62,7 @@ enum Handler {
 pub struct RpcResponseHandler {
     engine: Arc<WshRpcEngine>,
     req_id: String,
+    #[allow(dead_code)]
     source: String,
     canceled: AtomicBool,
     done: AtomicBool,
@@ -100,11 +102,13 @@ impl RpcResponseHandler {
     }
 
     /// Check if the request has been canceled.
+    #[allow(dead_code)]
     pub fn is_canceled(&self) -> bool {
         self.canceled.load(Ordering::Relaxed)
     }
 
     /// Get the source route ID of the request.
+    #[allow(dead_code)]
     pub fn get_source(&self) -> &str {
         &self.source
     }
@@ -127,6 +131,7 @@ impl RpcResponseHandler {
 
 /// Tracks an outgoing request and collects responses.
 /// Matches Go's `RpcRequestHandler`.
+#[allow(dead_code)]
 pub struct RpcRequestHandler {
     req_id: String,
     resp_rx: mpsc::Receiver<RpcMessage>,
@@ -135,6 +140,7 @@ pub struct RpcRequestHandler {
 
 impl RpcRequestHandler {
     /// Get the next response. Returns None if the stream is done.
+    #[allow(dead_code)]
     pub async fn next_response(&mut self) -> Option<Result<serde_json::Value, String>> {
         if !self.last_was_cont && self.req_id.is_empty() {
             return None;
@@ -153,11 +159,13 @@ impl RpcRequestHandler {
     }
 
     /// Check if the response stream is complete.
+    #[allow(dead_code)]
     pub fn is_done(&self) -> bool {
         !self.last_was_cont
     }
 
     /// Get the request ID.
+    #[allow(dead_code)]
     pub fn req_id(&self) -> &str {
         &self.req_id
     }
@@ -169,6 +177,7 @@ struct EngineInner {
     handlers: HashMap<String, Handler>,
     pending_responses: HashMap<String, mpsc::Sender<RpcMessage>>,
     active_handlers: HashMap<String, Arc<RpcResponseHandler>>,
+    #[allow(dead_code)]
     auth_token: String,
     rpc_context: Option<RpcContext>,
 }
@@ -209,6 +218,7 @@ impl WshRpcEngine {
     }
 
     /// Register a streaming handler (single request → stream of responses).
+    #[allow(dead_code)]
     pub fn register_stream_handler(&self, command: &str, handler: StreamHandler) {
         let mut inner = self.inner.lock().unwrap();
         inner
@@ -217,18 +227,21 @@ impl WshRpcEngine {
     }
 
     /// Set the authentication token.
+    #[allow(dead_code)]
     pub fn set_auth_token(&self, token: &str) {
         let mut inner = self.inner.lock().unwrap();
         inner.auth_token = token.to_string();
     }
 
     /// Get the authentication token.
+    #[allow(dead_code)]
     pub fn get_auth_token(&self) -> String {
         let inner = self.inner.lock().unwrap();
         inner.auth_token.clone()
     }
 
     /// Set the RPC context.
+    #[allow(dead_code)]
     pub fn set_rpc_context(&self, ctx: RpcContext) {
         let mut inner = self.inner.lock().unwrap();
         inner.rpc_context = Some(ctx);
@@ -266,6 +279,7 @@ impl WshRpcEngine {
     }
 
     /// Send an RPC command and wait for a single response.
+    #[allow(dead_code)]
     pub async fn send_command(
         self: &Arc<Self>,
         command: &str,
@@ -280,6 +294,7 @@ impl WshRpcEngine {
     }
 
     /// Send an RPC command and get a request handler for streaming responses.
+    #[allow(dead_code)]
     pub fn send_request(
         self: &Arc<Self>,
         command: &str,
@@ -326,6 +341,7 @@ impl WshRpcEngine {
     }
 
     /// Send a fire-and-forget command (no response expected).
+    #[allow(dead_code)]
     pub fn send_command_no_response(
         &self,
         command: &str,

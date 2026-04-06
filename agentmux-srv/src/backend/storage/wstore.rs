@@ -33,6 +33,7 @@ impl WaveStore {
     }
 
     /// Open an in-memory WaveStore for testing.
+    #[allow(dead_code)]
     pub fn open_in_memory() -> Result<Self, StoreError> {
         let conn = Connection::open_in_memory()?;
         Self::configure_and_migrate(conn)
@@ -118,6 +119,7 @@ impl WaveStore {
     }
 
     /// Check if an object exists (by otype and OID).
+    #[allow(dead_code)]
     pub fn exists_raw(&self, otype: &str, oid: &str) -> Result<bool, StoreError> {
         let conn = self.conn.lock().unwrap();
         let table = format!("db_{}", otype);
@@ -197,6 +199,7 @@ impl WaveStore {
     }
 
     /// Delete an object by OID.
+    #[allow(dead_code)]
     pub fn delete<T: WaveObj>(&self, oid: &str) -> Result<(), StoreError> {
         let conn = self.conn.lock().unwrap();
         let table = Self::table_name::<T>();
@@ -209,6 +212,7 @@ impl WaveStore {
 
     /// Delete by otype string and OID (for dynamic dispatch).
     /// Validates `otype` against `VALID_OTYPES` to prevent SQL injection.
+    #[allow(dead_code)]
     pub fn delete_by_otype(&self, otype: &str, oid: &str) -> Result<(), StoreError> {
         if !crate::backend::obj::VALID_OTYPES.contains(&otype) {
             return Err(StoreError::Other(format!("unknown otype: {otype:?}")));
@@ -244,6 +248,7 @@ impl WaveStore {
     }
 
     /// Count objects of a given type.
+    #[allow(dead_code)]
     pub fn count<T: WaveObj>(&self) -> Result<i64, StoreError> {
         let conn = self.conn.lock().unwrap();
         let table = Self::table_name::<T>();
@@ -376,6 +381,7 @@ impl<'a> StoreTx<'a> {
         Ok(result)
     }
 
+    #[allow(dead_code)]
     pub fn delete<T: WaveObj>(&self, oid: &str) -> Result<(), StoreError> {
         let table = Self::table_name::<T>();
         self.conn.execute(
@@ -645,6 +651,7 @@ impl WaveStore {
     }
 
     /// Delete a specific content blob. Returns true if a row was deleted.
+    #[allow(dead_code)]
     pub fn forge_delete_content(&self, agent_id: &str, content_type: &str) -> Result<bool, StoreError> {
         let conn = self.conn.lock().unwrap();
         let rows = conn.execute(
