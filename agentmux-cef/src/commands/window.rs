@@ -441,6 +441,10 @@ pub fn open_new_window(state: &Arc<AppState>) -> Result<serde_json::Value, Strin
     let (pos_x, pos_y) = get_offset_position();
     let (win_w, win_h) = get_secondary_window_size(pos_x, pos_y);
 
+    // Push label before posting — on_after_created pops it to register the
+    // browser under the same label that's baked into the window URL.
+    state.pending_window_labels.lock().push_back(label.clone());
+
     // Post to CEF UI thread — window_create_top_level must run there.
     // true = frameless: secondary app windows use the same custom title bar as main.
     crate::ui_tasks::post_create_window(
