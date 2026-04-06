@@ -363,12 +363,16 @@ pub fn get_instance_number(state: &Arc<AppState>, args: &serde_json::Value) -> s
 pub fn register_backend_window(state: &Arc<AppState>, args: &serde_json::Value) -> serde_json::Value {
     let label = args.get("label").and_then(|v| v.as_str()).unwrap_or("main");
     let window_id = args.get("window_id").and_then(|v| v.as_str()).unwrap_or("");
+    // Always log at info level so we can tell if the IPC reached the server at all.
+    tracing::info!(label = %label, window_id = %window_id, "[window] register_backend_window received");
     crate::client::dlog(&format!("register_backend_window: label={} window_id={}", label, window_id));
     if !window_id.is_empty() {
         state.window_id_map.lock().insert(label.to_string(), window_id.to_string());
         let keys: Vec<String> = state.window_id_map.lock().keys().cloned().collect();
         crate::client::dlog(&format!("window_id_map now has keys: {:?}", keys));
         tracing::info!(label = %label, window_id = %window_id, "[window] registered backend window ID");
+    } else {
+        tracing::warn!(label = %label, "[window] register_backend_window called with empty window_id — skipped");
     }
     serde_json::Value::Null
 }
@@ -390,6 +394,13 @@ pub fn toggle_devtools(_state: &Arc<AppState>) -> Result<serde_json::Value, Stri
 /// Production: IPC server serves static files from `frontend/` next to the exe.
 /// Dev: Vite dev server at `http://localhost:5173`.
 pub(crate) fn resolve_frontend_base_url(ipc_port: u16) -> String {
+    // In dev mode (AGENTMUX_DEV=1 set by `task dev`), always use the Vite dev
+    // server so secondary windows get the latest code and hot reload works.
+    // Without this, secondary windows load from dist/cef-dev/frontend/ (the
+    // stale production bundle copied at build time) and miss any live changes.
+    if std::env::var("AGENTMUX_DEV").is_ok() {
+        return "http://localhost:5173".to_string();
+    }
     let exe_dir = std::env::current_exe()
         .ok()
         .and_then(|p| p.parent().map(|d| d.to_path_buf()));

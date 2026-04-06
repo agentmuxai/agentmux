@@ -402,7 +402,10 @@ export function buildCefApi(): AppApi {
             return params.get("windowLabel") ?? "main";
         },
         registerBackendWindow: (label: string, windowId: string) => {
-            invokeCommand("register_backend_window", { label, window_id: windowId }).catch(() => {});
+            console.log(`[cef-api] registerBackendWindow: label=${label} windowId=${windowId}`);
+            invokeCommand("register_backend_window", { label, window_id: windowId }).catch((e: unknown) => {
+                console.error(`[cef-api] registerBackendWindow IPC failed: ${e}`);
+            });
         },
         isMainWindow: async () => {
             const params = new URLSearchParams(window.location.search);

@@ -669,8 +669,11 @@ async function initWave(initOpts: AgentMuxInitOpts) {
     {
         const wlabel = new URLSearchParams(window.location.search).get("windowLabel") ?? "main";
         const wid = initOpts.windowId;
+        console.log(`[wave] registerBackendWindow decision: wlabel=${wlabel} wid=${wid ?? "(falsy)"}`);
         if (wid) {
             getApi().registerBackendWindow(wlabel, wid);
+        } else {
+            console.error(`[wave] registerBackendWindow SKIPPED — windowId is falsy`);
         }
     }
 
