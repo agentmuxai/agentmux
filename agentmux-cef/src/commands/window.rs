@@ -378,6 +378,13 @@ pub fn toggle_devtools(state: &Arc<AppState>) -> Result<serde_json::Value, Strin
 /// Production: IPC server serves static files from `frontend/` next to the exe.
 /// Dev: Vite dev server at `http://localhost:5173`.
 pub(crate) fn resolve_frontend_base_url(ipc_port: u16) -> String {
+    // In dev mode (AGENTMUX_DEV=1 set by `task dev`), always use the Vite dev
+    // server so secondary windows get the latest code and hot reload works.
+    // Without this, secondary windows load from dist/cef-dev/frontend/ (the
+    // stale production bundle copied at build time) and miss any live changes.
+    if std::env::var("AGENTMUX_DEV").is_ok() {
+        return "http://localhost:5173".to_string();
+    }
     let exe_dir = std::env::current_exe()
         .ok()
         .and_then(|p| p.parent().map(|d| d.to_path_buf()));
@@ -421,12 +428,18 @@ pub fn open_new_window(state: &Arc<AppState>) -> Result<serde_json::Value, Strin
     let (pos_x, pos_y) = get_offset_position();
     let (win_w, win_h) = get_secondary_window_size(pos_x, pos_y);
 
-    // Post to CEF UI thread — window_create_top_level must run there.
-    // true = frameless: secondary app windows use the same custom title bar as main.
-    crate::ui_tasks::post_create_window(
-        state, &url, &label, pos_x, pos_y, win_w, win_h,
-        true,
-    );
+    // Hold the pending_window_labels lock across post_create_window so that
+    // concurrent open_new_window calls cannot interleave their push+post pairs.
+    // post_task is non-blocking (just enqueues a UI-thread task), so holding
+    // the lock here is safe and keeps the FIFO order consistent.
+    {
+        let mut pending = state.pending_window_labels.lock();
+        pending.push_back(label.clone());
+        crate::ui_tasks::post_create_window(
+            state, &url, &label, pos_x, pos_y, win_w, win_h,
+            true,
+        );
+    }
 
     // Notify all windows of the count change
     let count = state.window_instance_registry.lock().count();

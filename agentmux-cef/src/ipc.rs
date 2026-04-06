@@ -219,7 +219,7 @@ async fn route_command(
         "open_new_window" => commands::window::open_new_window(state),
         "get_instance_number" => Ok(commands::window::get_instance_number(state, args)),
         "get_window_count" => Ok(commands::window::get_window_count(state)),
-        "register_backend_window" => Ok(commands::window::register_backend_window(state, args)),
+
         "get_env" => Ok(commands::platform::get_env(args)),
         "open_external" => commands::platform::open_external(args),
         "set_window_transparency" => commands::window::set_window_transparency(state, args),
