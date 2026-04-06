@@ -3,7 +3,7 @@
 //
 // Shared application state for the CEF host.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use parking_lot::Mutex;
 
 use cef::Browser;
@@ -121,6 +121,11 @@ pub struct BackendEndpoints {
 /// `tauri::State<AppState>`. The sidecar child is `std::process::Child` instead
 /// of `tauri_plugin_shell::process::CommandChild`.
 pub struct AppState {
+    /// Maps window label (e.g. "main", "window-{uuid}") to the backend window ID.
+    /// Populated when the frontend calls `register_backend_window` during init.
+    /// Used by `on_before_close` to notify the backend to clean up.
+    pub window_id_map: Mutex<HashMap<String, String>>,
+
     /// Auth key for backend communication
     pub auth_key: Mutex<String>,
 
@@ -168,6 +173,12 @@ pub struct AppState {
     /// "main" is the primary window; tear-off windows get "window-{UUID}" labels.
     pub browsers: Mutex<HashMap<String, Browser>>,
 
+    /// FIFO queue of labels for windows that are about to be created.
+    /// Pushed in `open_new_window` / `open_window_at_position` before
+    /// `post_create_window`; popped in `on_after_created` so the browser gets
+    /// the correct label rather than a freshly-generated UUID.
+    pub pending_window_labels: Mutex<VecDeque<String>>,
+
     /// Version-specific data directory (e.g. ai.agentmux.cef.v0-32-111/)
     pub version_data_dir: Mutex<Option<String>>,
 
@@ -185,6 +196,7 @@ pub struct AppState {
 impl Default for AppState {
     fn default() -> Self {
         Self {
+            window_id_map: Mutex::new(HashMap::new()),
             auth_key: Mutex::new(uuid::Uuid::new_v4().to_string()),
             backend_endpoints: Mutex::new(BackendEndpoints::default()),
             sidecar_child: Mutex::new(None),
@@ -200,6 +212,7 @@ impl Default for AppState {
             ipc_port: Mutex::new(0),
             ipc_token: uuid::Uuid::new_v4().to_string(),
             browsers: Mutex::new(HashMap::new()),
+            pending_window_labels: Mutex::new(VecDeque::new()),
             version_data_dir: Mutex::new(None),
             version_config_dir: Mutex::new(None),
             active_drag: Mutex::new(None),

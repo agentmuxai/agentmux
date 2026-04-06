@@ -274,6 +274,9 @@ export function buildTauriApi(): AppApi {
         isMainWindow: async () => {
             return await invoke<boolean>("is_main_window");
         },
+        registerBackendWindow: (_label: string, _windowId: string) => {
+            // Tauri host manages its own process lifecycle — no-op
+        },
         listWindows: async () => {
             return await invoke<string[]>("list_windows");
         },

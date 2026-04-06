@@ -357,6 +357,26 @@ pub fn get_instance_number(state: &Arc<AppState>, args: &serde_json::Value) -> s
     serde_json::json!(reg.get(label).unwrap_or(1))
 }
 
+/// Register the backend window ID for a window label.
+/// Called by the frontend after it has initialized its backend Window object.
+/// Used by `on_before_close` to notify the backend when a secondary window closes.
+pub fn register_backend_window(state: &Arc<AppState>, args: &serde_json::Value) -> serde_json::Value {
+    let label = args.get("label").and_then(|v| v.as_str()).unwrap_or("main");
+    let window_id = args.get("window_id").and_then(|v| v.as_str()).unwrap_or("");
+    // Always log at info level so we can tell if the IPC reached the server at all.
+    tracing::info!(label = %label, window_id = %window_id, "[window] register_backend_window received");
+    crate::client::dlog(&format!("register_backend_window: label={} window_id={}", label, window_id));
+    if !window_id.is_empty() {
+        state.window_id_map.lock().insert(label.to_string(), window_id.to_string());
+        let keys: Vec<String> = state.window_id_map.lock().keys().cloned().collect();
+        crate::client::dlog(&format!("window_id_map now has keys: {:?}", keys));
+        tracing::info!(label = %label, window_id = %window_id, "[window] registered backend window ID");
+    } else {
+        tracing::warn!(label = %label, "[window] register_backend_window called with empty window_id — skipped");
+    }
+    serde_json::Value::Null
+}
+
 /// Get the total window count.
 pub fn get_window_count(state: &Arc<AppState>) -> serde_json::Value {
     let reg = state.window_instance_registry.lock();
@@ -374,6 +394,13 @@ pub fn toggle_devtools(_state: &Arc<AppState>) -> Result<serde_json::Value, Stri
 /// Production: IPC server serves static files from `frontend/` next to the exe.
 /// Dev: Vite dev server at `http://localhost:5173`.
 pub(crate) fn resolve_frontend_base_url(ipc_port: u16) -> String {
+    // In dev mode (AGENTMUX_DEV=1 set by `task dev`), always use the Vite dev
+    // server so secondary windows get the latest code and hot reload works.
+    // Without this, secondary windows load from dist/cef-dev/frontend/ (the
+    // stale production bundle copied at build time) and miss any live changes.
+    if std::env::var("AGENTMUX_DEV").is_ok() {
+        return "http://localhost:5173".to_string();
+    }
     let exe_dir = std::env::current_exe()
         .ok()
         .and_then(|p| p.parent().map(|d| d.to_path_buf()));
@@ -417,10 +444,17 @@ pub fn open_new_window(state: &Arc<AppState>) -> Result<serde_json::Value, Strin
     let (pos_x, pos_y) = get_offset_position();
     let (win_w, win_h) = get_secondary_window_size(pos_x, pos_y);
 
-    // Post to CEF UI thread — window_create_top_level must run there.
-    crate::ui_tasks::post_create_window(
-        state, &url, &label, pos_x, pos_y, win_w, win_h,
-    );
+    // Hold the pending_window_labels lock across post_create_window so that
+    // concurrent open_new_window calls cannot interleave their push+post pairs.
+    // post_task is non-blocking (just enqueues a UI-thread task), so holding
+    // the lock here is safe and keeps the FIFO order consistent.
+    {
+        let mut pending = state.pending_window_labels.lock();
+        pending.push_back(label.clone());
+        crate::ui_tasks::post_create_window(
+            state, &url, &label, pos_x, pos_y, win_w, win_h,
+        );
+    }
 
     // Notify all windows of the count change
     let count = state.window_instance_registry.lock().count();
