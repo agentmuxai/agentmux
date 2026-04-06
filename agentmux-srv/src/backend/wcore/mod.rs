@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
@@ -16,6 +17,7 @@ mod workspace;
 // Re-export all public APIs so callers can continue using `wcore::function_name`.
 pub use block::*;
 pub use dnd::*;
+#[allow(unused_imports)]
 pub use event::*;
 pub use tab::*;
 pub use window::*;

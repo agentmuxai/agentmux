@@ -20,6 +20,7 @@ pub struct Config {
     pub data_home: String,
     pub config_home: String,
     pub app_path: String,
+    #[allow(dead_code)]
     pub is_dev: bool,
     pub version: &'static str,
     pub build_time: &'static str,

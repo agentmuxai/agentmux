@@ -145,6 +145,7 @@ pub fn format_injected_message(msg: &str, source_agent: Option<&str>, include_so
 /// Validate an AgentMux URL for SSRF protection.
 ///
 /// Only allows https:// or http://localhost/127.0.0.1/::1.
+#[allow(dead_code)]
 pub fn validate_agentmux_url(url_str: &str) -> Result<(), String> {
     if url_str.is_empty() {
         return Err("URL is empty".to_string());

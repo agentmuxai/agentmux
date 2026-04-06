@@ -11,7 +11,9 @@ use super::types::WaveFile;
 /// Cache entry for file data parts.
 #[derive(Debug, Clone)]
 pub(super) struct DataCacheEntry {
+    #[allow(dead_code)]
     pub(super) part_idx: i32,
+    #[allow(dead_code)]
     pub(super) data: Vec<u8>,
 }
 
@@ -19,7 +21,9 @@ pub(super) struct DataCacheEntry {
 #[derive(Debug)]
 pub(super) struct CacheEntry {
     pub(super) file: Option<WaveFile>,
+    #[allow(dead_code)]
     pub(super) data_entries: HashMap<i32, DataCacheEntry>,
+    #[allow(dead_code)]
     pub(super) dirty: bool,
     /// Last time this entry was read or written (ms since epoch).
     /// Used for TTL-based eviction of clean entries.
