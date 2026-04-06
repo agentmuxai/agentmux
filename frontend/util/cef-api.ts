@@ -392,7 +392,9 @@ export function buildCefApi(): AppApi {
             invokeCommand("set_window_transparency", { transparent, blur, opacity }).catch(console.error);
         },
         toggleDevtools: () => {
-            invokeCommand("toggle_devtools").catch(console.error);
+            const params = new URLSearchParams(window.location.search);
+            const label = params.get("windowLabel") ?? "main";
+            invokeCommand("toggle_devtools", { label }).catch(console.error);
         },
         getWindowLabel: async () => {
             const params = new URLSearchParams(window.location.search);
