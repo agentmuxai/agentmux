@@ -388,8 +388,9 @@ pub fn register_backend_window(state: &Arc<AppState>, args: &serde_json::Value) 
 /// BrowserViewDelegate::on_popup_browser_view_created with is_devtools=1.
 /// That callback creates a top-level CefWindow with a native title bar,
 /// producing a standalone DevTools window — identical to Tauri's open_devtools().
-pub fn toggle_devtools(state: &Arc<AppState>) -> Result<serde_json::Value, String> {
-    crate::ui_tasks::post_show_dev_tools(state, "main");
+pub fn toggle_devtools(state: &Arc<AppState>, args: &serde_json::Value) -> Result<serde_json::Value, String> {
+    let label = args.get("label").and_then(|v| v.as_str()).unwrap_or("main");
+    crate::ui_tasks::post_show_dev_tools(state, label);
     Ok(serde_json::Value::Null)
 }
 
