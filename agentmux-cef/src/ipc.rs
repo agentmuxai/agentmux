@@ -270,6 +270,9 @@ async fn route_command(
         "open_in_editor" => commands::platform::open_in_editor(args),
         "copy_file_to_dir" => commands::providers::copy_file_to_dir(args),
 
+        // ---- Command palette ----
+        "run_command" => commands::palette::run_command(state, args),
+
         // ---- Unknown command ----
         _ => Err(format!("Unknown command: {}", cmd)),
     }

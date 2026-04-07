@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { App } from "@/app/app";
+import { registerDefaultCommands } from "@/app/store/command-registry";
 import {
     globalRefocus,
     registerControlShiftStateUpdateHandler,
@@ -648,6 +649,7 @@ async function initWave(initOpts: AgentMuxInitOpts) {
 
     t = performance.now();
     registerGlobalKeys();
+    registerDefaultCommands();
     registerControlShiftStateUpdateHandler();
     tlog("registerKeys", t);
 
