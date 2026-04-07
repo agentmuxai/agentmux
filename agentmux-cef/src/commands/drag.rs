@@ -275,15 +275,23 @@ pub fn open_window_at_position(state: &Arc<AppState>, args: &serde_json::Value) 
     let window_id = uuid::Uuid::new_v4();
     let label = format!("window-{}", window_id.simple());
 
-    let win_w = 1200i32;
-    let win_h = 800i32;
+    // Use pane dimensions from the frontend if provided; fall back to defaults.
+    let win_w = args.get("width").and_then(|v| v.as_f64()).map(|v| (v as i32).max(400)).unwrap_or(1200);
+    let win_h = args.get("height").and_then(|v| v.as_f64()).map(|v| (v as i32).max(300)).unwrap_or(800);
 
-    // Position so cursor lands near top-center of title bar
-    let pos_x = ((screen_x - win_w as f64 / 2.0).max(0.0)) as i32;
-    let pos_y = ((screen_y - 16.0).max(0.0)) as i32;
+    // Cursor grab offset within the pane (where the user grabbed it).
+    // Positions the new window so the cursor lands at the same relative point.
+    // Falls back to top-center / title-bar-offset if not provided.
+    let grab_dx = args.get("grabOffsetX").and_then(|v| v.as_f64()).map(|v| v as i32).unwrap_or(win_w / 2);
+    let grab_dy = args.get("grabOffsetY").and_then(|v| v.as_f64()).map(|v| v as i32).unwrap_or(20);
+
+    let pos_x = ((screen_x as i32) - grab_dx).max(0);
+    let pos_y = ((screen_y as i32) - grab_dy).max(0);
 
     tracing::info!(
         label = %label, pos_x = %pos_x, pos_y = %pos_y,
+        win_w = %win_w, win_h = %win_h,
+        grab_dx = %grab_dx, grab_dy = %grab_dy,
         workspace_id = %workspace_id,
         "[dnd:cef] open_window_at_position"
     );

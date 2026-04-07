@@ -30,8 +30,11 @@ import type { JSX } from "solid-js";
 import type { LayoutNode } from "@/layout/lib/types";
 
 // Shared drag state set by TileLayout / TabBar drag handlers
+export type PaneRect = { x: number; y: number; w: number; h: number };
+export type GrabOffset = { dx: number; dy: number };
+
 export type DragItemPayload =
-    | { kind: "tile"; node: LayoutNode }
+    | { kind: "tile"; node: LayoutNode; paneRect?: PaneRect; grabOffset?: GrabOffset }
     | { kind: "tab"; tabId: string; workspaceId: string; isPinned: boolean };
 
 // Module-level drag state so TileLayout/TabBar can set it before dragend fires
@@ -190,7 +193,7 @@ async function handleCrossWindowDragEnd(payload: DragItemPayload, sourceWindow: 
             await performCrossWindowDrop(dragType, dragPayloadForApi, workspace.oid, activeTabId);
             await api.completeCrossDrag(dragId, targetWindow, cursorPoint.x, cursorPoint.y);
         } else if (!targetWindow) {
-            await performTearOff(dragType, dragPayloadForApi, workspace.oid, activeTabId, cursorPoint.x, cursorPoint.y);
+            await performTearOff(dragType, dragPayloadForApi, workspace.oid, activeTabId, cursorPoint.x, cursorPoint.y, payload);
             await api.completeCrossDrag(dragId, null, cursorPoint.x, cursorPoint.y);
             try { await api.releaseDragCapture(); } catch {}
         } else {
@@ -216,9 +219,13 @@ async function performTearOff(
     sourceWsId: string,
     sourceTabId: string,
     screenX: number,
-    screenY: number
+    screenY: number,
+    dragPayload: DragItemPayload | null
 ) {
     const api = getApi();
+    const paneRect   = dragPayload?.kind === "tile" ? dragPayload.paneRect   : undefined;
+    const grabOffset = dragPayload?.kind === "tile" ? dragPayload.grabOffset : undefined;
+
     if (dragType === "pane" && payload.blockId) {
         const newWsId = await WorkspaceService.TearOffBlock(payload.blockId, sourceTabId, sourceWsId, true);
         if (newWsId) {
@@ -234,7 +241,11 @@ async function performTearOff(
                     } as LayoutTreeDeleteNodeAction);
                 }
             }
-            await api.openWindowAtPosition(screenX, screenY, newWsId);
+            await api.openWindowAtPosition(
+                screenX, screenY, newWsId,
+                paneRect?.w, paneRect?.h,
+                grabOffset?.dx, grabOffset?.dy
+            );
         }
     } else if (dragType === "tab" && payload.tabId) {
         const newWsId = await WorkspaceService.TearOffTab(payload.tabId, sourceWsId);
