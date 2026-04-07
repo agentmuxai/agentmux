@@ -1,4 +1,3 @@
-mod ai;
 mod cli_handlers;
 mod files;
 mod forge_handlers;
@@ -117,7 +116,6 @@ pub fn build_router(state: AppState) -> Router {
         .route("/wave/stream-file", get(stub_501))
         .route("/wave/stream-file/*path", get(stub_501))
         .route("/wave/stream-local-file", get(stub_501))
-        .route("/wave/aichat", post(ai::handle_ai_chat))
         .route("/api/post-chat-message", get(stub_501).post(stub_501))
         .route("/docsite/*path", get(files::handle_docsite))
         .route("/schema/*path", get(files::handle_schema))

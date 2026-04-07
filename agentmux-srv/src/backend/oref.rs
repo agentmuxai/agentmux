@@ -20,6 +20,7 @@ pub struct ORef {
 }
 
 impl ORef {
+    #[allow(dead_code)]
     pub fn new(otype: impl Into<String>, oid: impl Into<String>) -> Self {
         Self {
             otype: otype.into(),

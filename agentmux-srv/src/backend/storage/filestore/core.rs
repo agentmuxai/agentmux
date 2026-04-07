@@ -20,9 +20,11 @@ use crate::backend::storage::migrations::run_filestore_migrations;
 pub(super) const PART_DATA_SIZE: usize = 64 * 1024;
 
 /// Default flush interval in seconds.
+#[allow(dead_code)]
 pub const DEFAULT_FLUSH_SECS: u64 = 5;
 
 /// Clean cache entries idle longer than this are evicted during flush.
+#[allow(dead_code)]
 pub const CACHE_TTL_SECS: u64 = 60;
 
 /// SQLite-backed file storage with write-through cache.
@@ -39,6 +41,7 @@ impl FileStore {
     }
 
     /// Open an in-memory FileStore for testing.
+    #[allow(dead_code)]
     pub fn open_in_memory() -> Result<Self, StoreError> {
         let conn = Connection::open_in_memory()?;
         Self::configure_and_migrate(conn)
@@ -64,6 +67,7 @@ impl FileStore {
     }
 
     /// Create a new file. Fails if file already exists.
+    #[allow(dead_code)]
     pub fn make_file(
         &self,
         zone_id: &str,
@@ -119,6 +123,7 @@ impl FileStore {
     }
 
     /// Delete a file and all its data parts.
+    #[allow(dead_code)]
     pub fn delete_file(&self, zone_id: &str, name: &str) -> Result<(), StoreError> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
@@ -140,6 +145,7 @@ impl FileStore {
     }
 
     /// Delete all files in a zone.
+    #[allow(dead_code)]
     pub fn delete_zone(&self, zone_id: &str) -> Result<(), StoreError> {
         // Get file names first for cache cleanup
         let names: Vec<String> = {
@@ -453,6 +459,7 @@ impl FileStore {
     }
 
     /// List all files in a zone.
+    #[allow(dead_code)]
     pub fn list_files(&self, zone_id: &str) -> Result<Vec<WaveFile>, StoreError> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
@@ -477,6 +484,7 @@ impl FileStore {
     }
 
     /// Get all zone IDs that have files.
+    #[allow(dead_code)]
     pub fn get_all_zone_ids(&self) -> Result<Vec<String>, StoreError> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare("SELECT DISTINCT zoneid FROM db_wave_file")?;
@@ -487,6 +495,7 @@ impl FileStore {
 
     /// Flush dirty cache entries to the database and evict stale clean entries.
     /// Returns (files_flushed, parts_flushed).
+    #[allow(dead_code)]
     pub fn flush_cache(&self) -> Result<(usize, usize), StoreError> {
         let ttl_ms = (CACHE_TTL_SECS * 1000) as i64;
         let now = Self::now_ms();
@@ -560,6 +569,7 @@ impl FileStore {
     }
 
     /// Start background flusher (call from async context).
+    #[allow(dead_code)]
     pub fn start_flusher(self: &Arc<Self>) -> tokio::task::JoinHandle<()> {
         let store = Arc::clone(self);
         tokio::spawn(async move {

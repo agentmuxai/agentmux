@@ -14,8 +14,11 @@ use super::wps::{WaveEvent, WpsClient};
 
 // ---- Event type constants ----
 
+#[allow(dead_code)]
 pub const WS_EVENT_TAURI_NEW_WINDOW: &str = "electron:newwindow";
+#[allow(dead_code)]
 pub const WS_EVENT_TAURI_CLOSE_WINDOW: &str = "electron:closewindow";
+#[allow(dead_code)]
 pub const WS_EVENT_TAURI_UPDATE_ACTIVE_TAB: &str = "electron:updateactivetab";
 pub const WS_EVENT_RPC: &str = "rpc";
 
@@ -32,6 +35,7 @@ pub struct WSEventType {
 
 struct WindowWatchData {
     sender: tokio::sync::mpsc::UnboundedSender<serde_json::Value>,
+    #[allow(dead_code)]
     tab_id: String,
 }
 
@@ -73,12 +77,14 @@ impl EventBus {
     }
 
     /// Check if any connections exist for a given window/tab ID.
+    #[allow(dead_code)]
     pub fn has_connections_for(&self, tab_id: &str) -> bool {
         let watches = self.watches.lock().unwrap();
         watches.values().any(|w| w.tab_id == tab_id)
     }
 
     /// Wait for a connection to appear for the given tab_id (with timeout).
+    #[allow(dead_code)]
     pub async fn wait_for_connection(
         &self,
         tab_id: &str,
@@ -114,6 +120,7 @@ impl EventBus {
     }
 
     /// Send an event to connections matching a specific tab_id.
+    #[allow(dead_code)]
     pub fn send_to_tab(&self, tab_id: &str, event: &WSEventType) {
         let data = match serde_json::to_value(event) {
             Ok(v) => v,

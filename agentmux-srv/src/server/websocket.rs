@@ -12,14 +12,13 @@ use base64::Engine as _;
 use serde::Deserialize;
 use serde_json::json;
 
-use crate::backend::ai::chatstore::get_default_chat_store;
 use crate::backend::blockcontroller;
 use crate::backend::rpc::engine::WshRpcEngine;
 use crate::backend::rpc_types::{
     CommandBlockInputData, CommandControllerResyncData, CommandEventReadHistoryData,
     CommandGetMetaData, CommandSetMetaData, RpcMessage, COMMAND_CONTROLLER_INPUT,
     COMMAND_CONTROLLER_RESYNC, COMMAND_EVENT_READ_HISTORY, COMMAND_EVENT_SUB, COMMAND_EVENT_UNSUB,
-    COMMAND_EVENT_UNSUB_ALL, COMMAND_GET_FULL_CONFIG, COMMAND_GET_META, COMMAND_GET_AI_CHAT,
+    COMMAND_EVENT_UNSUB_ALL, COMMAND_GET_FULL_CONFIG, COMMAND_GET_META,
     COMMAND_GET_AI_RATE_LIMIT, COMMAND_ROUTE_ANNOUNCE, COMMAND_ROUTE_UNANNOUNCE,
     COMMAND_SET_META, COMMAND_SET_CONFIG, COMMAND_APP_INFO,
     COMMAND_SUBPROCESS_SPAWN, COMMAND_AGENT_INPUT, COMMAND_AGENT_STOP, COMMAND_WRITE_AGENT_CONFIG,
@@ -579,24 +578,6 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                 Ok(Some(serde_json::json!({
                     "version": version,
                 })))
-            })
-        }),
-    );
-
-    // getwaveaichat → return UIChat for the given chatid (null if not found)
-    engine.register_handler(
-        COMMAND_GET_AI_CHAT,
-        Box::new(|data, _ctx| {
-            Box::pin(async move {
-                let obj: serde_json::Map<String, serde_json::Value> =
-                    serde_json::from_value(data).map_err(|e| format!("getwaveaichat: {e}"))?;
-                let chat_id = obj
-                    .get("chatid")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
-                let result = get_default_chat_store().get_as_ui_chat(&chat_id);
-                Ok(result) // None → JSON null, Some(v) → JSON object
             })
         }),
     );
