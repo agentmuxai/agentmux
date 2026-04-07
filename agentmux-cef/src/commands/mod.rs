@@ -11,6 +11,7 @@ pub mod providers;
 pub mod drag;
 pub mod clipboard;
 pub mod stubs;
+pub mod palette;
 
 use std::sync::Arc;
 use crate::state::AppState;
