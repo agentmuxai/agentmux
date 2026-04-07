@@ -357,13 +357,18 @@ pub fn get_instance_number(state: &Arc<AppState>, args: &serde_json::Value) -> s
     serde_json::json!(reg.get(label).unwrap_or(1))
 }
 
+/// Get the total window count.
+pub fn get_window_count(state: &Arc<AppState>) -> serde_json::Value {
+    let reg = state.window_instance_registry.lock();
+    serde_json::json!(reg.count())
+}
+
 /// Register the backend window ID for a window label.
 /// Called by the frontend after it has initialized its backend Window object.
 /// Used by `on_before_close` to notify the backend when a secondary window closes.
 pub fn register_backend_window(state: &Arc<AppState>, args: &serde_json::Value) -> serde_json::Value {
     let label = args.get("label").and_then(|v| v.as_str()).unwrap_or("main");
     let window_id = args.get("window_id").and_then(|v| v.as_str()).unwrap_or("");
-    // Always log at info level so we can tell if the IPC reached the server at all.
     tracing::info!(label = %label, window_id = %window_id, "[window] register_backend_window received");
     crate::client::dlog(&format!("register_backend_window: label={} window_id={}", label, window_id));
     if !window_id.is_empty() {
@@ -377,17 +382,16 @@ pub fn register_backend_window(state: &Arc<AppState>, args: &serde_json::Value) 
     serde_json::Value::Null
 }
 
-/// Get the total window count.
-pub fn get_window_count(state: &Arc<AppState>) -> serde_json::Value {
-    let reg = state.window_instance_registry.lock();
-    serde_json::json!(reg.count())
-}
-
-/// Toggle devtools.
-/// Returns the remote debugging URL — the frontend opens it in a new browser tab.
-/// Direct host.show_dev_tools() calls crash with current CEF bindings.
-pub fn toggle_devtools(_state: &Arc<AppState>) -> Result<serde_json::Value, String> {
-    Ok(serde_json::json!({ "remote_debug_url": "http://localhost:9222" }))
+/// Toggle DevTools for the main window.
+///
+/// Uses CEF's native show_dev_tools() API, which triggers
+/// BrowserViewDelegate::on_popup_browser_view_created with is_devtools=1.
+/// That callback creates a top-level CefWindow with a native title bar,
+/// producing a standalone DevTools window — identical to Tauri's open_devtools().
+pub fn toggle_devtools(state: &Arc<AppState>, args: &serde_json::Value) -> Result<serde_json::Value, String> {
+    let label = args.get("label").and_then(|v| v.as_str()).unwrap_or("main");
+    crate::ui_tasks::post_show_dev_tools(state, label);
+    Ok(serde_json::Value::Null)
 }
 
 /// Resolve the base URL for the frontend.
@@ -444,17 +448,16 @@ pub fn open_new_window(state: &Arc<AppState>) -> Result<serde_json::Value, Strin
     let (pos_x, pos_y) = get_offset_position();
     let (win_w, win_h) = get_secondary_window_size(pos_x, pos_y);
 
-    // Hold the pending_window_labels lock across post_create_window so that
-    // concurrent open_new_window calls cannot interleave their push+post pairs.
-    // post_task is non-blocking (just enqueues a UI-thread task), so holding
-    // the lock here is safe and keeps the FIFO order consistent.
-    {
-        let mut pending = state.pending_window_labels.lock();
-        pending.push_back(label.clone());
-        crate::ui_tasks::post_create_window(
-            state, &url, &label, pos_x, pos_y, win_w, win_h,
-        );
-    }
+    // Push label before posting — on_after_created pops it to register the
+    // browser under the same label that's baked into the window URL.
+    state.pending_window_labels.lock().push_back(label.clone());
+
+    // Post to CEF UI thread — window_create_top_level must run there.
+    // true = frameless: secondary app windows use the same custom title bar as main.
+    crate::ui_tasks::post_create_window(
+        state, &url, &label, pos_x, pos_y, win_w, win_h,
+        true,
+    );
 
     // Notify all windows of the count change
     let count = state.window_instance_registry.lock().count();

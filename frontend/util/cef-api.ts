@@ -392,10 +392,9 @@ export function buildCefApi(): AppApi {
             invokeCommand("set_window_transparency", { transparent, blur, opacity }).catch(console.error);
         },
         toggleDevtools: () => {
-            // CEF host.show_dev_tools() crashes from IPC thread (wrap_task! broken
-            // in CEF Rust bindings v146). Open the remote debugging target list in
-            // the system browser — user clicks the "inspect" link to get full DevTools.
-            invokeCommand("open_external", { url: "http://127.0.0.1:9222" }).catch(console.error);
+            const params = new URLSearchParams(window.location.search);
+            const label = params.get("windowLabel") ?? "main";
+            invokeCommand("toggle_devtools", { label }).catch(console.error);
         },
         getWindowLabel: async () => {
             const params = new URLSearchParams(window.location.search);
