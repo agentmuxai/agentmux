@@ -560,8 +560,15 @@ export function buildCefApi(): AppApi {
         cancelCrossDrag: async (dragId: string) => {
             await invokeCommand("cancel_cross_drag", { dragId });
         },
-        openWindowAtPosition: async (screenX: number, screenY: number, workspaceId?: string) => {
-            return await invokeCommand<string>("open_window_at_position", { screenX, screenY, workspaceId: workspaceId ?? "" });
+        openWindowAtPosition: async (screenX: number, screenY: number, workspaceId?: string, width?: number, height?: number, grabOffsetX?: number, grabOffsetY?: number) => {
+            return await invokeCommand<string>("open_window_at_position", {
+                screenX, screenY,
+                workspaceId: workspaceId ?? "",
+                ...(width        != null && { width }),
+                ...(height       != null && { height }),
+                ...(grabOffsetX  != null && { grabOffsetX }),
+                ...(grabOffsetY  != null && { grabOffsetY }),
+            });
         },
 
         // --- Drag cursor & helpers ---

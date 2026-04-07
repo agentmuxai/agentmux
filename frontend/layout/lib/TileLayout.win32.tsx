@@ -24,6 +24,7 @@ import {
     TileLayoutContents,
 } from "./types";
 import { determineDropDirection } from "./utils";
+import type { GrabOffset, PaneRect } from "@/app/drag/CrossWindowDragMonitor";
 import { setCurrentDragPayload } from "@/app/drag/CrossWindowDragMonitor";
 
 export const tileItemType = "TILE_ITEM";
@@ -395,12 +396,34 @@ const DisplayNode = (props: DisplayNodeProps) => {
                         nativeSetDragImage(img, offsetX, offsetY);
                     }
                 },
-                onDragStart: () => {
+                onDragStart: ({ location }) => {
                     globalDragNodeId = props.node.id;
                     globalDragLayoutModel = props.layoutModel;
                     props.layoutModel.activeDrag._set(true);
                     setIsDragging(true);
-                    setCurrentDragPayload({ kind: "tile", node: props.node });
+                    // Capture pane screen rect and grab offset for tear-off sizing.
+                    let paneRect: PaneRect | undefined;
+                    let grabOffset: GrabOffset | undefined;
+                    if (tileNodeRef) {
+                        const rect = tileNodeRef.getBoundingClientRect();
+                        // Convert viewport-relative rect to screen coordinates.
+                        // window.outerHeight - window.innerHeight approximates the browser chrome height.
+                        const chromeH = window.outerHeight - window.innerHeight;
+                        const screenLeft = window.screenX ?? 0;
+                        const screenTop  = window.screenY ?? 0;
+                        paneRect = {
+                            x: rect.left + screenLeft,
+                            y: rect.top  + screenTop + chromeH,
+                            w: Math.round(rect.width),
+                            h: Math.round(rect.height),
+                        };
+                        const input = location.current.input;
+                        grabOffset = {
+                            dx: Math.round((input.clientX ?? 0) - rect.left),
+                            dy: Math.round((input.clientY ?? 0) - rect.top),
+                        };
+                    }
+                    setCurrentDragPayload({ kind: "tile", node: props.node, paneRect, grabOffset });
                 },
                 onDrop: () => {
                     globalDragNodeId = null;
