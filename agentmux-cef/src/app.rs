@@ -21,6 +21,8 @@ wrap_window_delegate! {
     pub struct AgentMuxWindowDelegate {
         browser_view: RefCell<Option<BrowserView>>,
         initial_bounds: Option<(i32, i32, i32, i32)>,
+        frameless: bool,
+        runtime_style: RuntimeStyle,
     }
 
     impl ViewDelegate {
@@ -50,8 +52,12 @@ wrap_window_delegate! {
                 window.set_bounds(Some(&Rect { x, y, width: w, height: h }));
             }
 
-            // Do NOT show here — deferred to on_load_end (client.rs) after
-            // content paints, eliminating the white flash.
+            // Chrome-style windows (DevTools popups) are shown immediately.
+            // Alloy-style windows defer to on_load_end in client.rs to avoid
+            // the DWM white flash on startup.
+            if self.runtime_style == RuntimeStyle::CHROME {
+                window.show();
+            }
         }
 
         fn on_window_destroyed(&self, _window: Option<&mut Window>) {
@@ -61,7 +67,9 @@ wrap_window_delegate! {
 
         fn can_close(&self, _window: Option<&mut Window>) -> i32 {
             let browser_view = self.browser_view.borrow();
-            let browser_view = browser_view.as_ref().expect("BrowserView is None");
+            let Some(browser_view) = browser_view.as_ref() else {
+                return 1;
+            };
             if let Some(browser) = browser_view.browser() {
                 let browser_host = browser.host().expect("BrowserHost is None");
                 browser_host.try_close_browser()
@@ -75,7 +83,7 @@ wrap_window_delegate! {
         }
 
         fn is_frameless(&self, _window: Option<&mut Window>) -> i32 {
-            1 // Frameless — AgentMux uses its own custom title bar
+            self.frameless as i32
         }
 
         fn can_resize(&self, _window: Option<&mut Window>) -> i32 {
@@ -91,7 +99,7 @@ wrap_window_delegate! {
         }
 
         fn window_runtime_style(&self) -> RuntimeStyle {
-            RuntimeStyle::ALLOY
+            self.runtime_style
         }
     }
 }
@@ -173,12 +181,25 @@ wrap_browser_view_delegate! {
             &self,
             _browser_view: Option<&mut BrowserView>,
             popup_browser_view: Option<&mut BrowserView>,
-            _is_devtools: i32,
+            is_devtools: i32,
         ) -> i32 {
-            // Create a new top-level window for popups (e.g., devtools).
+            // Create a new top-level window for the popup.
+            // DevTools windows (is_devtools != 0) get a native title bar so the
+            // user can see it's DevTools, move it, and close it with the X button.
+            // Regular popups stay frameless (matching the main window style).
+            let frameless = is_devtools == 0;
+            // DevTools popups are always Chrome-style (even from Alloy parents).
+            // The window runtime style must match the browser view style or CEF crashes.
+            let runtime_style = if is_devtools != 0 {
+                RuntimeStyle::CHROME
+            } else {
+                RuntimeStyle::ALLOY
+            };
             let mut window_delegate = AgentMuxWindowDelegate::new(
                 RefCell::new(popup_browser_view.cloned()),
                 None,
+                frameless,
+                runtime_style,
             );
             window_create_top_level(Some(&mut window_delegate));
             1
@@ -216,6 +237,14 @@ wrap_app! {
                 let bg_key = CefString::from("background-color");
                 let bg_val = CefString::from("ff222222");
                 cmd.append_switch_with_value(Some(&bg_key), Some(&bg_val));
+
+                // Allow the DevTools inspector page (served from the remote
+                // debugging server) to open its own WebSocket connection back
+                // to that same server.  Without this flag Chromium 107+ blocks
+                // cross-origin WebSocket upgrades to the debug port.
+                let ro_key = CefString::from("remote-allow-origins");
+                let ro_val = CefString::from("*");
+                cmd.append_switch_with_value(Some(&ro_key), Some(&ro_val));
             }
         }
 
@@ -321,6 +350,8 @@ wrap_browser_process_handler! {
                 let mut window_delegate = AgentMuxWindowDelegate::new(
                     RefCell::new(browser_view),
                     None,
+                    true, // frameless — main window uses custom title bar
+                    RuntimeStyle::ALLOY,
                 );
                 window_create_top_level(Some(&mut window_delegate));
             }

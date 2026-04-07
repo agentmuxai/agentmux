@@ -301,15 +301,16 @@ pub fn open_window_at_position(state: &Arc<AppState>, args: &serde_json::Value) 
         url.push_str(&format!("&workspaceId={}", workspace_id));
     }
 
-    // Hold the lock across post_create_window to prevent concurrent creation
-    // from interleaving push+post pairs (same pattern as open_new_window).
-    {
-        let mut pending = state.pending_window_labels.lock();
-        pending.push_back(label.clone());
-        crate::ui_tasks::post_create_window(
-            state, &url, &label, pos_x, pos_y, win_w, win_h,
-        );
-    }
+    // Push label before posting — on_after_created pops it to register
+    // the browser under the same label baked into the window URL.
+    state.pending_window_labels.lock().push_back(label.clone());
+
+    // Post to CEF UI thread — window_create_top_level must run there.
+    // true = frameless: tear-off windows use the same custom title bar as main.
+    crate::ui_tasks::post_create_window(
+        state, &url, &label, pos_x, pos_y, win_w, win_h,
+        true,
+    );
 
     // Register instance number
     {

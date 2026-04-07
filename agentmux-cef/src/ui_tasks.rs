@@ -165,6 +165,7 @@ wrap_task! {
         y: i32,
         w: i32,
         h: i32,
+        frameless: bool,
     }
 
     impl Task {
@@ -202,6 +203,8 @@ wrap_task! {
             let mut wd = crate::app::AgentMuxWindowDelegate::new(
                 RefCell::new(browser_view),
                 Some((self.x, self.y, self.w, self.h)),
+                self.frameless,
+                RuntimeStyle::ALLOY,
             );
             window_create_top_level(Some(&mut wd));
         }
@@ -213,10 +216,55 @@ pub fn post_create_window(
     url: &str,
     label: &str,
     x: i32, y: i32, w: i32, h: i32,
+    frameless: bool,
 ) {
     let mut task = CreateWindowTask::new(
         state.clone(), url.to_string(), label.to_string(),
-        x, y, w, h,
+        x, y, w, h, frameless,
     );
+    post_task(ThreadId::UI, Some(&mut task));
+}
+
+// ── DevTools (toggle) ─────────────────────────────────────────────────────
+
+wrap_task! {
+    pub struct ShowDevToolsTask {
+        state: Arc<AppState>,
+        label: String,
+    }
+
+    impl Task {
+        fn execute(&self) {
+            let browsers = self.state.browsers.lock();
+            let browser = match browsers.get(&self.label) {
+                Some(b) => b.clone(),
+                None => {
+                    tracing::warn!("[devtools] browser '{}' not found", self.label);
+                    return;
+                }
+            };
+            drop(browsers);
+
+            match browser.host() {
+                Some(host) => {
+                    // In CEF Views mode, window_info is ignored by show_dev_tools().
+                    // CEF routes the DevTools popup through on_popup_browser_view_created
+                    // in AgentMuxBrowserViewDelegate, which creates a native window for it.
+                    if host.has_dev_tools() != 0 {
+                        host.close_dev_tools();
+                    } else {
+                        host.show_dev_tools(None, None, None, None);
+                    }
+                }
+                None => {
+                    tracing::warn!("[devtools] no browser host for '{}'", self.label);
+                }
+            }
+        }
+    }
+}
+
+pub fn post_show_dev_tools(state: &Arc<AppState>, label: &str) {
+    let mut task = ShowDevToolsTask::new(state.clone(), label.to_string());
     post_task(ThreadId::UI, Some(&mut task));
 }
