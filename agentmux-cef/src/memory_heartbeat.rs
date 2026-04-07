@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// Memory heartbeat — logs system and process memory stats every 60 seconds.
+// Memory heartbeat — logs system and process memory stats every 20 seconds.
 // Designed to provide forensic data for OOM / VA exhaustion crash analysis.
 
 use std::time::Duration;
@@ -13,8 +13,8 @@ pub fn start() {
         .name("mem-heartbeat".into())
         .spawn(move || {
             loop {
-                log_memory_stats();
                 std::thread::sleep(Duration::from_secs(20));
+                log_memory_stats();
             }
         })
         .expect("Failed to spawn memory heartbeat thread");
