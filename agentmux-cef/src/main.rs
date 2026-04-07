@@ -26,6 +26,7 @@ mod client;
 mod commands;
 mod events;
 mod ipc;
+mod memory_heartbeat;
 mod sidecar;
 mod state;
 mod ui_tasks;
@@ -259,6 +260,10 @@ fn main() {
     assert_eq!(init_result, 1, "CEF initialization failed");
 
     tracing::info!("CEF initialized, entering message loop");
+
+    // Start memory heartbeat — logs system/process memory stats every 60s.
+    // Provides forensic data if the process later crashes from OOM / VA exhaustion.
+    memory_heartbeat::start();
 
     // Write port + token to file AFTER CEF init so a second instance
     // only connects when we're ready to handle new-window requests.
