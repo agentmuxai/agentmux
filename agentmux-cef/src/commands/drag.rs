@@ -301,6 +301,10 @@ pub fn open_window_at_position(state: &Arc<AppState>, args: &serde_json::Value) 
         url.push_str(&format!("&workspaceId={}", workspace_id));
     }
 
+    // Push label before posting — on_after_created pops it to register
+    // the browser under the same label baked into the window URL.
+    state.pending_window_labels.lock().push_back(label.clone());
+
     // Post to CEF UI thread — window_create_top_level must run there.
     // true = frameless: tear-off windows use the same custom title bar as main.
     crate::ui_tasks::post_create_window(
