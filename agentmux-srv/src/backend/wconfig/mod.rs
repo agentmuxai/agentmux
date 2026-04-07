@@ -20,7 +20,9 @@ pub use watcher::*;
 
 pub const SETTINGS_FILE: &str = "settings.json";
 pub const SETTINGS_TEMPLATE: &str = include_str!("../../../../settings-template.jsonc");
+#[allow(dead_code)]
 pub const CONNECTIONS_FILE: &str = "connections.json";
+#[allow(dead_code)]
 pub const PROFILES_FILE: &str = "profiles.json";
 
 // ---- Tests ----

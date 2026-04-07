@@ -45,6 +45,7 @@ pub struct AgentRegistration {
 }
 
 /// List of registered agents.
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentListResponse {
     pub agents: Vec<AgentRegistration>,
@@ -78,6 +79,7 @@ pub struct PollerConfig {
 }
 
 /// AgentMux config file format (agentmux.json).
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentMuxConfigFile {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -87,6 +89,7 @@ pub struct AgentMuxConfigFile {
 }
 
 /// Pending injection from AgentMux cloud.
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PendingInjection {
     pub id: String,
@@ -100,12 +103,14 @@ pub struct PendingInjection {
 }
 
 /// Response from AgentMux pending endpoint.
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PendingResponse {
     pub injections: Vec<PendingInjection>,
 }
 
 /// Acknowledgment request for delivered injections.
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AckRequest {
     pub injection_ids: Vec<String>,

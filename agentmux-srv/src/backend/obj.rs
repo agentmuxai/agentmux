@@ -121,12 +121,17 @@ pub fn meta_get_bool(meta: &MetaMapType, key: &str, default: bool) -> bool {
 pub trait WaveObj: Serialize + for<'de> Deserialize<'de> {
     fn get_otype() -> &'static str;
     fn get_oid(&self) -> &str;
+    #[allow(dead_code)]
     fn set_oid(&mut self, oid: String);
+    #[allow(dead_code)]
     fn get_version(&self) -> i64;
     fn set_version(&mut self, version: i64);
+    #[allow(dead_code)]
     fn get_meta(&self) -> &MetaMapType;
+    #[allow(dead_code)]
     fn set_meta(&mut self, meta: MetaMapType);
 
+    #[allow(dead_code)]
     fn oref(&self) -> ORef {
         ORef::new(Self::get_otype(), self.get_oid())
     }
@@ -165,10 +170,12 @@ macro_rules! impl_wave_obj {
 // ---- Update types ----
 
 pub const UPDATE_TYPE_UPDATE: &str = "update";
+#[allow(dead_code)]
 pub const UPDATE_TYPE_DELETE: &str = "delete";
 
 // ---- UIContext ----
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct UIContext {
     #[serde(rename = "windowid")]

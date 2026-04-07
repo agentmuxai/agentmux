@@ -10,12 +10,14 @@ pub enum StoreError {
     NotFound,
 
     #[error("already exists")]
+    #[allow(dead_code)]
     AlreadyExists,
 
     #[error("empty OID")]
     EmptyOID,
 
     #[error("version mismatch: expected {expected}, got {actual}")]
+    #[allow(dead_code)]
     VersionMismatch { expected: i64, actual: i64 },
 
     #[error("sqlite error: {0}")]

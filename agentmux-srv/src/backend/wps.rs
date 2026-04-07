@@ -18,26 +18,36 @@ use serde::{Deserialize, Serialize};
 
 // ---- Event type constants (match Go) ----
 
+#[allow(dead_code)]
 pub const EVENT_BLOCK_CLOSE: &str = "blockclose";
+#[allow(dead_code)]
 pub const EVENT_CONN_CHANGE: &str = "connchange";
 pub const EVENT_SYS_INFO: &str = "sysinfo";
 pub const EVENT_CONTROLLER_STATUS: &str = "controllerstatus";
 pub const EVENT_WAVE_OBJ_UPDATE: &str = "waveobj:update";
 pub const EVENT_BLOCK_FILE: &str = "blockfile";
 pub const EVENT_INSTALL_PROGRESS: &str = "install_progress";
+#[allow(dead_code)]
 pub const EVENT_CONFIG: &str = "config";
+#[allow(dead_code)]
 pub const EVENT_USER_INPUT: &str = "userinput";
+#[allow(dead_code)]
 pub const EVENT_ROUTE_GONE: &str = "route:gone";
+#[allow(dead_code)]
 pub const EVENT_WORKSPACE_UPDATE: &str = "workspace:update";
+#[allow(dead_code)]
 pub const EVENT_WAVE_AI_RATE_LIMIT: &str = "waveai:ratelimit";
 pub const EVENT_BLOCK_STATS: &str = "blockstats";
 pub const EVENT_AGENT_HEALTH: &str = "agenthealth";
 
 // File operation constants
+#[allow(dead_code)]
 pub const FILE_OP_CREATE: &str = "create";
+#[allow(dead_code)]
 pub const FILE_OP_DELETE: &str = "delete";
 pub const FILE_OP_APPEND: &str = "append";
 pub const FILE_OP_TRUNCATE: &str = "truncate";
+#[allow(dead_code)]
 pub const FILE_OP_INVALIDATE: &str = "invalidate";
 
 const MAX_PERSIST: usize = 4096;
@@ -63,6 +73,7 @@ fn is_zero(v: &usize) -> bool {
 }
 
 impl WaveEvent {
+    #[allow(dead_code)]
     pub fn has_scope(&self, scope: &str) -> bool {
         self.scopes.iter().any(|s| s == scope)
     }

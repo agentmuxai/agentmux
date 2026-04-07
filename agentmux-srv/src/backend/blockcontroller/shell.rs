@@ -74,6 +74,7 @@ const PTY_READ_BUF_SIZE: usize = 4096;
 
 /// Inner state protected by mutex.
 /// Grace period (seconds) between SIGTERM and SIGKILL during stop().
+#[allow(dead_code)]
 const KILL_GRACE_SECS: u64 = 5;
 
 struct ShellControllerInner {
@@ -88,6 +89,7 @@ struct ShellControllerInner {
     /// Input channel sender (sends to the PTY input loop).
     input_tx: Option<mpsc::Sender<BlockInputUnion>>,
     /// Input channel receiver (consumed by the PTY input loop).
+    #[allow(dead_code)]
     input_rx: Option<mpsc::Receiver<BlockInputUnion>>,
     /// OS PID of the running child process, kept for signal delivery in stop().
     child_pid: Option<u32>,
@@ -162,6 +164,7 @@ impl ShellController {
     }
 
     /// Set a custom ConnInterface factory (for testing).
+    #[allow(dead_code)]
     pub fn set_conn_factory(&self, factory: ConnFactory) {
         *self.conn_factory.lock().unwrap() = Some(factory);
     }
@@ -204,6 +207,7 @@ impl ShellController {
     }
 
     /// True if this pane is running an agent CLI.
+    #[allow(dead_code)]
     pub fn is_agent_pane(&self) -> bool {
         self.inner.lock().unwrap().is_agent_pane
     }
@@ -930,6 +934,7 @@ pub fn handle_append_block_file(
 
 /// Truncate a block's terminal output file and publish a WPS event.
 /// Port of Go's `HandleTruncateBlockFile`.
+#[allow(dead_code)]
 pub fn handle_truncate_block_file(broker: &wps::Broker, block_id: &str, filename: &str) {
     let event_data = wps::WSFileEventData {
         zoneid: block_id.to_string(),

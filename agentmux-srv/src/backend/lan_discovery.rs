@@ -209,6 +209,7 @@ impl LanDiscovery {
     }
 
     /// Get peer count (excludes self).
+    #[allow(dead_code)]
     pub fn peer_count(&self) -> usize {
         self.instances.read().len()
     }

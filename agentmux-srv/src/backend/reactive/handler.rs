@@ -80,6 +80,7 @@ impl Handler {
     }
 
     /// Set whether to include source agent prefix in injected messages.
+    #[allow(dead_code)]
     pub fn set_include_source(&mut self, include: bool) {
         self.include_source_in_message = include;
     }
@@ -145,6 +146,7 @@ impl Handler {
     }
 
     /// Update the last_seen timestamp for an agent.
+    #[allow(dead_code)]
     pub fn update_last_seen(&mut self, agent_id: &str) {
         if let Some(info) = self.agent_info.get_mut(&agent_id.to_lowercase()) {
             info.last_seen = now_unix_millis();
@@ -157,6 +159,7 @@ impl Handler {
     }
 
     /// Get agent registration by block ID.
+    #[allow(dead_code)]
     pub fn get_agent_by_block(&self, block_id: &str) -> Option<&AgentRegistration> {
         self.block_to_agent
             .get(block_id)
@@ -398,6 +401,7 @@ impl ReactiveHandler {
         self.inner.lock().unwrap().set_input_sender(sender);
     }
 
+    #[allow(dead_code)]
     pub fn set_include_source(&self, include: bool) {
         self.inner.lock().unwrap().set_include_source(include);
     }
@@ -422,6 +426,7 @@ impl ReactiveHandler {
         self.inner.lock().unwrap().unregister_block(block_id);
     }
 
+    #[allow(dead_code)]
     pub fn update_last_seen(&self, agent_id: &str) {
         self.inner.lock().unwrap().update_last_seen(agent_id);
     }
@@ -430,6 +435,7 @@ impl ReactiveHandler {
         self.inner.lock().unwrap().get_agent(agent_id).cloned()
     }
 
+    #[allow(dead_code)]
     pub fn get_agent_by_block(&self, block_id: &str) -> Option<AgentRegistration> {
         self.inner
             .lock()

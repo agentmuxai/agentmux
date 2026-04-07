@@ -1,32 +1,19 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-pub mod ai;
+
 pub mod blockcontroller;
-pub mod colprint;
 pub mod config_watcher_fs;
-pub mod daystr;
-pub mod dbutil;
+pub mod ijson;
 pub mod docsite;
-pub mod ds;
-pub mod envutil;
 pub mod eventbus;
-pub mod fileutil;
 pub mod forge_seed;
 pub mod history;
 pub mod lan_discovery;
 pub mod messagebus;
-pub mod ijson;
-pub mod iochan;
-pub mod logview;
-pub mod migrateutil;
 pub mod oref;
-pub mod packetparser;
-pub mod pamparse;
-pub mod panichandler;
 pub mod reactive;
 pub mod readutil;
-pub mod remote;
 pub mod rpc;
 pub mod rpc_types;
 pub mod schema;
