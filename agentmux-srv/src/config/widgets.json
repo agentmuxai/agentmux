@@ -101,6 +101,7 @@
     },
     "defwidget@devtools": {
         "display:order": 9,
+        "display:pinned": true,
         "icon": "code",
         "label": "devtools",
         "description": "Toggle Developer Tools",

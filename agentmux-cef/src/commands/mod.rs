@@ -33,10 +33,13 @@ pub fn create_isolated_request_context(state: &Arc<AppState>, label: &str) -> Op
     let ctx_path = std::path::PathBuf::from(&data_dir)
         .join("browser-contexts")
         .join(label);
-    std::fs::create_dir_all(&ctx_path).ok();
+    // Do NOT pre-create the directory — CEF's Chrome profile initializer
+    // (chrome_browser_context.cc) fails when the directory already exists but
+    // has no valid profile structure. Let CEF create and initialize it.
 
     let settings = cef::RequestContextSettings {
         cache_path: cef::CefString::from(ctx_path.to_str().unwrap_or("")),
+        persist_session_cookies: 0,
         ..Default::default()
     };
 
