@@ -670,6 +670,11 @@ function registerGlobalKeys() {
         return true;
     });
     globalChordMap.set("Ctrl:Shift:s", splitBlockKeys);
+
+    globalKeyMap.set("Ctrl:p", () => {
+        modalsModel.pushModal("CommandPaletteModal");
+        return true;
+    });
 }
 
 function getAllGlobalKeyBindings(): string[] {
