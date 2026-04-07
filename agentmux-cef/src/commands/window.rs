@@ -398,6 +398,13 @@ pub fn toggle_devtools(state: &Arc<AppState>, args: &serde_json::Value) -> Resul
 /// Production: IPC server serves static files from `frontend/` next to the exe.
 /// Dev: Vite dev server at `http://localhost:5173`.
 pub(crate) fn resolve_frontend_base_url(ipc_port: u16) -> String {
+    // In dev mode (AGENTMUX_DEV=1 set by `task dev`), always use the Vite dev
+    // server so secondary windows get the latest code and hot reload works.
+    // Without this, secondary windows load from dist/cef-dev/frontend/ (the
+    // stale production bundle copied at build time) and miss any live changes.
+    if std::env::var("AGENTMUX_DEV").is_ok() {
+        return "http://localhost:5173".to_string();
+    }
     let exe_dir = std::env::current_exe()
         .ok()
         .and_then(|p| p.parent().map(|d| d.to_path_buf()));
