@@ -261,7 +261,7 @@ fn main() {
 
     tracing::info!("CEF initialized, entering message loop");
 
-    // Start memory heartbeat — logs system/process memory stats every 60s.
+    // Start memory heartbeat — logs system/process memory stats every 20s.
     // Provides forensic data if the process later crashes from OOM / VA exhaustion.
     memory_heartbeat::start();
 
