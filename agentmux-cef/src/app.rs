@@ -245,6 +245,21 @@ wrap_app! {
                 let ro_key = CefString::from("remote-allow-origins");
                 let ro_val = CefString::from("*");
                 cmd.append_switch_with_value(Some(&ro_key), Some(&ro_val));
+
+                // Merge GPU process into the browser process. Eliminates one
+                // ~100GB virtual address space reservation from PartitionAlloc
+                // pools (32GB GigaCage + 4×16GB pools + 4GB V8 pointer cage).
+                // Tradeoff: GPU driver crash kills the app instead of just
+                // restarting the GPU process — acceptable for a local desktop app.
+                let gpu_key = CefString::from("in-process-gpu");
+                cmd.append_switch(Some(&gpu_key));
+
+                // Cap renderer subprocesses. In Alloy mode the frontend runs
+                // in the browser process (no renderer spawned), but DevTools
+                // popups can spawn additional renderers at ~100GB VA each.
+                let rpl_key = CefString::from("renderer-process-limit");
+                let rpl_val = CefString::from("1");
+                cmd.append_switch_with_value(Some(&rpl_key), Some(&rpl_val));
             }
         }
 
