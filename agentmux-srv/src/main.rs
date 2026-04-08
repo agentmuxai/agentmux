@@ -546,9 +546,11 @@ fn init_logging() -> tracing_appender::non_blocking::WorkerGuard {
     let (non_blocking_file, guard) = tracing_appender::non_blocking(file_appender);
 
     // Write pointer to current log file for zero-lookup agent discovery.
+    // Version-qualified name so multi-instance doesn't clobber pointers.
     let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
     let current_filename = format!("{}.{}", log_prefix, today);
-    let _ = std::fs::write(log_dir.join("current-srv.path"), &current_filename);
+    let pointer_name = format!("current-srv-v{}.path", version);
+    let _ = std::fs::write(log_dir.join(&pointer_name), &current_filename);
 
     let subscriber = tracing_subscriber::registry()
         .with(
