@@ -57,6 +57,14 @@ function installCefDragListener() {
     document.addEventListener("mouseup", () => {
         dragging = false;
     });
+
+    document.addEventListener("dblclick", (e: MouseEvent) => {
+        if (e.button !== 0) return;
+        if (!isInDragRegion(e.target as HTMLElement)) return;
+        e.preventDefault();
+        dragging = false;
+        invokeCommand("maximize_window").catch(() => {});
+    }, true);
 }
 
 export function useWindowDrag(): { dragProps: Record<string, unknown> } {
