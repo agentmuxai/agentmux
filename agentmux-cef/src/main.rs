@@ -54,21 +54,8 @@ fn main() {
         }
     }
 
-    // Initialize tracing (stderr + optional env filter).
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
-        )
-        .with_writer(std::io::stderr)
-        .init();
-
-    tracing::info!(
-        version = env!("CARGO_PKG_VERSION"),
-        os = std::env::consts::OS,
-        arch = std::env::consts::ARCH,
-        "AgentMux CEF host starting"
-    );
+    // Tracing is initialized after the subprocess check below — browser process
+    // gets dual file+stderr output; subprocesses exit before tracing is needed.
 
     // macOS: load the CEF framework library explicitly.
     #[cfg(target_os = "macos")]
@@ -85,7 +72,7 @@ fn main() {
     // Parse command-line arguments.
     let args = cef::args::Args::new();
     let Some(cmd_line) = args.as_cmd_line() else {
-        tracing::error!("Failed to parse command line arguments");
+        eprintln!("agentmux-cef: Failed to parse command line arguments");
         std::process::exit(1);
     };
 
@@ -107,7 +94,7 @@ fn main() {
     } else {
         // Subprocess: execute_process returns the exit code.
         let process_type = CefString::from(&cmd_line.switch_value(Some(&type_switch)));
-        tracing::info!("CEF subprocess exiting: type={}", process_type);
+        eprintln!("agentmux-cef: subprocess exiting: type={}", process_type);
         assert!(ret >= 0, "execute_process failed for subprocess");
         std::process::exit(ret);
     }
@@ -115,6 +102,10 @@ fn main() {
     // -----------------------------------------------------------------------
     // Browser process initialization
     // -----------------------------------------------------------------------
+
+    // Initialize dual-output tracing: rolling log file + stderr.
+    // The log file guard must live for the entire process to ensure flushing.
+    let _log_guard = init_logging();
 
     tracing::info!("Initializing CEF browser process");
 
@@ -297,4 +288,51 @@ fn main() {
     let _ = std::fs::remove_file(&port_file);
 
     tracing::info!("AgentMux CEF host shutdown complete");
+}
+
+/// Initialize tracing with dual output: rolling daily log file + human-readable stderr.
+/// Returns a guard that must be held for the lifetime of the process to ensure log flushing.
+fn init_logging() -> tracing_appender::non_blocking::WorkerGuard {
+    use tracing_subscriber::{fmt, layer::SubscriberExt, EnvFilter};
+
+    let version = env!("CARGO_PKG_VERSION");
+    let log_dir = std::env::var("AGENTMUX_DATA_HOME")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| dirs::home_dir().unwrap_or_default().join(".agentmux"))
+        .join("logs");
+    let _ = std::fs::create_dir_all(&log_dir);
+
+    let log_prefix = format!("agentmux-host-v{}.log", version);
+    let file_appender = tracing_appender::rolling::daily(&log_dir, &log_prefix);
+    let (non_blocking_file, guard) = tracing_appender::non_blocking(file_appender);
+
+    let subscriber = tracing_subscriber::registry()
+        .with(
+            EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| EnvFilter::new("info")),
+        )
+        .with(
+            fmt::layer()
+                .json()
+                .with_writer(non_blocking_file)
+                .with_target(true)
+                .with_thread_ids(true),
+        )
+        .with(
+            fmt::layer()
+                .with_writer(std::io::stderr)
+                .with_ansi(true),
+        );
+
+    tracing::subscriber::set_global_default(subscriber).ok();
+
+    tracing::info!(
+        version,
+        os = std::env::consts::OS,
+        arch = std::env::consts::ARCH,
+        log_dir = %log_dir.display(),
+        "AgentMux CEF host starting"
+    );
+
+    guard
 }
