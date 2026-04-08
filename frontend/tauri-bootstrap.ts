@@ -16,6 +16,50 @@ import { benchMark } from "@/util/startup-bench";
 // Must run before any other code so early messages are captured.
 initLogPipe();
 
+// Recover from GPU context loss (driver reset, DXGI device removal, display
+// power state change). Chromium's webglcontextrestored event is unreliable
+// (electron#11934), so reload the page to re-establish the rendering surface.
+// capture:true ensures we see events from canvases deep in the DOM (xterm WebGL).
+// Reload-loop protection: stop after 3 attempts to avoid infinite reloads from
+// persistent driver failures. Counter resets when the page loads successfully
+// (60s without another context loss).
+const CONTEXT_LOSS_MAX_RELOADS = 3;
+const CONTEXT_LOSS_STORAGE_KEY = "webgl-context-loss-reloads";
+let contextLostReloading = false;
+
+function getContextLossReloadCount(): number {
+    try {
+        return parseInt(sessionStorage.getItem(CONTEXT_LOSS_STORAGE_KEY) ?? "0", 10) || 0;
+    } catch {
+        return 0;
+    }
+}
+
+function setContextLossReloadCount(n: number) {
+    try {
+        sessionStorage.setItem(CONTEXT_LOSS_STORAGE_KEY, String(n));
+    } catch {
+        // sessionStorage unavailable — can't track, allow reload anyway
+    }
+}
+
+// If we survived 60s without context loss, reset the counter — the GPU is stable.
+setTimeout(() => setContextLossReloadCount(0), 60_000);
+
+document.addEventListener("webglcontextlost", (event) => {
+    event.preventDefault();
+    if (contextLostReloading) return;
+    const reloadCount = getContextLossReloadCount();
+    if (reloadCount >= CONTEXT_LOSS_MAX_RELOADS) {
+        console.error(`[recovery] WebGL context lost — suppressing reload (already reloaded ${reloadCount}x, possible driver issue)`);
+        return;
+    }
+    contextLostReloading = true;
+    setContextLossReloadCount(reloadCount + 1);
+    console.error(`[recovery] WebGL context lost — reloading page in 1s (attempt ${reloadCount + 1}/${CONTEXT_LOSS_MAX_RELOADS})`);
+    setTimeout(() => window.location.reload(), 1000);
+}, true);
+
 // Show the Tauri window immediately so the user sees the loading spinner
 // instead of staring at a blank screen while the backend starts (~1.4s on Windows 11).
 // The #startup-loading overlay stays visible until initWave() finishes rendering.
