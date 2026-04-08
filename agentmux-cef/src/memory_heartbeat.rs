@@ -7,17 +7,39 @@
 use std::time::Duration;
 
 /// Spawn a background thread that logs memory stats at a fixed interval.
+/// Also refreshes the log pointer file on UTC date rollover.
 /// Runs for the lifetime of the process — no shutdown signal needed.
 pub fn start() {
     std::thread::Builder::new()
         .name("mem-heartbeat".into())
         .spawn(move || {
+            let mut last_date = String::new();
             loop {
                 std::thread::sleep(Duration::from_secs(20));
                 log_memory_stats();
+                refresh_log_pointer(&mut last_date);
             }
         })
         .expect("Failed to spawn memory heartbeat thread");
+}
+
+/// Update the host log pointer file when the UTC date changes (midnight rollover).
+/// tracing_appender::rolling::daily creates a new file at UTC midnight, so the
+/// pointer must track the new date suffix.
+fn refresh_log_pointer(last_date: &mut String) {
+    let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
+    if *last_date == today {
+        return;
+    }
+    *last_date = today.clone();
+    let version = env!("CARGO_PKG_VERSION");
+    let log_dir = dirs::home_dir()
+        .unwrap_or_default()
+        .join(".agentmux")
+        .join("logs");
+    let current_filename = format!("agentmux-host-v{}.log.{}", version, today);
+    let pointer_name = format!("current-host-v{}.path", version);
+    let _ = std::fs::write(log_dir.join(&pointer_name), &current_filename);
 }
 
 #[cfg(target_os = "windows")]
