@@ -1,4 +1,4 @@
-mod cli_handlers;
+pub(crate) mod cli_handlers;
 mod files;
 mod forge_handlers;
 mod messagebus;
