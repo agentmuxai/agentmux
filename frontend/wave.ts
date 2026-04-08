@@ -407,11 +407,18 @@ export async function initBare() {
     // Defensive wait: if a race condition leaves window.api unset, poll briefly.
     if (!window.api) {
         console.error("[initBare] window.api not ready — polling (max 5s)");
-        await new Promise<void>((resolve) => {
+        await new Promise<void>((resolve, reject) => {
             const check = setInterval(() => {
                 if (window.api) { clearInterval(check); resolve(); }
             }, 50);
-            setTimeout(() => { clearInterval(check); resolve(); }, 5000);
+            setTimeout(() => {
+                clearInterval(check);
+                if (window.api) {
+                    resolve();
+                } else {
+                    reject(new Error("[initBare] window.api still undefined after 5s — host API bridge failed to initialize"));
+                }
+            }, 5000);
         });
     }
     // Assign deferred module-level values now.
