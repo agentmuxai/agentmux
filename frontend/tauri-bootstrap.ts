@@ -16,6 +16,19 @@ import { benchMark } from "@/util/startup-bench";
 // Must run before any other code so early messages are captured.
 initLogPipe();
 
+// Recover from GPU context loss (driver reset, DXGI device removal, display
+// power state change). Chromium's webglcontextrestored event is unreliable
+// (electron#11934), so reload the page to re-establish the rendering surface.
+// capture:true ensures we see events from canvases deep in the DOM (xterm WebGL).
+let contextLostReloading = false;
+document.addEventListener("webglcontextlost", (event) => {
+    event.preventDefault();
+    if (contextLostReloading) return;
+    contextLostReloading = true;
+    console.error("[recovery] WebGL context lost — reloading page in 1s");
+    setTimeout(() => window.location.reload(), 1000);
+}, true);
+
 // Show the Tauri window immediately so the user sees the loading spinner
 // instead of staring at a blank screen while the backend starts (~1.4s on Windows 11).
 // The #startup-loading overlay stays visible until initWave() finishes rendering.
