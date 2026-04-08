@@ -530,12 +530,13 @@ async fn main() {
 fn init_logging() -> tracing_appender::non_blocking::WorkerGuard {
     use tracing_subscriber::{fmt, layer::SubscriberExt, EnvFilter};
 
-    // Determine log directory: {AGENTMUX_DATA_HOME}/logs/ or ~/.agentmux/logs/
-    // Include version in filename so multiple versions can run side-by-side.
+    // Always log to ~/.agentmux/logs/ so all logs (host + sidecar) land in one
+    // discoverable directory. AGENTMUX_DATA_HOME controls the data dir, not logs.
+    // Version is embedded in the filename for side-by-side coexistence.
     let version = env!("CARGO_PKG_VERSION");
-    let log_dir = std::env::var("AGENTMUX_DATA_HOME")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|_| dirs::home_dir().unwrap_or_default().join(".agentmux"))
+    let log_dir = dirs::home_dir()
+        .unwrap_or_default()
+        .join(".agentmux")
         .join("logs");
     let _ = std::fs::create_dir_all(&log_dir);
 
@@ -543,6 +544,36 @@ fn init_logging() -> tracing_appender::non_blocking::WorkerGuard {
     let log_prefix = format!("agentmuxsrv-v{}.log", version);
     let file_appender = tracing_appender::rolling::daily(&log_dir, &log_prefix);
     let (non_blocking_file, guard) = tracing_appender::non_blocking(file_appender);
+
+    // Write pointer to current log file for zero-lookup agent discovery.
+    // Version-qualified name so multi-instance doesn't clobber pointers.
+    let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
+    let current_filename = format!("{}.{}", log_prefix, today);
+    let pointer_name = format!("current-srv-v{}.path", version);
+    let _ = std::fs::write(log_dir.join(&pointer_name), &current_filename);
+
+    // Spawn a background thread to refresh the pointer on UTC date rollover.
+    // tracing_appender::rolling::daily creates a new file at midnight UTC.
+    {
+        let log_dir = log_dir.clone();
+        let log_prefix = log_prefix.clone();
+        let pointer_name = pointer_name.clone();
+        std::thread::Builder::new()
+            .name("srv-log-pointer".into())
+            .spawn(move || {
+                let mut last_date = chrono::Utc::now().format("%Y-%m-%d").to_string();
+                loop {
+                    std::thread::sleep(std::time::Duration::from_secs(60));
+                    let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
+                    if last_date != today {
+                        last_date = today.clone();
+                        let filename = format!("{}.{}", log_prefix, today);
+                        let _ = std::fs::write(log_dir.join(&pointer_name), &filename);
+                    }
+                }
+            })
+            .ok();
+    }
 
     let subscriber = tracing_subscriber::registry()
         .with(
