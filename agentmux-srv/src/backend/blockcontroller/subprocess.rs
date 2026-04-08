@@ -23,7 +23,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::process::Command;
+
 
 use super::{
     BlockControllerRuntimeStatus, BlockInputUnion, Controller, STATUS_DONE, STATUS_INIT,
@@ -211,24 +211,10 @@ impl SubprocessController {
         self.publish_status();
         self.health_monitor.set_active_turn(true);
 
-        // Build command — on Windows, .cmd batch scripts must be run via cmd.exe /C
-        #[cfg(windows)]
-        let mut cmd = if config.cli_command.ends_with(".cmd") || config.cli_command.ends_with(".bat") {
-            let mut c = Command::new("cmd.exe");
-            c.args(["/C", &config.cli_command]);
-            c.args(&args);
-            c
-        } else {
-            let mut c = Command::new(&config.cli_command);
-            c.args(&args);
-            c
-        };
-        #[cfg(not(windows))]
-        let mut cmd = {
-            let mut c = Command::new(&config.cli_command);
-            c.args(&args);
-            c
-        };
+        // Build command — on Windows, .cmd batch wrappers can't be reliably spawned
+        // via cmd.exe /C with piped stdio. Resolve to node <script> instead.
+        let mut cmd = crate::server::cli_handlers::make_cli_cmd(&config.cli_command);
+        cmd.args(&args);
         if !config.working_dir.is_empty() {
             // Expand ~ to home directory (cross-platform)
             let expanded_dir = if config.working_dir.starts_with("~/") || config.working_dir == "~" {
