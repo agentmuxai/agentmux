@@ -306,6 +306,12 @@ fn init_logging() -> tracing_appender::non_blocking::WorkerGuard {
     let file_appender = tracing_appender::rolling::daily(&log_dir, &log_prefix);
     let (non_blocking_file, guard) = tracing_appender::non_blocking(file_appender);
 
+    // Write pointer to current log file for zero-lookup agent discovery.
+    // Uses UTC to match tracing_appender::rolling::daily's date suffix.
+    let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
+    let current_filename = format!("{}.{}", log_prefix, today);
+    let _ = std::fs::write(log_dir.join("current-host.path"), &current_filename);
+
     let subscriber = tracing_subscriber::registry()
         .with(
             EnvFilter::try_from_default_env()
