@@ -519,6 +519,9 @@ export function useBlockDataLoaded(blockId: string): boolean {
 // ---------------------------------------------------------------------------
 
 export function getApi(): AppApi {
+    if (!window.api) {
+        console.error("[getApi] called before window.api exists. Stack:", new Error().stack);
+    }
     return window.api;
 }
 

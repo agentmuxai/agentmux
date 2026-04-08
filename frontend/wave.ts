@@ -404,6 +404,16 @@ async function initHostNewWindow(): Promise<void> {
 export async function initBare() {
     // window.api is guaranteed to exist here — tauri-bootstrap.ts calls
     // setupTauriApi() or setupCefApi() before calling initBare().
+    // Defensive wait: if a race condition leaves window.api unset, poll briefly.
+    if (!window.api) {
+        console.error("[initBare] window.api not ready — polling (max 5s)");
+        await new Promise<void>((resolve) => {
+            const check = setInterval(() => {
+                if (window.api) { clearInterval(check); resolve(); }
+            }, 50);
+            setTimeout(() => { clearInterval(check); resolve(); }, 5000);
+        });
+    }
     // Assign deferred module-level values now.
     platform = getApi().getPlatform();
     appVersion = getApi().getAboutModalDetails().version;
