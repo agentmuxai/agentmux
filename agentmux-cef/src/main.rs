@@ -295,10 +295,13 @@ fn main() {
 fn init_logging() -> tracing_appender::non_blocking::WorkerGuard {
     use tracing_subscriber::{fmt, layer::SubscriberExt, EnvFilter};
 
+    // Always log to ~/.agentmux/logs/ so all logs (host + sidecar) land in one
+    // discoverable directory. Ignores AGENTMUX_DATA_HOME which may point to a
+    // versioned AppData dir (or be inherited from a parent AgentMux instance).
     let version = env!("CARGO_PKG_VERSION");
-    let log_dir = std::env::var("AGENTMUX_DATA_HOME")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|_| dirs::home_dir().unwrap_or_default().join(".agentmux"))
+    let log_dir = dirs::home_dir()
+        .unwrap_or_default()
+        .join(".agentmux")
         .join("logs");
     let _ = std::fs::create_dir_all(&log_dir);
 
