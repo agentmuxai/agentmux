@@ -552,6 +552,29 @@ fn init_logging() -> tracing_appender::non_blocking::WorkerGuard {
     let pointer_name = format!("current-srv-v{}.path", version);
     let _ = std::fs::write(log_dir.join(&pointer_name), &current_filename);
 
+    // Spawn a background thread to refresh the pointer on UTC date rollover.
+    // tracing_appender::rolling::daily creates a new file at midnight UTC.
+    {
+        let log_dir = log_dir.clone();
+        let log_prefix = log_prefix.clone();
+        let pointer_name = pointer_name.clone();
+        std::thread::Builder::new()
+            .name("srv-log-pointer".into())
+            .spawn(move || {
+                let mut last_date = chrono::Utc::now().format("%Y-%m-%d").to_string();
+                loop {
+                    std::thread::sleep(std::time::Duration::from_secs(60));
+                    let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
+                    if last_date != today {
+                        last_date = today.clone();
+                        let filename = format!("{}.{}", log_prefix, today);
+                        let _ = std::fs::write(log_dir.join(&pointer_name), &filename);
+                    }
+                }
+            })
+            .ok();
+    }
+
     let subscriber = tracing_subscriber::registry()
         .with(
             EnvFilter::try_from_default_env()
