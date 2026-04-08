@@ -246,13 +246,15 @@ wrap_app! {
                 let ro_val = CefString::from("*");
                 cmd.append_switch_with_value(Some(&ro_key), Some(&ro_val));
 
-                // Merge GPU process into the browser process. Eliminates one
-                // ~100GB virtual address space reservation from PartitionAlloc
-                // pools (32GB GigaCage + 4×16GB pools + 4GB V8 pointer cage).
-                // Tradeoff: GPU driver crash kills the app instead of just
-                // restarting the GPU process — acceptable for a local desktop app.
-                let gpu_key = CefString::from("in-process-gpu");
-                cmd.append_switch(Some(&gpu_key));
+                // GPU compositing runs in a separate process (Chromium default).
+                // This allows Chromium to restart the GPU process transparently
+                // after driver resets (TDR, DXGI device removal, display power
+                // state changes). The ~100GB VA overhead is virtual, not physical
+                // (~20-50MB RSS), and negligible on 64-bit systems.
+                //
+                // Previously used --in-process-gpu to save VA space, but it left
+                // the app in a zombie white-screen state on GPU context loss with
+                // no recovery path. Removed in v0.33.66.
 
                 // Cap renderer subprocesses. In Alloy mode the frontend runs
                 // in the browser process (no renderer spawned), but DevTools
