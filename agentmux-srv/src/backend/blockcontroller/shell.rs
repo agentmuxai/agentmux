@@ -485,6 +485,14 @@ impl Controller for ShellController {
             c.env("AGENTMUX_TABID", &self.tab_id);
             c.env("AGENTMUX_VERSION", env!("CARGO_PKG_VERSION"));
 
+            // Inject log directory so agents can find logs without guessing.
+            // Always ~/.agentmux/logs/ — matches both host and sidecar.
+            let log_dir = dirs::home_dir()
+                .unwrap_or_default()
+                .join(".agentmux")
+                .join("logs");
+            c.env("AGENTMUX_LOG_DIR", log_dir.to_string_lossy().as_ref());
+
             // Propagate local backend URL so agentbus-client prefers local PTY delivery.
             // Set by main.rs after binding; absent in test/mock contexts (graceful no-op).
             if let Ok(local_url) = std::env::var("AGENTMUX_LOCAL_URL") {

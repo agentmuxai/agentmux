@@ -295,16 +295,27 @@ fn main() {
 fn init_logging() -> tracing_appender::non_blocking::WorkerGuard {
     use tracing_subscriber::{fmt, layer::SubscriberExt, EnvFilter};
 
+    // Always log to ~/.agentmux/logs/ so all logs (host + sidecar) land in one
+    // discoverable directory. Ignores AGENTMUX_DATA_HOME which may point to a
+    // versioned AppData dir (or be inherited from a parent AgentMux instance).
     let version = env!("CARGO_PKG_VERSION");
-    let log_dir = std::env::var("AGENTMUX_DATA_HOME")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|_| dirs::home_dir().unwrap_or_default().join(".agentmux"))
+    let log_dir = dirs::home_dir()
+        .unwrap_or_default()
+        .join(".agentmux")
         .join("logs");
     let _ = std::fs::create_dir_all(&log_dir);
 
     let log_prefix = format!("agentmux-host-v{}.log", version);
     let file_appender = tracing_appender::rolling::daily(&log_dir, &log_prefix);
     let (non_blocking_file, guard) = tracing_appender::non_blocking(file_appender);
+
+    // Write pointer to current log file for zero-lookup agent discovery.
+    // Version-qualified name so multi-instance doesn't clobber pointers.
+    // Uses UTC to match tracing_appender::rolling::daily's date suffix.
+    let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
+    let current_filename = format!("{}.{}", log_prefix, today);
+    let pointer_name = format!("current-host-v{}.path", version);
+    let _ = std::fs::write(log_dir.join(&pointer_name), &current_filename);
 
     let subscriber = tracing_subscriber::registry()
         .with(
