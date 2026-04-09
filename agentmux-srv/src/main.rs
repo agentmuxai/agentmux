@@ -312,6 +312,10 @@ async fn main() {
         tracing::info!("First launch: created initial data");
     }
 
+    // Self-heal layouts: remove orphaned block nodes that cause blank panes.
+    // Runs on every startup to catch any corruption from prior sessions.
+    heal_all_layouts(&wstore);
+
     // Auto-seed Forge agents on first launch (or empty DB)
     backend::forge_seed::auto_seed_on_startup(&wstore);
 
@@ -604,4 +608,36 @@ fn init_logging() -> tracing_appender::non_blocking::WorkerGuard {
     );
 
     guard
+}
+
+/// Walk all tabs and heal their layouts by removing orphaned block references.
+fn heal_all_layouts(store: &WaveStore) {
+    use backend::obj::Tab;
+
+    let tabs: Vec<Tab> = match store.get_all::<Tab>() {
+        Ok(tabs) => tabs,
+        Err(e) => {
+            tracing::warn!(error = %e, "heal_all_layouts: failed to list tabs");
+            return;
+        }
+    };
+
+    let mut healed = 0;
+    for tab in &tabs {
+        match backend::wcore::heal_layout(store, &tab.oid) {
+            Ok(true) => {
+                tracing::info!(tab_id = %tab.oid, tab_name = %tab.name, "layout healed on startup");
+                healed += 1;
+            }
+            Ok(false) => {}
+            Err(e) => {
+                tracing::warn!(tab_id = %tab.oid, error = %e, "heal_layout failed");
+            }
+        }
+    }
+    if healed > 0 {
+        tracing::info!(tabs_healed = healed, "layout self-healing complete");
+    } else {
+        tracing::info!("layout self-healing: all layouts clean");
+    }
 }
