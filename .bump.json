@@ -25,6 +25,11 @@
       "file": "agentmux-launcher/Cargo.toml",
       "type": "toml",
       "path": "package.version"
+    },
+    {
+      "file": "agentmux-common/Cargo.toml",
+      "type": "toml",
+      "path": "package.version"
     }
   ],
   "lockfiles": [
@@ -53,7 +58,8 @@
       "agentmux-srv/Cargo.toml",
       "agentmux-wsh/Cargo.toml",
       "agentmux-cef/Cargo.toml",
-      "agentmux-launcher/Cargo.toml"
+      "agentmux-launcher/Cargo.toml",
+      "agentmux-common/Cargo.toml"
     ],
     "commitMessage": "chore: bump version to {{version}}"
   }

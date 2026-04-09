@@ -13,13 +13,13 @@ interface AgentFooterProps {
     loading?: boolean;
 }
 
-export const AgentFooter = ({ agentId, onSendMessage, loading }: AgentFooterProps): JSX.Element => {
+export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
     const [message, setMessage] = createSignal("");
 
     const handleSend = () => {
         if (!message().trim()) return;
-        if (onSendMessage) {
-            onSendMessage(message());
+        if (props.onSendMessage) {
+            props.onSendMessage(message());
             setMessage("");
         }
     };
@@ -36,7 +36,7 @@ export const AgentFooter = ({ agentId, onSendMessage, loading }: AgentFooterProp
             <div class="agent-input-container">
                 <textarea
                     class="agent-input"
-                    placeholder={`Send message to ${agentId}...`}
+                    placeholder={`Send message to ${props.agentId}...`}
                     value={message()}
                     onInput={(e) => setMessage((e.target as HTMLTextAreaElement).value)}
                     onKeyDown={handleKeyDown}
@@ -44,7 +44,7 @@ export const AgentFooter = ({ agentId, onSendMessage, loading }: AgentFooterProp
                 />
                 <div class="agent-input-hint">
                     <span>Enter to send • Shift+Enter for newline</span>
-                    <Show when={loading}>
+                    <Show when={props.loading}>
                         <span class="agent-loading-spinner">
                             <span class="agent-spinner-dot" />
                             loading
