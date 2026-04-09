@@ -1,0 +1,9 @@
+[package]
+name = "agentmux-common"
+version = "0.33.69"
+edition = "2021"
+description = "Shared utilities for AgentMux crates"
+
+[dependencies]
+tokio = { version = "1", features = ["process"] }
+tracing = "0.1"
