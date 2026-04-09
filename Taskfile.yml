@@ -532,8 +532,9 @@ tasks:
                 # Copy staging dir to session dir so dist/cef/ is never locked
                 # by the running process. Next build can overwrite dist/cef/ freely.
                 DEV_DIR="dist/cef-dev"
-                rm -rf "$DEV_DIR"
-                cp -r dist/cef "$DEV_DIR"
+                rm -rf "$DEV_DIR" 2>/dev/null || true
+                mkdir -p "$DEV_DIR"
+                cp -r dist/cef/* "$DEV_DIR"/
                 echo "Copied dist/cef → $DEV_DIR (isolation)"
 
                 npx vite --config vite.config.ts --port 5173 &

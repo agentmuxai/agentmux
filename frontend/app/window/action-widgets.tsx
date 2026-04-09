@@ -205,7 +205,7 @@ const ActionWidgets = (): JSX.Element => {
     const fullConfig = atoms.fullConfigAtom;
     const settings = (): Record<string, any> => fullConfig()?.settings ?? {};
     const wmap = (): Record<string, WidgetConfigType> => fullConfig()?.widgets ?? {};
-    const iconOnly = (): boolean => settings()["widget:icononly"] ?? false;
+    const iconOnly = (): boolean => settings()["widget:icononly"] ?? true;
     const pinnedWidgets = () => getPinnedWidgets(settings(), wmap());
     const moreWidgets = () => getMoreWidgets(settings(), wmap());
 
