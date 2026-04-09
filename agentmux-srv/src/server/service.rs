@@ -416,6 +416,10 @@ fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType {
                 Ok(v) => v,
                 Err(e) => return WebReturnType::error(e),
             };
+            // Self-heal the layout before activating — remove any orphaned
+            // block nodes that would render as blank panes.
+            let _ = wcore::heal_layout(store, &tab_id);
+
             match wcore::set_active_tab(store, &ws_id, &tab_id) {
                 Ok(()) => {
                     if let Ok(ws) = store.must_get::<Workspace>(&ws_id) {
