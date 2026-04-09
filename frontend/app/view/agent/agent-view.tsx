@@ -685,7 +685,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 </div>
             </Show>
 
-            <AgentFooter agentId={agentId} onSendMessage={handleSendMessage} />
+            <AgentFooter agentId={agentId} onSendMessage={handleSendMessage} loading={flowRunning()} />
         </div>
     );
 };
