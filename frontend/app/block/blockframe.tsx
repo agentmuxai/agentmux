@@ -286,6 +286,8 @@ function BlockFrame_Header(props: BlockFrameProps & { changeConnModalAtom: util.
         const atc = agentTextColor();
         if (ac) {
             style["border-top"] = `2px solid ${ac}`;
+            style["border-left"] = `2px solid ${ac}`;
+            style["border-right"] = `2px solid ${ac}`;
             style["border-bottom-color"] = ac;
             style.color = atc ?? ac;
         }
@@ -547,7 +549,8 @@ function ConnStatusOverlay({
     );
 }
 
-function BlockMask({ nodeModel, focusColor }: { nodeModel: NodeModel; focusColor?: string }): JSX.Element {
+function BlockMask(props: { nodeModel: NodeModel; focusColor?: string }): JSX.Element {
+    const nodeModel = props.nodeModel;
     const isFocused = () => nodeModel.isFocused();
     const blockNum = () => nodeModel.blockNum();
     const isLayoutMode = () => atoms.controlShiftDelayAtom();
@@ -561,7 +564,7 @@ function BlockMask({ nodeModel, focusColor }: { nodeModel: NodeModel; focusColor
             // Always set border-color as inline style to bypass Win11 backdrop-filter
             // compositor bug where var(--accent-color) from :root fails on initial
             // GPU composite. Inline HEX values resolve correctly on all composites.
-            style["border-color"] = focusColor || "#419FE0";
+            style["border-color"] = props.focusColor || "#419FE0";
             const tabData = atoms.tabAtom();
             const tabActiveBorderColor = tabData?.meta?.["bg:activebordercolor"];
             if (tabActiveBorderColor) {
