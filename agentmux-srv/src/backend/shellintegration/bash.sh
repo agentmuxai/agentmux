@@ -88,6 +88,30 @@ _agentmux_si_prompt_command() {
     _agentmux_si_agent_env
 }
 
+# ─── muxlog helper ────────────────────────────────────────────────────────────
+# Usage: muxlog [host|srv] [tail|cat|<pattern>]
+muxlog() {
+    local target="${1:-host}"
+    local action="${2:-tail}"
+    if [ -z "$AGENTMUX_LOG_DIR" ]; then
+        echo "AGENTMUX_LOG_DIR not set — run inside an AgentMux terminal" >&2
+        return 1
+    fi
+    local ptr="$AGENTMUX_LOG_DIR/current-${target}-v${AGENTMUX_VERSION}.path"
+    if [ ! -f "$ptr" ]; then
+        echo "Unknown log target '$target'. Available:" >&2
+        ls "$AGENTMUX_LOG_DIR"/current-*.path 2>/dev/null \
+            | sed 's|.*/current-||;s|\.path||' >&2
+        return 1
+    fi
+    local logfile="$AGENTMUX_LOG_DIR/$(cat "$ptr")"
+    case "$action" in
+        tail) tail -f "$logfile" ;;
+        cat)  cat "$logfile" ;;
+        *)    grep "$action" "$logfile" ;;
+    esac
+}
+
 # Append to PROMPT_COMMAND (array-safe)
 if [[ $(declare -p PROMPT_COMMAND 2>/dev/null) == "declare -a"* ]]; then
     PROMPT_COMMAND+=(_agentmux_si_prompt_command)

@@ -65,6 +65,26 @@ function Global:_agentmux_si_prompt {
     _agentmux_si_agent_env
 }
 
+# ─── muxlog helper ────────────────────────────────────────────────────────────
+function Global:muxlog {
+    param([string]$Target = "host", [string]$Action = "tail")
+    if (-not $env:AGENTMUX_LOG_DIR) {
+        Write-Error "AGENTMUX_LOG_DIR not set - run inside an AgentMux terminal"
+        return
+    }
+    $ptr = Join-Path $env:AGENTMUX_LOG_DIR "current-$Target-v$($env:AGENTMUX_VERSION).path"
+    if (-not (Test-Path $ptr)) {
+        Write-Error "Unknown log target '$Target'. Check $env:AGENTMUX_LOG_DIR for current-*.path files."
+        return
+    }
+    $logfile = Join-Path $env:AGENTMUX_LOG_DIR (Get-Content $ptr)
+    switch ($Action) {
+        "tail" { Get-Content $logfile -Wait -Tail 50 }
+        "cat"  { Get-Content $logfile }
+        default { Select-String $Action $logfile }
+    }
+}
+
 # Hook into the prompt function
 if (Test-Path Function:\prompt) {
     $global:_agentmux_original_prompt = $function:prompt
