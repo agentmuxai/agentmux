@@ -1,6 +1,6 @@
 [package]
 name = "agentmux-wsh"
-version = "0.33.67"
+version = "0.33.68"
 edition = "2021"
 description = "Shell integration CLI for AgentMux"
 
