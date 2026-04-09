@@ -9,6 +9,7 @@ name = "agentmux-srv"
 path = "src/main.rs"
 
 [dependencies]
+agentmux-common = { path = "../agentmux-common" }
 tokio = { version = "1", features = ["full"] }
 axum = { version = "0.7", features = ["ws"] }
 tower-http = { version = "0.6", features = ["cors"] }
