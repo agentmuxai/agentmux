@@ -19,6 +19,8 @@ fn main() {
     let exe_dir = exe_path.parent().expect("exe has no parent directory");
     let runtime_dir = exe_dir.join("runtime");
 
+    log(&format!("starting — exe={} runtime={}", exe_path.display(), runtime_dir.display()));
+
     // Set DLL search path so libcef.dll (in runtime/) is found by the child process
     #[cfg(target_os = "windows")]
     {
@@ -32,14 +34,14 @@ fn main() {
             windows_sys::Win32::System::LibraryLoader::SetDllDirectoryW(wide.as_ptr());
         }
     }
+    log("SetDllDirectoryW done");
 
     // Resolve the real CEF host binary in runtime/.
-    // Prefer the versioned binary (e.g., agentmux-cef-0.33.43.exe) so that Task Manager,
-    // WER crash dumps, and Event Viewer all show the version in the process/filename.
-    // Falls back to plain name for dev mode.
     let real_exe = find_cef_binary(&runtime_dir);
+    log(&format!("resolved CEF binary: {}", real_exe.display()));
 
     if !real_exe.exists() {
+        log(&format!("FATAL: CEF binary not found at {}", real_exe.display()));
         eprintln!(
             "AgentMux runtime not found in: {}\nMake sure the runtime/ folder is intact.",
             runtime_dir.display()
@@ -49,17 +51,22 @@ fn main() {
 
     // Forward all CLI arguments
     let args: Vec<String> = std::env::args().skip(1).collect();
+    log(&format!("spawning CEF host with {} args", args.len()));
 
     #[cfg(target_os = "windows")]
     {
-        // Spawn the CEF host and wait for it to exit
         let status = std::process::Command::new(&real_exe)
             .args(&args)
             .status();
 
         match status {
-            Ok(s) => std::process::exit(s.code().unwrap_or(1)),
+            Ok(s) => {
+                let code = s.code().unwrap_or(1);
+                log(&format!("CEF host exited with code {}", code));
+                std::process::exit(code);
+            }
             Err(e) => {
+                log(&format!("FATAL: failed to spawn CEF host: {}", e));
                 eprintln!("Failed to launch AgentMux: {}", e);
                 std::process::exit(1);
             }
@@ -68,12 +75,41 @@ fn main() {
 
     #[cfg(not(target_os = "windows"))]
     {
-        // On Unix, exec replaces this process entirely
+        log("exec into CEF host (Unix)");
         use std::os::unix::process::CommandExt;
         let err = std::process::Command::new(&real_exe).args(&args).exec();
+        log(&format!("FATAL: exec failed: {}", err));
         eprintln!("Failed to launch AgentMux: {}", err);
         std::process::exit(1);
     }
+}
+
+/// Append a timestamped line to ~/.agentmux/logs/agentmux-launcher.log.
+/// Best-effort — silently no-ops if the log dir doesn't exist yet.
+fn log(msg: &str) {
+    let log_dir = dirs_fallback_home().join(".agentmux").join("logs");
+    let _ = std::fs::create_dir_all(&log_dir);
+    let path = log_dir.join("agentmux-launcher.log");
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+    {
+        use std::io::Write;
+        let secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let _ = writeln!(f, "[{}] v{} {}", secs, env!("CARGO_PKG_VERSION"), msg);
+    }
+}
+
+/// Home dir without the `dirs` crate (keep launcher zero-dep beyond windows-sys).
+fn dirs_fallback_home() -> std::path::PathBuf {
+    std::env::var("USERPROFILE")
+        .or_else(|_| std::env::var("HOME"))
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| std::path::PathBuf::from("."))
 }
 
 /// Find the CEF host binary in the runtime directory.

@@ -540,6 +540,9 @@ fn init_logging() -> tracing_appender::non_blocking::WorkerGuard {
         .join("logs");
     let _ = std::fs::create_dir_all(&log_dir);
 
+    // Delete log files older than 7 days to prevent unbounded growth.
+    cleanup_old_logs(&log_dir, 7);
+
     // Rolling daily log file with JSON structured output
     let log_prefix = format!("agentmuxsrv-v{}.log", version);
     let file_appender = tracing_appender::rolling::daily(&log_dir, &log_prefix);
@@ -604,4 +607,25 @@ fn init_logging() -> tracing_appender::non_blocking::WorkerGuard {
     );
 
     guard
+}
+
+/// Delete log files (*.log.*) older than `days` to prevent unbounded growth.
+/// Only touches files with `.log.` in the name — pointer files and other data are safe.
+fn cleanup_old_logs(log_dir: &std::path::Path, days: u64) {
+    let cutoff = std::time::SystemTime::now()
+        - std::time::Duration::from_secs(days * 86400);
+    let Ok(entries) = std::fs::read_dir(log_dir) else { return };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.to_string_lossy().contains(".log.") {
+            continue;
+        }
+        if let Ok(meta) = entry.metadata() {
+            if let Ok(modified) = meta.modified() {
+                if modified < cutoff {
+                    let _ = std::fs::remove_file(&path);
+                }
+            }
+        }
+    }
 }
