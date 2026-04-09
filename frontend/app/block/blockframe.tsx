@@ -284,8 +284,11 @@ function BlockFrame_Header(props: BlockFrameProps & { changeConnModalAtom: util.
         const style: JSX.CSSProperties = {};
         const ac = agentColor();
         const atc = agentTextColor();
-        if (ac) style["background-color"] = ac;
-        if (atc) style.color = atc;
+        if (ac) {
+            style["border-top"] = `2px solid ${ac}`;
+            style["border-bottom-color"] = ac;
+            style.color = atc ?? ac;
+        }
         return style;
     });
 
