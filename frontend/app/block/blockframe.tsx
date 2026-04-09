@@ -547,7 +547,7 @@ function ConnStatusOverlay({
     );
 }
 
-function BlockMask({ nodeModel }: { nodeModel: NodeModel }): JSX.Element {
+function BlockMask({ nodeModel, focusColor }: { nodeModel: NodeModel; focusColor?: string }): JSX.Element {
     const isFocused = () => nodeModel.isFocused();
     const blockNum = () => nodeModel.blockNum();
     const isLayoutMode = () => atoms.controlShiftDelayAtom();
@@ -558,6 +558,10 @@ function BlockMask({ nodeModel }: { nodeModel: NodeModel }): JSX.Element {
         const style: JSX.CSSProperties = {};
         const bd = blockData();
         if (isFocused()) {
+            // Always set border-color as inline style to bypass Win11 backdrop-filter
+            // compositor bug where var(--accent-color) from :root fails on initial
+            // GPU composite. Inline HEX values resolve correctly on all composites.
+            style["border-color"] = focusColor || "#419FE0";
             const tabData = atoms.tabAtom();
             const tabActiveBorderColor = tabData?.meta?.["bg:activebordercolor"];
             if (tabActiveBorderColor) {
@@ -748,7 +752,7 @@ function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
             </Show>
             {/* BlockMask is last in DOM so it paints above all block content,
                 including hardware-accelerated WebGL surfaces */}
-            <BlockMask nodeModel={nodeModel} />
+            <BlockMask nodeModel={nodeModel} focusColor={blockAgentColor() || "#419FE0"} />
         </div>
     );
 }
