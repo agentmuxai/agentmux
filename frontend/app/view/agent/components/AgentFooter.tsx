@@ -5,14 +5,15 @@
  * AgentFooter - Minimal Claude Code-style input
  */
 
-import { createSignal, type JSX } from "solid-js";
+import { createSignal, Show, type JSX } from "solid-js";
 
 interface AgentFooterProps {
     agentId: string;
     onSendMessage?: (message: string) => void;
+    loading?: boolean;
 }
 
-export const AgentFooter = ({ agentId, onSendMessage }: AgentFooterProps): JSX.Element => {
+export const AgentFooter = ({ agentId, onSendMessage, loading }: AgentFooterProps): JSX.Element => {
     const [message, setMessage] = createSignal("");
 
     const handleSend = () => {
@@ -41,7 +42,15 @@ export const AgentFooter = ({ agentId, onSendMessage }: AgentFooterProps): JSX.E
                     onKeyDown={handleKeyDown}
                     rows={2}
                 />
-                <div class="agent-input-hint">Enter to send • Shift+Enter for newline</div>
+                <div class="agent-input-hint">
+                    <span>Enter to send • Shift+Enter for newline</span>
+                    <Show when={loading}>
+                        <span class="agent-loading-spinner">
+                            <span class="agent-spinner-dot" />
+                            loading
+                        </span>
+                    </Show>
+                </div>
             </div>
         </div>
     );
