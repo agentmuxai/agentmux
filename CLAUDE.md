@@ -99,6 +99,23 @@ Widgets are defined in `agentmux-srv/src/config/widgets.json`. These are the **o
 
 ---
 
+## Log Access
+
+All logs land in `~/.agentmux/logs/` (`$AGENTMUX_LOG_DIR` in terminals). Pointer files resolve the current filename.
+
+| What | Command |
+|------|---------|
+| Tail host log | `muxlog host` |
+| Tail sidecar log | `muxlog srv` |
+| Frontend logs | `muxlog host '[fe]'` |
+| Memory heartbeat | `muxlog host mem_heartbeat` |
+| Full host log | `muxlog host cat` |
+| Launcher log | `cat "$AGENTMUX_LOG_DIR/agentmux-launcher.log"` |
+
+Works identically across `task dev`, portable, and install builds. Logs auto-rotate daily and are retained for 7 days.
+
+---
+
 ## Version Management
 
 **CRITICAL:** Always use `@a5af/bump-cli` - never manually edit version numbers.
