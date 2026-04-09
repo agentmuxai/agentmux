@@ -12,6 +12,7 @@ checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 name = "agentmux-cef"
 version = "0.33.74"
 dependencies = [
+ "agentmux-common",
  "axum 0.8.8",
  "cef",
  "chrono",
@@ -32,6 +33,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "agentmux-common"
+version = "0.33.69"
+dependencies = [
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "agentmux-launcher"
 version = "0.33.74"
 dependencies = [
@@ -43,6 +52,7 @@ dependencies = [
 name = "agentmux-srv"
 version = "0.33.74"
 dependencies = [
+ "agentmux-common",
  "async-stream",
  "axum 0.7.9",
  "base64",
