@@ -48,11 +48,14 @@ pub fn delete_block(
     // frontend update races with the delete or is lost, the orphaned node
     // persists in the database.
     if !tab.layoutstate.is_empty() {
-        if let Ok(mut layout) = store.get::<LayoutState>(&tab.layoutstate) {
-            if let Some(ref mut layout) = layout {
-                prune_block_from_layout(layout, block_id);
-                let _ = store.update(layout);
-            }
+        if let Ok(Some(mut layout)) = store.get::<LayoutState>(&tab.layoutstate) {
+            tracing::info!(
+                block_id = %block_id,
+                layout_id = %tab.layoutstate,
+                "pruning deleted block from layout tree"
+            );
+            prune_block_from_layout(&mut layout, block_id);
+            let _ = store.update(&mut layout);
         }
     }
     Ok(())
