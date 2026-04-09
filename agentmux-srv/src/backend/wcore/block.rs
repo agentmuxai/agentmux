@@ -74,7 +74,8 @@ fn prune_block_from_layout(layout: &mut LayoutState, block_id: &str) {
 }
 
 /// Recursively remove child nodes whose `data.blockId` matches `block_id`.
-/// If removing a child leaves a parent with only one child, collapse it.
+/// If removing a child leaves a parent with only one child, collapse by
+/// promoting the sole child to replace the parent node.
 fn prune_node(node: &mut serde_json::Value, block_id: &str) {
     if let Some(children) = node.get_mut("children").and_then(|c| c.as_array_mut()) {
         // Remove children that are leaves matching block_id
@@ -89,8 +90,30 @@ fn prune_node(node: &mut serde_json::Value, block_id: &str) {
         for child in children.iter_mut() {
             prune_node(child, block_id);
         }
-        // If only one child remains, promote it to replace this node
-        // (preserving the tree's flex layout invariant)
+    }
+    // If only one child remains, promote it to replace this split node.
+    // This avoids degenerate single-child splits in the layout tree.
+    let should_collapse = node.get("children")
+        .and_then(|c| c.as_array())
+        .map(|c| c.len() == 1)
+        .unwrap_or(false);
+    if should_collapse {
+        if let Some(sole_child) = node.get("children")
+            .and_then(|c| c.as_array())
+            .and_then(|c| c.first())
+            .cloned()
+        {
+            // Preserve the parent's id and size, replace everything else
+            let parent_id = node.get("id").cloned();
+            let parent_size = node.get("size").cloned();
+            *node = sole_child;
+            if let Some(id) = parent_id {
+                node["id"] = id;
+            }
+            if let Some(size) = parent_size {
+                node["size"] = size;
+            }
+        }
     }
 }
 
