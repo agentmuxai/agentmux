@@ -85,7 +85,7 @@ tasks:
 
     build:frontend:
         desc: Build the frontend (production mode).
-        cmd: npx vite build --mode production --config vite.config.ts
+        cmd: bash scripts/vite-build.sh --mode production --config vite.config.ts
         deps:
             - npm:install
         env:
@@ -93,7 +93,7 @@ tasks:
 
     build:frontend:dev:
         desc: Build the frontend in development mode.
-        cmd: npx vite build --mode dev --config vite.config.ts
+        cmd: bash scripts/vite-build.sh --mode dev --config vite.config.ts
         deps:
             - npm:install
         env:
