@@ -306,6 +306,27 @@ export interface UserInfo {
 }
 
 /**
+ * Runtime configuration for agent pane controls.
+ * Stored in block metadata as "agent:runtime".
+ * Applied as CLI flags on each turn (between --resume spawns).
+ */
+export type PermissionMode = "bypass" | "auto" | "acceptEdits" | "plan" | "default";
+export type ModelChoice = null | "opus" | "sonnet" | "haiku";
+export type EffortLevel = null | "low" | "medium" | "high" | "max";
+
+export interface AgentRuntimeConfig {
+    permissionMode: PermissionMode;
+    model: ModelChoice;
+    effort: EffortLevel;
+}
+
+export const DEFAULT_RUNTIME_CONFIG: AgentRuntimeConfig = {
+    permissionMode: "bypass",
+    model: null,
+    effort: null,
+};
+
+/**
  * Tool icon mapping
  */
 export const TOOL_ICONS: Record<string, string> = {
