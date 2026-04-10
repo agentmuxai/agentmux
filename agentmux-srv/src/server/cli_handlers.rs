@@ -66,30 +66,22 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // Step 2: Not in versioned dir — install from network.
                 // Never copy from system PATH — that defeats version isolation and
                 // can copy the wrong binary type (e.g., .exe saved as .cmd).
-                let install_cmd = if cfg!(windows) {
-                    &cmd.windows_install_command
-                } else {
-                    &cmd.unix_install_command
-                };
-
-                if install_cmd.is_empty() {
+                if cmd.npm_package.is_empty() {
                     return Err(format!(
-                        "{} not found and no install command configured for this provider",
+                        "{} not found and no npm package configured for this provider",
                         cmd.cli_command
                     ));
                 }
 
                 tracing::info!(
                     provider = %cmd.provider_id,
-                    install_cmd = %install_cmd,
+                    npm_package = %cmd.npm_package,
+                    pinned_version = %cmd.pinned_version,
                     target_dir = %provider_dir,
-                    "CLI not found locally, installing from network"
+                    "CLI not found locally, installing via npm"
                 );
 
-                // Determine if this is an npm-based provider or official installer
-                let is_npm_install = install_cmd.contains("npm install");
-
-                if is_npm_install {
+                {
                     // Verify npm is available before attempting install.
                     let npm_available = if cfg!(windows) {
                         tokio::process::Command::new("where").arg("npm").output().await
@@ -206,17 +198,11 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         }).unwrap()));
                     }
 
-                    return Err(format!(
+                    Err(format!(
                         "npm install completed but binary not found at {}",
                         npm_bin
-                    ));
+                    ))
                 }
-
-                // All providers use npm install — no official installer path needed.
-                Err(format!(
-                    "{} not found and npm install is not configured for this provider",
-                    cmd.cli_command
-                ))
             })
         }),
     );
