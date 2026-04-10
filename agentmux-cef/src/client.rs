@@ -380,12 +380,60 @@ wrap_client! {
             Some(AgentMuxDisplayHandler::new(self.inner.clone()))
         }
 
+        fn keyboard_handler(&self) -> Option<KeyboardHandler> {
+            Some(AgentMuxKeyboardHandler::new())
+        }
+
         fn life_span_handler(&self) -> Option<LifeSpanHandler> {
             Some(AgentMuxLifeSpanHandler::new(self.inner.clone()))
         }
 
         fn load_handler(&self) -> Option<LoadHandler> {
             Some(AgentMuxLoadHandler::new(self.inner.clone()))
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// KeyboardHandler — intercept Ctrl+<key> shortcuts before CEF/Chromium
+// consumes them (e.g., Ctrl+P = print, Ctrl+G = find-next).
+// Returning true from on_pre_key_event tells CEF "handled" so it won't
+// trigger the built-in action; the key still reaches JavaScript.
+// ---------------------------------------------------------------------------
+
+/// CEF event flag: Ctrl key is held.
+const EVENTFLAG_CONTROL_DOWN: u32 = 1 << 2;
+
+/// Windows virtual-key codes for shortcuts we want to forward to JS.
+const VK_P: i32 = 0x50; // Ctrl+P — command palette (not print)
+const VK_G: i32 = 0x47; // Ctrl+G — (reserve for app use)
+
+wrap_keyboard_handler! {
+    struct AgentMuxKeyboardHandler;
+
+    impl KeyboardHandler {
+        fn on_pre_key_event(
+            &self,
+            _browser: Option<&mut Browser>,
+            event: Option<&KeyEvent>,
+            _os_event: Option<&mut cef::sys::MSG>,
+            is_keyboard_shortcut: Option<&mut ::std::os::raw::c_int>,
+        ) -> ::std::os::raw::c_int {
+            if let Some(ev) = event {
+                let ctrl = (ev.modifiers & EVENTFLAG_CONTROL_DOWN) != 0;
+                if ctrl && matches!(ev.windows_key_code, VK_P | VK_G) {
+                    // Tell CEF this is a keyboard shortcut so it dispatches
+                    // the keydown event to JavaScript instead of handling it
+                    // as a built-in browser action (print dialog, etc.).
+                    if let Some(flag) = is_keyboard_shortcut {
+                        *flag = 1;
+                    }
+                    // Return 0 = not consumed at pre-key stage; CEF will
+                    // still call on_key_event where we return 0 again,
+                    // letting JS handle it via the normal keydown path.
+                }
+            }
+            0 // not consumed
         }
     }
 }
