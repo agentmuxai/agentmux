@@ -386,6 +386,88 @@
         }
     }
 
+    // === Control Bar ===
+    .agent-control-bar {
+        border-bottom: 1px solid var(--border-color);
+        background: color-mix(in srgb, var(--main-text-color) 2%, transparent);
+        flex-shrink: 0;
+        font-size: 11px;
+    }
+
+    .agent-control-bar-header {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        padding: 3px 6px;
+        cursor: pointer;
+        user-select: none;
+        color: var(--secondary-text-color);
+
+        &:hover {
+            color: var(--main-text-color);
+            background: color-mix(in srgb, var(--main-text-color) 4%, transparent);
+        }
+    }
+
+    .agent-control-chevron {
+        font-size: 9px;
+        width: 10px;
+        flex-shrink: 0;
+    }
+
+    .agent-control-summary {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+    }
+
+    .agent-control-nondefault {
+        color: var(--warning-color, #eab308);
+        font-weight: 700;
+    }
+
+    .agent-control-bar-body {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        padding: 4px 8px 6px 16px;
+    }
+
+    .agent-control-row {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+    }
+
+    .agent-control-label {
+        color: var(--secondary-text-color);
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        min-width: 36px;
+    }
+
+    .agent-control-select {
+        background: var(--main-bg-color);
+        color: var(--main-text-color);
+        border: 1px solid var(--border-color);
+        border-radius: 3px;
+        padding: 2px 4px;
+        font-size: 11px;
+        font-family: inherit;
+        cursor: pointer;
+        outline: none;
+
+        &:hover {
+            border-color: var(--accent-color);
+        }
+
+        &:focus {
+            border-color: var(--accent-color);
+            box-shadow: 0 0 0 1px var(--accent-color);
+        }
+    }
+
     @keyframes agent-spin {
         to { transform: rotate(360deg); }
     }
@@ -1127,8 +1209,10 @@
                 color: var(--main-text-color);
                 font-family: inherit;
                 font-size: 12px;
-                resize: vertical;
-                min-height: 28px;
+                resize: none;
+                min-height: 20px;
+                max-height: 200px;
+                overflow-y: auto;
 
                 &:focus {
                     outline: none;
