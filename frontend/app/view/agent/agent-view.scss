@@ -1209,8 +1209,10 @@
                 color: var(--main-text-color);
                 font-family: inherit;
                 font-size: 12px;
-                resize: vertical;
-                min-height: 28px;
+                resize: none;
+                min-height: 20px;
+                max-height: 200px;
+                overflow-y: auto;
 
                 &:focus {
                     outline: none;
