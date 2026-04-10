@@ -708,7 +708,7 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
         }),
     );
 
-    // agentinput → send follow-up message to agent (re-spawns with --resume)
+    // agentinput → send message to agent (persistent or per-turn subprocess)
     let wstore_ai = state.wstore.clone();
     engine.register_handler(
         COMMAND_AGENT_INPUT,
@@ -722,12 +722,7 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                 let ctrl = blockcontroller::get_controller(&cmd.blockid)
                     .ok_or_else(|| format!("no controller for block {}", cmd.blockid))?;
 
-                let subprocess_ctrl = ctrl
-                    .as_any()
-                    .downcast_ref::<blockcontroller::subprocess::SubprocessController>()
-                    .ok_or_else(|| "controller is not a SubprocessController".to_string())?;
-
-                // Re-read the original spawn config from block metadata
+                // Re-read the spawn config from block metadata
                 let block: Block = wstore
                     .get(&cmd.blockid)
                     .map_err(|e| format!("agentinput: load block: {e}"))?
@@ -741,7 +736,6 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                         .iter()
                         .filter_map(|v| v.as_str().map(|s| s.to_string()))
                         .collect(),
-                    // Fallback: Claude-style args for blocks created before launchArgs was added
                     _ => vec![
                         "-p".to_string(),
                         "--input-format".to_string(),
@@ -760,23 +754,44 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                         .collect(),
                     _ => std::collections::HashMap::new(),
                 };
-                let resume_flag = crate::backend::obj::meta_get_string(
-                    &block.meta, "agent:resume_flag", "--resume",
-                );
                 let session_id_field = crate::backend::obj::meta_get_string(
                     &block.meta, "agent:session_id_field", "session_id",
                 );
 
-                let config = blockcontroller::subprocess::SubprocessSpawnConfig {
-                    cli_command,
-                    cli_args,
-                    working_dir,
-                    env_vars,
-                    message: cmd.message,
-                    resume_flag,
-                    session_id_field,
-                };
-                subprocess_ctrl.spawn_turn(config)?;
+                // Try persistent controller first, fall back to subprocess
+                if let Some(persistent_ctrl) = ctrl
+                    .as_any()
+                    .downcast_ref::<blockcontroller::persistent::PersistentSubprocessController>()
+                {
+                    let config = blockcontroller::persistent::PersistentSpawnConfig {
+                        cli_command,
+                        cli_args,
+                        working_dir,
+                        env_vars,
+                        session_id_field,
+                    };
+                    persistent_ctrl.send_message(cmd.message, config)?;
+                } else if let Some(subprocess_ctrl) = ctrl
+                    .as_any()
+                    .downcast_ref::<blockcontroller::subprocess::SubprocessController>()
+                {
+                    let resume_flag = crate::backend::obj::meta_get_string(
+                        &block.meta, "agent:resume_flag", "--resume",
+                    );
+                    let config = blockcontroller::subprocess::SubprocessSpawnConfig {
+                        cli_command,
+                        cli_args,
+                        working_dir,
+                        env_vars,
+                        message: cmd.message,
+                        resume_flag,
+                        session_id_field,
+                    };
+                    subprocess_ctrl.spawn_turn(config)?;
+                } else {
+                    return Err("controller is not a SubprocessController or PersistentSubprocessController".to_string());
+                }
+
                 Ok(None)
             })
         }),
