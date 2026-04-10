@@ -207,12 +207,15 @@ export class ClaudeCodeStreamParser {
     private toolResultToNode(event: ToolResultEvent): DocumentNode {
         const toolCall = this.pendingToolCalls.get(event.id);
         const params = toolCall?.params || {};
+        // Prefer tool name from the pending call (set during tool_use) over
+        // event.tool which may be "Unknown" when the API doesn't include it.
+        const toolName = (event.tool && event.tool !== "Unknown") ? event.tool : (toolCall?.tool || "Unknown");
 
         // Remove from pending
         this.pendingToolCalls.delete(event.id);
 
         const summary = this.generateToolSummary(
-            event.tool,
+            toolName,
             params,
             event.status,
             event.duration
@@ -221,7 +224,7 @@ export class ClaudeCodeStreamParser {
         return {
             type: "tool",
             id: event.id,
-            tool: this.normalizeToolName(event.tool),
+            tool: this.normalizeToolName(toolName),
             params,
             status: event.status,
             duration: event.duration,
