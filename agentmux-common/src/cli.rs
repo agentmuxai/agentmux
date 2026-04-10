@@ -46,7 +46,13 @@ fn parse_cmd_wrapper(cmd_path: &str) -> Option<String> {
             if relative_path.ends_with(".js") || relative_path.ends_with(".mjs") || relative_path.ends_with(".cjs") {
                 let resolved = cmd_dir.join(relative_path);
                 if let Ok(canonical) = resolved.canonicalize() {
-                    return Some(canonical.to_string_lossy().to_string());
+                    let mut path_str = canonical.to_string_lossy().to_string();
+                    // Windows canonicalize() returns \\?\C:\... (UNC extended path)
+                    // which Node.js cannot handle — strip the prefix.
+                    if path_str.starts_with(r"\\?\") {
+                        path_str = path_str[4..].to_string();
+                    }
+                    return Some(path_str);
                 }
                 return Some(resolved.to_string_lossy().to_string());
             }

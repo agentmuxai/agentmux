@@ -204,9 +204,7 @@ impl PersistentSubprocessController {
 
         cmd.stdin(std::process::Stdio::piped());
         cmd.stdout(std::process::Stdio::piped());
-        // Use null for stderr — piped stderr that is immediately dropped would
-        // cause SIGPIPE/EPIPE on the child's first stderr write, killing it.
-        cmd.stderr(std::process::Stdio::null());
+        cmd.stderr(std::process::Stdio::piped());
 
         let mut child = cmd.spawn().map_err(|e| {
             tracing::error!(block_id = %self.block_id, error = %e, "persistent process spawn failed");
@@ -218,12 +216,30 @@ impl PersistentSubprocessController {
             block_id = %self.block_id,
             pid = pid,
             cmd = %config.cli_command,
+            args = ?config.cli_args,
+            working_dir = %config.working_dir,
             "persistent process spawned"
         );
 
         let (kill_tx, kill_rx) = tokio::sync::oneshot::channel::<bool>();
         let stdin = child.stdin.take().unwrap();
         let stdout = child.stdout.take().unwrap();
+        let stderr = child.stderr.take();
+
+        // Drain stderr in background — log lines for debugging
+        if let Some(stderr_pipe) = stderr {
+            let block_id_stderr = self.block_id.clone();
+            tokio::spawn(async move {
+                let mut reader = BufReader::new(stderr_pipe).lines();
+                while let Ok(Some(line)) = reader.next_line().await {
+                    tracing::warn!(
+                        block_id = %block_id_stderr,
+                        line = %line,
+                        "persistent stderr"
+                    );
+                }
+            });
+        }
 
         // Create stdin writer channel
         let (msg_tx, mut msg_rx) = mpsc::channel::<String>(32);
