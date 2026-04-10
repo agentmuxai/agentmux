@@ -5,14 +5,15 @@
  * AgentFooter - Minimal Claude Code-style input
  */
 
-import { createSignal, type JSX } from "solid-js";
+import { createSignal, Show, type JSX } from "solid-js";
 
 interface AgentFooterProps {
     agentId: string;
     onSendMessage?: (message: string) => void;
+    loading?: boolean;
 }
 
-export const AgentFooter = ({ agentId, onSendMessage }: AgentFooterProps): JSX.Element => {
+export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
     const [message, setMessage] = createSignal("");
     let textareaRef: HTMLTextAreaElement | undefined;
 
@@ -23,8 +24,8 @@ export const AgentFooter = ({ agentId, onSendMessage }: AgentFooterProps): JSX.E
 
     const handleSend = () => {
         if (!message().trim()) return;
-        if (onSendMessage) {
-            onSendMessage(message());
+        if (props.onSendMessage) {
+            props.onSendMessage(message());
             setMessage("");
             if (textareaRef) {
                 textareaRef.style.height = "auto";
@@ -51,13 +52,21 @@ export const AgentFooter = ({ agentId, onSendMessage }: AgentFooterProps): JSX.E
                 <textarea
                     ref={textareaRef}
                     class="agent-input"
-                    placeholder={`Send message to ${agentId}...`}
+                    placeholder={`Send message to ${props.agentId}...`}
                     value={message()}
                     onInput={handleInput}
                     onKeyDown={handleKeyDown}
                     rows={1}
                 />
-                <div class="agent-input-hint">Enter to send • Shift+Enter for newline</div>
+                <div class="agent-input-hint">
+                    <span>Enter to send • Shift+Enter for newline</span>
+                    <Show when={props.loading}>
+                        <span class="agent-loading-spinner">
+                            <span class="agent-spinner-dot" />
+                            loading
+                        </span>
+                    </Show>
+                </div>
             </div>
         </div>
     );

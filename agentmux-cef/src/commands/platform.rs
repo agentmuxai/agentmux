@@ -292,7 +292,7 @@ pub async fn run_cli_login(
         })
         .unwrap_or_default();
 
-    let mut cmd = tokio::process::Command::new(&cli_path);
+    let mut cmd = make_cli_cmd(&cli_path);
     cmd.args(&login_args)
         .envs(&auth_env)
         .stdin(std::process::Stdio::null())
@@ -351,6 +351,12 @@ pub fn cancel_cli_login(state: &Arc<AppState>) -> Result<serde_json::Value, Stri
         tracing::info!("cancel_cli_login: cancel signal sent");
     }
     Ok(serde_json::Value::Null)
+}
+
+// --- CLI command helpers ---
+
+fn make_cli_cmd(cli_path: &str) -> tokio::process::Command {
+    agentmux_common::make_cli_cmd(cli_path)
 }
 
 // --- Settings helpers (ported from src-tauri/src/commands/platform.rs) ---
