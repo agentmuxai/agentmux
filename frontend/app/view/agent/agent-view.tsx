@@ -396,6 +396,10 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
     const [canRetry, setCanRetry] = createSignal(false);
     // Whether the launch flow is currently running
     const [flowRunning, setFlowRunning] = createSignal(false);
+    // Whether the agent is ready (launch complete, controller registered)
+    const [agentReady, setAgentReady] = createSignal(false);
+    // Show spinner during launch and until agent is ready
+    const isLoading = () => flowRunning() || !agentReady();
     // Whether we're specifically in the login-polling phase
     const [loginWaiting, setLoginWaiting] = createSignal(false);
     // Mutable flag for cancelling the polling loop (set by cancel or onCleanup)
@@ -429,11 +433,15 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 setLoginWaiting,
                 authEnv,
             );
-            if (result === "auth_failed" && !loginCancelled) {
+            if (result === "success") {
+                setAgentReady(true);
+            } else if (result === "auth_failed" && !loginCancelled) {
                 setCanRetry(true);
+                setAgentReady(true); // clear spinner so retry button is usable
             }
         } catch (err: any) {
             log("error", err?.message ?? String(err), "error");
+            setAgentReady(true); // clear spinner on error
         } finally {
             setFlowRunning(false);
         }
@@ -685,7 +693,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 </div>
             </Show>
 
-            <AgentFooter agentId={agentId} onSendMessage={handleSendMessage} />
+            <AgentFooter agentId={agentId} onSendMessage={handleSendMessage} loading={isLoading()} />
         </div>
     );
 };

@@ -442,16 +442,25 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
                 // Fast path: read credentials file directly (Claude)
                 if cmd.cli_path.contains("claude") {
-                    // Use CLAUDE_CONFIG_DIR from auth_env if provided (isolated auth dir).
-                    // Fall back to ~/.claude/ for legacy/non-isolated invocations.
-                    let creds_path = if let Some(config_dir) = cmd.auth_env.get("CLAUDE_CONFIG_DIR") {
-                        format!("{}/.credentials.json", config_dir)
-                    } else {
-                        let home = std::env::var("HOME")
-                            .or_else(|_| std::env::var("USERPROFILE"))
-                            .unwrap_or_default();
-                        format!("{}/.claude/.credentials.json", home)
-                    };
+                    // Check isolated auth dir first (CLAUDE_CONFIG_DIR), then fall back
+                    // to global ~/.claude/. Users may be authenticated globally but not
+                    // yet in the per-version isolated dir.
+                    let home = std::env::var("HOME")
+                        .or_else(|_| std::env::var("USERPROFILE"))
+                        .unwrap_or_default();
+                    let global_creds = format!("{}/.claude/.credentials.json", home);
+
+                    let mut creds_candidates: Vec<String> = Vec::new();
+                    if let Some(config_dir) = cmd.auth_env.get("CLAUDE_CONFIG_DIR") {
+                        creds_candidates.push(format!("{}/.credentials.json", config_dir));
+                    }
+                    creds_candidates.push(global_creds);
+
+                    // Try each candidate path — first one with valid credentials wins
+                    let creds_path = creds_candidates.iter()
+                        .find(|p| std::path::Path::new(p.as_str()).exists())
+                        .cloned()
+                        .unwrap_or_else(|| creds_candidates.last().unwrap().clone());
 
                     if let Ok(content) = std::fs::read_to_string(&creds_path) {
                         if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
@@ -586,16 +595,9 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     );
 }
 
-/// Create a Command for a CLI binary, transparently wrapping Windows `.cmd` batch scripts
-/// with `cmd.exe /C` so they can be spawned via the Win32 API.
+/// Re-export from shared crate for internal use.
 pub(crate) fn make_cli_cmd(cli_path: &str) -> tokio::process::Command {
-    #[cfg(windows)]
-    if cli_path.ends_with(".cmd") || cli_path.ends_with(".bat") {
-        let mut c = tokio::process::Command::new("cmd.exe");
-        c.args(["/C", cli_path]);
-        return c;
-    }
-    tokio::process::Command::new(cli_path)
+    agentmux_common::make_cli_cmd(cli_path)
 }
 
 async fn get_cli_version(cli_path: &str) -> String {

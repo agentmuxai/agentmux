@@ -1,6 +1,6 @@
 [package]
 name = "agentmux-cef"
-version = "0.33.74"
+version = "0.33.76"
 description = "AgentMux CEF Host — Pinned Chromium renderer replacing system WebView2"
 authors = ["AgentMux Corp"]
 edition = "2021"
@@ -20,6 +20,7 @@ sandbox = ["cef/sandbox"]
 resources_path = "resources"
 
 [dependencies]
+agentmux-common = { path = "../agentmux-common" }
 cef = { version = "146", default-features = false, features = ["build-util"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
