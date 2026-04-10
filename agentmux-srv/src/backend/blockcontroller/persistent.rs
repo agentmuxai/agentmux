@@ -205,7 +205,9 @@ impl PersistentSubprocessController {
 
         cmd.stdin(std::process::Stdio::piped());
         cmd.stdout(std::process::Stdio::piped());
-        cmd.stderr(std::process::Stdio::piped());
+        // Use null for stderr — piped stderr that is immediately dropped would
+        // cause SIGPIPE/EPIPE on the child's first stderr write, killing it.
+        cmd.stderr(std::process::Stdio::null());
 
         let mut child = cmd.spawn().map_err(|e| {
             tracing::error!(block_id = %self.block_id, error = %e, "persistent process spawn failed");
@@ -223,7 +225,6 @@ impl PersistentSubprocessController {
         let (kill_tx, kill_rx) = tokio::sync::oneshot::channel::<bool>();
         let stdin = child.stdin.take().unwrap();
         let stdout = child.stdout.take().unwrap();
-        let _stderr = child.stderr.take().unwrap();
 
         // Create stdin writer channel
         let (msg_tx, mut msg_rx) = mpsc::channel::<String>(32);
