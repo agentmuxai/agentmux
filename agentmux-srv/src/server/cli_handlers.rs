@@ -42,18 +42,8 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     "{}/.agentmux/{}/cli/{}",
                     home, AGENTMUX_VERSION, cmd.provider_id
                 );
-                let bin_dir = format!("{}/bin", provider_dir);
-
-                // Expected binary path.
-                // On Windows, Node.js CLIs installed by npm are .cmd batch wrappers, not .exe.
-                // Use .cmd so make_cli_cmd() routes them through cmd.exe /C correctly.
-                let cli_bin = if cfg!(windows) {
-                    format!("{}/{}.cmd", bin_dir, cmd.cli_command)
-                } else {
-                    format!("{}/{}", bin_dir, cmd.cli_command)
-                };
-
-                // Also check npm-style path (for npm-based providers like codex/gemini)
+                // npm binary path — the only valid location for installed CLIs.
+                // Never use bin/ (legacy copy path that mixed up binary types).
                 let npm_bin = if cfg!(windows) {
                     format!("{}/node_modules/.bin/{}.cmd", provider_dir, cmd.cli_command)
                 } else {
@@ -61,107 +51,22 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 };
 
                 // Step 1: Check if already installed in versioned directory
-                for candidate in [&cli_bin, &npm_bin] {
-                    if std::path::Path::new(candidate).exists() {
-                        let version = get_cli_version(candidate).await;
-                        tracing::info!(
-                            path = %candidate, version = %version,
-                            "CLI found in versioned install"
-                        );
-                        return Ok(Some(serde_json::to_value(&ResolveCliResult {
-                            cli_path: candidate.clone(),
-                            version,
-                            source: "local_install".to_string(),
-                        }).unwrap()));
-                    }
-                }
-
-                // Step 2: Not in versioned dir yet. Try to copy from a known location.
-                let exe_name = if cfg!(windows) {
-                    format!("{}.exe", cmd.cli_command)
-                } else {
-                    cmd.cli_command.clone()
-                };
-
-                // Known locations where CLIs get installed on the system
-                let known_paths: Vec<String> = vec![
-                    format!("{}/.local/bin/{}", home, exe_name),
-                    format!("{}/.claude/local/bin/{}", home, exe_name),
-                    format!("{}/AppData/Local/Programs/{}/{}", home, cmd.cli_command, exe_name),
-                ];
-
-                // Also check PATH via where/which (to find binary, NOT to use directly)
-                let mut system_bin: Option<String> = None;
-                for path in &known_paths {
-                    if std::path::Path::new(path).exists() {
-                        system_bin = Some(path.clone());
-                        break;
-                    }
-                }
-                if system_bin.is_none() {
-                    let which_cmd = if cfg!(windows) { "where" } else { "which" };
-                    if let Ok(output) = tokio::process::Command::new(which_cmd)
-                        .arg(&cmd.cli_command)
-                        .output()
-                        .await
-                    {
-                        if output.status.success() {
-                            let path = String::from_utf8_lossy(&output.stdout)
-                                .lines().next().unwrap_or("").trim().to_string();
-                            if !path.is_empty() && std::path::Path::new(&path).exists() {
-                                // On Windows, npm CLIs ship as both a bare script (no ext) and a
-                                // .cmd batch wrapper. Prefer the .cmd sibling so make_cli_cmd()
-                                // routes it through cmd.exe /C correctly.  If the path already
-                                // has .cmd/.bat/.exe we use it as-is.
-                                #[cfg(windows)]
-                                {
-                                    let p = std::path::Path::new(&path);
-                                    let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("");
-                                    if ext.eq_ignore_ascii_case("cmd") || ext.eq_ignore_ascii_case("bat") || ext.eq_ignore_ascii_case("exe") {
-                                        system_bin = Some(path);
-                                    } else {
-                                        let cmd_sibling = p.with_extension("cmd").to_string_lossy().to_string();
-                                        if std::path::Path::new(&cmd_sibling).exists() {
-                                            tracing::info!(script = %path, cmd = %cmd_sibling, "preferring .cmd sibling over bare script");
-                                            system_bin = Some(cmd_sibling);
-                                        } else {
-                                            system_bin = Some(path);
-                                        }
-                                    }
-                                }
-                                #[cfg(not(windows))]
-                                {
-                                    system_bin = Some(path);
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // Create versioned directory
-                std::fs::create_dir_all(&bin_dir).map_err(|e| {
-                    format!("failed to create {}: {e}", bin_dir)
-                })?;
-
-                // Fast path: copy existing binary to versioned dir (no network needed)
-                if let Some(ref source) = system_bin {
+                if std::path::Path::new(&npm_bin).exists() {
+                    let version = get_cli_version(&npm_bin).await;
                     tracing::info!(
-                        source = %source, target = %cli_bin,
-                        "copying existing CLI binary to versioned directory"
+                        path = %npm_bin, version = %version,
+                        "CLI found in versioned install"
                     );
-                    std::fs::copy(source, &cli_bin).map_err(|e| {
-                        format!("failed to copy {} → {}: {e}", source, cli_bin)
-                    })?;
-                    let version = get_cli_version(&cli_bin).await;
-                    tracing::info!(path = %cli_bin, version = %version, "CLI copied to versioned dir");
                     return Ok(Some(serde_json::to_value(&ResolveCliResult {
-                        cli_path: cli_bin,
+                        cli_path: npm_bin,
                         version,
                         source: "local_install".to_string(),
                     }).unwrap()));
                 }
 
-                // Slow path: binary not found anywhere — need to install from network
+                // Step 2: Not in versioned dir — install from network.
+                // Never copy from system PATH — that defeats version isolation and
+                // can copy the wrong binary type (e.g., .exe saved as .cmd).
                 let install_cmd = if cfg!(windows) {
                     &cmd.windows_install_command
                 } else {
@@ -308,123 +213,11 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     ));
                 }
 
-                // Official installer (Claude): run installer streaming output to block
-                let mut child_installer = if cfg!(windows) {
-                    tokio::process::Command::new("powershell")
-                        .args(["-NoProfile", "-Command", install_cmd])
-                        .stdout(std::process::Stdio::piped())
-                        .stderr(std::process::Stdio::piped())
-                        .spawn()
-                } else {
-                    tokio::process::Command::new("bash")
-                        .args(["-c", install_cmd])
-                        .stdout(std::process::Stdio::piped())
-                        .stderr(std::process::Stdio::piped())
-                        .spawn()
-                }.map_err(|e| format!("failed to spawn installer: {e}"))?;
-
-                let block_id_inst = cmd.block_id.clone();
-                let broker_inst = broker.clone();
-                let stdout_inst = child_installer.stdout.take();
-                let stderr_inst = child_installer.stderr.take();
-
-                let block_id_inst2 = cmd.block_id.clone();
-                let broker_inst2 = broker.clone();
-                let (_, _, install_exit) = tokio::time::timeout(
-                    std::time::Duration::from_secs(120),
-                    async move {
-                        tokio::join!(
-                            async move {
-                                if let Some(p) = stdout_inst {
-                                    use tokio::io::AsyncBufReadExt;
-                                    let mut reader = tokio::io::BufReader::new(p).lines();
-                                    while let Ok(Some(line)) = reader.next_line().await {
-                                        tracing::info!(line = %line, "installer stdout");
-                                        if !block_id_inst.is_empty() {
-                                            crate::backend::wps::publish_install_progress(&broker_inst, &block_id_inst, &line);
-                                        }
-                                    }
-                                }
-                            },
-                            async move {
-                                if let Some(p) = stderr_inst {
-                                    use tokio::io::AsyncBufReadExt;
-                                    let mut reader = tokio::io::BufReader::new(p).lines();
-                                    while let Ok(Some(line)) = reader.next_line().await {
-                                        tracing::info!(line = %line, "installer stderr");
-                                        if !block_id_inst2.is_empty() {
-                                            crate::backend::wps::publish_install_progress(&broker_inst2, &block_id_inst2, &line);
-                                        }
-                                    }
-                                }
-                            },
-                            child_installer.wait(),
-                        )
-                    }
-                ).await.map_err(|_| format!("install timed out after 120s — try manually:\n  {}", install_cmd))?;
-
-                let install_exit = install_exit.map_err(|e| format!("installer wait failed: {e}"))?;
-                tracing::info!(exit_code = install_exit.code().unwrap_or(-1), "official installer completed");
-
-                if !install_exit.success() {
-                    return Err(format!(
-                        "installer failed (exit {}). Check output above for details.",
-                        install_exit.code().unwrap_or(-1)
-                    ));
-                }
-
-                // Find where the official installer placed the binary
-                let search_paths = known_paths;
-
-                let mut found_source: Option<String> = None;
-                for search in &search_paths {
-                    if std::path::Path::new(search).exists() {
-                        found_source = Some(search.clone());
-                        break;
-                    }
-                }
-
-                // Also try `where`/`which` as last resort to find installed binary
-                if found_source.is_none() {
-                    let which_cmd = if cfg!(windows) { "where" } else { "which" };
-                    if let Ok(output) = tokio::process::Command::new(which_cmd)
-                        .arg(&cmd.cli_command)
-                        .output()
-                        .await
-                    {
-                        if output.status.success() {
-                            let path = String::from_utf8_lossy(&output.stdout)
-                                .lines().next().unwrap_or("").trim().to_string();
-                            if !path.is_empty() {
-                                found_source = Some(path);
-                            }
-                        }
-                    }
-                }
-
-                let source_path = found_source.ok_or_else(|| format!(
-                    "installer ran successfully but cannot find {} binary. \
-                     Searched: {:?}",
-                    cmd.cli_command, search_paths
-                ))?;
-
-                // Copy binary to versioned directory
-                tracing::info!(
-                    source = %source_path,
-                    target = %cli_bin,
-                    "copying CLI binary to versioned directory"
-                );
-                std::fs::copy(&source_path, &cli_bin).map_err(|e| {
-                    format!("failed to copy {} → {}: {e}", source_path, cli_bin)
-                })?;
-
-                let version = get_cli_version(&cli_bin).await;
-                tracing::info!(path = %cli_bin, version = %version, "CLI installed successfully");
-                Ok(Some(serde_json::to_value(&ResolveCliResult {
-                    cli_path: cli_bin,
-                    version,
-                    source: "installed".to_string(),
-                }).unwrap()))
+                // All providers use npm install — no official installer path.
+                return Err(format!(
+                    "{} not found and npm install is not configured for this provider",
+                    cmd.cli_command
+                ));
             })
         }),
     );
