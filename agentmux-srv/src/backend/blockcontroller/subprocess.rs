@@ -263,7 +263,8 @@ impl SubprocessController {
             }
         }
         for (k, v) in &config.env_vars {
-            cmd.env(k, v);
+            let expanded = crate::backend::base::expand_home_dir_safe(v);
+            cmd.env(k, expanded.to_string_lossy().as_ref());
         }
         cmd.stdin(std::process::Stdio::piped());
         cmd.stdout(std::process::Stdio::piped());

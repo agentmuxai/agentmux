@@ -520,7 +520,8 @@ impl Controller for ShellController {
                 if k == "AGENTMUX_AGENT_ID" {
                     has_agent_id = true;
                 }
-                c.env(k, v);
+                let expanded = crate::backend::base::expand_home_dir_safe(v);
+                c.env(k, expanded.to_string_lossy().as_ref());
             }
 
             // Block metadata (per-block overrides, highest priority)
@@ -531,7 +532,8 @@ impl Controller for ShellController {
                             if k == "AGENTMUX_AGENT_ID" {
                                 has_agent_id = true;
                             }
-                            c.env(k, val);
+                            let expanded = crate::backend::base::expand_home_dir_safe(val);
+                            c.env(k, expanded.to_string_lossy().as_ref());
                         }
                     }
                 }
