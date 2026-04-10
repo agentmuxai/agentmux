@@ -69,10 +69,14 @@ export const AgentControlBar = ({ blockId, blockAtom, providerId }: AgentControl
         const current = runtime();
         const updated = { ...current, ...patch };
         const oref = WOS.makeORef("block", blockId);
-        await RpcApi.SetMetaCommand(TabRpcClient, {
-            oref,
-            meta: { "agent:runtime": updated },
-        });
+        try {
+            await RpcApi.SetMetaCommand(TabRpcClient, {
+                oref,
+                meta: { "agent:runtime": updated },
+            });
+        } catch {
+            // Silently ignore — settings will retry on next change
+        }
     };
 
     const compactSummary = (): string => {

@@ -68,8 +68,9 @@ export function buildRuntimeArgs(
         i++;
     }
 
-    // Apply permission mode
-    args.push(...PERMISSION_FLAGS[config.permissionMode]);
+    // Apply permission mode (fall back to bypass if metadata contains an invalid value)
+    const permFlags = PERMISSION_FLAGS[config.permissionMode] ?? PERMISSION_FLAGS.bypass;
+    args.push(...permFlags);
 
     // Apply model if set
     if (config.model) {
