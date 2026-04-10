@@ -2,7 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 
+pub mod agent_config;
 pub mod blockcontroller;
+pub mod providers;
 pub mod config_watcher_fs;
 pub mod ijson;
 pub mod docsite;
