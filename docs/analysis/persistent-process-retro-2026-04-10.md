@@ -70,6 +70,50 @@ using `--input-format stream-json` for bidirectional communication.
   programs (Node, Python, etc.). Rust's `canonicalize()` is the only stdlib
   function that produces these paths.
 
+### 9. Stale instances stacking up — port file collisions (v0.33.86-91)
+- **Symptom:** "Sent new-window request to existing instance" — new versions
+  refuse to launch, or open windows in a broken older instance.
+- **Root cause:** Test instances (.86, .87, .88, .89) were never closed between
+  builds. Each version left an `ipc-port` file in its data dir. New launches
+  connected to the stale port and delegated, or opened a window in a broken
+  instance whose frontend was from a different branch.
+- **Fix:** Discipline — always kill the previous test instance before launching
+  the next. Only `.78` (our running instance) and ONE test instance at a time.
+- **Lesson:** `tasklist | grep agentmux | grep -v "0.33.78"` before every launch.
+  Clean up stale port files. Never let instances stack up.
+
+### 10. "Failed to load AgentMux frontend" — stale instance windows (v0.33.86-91)
+- **Symptom:** Multiple windows show "Failed to load AgentMux frontend" with
+  `ERR_CONNECTION_REFUSED` to `localhost:5173`.
+- **Root cause:** These were windows from stale .86/.89 instances that were never
+  closed. The "Sent new-window request to existing instance" mechanism opened
+  new windows in these broken instances. The frontend couldn't load because
+  `frontend/index.html` wasn't found relative to the exe in those builds
+  (branch mismatch or build artifact issue).
+- **Fix:** Killed all stale instances. The .88 build that was properly launched
+  worked fine — frontend loaded correctly.
+- **Lesson:** "Failed to load" errors during testing are usually stale instances,
+  not build bugs. Close everything and retry with a clean state.
+
+### 11. agent.open creates block but pane not visible in UI (v0.33.88-89)
+- **Symptom:** `agent.open` returns success, `agent.list` shows the agent, but
+  no pane appears in the UI.
+- **Root cause:** `create_block` only adds the block to the tab's `blockids` and
+  stores it in the database. The layout tree (`LayoutState.rootnode`) is a
+  separate data structure that defines what the frontend renders. Without a
+  layout node, the block is invisible.
+- **Fix:** After `create_block`, insert a layout node into the tab's `LayoutState`:
+  - Empty tab: set as sole root node
+  - Existing panes: wrap old root + new leaf in a row container
+  - Update `leaforder` array
+  - Broadcast layout + tab + block updates via event bus
+- **Lesson:** The layout tree is the source of truth for what's visible. Creating
+  a block without a layout node is like adding a row to a database table without
+  updating the UI's data source. The frontend's `createBlock()` uses
+  `layoutModel.treeReducer(InsertNode)` which handles all the edge cases
+  (splitting, focusing, flex sizing). The backend layout manipulation is simpler
+  but functional.
+
 ---
 
 ## Architecture Decisions

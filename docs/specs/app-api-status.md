@@ -1,0 +1,143 @@
+# App API — Implementation Status
+
+**Date:** 2026-04-11
+**Spec:** `docs/specs/app-api-extension.md`
+**Retro:** `docs/analysis/persistent-process-retro-2026-04-10.md`
+
+---
+
+## What's Working (Verified End-to-End)
+
+### Backend RPC Commands (WebSocket)
+
+All Tier 1 commands register on the WSH RPC engine and respond correctly:
+
+| Command | Status | Verified |
+|---------|--------|----------|
+| `agent.open` | Working | Creates block, sets metadata, writes config files, registers controller, inserts layout node |
+| `agent.send` | Working | Sends message via persistent stdin or subprocess spawn |
+| `agent.stop` | Working | Stops controller process |
+| `agent.status` | Working | Returns agent state, session ID, exit code |
+| `agent.list` | Working | Lists all agent panes across tabs |
+| `agent.output` | Implemented | Reads broker event history (needs persist > 0 for blockfile events) |
+
+### WebSocket Protocol
+
+Commands are sent via the WSH RPC envelope:
+```json
+{
+  "wscommand": "rpc",
+  "message": {
+    "command": "agent.open",
+    "reqid": "unique-id",
+    "data": { "agent_id": "agentx" }
+  }
+}
+```
+
+Auth via query param: `ws://127.0.0.1:{WS_PORT}/ws?authkey={AUTH_KEY}`
+
+### Getting Auth Credentials
+
+```bash
+# 1. Read IPC token from host log (injected into page URL)
+TOKEN=$(grep "ipc_token=" ~/.agentmux/logs/agentmux-host-v*.log.* | tail -1 | sed 's/.*ipc_token=\([^&"]*\).*/\1/')
+IPC_PORT=$(grep "IPC HTTP server started" ~/.agentmux/logs/agentmux-host-v*.log.* | tail -1 | sed 's/.*127.0.0.1:\([0-9]*\).*/\1/')
+
+# 2. Get backend auth key via CEF IPC
+AUTH=$(curl -s -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"cmd":"get_auth_key","args":{}}' "http://127.0.0.1:$IPC_PORT/ipc" | jq -r .data)
+
+# 3. Get WebSocket port
+WS_PORT=$(curl -s -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"cmd":"get_backend_endpoints","args":{}}' "http://127.0.0.1:$IPC_PORT/ipc" | jq -r '.data.ws | split(":") | last')
+```
+
+### Persistent Process Pipeline
+
+The full flow works:
+1. `agent.open` → block created, persistent controller registered
+2. `agent.send` → CLI spawned with `--input-format stream-json`, stdin message written
+3. Claude Code responds, session ID captured, stdout published to WPS blockfile
+4. Process stays alive for multi-turn (no `CLAUDE_CODE_EXIT_AFTER_STOP_DELAY`)
+
+---
+
+## What's Not Working Yet
+
+### 1. Pane Not Visible After `agent.open`
+
+**Status:** Backend layout tree updated, but frontend doesn't re-render.
+
+**Root cause:** The frontend layout model is a client-side state machine driven by
+`layoutModel.treeReducer(InsertNode)`. Backend-side `LayoutState` writes + event
+broadcasts are insufficient — the frontend's reactive layout model doesn't
+re-derive from raw database state on `waveobj:update` events for layouts.
+
+**Fix needed:** Either:
+- **Option A:** Add a frontend event handler for `layoutaction` events that
+  calls `layoutModel.treeReducer()` when the backend requests a layout change
+- **Option B:** Have `agent.open` return the block ID and let the frontend's
+  existing `createBlock()` handle the layout insertion via a new IPC command
+- **Option C:** Make the frontend layout model reactive to `LayoutState` changes
+  (would also fix cross-window layout sync)
+
+**Recommendation:** Option A — minimal frontend change, backend-driven layout.
+
+### 2. Agent Response Not Rendering in Agent View
+
+**Status:** stdout lines published to WPS blockfile, `useAgentStream` subscribes
+to the correct subject (`"output"`), but no text appears in the agent view.
+
+**Root cause:** Not yet diagnosed. The WPS data flow is:
+`persistent.rs stdout reader` → `handle_append_block_file(broker, blockId, "output", data)`
+→ `broker.publish(EVENT_BLOCK_FILE, ...)` → `frontend global.ts fileSubject.next()`
+→ `useAgentStream subscription`
+
+The `console.log` in `useAgentStream` (added in v0.33.86) was never tested in a
+clean build with a visible pane. Needs debugging with both frontend and backend
+logging enabled simultaneously.
+
+### 3. CLI Auto-Install in `agent.open`
+
+**Status:** `agent.open` returns `CLI_NOT_AVAILABLE` if the npm package isn't
+installed. The caller must pre-install via `npm install --prefix`.
+
+**Fix needed:** Add optional auto-install to `agent.open` — call the same npm
+install logic from `cli_handlers.rs` if the binary isn't found. Add an
+`auto_install: bool` field to the request (default: true).
+
+---
+
+## Files Added
+
+| File | Lines | Purpose |
+|------|-------|---------|
+| `agentmux-srv/src/backend/providers.rs` | ~270 | Static provider registry (claude, codex, gemini) with 7 unit tests |
+| `agentmux-srv/src/backend/agent_config.rs` | ~330 | Config file builder (CLAUDE.md, .mcp.json, skills) with 9 unit tests |
+| `agentmux-srv/src/server/app_api.rs` | ~530 | All 6 command handlers |
+| `docs/specs/app-api-extension.md` | ~280 | Full API spec (Tiers 1-5) |
+| `docs/specs/app-api-status.md` | this file | Implementation status |
+| `docs/analysis/persistent-process-retro-2026-04-10.md` | ~150 | Debug retro (11 issues found and fixed) |
+
+## Files Modified
+
+| File | Change |
+|------|--------|
+| `agentmux-srv/src/backend/rpc_types.rs` | 7 command constants + 13 request/response structs |
+| `agentmux-srv/src/backend/mod.rs` | `pub mod providers; pub mod agent_config;` |
+| `agentmux-srv/src/server/mod.rs` | `mod app_api;` |
+| `agentmux-srv/src/server/websocket.rs` | `register_app_api_handlers()` call |
+| `agentmux-srv/src/backend/blockcontroller/persistent.rs` | `controller_type_str()` method |
+| `agentmux-srv/src/backend/providers.rs` | `controller_type_str()` impl |
+
+---
+
+## Next Steps
+
+1. **Fix pane visibility** — frontend `layoutaction` event handler (Option A)
+2. **Fix agent response rendering** — debug `useAgentStream` with visible pane
+3. **CLI auto-install** — integrate npm install into `agent.open`
+4. **Tier 2 commands** — `pane.open`, `pane.close`, `pane.list`, `pane.focus`
+5. **HTTP REST gateway** — `/api/v1/agent/*` endpoints for external tools
+6. **MCP integration** — expose App API as MCP tools in the agentmux MCP server
