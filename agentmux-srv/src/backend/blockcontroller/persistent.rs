@@ -166,8 +166,8 @@ impl PersistentSubprocessController {
 
     /// Spawn the persistent CLI process.
     fn spawn_process(&self, config: PersistentSpawnConfig) -> Result<(), String> {
-        // Build command
-        let mut cmd = Command::new(&config.cli_command);
+        // Build command — use make_cli_cmd to resolve .cmd wrappers to node on Windows
+        let mut cmd = crate::server::cli_handlers::make_cli_cmd(&config.cli_command);
         cmd.args(&config.cli_args);
 
         // Working directory
