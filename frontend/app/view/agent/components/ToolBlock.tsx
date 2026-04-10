@@ -6,10 +6,11 @@
  */
 
 import clsx from "clsx";
-import { createSignal, Show, type JSX } from "solid-js";
+import { Show, type JSX } from "solid-js";
 import { createBlock } from "@/store/global";
 import type { ToolNode } from "../types";
 import { BashOutputViewer } from "./BashOutputViewer";
+import { CompactResult } from "./CompactResult";
 import { DiffViewer } from "./DiffViewer";
 
 interface ToolBlockProps {
@@ -18,19 +19,7 @@ interface ToolBlockProps {
     onToggle: () => void;
 }
 
-const TOOL_RESULT_MAX_LENGTH = 50000; // 50KB
-
 export const ToolBlock = ({ node, collapsed, onToggle }: ToolBlockProps): JSX.Element => {
-    const [showFullResult, setShowFullResult] = createSignal(false);
-
-    // Determine if result needs truncation
-    const resultString = node.result ? JSON.stringify(node.result) : "";
-    const isTruncated = resultString.length > TOOL_RESULT_MAX_LENGTH;
-    const displayResult = () =>
-        isTruncated && !showFullResult()
-            ? resultString.slice(0, TOOL_RESULT_MAX_LENGTH)
-            : resultString;
-
     // Render tool-specific content
     const renderToolContent = (): JSX.Element => {
         if (node.status === "running") {
@@ -53,9 +42,11 @@ export const ToolBlock = ({ node, collapsed, onToggle }: ToolBlockProps): JSX.El
                     <div class="agent-tool-read">
                         <div class="agent-tool-file-path">{(node.params as any).file_path}</div>
                         <Show when={node.result}>
-                            <pre class="agent-tool-read-content">
-                                {(node.result as any).content || displayResult()}
-                            </pre>
+                            {(node.result as any).content ? (
+                                <pre class="agent-tool-read-content">{(node.result as any).content}</pre>
+                            ) : (
+                                <CompactResult tool={node.tool} params={node.params as any} result={node.result} />
+                            )}
                         </Show>
                     </div>
                 );
@@ -75,7 +66,7 @@ export const ToolBlock = ({ node, collapsed, onToggle }: ToolBlockProps): JSX.El
                 return (
                     <div class="agent-tool-search">
                         <div class="agent-tool-pattern">Pattern: {(node.params as any).pattern}</div>
-                        <pre class="agent-tool-search-results">{displayResult()}</pre>
+                        <CompactResult tool={node.tool} params={node.params as any} result={node.result} />
                     </div>
                 );
 
@@ -86,7 +77,7 @@ export const ToolBlock = ({ node, collapsed, onToggle }: ToolBlockProps): JSX.El
                             <div class="agent-tool-agent-desc">{(node.params as any).description}</div>
                         </Show>
                         <Show when={node.result}>
-                            <pre class="agent-tool-agent-result">{displayResult()}</pre>
+                            <CompactResult tool={node.tool} params={node.params as any} result={node.result} />
                         </Show>
                     </div>
                 );
@@ -94,12 +85,12 @@ export const ToolBlock = ({ node, collapsed, onToggle }: ToolBlockProps): JSX.El
             case "Task":
                 return (
                     <div class="agent-tool-task">
-                        <pre class="agent-tool-task-info">{displayResult()}</pre>
+                        <CompactResult tool={node.tool} params={node.params as any} result={node.result} />
                     </div>
                 );
 
             default:
-                return <pre class="agent-tool-generic">{displayResult()}</pre>;
+                return <CompactResult tool={node.tool} params={node.params as any} result={node.result} />;
         }
     };
 
@@ -142,17 +133,6 @@ export const ToolBlock = ({ node, collapsed, onToggle }: ToolBlockProps): JSX.El
             <Show when={!collapsed}>
                 <div class="agent-tool-content" onClick={(e) => e.stopPropagation()}>
                     {renderToolContent()}
-                    <Show when={isTruncated && !showFullResult()}>
-                        <button
-                            class="agent-tool-show-more"
-                            onClick={(e) => {
-                                e.stopPropagation();
-                                setShowFullResult(true);
-                            }}
-                        >
-                            Show full output ({(resultString.length / 1024).toFixed(0)}KB)
-                        </button>
-                    </Show>
                 </div>
             </Show>
         </div>

@@ -890,6 +890,52 @@
         font-size: 11px;
     }
 
+    // === Compact Result ===
+    .agent-tool-compact-result {
+        font-size: 11px;
+
+        .agent-tool-compact-summary {
+            display: flex;
+            align-items: baseline;
+            gap: 4px;
+            color: var(--main-text-color);
+            opacity: 0.85;
+            line-height: 1.4;
+
+            &.clickable {
+                cursor: pointer;
+                &:hover {
+                    opacity: 1;
+                }
+            }
+        }
+
+        .agent-tool-compact-chevron {
+            font-size: 9px;
+            flex-shrink: 0;
+            width: 10px;
+        }
+
+        .agent-tool-compact-text {
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .agent-tool-compact-json {
+            background: var(--main-bg-color);
+            border: 1px solid var(--border-color);
+            padding: 4px 6px;
+            border-radius: 3px;
+            max-height: 400px;
+            overflow-y: auto;
+            margin: 4px 0 0 0;
+            font-size: 11px;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+    }
+
     // === Agent Header ===
     .agent-header {
         display: flex;
