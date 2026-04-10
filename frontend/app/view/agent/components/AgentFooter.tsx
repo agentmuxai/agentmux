@@ -14,12 +14,21 @@ interface AgentFooterProps {
 
 export const AgentFooter = ({ agentId, onSendMessage }: AgentFooterProps): JSX.Element => {
     const [message, setMessage] = createSignal("");
+    let textareaRef: HTMLTextAreaElement | undefined;
+
+    const autoGrow = (el: HTMLTextAreaElement) => {
+        el.style.height = "auto";
+        el.style.height = el.scrollHeight + "px";
+    };
 
     const handleSend = () => {
         if (!message().trim()) return;
         if (onSendMessage) {
             onSendMessage(message());
             setMessage("");
+            if (textareaRef) {
+                textareaRef.style.height = "auto";
+            }
         }
     };
 
@@ -30,16 +39,23 @@ export const AgentFooter = ({ agentId, onSendMessage }: AgentFooterProps): JSX.E
         }
     };
 
+    const handleInput = (e: Event) => {
+        const el = e.target as HTMLTextAreaElement;
+        setMessage(el.value);
+        autoGrow(el);
+    };
+
     return (
         <div class="agent-footer">
             <div class="agent-input-container">
                 <textarea
+                    ref={textareaRef}
                     class="agent-input"
                     placeholder={`Send message to ${agentId}...`}
                     value={message()}
-                    onInput={(e) => setMessage((e.target as HTMLTextAreaElement).value)}
+                    onInput={handleInput}
                     onKeyDown={handleKeyDown}
-                    rows={2}
+                    rows={1}
                 />
                 <div class="agent-input-hint">Enter to send • Shift+Enter for newline</div>
             </div>
