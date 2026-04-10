@@ -25,6 +25,9 @@ export class ClaudeTranslator implements OutputTranslator {
     private currentToolCallId: string | null = null;
     private currentToolName: string | null = null;
     private toolInputBuffer: string = "";
+    // Map tool_use_id → tool name so tool_result can resolve the name
+    // (Anthropic API does not include tool_name on tool_result blocks)
+    private toolNameById: Map<string, string> = new Map();
 
     translate(rawEvent: any): StreamEvent[] {
         if (!rawEvent || typeof rawEvent !== "object") return [];
@@ -62,6 +65,7 @@ export class ClaudeTranslator implements OutputTranslator {
         this.currentToolCallId = null;
         this.currentToolName = null;
         this.toolInputBuffer = "";
+        this.toolNameById.clear();
     }
 
     private isStreamEvent(event: any): boolean {
@@ -145,10 +149,11 @@ export class ClaudeTranslator implements OutputTranslator {
             for (const block of content) {
                 if (block.type === "tool_result") {
                     const isError = block.is_error === true;
+                    const toolId = block.tool_use_id || `tool_${Date.now()}`;
                     results.push({
                         type: "tool_result",
-                        tool: block.tool_name || "Unknown",
-                        id: block.tool_use_id || `tool_${Date.now()}`,
+                        tool: block.tool_name || this.toolNameById.get(toolId) || "Unknown",
+                        id: toolId,
                         status: isError ? "failed" : "success",
                         result: typeof block.content === "string"
                             ? { content: block.content }
@@ -176,10 +181,11 @@ export class ClaudeTranslator implements OutputTranslator {
             for (const block of message.content) {
                 if (block.type === "tool_result") {
                     const isError = block.is_error === true;
+                    const toolId = block.tool_use_id || `tool_${Date.now()}`;
                     results.push({
                         type: "tool_result",
-                        tool: block.tool_name || "Unknown",
-                        id: block.tool_use_id || `tool_${Date.now()}`,
+                        tool: block.tool_name || this.toolNameById.get(toolId) || "Unknown",
+                        id: toolId,
                         status: isError ? "failed" : "success",
                         result: typeof block.content === "string"
                             ? { content: block.content }
@@ -205,6 +211,10 @@ export class ClaudeTranslator implements OutputTranslator {
             this.currentToolCallId = block.id || `tool_${Date.now()}`;
             this.currentToolName = block.name || "Unknown";
             this.toolInputBuffer = "";
+            // Record id→name so tool_result can resolve the tool name
+            if (this.currentToolCallId && this.currentToolName) {
+                this.toolNameById.set(this.currentToolCallId, this.currentToolName);
+            }
 
             return [
                 {
