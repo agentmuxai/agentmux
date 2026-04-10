@@ -437,9 +437,11 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 setAgentReady(true);
             } else if (result === "auth_failed" && !loginCancelled) {
                 setCanRetry(true);
+                setAgentReady(true); // clear spinner so retry button is usable
             }
         } catch (err: any) {
             log("error", err?.message ?? String(err), "error");
+            setAgentReady(true); // clear spinner on error
         } finally {
             setFlowRunning(false);
         }
