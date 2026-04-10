@@ -213,17 +213,10 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 }
 
                 // All providers use npm install — no official installer path needed.
-                return Err(format!(
+                Err(format!(
                     "{} not found and npm install is not configured for this provider",
                     cmd.cli_command
-                ));
-                // Unreachable but keeps the return type consistent
-                #[allow(unreachable_code)]
-                Ok(Some(serde_json::to_value(&ResolveCliResult {
-                    cli_path: npm_bin,
-                    version: "unknown".to_string(),
-                    source: "installed".to_string(),
-                }).unwrap()))
+                ))
             })
         }),
     );
