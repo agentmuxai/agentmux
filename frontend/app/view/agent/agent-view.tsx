@@ -4,11 +4,13 @@
 import { writeText as clipboardWriteText } from "@/util/clipboard";
 import { createMemo, createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
 import type { AgentViewModel } from "./agent-model";
+import { buildRuntimeArgs, getRuntimeConfig } from "./buildRuntimeArgs";
 import { getProvider, type ProviderDefinition } from "./providers";
 import { createAgentAtoms } from "./state";
 import type { DocumentNode, SubagentLinkNode } from "./types";
 import { openSubagentPane, isSubagentPaneOpen } from "@/app/store/subagent-pane-manager";
 import { useAgentStream } from "./useAgentStream";
+import { AgentControlBar } from "./components/AgentControlBar";
 import { AgentDocumentView } from "./components/AgentDocumentView";
 import { AgentFooter } from "./components/AgentFooter";
 import { RpcApi } from "@/app/store/wshclientapi";
@@ -540,7 +542,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
     });
 
     // Send user message
-    const handleSendMessage = (message: string) => {
+    const handleSendMessage = async (message: string) => {
         // Add user message as a document node so it appears in the chat
         const [, setDocument] = agentAtoms().documentAtom;
         setDocument((prev) => [
@@ -554,6 +556,22 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 summary: "",
             } as DocumentNode,
         ]);
+
+        // Apply runtime args (permission mode, model, effort) before this turn
+        const prov = provider();
+        if (prov) {
+            const runtimeConfig = getRuntimeConfig(block()?.meta);
+            const updatedArgs = buildRuntimeArgs(prov.launchArgs, runtimeConfig);
+            const oref = WOS.makeORef("block", model.blockId);
+            try {
+                await RpcApi.SetMetaCommand(TabRpcClient, {
+                    oref,
+                    meta: { "cmd:args": updatedArgs },
+                });
+            } catch (err) {
+                log("error", `Failed to update runtime args: ${err}`, "error");
+            }
+        }
 
         RpcApi.AgentInputCommand(TabRpcClient, {
             blockid: model.blockId,
@@ -637,6 +655,12 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                     {"\u2715"}
                 </button>
             </div>
+
+            <AgentControlBar
+                blockId={model.blockId}
+                blockAtom={block}
+                providerId={provider()?.id ?? ""}
+            />
 
             <AgentDocumentView
                 documentAtom={agentAtoms().documentAtom}
