@@ -69,8 +69,11 @@ export class AgentViewModel implements ViewModel {
         const oref = WOS.makeORef("block", this.blockId);
         const blockId = this.blockId;
 
-        // Build CLI args from provider's launch args (provider-specific, not hardcoded -p)
-        const cliArgs = [...provider.launchArgs];
+        // Build CLI args: use persistent args if available, otherwise standard launch args
+        const isPersistent = provider.controllerType === "persistent";
+        const cliArgs = isPersistent && provider.persistentLaunchArgs
+            ? [...provider.persistentLaunchArgs]
+            : [...provider.launchArgs];
 
         // Build env vars: unset nested-session guards by setting them empty
         const envVars: Record<string, string> = {};
@@ -95,7 +98,7 @@ export class AgentViewModel implements ViewModel {
                 meta: {
                     agentId: agentId,
                     agentOutputFormat: provider.styledOutputFormat,
-                    controller: "subprocess",
+                    controller: isPersistent ? "persistent" : "subprocess",
                     cmd: cliBin,
                     "cmd:args": cliArgs,
                     "cmd:env": envVars,
@@ -169,8 +172,11 @@ export class AgentViewModel implements ViewModel {
         // Determine working directory
         const workDir = agent.working_directory || `~/.agentmux/agents/${agent.name.toLowerCase().replace(/[^a-z0-9-_]/g, "-")}`;
 
-        // Build CLI args from provider's launch args (provider-specific, not hardcoded -p)
-        const cliArgs = [...provider.launchArgs];
+        // Build CLI args: use persistent args if available, otherwise standard launch args
+        const isPersistent = provider.controllerType === "persistent";
+        const cliArgs = isPersistent && provider.persistentLaunchArgs
+            ? [...provider.persistentLaunchArgs]
+            : [...provider.launchArgs];
         if (agent.provider_flags) {
             cliArgs.push(...agent.provider_flags.split(/\s+/).filter(Boolean));
         }
@@ -227,7 +233,7 @@ export class AgentViewModel implements ViewModel {
                     agentName: agent.name,
                     agentIcon: agent.icon,
                     agentMode: agent.agent_type || "host",
-                    controller: "subprocess",
+                    controller: isPersistent ? "persistent" : "subprocess",
                     cmd: cliBin,
                     "cmd:args": cliArgs,
                     "cmd:cwd": workDir,
