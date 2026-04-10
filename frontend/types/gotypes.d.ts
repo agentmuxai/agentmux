@@ -853,6 +853,11 @@ declare global {
         "agent:resume_flag"?: string;
         "agent:session_id_field"?: string;
         "agent:sessionid"?: string;
+        "agent:runtime"?: {
+            permissionMode?: string;
+            model?: string | null;
+            effort?: string | null;
+        };
         "subagent:*"?: boolean;
         "subagent:id"?: string;
         "subagent:slug"?: string;
