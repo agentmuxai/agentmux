@@ -31,6 +31,12 @@ export interface ProviderDefinition {
     resumeFlag: string | null;
     // JSON field name containing the session/thread ID in the CLI's init event.
     sessionIdField: string;
+    // Controller type: "persistent" keeps a long-running process with stdin streaming,
+    // "subprocess" spawns a fresh process per turn with --resume.
+    controllerType: "persistent" | "subprocess";
+    // Launch args for persistent mode (--input-format stream-json, no -p).
+    // Only used when controllerType is "persistent".
+    persistentLaunchArgs?: string[];
 }
 
 export const PROVIDERS: Record<string, ProviderDefinition> = {
@@ -57,6 +63,8 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         launchArgs: ["-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--dangerously-skip-permissions"],
         resumeFlag: "--resume",
         sessionIdField: "session_id",
+        controllerType: "persistent",
+        persistentLaunchArgs: ["--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--dangerously-skip-permissions"],
     },
     codex: {
         id: "codex",
@@ -83,6 +91,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         // Multi-turn is handled by re-running exec; null disables automatic --resume append.
         resumeFlag: null,
         sessionIdField: "thread_id",
+        controllerType: "subprocess",
     },
     gemini: {
         id: "gemini",
@@ -109,6 +118,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         launchArgs: ["--output-format", "stream-json", "--yolo", "-p", ""],
         resumeFlag: "-r",
         sessionIdField: "session_id",
+        controllerType: "subprocess",
     },
 };
 
