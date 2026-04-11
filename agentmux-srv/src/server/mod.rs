@@ -1,5 +1,6 @@
 pub(crate) mod cli_handlers;
 mod files;
+mod app_api;
 mod forge_handlers;
 mod messagebus;
 mod reactive;
