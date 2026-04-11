@@ -125,10 +125,42 @@ export class ClaudeTranslator implements OutputTranslator {
      */
     private handleAssistantMessage(message: any): StreamEvent[] {
         if (!message || !Array.isArray(message.content)) return [];
-        // The assistant message duplicates content from stream_events.
-        // We skip it to avoid double-rendering. The stream_events provide
-        // incremental content which is better for UX.
-        return [];
+
+        // Convert each content block into a StreamEvent.
+        // In persistent mode (--input-format stream-json), assistant messages
+        // may arrive without prior stream_event deltas, so we must render them.
+        const events: StreamEvent[] = [];
+        for (const block of message.content) {
+            if (block.type === "text" && block.text) {
+                events.push({
+                    type: "text",
+                    content: block.text,
+                    messageId: message.id || `msg-${Date.now()}`,
+                    timestamp: Date.now(),
+                });
+            } else if (block.type === "thinking" && block.thinking) {
+                events.push({
+                    type: "thinking",
+                    content: block.thinking,
+                    messageId: message.id || `msg-${Date.now()}`,
+                    timestamp: Date.now(),
+                });
+            } else if (block.type === "tool_use") {
+                this.currentToolCallId = block.id;
+                this.currentToolName = block.name;
+                if (block.id && block.name) {
+                    this.toolNameById.set(block.id, block.name);
+                }
+                events.push({
+                    type: "tool_call",
+                    toolCallId: block.id,
+                    toolName: block.name,
+                    args: typeof block.input === "string" ? block.input : JSON.stringify(block.input || {}),
+                    timestamp: Date.now(),
+                });
+            }
+        }
+        return events;
     }
 
     /**
