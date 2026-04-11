@@ -89,7 +89,10 @@ export class AgentViewModel implements ViewModel {
         if (provider.authExtraEnv) {
             Object.assign(envVars, provider.authExtraEnv);
         }
-        envVars["CLAUDE_CODE_EXIT_AFTER_STOP_DELAY"] = "30000";
+        // Only set exit delay for subprocess mode — persistent processes must stay alive
+        if (provider.controllerType !== "persistent") {
+            envVars["CLAUDE_CODE_EXIT_AFTER_STOP_DELAY"] = "30000";
+        }
 
         try {
             // Store CLI config in block metadata for the backend to read on AgentInput
@@ -214,8 +217,10 @@ export class AgentViewModel implements ViewModel {
         if (provider.authExtraEnv) {
             Object.assign(envVars, provider.authExtraEnv);
         }
-        // Prevent process hang after result event
-        envVars["CLAUDE_CODE_EXIT_AFTER_STOP_DELAY"] = "30000";
+        // Only set exit delay for subprocess mode — persistent processes must stay alive
+        if (provider.controllerType !== "persistent") {
+            envVars["CLAUDE_CODE_EXIT_AFTER_STOP_DELAY"] = "30000";
+        }
 
         // Build config files to write via backend RPC
         const configFiles = buildConfigFiles(contentMap, skills, agent);
