@@ -67,6 +67,25 @@ fn register_agent_open(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // 4. Check for existing agent pane in this tab (idempotent)
                 // Use resolved agent.id (not raw user input which could be a name)
                 if let Some(existing) = find_agent_block(&wstore, &tab_id, &agent.id)? {
+                    // Ensure the controller is registered (may be missing if block
+                    // was created by the frontend without backend initialization)
+                    if blockcontroller::get_controller(&existing.oid).is_none() {
+                        let controller_type = provider.controller_type_str();
+                        // Set essential metadata if missing
+                        let mut meta_update = obj::MetaMapType::new();
+                        meta_update.insert("controller".to_string(), json!(controller_type));
+                        meta_update.insert("agentProvider".to_string(), json!(&agent.provider));
+                        let _ = crate::server::service::update_object_meta(
+                            &wstore, &format!("block:{}", existing.oid), &meta_update,
+                        );
+                        // Register controller
+                        let block_for_resync = wstore.must_get::<Block>(&existing.oid)
+                            .map_err(|e| format!("agent.open: reload block: {e}"))?;
+                        let _ = blockcontroller::resync_controller(
+                            &block_for_resync, &tab_id, None, true,
+                            Some(broker.clone()), Some(event_bus.clone()), Some(wstore.clone()),
+                        );
+                    }
                     let status = blockcontroller::get_block_controller_status(&existing.oid)
                         .map(|s| s.shellprocstatus)
                         .unwrap_or_else(|| "init".to_string());
