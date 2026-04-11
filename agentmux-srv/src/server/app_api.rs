@@ -65,7 +65,8 @@ fn register_agent_open(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 let tab_id = resolve_tab_id(&wstore, cmd.tab_id.as_deref())?;
 
                 // 4. Check for existing agent pane in this tab (idempotent)
-                if let Some(existing) = find_agent_block(&wstore, &tab_id, &cmd.agent_id)? {
+                // Use resolved agent.id (not raw user input which could be a name)
+                if let Some(existing) = find_agent_block(&wstore, &tab_id, &agent.id)? {
                     let status = blockcontroller::get_block_controller_status(&existing.oid)
                         .map(|s| s.shellprocstatus)
                         .unwrap_or_else(|| "init".to_string());
@@ -424,7 +425,8 @@ fn register_agent_status(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 let status = runtime.as_ref()
                     .map(|s| s.shellprocstatus.clone())
                     .unwrap_or_else(|| "init".to_string());
-                let exit_code = runtime.as_ref().map(|s| s.shellprocexitcode);
+                let exit_code = runtime.as_ref()
+                    .and_then(|s| if s.shellprocstatus == "done" { Some(s.shellprocexitcode) } else { None });
                 let pid = None; // PID not currently exposed in status struct
 
                 // Get session ID from block meta
