@@ -59,7 +59,6 @@ export function useAgentStream({
 
         console.debug(`[useAgentStream] subscribed blockId=${blockId} format=${outputFormat}`);
         const subscription = fileSubject.subscribe((msg: { fileop: string; data64: string }) => {
-            console.debug(`[useAgentStream] msg blockId=${blockId} fileop=${msg.fileop} len=${msg.data64?.length ?? 0}`);
             if (msg.fileop === "truncate") {
                 // Terminal was cleared — reset document
                 setDocument([]);
@@ -119,7 +118,6 @@ export function useAgentStream({
 
                 // Translate provider-specific format → StreamEvent[]
                 const streamEvents = translator.translate(rawEvent);
-
                 // Convert StreamEvents → DocumentNodes
                 for (const event of streamEvents) {
                     const node = parser.parseLine(JSON.stringify(event));
