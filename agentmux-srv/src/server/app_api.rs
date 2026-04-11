@@ -166,45 +166,28 @@ fn register_agent_open(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     .map_err(|e| format!("agent.open: create_block: {e}"))?;
                 let block_id = block.oid.clone();
 
-                // Insert layout node so the pane is visible in the UI
+                // Enqueue a layout insert action for the frontend to process.
+                // The frontend's LayoutModel watches pendingbackendactions on the
+                // LayoutState and applies them via treeReducer — same mechanism
+                // used by cross-window drag-and-drop (dnd.rs).
                 {
                     let tab: Tab = wstore.must_get(&tab_id)
                         .map_err(|e| format!("agent.open: reload tab: {e}"))?;
                     if let Ok(mut layout) = wstore.must_get::<obj::LayoutState>(&tab.layoutstate) {
-                        let node_id = uuid::Uuid::new_v4().to_string();
-
-                        if layout.rootnode.is_none() {
-                            layout.rootnode = Some(json!({
-                                "id": &node_id,
-                                "data": { "blockId": &block_id },
-                                "flexDirection": "row",
-                                "size": 10
-                            }));
-                            layout.leaforder = Some(vec![obj::LeafOrderEntry {
-                                nodeid: node_id,
-                                blockid: block_id.clone(),
-                            }]);
-                        } else {
-                            let new_leaf = json!({
-                                "id": &node_id,
-                                "data": { "blockId": &block_id },
-                                "flexDirection": "column",
-                                "size": 10
-                            });
-                            let old_root = layout.rootnode.take().unwrap();
-                            layout.rootnode = Some(json!({
-                                "id": uuid::Uuid::new_v4().to_string(),
-                                "flexDirection": "row",
-                                "size": 10,
-                                "children": [old_root, new_leaf]
-                            }));
-                            let mut leaforder = layout.leaforder.clone().unwrap_or_default();
-                            leaforder.push(obj::LeafOrderEntry {
-                                nodeid: node_id,
-                                blockid: block_id.clone(),
-                            });
-                            layout.leaforder = Some(leaforder);
-                        }
+                        let mut actions = layout.pendingbackendactions.take().unwrap_or_default();
+                        actions.push(obj::LayoutActionData {
+                            actiontype: "insert".to_string(),
+                            actionid: uuid::Uuid::new_v4().to_string(),
+                            blockid: block_id.clone(),
+                            nodesize: None,
+                            indexarr: None,
+                            focused: true,
+                            magnified: false,
+                            ephemeral: false,
+                            targetblockid: String::new(),
+                            position: String::new(),
+                        });
+                        layout.pendingbackendactions = Some(actions);
                         let _ = wstore.update(&mut layout);
                     }
                 }
