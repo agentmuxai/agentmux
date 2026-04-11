@@ -360,3 +360,20 @@ window.addEventListener("agentmux-run-command", ((e: CustomEvent) => {
         console.warn(`[command-palette] Unknown command: ${id}`);
     }
 }) as EventListener);
+
+// Listen for `open_agent` dispatched by the Rust IPC handler (App API).
+// Creates a new agent pane with agentId pre-set so the AgentView auto-launches.
+window.addEventListener("agentmux-open-agent", (async (e: CustomEvent) => {
+    const agentId = e.detail?.agentId as string;
+    if (!agentId) {
+        console.warn("[open-agent] missing agentId");
+        return;
+    }
+    try {
+        const { createBlock } = await import("@/app/store/global");
+        const blockId = await createBlock({ meta: { view: "agent", agentId } });
+        console.log(`[open-agent] created agent pane ${blockId} for agent ${agentId}`);
+    } catch (err) {
+        console.error("[open-agent] failed:", err);
+    }
+}) as EventListener);

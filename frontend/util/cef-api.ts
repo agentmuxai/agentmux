@@ -305,6 +305,9 @@ export function buildCefApi(): AppApi {
             // CEF: open in system browser
             invokeCommand("open_external", { url }).catch(console.error);
         },
+        openAgent: (agentId: string) => {
+            return invokeCommand("open_agent", { agent_id: agentId });
+        },
         openNativePath: (filePath: string) => {
             invokeCommand("open_native_path", { filePath }).catch(console.error);
         },
