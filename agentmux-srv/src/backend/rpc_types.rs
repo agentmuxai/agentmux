@@ -288,6 +288,15 @@ pub const COMMAND_IMPORT_FORGE_FROM_CLAW: &str = "importforgefromclaw";
 // Forge Seed
 pub const COMMAND_RESEED_FORGE_AGENTS: &str = "reseedforgeagents";
 
+// App API Tier 1 — agent lifecycle commands
+pub const COMMAND_AGENT_OPEN: &str = "agent.open";
+pub const COMMAND_AGENT_SEND: &str = "agent.send";
+pub const COMMAND_AGENT_STOP_API: &str = "agent.stop";
+pub const COMMAND_AGENT_STATUS: &str = "agent.status";
+pub const COMMAND_AGENT_LIST: &str = "agent.list";
+pub const COMMAND_AGENT_OUTPUT: &str = "agent.output";
+pub const COMMAND_AGENT_STREAM: &str = "agent.stream";
+
 // ---- Client type constants ----
 
 pub const CLIENT_TYPE_CONN_SERVER: &str = "connserver";
@@ -535,6 +544,132 @@ pub struct RunCliLoginResult {
     /// OAuth URL extracted from the CLI's output (open in browser)
     pub auth_url: Option<String>,
     pub raw_output: String,
+}
+
+// ---- App API Tier 1 — request/response types ----
+
+/// Request for agent.open — find or create an agent pane for the given agent_id.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct CommandAgentOpenData {
+    pub agent_id: String,
+    pub tab_id: Option<String>,
+    pub split_direction: Option<String>,
+    pub split_reference_block_id: Option<String>,
+    pub focus: Option<bool>,
+}
+
+/// Request for agent.send — send a message to an agent pane.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct CommandAgentSendData {
+    pub block_id: String,
+    pub message: String,
+}
+
+/// Request for agent.stop — stop a running agent subprocess.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct CommandAgentStopApiData {
+    pub block_id: String,
+    pub signal: Option<String>,
+}
+
+/// Request for agent.status — query status of an agent pane.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct CommandAgentStatusData {
+    pub block_id: String,
+}
+
+/// Request for agent.output — read buffered output lines from an agent pane.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct CommandAgentOutputData {
+    pub block_id: String,
+    pub after_line: Option<usize>,
+    pub max_lines: Option<usize>,
+}
+
+/// Request for agent.stream — subscribe to live output from an agent pane.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct CommandAgentStreamData {
+    pub block_id: String,
+}
+
+/// Response from agent.open.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct AgentOpenResult {
+    pub block_id: String,
+    pub tab_id: String,
+    pub agent_id: String,
+    pub provider: String,
+    pub controller_type: String,
+    pub status: String,
+    pub created: bool,
+}
+
+/// Response from agent.send.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct AgentSendResult {
+    pub block_id: String,
+    pub status: String,
+    pub session_id: Option<String>,
+}
+
+/// Response from agent.stop.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct AgentStopResult {
+    pub block_id: String,
+    pub status: String,
+    pub exit_code: Option<i32>,
+}
+
+/// Response from agent.status.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct AgentStatusResult {
+    pub block_id: String,
+    pub agent_id: String,
+    pub provider: String,
+    pub controller_type: String,
+    pub status: String,
+    pub session_id: Option<String>,
+    pub pid: Option<u32>,
+    pub exit_code: Option<i32>,
+}
+
+/// A single entry in the agent.list response.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct AgentListEntry {
+    pub block_id: String,
+    pub tab_id: String,
+    pub agent_id: String,
+    pub provider: String,
+    pub status: String,
+    pub session_id: Option<String>,
+}
+
+/// Response from agent.list.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct AgentListResult {
+    pub agents: Vec<AgentListEntry>,
+}
+
+/// Response from agent.output.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct AgentOutputResult {
+    pub block_id: String,
+    pub lines: Vec<String>,
+    pub total_lines: usize,
+    pub has_more: bool,
 }
 
 /// Matches Go's `FileDataAt`

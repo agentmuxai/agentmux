@@ -352,6 +352,11 @@ impl PersistentSubprocessController {
                 }
 
                 // Publish line as WPS blockfile event
+                tracing::info!(
+                    block_id = %block_id_read,
+                    line_len = line.len(),
+                    "persistent stdout → blockfile"
+                );
                 let line_with_newline = format!("{}\n", line);
                 if let Some(ref broker) = broker_read {
                     super::shell::handle_append_block_file(
@@ -360,6 +365,8 @@ impl PersistentSubprocessController {
                         PERSISTENT_OUTPUT_SUBJECT,
                         line_with_newline.as_bytes(),
                     );
+                } else {
+                    tracing::warn!(block_id = %block_id_read, "persistent stdout: no broker available");
                 }
             }
 

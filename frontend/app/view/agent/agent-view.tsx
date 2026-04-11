@@ -569,7 +569,10 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         const prov = provider();
         if (prov) {
             const runtimeConfig = getRuntimeConfig(block()?.meta);
-            const updatedArgs = buildRuntimeArgs(prov.launchArgs, runtimeConfig);
+            const baseArgs = prov.controllerType === "persistent" && prov.persistentLaunchArgs
+                ? prov.persistentLaunchArgs
+                : prov.launchArgs;
+            const updatedArgs = buildRuntimeArgs(baseArgs, runtimeConfig);
             const oref = WOS.makeORef("block", model.blockId);
             try {
                 await RpcApi.SetMetaCommand(TabRpcClient, {
