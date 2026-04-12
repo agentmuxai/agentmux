@@ -10,6 +10,7 @@ import { createAgentAtoms } from "./state";
 import type { DocumentNode, SubagentLinkNode } from "./types";
 import { openSubagentPane, isSubagentPaneOpen } from "@/app/store/subagent-pane-manager";
 import { useAgentStream } from "./useAgentStream";
+import { parseHistoryLines } from "./parseHistoryLines";
 import { AgentControlBar } from "./components/AgentControlBar";
 import { AgentDocumentView } from "./components/AgentDocumentView";
 import { AgentFooter } from "./components/AgentFooter";
@@ -383,6 +384,14 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
 
     const agentAtoms = createMemo(() => createAgentAtoms(model.blockId));
 
+    // ── History pagination state ────────────────────────────────────────────────
+    // These track the window of lines we've loaded from the persisted blockfile.
+    // historyOffset = the line index where the currently-loaded slice starts.
+    // historyTotal  = total lines in the file (from session:line_count meta).
+    const [historyOffset, setHistoryOffset] = createSignal(0);
+    const [historyTotal, setHistoryTotal] = createSignal(0);
+    const [loadingOlder, setLoadingOlder] = createSignal(false);
+
     // Accumulated terminal-style log lines
     type LogLine = { tag: string; text: string; level?: "info" | "error" | "warn" };
     const [logLines, setLogLines] = createSignal<LogLine[]>([]);
@@ -417,6 +426,40 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
             return env;
         } catch {
             return undefined; // non-fatal — fall back to default auth dir
+        }
+    };
+
+    // Load the previous page of history (prepend to document).
+    // Called by AgentDocumentView when the user scrolls near the top.
+    const loadOlder = async (): Promise<void> => {
+        const currentOffset = historyOffset();
+        if (currentOffset === 0) return; // already at the beginning
+        if (loadingOlder()) return;
+
+        setLoadingOlder(true);
+        try {
+            const newOffset = Math.max(0, currentOffset - 200);
+            const loadLimit = currentOffset - newOffset;
+
+            const resp = await RpcApi.BlockfileReadRangeCommand(TabRpcClient, {
+                block_id: model.blockId,
+                filename: "output",
+                offset: newOffset,
+                limit: loadLimit,
+            }, { timeout: 15000 });
+
+            const newNodes = parseHistoryLines(resp.lines ?? [], outputFormat());
+            if (newNodes.length > 0) {
+                const [, setDoc] = agentAtoms().documentAtom;
+                setDoc((prev) => [...newNodes, ...prev]);
+            }
+
+            setHistoryOffset(newOffset);
+            log("history", `loaded ${newNodes.length} older messages (offset ${newOffset})`);
+        } catch (err: any) {
+            log("history", `failed to load older messages: ${err?.message ?? String(err)}`, "warn");
+        } finally {
+            setLoadingOlder(false);
         }
     };
 
@@ -472,6 +515,47 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
 
         log("agent", `${name} selected (provider: ${provName})`);
         if (cwd) log("env", `working directory: ${cwd}`);
+
+        // Load persisted session history before starting the live stream.
+        // We do this asynchronously so the UI isn't blocked, but we fire it
+        // immediately so history appears as early as possible.
+        (async () => {
+            try {
+                const countResp = await RpcApi.BlockfileLineCountCommand(TabRpcClient, {
+                    block_id: model.blockId,
+                    filename: "output",
+                }, { timeout: 5000 });
+
+                const total = countResp?.count ?? 0;
+                if (total > 0) {
+                    const pageSize = 200;
+                    const offset = Math.max(0, total - pageSize);
+                    const limit = total - offset;
+
+                    const rangeResp = await RpcApi.BlockfileReadRangeCommand(TabRpcClient, {
+                        block_id: model.blockId,
+                        filename: "output",
+                        offset,
+                        limit,
+                    }, { timeout: 15000 });
+
+                    const nodes = parseHistoryLines(rangeResp.lines ?? [], outputFormat());
+                    if (nodes.length > 0) {
+                        const [, setDoc] = agentAtoms().documentAtom;
+                        setDoc(nodes);
+                    }
+
+                    // Store pagination state for subsequent loadOlder() calls
+                    setHistoryOffset(offset);
+                    setHistoryTotal(total);
+
+                    log("history", `loaded ${nodes.length} of ${total} previous messages`);
+                }
+            } catch (err: any) {
+                // Non-fatal — fresh session or backend not ready yet
+                log("history", `could not load history: ${err?.message ?? String(err)}`, "warn");
+            }
+        })();
 
         // Full launch flow: CLI resolution → auth check → controller registration
         startLaunchFlow();
@@ -721,6 +805,8 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 logLines={logLines}
                 authUrl={authUrl}
                 onSubagentClick={handleSubagentClick}
+                onLoadOlder={loadOlder}
+                loadingOlder={loadingOlder}
             />
 
             <Show when={loginWaiting()}>

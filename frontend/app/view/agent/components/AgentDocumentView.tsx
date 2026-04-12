@@ -27,13 +27,19 @@ interface AgentDocumentViewProps {
     logLines: Accessor<LogLine[]>;
     authUrl?: Accessor<string | null>;
     onSubagentClick?: (node: SubagentLinkNode) => void;
+    /** Called when the user scrolls near the top — load the previous page of history. */
+    onLoadOlder?: () => Promise<void>;
+    /** Whether an older-history load is currently in progress. */
+    loadingOlder?: Accessor<boolean>;
 }
 
-export const AgentDocumentView = ({ documentAtom, documentStateAtom, logLines, authUrl, onSubagentClick }: AgentDocumentViewProps): JSX.Element => {
+export const AgentDocumentView = ({ documentAtom, documentStateAtom, logLines, authUrl, onSubagentClick, onLoadOlder, loadingOlder }: AgentDocumentViewProps): JSX.Element => {
     const [document] = documentAtom;
     const [documentState, setDocumentState] = documentStateAtom;
     let scrollRef!: HTMLDivElement;
     let autoScroll = true;
+    // Guard against concurrent older-history fetches triggered by scroll
+    let loadingOlderInFlight = false;
 
     // Toggle collapsed state for a node
     const toggleCollapse = (nodeId: string) => {
@@ -73,11 +79,37 @@ export const AgentDocumentView = ({ documentAtom, documentStateAtom, logLines, a
         if (scrollRafId != null) cancelAnimationFrame(scrollRafId);
     });
 
-    // Detect if user scrolled up (disable auto-scroll)
+    // Detect if user scrolled up (disable auto-scroll) and trigger older-history load
     const handleScroll = () => {
         if (!scrollRef) return;
         const { scrollTop, scrollHeight, clientHeight } = scrollRef;
         autoScroll = scrollHeight - scrollTop - clientHeight < 50;
+
+        // Trigger older-history load when near the top
+        if (
+            onLoadOlder &&
+            scrollTop < 50 &&
+            !loadingOlderInFlight &&
+            !(loadingOlder?.())
+        ) {
+            // Snapshot scroll anchor before content is prepended
+            const snapshotScrollHeight = scrollHeight;
+            const snapshotScrollTop = scrollTop;
+            loadingOlderInFlight = true;
+            onLoadOlder().then(() => {
+                // Restore scroll position so the user's viewport doesn't jump.
+                // Use a RAF so the DOM has updated with the new nodes first.
+                requestAnimationFrame(() => {
+                    if (scrollRef) {
+                        scrollRef.scrollTop =
+                            scrollRef.scrollHeight - snapshotScrollHeight + snapshotScrollTop;
+                    }
+                    loadingOlderInFlight = false;
+                });
+            }).catch(() => {
+                loadingOlderInFlight = false;
+            });
+        }
     };
 
     return (
@@ -86,6 +118,11 @@ export const AgentDocumentView = ({ documentAtom, documentStateAtom, logLines, a
             ref={scrollRef}
             onScroll={handleScroll}
         >
+            {/* Older-history loading indicator — pinned at the very top */}
+            <Show when={loadingOlder?.()}>
+                <div class="agent-history-loading">Loading older messages...</div>
+            </Show>
+
             {/* Log lines always shown at the top */}
             <Show when={logLines().length > 0}>
                 <div class="agent-status-log">
