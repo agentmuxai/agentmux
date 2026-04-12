@@ -28,4 +28,7 @@ pub(super) struct CacheEntry {
     /// Last time this entry was read or written (ms since epoch).
     /// Used for TTL-based eviction of clean entries.
     pub(super) last_access_ms: i64,
+    /// Byte size charged to the LRU cap for this entry.
+    /// Approximates `file.size` at insertion time; updated on write.
+    pub(super) cached_size_bytes: usize,
 }

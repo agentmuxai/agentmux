@@ -311,12 +311,16 @@ impl SubprocessController {
         tokio::spawn(async move {
             let reader = BufReader::new(stdout);
             let mut lines = reader.lines();
+            let mut stats = super::session_stats::SessionStatsAccumulator::new(block_id_read.clone());
 
             while let Ok(Some(line)) = lines.next_line().await {
                 let trimmed = line.trim();
                 if trimmed.is_empty() {
                     continue;
                 }
+
+                // Track session metadata (debounced 1 s)
+                stats.record_line(trimmed.len(), &wstore_read);
 
                 // Classify output for health monitoring
                 if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(trimmed) {
