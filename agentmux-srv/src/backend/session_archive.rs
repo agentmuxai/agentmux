@@ -117,18 +117,12 @@ pub fn archive_session_output(
     let archive_path = archive_dir.join(format!("{}.jsonl.gz", block_id));
     write_gz(&raw_bytes, &archive_path)?;
 
-    // Delete from FileStore so SQLite reclaims the space
-    if let Err(e) = filestore.delete_file(block_id, OUTPUT_FILENAME) {
-        tracing::warn!(
-            block_id = %block_id,
-            error = %e,
-            "session_archive: failed to delete filestore entry after archiving"
-        );
-    }
-
     let archived_at = now_ms();
 
-    // Write archive metadata to the block
+    // Write archive metadata BEFORE deleting the FileStore entry. If the meta
+    // update fails, the session data is still retrievable from FileStore and
+    // the orphaned .gz can be cleaned up by the next sweep. Deleting first
+    // would orphan the session if the meta write then failed.
     let mut meta = MetaMapType::new();
     meta.insert(META_SESSION_ARCHIVED_AT.to_string(), serde_json::json!(archived_at));
     meta.insert(META_SESSION_ARCHIVED_BYTES.to_string(), serde_json::json!(archived_bytes));
@@ -138,8 +132,20 @@ pub fn archive_session_output(
     );
 
     let oref_str = format!("block:{}", block_id);
-    crate::server::service::update_object_meta(wstore, &oref_str, &meta)
-        .map_err(|e| format!("update_object_meta: {e}"))?;
+    if let Err(e) = crate::server::service::update_object_meta(wstore, &oref_str, &meta) {
+        // Roll back the archive file so we don't leak disk on retry
+        let _ = std::fs::remove_file(&archive_path);
+        return Err(format!("update_object_meta: {e}"));
+    }
+
+    // Meta is now persisted; safe to reclaim the FileStore entry
+    if let Err(e) = filestore.delete_file(block_id, OUTPUT_FILENAME) {
+        tracing::warn!(
+            block_id = %block_id,
+            error = %e,
+            "session_archive: failed to delete filestore entry after archiving (meta already updated)"
+        );
+    }
 
     tracing::info!(
         block_id = %block_id,

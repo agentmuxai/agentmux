@@ -1178,20 +1178,38 @@ async fn invoke_cli_for_digest(
         _ => std::collections::HashMap::new(),
     };
 
+    // Pipe the prompt via stdin rather than passing it as a CLI arg — Linux
+    // caps individual argv entries at MAX_ARG_STRLEN (~128 KB), and a digest
+    // over 200 lines of session content can easily exceed that. Using `-p`
+    // with an empty string arg tells Claude CLI to read the prompt from stdin.
+    let mut child = crate::server::cli_handlers::make_cli_cmd(cli_path)
+        .args(["-p", "--output-format", "stream-json", "--verbose"])
+        .envs(&auth_env)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map_err(|e| format!("failed to spawn digest CLI: {e}"))?;
+
+    if let Some(mut stdin) = child.stdin.take() {
+        use tokio::io::AsyncWriteExt;
+        stdin
+            .write_all(prompt.as_bytes())
+            .await
+            .map_err(|e| format!("digest CLI stdin write: {e}"))?;
+        stdin
+            .shutdown()
+            .await
+            .map_err(|e| format!("digest CLI stdin shutdown: {e}"))?;
+    }
+
     let output = tokio::time::timeout(
         std::time::Duration::from_secs(60),
-        crate::server::cli_handlers::make_cli_cmd(cli_path)
-            .args(["-p", "--output-format", "stream-json", "--verbose"])
-            .arg(prompt)
-            .envs(&auth_env)
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::null())
-            .output(),
+        child.wait_with_output(),
     )
     .await
     .map_err(|_| "digest CLI timed out after 60s".to_string())?
-    .map_err(|e| format!("failed to spawn digest CLI: {e}"))?;
+    .map_err(|e| format!("digest CLI wait: {e}"))?;
 
     if !output.status.success() {
         return Err(format!("digest CLI exited with status {}", output.status));

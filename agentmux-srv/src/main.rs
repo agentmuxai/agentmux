@@ -384,17 +384,16 @@ async fn main() {
     // History service — discovers and indexes past CLI agent conversations
     let history_service = Arc::new(backend::history::HistoryService::new());
 
-    // Session archiver — auto-archive sessions inactive for >7 days, cap at 2 GB
-    {
+    // Session archiver — auto-archive sessions inactive for >7 days, cap at 2 GB.
+    // Skip if home directory can't be determined (would otherwise fall back to a
+    // relative path and create archives under the current working directory).
+    if let Some(archive_dir) = backend::session_archive::default_archive_dir() {
         let archiver = Arc::new(backend::session_archive::SessionArchiver::new(
             wstore.clone(),
             filestore.clone(),
             7,                              // inactive days
             2 * 1024 * 1024 * 1024,         // 2 GB max
-            dirs::home_dir()
-                .unwrap_or_default()
-                .join(".agentmux")
-                .join("archives"),
+            archive_dir,
         ));
         tokio::spawn(async move {
             loop {
@@ -405,6 +404,8 @@ async fn main() {
                 }
             }
         });
+    } else {
+        tracing::warn!("session archiver: home dir unavailable, archiver disabled");
     }
 
     // 5. Bind 2 TCP listeners on 127.0.0.1:0 (web + ws — separate ports matching Go)
