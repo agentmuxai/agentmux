@@ -31,8 +31,11 @@
         user-select: text;
         cursor: text;
         // Isolate layout/paint from siblings — critical for typing smoothness
-        // when many nodes are present. `content-visibility: auto` lets the
-        // browser skip layout/paint for off-screen content entirely.
+        // when many nodes are present. The actual off-screen skip happens via
+        // `content-visibility: auto` on each `.agent-document-node-wrapper`
+        // child below; this containment here just scopes the blast radius so
+        // mutations inside the scroll container don't invalidate layout
+        // outside it.
         contain: layout style paint;
     }
 

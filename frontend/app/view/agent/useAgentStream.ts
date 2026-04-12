@@ -63,7 +63,7 @@ export function useAgentStream({
 
         setDocument((prev) => {
             // Only copy the array once per flush, not per WebSocket message
-            let result = prev.slice();
+            const result = prev.slice();
             let mutated = false;
 
             // Apply updates using index map for O(1) lookup
