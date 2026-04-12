@@ -18,5 +18,5 @@ mod types;
 mod tests;
 
 #[allow(unused_imports)]
-pub use core::{FileStore, DEFAULT_FLUSH_SECS};
+pub use core::{FileStore, DEFAULT_FLUSH_SECS, MAX_CACHE_BYTES};
 pub use types::{FileMeta, FileOpts, WaveFile};

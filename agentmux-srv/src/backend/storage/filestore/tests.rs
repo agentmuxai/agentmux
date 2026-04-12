@@ -3,7 +3,7 @@
 
 //! Tests for FileStore.
 
-use super::core::{PART_DATA_SIZE, CACHE_TTL_SECS};
+use super::core::{PART_DATA_SIZE, CACHE_TTL_SECS, MAX_CACHE_BYTES};
 use super::{FileOpts, FileMeta, FileStore, WaveFile};
 use crate::backend::storage::error::StoreError;
 
@@ -629,4 +629,189 @@ fn test_compact_ijson() {
         .and_then(|v| v.as_i64())
         .unwrap_or(-1);
     assert_eq!(num_cmds, 0);
+}
+
+// ---- LRU eviction tests ----
+
+/// Helper: sum up file sizes tracked in the cache.
+fn cache_total(store: &FileStore) -> usize {
+    *store.cache_total_bytes.lock().unwrap()
+}
+
+/// Helper: count entries currently in the cache.
+fn cache_len(store: &FileStore) -> usize {
+    store.cache.lock().unwrap().len()
+}
+
+#[test]
+fn test_lru_entries_under_cap_all_retained() {
+    // Cap = 1 MB; insert two small files — both should stay in cache.
+    let store = FileStore::open_in_memory_with_cap(1024 * 1024).unwrap();
+
+    store.make_file("z1", "f1", FileMeta::new(), FileOpts::default()).unwrap();
+    store.make_file("z1", "f2", FileMeta::new(), FileOpts::default()).unwrap();
+
+    // Write 100 bytes each
+    let data = vec![0xAB_u8; 100];
+    store.write_file("z1", "f1", &data).unwrap();
+    store.write_file("z1", "f2", &data).unwrap();
+
+    assert_eq!(cache_len(&store), 2, "both entries should be in cache");
+    assert!(
+        cache_total(&store) <= 1024 * 1024,
+        "total bytes should be under cap"
+    );
+}
+
+#[test]
+fn test_lru_oldest_evicted_when_cap_exceeded() {
+    // Cap = 200 bytes.  Each file charges max(size, 64) bytes.
+    // We'll write files of 100 bytes each (charged as 100 bytes).
+    // Three files = 300 bytes > 200 cap → oldest should be evicted.
+    let cap: usize = 200;
+    let store = FileStore::open_in_memory_with_cap(cap).unwrap();
+
+    // Create files and write 100-byte payloads, accessing them in order f1, f2, f3.
+    for name in &["f1", "f2", "f3"] {
+        store.make_file("z1", name, FileMeta::new(), FileOpts::default()).unwrap();
+    }
+
+    let data = vec![0xBB_u8; 100];
+
+    // Write f1 first (oldest), then f2, then f3 (newest).
+    store.write_file("z1", "f1", &data).unwrap();
+    store.write_file("z1", "f2", &data).unwrap();
+    store.write_file("z1", "f3", &data).unwrap();
+
+    // After inserting f3 the cap (200) is exceeded.  evict_to_cap should have
+    // removed at least f1 (oldest) so total <= cap.
+    assert!(
+        cache_total(&store) <= cap,
+        "total {} exceeds cap {}",
+        cache_total(&store),
+        cap
+    );
+
+    // f1 is the oldest; it should have been evicted.
+    let has_f1 = store
+        .cache
+        .lock()
+        .unwrap()
+        .contains_key(&("z1".to_string(), "f1".to_string()));
+    assert!(!has_f1, "f1 (oldest) should have been evicted");
+
+    // The data must still be readable from DB after eviction.
+    let read = store.read_file("z1", "f1").unwrap().unwrap();
+    assert_eq!(read, data, "f1 data must survive LRU eviction (lives in DB)");
+}
+
+#[test]
+fn test_lru_access_promotes_entry() {
+    // Cap sized to hold exactly 2 × 100-byte entries.
+    // Insert f1, f2 (fills to cap).  Then re-access f1 (promotes it to MRU).
+    // Insert f3 → cap exceeded → eviction should remove f2 (now the oldest),
+    // not f1 (recently touched).
+    let cap: usize = 200;
+    let store = FileStore::open_in_memory_with_cap(cap).unwrap();
+
+    for name in &["f1", "f2", "f3"] {
+        store.make_file("z1", name, FileMeta::new(), FileOpts::default()).unwrap();
+    }
+
+    let data = vec![0xCC_u8; 100];
+    store.write_file("z1", "f1", &data).unwrap();
+    store.write_file("z1", "f2", &data).unwrap();
+
+    // Re-access f1 to promote it (make it newer than f2).
+    // We use a small sleep-free timestamp backdate trick: directly set f2's
+    // last_access_ms to an older value so f1 is definitively newer.
+    {
+        let mut cache = store.cache.lock().unwrap();
+        if let Some(e) = cache.get_mut(&("z1".to_string(), "f2".to_string())) {
+            e.last_access_ms = 1; // artificially old
+        }
+        // Touch f1 to make it newer
+        if let Some(e) = cache.get_mut(&("z1".to_string(), "f1".to_string())) {
+            e.last_access_ms = FileStore::now_ms();
+        }
+    }
+
+    // Insert f3 — should trigger eviction of f2 (oldest), not f1.
+    store.write_file("z1", "f3", &data).unwrap();
+
+    assert!(
+        cache_total(&store) <= cap,
+        "total {} should be <= cap {}",
+        cache_total(&store),
+        cap
+    );
+
+    let cache_guard = store.cache.lock().unwrap();
+    let has_f1 = cache_guard.contains_key(&("z1".to_string(), "f1".to_string()));
+    let has_f2 = cache_guard.contains_key(&("z1".to_string(), "f2".to_string()));
+    drop(cache_guard);
+
+    assert!(!has_f2, "f2 (oldest / LRU) should have been evicted");
+    assert!(has_f1, "f1 (recently accessed / MRU) should be retained");
+}
+
+#[test]
+fn test_lru_ttl_still_works_alongside_lru() {
+    // Verify that TTL eviction via flush_cache still removes stale entries
+    // independently of the LRU cap.
+    let store = make_store(); // default 128 MB cap — LRU won't kick in for tiny data
+
+    store.make_file("z1", "f1", FileMeta::new(), FileOpts::default()).unwrap();
+    store.write_file("z1", "f1", b"tiny").unwrap();
+
+    // Backdate the entry beyond TTL.
+    {
+        let ttl_ms = (CACHE_TTL_SECS * 1000 + 1000) as i64;
+        let now = FileStore::now_ms();
+        let mut cache = store.cache.lock().unwrap();
+        if let Some(entry) = cache.get_mut(&("z1".to_string(), "f1".to_string())) {
+            entry.last_access_ms = now - ttl_ms;
+        }
+    }
+
+    let before_total = cache_total(&store);
+    store.flush_cache().unwrap();
+
+    // Entry should be gone from cache.
+    let has_f1 = store
+        .cache
+        .lock()
+        .unwrap()
+        .contains_key(&("z1".to_string(), "f1".to_string()));
+    assert!(!has_f1, "stale entry should have been TTL-evicted by flush_cache");
+
+    // cache_total_bytes must have decreased.
+    let after_total = cache_total(&store);
+    assert!(
+        after_total < before_total,
+        "cache_total_bytes should decrease after TTL eviction"
+    );
+
+    // Data still readable from DB.
+    let data = store.read_file("z1", "f1").unwrap().unwrap();
+    assert_eq!(data, b"tiny");
+}
+
+#[test]
+fn test_lru_delete_updates_total_bytes() {
+    let store = make_store();
+    store.make_file("z1", "f1", FileMeta::new(), FileOpts::default()).unwrap();
+    store.write_file("z1", "f1", b"some data").unwrap();
+
+    let before = cache_total(&store);
+    store.delete_file("z1", "f1").unwrap();
+    let after = cache_total(&store);
+
+    assert!(after < before, "cache_total_bytes should decrease after delete_file");
+}
+
+#[test]
+fn test_lru_default_cap_constant() {
+    // Sanity check that the public constant is what we expect.
+    assert_eq!(MAX_CACHE_BYTES, 128 * 1024 * 1024);
 }

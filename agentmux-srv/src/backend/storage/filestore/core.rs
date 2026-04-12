@@ -27,10 +27,18 @@ pub const DEFAULT_FLUSH_SECS: u64 = 5;
 #[allow(dead_code)]
 pub const CACHE_TTL_SECS: u64 = 60;
 
+/// Hard cap on the total byte size held in the metadata cache (128 MB).
+/// When this is exceeded, LRU eviction removes the oldest entries first.
+pub const MAX_CACHE_BYTES: usize = 128 * 1024 * 1024;
+
 /// SQLite-backed file storage with write-through cache.
 pub struct FileStore {
     pub(super) conn: Mutex<Connection>,
     pub(super) cache: Mutex<HashMap<(String, String), CacheEntry>>,
+    /// Total bytes currently accounted for across all cache entries.
+    pub(super) cache_total_bytes: Mutex<usize>,
+    /// Maximum bytes the cache may hold before LRU eviction kicks in.
+    pub(super) cache_max_bytes: usize,
 }
 
 impl FileStore {
@@ -47,6 +55,15 @@ impl FileStore {
         Self::configure_and_migrate(conn)
     }
 
+    /// Open an in-memory FileStore with a custom LRU byte cap.  Used in tests.
+    #[allow(dead_code)]
+    pub fn open_in_memory_with_cap(max_bytes: usize) -> Result<Self, StoreError> {
+        let conn = Connection::open_in_memory()?;
+        let mut store = Self::configure_and_migrate(conn)?;
+        store.cache_max_bytes = max_bytes;
+        Ok(store)
+    }
+
     fn configure_and_migrate(conn: Connection) -> Result<Self, StoreError> {
         conn.execute_batch(
             "PRAGMA journal_mode=WAL;
@@ -56,6 +73,8 @@ impl FileStore {
         Ok(Self {
             conn: Mutex::new(conn),
             cache: Mutex::new(HashMap::new()),
+            cache_total_bytes: Mutex::new(0),
+            cache_max_bytes: MAX_CACHE_BYTES,
         })
     }
 
@@ -64,6 +83,59 @@ impl FileStore {
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis() as i64
+    }
+
+    /// Evict the least-recently-used cache entries until `cache_total_bytes <= cache_max_bytes`.
+    /// Must be called with *neither* `cache` nor `cache_total_bytes` lock held.
+    pub(super) fn evict_to_cap(&self) {
+        // Fast path: check total without evicting.
+        let total = *self.cache_total_bytes.lock().unwrap();
+        if total <= self.cache_max_bytes {
+            return;
+        }
+
+        // Collect (last_access_ms, key, size) for all entries, sort oldest-first.
+        let candidates: Vec<(i64, (String, String), usize)> = {
+            let cache = self.cache.lock().unwrap();
+            cache
+                .iter()
+                .map(|(k, e)| (e.last_access_ms, k.clone(), e.cached_size_bytes))
+                .collect()
+        };
+
+        // Sort by last_access_ms ascending (oldest first).
+        let mut candidates = candidates;
+        candidates.sort_by_key(|(ts, _, _)| *ts);
+
+        let mut evicted_count = 0usize;
+        let mut evicted_bytes = 0usize;
+
+        for (_, key, size) in candidates {
+            {
+                let total = *self.cache_total_bytes.lock().unwrap();
+                if total <= self.cache_max_bytes {
+                    break;
+                }
+            }
+            {
+                let mut cache = self.cache.lock().unwrap();
+                if cache.remove(&key).is_some() {
+                    let mut total = self.cache_total_bytes.lock().unwrap();
+                    *total = total.saturating_sub(size);
+                    evicted_count += 1;
+                    evicted_bytes += size;
+                }
+            }
+        }
+
+        if evicted_count > 0 {
+            tracing::debug!(
+                "filestore lru: evicted {} entries, freed {} bytes (cap={})",
+                evicted_count,
+                evicted_bytes,
+                self.cache_max_bytes,
+            );
+        }
     }
 
     /// Create a new file. Fails if file already exists.
@@ -108,16 +180,19 @@ impl FileStore {
 
         // Add to cache
         let key = (zone_id.to_string(), name.to_string());
-        let mut cache = self.cache.lock().unwrap();
-        cache.insert(
-            key,
-            CacheEntry {
-                file: Some(file),
-                data_entries: HashMap::new(),
-                dirty: false,
-                last_access_ms: now,
-            },
-        );
+        let entry = CacheEntry {
+            file: Some(file),
+            data_entries: HashMap::new(),
+            dirty: false,
+            last_access_ms: now,
+            cached_size_bytes: 64, // new file is size=0; charge minimum overhead
+        };
+        {
+            let mut cache = self.cache.lock().unwrap();
+            cache.insert(key, entry);
+            *self.cache_total_bytes.lock().unwrap() += 64;
+        }
+        self.evict_to_cap();
 
         Ok(())
     }
@@ -139,7 +214,10 @@ impl FileStore {
         // Remove from cache
         let key = (zone_id.to_string(), name.to_string());
         let mut cache = self.cache.lock().unwrap();
-        cache.remove(&key);
+        if let Some(removed) = cache.remove(&key) {
+            *self.cache_total_bytes.lock().unwrap() =
+                self.cache_total_bytes.lock().unwrap().saturating_sub(removed.cached_size_bytes);
+        }
 
         Ok(())
     }
@@ -167,8 +245,15 @@ impl FileStore {
         drop(conn);
 
         let mut cache = self.cache.lock().unwrap();
+        let mut freed = 0usize;
         for name in names {
-            cache.remove(&(zone_id.to_string(), name));
+            if let Some(removed) = cache.remove(&(zone_id.to_string(), name)) {
+                freed += removed.cached_size_bytes;
+            }
+        }
+        if freed > 0 {
+            *self.cache_total_bytes.lock().unwrap() =
+                self.cache_total_bytes.lock().unwrap().saturating_sub(freed);
         }
 
         Ok(())
@@ -261,14 +346,27 @@ impl FileStore {
         drop(conn);
 
         // Update cache (metadata only — data parts are already in DB, read_file loads from DB)
-        let mut cache = self.cache.lock().unwrap();
-        if let Some(entry) = cache.get_mut(&key) {
-            if let Some(ref mut file) = entry.file {
-                file.size = data.len() as i64;
-                file.modts = now;
+        {
+            let new_size = data.len().max(64);
+            let mut cache = self.cache.lock().unwrap();
+            if let Some(entry) = cache.get_mut(&key) {
+                let old_size = entry.cached_size_bytes;
+                if let Some(ref mut file) = entry.file {
+                    file.size = data.len() as i64;
+                    file.modts = now;
+                }
+                entry.last_access_ms = now;
+                entry.cached_size_bytes = new_size;
+                let delta = new_size as i64 - old_size as i64;
+                let mut total = self.cache_total_bytes.lock().unwrap();
+                if delta >= 0 {
+                    *total += delta as usize;
+                } else {
+                    *total = total.saturating_sub((-delta) as usize);
+                }
             }
-            entry.last_access_ms = now;
         }
+        self.evict_to_cap();
 
         Ok(())
     }
@@ -397,14 +495,27 @@ impl FileStore {
         drop(conn);
 
         // Update cache
-        let mut cache = self.cache.lock().unwrap();
-        if let Some(entry) = cache.get_mut(&key) {
-            if let Some(ref mut f) = entry.file {
-                f.size = new_size;
-                f.modts = now;
+        {
+            let new_size_bytes = (new_size as usize).max(64);
+            let mut cache = self.cache.lock().unwrap();
+            if let Some(entry) = cache.get_mut(&key) {
+                let old_size = entry.cached_size_bytes;
+                if let Some(ref mut f) = entry.file {
+                    f.size = new_size;
+                    f.modts = now;
+                }
+                entry.last_access_ms = now;
+                entry.cached_size_bytes = new_size_bytes;
+                let delta = new_size_bytes as i64 - old_size as i64;
+                let mut total = self.cache_total_bytes.lock().unwrap();
+                if delta >= 0 {
+                    *total += delta as usize;
+                } else {
+                    *total = total.saturating_sub((-delta) as usize);
+                }
             }
-            entry.last_access_ms = now;
         }
+        self.evict_to_cap();
 
         Ok(())
     }
@@ -445,7 +556,7 @@ impl FileStore {
         )?;
         drop(conn);
 
-        // Update cache
+        // Update cache (metadata write doesn't change file.size, so cached_size_bytes unchanged)
         let mut cache = self.cache.lock().unwrap();
         if let Some(entry) = cache.get_mut(&key) {
             if let Some(ref mut f) = entry.file {
@@ -518,11 +629,18 @@ impl FileStore {
 
         // Evict stale clean entries — they're already persisted in DB.
         if !stale_keys.is_empty() {
+            let mut freed = 0usize;
             let mut cache = self.cache.lock().unwrap();
             for key in &stale_keys {
-                cache.remove(key);
+                if let Some(removed) = cache.remove(key) {
+                    freed += removed.cached_size_bytes;
+                }
             }
-            tracing::debug!("filestore cache: evicted {} stale entries", stale_keys.len());
+            if freed > 0 {
+                *self.cache_total_bytes.lock().unwrap() =
+                    self.cache_total_bytes.lock().unwrap().saturating_sub(freed);
+            }
+            tracing::debug!("filestore cache: evicted {} stale entries ({} bytes)", stale_keys.len(), freed);
         }
 
         let mut files_flushed = 0;
@@ -531,7 +649,12 @@ impl FileStore {
         for key in dirty_keys {
             let entry = {
                 let mut cache = self.cache.lock().unwrap();
-                cache.remove(&key)
+                let entry = cache.remove(&key);
+                if let Some(ref e) = entry {
+                    *self.cache_total_bytes.lock().unwrap() =
+                        self.cache_total_bytes.lock().unwrap().saturating_sub(e.cached_size_bytes);
+                }
+                entry
             };
 
             if let Some(entry) = entry {

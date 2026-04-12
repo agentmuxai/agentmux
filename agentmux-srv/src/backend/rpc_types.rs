@@ -297,6 +297,10 @@ pub const COMMAND_AGENT_LIST: &str = "agent.list";
 pub const COMMAND_AGENT_OUTPUT: &str = "agent.output";
 pub const COMMAND_AGENT_STREAM: &str = "agent.stream";
 
+// App API Tier 1 — blockfile pagination commands
+pub const COMMAND_BLOCKFILE_LINE_COUNT: &str = "blockfile:line_count";
+pub const COMMAND_BLOCKFILE_READ_RANGE: &str = "blockfile:read_range";
+
 // ---- Client type constants ----
 
 pub const CLIENT_TYPE_CONN_SERVER: &str = "connserver";
@@ -670,6 +674,39 @@ pub struct AgentOutputResult {
     pub lines: Vec<String>,
     pub total_lines: usize,
     pub has_more: bool,
+}
+
+/// Request for blockfile:line_count — count total lines in a blockfile.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct CommandBlockfileLineCountData {
+    pub block_id: String,
+    pub filename: String,
+}
+
+/// Response from blockfile:line_count.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct BlockfileLineCountResult {
+    pub count: u64,
+}
+
+/// Request for blockfile:read_range — read a range of lines from a blockfile.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct CommandBlockfileReadRangeData {
+    pub block_id: String,
+    pub filename: String,
+    pub offset: u64,
+    pub limit: u64,
+}
+
+/// Response from blockfile:read_range.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct BlockfileReadRangeResult {
+    pub lines: Vec<String>,
+    pub total: u64,
 }
 
 /// Matches Go's `FileDataAt`
