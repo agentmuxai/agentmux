@@ -63,49 +63,38 @@ The full flow works:
 
 ---
 
-## What's Not Working Yet
+## Verified Working End-to-End (as of 0.33.91)
 
-### 1. Pane Not Visible After `agent.open`
+All three initial blockers were resolved:
 
-**Status:** Backend layout tree updated, but frontend doesn't re-render.
+| Issue | Fix | Version |
+|-------|-----|---------|
+| Pane not visible after `agent.open` | Use `LayoutState.pendingbackendactions` — frontend's layout model picks up insert actions via its reactive `createEffect` (same mechanism as cross-window drag) | 0.33.83 |
+| Agent response not rendering | `claude-translator.handleAssistantMessage` now emits text/thinking/tool_use StreamEvents. Previously returned `[]` on the assumption that `stream_event` deltas would arrive first, but in persistent mode they don't | 0.33.84 |
+| CLI auto-install | Still a limitation — caller must pre-install via `npm install --prefix ~/.agentmux/<version>/cli/claude @anthropic-ai/claude-code@latest` before calling `agent.open` | — |
 
-**Root cause:** The frontend layout model is a client-side state machine driven by
-`layoutModel.treeReducer(InsertNode)`. Backend-side `LayoutState` writes + event
-broadcasts are insufficient — the frontend's reactive layout model doesn't
-re-derive from raw database state on `waveobj:update` events for layouts.
+**Confirmed working:**
+- `agent.open` → block created, layout inserted, pane visible in UI
+- `agent.send` → persistent process spawned with correct args, message delivered
+- Claude responds → stdout → WPS blockfile → `useAgentStream` → rendered text
+- Multi-turn persistent conversation with preserved session ID
 
-**Fix needed:** Either:
-- **Option A:** Add a frontend event handler for `layoutaction` events that
-  calls `layoutModel.treeReducer()` when the backend requests a layout change
-- **Option B:** Have `agent.open` return the block ID and let the frontend's
-  existing `createBlock()` handle the layout insertion via a new IPC command
-- **Option C:** Make the frontend layout model reactive to `LayoutState` changes
-  (would also fix cross-window layout sync)
+## Known Remaining Limitations
 
-**Recommendation:** Option A — minimal frontend change, backend-driven layout.
+### 1. CLI Auto-Install
 
-### 2. Agent Response Not Rendering in Agent View
+`agent.open` returns `CLI_NOT_AVAILABLE` if the npm package isn't installed. Workaround: pre-install before calling `agent.open`.
 
-**Status:** stdout lines published to WPS blockfile, `useAgentStream` subscribes
-to the correct subject (`"output"`), but no text appears in the agent view.
+**Fix planned:** Add an `auto_install: bool` field to the `agent.open` request (default `true`) that triggers the same npm install logic used by the frontend's launch flow.
 
-**Root cause:** Not yet diagnosed. The WPS data flow is:
-`persistent.rs stdout reader` → `handle_append_block_file(broker, blockId, "output", data)`
-→ `broker.publish(EVENT_BLOCK_FILE, ...)` → `frontend global.ts fileSubject.next()`
-→ `useAgentStream subscription`
+### 2. Slash Commands
 
-The `console.log` in `useAgentStream` (added in v0.33.86) was never tested in a
-clean build with a visible pane. Needs debugging with both frontend and backend
-logging enabled simultaneously.
+Interactive commands (`/login`, `/help`, `/clear`) don't work natively in stream-json mode — the CLI excludes them from the `slash_commands` array in the `system.init` event. Frontend intercepts `/login` and `/clear` in `handleSendMessage`:
 
-### 3. CLI Auto-Install in `agent.open`
+- `/login` → calls `runCliLogin` IPC → spawns separate CLI process → captures OAuth URL → displays in URL box with hover-to-copy button (shipped 0.33.89)
+- `/clear` → resets document signal (frontend-only, shipped 0.33.88)
 
-**Status:** `agent.open` returns `CLI_NOT_AVAILABLE` if the npm package isn't
-installed. The caller must pre-install via `npm install --prefix`.
-
-**Fix needed:** Add optional auto-install to `agent.open` — call the same npm
-install logic from `cli_handlers.rs` if the binary isn't found. Add an
-`auto_install: bool` field to the request (default: true).
+Other slash commands (`/cost`, `/compact`, etc.) pass through to the CLI which handles them as synthetic assistant messages (zero tokens).
 
 ---
 
