@@ -588,50 +588,33 @@ fn register_agent_output(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
 fn register_blockfile_line_count(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let broker = state.broker.clone();
-    let wstore = state.wstore.clone();
 
     engine.register_handler(
         COMMAND_BLOCKFILE_LINE_COUNT,
         Box::new(move |data, _ctx| {
             let broker = broker.clone();
-            let wstore = wstore.clone();
             Box::pin(async move {
                 let cmd: CommandBlockfileLineCountData = serde_json::from_value(data)
                     .map_err(|e| format!("blockfile:line_count: {e}"))?;
 
                 tracing::info!(block_id = %cmd.block_id, filename = %cmd.filename, "blockfile:line_count");
 
-                // Fast path: read the pre-computed `session:line_count` meta
-                // field maintained by SessionStatsAccumulator. This is O(1) —
-                // no event history scan. The accumulator updates it debounced
-                // at 1s so the value may trail real-time by up to a second,
-                // which is fine for UI purposes.
+                // Returns the number of lines *currently available* in the
+                // event ring buffer (MAX_PERSIST = 4096 events). For long
+                // sessions this may be LESS than the all-time session line
+                // count — older events have been evicted. This matches the
+                // semantics of `blockfile:read_range` so the two commands
+                // agree on what "offset N" means.
                 //
-                // Currently SessionStatsAccumulator tracks total session lines,
-                // not per-filename. If the caller requests a filename other
-                // than "output" we fall through to an event history scan.
-                let block = wstore
-                    .get::<Block>(&cmd.block_id)
-                    .map_err(|e| format!("blockfile:line_count: {e}"))?
-                    .ok_or_else(|| format!("BLOCK_NOT_FOUND: {}", cmd.block_id))?;
-
-                if cmd.filename == "output" {
-                    let count = block.meta.get("session:line_count")
-                        .and_then(|v| v.as_u64())
-                        .unwrap_or(0);
-                    return Ok(Some(serde_json::to_value(
-                        &BlockfileLineCountResult { count },
-                    ).unwrap()));
-                }
-
-                // Fallback: scan event history for non-output filenames
-                // (rare — current persistent/subprocess controllers only
-                // publish to "output")
+                // Callers who need the all-time count should read the
+                // `session:line_count` meta field directly. Until Phase 1.3
+                // (disk-based segmentation) lands, lines outside the ring
+                // buffer window are not retrievable.
                 let scope = format!("block:{}", cmd.block_id);
                 let events = broker.read_event_history(
                     crate::backend::wps::EVENT_BLOCK_FILE,
                     &scope,
-                    10_000,
+                    usize::MAX, // broker clamps to MAX_PERSIST internally
                 );
 
                 let mut count: u64 = 0;
@@ -667,13 +650,11 @@ fn register_blockfile_line_count(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
 fn register_blockfile_read_range(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let broker = state.broker.clone();
-    let wstore = state.wstore.clone();
 
     engine.register_handler(
         COMMAND_BLOCKFILE_READ_RANGE,
         Box::new(move |data, _ctx| {
             let broker = broker.clone();
-            let wstore = wstore.clone();
             Box::pin(async move {
                 let cmd: CommandBlockfileReadRangeData = serde_json::from_value(data)
                     .map_err(|e| format!("blockfile:read_range: {e}"))?;
@@ -684,31 +665,31 @@ fn register_blockfile_read_range(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 let offset = cmd.offset as usize;
                 let end = offset.saturating_add(limit);
 
-                // Get the authoritative total from session meta (fast path for
-                // "output"; O(1)). If unavailable, we'll compute it during the
-                // scan below as a fallback.
-                let mut total: u64 = 0;
-                if cmd.filename == "output" {
-                    if let Ok(Some(block)) = wstore.get::<Block>(&cmd.block_id) {
-                        total = block.meta.get("session:line_count")
-                            .and_then(|v| v.as_u64())
-                            .unwrap_or(0);
-                    }
-                }
-
-                // Read events and stream-decode line-by-line. Stop as soon as
-                // we've collected the requested window — avoids the O(n) memory
-                // cost of materializing the entire history.
+                // Read the full event window (capped at the broker's
+                // MAX_PERSIST = 4096 events). The in-memory ring buffer may
+                // not have every event from the start of the session — older
+                // events have been evicted. The `total` we report is the
+                // number of lines *available* right now, not the all-time
+                // count. This is what the frontend should use for pagination
+                // so it never asks for offsets the ring buffer can't serve.
+                //
+                // For all-time totals, use `blockfile:line_count` which reads
+                // `session:line_count` meta (unbounded) — but be aware that
+                // lines outside the ring buffer window are effectively gone
+                // until Phase 1.3 (disk-based segmentation) lands.
                 let scope = format!("block:{}", cmd.block_id);
                 let events = broker.read_event_history(
                     crate::backend::wps::EVENT_BLOCK_FILE,
                     &scope,
-                    10_000,
+                    usize::MAX, // broker clamps to MAX_PERSIST internally
                 );
 
-                let mut lines: Vec<String> = Vec::with_capacity(limit);
-                let mut seen: usize = 0;
-                'outer: for event in events {
+                // First pass: collect all available lines from the ring buffer.
+                // We need the total count before we can apply offset/limit,
+                // because `offset` is expressed relative to the available
+                // window (0 = oldest still-retained line).
+                let mut all_lines: Vec<String> = Vec::new();
+                for event in events {
                     let Some(ref event_data) = event.data else { continue };
                     let ev_filename = event_data.get("filename")
                         .and_then(|v| v.as_str()).unwrap_or("");
@@ -719,25 +700,20 @@ fn register_blockfile_read_range(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(data64) else { continue };
                     let text = String::from_utf8_lossy(&bytes);
                     for line in text.lines() {
-                        if line.trim().is_empty() {
-                            continue;
-                        }
-                        if seen >= offset && seen < end {
-                            lines.push(line.to_string());
-                        }
-                        seen += 1;
-                        if seen >= end && total > 0 {
-                            // We have the requested window AND an authoritative
-                            // total from meta — safe to stop early.
-                            break 'outer;
+                        if !line.trim().is_empty() {
+                            all_lines.push(line.to_string());
                         }
                     }
                 }
 
-                // If meta didn't give us a total, use what we counted
-                if total == 0 {
-                    total = seen as u64;
-                }
+                let total = all_lines.len() as u64;
+                let clamped_offset = offset.min(all_lines.len());
+                let clamped_end = end.min(all_lines.len());
+                let lines: Vec<String> = if clamped_offset >= clamped_end {
+                    Vec::new()
+                } else {
+                    all_lines[clamped_offset..clamped_end].to_vec()
+                };
 
                 Ok(Some(serde_json::to_value(&BlockfileReadRangeResult {
                     lines,
