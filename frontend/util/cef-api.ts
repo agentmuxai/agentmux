@@ -526,7 +526,12 @@ export function buildCefApi(): AppApi {
             return await invokeCommand<string>("ensure_auth_dir", { providerId });
         },
         runCliLogin: async (cliPath: string, loginArgs: string[], authEnv: Record<string, string>) => {
-            return await invokeCommand<string | null>("run_cli_login", { cliPath, loginArgs, authEnv });
+            const result = await invokeCommand<{ auth_url: string | null } | string | null>("run_cli_login", { cliPath, loginArgs, authEnv });
+            // Backend now returns { auth_url } — extract for callers expecting just a URL
+            if (result && typeof result === "object" && "auth_url" in result) {
+                return result.auth_url;
+            }
+            return result as string | null;
         },
         cancelCliLogin: async () => {
             await invokeCommand("cancel_cli_login");

@@ -296,8 +296,8 @@ pub async fn run_cli_login(
     cmd.args(&login_args)
         .envs(&auth_env)
         .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null());
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
 
     #[cfg(windows)]
     {
@@ -309,6 +309,47 @@ pub async fn run_cli_login(
         .map_err(|e| format!("failed to spawn {cli_path}: {e}"))?;
 
     tracing::info!(cli = %cli_path, "run_cli_login: spawned, browser should open");
+
+    // Capture the OAuth URL from stdout/stderr. The CLI prints it within the
+    // first few hundred ms after spawn. We read until we find "https://..."
+    // or time out after 2s.
+    let stdout = child.stdout.take();
+    let stderr = child.stderr.take();
+
+    let auth_url: Option<String> = tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        async {
+            use tokio::io::AsyncBufReadExt;
+            let mut combined = Vec::new();
+            if let Some(s) = stdout {
+                let mut lines = tokio::io::BufReader::new(s).lines();
+                while let Ok(Some(line)) = lines.next_line().await {
+                    if let Some(url) = extract_url(&line) {
+                        return Some(url);
+                    }
+                    combined.push(line);
+                    if combined.len() > 20 { break; }
+                }
+            }
+            if let Some(s) = stderr {
+                let mut lines = tokio::io::BufReader::new(s).lines();
+                while let Ok(Some(line)) = lines.next_line().await {
+                    if let Some(url) = extract_url(&line) {
+                        return Some(url);
+                    }
+                    if combined.len() > 40 { break; }
+                    combined.push(line);
+                }
+            }
+            None
+        },
+    ).await.unwrap_or(None);
+
+    if let Some(ref url) = auth_url {
+        tracing::info!(url = %url, "run_cli_login: captured auth URL");
+    } else {
+        tracing::warn!("run_cli_login: no auth URL captured within 2s");
+    }
 
     let (cancel_tx, cancel_rx) = tokio::sync::oneshot::channel::<()>();
     {
@@ -337,7 +378,44 @@ pub async fn run_cli_login(
         }
     });
 
-    Ok(serde_json::Value::Null)
+    Ok(serde_json::json!({ "auth_url": auth_url }))
+}
+
+/// Extract an OAuth URL from a line of CLI output.
+/// Strips ANSI escape sequences and looks for `https://...` substrings.
+fn extract_url(line: &str) -> Option<String> {
+    // Strip ANSI escapes (simple approach: remove ESC[...letter sequences)
+    let clean: String = {
+        let mut out = String::with_capacity(line.len());
+        let bytes = line.as_bytes();
+        let mut i = 0;
+        while i < bytes.len() {
+            if bytes[i] == 0x1b && i + 1 < bytes.len() && bytes[i+1] == b'[' {
+                // Skip until we find a letter (end of ANSI sequence)
+                i += 2;
+                while i < bytes.len() && !(bytes[i] as char).is_ascii_alphabetic() {
+                    i += 1;
+                }
+                i += 1;
+            } else {
+                out.push(bytes[i] as char);
+                i += 1;
+            }
+        }
+        out
+    };
+
+    // Find https:// and extract until whitespace or end
+    if let Some(start) = clean.find("https://") {
+        let rest = &clean[start..];
+        let end = rest.find(|c: char| c.is_whitespace() || c == '"' || c == '\'')
+            .unwrap_or(rest.len());
+        let url = &rest[..end];
+        if url.contains("oauth") || url.contains("auth") || url.contains("login") {
+            return Some(url.to_string());
+        }
+    }
+    None
 }
 
 /// Kill the in-progress CLI login process.
