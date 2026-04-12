@@ -858,6 +858,10 @@ declare global {
             model?: string | null;
             effort?: string | null;
         };
+        "agent:bookmarks"?: unknown[];
+        "session:start_ts_ms"?: number;
+        "session:last_activity_ms"?: number;
+        "session:line_count"?: number;
         "subagent:*"?: boolean;
         "subagent:id"?: string;
         "subagent:slug"?: string;
