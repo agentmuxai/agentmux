@@ -63,7 +63,7 @@ export function useAgentStream({
 
         setDocument((prev) => {
             // Only copy the array once per flush, not per WebSocket message
-            const result = prev.slice();
+            let result = prev.slice();
             let mutated = false;
 
             // Apply updates using index map for O(1) lookup
@@ -86,6 +86,21 @@ export function useAgentStream({
                 for (let i = 0; i < batchNew.length; i++) {
                     nodeIndexMap.set(batchNew[i].id, baseIdx + i);
                     result.push(batchNew[i]);
+                }
+                mutated = true;
+            }
+
+            // Cap document size to prevent unbounded DOM growth in long sessions.
+            // Typing lag correlates directly with DOM element count — 500 nodes
+            // is a reasonable ceiling for interactive use.
+            const MAX_NODES = 500;
+            if (result.length > MAX_NODES) {
+                const drop = result.length - MAX_NODES;
+                result = result.slice(drop);
+                // Rebuild index map since indices shifted
+                nodeIndexMap.clear();
+                for (let i = 0; i < result.length; i++) {
+                    nodeIndexMap.set(result[i].id, i);
                 }
                 mutated = true;
             }

@@ -385,9 +385,14 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
 
     // Accumulated terminal-style log lines
     type LogLine = { tag: string; text: string; level?: "info" | "error" | "warn" };
+    const MAX_LOG_LINES = 50;
     const [logLines, setLogLines] = createSignal<LogLine[]>([]);
     const log = (tag: string, text: string, level?: "info" | "error" | "warn") => {
-        setLogLines((prev) => [...prev, { tag, text, level: level ?? "info" }]);
+        setLogLines((prev) => {
+            const next = [...prev, { tag, text, level: level ?? "info" }];
+            // Cap to prevent unbounded growth during long sessions
+            return next.length > MAX_LOG_LINES ? next.slice(-MAX_LOG_LINES) : next;
+        });
     };
 
     // OAuth URL — shown prominently with a copy button when login is needed
@@ -398,8 +403,10 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
     const [flowRunning, setFlowRunning] = createSignal(false);
     // Whether the agent is ready (launch complete, controller registered)
     const [agentReady, setAgentReady] = createSignal(false);
-    // Show spinner during launch and until agent is ready
-    const isLoading = () => flowRunning() || !agentReady();
+    // Show spinner during launch and until agent is ready.
+    // createMemo ensures derived value is cached and only re-evaluates
+    // when underlying signals change — not on every caller read.
+    const isLoading = createMemo(() => flowRunning() || !agentReady());
     // Whether we're specifically in the login-polling phase
     const [loginWaiting, setLoginWaiting] = createSignal(false);
     // Mutable flag for cancelling the polling loop (set by cancel or onCleanup)

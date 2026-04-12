@@ -30,6 +30,20 @@
         gap: 1px;
         user-select: text;
         cursor: text;
+        // Isolate layout/paint from siblings — critical for typing smoothness
+        // when many nodes are present. `content-visibility: auto` lets the
+        // browser skip layout/paint for off-screen content entirely.
+        contain: layout style paint;
+    }
+
+    .agent-document-node-wrapper {
+        // Each document node gets its own containment box. Off-screen nodes
+        // are skipped by the browser via content-visibility.
+        // contain-intrinsic-size gives the browser a size estimate so scroll
+        // position stays stable when content is virtualized in/out.
+        content-visibility: auto;
+        contain-intrinsic-size: auto 80px;
+        contain: layout style;
     }
 
     // === Status Log (terminal-style) ===
