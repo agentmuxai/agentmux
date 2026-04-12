@@ -32,6 +32,7 @@ use super::{
 };
 use super::health::{classify_output_line, HealthMonitor};
 use crate::backend::eventbus::EventBus;
+use crate::backend::storage::filestore::FileStore;
 use crate::backend::storage::wstore::WaveStore;
 use crate::backend::wps;
 
@@ -74,6 +75,8 @@ pub struct PersistentSubprocessController {
     broker: Option<Arc<wps::Broker>>,
     event_bus: Option<Arc<EventBus>>,
     wstore: Option<Arc<WaveStore>>,
+    /// FileStore for write-through persistence of output lines (Phase 1.3).
+    filestore: Option<Arc<FileStore>>,
     health_monitor: Arc<HealthMonitor>,
 }
 
@@ -84,6 +87,7 @@ impl PersistentSubprocessController {
         broker: Option<Arc<wps::Broker>>,
         event_bus: Option<Arc<EventBus>>,
         wstore: Option<Arc<WaveStore>>,
+        filestore: Option<Arc<FileStore>>,
     ) -> Self {
         let health_monitor = Arc::new(HealthMonitor::new(
             block_id.clone(),
@@ -104,6 +108,7 @@ impl PersistentSubprocessController {
             broker,
             event_bus,
             wstore,
+            filestore,
             health_monitor,
         }
     }
@@ -279,6 +284,7 @@ impl PersistentSubprocessController {
         let inner_read = Arc::clone(&self.inner);
         let wstore_read = self.wstore.clone();
         let event_bus_read = self.event_bus.clone();
+        let filestore_read = self.filestore.clone();
         let health_read = Arc::clone(&self.health_monitor);
         let session_id_field = config.session_id_field.clone();
 
@@ -354,7 +360,8 @@ impl PersistentSubprocessController {
                     }
                 }
 
-                // Publish line as WPS blockfile event
+                // Publish line as WPS blockfile event and write-through to FileStore
+                // for persistent history (Phase 1.3).
                 tracing::info!(
                     block_id = %block_id_read,
                     line_len = line.len(),
@@ -367,6 +374,7 @@ impl PersistentSubprocessController {
                         &block_id_read,
                         PERSISTENT_OUTPUT_SUBJECT,
                         line_with_newline.as_bytes(),
+                        filestore_read.as_ref(),
                     );
                 } else {
                     tracing::warn!(block_id = %block_id_read, "persistent stdout: no broker available");

@@ -38,6 +38,7 @@ fn register_agent_open(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let wstore = state.wstore.clone();
     let broker = state.broker.clone();
     let event_bus = state.event_bus.clone();
+    let filestore = state.filestore.clone();
 
     engine.register_handler(
         COMMAND_AGENT_OPEN,
@@ -45,6 +46,7 @@ fn register_agent_open(engine: &Arc<WshRpcEngine>, state: &AppState) {
             let wstore = wstore.clone();
             let broker = broker.clone();
             let event_bus = event_bus.clone();
+            let filestore = filestore.clone();
             Box::pin(async move {
                 let cmd: CommandAgentOpenData = serde_json::from_value(data)
                     .map_err(|e| format!("agent.open: {e}"))?;
@@ -86,6 +88,7 @@ fn register_agent_open(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         let _ = blockcontroller::resync_controller(
                             &block_for_resync, &tab_id, None, true,
                             Some(broker.clone()), Some(event_bus.clone()), Some(wstore.clone()),
+                            Some(filestore.clone()),
                         );
                     }
                     let status = blockcontroller::get_block_controller_status(&existing.oid)
@@ -236,6 +239,7 @@ fn register_agent_open(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     Some(broker.clone()),
                     Some(event_bus.clone()),
                     Some(wstore.clone()),
+                    Some(filestore.clone()),
                 )?;
 
                 // 10. Broadcast block + tab + layout updates to frontend
@@ -588,28 +592,64 @@ fn register_agent_output(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
 fn register_blockfile_line_count(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let broker = state.broker.clone();
+    let filestore = state.filestore.clone();
 
     engine.register_handler(
         COMMAND_BLOCKFILE_LINE_COUNT,
         Box::new(move |data, _ctx| {
             let broker = broker.clone();
+            let filestore = filestore.clone();
             Box::pin(async move {
                 let cmd: CommandBlockfileLineCountData = serde_json::from_value(data)
                     .map_err(|e| format!("blockfile:line_count: {e}"))?;
 
                 tracing::info!(block_id = %cmd.block_id, filename = %cmd.filename, "blockfile:line_count");
 
-                // Returns the number of lines *currently available* in the
-                // event ring buffer (MAX_PERSIST = 4096 events). For long
-                // sessions this may be LESS than the all-time session line
-                // count — older events have been evicted. This matches the
-                // semantics of `blockfile:read_range` so the two commands
-                // agree on what "offset N" means.
+                // Phase 1.3: Prefer FileStore (persistent, no size cap) over the
+                // WPS broker ring buffer (MAX_PERSIST = 4096 events).
                 //
-                // Callers who need the all-time count should read the
-                // `session:line_count` meta field directly. Until Phase 1.3
-                // (disk-based segmentation) lands, lines outside the ring
-                // buffer window are not retrievable.
+                // If FileStore has the file and it is non-empty, count lines in
+                // the persisted bytes. Otherwise fall back to the ring buffer so
+                // sessions that pre-date Phase 1.3 (no FileStore writes yet) still
+                // work correctly.
+                let filestore_count = match filestore.stat(&cmd.block_id, &cmd.filename) {
+                    Ok(Some(ref wf)) if wf.size > 0 => {
+                        match filestore.read_file(&cmd.block_id, &cmd.filename) {
+                            Ok(Some(bytes)) => {
+                                let text = String::from_utf8_lossy(&bytes);
+                                let count = text.lines()
+                                    .filter(|l| !l.trim().is_empty())
+                                    .count() as u64;
+                                Some(count)
+                            }
+                            Ok(None) => None,
+                            Err(e) => {
+                                tracing::warn!(
+                                    block_id = %cmd.block_id,
+                                    filename = %cmd.filename,
+                                    error = %e,
+                                    "blockfile:line_count: filestore read failed, falling back to ring buffer"
+                                );
+                                None
+                            }
+                        }
+                    }
+                    Ok(_) => None, // file absent or empty → fall back
+                    Err(e) => {
+                        tracing::warn!(
+                            block_id = %cmd.block_id,
+                            error = %e,
+                            "blockfile:line_count: filestore stat failed, falling back to ring buffer"
+                        );
+                        None
+                    }
+                };
+
+                if let Some(count) = filestore_count {
+                    return Ok(Some(serde_json::to_value(&BlockfileLineCountResult { count }).unwrap()));
+                }
+
+                // Fallback: count from WPS event ring buffer (capped at MAX_PERSIST = 4096).
                 let scope = format!("block:{}", cmd.block_id);
                 let events = broker.read_event_history(
                     crate::backend::wps::EVENT_BLOCK_FILE,
@@ -650,11 +690,13 @@ fn register_blockfile_line_count(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
 fn register_blockfile_read_range(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let broker = state.broker.clone();
+    let filestore = state.filestore.clone();
 
     engine.register_handler(
         COMMAND_BLOCKFILE_READ_RANGE,
         Box::new(move |data, _ctx| {
             let broker = broker.clone();
+            let filestore = filestore.clone();
             Box::pin(async move {
                 let cmd: CommandBlockfileReadRangeData = serde_json::from_value(data)
                     .map_err(|e| format!("blockfile:read_range: {e}"))?;
@@ -665,48 +707,77 @@ fn register_blockfile_read_range(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 let offset = cmd.offset as usize;
                 let end = offset.saturating_add(limit);
 
-                // Read the full event window (capped at the broker's
-                // MAX_PERSIST = 4096 events). The in-memory ring buffer may
-                // not have every event from the start of the session — older
-                // events have been evicted. The `total` we report is the
-                // number of lines *available* right now, not the all-time
-                // count. This matches `blockfile:line_count` semantics
-                // (both commands agree on what "offset N" means) so the
-                // frontend never asks for offsets the ring buffer can't
-                // serve.
+                // Phase 1.3: Prefer FileStore (persistent, no size cap) over the
+                // WPS broker ring buffer (MAX_PERSIST = 4096 events).
                 //
-                // Callers needing the all-time count can read the
-                // `session:line_count` meta field directly — but be aware
-                // that lines outside the ring buffer window are effectively
-                // gone until Phase 1.3 (disk-based segmentation) lands.
-                let scope = format!("block:{}", cmd.block_id);
-                let events = broker.read_event_history(
-                    crate::backend::wps::EVENT_BLOCK_FILE,
-                    &scope,
-                    usize::MAX, // broker clamps to MAX_PERSIST internally
-                );
-
-                // First pass: collect all available lines from the ring buffer.
-                // We need the total count before we can apply offset/limit,
-                // because `offset` is expressed relative to the available
-                // window (0 = oldest still-retained line).
-                let mut all_lines: Vec<String> = Vec::new();
-                for event in events {
-                    let Some(ref event_data) = event.data else { continue };
-                    let ev_filename = event_data.get("filename")
-                        .and_then(|v| v.as_str()).unwrap_or("");
-                    if ev_filename != cmd.filename {
-                        continue;
-                    }
-                    let Some(data64) = event_data.get("data64").and_then(|v| v.as_str()) else { continue };
-                    let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(data64) else { continue };
-                    let text = String::from_utf8_lossy(&bytes);
-                    for line in text.lines() {
-                        if !line.trim().is_empty() {
-                            all_lines.push(line.to_string());
+                // If FileStore has the file and it is non-empty, read from disk.
+                // Otherwise fall back to ring buffer for backward compatibility.
+                let filestore_lines = match filestore.stat(&cmd.block_id, &cmd.filename) {
+                    Ok(Some(ref wf)) if wf.size > 0 => {
+                        match filestore.read_file(&cmd.block_id, &cmd.filename) {
+                            Ok(Some(bytes)) => {
+                                let text = String::from_utf8_lossy(&bytes);
+                                let lines: Vec<String> = text.lines()
+                                    .filter(|l| !l.trim().is_empty())
+                                    .map(|l| l.to_string())
+                                    .collect();
+                                Some(lines)
+                            }
+                            Ok(None) => None,
+                            Err(e) => {
+                                tracing::warn!(
+                                    block_id = %cmd.block_id,
+                                    filename = %cmd.filename,
+                                    error = %e,
+                                    "blockfile:read_range: filestore read failed, falling back to ring buffer"
+                                );
+                                None
+                            }
                         }
                     }
-                }
+                    Ok(_) => None, // file absent or empty → fall back
+                    Err(e) => {
+                        tracing::warn!(
+                            block_id = %cmd.block_id,
+                            error = %e,
+                            "blockfile:read_range: filestore stat failed, falling back to ring buffer"
+                        );
+                        None
+                    }
+                };
+
+                let all_lines = if let Some(lines) = filestore_lines {
+                    lines
+                } else {
+                    // Fallback: reconstruct from WPS event ring buffer.
+                    // The ring buffer holds at most MAX_PERSIST = 4096 events;
+                    // older events are evicted. Offset 0 = oldest retained line.
+                    let scope = format!("block:{}", cmd.block_id);
+                    let events = broker.read_event_history(
+                        crate::backend::wps::EVENT_BLOCK_FILE,
+                        &scope,
+                        usize::MAX, // broker clamps to MAX_PERSIST internally
+                    );
+
+                    let mut lines: Vec<String> = Vec::new();
+                    for event in events {
+                        let Some(ref event_data) = event.data else { continue };
+                        let ev_filename = event_data.get("filename")
+                            .and_then(|v| v.as_str()).unwrap_or("");
+                        if ev_filename != cmd.filename {
+                            continue;
+                        }
+                        let Some(data64) = event_data.get("data64").and_then(|v| v.as_str()) else { continue };
+                        let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(data64) else { continue };
+                        let text = String::from_utf8_lossy(&bytes);
+                        for line in text.lines() {
+                            if !line.trim().is_empty() {
+                                lines.push(line.to_string());
+                            }
+                        }
+                    }
+                    lines
+                };
 
                 let total = all_lines.len() as u64;
                 let clamped_offset = offset.min(all_lines.len());

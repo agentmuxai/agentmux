@@ -31,6 +31,7 @@ use super::{
 };
 use super::health::{classify_output_line, HealthMonitor};
 use crate::backend::eventbus::EventBus;
+use crate::backend::storage::filestore::FileStore;
 use crate::backend::storage::wstore::WaveStore;
 use crate::backend::wps;
 
@@ -98,6 +99,8 @@ pub struct SubprocessController {
     event_bus: Option<Arc<EventBus>>,
     /// Wave object store for block metadata persistence.
     wstore: Option<Arc<WaveStore>>,
+    /// FileStore for write-through persistence of output lines (Phase 1.3).
+    filestore: Option<Arc<FileStore>>,
     /// Agent health monitor (output activity + error tracking).
     health_monitor: Arc<HealthMonitor>,
 }
@@ -110,6 +113,7 @@ impl SubprocessController {
         broker: Option<Arc<wps::Broker>>,
         event_bus: Option<Arc<EventBus>>,
         wstore: Option<Arc<WaveStore>>,
+        filestore: Option<Arc<FileStore>>,
     ) -> Self {
         let health_monitor = Arc::new(HealthMonitor::new(
             block_id.clone(),
@@ -130,6 +134,7 @@ impl SubprocessController {
             broker,
             event_bus,
             wstore,
+            filestore,
             health_monitor,
         }
     }
@@ -306,6 +311,7 @@ impl SubprocessController {
         let inner_read = Arc::clone(&self.inner);
         let wstore_read = self.wstore.clone();
         let event_bus_read = self.event_bus.clone();
+        let filestore_read = self.filestore.clone();
         let health_read = Arc::clone(&self.health_monitor);
         let session_id_field = config.session_id_field.clone();
         tokio::spawn(async move {
@@ -398,6 +404,7 @@ impl SubprocessController {
                 }
 
                 // Publish the NDJSON line as a WPS blockfile event on the "output" subject
+                // and write-through to FileStore for persistent history (Phase 1.3).
                 if let Some(ref broker) = broker_read {
                     tracing::info!(block_id = %block_id_read, line = %trimmed, "subprocess stdout → blockfile");
                     // Include the newline so the frontend line splitter works correctly
@@ -407,6 +414,7 @@ impl SubprocessController {
                         &block_id_read,
                         SUBPROCESS_OUTPUT_SUBJECT,
                         line_with_newline.as_bytes(),
+                        filestore_read.as_ref(),
                     );
                 }
             }
@@ -628,6 +636,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         );
         assert_eq!(ctrl.controller_type(), BLOCK_CONTROLLER_SUBPROCESS);
         assert_eq!(ctrl.block_id(), "block-1");
@@ -645,6 +654,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         );
         let result = ctrl.send_input(BlockInputUnion::data(b"hello".to_vec()));
         assert!(result.is_err());
@@ -656,6 +666,7 @@ mod tests {
         let ctrl = SubprocessController::new(
             "tab-1".to_string(),
             "block-1".to_string(),
+            None,
             None,
             None,
             None,
@@ -676,6 +687,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         );
         let result = ctrl.stop(true, STATUS_DONE);
         assert!(result.is_ok());
@@ -692,6 +704,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         );
         assert!(ctrl.session_id().is_none());
     }
@@ -701,6 +714,7 @@ mod tests {
         let ctrl = SubprocessController::new(
             "tab-1".to_string(),
             "block-1".to_string(),
+            None,
             None,
             None,
             None,
@@ -715,6 +729,8 @@ mod tests {
             working_dir: String::new(),
             env_vars: HashMap::new(),
             message: "test".to_string(),
+            resume_flag: String::new(),
+            session_id_field: "session_id".to_string(),
         };
 
         let result = ctrl.spawn_turn(config);

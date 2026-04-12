@@ -7,13 +7,15 @@
  * When no document nodes exist yet, shows accumulated log lines (terminal-style).
  */
 
-import { createEffect, For, Show, type Accessor, type JSX, onCleanup } from "solid-js";
+import { createEffect, createSignal, For, Show, type Accessor, type JSX, onCleanup } from "solid-js";
 import type { SignalPair } from "../state";
 import type { DocumentNode, DocumentState, SubagentLinkNode } from "../types";
 import { AgentMessageBlock } from "./AgentMessageBlock";
+import { AgentTimeline } from "./AgentTimeline";
 import { MarkdownBlock } from "./MarkdownBlock";
 import { SubagentLinkBlock } from "./SubagentLinkBlock";
 import { ToolBlock } from "./ToolBlock";
+import { ContextMenuModel } from "@/app/store/contextmenu";
 
 export interface LogLine {
     tag: string;        // "agent", "cli", "auth", "env", "error", etc.
@@ -31,15 +33,41 @@ interface AgentDocumentViewProps {
     onLoadOlder?: () => Promise<void>;
     /** Whether an older-history load is currently in progress. */
     loadingOlder?: Accessor<boolean>;
+    /** session:start_ts_ms from block meta — enables the timeline minimap. */
+    startTsMs?: Accessor<number | null>;
+    /** session:last_activity_ms from block meta — enables the timeline minimap. */
+    endTsMs?: Accessor<number | null>;
+    /** Set of bookmarked node IDs — drives the bookmarked visual indicator. */
+    bookmarkedNodeIds?: Accessor<Set<string>>;
+    /** Called when the user bookmarks or un-bookmarks a node via context menu. */
+    onBookmark?: (node: DocumentNode) => void;
+    /** Expose a scrollToNode function to the parent for jump-to-bookmark support. */
+    scrollToNodeRef?: (fn: (nodeId: string) => void) => void;
 }
 
-export const AgentDocumentView = ({ documentAtom, documentStateAtom, logLines, authUrl, onSubagentClick, onLoadOlder, loadingOlder }: AgentDocumentViewProps): JSX.Element => {
+export const AgentDocumentView = ({ documentAtom, documentStateAtom, logLines, authUrl, onSubagentClick, onLoadOlder, loadingOlder, startTsMs, endTsMs, bookmarkedNodeIds, onBookmark, scrollToNodeRef }: AgentDocumentViewProps): JSX.Element => {
     const [document] = documentAtom;
     const [documentState, setDocumentState] = documentStateAtom;
     let scrollRef!: HTMLDivElement;
     let autoScroll = true;
     // Guard against concurrent older-history fetches triggered by scroll
     let loadingOlderInFlight = false;
+    // 0..1 fraction of the current scroll position within the document
+    const [scrollFraction, setScrollFraction] = createSignal(0);
+
+    // Scroll to a node by its data-node-id attribute.
+    // Exposed to the parent via scrollToNodeRef so BookmarksPanel can call it.
+    const scrollToNode = (nodeId: string) => {
+        const el = scrollRef?.querySelector(`[data-node-id="${nodeId}"]`);
+        if (el) {
+            el.scrollIntoView({ behavior: "smooth", block: "center" });
+            // Disable auto-scroll after a manual jump
+            autoScroll = false;
+        }
+    };
+
+    // Expose scrollToNode to the parent on mount
+    if (scrollToNodeRef) scrollToNodeRef(scrollToNode);
 
     // Toggle collapsed state for a node
     const toggleCollapse = (nodeId: string) => {
@@ -85,6 +113,10 @@ export const AgentDocumentView = ({ documentAtom, documentStateAtom, logLines, a
         const { scrollTop, scrollHeight, clientHeight } = scrollRef;
         autoScroll = scrollHeight - scrollTop - clientHeight < 50;
 
+        // Update timeline scroll indicator
+        const maxScroll = scrollHeight - clientHeight;
+        setScrollFraction(maxScroll > 0 ? Math.min(1, scrollTop / maxScroll) : 0);
+
         // Trigger older-history load when near the top
         if (
             onLoadOlder &&
@@ -112,7 +144,18 @@ export const AgentDocumentView = ({ documentAtom, documentStateAtom, logLines, a
         }
     };
 
+    // Called when the user clicks the timeline — scroll the document to that position.
+    const handleTimelineJump = (fraction: number) => {
+        if (!scrollRef) return;
+        const { scrollHeight, clientHeight } = scrollRef;
+        const maxScroll = scrollHeight - clientHeight;
+        scrollRef.scrollTop = fraction * maxScroll;
+        // Disable auto-scroll when the user manually jumps to a position
+        autoScroll = fraction >= 0.98;
+    };
+
     return (
+        <div class="agent-document-wrapper">
         <div
             class="agent-document"
             ref={scrollRef}
@@ -164,17 +207,65 @@ export const AgentDocumentView = ({ documentAtom, documentStateAtom, logLines, a
                 skip layout/paint for off-screen nodes — critical for
                 long sessions where thousands of DOM elements accumulate. */}
             <For each={document()}>
-                {(node) => (
-                    <div class="agent-document-node-wrapper">
-                        <DocumentNodeRenderer
-                            node={node}
-                            collapsed={documentState().collapsedNodes.has(node.id)}
-                            onToggle={() => toggleCollapse(node.id)}
-                            onSubagentClick={onSubagentClick}
-                        />
-                    </div>
-                )}
+                {(node) => {
+                    const isBookmarked = () => bookmarkedNodeIds?.().has(node.id) ?? false;
+
+                    const handleContextMenu = (e: MouseEvent) => {
+                        if (!onBookmark) return;
+                        // Don't show bookmark menu on top of text selections — let the parent handle those.
+                        const sel = window.getSelection()?.toString();
+                        if (sel) return;
+                        e.preventDefault();
+                        e.stopPropagation();
+                        ContextMenuModel.showContextMenu(
+                            [
+                                {
+                                    label: isBookmarked() ? "Remove bookmark" : "Bookmark this message",
+                                    click: () => onBookmark(node),
+                                },
+                            ],
+                            e,
+                        );
+                    };
+
+                    return (
+                        <div
+                            class="agent-document-node-wrapper"
+                            classList={{ "agent-node-bookmarked": isBookmarked() }}
+                            data-node-id={node.id}
+                            onContextMenu={handleContextMenu}
+                        >
+                            {/* Bookmark indicator button — shown on hover */}
+                            <Show when={onBookmark != null}>
+                                <button
+                                    class="agent-bookmark-btn"
+                                    classList={{ "agent-bookmark-btn--active": isBookmarked() }}
+                                    onClick={(e) => { e.stopPropagation(); onBookmark!(node); }}
+                                    title={isBookmarked() ? "Remove bookmark" : "Bookmark this message"}
+                                >
+                                    {isBookmarked() ? "\uD83D\uDD16" : "\uD83D\uDD16"}
+                                </button>
+                            </Show>
+                            <DocumentNodeRenderer
+                                node={node}
+                                collapsed={documentState().collapsedNodes.has(node.id)}
+                                onToggle={() => toggleCollapse(node.id)}
+                                onSubagentClick={onSubagentClick}
+                            />
+                        </div>
+                    );
+                }}
             </For>
+        </div>
+        <Show when={startTsMs != null && endTsMs != null}>
+            <AgentTimeline
+                document={document}
+                startTsMs={startTsMs ?? (() => null)}
+                endTsMs={endTsMs ?? (() => null)}
+                scrollPosition={scrollFraction}
+                onJump={handleTimelineJump}
+            />
+        </Show>
         </div>
     );
 };

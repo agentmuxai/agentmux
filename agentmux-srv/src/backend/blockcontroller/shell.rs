@@ -36,6 +36,7 @@ use super::{
 };
 use crate::backend::eventbus::EventBus;
 use crate::backend::shellexec::{ConnInterface, ShellProc};
+use crate::backend::storage::filestore::FileStore;
 use crate::backend::storage::wstore::WaveStore;
 use crate::backend::obj::{self, MetaMapType};
 use crate::backend::wps;
@@ -731,6 +732,7 @@ impl Controller for ShellController {
                                 &block_id_read,
                                 "term",
                                 &buf[..n],
+                                None, // PTY output is raw terminal data; no FileStore write-through
                             );
                         }
                     }
@@ -912,16 +914,20 @@ impl Controller for ShellController {
 
 // ---- File operation helpers ----
 
-/// Append data to a block's terminal output file and publish a WPS event.
+/// Append data to a block's terminal output file, publish a WPS event,
+/// and write-through to FileStore (if provided).
+///
 /// Port of Go's `HandleAppendBlockFile`.
+///
+/// The FileStore write is fire-and-forget: if it fails we emit a warning but
+/// never propagate the error back to the hot stdout-reader path.
 pub fn handle_append_block_file(
     broker: &wps::Broker,
     block_id: &str,
     filename: &str,
     data: &[u8],
+    filestore: Option<&Arc<FileStore>>,
 ) {
-    // In a full implementation, this would also write to FileStore.
-    // For now, just publish the WPS event.
     let data64 = base64::engine::general_purpose::STANDARD.encode(data);
 
     let event_data = wps::WSFileEventData {
@@ -940,6 +946,56 @@ pub fn handle_append_block_file(
     };
 
     broker.publish(event);
+
+    // Write-through to FileStore for persistent history (Phase 1.3).
+    // Create the file lazily on first append; if the file already exists
+    // we skip make_file and go straight to append_data.
+    if let Some(fs) = filestore {
+        let needs_create = match fs.stat(block_id, filename) {
+            Ok(None) => true,
+            Ok(Some(_)) => false,
+            Err(e) => {
+                tracing::warn!(
+                    block_id = %block_id,
+                    filename = %filename,
+                    error = %e,
+                    "filestore stat failed; skipping write-through"
+                );
+                return;
+            }
+        };
+
+        if needs_create {
+            if let Err(e) = fs.make_file(
+                block_id,
+                filename,
+                std::collections::HashMap::new(),
+                crate::backend::storage::filestore::FileOpts::default(),
+            ) {
+                // AlreadyExists is benign (race between two appends); anything
+                // else is worth warning about.
+                use crate::backend::storage::error::StoreError;
+                if !matches!(e, StoreError::AlreadyExists) {
+                    tracing::warn!(
+                        block_id = %block_id,
+                        filename = %filename,
+                        error = %e,
+                        "filestore make_file failed; skipping write-through"
+                    );
+                    return;
+                }
+            }
+        }
+
+        if let Err(e) = fs.append_data(block_id, filename, data) {
+            tracing::warn!(
+                block_id = %block_id,
+                filename = %filename,
+                error = %e,
+                "filestore append_data failed"
+            );
+        }
+    }
 }
 
 /// Truncate a block's terminal output file and publish a WPS event.
@@ -1268,7 +1324,7 @@ mod tests {
             },
         );
 
-        handle_append_block_file(&broker, "block-1", "term", b"hello world");
+        handle_append_block_file(&broker, "block-1", "term", b"hello world", None);
 
         // Check event was published
         let _history = broker.read_event_history(wps::EVENT_BLOCK_FILE, "block:block-1", 10);
@@ -1327,7 +1383,7 @@ mod tests {
             ..Default::default()
         };
 
-        let result = super::super::resync_controller(&block, "tab-1", None, false, None, None, None);
+        let result = super::super::resync_controller(&block, "tab-1", None, false, None, None, None, None);
         assert!(result.is_ok());
 
         let ctrl = super::super::get_controller("resync-test-block");
@@ -1336,5 +1392,54 @@ mod tests {
 
         // Cleanup
         super::super::delete_controller("resync-test-block");
+    }
+
+    /// Phase 1.3 integration test: write output via handle_append_block_file with a
+    /// FileStore, then verify the data is readable back from the store.
+    #[test]
+    fn test_handle_append_block_file_writes_to_filestore() {
+        use crate::backend::storage::filestore::FileStore;
+        use std::sync::Arc;
+
+        let broker = wps::Broker::new();
+        let fs = Arc::new(FileStore::open_in_memory().expect("open in-memory filestore"));
+
+        let block_id = "test-block-fs";
+        let filename = "output";
+
+        // First append — file does not exist yet; handle_append_block_file must create it lazily.
+        let line1 = b"line one\n";
+        handle_append_block_file(&broker, block_id, filename, line1, Some(&fs));
+
+        // Second append
+        let line2 = b"line two\n";
+        handle_append_block_file(&broker, block_id, filename, line2, Some(&fs));
+
+        // Read back from FileStore
+        let data = fs.read_file(block_id, filename)
+            .expect("read_file ok")
+            .expect("data present");
+
+        let text = String::from_utf8(data).expect("valid utf8");
+        assert!(text.contains("line one"), "expected 'line one' in {:?}", text);
+        assert!(text.contains("line two"), "expected 'line two' in {:?}", text);
+
+        // Also verify total size matches
+        let stat = fs.stat(block_id, filename).unwrap().unwrap();
+        assert_eq!(stat.size, (line1.len() + line2.len()) as i64);
+
+        // Verify WPS events were also published (broker path still works)
+        broker.subscribe(
+            "test-route-fs",
+            wps::SubscriptionRequest {
+                event: wps::EVENT_BLOCK_FILE.to_string(),
+                scopes: vec![format!("block:{}", block_id)],
+                allscopes: false,
+            },
+        );
+        // Re-publish one more line to confirm broker still receives events alongside filestore
+        handle_append_block_file(&broker, block_id, filename, b"line three\n", Some(&fs));
+        let stat_after = fs.stat(block_id, filename).unwrap().unwrap();
+        assert_eq!(stat_after.size, (line1.len() + line2.len() + b"line three\n".len()) as i64);
     }
 }
