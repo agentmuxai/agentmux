@@ -123,6 +123,17 @@ export function useAgentStream({
         pendingNew = [];
         pendingUpdates = [];
 
+        // Seed the dedup set from any history nodes already in the document
+        // (loaded by the history-load step in agent-view.tsx before this hook
+        // mounts). This prevents live-stream events from re-inserting nodes
+        // that were restored from persisted history.
+        const [doc] = documentAtom;
+        const existingNodes = doc();
+        for (let i = 0; i < existingNodes.length; i++) {
+            nodeIdSet.add(existingNodes[i].id);
+            nodeIndexMap.set(existingNodes[i].id, i);
+        }
+
         setStreaming((prev) => ({ ...prev, active: true, lastEventTime: Date.now() }));
 
         const fileSubject = getFileSubject(blockId, OutputFileName);
