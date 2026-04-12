@@ -66,42 +66,70 @@
 
     .agent-auth-url-box {
         margin-top: 8px;
-        padding: 8px;
-        background: var(--panel-bg-color, rgba(255,255,255,0.04));
+        padding: 10px 12px;
+        background: var(--panel-bg-color, rgba(74, 158, 255, 0.08));
         border: 1px solid var(--accent-color, #4a9eff);
-        border-radius: 4px;
+        border-radius: 6px;
+        box-shadow: 0 0 12px rgba(74, 158, 255, 0.15);
     }
 
     .agent-auth-url-label {
         font-size: 11px;
-        opacity: 0.7;
-        margin-bottom: 4px;
+        color: #8cc8ff;
+        margin-bottom: 6px;
+        font-weight: 600;
+        letter-spacing: 0.3px;
     }
 
     .agent-auth-url-row {
+        position: relative;
         display: flex;
         align-items: center;
-        gap: 8px;
+        padding: 8px 10px;
+        background: rgba(0, 0, 0, 0.35);
+        border-radius: 4px;
+        cursor: default;
+
+        &:hover .agent-auth-url-copy {
+            opacity: 1;
+            transform: translateY(-50%) scale(1);
+        }
     }
 
     .agent-auth-url-text {
         flex: 1;
         word-break: break-all;
-        color: var(--accent-color, #4a9eff);
+        color: #8cc8ff;
         font-size: 11px;
+        font-family: var(--fixed-font, monospace);
         user-select: text;
+        padding-right: 60px;
     }
 
     .agent-auth-url-copy {
-        flex-shrink: 0;
-        padding: 3px 10px;
-        font-size: 11px;
-        background: var(--accent-color, #4a9eff);
+        position: absolute;
+        right: 8px;
+        top: 50%;
+        transform: translateY(-50%) scale(0.95);
+        padding: 4px 12px;
+        font-size: 10px;
+        font-weight: 600;
+        background: #4a9eff;
         color: #fff;
         border: none;
         border-radius: 3px;
         cursor: pointer;
-        &:hover { opacity: 0.85; }
+        opacity: 0;
+        transition: opacity 0.15s ease, transform 0.15s ease, background 0.15s ease;
+        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+
+        &:hover {
+            background: #6bb0ff;
+        }
+
+        &:active {
+            transform: translateY(-50%) scale(0.92);
+        }
     }
 
     // === Retry Login Bar ===

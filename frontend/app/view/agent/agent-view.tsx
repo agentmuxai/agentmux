@@ -584,8 +584,14 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                         if (typeof v === "string") authEnv[k] = v;
                     }
                 }
-                await getApi().runCliLogin(cliPath, prov.authLoginCommand, authEnv);
-                log("auth", "a browser window should have opened — complete login there");
+                const url = await getApi().runCliLogin(cliPath, prov.authLoginCommand, authEnv);
+                if (url) {
+                    setAuthUrl(url);
+                    log("auth", `OAuth URL captured — browser should open automatically`);
+                    log("auth", `if it didn't, copy the URL from the box above`);
+                } else {
+                    log("auth", "a browser window should have opened — complete login there");
+                }
                 log("auth", "run /cost to verify authentication once logged in");
             } catch (err: any) {
                 log("error", `/login failed: ${err?.message ?? String(err)}`, "error");
