@@ -49,8 +49,7 @@ export const AgentDocumentView = ({ documentAtom, documentStateAtom, logLines, a
     };
 
     // Auto-scroll to bottom when new content arrives.
-    // Use MutationObserver to scroll AFTER the DOM has updated.
-    let observer: MutationObserver | null = null;
+    let scrollRafId: number | null = null;
 
     const scrollToBottom = () => {
         if (autoScroll && scrollRef) {
@@ -58,25 +57,20 @@ export const AgentDocumentView = ({ documentAtom, documentStateAtom, logLines, a
         }
     };
 
-    // Also trigger on signal changes (for initial content)
+    // Scroll when document or log signals change — throttled to one RAF per batch
     createEffect(() => {
         const _docLen = document().length;
         const _logLen = logLines().length;
-        // Defer to next frame so DOM is updated
-        requestAnimationFrame(scrollToBottom);
+        if (scrollRafId == null) {
+            scrollRafId = requestAnimationFrame(() => {
+                scrollRafId = null;
+                scrollToBottom();
+            });
+        }
     });
 
-    // Watch for any DOM mutations inside the scroll container
-    // This catches content appended to existing nodes (text streaming)
-    createEffect(() => {
-        if (!scrollRef) return;
-        observer = new MutationObserver(() => {
-            if (autoScroll) {
-                scrollRef.scrollTop = scrollRef.scrollHeight;
-            }
-        });
-        observer.observe(scrollRef, { childList: true, subtree: true, characterData: true });
-        onCleanup(() => observer?.disconnect());
+    onCleanup(() => {
+        if (scrollRafId != null) cancelAnimationFrame(scrollRafId);
     });
 
     // Detect if user scrolled up (disable auto-scroll)

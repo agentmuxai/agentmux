@@ -44,6 +44,68 @@ export function useAgentStream({
     let parser = new ClaudeCodeStreamParser();
     let nodeIdSet = new Set<string>();
 
+    // Batching: accumulate parsed nodes between RAF flushes
+    let pendingNew: DocumentNode[] = [];
+    let pendingUpdates: DocumentNode[] = [];
+    let flushRafId: number | null = null;
+
+    // Index for O(1) node lookups during updates
+    let nodeIndexMap = new Map<string, number>();
+
+    function flushPendingNodes() {
+        flushRafId = null;
+        if (pendingNew.length === 0 && pendingUpdates.length === 0) return;
+
+        const batchNew = pendingNew;
+        const batchUpdates = pendingUpdates;
+        pendingNew = [];
+        pendingUpdates = [];
+
+        setDocument((prev) => {
+            // Only copy the array once per flush, not per WebSocket message
+            const result = prev.slice();
+            let mutated = false;
+
+            // Apply updates using index map for O(1) lookup
+            for (const updated of batchUpdates) {
+                const idx = nodeIndexMap.get(updated.id);
+                if (idx != null && idx < result.length) {
+                    const existing = result[idx];
+                    if (existing.type === "markdown" && updated.type === "markdown") {
+                        result[idx] = { ...existing, content: updated.content };
+                    } else {
+                        result[idx] = updated;
+                    }
+                    mutated = true;
+                }
+            }
+
+            // Append new nodes
+            if (batchNew.length > 0) {
+                const baseIdx = result.length;
+                for (let i = 0; i < batchNew.length; i++) {
+                    nodeIndexMap.set(batchNew[i].id, baseIdx + i);
+                    result.push(batchNew[i]);
+                }
+                mutated = true;
+            }
+
+            return mutated ? result : prev;
+        });
+
+        setStreaming((prev) => ({
+            ...prev,
+            lastEventTime: Date.now(),
+            bufferSize: prev.bufferSize + batchNew.length,
+        }));
+    }
+
+    function scheduleFlush() {
+        if (flushRafId == null) {
+            flushRafId = requestAnimationFrame(flushPendingNodes);
+        }
+    }
+
     onMount(() => {
         if (!enabled || !blockId) return;
 
@@ -52,6 +114,9 @@ export function useAgentStream({
         translator = createTranslator(outputFormat);
         parser = new ClaudeCodeStreamParser();
         nodeIdSet = new Set();
+        nodeIndexMap = new Map();
+        pendingNew = [];
+        pendingUpdates = [];
 
         setStreaming((prev) => ({ ...prev, active: true, lastEventTime: Date.now() }));
 
@@ -59,9 +124,12 @@ export function useAgentStream({
 
         console.debug(`[useAgentStream] subscribed blockId=${blockId} format=${outputFormat}`);
         const subscription = fileSubject.subscribe((msg: { fileop: string; data64: string }) => {
-            console.debug(`[useAgentStream] msg blockId=${blockId} fileop=${msg.fileop} len=${msg.data64?.length ?? 0}`);
             if (msg.fileop === "truncate") {
                 // Terminal was cleared — reset document
+                if (flushRafId != null) { cancelAnimationFrame(flushRafId); flushRafId = null; }
+                pendingNew = [];
+                pendingUpdates = [];
+                nodeIndexMap = new Map();
                 setDocument([]);
                 lineBuffer = "";
                 translator.reset();
@@ -81,11 +149,6 @@ export function useAgentStream({
             const lines = lineBuffer.split("\n");
             lineBuffer = lines.pop() || ""; // Keep incomplete line
 
-            // Process complete lines
-
-            const newNodes: DocumentNode[] = [];
-            const updatedNodes: DocumentNode[] = [];
-
             for (const line of lines) {
                 const trimmed = line.trim();
                 if (!trimmed) continue;
@@ -95,25 +158,22 @@ export function useAgentStream({
                 try {
                     rawEvent = JSON.parse(trimmed);
                 } catch {
-                    // Not valid JSON — skip (could be raw CLI output during init)
                     continue;
                 }
 
                 // Handle stderr events from subprocess
                 if (rawEvent.type === "stderr" && rawEvent.text) {
-                    // Skip benign CLI warnings
                     const text = rawEvent.text.trim();
                     if (text.includes("Fast mode is not available") ||
                         text.includes("[WARN]") && text.length < 200) {
-                        console.log("[useAgentStream] suppressed stderr:", text);
                         continue;
                     }
-                    const stderrNode: DocumentNode = {
+                    pendingNew.push({
                         id: `stderr-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
                         type: "markdown",
                         content: `**stderr:** ${text}`,
-                    };
-                    newNodes.push(stderrNode);
+                    });
+                    scheduleFlush();
                     continue;
                 }
 
@@ -126,57 +186,22 @@ export function useAgentStream({
                     if (!node) continue;
 
                     if (nodeIdSet.has(node.id)) {
-                        // Existing node — append content for text/thinking, replace for others
-                        updatedNodes.push(node);
+                        pendingUpdates.push(node);
                     } else {
                         nodeIdSet.add(node.id);
-                        newNodes.push(node);
+                        pendingNew.push(node);
                     }
                 }
             }
 
-            // Batch update the document signal
-            if (newNodes.length > 0 || updatedNodes.length > 0) {
-                setDocument((prev) => {
-                    let result = [...prev];
-
-                    // Apply updates to existing nodes
-                    for (const updated of updatedNodes) {
-                        const idx = result.findIndex((n) => n.id === updated.id);
-                        if (idx !== -1) {
-                            const existing = result[idx];
-                            if (existing.type === "markdown" && updated.type === "markdown") {
-                                // Replace with accumulated content — the stream parser
-                                // already accumulates deltas into the full text, so we
-                                // must NOT append here or content gets duplicated.
-                                result[idx] = {
-                                    ...existing,
-                                    content: updated.content,
-                                };
-                            } else {
-                                // Replace for other node types (tool_result completing tool_call)
-                                result[idx] = updated;
-                            }
-                        }
-                    }
-
-                    // Append new nodes
-                    if (newNodes.length > 0) {
-                        result = [...result, ...newNodes];
-                    }
-
-                    return result;
-                });
-
-                setStreaming((prev) => ({
-                    ...prev,
-                    lastEventTime: Date.now(),
-                    bufferSize: prev.bufferSize + newNodes.length,
-                }));
+            // Schedule a single flush per animation frame
+            if (pendingNew.length > 0 || pendingUpdates.length > 0) {
+                scheduleFlush();
             }
         });
 
         onCleanup(() => {
+            if (flushRafId != null) { cancelAnimationFrame(flushRafId); flushRafId = null; }
             subscription.unsubscribe();
             setStreaming((prev) => ({ ...prev, active: false }));
         });
