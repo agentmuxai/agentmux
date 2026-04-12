@@ -30,6 +30,23 @@
         gap: 1px;
         user-select: text;
         cursor: text;
+        // Isolate layout/paint from siblings — critical for typing smoothness
+        // when many nodes are present. The actual off-screen skip happens via
+        // `content-visibility: auto` on each `.agent-document-node-wrapper`
+        // child below; this containment here just scopes the blast radius so
+        // mutations inside the scroll container don't invalidate layout
+        // outside it.
+        contain: layout style paint;
+    }
+
+    .agent-document-node-wrapper {
+        // Each document node gets its own containment box. Off-screen nodes
+        // are skipped by the browser via content-visibility.
+        // contain-intrinsic-size gives the browser a size estimate so scroll
+        // position stays stable when content is virtualized in/out.
+        content-visibility: auto;
+        contain-intrinsic-size: auto 80px;
+        contain: layout style;
     }
 
     // === Status Log (terminal-style) ===

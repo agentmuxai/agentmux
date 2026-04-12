@@ -81,7 +81,11 @@ export const AgentDocumentView = ({ documentAtom, documentStateAtom, logLines, a
     };
 
     return (
-        <div class="agent-document" ref={scrollRef} onScroll={handleScroll}>
+        <div
+            class="agent-document"
+            ref={scrollRef}
+            onScroll={handleScroll}
+        >
             {/* Log lines always shown at the top */}
             <Show when={logLines().length > 0}>
                 <div class="agent-status-log">
@@ -118,15 +122,20 @@ export const AgentDocumentView = ({ documentAtom, documentStateAtom, logLines, a
                 </div>
             </Show>
 
-            {/* Document nodes render below log lines */}
+            {/* Document nodes render below log lines.
+                `content-visibility: auto` on the wrapper lets the browser
+                skip layout/paint for off-screen nodes — critical for
+                long sessions where thousands of DOM elements accumulate. */}
             <For each={document()}>
                 {(node) => (
-                    <DocumentNodeRenderer
-                        node={node}
-                        collapsed={documentState().collapsedNodes.has(node.id)}
-                        onToggle={() => toggleCollapse(node.id)}
-                        onSubagentClick={onSubagentClick}
-                    />
+                    <div class="agent-document-node-wrapper">
+                        <DocumentNodeRenderer
+                            node={node}
+                            collapsed={documentState().collapsedNodes.has(node.id)}
+                            onToggle={() => toggleCollapse(node.id)}
+                            onSubagentClick={onSubagentClick}
+                        />
+                    </div>
                 )}
             </For>
         </div>
