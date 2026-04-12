@@ -15,6 +15,7 @@ pub mod health;
 pub mod persistent;
 pub mod pidregistry;
 pub mod process_tree;
+pub mod session_recovery;
 pub mod session_stats;
 pub mod shell;
 pub mod subprocess;

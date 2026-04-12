@@ -316,6 +316,19 @@ async fn main() {
     // Runs on every startup to catch any corruption from prior sessions.
     heal_all_layouts(&wstore);
 
+    // Session recovery (Phase 4.2): scan for agent blocks that still have
+    // `session:active_pid` from a previous run — those sessions were killed
+    // by a crash/reboot. Transfer to `session:was_interrupted` so the
+    // frontend can show a reconnect banner.
+    let orphan_count = backend::blockcontroller::session_recovery::scan_orphans(&wstore);
+    if orphan_count > 0 {
+        tracing::info!(
+            orphan_count = orphan_count,
+            "session_recovery: flagged {} interrupted sessions for user reconnect",
+            orphan_count
+        );
+    }
+
     // Auto-seed Forge agents on first launch (or empty DB)
     backend::forge_seed::auto_seed_on_startup(&wstore);
 
