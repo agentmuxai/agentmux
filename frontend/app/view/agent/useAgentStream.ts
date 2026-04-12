@@ -153,16 +153,33 @@ export function useAgentStream({
             lineBuffer += text;
             const lines = lineBuffer.split("\n");
             lineBuffer = lines.pop() || ""; // Keep incomplete line
+            // Safety: drop the buffer if it grows absurdly large without a
+            // newline. This should never happen in well-formed stream-json
+            // output, but protects against runaway memory if something
+            // upstream is sending garbage.
+            if (lineBuffer.length > 10_000_000) {
+                console.warn(`[useAgentStream] line buffer exceeded 10MB, dropping`);
+                lineBuffer = "";
+            }
 
             for (const line of lines) {
                 const trimmed = line.trim();
                 if (!trimmed) continue;
+
+                // Fast path: non-JSON lines (subprocess echoes, CLI warnings).
+                // Skip without the cost of a try/catch on a huge string.
+                if (!trimmed.startsWith("{")) continue;
 
                 // Try to parse as JSON
                 let rawEvent: any;
                 try {
                     rawEvent = JSON.parse(trimmed);
                 } catch {
+                    // Don't log the full line — it may be 100KB+ (e.g. a Write
+                    // tool call with a long file content) and forwarding it
+                    // through the IPC log pipe stalls the main thread.
+                    // See docs/analysis/v0-33-91-ndjson-parse-crash-2026-04-12.md
+                    console.warn(`[useAgentStream] JSON parse failed, len=${trimmed.length}`);
                     continue;
                 }
 
