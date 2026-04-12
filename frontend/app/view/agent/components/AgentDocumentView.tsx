@@ -43,9 +43,11 @@ interface AgentDocumentViewProps {
     onBookmark?: (node: DocumentNode) => void;
     /** Expose a scrollToNode function to the parent for jump-to-bookmark support. */
     scrollToNodeRef?: (fn: (nodeId: string) => void) => void;
+    /** The node id of the currently highlighted search match (if any). */
+    highlightNodeId?: Accessor<string | null>;
 }
 
-export const AgentDocumentView = ({ documentAtom, documentStateAtom, logLines, authUrl, onSubagentClick, onLoadOlder, loadingOlder, startTsMs, endTsMs, bookmarkedNodeIds, onBookmark, scrollToNodeRef }: AgentDocumentViewProps): JSX.Element => {
+export const AgentDocumentView = ({ documentAtom, documentStateAtom, logLines, authUrl, onSubagentClick, onLoadOlder, loadingOlder, startTsMs, endTsMs, bookmarkedNodeIds, onBookmark, scrollToNodeRef, highlightNodeId }: AgentDocumentViewProps): JSX.Element => {
     const [document] = documentAtom;
     const [documentState, setDocumentState] = documentStateAtom;
     let scrollRef!: HTMLDivElement;
@@ -231,7 +233,10 @@ export const AgentDocumentView = ({ documentAtom, documentStateAtom, logLines, a
                     return (
                         <div
                             class="agent-document-node-wrapper"
-                            classList={{ "agent-node-bookmarked": isBookmarked() }}
+                            classList={{
+                                "agent-node-bookmarked": isBookmarked(),
+                                "agent-node-search-match": highlightNodeId?.() === node.id,
+                            }}
                             data-node-id={node.id}
                             onContextMenu={handleContextMenu}
                         >

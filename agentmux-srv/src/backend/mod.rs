@@ -20,6 +20,7 @@ pub mod rpc;
 pub mod rpc_types;
 pub mod schema;
 pub mod service;
+pub mod session_archive;
 pub mod shellexec;
 pub mod shellintegration;
 pub mod sigutil;
