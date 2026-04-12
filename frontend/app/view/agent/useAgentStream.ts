@@ -90,21 +90,11 @@ export function useAgentStream({
                 mutated = true;
             }
 
-            // Cap document size to prevent unbounded DOM growth in long sessions.
-            // Typing lag correlates directly with DOM element count — 500 nodes
-            // is a reasonable ceiling for interactive use.
-            const MAX_NODES = 500;
-            if (result.length > MAX_NODES) {
-                const drop = result.length - MAX_NODES;
-                result = result.slice(drop);
-                // Rebuild index map since indices shifted
-                nodeIndexMap.clear();
-                for (let i = 0; i < result.length; i++) {
-                    nodeIndexMap.set(result[i].id, i);
-                }
-                mutated = true;
-            }
-
+            // No cap on document size — `content-visibility: auto` on each
+            // node wrapper lets the browser skip layout/paint for off-screen
+            // nodes, so the DOM can grow to thousands without affecting
+            // typing smoothness. Full history is preserved.
+            // See docs/plans/agent-pane-ultra-long-sessions.md
             return mutated ? result : prev;
         });
 
