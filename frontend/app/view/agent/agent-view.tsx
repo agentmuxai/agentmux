@@ -385,14 +385,9 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
 
     // Accumulated terminal-style log lines
     type LogLine = { tag: string; text: string; level?: "info" | "error" | "warn" };
-    const MAX_LOG_LINES = 50;
     const [logLines, setLogLines] = createSignal<LogLine[]>([]);
     const log = (tag: string, text: string, level?: "info" | "error" | "warn") => {
-        setLogLines((prev) => {
-            const next = [...prev, { tag, text, level: level ?? "info" }];
-            // Cap to prevent unbounded growth during long sessions
-            return next.length > MAX_LOG_LINES ? next.slice(-MAX_LOG_LINES) : next;
-        });
+        setLogLines((prev) => [...prev, { tag, text, level: level ?? "info" }]);
     };
 
     // OAuth URL — shown prominently with a copy button when login is needed

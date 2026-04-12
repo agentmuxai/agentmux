@@ -85,7 +85,6 @@ export const AgentDocumentView = ({ documentAtom, documentStateAtom, logLines, a
             class="agent-document"
             ref={scrollRef}
             onScroll={handleScroll}
-            style="contain: layout style paint; content-visibility: auto;"
         >
             {/* Log lines always shown at the top */}
             <Show when={logLines().length > 0}>
