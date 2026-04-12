@@ -603,6 +603,16 @@ class RpcApiType {
         return client.wshRpcCall("runclilogin", data, opts);
     }
 
+    // command "blockfile:line_count" [call]
+    BlockfileLineCountCommand(client: WshClient, data: CommandBlockfileLineCountData, opts?: RpcOpts): Promise<BlockfileLineCountResult> {
+        return client.wshRpcCall("blockfile:line_count", data, opts);
+    }
+
+    // command "blockfile:read_range" [call]
+    BlockfileReadRangeCommand(client: WshClient, data: CommandBlockfileReadRangeData, opts?: RpcOpts): Promise<BlockfileReadRangeResult> {
+        return client.wshRpcCall("blockfile:read_range", data, opts);
+    }
+
 }
 
 export const RpcApi = new RpcApiType();

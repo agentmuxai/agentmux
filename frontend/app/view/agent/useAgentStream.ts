@@ -9,7 +9,7 @@
 
 import { getFileSubject } from "@/app/store/wps";
 import { base64ToArray } from "@/util/util";
-import { onCleanup, onMount } from "solid-js";
+import { createEffect, onCleanup, onMount, untrack } from "solid-js";
 import { createTranslator } from "./providers/translator-factory";
 import { ClaudeCodeStreamParser } from "./stream-parser";
 import type { SignalPair } from "./state";
@@ -23,6 +23,13 @@ interface UseAgentStreamOpts {
     documentAtom: SignalPair<DocumentNode[]>;
     streamingStateAtom: SignalPair<StreamingState>;
     enabled: boolean;
+    /**
+     * Version signal bumped by external document mutations (e.g. history
+     * load or prepend). When this changes, the hook rebuilds its internal
+     * `nodeIdSet` and `nodeIndexMap` from the current documentAtom so live
+     * updates continue to target the correct nodes.
+     */
+    documentVersion?: () => number;
 }
 
 /**
@@ -34,6 +41,7 @@ export function useAgentStream({
     documentAtom,
     streamingStateAtom,
     enabled,
+    documentVersion,
 }: UseAgentStreamOpts): void {
     const [, setDocument] = documentAtom;
     const [, setStreaming] = streamingStateAtom;
@@ -122,6 +130,38 @@ export function useAgentStream({
         nodeIndexMap = new Map();
         pendingNew = [];
         pendingUpdates = [];
+
+        const [doc] = documentAtom;
+
+        // Rebuild dedup set + index map from whatever is currently in the
+        // document. `doc()` is wrapped in `untrack` so the createEffect
+        // below only subscribes to documentVersion — NOT to the document
+        // signal itself. Without this, the rebuild would fire on every
+        // streaming flush (since flushPendingNodes calls setDoc), which
+        // would be O(n) per live event.
+        const rebuildIndicesFromDocument = () => {
+            const existingNodes = untrack(() => doc());
+            nodeIdSet = new Set();
+            nodeIndexMap = new Map();
+            for (let i = 0; i < existingNodes.length; i++) {
+                nodeIdSet.add(existingNodes[i].id);
+                nodeIndexMap.set(existingNodes[i].id, i);
+            }
+        };
+
+        // Initial seed — covers history nodes that were loaded before this
+        // hook mounted.
+        rebuildIndicesFromDocument();
+
+        // Reactive rebuild only when the caller bumps documentVersion after
+        // an external prepend/load. The first invocation runs immediately
+        // (SolidJS semantics) which is fine — it's idempotent.
+        if (documentVersion != null) {
+            createEffect(() => {
+                documentVersion();
+                rebuildIndicesFromDocument();
+            });
+        }
 
         setStreaming((prev) => ({ ...prev, active: true, lastEventTime: Date.now() }));
 
