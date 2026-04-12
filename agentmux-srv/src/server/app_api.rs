@@ -588,29 +588,57 @@ fn register_agent_output(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
 fn register_blockfile_line_count(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let broker = state.broker.clone();
+    let wstore = state.wstore.clone();
 
     engine.register_handler(
         COMMAND_BLOCKFILE_LINE_COUNT,
         Box::new(move |data, _ctx| {
             let broker = broker.clone();
+            let wstore = wstore.clone();
             Box::pin(async move {
                 let cmd: CommandBlockfileLineCountData = serde_json::from_value(data)
                     .map_err(|e| format!("blockfile:line_count: {e}"))?;
 
                 tracing::info!(block_id = %cmd.block_id, filename = %cmd.filename, "blockfile:line_count");
 
+                // Fast path: read the pre-computed `session:line_count` meta
+                // field maintained by SessionStatsAccumulator. This is O(1) —
+                // no event history scan. The accumulator updates it debounced
+                // at 1s so the value may trail real-time by up to a second,
+                // which is fine for UI purposes.
+                //
+                // Currently SessionStatsAccumulator tracks total session lines,
+                // not per-filename. If the caller requests a filename other
+                // than "output" we fall through to an event history scan.
+                let block = wstore
+                    .get::<Block>(&cmd.block_id)
+                    .map_err(|e| format!("blockfile:line_count: {e}"))?
+                    .ok_or_else(|| format!("BLOCK_NOT_FOUND: {}", cmd.block_id))?;
+
+                if cmd.filename == "output" {
+                    let count = block.meta.get("session:line_count")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(0);
+                    return Ok(Some(serde_json::to_value(
+                        &BlockfileLineCountResult { count },
+                    ).unwrap()));
+                }
+
+                // Fallback: scan event history for non-output filenames
+                // (rare — current persistent/subprocess controllers only
+                // publish to "output")
                 let scope = format!("block:{}", cmd.block_id);
                 let events = broker.read_event_history(
                     crate::backend::wps::EVENT_BLOCK_FILE,
                     &scope,
-                    usize::MAX,
+                    10_000,
                 );
 
                 let mut count: u64 = 0;
                 for event in events {
                     if let Some(ref event_data) = event.data {
-                        // Filter to events for the requested filename
-                        let ev_filename = event_data.get("filename").and_then(|v| v.as_str()).unwrap_or("");
+                        let ev_filename = event_data.get("filename")
+                            .and_then(|v| v.as_str()).unwrap_or("");
                         if ev_filename != cmd.filename {
                             continue;
                         }
