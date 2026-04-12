@@ -319,8 +319,10 @@ impl SubprocessController {
                     continue;
                 }
 
-                // Track session metadata (debounced 1 s)
-                stats.record_line(trimmed.len(), &wstore_read);
+                // Track session metadata (debounced 1 s).
+                // Use `line.len()` (not `trimmed.len()`) to match persistent.rs
+                // so token_estimate stays consistent across controller types.
+                stats.record_line(line.len(), &wstore_read);
 
                 // Classify output for health monitoring
                 if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(trimmed) {

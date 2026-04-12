@@ -667,11 +667,13 @@ fn register_blockfile_line_count(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
 fn register_blockfile_read_range(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let broker = state.broker.clone();
+    let wstore = state.wstore.clone();
 
     engine.register_handler(
         COMMAND_BLOCKFILE_READ_RANGE,
         Box::new(move |data, _ctx| {
             let broker = broker.clone();
+            let wstore = wstore.clone();
             Box::pin(async move {
                 let cmd: CommandBlockfileReadRangeData = serde_json::from_value(data)
                     .map_err(|e| format!("blockfile:read_range: {e}"))?;
@@ -680,40 +682,62 @@ fn register_blockfile_read_range(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
                 let limit = cmd.limit.min(10_000) as usize;
                 let offset = cmd.offset as usize;
+                let end = offset.saturating_add(limit);
 
+                // Get the authoritative total from session meta (fast path for
+                // "output"; O(1)). If unavailable, we'll compute it during the
+                // scan below as a fallback.
+                let mut total: u64 = 0;
+                if cmd.filename == "output" {
+                    if let Ok(Some(block)) = wstore.get::<Block>(&cmd.block_id) {
+                        total = block.meta.get("session:line_count")
+                            .and_then(|v| v.as_u64())
+                            .unwrap_or(0);
+                    }
+                }
+
+                // Read events and stream-decode line-by-line. Stop as soon as
+                // we've collected the requested window — avoids the O(n) memory
+                // cost of materializing the entire history.
                 let scope = format!("block:{}", cmd.block_id);
                 let events = broker.read_event_history(
                     crate::backend::wps::EVENT_BLOCK_FILE,
                     &scope,
-                    usize::MAX,
+                    10_000,
                 );
 
-                let mut all_lines: Vec<String> = Vec::new();
-                for event in events {
-                    if let Some(ref event_data) = event.data {
-                        // Filter to events for the requested filename
-                        let ev_filename = event_data.get("filename").and_then(|v| v.as_str()).unwrap_or("");
-                        if ev_filename != cmd.filename {
+                let mut lines: Vec<String> = Vec::with_capacity(limit);
+                let mut seen: usize = 0;
+                'outer: for event in events {
+                    let Some(ref event_data) = event.data else { continue };
+                    let ev_filename = event_data.get("filename")
+                        .and_then(|v| v.as_str()).unwrap_or("");
+                    if ev_filename != cmd.filename {
+                        continue;
+                    }
+                    let Some(data64) = event_data.get("data64").and_then(|v| v.as_str()) else { continue };
+                    let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(data64) else { continue };
+                    let text = String::from_utf8_lossy(&bytes);
+                    for line in text.lines() {
+                        if line.trim().is_empty() {
                             continue;
                         }
-                        if let Some(data64) = event_data.get("data64").and_then(|v| v.as_str()) {
-                            if let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(data64) {
-                                let text = String::from_utf8_lossy(&bytes);
-                                for line in text.lines() {
-                                    if !line.trim().is_empty() {
-                                        all_lines.push(line.to_string());
-                                    }
-                                }
-                            }
+                        if seen >= offset && seen < end {
+                            lines.push(line.to_string());
+                        }
+                        seen += 1;
+                        if seen >= end && total > 0 {
+                            // We have the requested window AND an authoritative
+                            // total from meta — safe to stop early.
+                            break 'outer;
                         }
                     }
                 }
 
-                let total = all_lines.len() as u64;
-                let lines: Vec<String> = all_lines.into_iter()
-                    .skip(offset)
-                    .take(limit)
-                    .collect();
+                // If meta didn't give us a total, use what we counted
+                if total == 0 {
+                    total = seen as u64;
+                }
 
                 Ok(Some(serde_json::to_value(&BlockfileReadRangeResult {
                     lines,
