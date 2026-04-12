@@ -215,8 +215,8 @@ impl FileStore {
         let key = (zone_id.to_string(), name.to_string());
         let mut cache = self.cache.lock().unwrap();
         if let Some(removed) = cache.remove(&key) {
-            *self.cache_total_bytes.lock().unwrap() =
-                self.cache_total_bytes.lock().unwrap().saturating_sub(removed.cached_size_bytes);
+            let mut total = self.cache_total_bytes.lock().unwrap();
+            *total = total.saturating_sub(removed.cached_size_bytes);
         }
 
         Ok(())
@@ -252,8 +252,8 @@ impl FileStore {
             }
         }
         if freed > 0 {
-            *self.cache_total_bytes.lock().unwrap() =
-                self.cache_total_bytes.lock().unwrap().saturating_sub(freed);
+            let mut total = self.cache_total_bytes.lock().unwrap();
+            *total = total.saturating_sub(freed);
         }
 
         Ok(())
@@ -637,8 +637,8 @@ impl FileStore {
                 }
             }
             if freed > 0 {
-                *self.cache_total_bytes.lock().unwrap() =
-                    self.cache_total_bytes.lock().unwrap().saturating_sub(freed);
+                let mut total = self.cache_total_bytes.lock().unwrap();
+                *total = total.saturating_sub(freed);
             }
             tracing::debug!("filestore cache: evicted {} stale entries ({} bytes)", stale_keys.len(), freed);
         }
@@ -651,8 +651,8 @@ impl FileStore {
                 let mut cache = self.cache.lock().unwrap();
                 let entry = cache.remove(&key);
                 if let Some(ref e) = entry {
-                    *self.cache_total_bytes.lock().unwrap() =
-                        self.cache_total_bytes.lock().unwrap().saturating_sub(e.cached_size_bytes);
+                    let mut total = self.cache_total_bytes.lock().unwrap();
+                    *total = total.saturating_sub(e.cached_size_bytes);
                 }
                 entry
             };
