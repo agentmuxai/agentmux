@@ -450,6 +450,40 @@
         font-size: 11px;
     }
 
+    .agent-interrupted-banner {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        padding: 4px 8px;
+        background: color-mix(in srgb, var(--accent-color, #3b82f6) 14%, transparent);
+        border-bottom: 1px solid color-mix(in srgb, var(--accent-color, #3b82f6) 30%, transparent);
+        font-size: 11px;
+        color: var(--main-text-color);
+
+        .agent-interrupted-label {
+            flex: 1 1 auto;
+            min-width: 0;
+        }
+    }
+
+    .agent-large-session-banner {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        padding: 4px 8px;
+        background: color-mix(in srgb, var(--warning-color, #eab308) 14%, transparent);
+        border-bottom: 1px solid color-mix(in srgb, var(--warning-color, #eab308) 30%, transparent);
+        font-size: 11px;
+        color: var(--main-text-color);
+
+        .agent-large-session-label {
+            flex: 1 1 auto;
+            min-width: 0;
+        }
+    }
+
     .agent-control-bar-header {
         display: flex;
         align-items: center;

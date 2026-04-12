@@ -160,8 +160,67 @@ export const AgentControlBar = ({ blockId, blockAtom, providerId }: AgentControl
     // Only show for Claude provider (Phase 1)
     if (providerId !== "claude") return null;
 
+    // 4.1 Graceful degradation: warn when session grows unwieldy (500K lines).
+    // Browser still handles this via content-visibility, but we surface the state
+    // so the user can archive + start fresh if they want a cleaner session.
+    const LARGE_SESSION_THRESHOLD = 500_000;
+    const isLargeSession = (): boolean =>
+        !isArchived() && lineCount() >= LARGE_SESSION_THRESHOLD;
+
+    // 4.2 Multi-day continuity: server sets `session:was_interrupted` when it
+    // finds a stale `session:active_pid` on startup (i.e. the previous server
+    // process died with a subprocess running). The next user message will
+    // automatically `--resume` the session, so the banner just lets the user
+    // know what happened and offers a "Dismiss" to clear the flag.
+    const wasInterrupted = (): boolean =>
+        (blockAtom()?.meta?.["session:was_interrupted"] as boolean | undefined) === true;
+
+    const dismissInterrupted = async () => {
+        try {
+            await RpcApi.SetMetaCommand(TabRpcClient, {
+                oref: WOS.makeORef("block", blockId),
+                meta: { "session:was_interrupted": null } as MetaType,
+            });
+        } catch (e) {
+            console.error("failed to clear was_interrupted:", e);
+        }
+    };
+
     return (
         <div class="agent-control-bar">
+            {/* ── Interrupted-session recovery banner (4.2 multi-day continuity) ── */}
+            <Show when={wasInterrupted()}>
+                <div class="agent-interrupted-banner">
+                    <span class="agent-interrupted-label">
+                        Session was interrupted by a restart. Your next message will resume it.
+                    </span>
+                    <button
+                        class="agent-session-btn agent-session-btn-dismiss"
+                        onClick={dismissInterrupted}
+                        title="Dismiss this notice"
+                    >
+                        Dismiss
+                    </button>
+                </div>
+            </Show>
+
+            {/* ── Large session warning (4.1 graceful degradation) ── */}
+            <Show when={isLargeSession()}>
+                <div class="agent-large-session-banner">
+                    <span class="agent-large-session-label">
+                        Session has {lineCount().toLocaleString()} lines. Consider archiving to free disk space.
+                    </span>
+                    <button
+                        class="agent-session-btn agent-session-btn-archive"
+                        disabled={archiveBusy()}
+                        onClick={handleArchive}
+                        title="Archive this session and start fresh"
+                    >
+                        {archiveBusy() ? "Archiving…" : "Archive"}
+                    </button>
+                </div>
+            </Show>
+
             {/* ── Archived badge (shown when session is archived) ── */}
             <Show when={isArchived()}>
                 <div class="agent-archived-banner">
