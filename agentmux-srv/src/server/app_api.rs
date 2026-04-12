@@ -670,13 +670,15 @@ fn register_blockfile_read_range(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // not have every event from the start of the session — older
                 // events have been evicted. The `total` we report is the
                 // number of lines *available* right now, not the all-time
-                // count. This is what the frontend should use for pagination
-                // so it never asks for offsets the ring buffer can't serve.
+                // count. This matches `blockfile:line_count` semantics
+                // (both commands agree on what "offset N" means) so the
+                // frontend never asks for offsets the ring buffer can't
+                // serve.
                 //
-                // For all-time totals, use `blockfile:line_count` which reads
-                // `session:line_count` meta (unbounded) — but be aware that
-                // lines outside the ring buffer window are effectively gone
-                // until Phase 1.3 (disk-based segmentation) lands.
+                // Callers needing the all-time count can read the
+                // `session:line_count` meta field directly — but be aware
+                // that lines outside the ring buffer window are effectively
+                // gone until Phase 1.3 (disk-based segmentation) lands.
                 let scope = format!("block:{}", cmd.block_id);
                 let events = broker.read_event_history(
                     crate::backend::wps::EVENT_BLOCK_FILE,
