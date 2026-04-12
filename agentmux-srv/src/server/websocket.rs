@@ -603,12 +603,14 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
     let wstore_resync = state.wstore.clone();
     let broker_resync = state.broker.clone();
     let event_bus_resync = state.event_bus.clone();
+    let filestore_resync = state.filestore.clone();
     engine.register_handler(
         COMMAND_CONTROLLER_RESYNC,
         Box::new(move |data, _ctx| {
             let wstore = wstore_resync.clone();
             let broker = broker_resync.clone();
             let event_bus = event_bus_resync.clone();
+            let filestore = filestore_resync.clone();
             Box::pin(async move {
                 let cmd: CommandControllerResyncData = serde_json::from_value(data)
                     .map_err(|e| format!("controllerresync: {e}"))?;
@@ -630,6 +632,7 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                     Some(broker),
                     Some(event_bus),
                     Some(wstore),
+                    Some(filestore),
                 )?;
                 Ok(None)
             })
@@ -654,12 +657,14 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
     let wstore_spawn = state.wstore.clone();
     let broker_spawn = state.broker.clone();
     let event_bus_spawn = state.event_bus.clone();
+    let filestore_spawn = state.filestore.clone();
     engine.register_handler(
         COMMAND_SUBPROCESS_SPAWN,
         Box::new(move |data, _ctx| {
             let wstore = wstore_spawn.clone();
             let broker = broker_spawn.clone();
             let event_bus = event_bus_spawn.clone();
+            let filestore = filestore_spawn.clone();
             Box::pin(async move {
                 let cmd: CommandSubprocessSpawnData = serde_json::from_value(data)
                     .map_err(|e| format!("subprocessspawn: {e}"))?;
@@ -680,6 +685,7 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                             Some(broker),
                             Some(event_bus),
                             Some(wstore),
+                            Some(filestore),
                         );
                         let ctrl = std::sync::Arc::new(ctrl);
                         blockcontroller::register_controller(&cmd.blockid, ctrl.clone());
