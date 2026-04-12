@@ -1,6 +1,6 @@
 [package]
 name = "agentmux-srv"
-version = "0.33.97"
+version = "0.33.99"
 edition = "2021"
 description = "AgentMux Rust backend server"
 
@@ -38,6 +38,7 @@ parking_lot = "0.12"
 notify = "7"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 mdns-sd = "0.12"
+flate2 = "1"
 
 [target.'cfg(windows)'.dependencies]
 # Out-of-process crash dump capture via VEH + named-pipe IPC.
@@ -53,3 +54,4 @@ winres = "0.1"
 tower = { version = "0.5", features = ["util"] }
 serde_json = "1"
 libc = "0.2"
+tempfile = "3"

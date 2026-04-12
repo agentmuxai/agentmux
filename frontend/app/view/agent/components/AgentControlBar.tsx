@@ -4,6 +4,9 @@
 /**
  * AgentControlBar - Collapsible runtime controls for permission mode,
  * model, and effort level. Changes take effect on the next turn.
+ *
+ * Also shows Archive / Export / Restore session management buttons
+ * when the session has data (session:line_count > 0).
  */
 
 import { createSignal, Show, type JSX } from "solid-js";
@@ -53,6 +56,9 @@ const EFFORT_LABELS: Record<string, string> = {
 
 export const AgentControlBar = ({ blockId, blockAtom, providerId }: AgentControlBarProps): JSX.Element => {
     const [expanded, setExpanded] = createSignal(false);
+    const [archiveBusy, setArchiveBusy] = createSignal(false);
+    const [exportBusy, setExportBusy] = createSignal(false);
+    const [restoreBusy, setRestoreBusy] = createSignal(false);
 
     const runtime = (): AgentRuntimeConfig => getRuntimeConfig(blockAtom()?.meta);
 
@@ -87,11 +93,100 @@ export const AgentControlBar = ({ blockId, blockAtom, providerId }: AgentControl
         return parts.join(" · ");
     };
 
+    // ── Session management helpers ──────────────────────────────────────────────
+
+    const lineCount = (): number =>
+        (blockAtom()?.meta?.["session:line_count"] as number | undefined) ?? 0;
+
+    const isArchived = (): boolean => {
+        const archivedAt = blockAtom()?.meta?.["session:archived_at"] as number | undefined;
+        return (archivedAt ?? 0) > 0;
+    };
+
+    const archivedAtLabel = (): string => {
+        const ts = blockAtom()?.meta?.["session:archived_at"] as number | undefined;
+        if (!ts) return "";
+        return new Date(ts).toLocaleString();
+    };
+
+    const handleArchive = async () => {
+        if (archiveBusy()) return;
+        setArchiveBusy(true);
+        try {
+            await RpcApi.SessionArchiveCommand(TabRpcClient, { block_id: blockId });
+        } catch (e) {
+            console.error("session:archive failed:", e);
+        } finally {
+            setArchiveBusy(false);
+        }
+    };
+
+    const handleRestore = async () => {
+        if (restoreBusy()) return;
+        setRestoreBusy(true);
+        try {
+            await RpcApi.SessionRestoreCommand(TabRpcClient, { block_id: blockId });
+        } catch (e) {
+            console.error("session:restore failed:", e);
+        } finally {
+            setRestoreBusy(false);
+        }
+    };
+
+    const handleExport = async () => {
+        if (exportBusy()) return;
+        setExportBusy(true);
+        try {
+            const result = await RpcApi.SessionExportCommand(TabRpcClient, { block_id: blockId });
+            // Decode base64 and trigger a browser download
+            const raw = atob(result.content);
+            const bytes = new Uint8Array(raw.length);
+            for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+            const blob = new Blob([bytes], { type: "application/x-ndjson" });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            const ts = Date.now();
+            a.href = url;
+            a.download = `session-${blockId.slice(0, 8)}-${ts}.jsonl`;
+            a.click();
+            URL.revokeObjectURL(url);
+        } catch (e) {
+            console.error("session:export failed:", e);
+        } finally {
+            setExportBusy(false);
+        }
+    };
+
     // Only show for Claude provider (Phase 1)
     if (providerId !== "claude") return null;
 
     return (
         <div class="agent-control-bar">
+            {/* ── Archived badge (shown when session is archived) ── */}
+            <Show when={isArchived()}>
+                <div class="agent-archived-banner">
+                    <span class="agent-archived-label" title={`Archived at ${archivedAtLabel()}`}>
+                        Archived
+                    </span>
+                    <button
+                        class="agent-session-btn agent-session-btn-restore"
+                        disabled={restoreBusy()}
+                        onClick={handleRestore}
+                        title="Restore session data from archive"
+                    >
+                        {restoreBusy() ? "Restoring…" : "Restore"}
+                    </button>
+                    <button
+                        class="agent-session-btn agent-session-btn-export"
+                        disabled={exportBusy()}
+                        onClick={handleExport}
+                        title="Export session as .jsonl"
+                    >
+                        {exportBusy() ? "Exporting…" : "Export"}
+                    </button>
+                </div>
+            </Show>
+
             <div
                 class="agent-control-bar-header"
                 onClick={() => setExpanded(!expanded())}
@@ -153,6 +248,31 @@ export const AgentControlBar = ({ blockId, blockAtom, providerId }: AgentControl
                             <option value="max">Max (Opus only)</option>
                         </select>
                     </div>
+
+                    {/* ── Session management buttons (shown when there is history) ── */}
+                    <Show when={lineCount() > 0 && !isArchived()}>
+                        <div class="agent-control-row agent-control-row-session">
+                            <label class="agent-control-label">Session</label>
+                            <div class="agent-session-actions">
+                                <button
+                                    class="agent-session-btn agent-session-btn-archive"
+                                    disabled={archiveBusy()}
+                                    onClick={handleArchive}
+                                    title="Compress and archive session history to free disk space"
+                                >
+                                    {archiveBusy() ? "Archiving…" : "Archive"}
+                                </button>
+                                <button
+                                    class="agent-session-btn agent-session-btn-export"
+                                    disabled={exportBusy()}
+                                    onClick={handleExport}
+                                    title="Download session history as .jsonl"
+                                >
+                                    {exportBusy() ? "Exporting…" : "Export"}
+                                </button>
+                            </div>
+                        </div>
+                    </Show>
                 </div>
             </Show>
         </div>

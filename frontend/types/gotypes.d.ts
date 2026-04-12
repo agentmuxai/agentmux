@@ -1670,6 +1670,55 @@ declare global {
         total: number;
     };
 
+    // wshrpc.CommandSessionDigestData
+    type CommandSessionDigestData = {
+        block_id: string;
+        force?: boolean;
+    };
+
+    // wshrpc.SessionDigestResult
+    type SessionDigestResult = {
+        summary: string;
+        generated_at: number;
+        cached: boolean;
+    };
+
+    // wshrpc.CommandSessionArchiveData
+    type CommandSessionArchiveData = {
+        block_id: string;
+    };
+
+    // wshrpc.SessionArchiveResult
+    type SessionArchiveResult = {
+        block_id: string;
+        archived_bytes: number;
+        archived_at: number;
+    };
+
+    // wshrpc.CommandSessionRestoreData
+    type CommandSessionRestoreData = {
+        block_id: string;
+    };
+
+    // wshrpc.SessionRestoreResult
+    type SessionRestoreResult = {
+        block_id: string;
+        restored_bytes: number;
+    };
+
+    // wshrpc.CommandSessionExportData
+    type CommandSessionExportData = {
+        block_id: string;
+    };
+
+    // wshrpc.SessionExportResult
+    type SessionExportResult = {
+        /** base64-encoded JSONL content (raw output file bytes) */
+        content: string;
+        line_count: number;
+        byte_count: number;
+    };
+
 }
 
 export {}

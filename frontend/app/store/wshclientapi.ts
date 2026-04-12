@@ -613,6 +613,26 @@ class RpcApiType {
         return client.wshRpcCall("blockfile:read_range", data, opts);
     }
 
+    // command "session:digest" [call]
+    SessionDigestCommand(client: WshClient, data: CommandSessionDigestData, opts?: RpcOpts): Promise<SessionDigestResult> {
+        return client.wshRpcCall("session:digest", data, opts);
+    }
+
+    // command "session:archive" [call]
+    SessionArchiveCommand(client: WshClient, data: CommandSessionArchiveData, opts?: RpcOpts): Promise<SessionArchiveResult> {
+        return client.wshRpcCall("session:archive", data, opts);
+    }
+
+    // command "session:restore" [call]
+    SessionRestoreCommand(client: WshClient, data: CommandSessionRestoreData, opts?: RpcOpts): Promise<SessionRestoreResult> {
+        return client.wshRpcCall("session:restore", data, opts);
+    }
+
+    // command "session:export" [call]
+    SessionExportCommand(client: WshClient, data: CommandSessionExportData, opts?: RpcOpts): Promise<SessionExportResult> {
+        return client.wshRpcCall("session:export", data, opts);
+    }
+
 }
 
 export const RpcApi = new RpcApiType();

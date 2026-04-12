@@ -2266,4 +2266,194 @@
         text-overflow: ellipsis;
         font-family: var(--fixed-font, monospace);
     }
+
+    // === In-session Search Bar ===
+
+    .agent-search-bar {
+        flex-shrink: 0;
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        padding: 4px 8px;
+        background: color-mix(in srgb, var(--accent-color, #4a9eff) 6%, var(--main-bg-color));
+        border-bottom: 1px solid var(--border-color);
+        // Sticky so it stays visible while the document scrolls beneath it
+        position: sticky;
+        top: 0;
+        z-index: 10;
+    }
+
+    .agent-search-input {
+        flex: 1;
+        min-width: 0;
+        background: var(--main-bg-color);
+        color: var(--main-text-color);
+        border: 1px solid var(--border-color);
+        border-radius: 3px;
+        padding: 3px 6px;
+        font-size: 12px;
+        font-family: inherit;
+        outline: none;
+        transition: border-color 0.15s;
+
+        &:focus {
+            border-color: var(--accent-color, #4a9eff);
+        }
+
+        &::placeholder {
+            color: var(--secondary-text-color);
+            opacity: 0.6;
+        }
+    }
+
+    .agent-search-counter {
+        flex-shrink: 0;
+        font-size: 11px;
+        color: var(--secondary-text-color);
+        white-space: nowrap;
+        min-width: 56px;
+        text-align: right;
+        opacity: 0.75;
+    }
+
+    .agent-search-btn {
+        flex-shrink: 0;
+        width: 22px;
+        height: 22px;
+        padding: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: none;
+        border: 1px solid transparent;
+        border-radius: 3px;
+        cursor: pointer;
+        color: var(--secondary-text-color);
+        font-size: 11px;
+        line-height: 1;
+        transition: background 0.1s, color 0.1s, border-color 0.1s;
+
+        &:hover {
+            background: color-mix(in srgb, var(--accent-color, #4a9eff) 15%, transparent);
+            border-color: var(--border-color);
+            color: var(--main-text-color);
+        }
+
+        &--close {
+            font-size: 14px;
+            margin-left: 2px;
+
+            &:hover {
+                background: color-mix(in srgb, var(--error-color, #f87171) 15%, transparent);
+                border-color: color-mix(in srgb, var(--error-color, #f87171) 40%, transparent);
+                color: var(--error-color, #f87171);
+            }
+        }
+    }
+
+    // === Search-match highlight ===
+
+    .agent-node-search-match {
+        // Subtle accent-tinted background to flag the matched node
+        background: color-mix(in srgb, var(--accent-color, #4a9eff) 10%, transparent) !important;
+        // Left border acts as a gutter indicator
+        border-left: 3px solid var(--accent-color, #4a9eff) !important;
+        border-radius: 2px;
+        // Small padding-left offset to compensate for the border
+        padding-left: 4px;
+        // Brief animation so the highlight is immediately noticeable when
+        // navigating between matches
+        animation: search-match-flash 0.25s ease-out;
+    }
+
+    @keyframes search-match-flash {
+        from {
+            background: color-mix(in srgb, var(--accent-color, #4a9eff) 28%, transparent);
+        }
+        to {
+            background: color-mix(in srgb, var(--accent-color, #4a9eff) 10%, transparent);
+        }
+    }
+
+    // === Session digest banner ===
+
+    .agent-session-digest {
+        margin: 4px 0 2px;
+        padding: 6px 8px;
+        background: color-mix(in srgb, var(--accent-color, #4a9eff) 8%, transparent);
+        border: 1px solid var(--accent-color, #4a9eff);
+        border-radius: 4px;
+        font-size: 12px;
+        flex-shrink: 0;
+    }
+
+    .agent-session-digest-header {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-weight: 600;
+        color: var(--main-text-color);
+    }
+
+    .agent-session-digest-title {
+        flex: 1;
+        color: var(--accent-color, #4a9eff);
+        font-size: 12px;
+    }
+
+    .agent-session-digest-age {
+        font-weight: normal;
+        opacity: 0.7;
+        font-size: 11px;
+    }
+
+    .agent-session-digest-toggle,
+    .agent-session-digest-action {
+        background: none;
+        border: none;
+        cursor: pointer;
+        padding: 2px 5px;
+        color: var(--secondary-text-color);
+        opacity: 0.75;
+        font-size: 12px;
+        line-height: 1;
+        border-radius: 3px;
+        transition: opacity 0.1s, background 0.1s;
+        flex-shrink: 0;
+
+        &:hover:not(:disabled) {
+            opacity: 1;
+            background: color-mix(in srgb, var(--accent-color, #4a9eff) 15%, transparent);
+        }
+
+        &:disabled {
+            cursor: default;
+            opacity: 0.4;
+        }
+    }
+
+    .agent-session-digest-dismiss:hover:not(:disabled) {
+        background: color-mix(in srgb, var(--error-color, #f87171) 15%, transparent);
+        color: var(--error-color, #f87171);
+    }
+
+    .agent-session-digest-body {
+        padding: 6px 2px 2px;
+        line-height: 1.5;
+        color: var(--main-text-color);
+
+        // Markdown renders <p> tags — tighten spacing inside the banner
+        p {
+            margin: 0 0 4px;
+            &:last-child { margin-bottom: 0; }
+        }
+    }
+
+    .agent-session-digest-loading,
+    .agent-session-digest-empty {
+        padding: 6px 2px 2px;
+        opacity: 0.6;
+        font-style: italic;
+        color: var(--secondary-text-color);
+    }
 }
