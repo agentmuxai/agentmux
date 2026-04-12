@@ -135,15 +135,11 @@ export class ClaudeTranslator implements OutputTranslator {
                 events.push({
                     type: "text",
                     content: block.text,
-                    messageId: message.id || `msg-${Date.now()}`,
-                    timestamp: Date.now(),
                 });
             } else if (block.type === "thinking" && block.thinking) {
                 events.push({
                     type: "thinking",
                     content: block.thinking,
-                    messageId: message.id || `msg-${Date.now()}`,
-                    timestamp: Date.now(),
                 });
             } else if (block.type === "tool_use") {
                 this.currentToolCallId = block.id;
@@ -153,10 +149,11 @@ export class ClaudeTranslator implements OutputTranslator {
                 }
                 events.push({
                     type: "tool_call",
-                    toolCallId: block.id,
-                    toolName: block.name,
-                    args: typeof block.input === "string" ? block.input : JSON.stringify(block.input || {}),
-                    timestamp: Date.now(),
+                    tool: block.name,
+                    id: block.id,
+                    params: typeof block.input === "object" && block.input !== null
+                        ? block.input
+                        : {},
                 });
             }
         }
