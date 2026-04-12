@@ -1641,6 +1641,31 @@ declare global {
         raw_output: string;
     };
 
+    // wshrpc.CommandBlockfileLineCountData
+    type CommandBlockfileLineCountData = {
+        block_id: string;
+        filename: string;
+    };
+
+    // wshrpc.BlockfileLineCountResult
+    type BlockfileLineCountResult = {
+        count: number;
+    };
+
+    // wshrpc.CommandBlockfileReadRangeData
+    type CommandBlockfileReadRangeData = {
+        block_id: string;
+        filename: string;
+        offset: number;
+        limit: number;
+    };
+
+    // wshrpc.BlockfileReadRangeResult
+    type BlockfileReadRangeResult = {
+        lines: string[];
+        total: number;
+    };
+
 }
 
 export {}
