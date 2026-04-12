@@ -5,7 +5,7 @@
  * AgentFooter - Minimal Claude Code-style input
  */
 
-import { createSignal, Show, type JSX } from "solid-js";
+import { Show, type JSX } from "solid-js";
 
 interface AgentFooterProps {
     agentId: string;
@@ -14,7 +14,10 @@ interface AgentFooterProps {
 }
 
 export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
-    const [message, setMessage] = createSignal("");
+    // Uncontrolled textarea — DOM owns the value. Reading via ref on send
+    // avoids re-rendering the component tree on every keystroke, which was
+    // causing severe typing lag when the parent's `loading` signal updated
+    // frequently from streaming controller status events.
     let textareaRef: HTMLTextAreaElement | undefined;
 
     const autoGrow = (el: HTMLTextAreaElement) => {
@@ -23,13 +26,13 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
     };
 
     const handleSend = () => {
-        if (!message().trim()) return;
+        if (!textareaRef) return;
+        const message = textareaRef.value;
+        if (!message.trim()) return;
         if (props.onSendMessage) {
-            props.onSendMessage(message());
-            setMessage("");
-            if (textareaRef) {
-                textareaRef.style.height = "auto";
-            }
+            props.onSendMessage(message);
+            textareaRef.value = "";
+            textareaRef.style.height = "auto";
         }
     };
 
@@ -41,9 +44,9 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
     };
 
     const handleInput = (e: Event) => {
-        const el = e.target as HTMLTextAreaElement;
-        setMessage(el.value);
-        autoGrow(el);
+        // Only auto-grow — do NOT update a signal here. Keeping the DOM as
+        // the source of truth means keystrokes don't trigger re-renders.
+        autoGrow(e.target as HTMLTextAreaElement);
     };
 
     return (
@@ -53,7 +56,6 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
                     ref={textareaRef}
                     class="agent-input"
                     placeholder={`Send message to ${props.agentId}...`}
-                    value={message()}
                     onInput={handleInput}
                     onKeyDown={handleKeyDown}
                     rows={1}
