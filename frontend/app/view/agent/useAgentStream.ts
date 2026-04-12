@@ -9,7 +9,7 @@
 
 import { getFileSubject } from "@/app/store/wps";
 import { base64ToArray } from "@/util/util";
-import { createEffect, onCleanup, onMount } from "solid-js";
+import { createEffect, onCleanup, onMount, untrack } from "solid-js";
 import { createTranslator } from "./providers/translator-factory";
 import { ClaudeCodeStreamParser } from "./stream-parser";
 import type { SignalPair } from "./state";
@@ -134,11 +134,13 @@ export function useAgentStream({
         const [doc] = documentAtom;
 
         // Rebuild dedup set + index map from whatever is currently in the
-        // document. Called on mount and whenever `documentVersion()` changes
-        // (history load, history prepend). This keeps live-stream updates
-        // targeting the correct node indices after external mutations.
+        // document. `doc()` is wrapped in `untrack` so the createEffect
+        // below only subscribes to documentVersion — NOT to the document
+        // signal itself. Without this, the rebuild would fire on every
+        // streaming flush (since flushPendingNodes calls setDoc), which
+        // would be O(n) per live event.
         const rebuildIndicesFromDocument = () => {
-            const existingNodes = doc();
+            const existingNodes = untrack(() => doc());
             nodeIdSet = new Set();
             nodeIndexMap = new Map();
             for (let i = 0; i < existingNodes.length; i++) {
@@ -151,7 +153,7 @@ export function useAgentStream({
         // hook mounted.
         rebuildIndicesFromDocument();
 
-        // Reactive rebuild whenever the caller bumps documentVersion after
+        // Reactive rebuild only when the caller bumps documentVersion after
         // an external prepend/load. The first invocation runs immediately
         // (SolidJS semantics) which is fine — it's idempotent.
         if (documentVersion != null) {
