@@ -257,6 +257,13 @@ impl PersistentSubprocessController {
         }
         self.publish_status();
 
+        // Record active pid for crash recovery (Phase 4.2). If the server
+        // dies while this subprocess is running, scan_orphans() will find
+        // the stale pid on next boot and flag the session as interrupted.
+        if let Some(ref wstore) = self.wstore {
+            super::session_recovery::mark_active_pid(wstore, &self.block_id, pid);
+        }
+
         // Spawn stdin writer task
         tokio::spawn(async move {
             let mut stdin = stdin;
@@ -388,6 +395,7 @@ impl PersistentSubprocessController {
         let block_id_wait = self.block_id.clone();
         let inner_wait = Arc::clone(&self.inner);
         let broker_wait = self.broker.clone();
+        let wstore_wait = self.wstore.clone();
 
         tokio::spawn(async move {
             tokio::select! {
@@ -406,6 +414,11 @@ impl PersistentSubprocessController {
                     inner.kill_tx = None;
                     Self::set_status(&mut inner, STATUS_DONE);
                     drop(inner);
+
+                    // Clear active pid — clean exit, no recovery needed.
+                    if let Some(ref wstore) = wstore_wait {
+                        super::session_recovery::clear_active_pid(wstore, &block_id_wait);
+                    }
 
                     // Publish status
                     if let Some(ref broker) = broker_wait {
@@ -449,6 +462,12 @@ impl PersistentSubprocessController {
                     inner.stdin_tx = None;
                     inner.kill_tx = None;
                     Self::set_status(&mut inner, STATUS_DONE);
+                    drop(inner);
+
+                    // Clear active pid — user-initiated stop, no recovery needed.
+                    if let Some(ref wstore) = wstore_wait {
+                        super::session_recovery::clear_active_pid(wstore, &block_id_wait);
+                    }
                 }
             }
         });
