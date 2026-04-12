@@ -242,6 +242,22 @@ export interface UserMessageEvent {
 }
 
 /**
+ * Bookmark — pins a document node for quick navigation.
+ * Stored as a JSON array under block meta key "agent:bookmarks".
+ *
+ * Known limitation: if the session is replayed from history, node IDs are
+ * regenerated (UUIDs) and will not match the stored nodeId. The `preview`
+ * text can be used as a fallback to search for the original content.
+ */
+export interface Bookmark {
+    id: string;       // uuid — unique bookmark identifier
+    nodeId: string;   // DocumentNode.id this bookmark points to
+    createdAt: number; // Unix ms
+    label: string;    // user-editable; defaults to first 60 chars of node content
+    preview: string;  // immutable snapshot of node content at bookmark time (80 chars)
+}
+
+/**
  * Document state (managed by Jotai atoms)
  */
 export interface DocumentState {
