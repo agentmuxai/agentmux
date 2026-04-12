@@ -26,6 +26,8 @@ pub fn register_app_api_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     register_agent_status(engine, state);
     register_agent_list(engine, state);
     register_agent_output(engine, state);
+    register_blockfile_line_count(engine, state);
+    register_blockfile_read_range(engine, state);
 }
 
 // ---------------------------------------------------------------------------
@@ -574,6 +576,120 @@ fn register_agent_output(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     lines,
                     total_lines: total,
                     has_more,
+                }).unwrap()))
+            })
+        }),
+    );
+}
+
+// ---------------------------------------------------------------------------
+// blockfile:line_count
+// ---------------------------------------------------------------------------
+
+fn register_blockfile_line_count(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    let broker = state.broker.clone();
+
+    engine.register_handler(
+        COMMAND_BLOCKFILE_LINE_COUNT,
+        Box::new(move |data, _ctx| {
+            let broker = broker.clone();
+            Box::pin(async move {
+                let cmd: CommandBlockfileLineCountData = serde_json::from_value(data)
+                    .map_err(|e| format!("blockfile:line_count: {e}"))?;
+
+                tracing::info!(block_id = %cmd.block_id, filename = %cmd.filename, "blockfile:line_count");
+
+                let scope = format!("block:{}", cmd.block_id);
+                let events = broker.read_event_history(
+                    crate::backend::wps::EVENT_BLOCK_FILE,
+                    &scope,
+                    usize::MAX,
+                );
+
+                let mut count: u64 = 0;
+                for event in events {
+                    if let Some(ref event_data) = event.data {
+                        // Filter to events for the requested filename
+                        let ev_filename = event_data.get("filename").and_then(|v| v.as_str()).unwrap_or("");
+                        if ev_filename != cmd.filename {
+                            continue;
+                        }
+                        if let Some(data64) = event_data.get("data64").and_then(|v| v.as_str()) {
+                            if let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(data64) {
+                                let text = String::from_utf8_lossy(&bytes);
+                                for line in text.lines() {
+                                    if !line.trim().is_empty() {
+                                        count += 1;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Ok(Some(serde_json::to_value(&BlockfileLineCountResult { count }).unwrap()))
+            })
+        }),
+    );
+}
+
+// ---------------------------------------------------------------------------
+// blockfile:read_range
+// ---------------------------------------------------------------------------
+
+fn register_blockfile_read_range(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    let broker = state.broker.clone();
+
+    engine.register_handler(
+        COMMAND_BLOCKFILE_READ_RANGE,
+        Box::new(move |data, _ctx| {
+            let broker = broker.clone();
+            Box::pin(async move {
+                let cmd: CommandBlockfileReadRangeData = serde_json::from_value(data)
+                    .map_err(|e| format!("blockfile:read_range: {e}"))?;
+
+                tracing::info!(block_id = %cmd.block_id, filename = %cmd.filename, offset = cmd.offset, limit = cmd.limit, "blockfile:read_range");
+
+                let limit = cmd.limit.min(10_000) as usize;
+                let offset = cmd.offset as usize;
+
+                let scope = format!("block:{}", cmd.block_id);
+                let events = broker.read_event_history(
+                    crate::backend::wps::EVENT_BLOCK_FILE,
+                    &scope,
+                    usize::MAX,
+                );
+
+                let mut all_lines: Vec<String> = Vec::new();
+                for event in events {
+                    if let Some(ref event_data) = event.data {
+                        // Filter to events for the requested filename
+                        let ev_filename = event_data.get("filename").and_then(|v| v.as_str()).unwrap_or("");
+                        if ev_filename != cmd.filename {
+                            continue;
+                        }
+                        if let Some(data64) = event_data.get("data64").and_then(|v| v.as_str()) {
+                            if let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(data64) {
+                                let text = String::from_utf8_lossy(&bytes);
+                                for line in text.lines() {
+                                    if !line.trim().is_empty() {
+                                        all_lines.push(line.to_string());
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                let total = all_lines.len() as u64;
+                let lines: Vec<String> = all_lines.into_iter()
+                    .skip(offset)
+                    .take(limit)
+                    .collect();
+
+                Ok(Some(serde_json::to_value(&BlockfileReadRangeResult {
+                    lines,
+                    total,
                 }).unwrap()))
             })
         }),

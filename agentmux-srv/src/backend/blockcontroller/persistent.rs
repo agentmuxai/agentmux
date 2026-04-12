@@ -22,7 +22,6 @@
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::mpsc;
@@ -286,11 +285,15 @@ impl PersistentSubprocessController {
         tokio::spawn(async move {
             let reader = BufReader::new(stdout);
             let mut lines = reader.lines();
+            let mut stats = super::session_stats::SessionStatsAccumulator::new(block_id_read.clone());
 
             while let Ok(Some(line)) = lines.next_line().await {
                 if line.trim().is_empty() {
                     continue;
                 }
+
+                // Track session metadata (debounced 1 s)
+                stats.record_line(line.len(), &wstore_read);
 
                 // Parse JSON for health monitoring and session ID capture
                 if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&line) {
