@@ -301,6 +301,14 @@ pub const COMMAND_AGENT_STREAM: &str = "agent.stream";
 pub const COMMAND_BLOCKFILE_LINE_COUNT: &str = "blockfile:line_count";
 pub const COMMAND_BLOCKFILE_READ_RANGE: &str = "blockfile:read_range";
 
+// App API Tier 1 — session archival commands
+pub const COMMAND_SESSION_ARCHIVE: &str = "session:archive";
+pub const COMMAND_SESSION_RESTORE: &str = "session:restore";
+pub const COMMAND_SESSION_EXPORT: &str = "session:export";
+
+// Session digest
+pub const COMMAND_SESSION_DIGEST: &str = "session:digest";
+
 // ---- Client type constants ----
 
 pub const CLIENT_TYPE_CONN_SERVER: &str = "connserver";
@@ -707,6 +715,79 @@ pub struct CommandBlockfileReadRangeData {
 pub struct BlockfileReadRangeResult {
     pub lines: Vec<String>,
     pub total: u64,
+}
+
+// ---- Session digest types ----
+
+/// Request for session:digest — generate or return a cached AI summary of the session.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct CommandSessionDigestData {
+    pub block_id: String,
+    /// If true, regenerate even if a cached digest exists.
+    pub force: Option<bool>,
+}
+
+/// Response from session:digest.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct SessionDigestResult {
+    /// AI-generated summary text (Markdown).
+    pub summary: String,
+    /// Unix milliseconds when this digest was generated.
+    pub generated_at: i64,
+    /// true if we returned a previously-cached result (no new activity since last run).
+    pub cached: bool,
+}
+
+// ---- Session archival types ----
+
+/// Request for session:archive — compress and archive a session's FileStore output.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct CommandSessionArchiveData {
+    pub block_id: String,
+}
+
+/// Response from session:archive.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct SessionArchiveResult {
+    pub block_id: String,
+    pub archived_bytes: u64,
+    pub archived_at: i64,
+}
+
+/// Request for session:restore — decompress archive back into FileStore.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct CommandSessionRestoreData {
+    pub block_id: String,
+}
+
+/// Response from session:restore.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct SessionRestoreResult {
+    pub block_id: String,
+    pub restored_bytes: u64,
+}
+
+/// Request for session:export — read session output and return as base64 JSONL.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct CommandSessionExportData {
+    pub block_id: String,
+}
+
+/// Response from session:export.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct SessionExportResult {
+    /// base64-encoded JSONL content (the raw output file bytes).
+    pub content: String,
+    pub line_count: u64,
+    pub byte_count: u64,
 }
 
 /// Matches Go's `FileDataAt`

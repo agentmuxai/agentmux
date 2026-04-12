@@ -384,6 +384,29 @@ async fn main() {
     // History service — discovers and indexes past CLI agent conversations
     let history_service = Arc::new(backend::history::HistoryService::new());
 
+    // Session archiver — auto-archive sessions inactive for >7 days, cap at 2 GB
+    {
+        let archiver = Arc::new(backend::session_archive::SessionArchiver::new(
+            wstore.clone(),
+            filestore.clone(),
+            7,                              // inactive days
+            2 * 1024 * 1024 * 1024,         // 2 GB max
+            dirs::home_dir()
+                .unwrap_or_default()
+                .join(".agentmux")
+                .join("archives"),
+        ));
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(std::time::Duration::from_secs(3600)).await;
+                match archiver.sweep().await {
+                    Ok(stats) => tracing::info!(?stats, "session archiver sweep complete"),
+                    Err(e) => tracing::warn!(error = %e, "session archiver sweep failed"),
+                }
+            }
+        });
+    }
+
     // 5. Bind 2 TCP listeners on 127.0.0.1:0 (web + ws — separate ports matching Go)
     let web_listener = TcpListener::bind("127.0.0.1:0")
         .await

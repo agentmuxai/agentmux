@@ -15,7 +15,9 @@ import { parseHistoryLines } from "./parseHistoryLines";
 import { AgentControlBar } from "./components/AgentControlBar";
 import { AgentDocumentView } from "./components/AgentDocumentView";
 import { AgentFooter } from "./components/AgentFooter";
+import { AgentSearchBar } from "./components/AgentSearchBar";
 import { BookmarksPanel } from "./components/BookmarksPanel";
+import { SessionDigestBanner } from "./components/SessionDigestBanner";
 import { RpcApi } from "@/app/store/wshclientapi";
 import { TabRpcClient } from "@/app/store/wshrpcutil";
 import { waveEventSubscribe } from "@/app/store/wps";
@@ -394,6 +396,14 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
     const [historyTotal, setHistoryTotal] = createSignal(0);
     const [loadingOlder, setLoadingOlder] = createSignal(false);
 
+    // ── Session digest ──────────────────────────────────────────────────────────
+    // Shows a collapsible AI-generated summary when the user returns to a stale
+    // session (idle >1 hour with >20 lines of new activity).
+    const [digestSummary, setDigestSummary] = createSignal<string | null>(null);
+    const [digestGeneratedAt, setDigestGeneratedAt] = createSignal<number | null>(null);
+    const [digestLoading, setDigestLoading] = createSignal(false);
+    const [digestDismissed, setDigestDismissed] = createSignal(false);
+
     // Bumped on every external document mutation (history load, prepend).
     // useAgentStream watches this and rebuilds its internal nodeIdSet +
     // nodeIndexMap so live-stream updates continue targeting the right
@@ -474,6 +484,34 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
             setLoadingOlder(false);
         }
     };
+
+    // Fetch (or regenerate) the session digest via the session:digest RPC.
+    // `force=true` bypasses the cache and re-invokes the Claude CLI.
+    const fetchDigest = async (force = false): Promise<void> => {
+        if (digestLoading()) return;
+        setDigestLoading(true);
+        try {
+            const result = await RpcApi.SessionDigestCommand(TabRpcClient, {
+                block_id: model.blockId,
+                force,
+            }, { timeout: 90000 }); // 60s CLI + headroom
+
+            if (result.summary) {
+                setDigestSummary(result.summary);
+                setDigestGeneratedAt(result.generated_at > 0 ? result.generated_at : null);
+            } else {
+                // Backend returned an empty summary (CLI unavailable, etc.) — hide the banner
+                setDigestSummary(null);
+            }
+        } catch (err: any) {
+            log("digest", `failed to generate session digest: ${err?.message ?? String(err)}`, "warn");
+            setDigestSummary(null);
+        } finally {
+            setDigestLoading(false);
+        }
+    };
+
+    const dismissDigest = () => setDigestDismissed(true);
 
     // Runs the full launch flow; can be triggered at mount time or via retry.
     const startLaunchFlow = async () => {
@@ -590,6 +628,48 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
             }
         })();
 
+        // ── Session digest auto-trigger ─────────────────────────────────────────
+        // Decide whether to show (or generate) a digest on pane open.
+        // Conditions: the session was idle for >1 hour AND has >20 lines.
+        // We use block meta for both facts; no extra RPC needed.
+        (() => {
+            const meta = block()?.meta ?? {};
+            const lastActivityMs: number = typeof meta["session:last_activity_ms"] === "number"
+                ? (meta["session:last_activity_ms"] as number)
+                : 0;
+            const lineCount: number = typeof meta["session:line_count"] === "number"
+                ? (meta["session:line_count"] as number)
+                : 0;
+            const cachedDigest = typeof meta["session:digest_summary"] === "string"
+                ? (meta["session:digest_summary"] as string)
+                : null;
+            const cachedDigestAt: number = typeof meta["session:digest_generated_at"] === "number"
+                ? (meta["session:digest_generated_at"] as number)
+                : 0;
+            const digestLastLineCount: number = typeof meta["session:digest_last_line_count"] === "number"
+                ? (meta["session:digest_last_line_count"] as number)
+                : 0;
+
+            const idleMs = lastActivityMs > 0 ? Date.now() - lastActivityMs : 0;
+            const idleOverOneHour = idleMs > 3600000;
+            const linesSinceDigest = lineCount - digestLastLineCount;
+
+            if (cachedDigest) {
+                // Always show the cached digest if available — let the backend decide
+                // on staleness when the user clicks Regenerate.
+                setDigestSummary(cachedDigest);
+                setDigestGeneratedAt(cachedDigestAt > 0 ? cachedDigestAt : null);
+
+                // Auto-regenerate in the background if idle >1h AND stale (>20 new lines)
+                if (idleOverOneHour && linesSinceDigest >= 20) {
+                    fetchDigest(false); // non-forced — backend will regenerate due to line delta
+                }
+            } else if (idleOverOneHour && lineCount > 20) {
+                // No cached digest — auto-generate one (takes 2-5s; show loading state)
+                fetchDigest(false);
+            }
+        })();
+
         // Full launch flow: CLI resolution → auth check → controller registration
         startLaunchFlow();
 
@@ -659,16 +739,27 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         onCleanup(() => unsubCompleted());
 
         // Ctrl+B — toggle bookmarks panel.
-        // Only fires for THIS pane if it's the currently focused block.
-        // Without this check, Ctrl+B would toggle every open agent pane's
-        // bookmarks panel simultaneously (all panes register the listener
-        // at window level).
+        // Ctrl+F — toggle search bar.
+        // Both are scoped to THIS pane via focusedBlockId() so that only the
+        // focused pane responds when multiple agent panes are open.
         const handleKeyDown = (e: KeyboardEvent) => {
+            const focused = focusedBlockId();
+            if (focused !== model.blockId) return;
+
             if (e.ctrlKey && e.key === "b") {
-                const focused = focusedBlockId();
-                if (focused !== model.blockId) return;
                 e.preventDefault();
                 setShowBookmarks((v) => !v);
+            } else if (e.ctrlKey && e.key === "f") {
+                e.preventDefault();
+                // Capture current state BEFORE toggling so we know if this
+                // Ctrl+F press is opening or closing the bar.
+                const wasVisible = searchVisible();
+                if (wasVisible) {
+                    // Second Ctrl+F press closes and clears state.
+                    searchClose();
+                } else {
+                    setSearchVisible(true);
+                }
             }
         };
         window.addEventListener("keydown", handleKeyDown);
@@ -825,6 +916,81 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
     // Mutable ref to the scrollToNode function exposed by AgentDocumentView.
     let scrollToNodeFn: ((nodeId: string) => void) | null = null;
 
+    // ── In-session search ───────────────────────────────────────────────────────
+    // Searches over the currently-loaded document slice only. Searching the
+    // full persisted history would require a backend blockfile:search RPC —
+    // out of scope for this PR.
+
+    const [searchVisible, setSearchVisible] = createSignal(false);
+    /** Node IDs whose text content matches the active query. */
+    const [searchMatches, setSearchMatches] = createSignal<string[]>([]);
+    /** 0-based index into searchMatches. -1 when there are no matches. */
+    const [searchCurrentIndex, setSearchCurrentIndex] = createSignal(-1);
+
+    /** Extract searchable plain text from any document node. */
+    const nodeSearchText = (node: DocumentNode): string => {
+        switch (node.type) {
+            case "markdown":      return node.content;
+            case "user_message":  return node.message;
+            case "agent_message": return node.message;
+            case "tool":          return node.tool + " " + JSON.stringify(node.params ?? {});
+            case "section":       return node.title;
+            case "subagent_link": return node.slug + " " + node.subagentId;
+            default:              return "";
+        }
+    };
+
+    const performSearch = (query: string) => {
+        if (!query.trim()) {
+            setSearchMatches([]);
+            setSearchCurrentIndex(-1);
+            return;
+        }
+        const q = query.toLowerCase();
+        const [doc] = agentAtoms().documentAtom;
+        const matches: string[] = [];
+        for (const node of doc()) {
+            if (nodeSearchText(node).toLowerCase().includes(q)) {
+                matches.push(node.id);
+            }
+        }
+        setSearchMatches(matches);
+        const newIndex = matches.length > 0 ? 0 : -1;
+        setSearchCurrentIndex(newIndex);
+        if (newIndex >= 0 && scrollToNodeFn) {
+            scrollToNodeFn(matches[0]);
+        }
+    };
+
+    const searchNext = () => {
+        const matches = searchMatches();
+        if (matches.length === 0) return;
+        const next = (searchCurrentIndex() + 1) % matches.length;
+        setSearchCurrentIndex(next);
+        if (scrollToNodeFn) scrollToNodeFn(matches[next]);
+    };
+
+    const searchPrev = () => {
+        const matches = searchMatches();
+        if (matches.length === 0) return;
+        const prev = (searchCurrentIndex() - 1 + matches.length) % matches.length;
+        setSearchCurrentIndex(prev);
+        if (scrollToNodeFn) scrollToNodeFn(matches[prev]);
+    };
+
+    const searchClose = () => {
+        setSearchVisible(false);
+        setSearchMatches([]);
+        setSearchCurrentIndex(-1);
+    };
+
+    /** Node id of the currently highlighted search result, or null. */
+    const searchHighlightId = createMemo<string | null>(() => {
+        const matches = searchMatches();
+        const idx = searchCurrentIndex();
+        return idx >= 0 && idx < matches.length ? matches[idx] : null;
+    });
+
     const saveBookmarks = async (next: Bookmark[]): Promise<void> => {
         await RpcApi.SetMetaCommand(TabRpcClient, {
             oref: WOS.makeORef("block", model.blockId),
@@ -957,6 +1123,26 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 />
             </Show>
 
+            <AgentSearchBar
+                visible={searchVisible}
+                onSearch={performSearch}
+                onNext={searchNext}
+                onPrev={searchPrev}
+                onClose={searchClose}
+                matchIndex={searchCurrentIndex}
+                matchCount={() => searchMatches().length}
+            />
+
+            <Show when={!digestDismissed()}>
+                <SessionDigestBanner
+                    summary={digestSummary}
+                    generatedAt={digestGeneratedAt}
+                    loading={digestLoading}
+                    onDismiss={dismissDigest}
+                    onRegenerate={() => fetchDigest(true)}
+                />
+            </Show>
+
             <AgentDocumentView
                 documentAtom={agentAtoms().documentAtom}
                 documentStateAtom={agentAtoms().documentStateAtom}
@@ -970,6 +1156,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 bookmarkedNodeIds={bookmarkedNodeIds}
                 onBookmark={handleBookmark}
                 scrollToNodeRef={(fn) => { scrollToNodeFn = fn; }}
+                highlightNodeId={searchHighlightId}
             />
 
             <Show when={loginWaiting()}>
