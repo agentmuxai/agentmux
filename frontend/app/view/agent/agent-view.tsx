@@ -565,6 +565,40 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
             } as DocumentNode,
         ]);
 
+        // Intercept interactive-only slash commands that don't work in
+        // stream-json mode. These require TTY/browser interaction.
+        const trimmed = message.trim();
+        if (trimmed === "/login") {
+            const prov = provider();
+            const cliPath = block()?.meta?.["cmd"] ?? "";
+            if (!prov || !cliPath) {
+                log("error", "/login: provider or CLI path not available", "error");
+                return;
+            }
+            log("auth", "running /login via GUI flow...");
+            try {
+                const authEnv: Record<string, string> = {};
+                const envMeta = block()?.meta?.["cmd:env"];
+                if (envMeta && typeof envMeta === "object") {
+                    for (const [k, v] of Object.entries(envMeta)) {
+                        if (typeof v === "string") authEnv[k] = v;
+                    }
+                }
+                await getApi().runCliLogin(cliPath, prov.authLoginCommand, authEnv);
+                log("auth", "a browser window should have opened — complete login there");
+                log("auth", "run /cost to verify authentication once logged in");
+            } catch (err: any) {
+                log("error", `/login failed: ${err?.message ?? String(err)}`, "error");
+            }
+            return;
+        }
+        if (trimmed === "/clear") {
+            // Frontend-only: clear the document
+            setDocument([]);
+            log("system", "chat cleared");
+            return;
+        }
+
         // Apply runtime args (permission mode, model, effort) before this turn
         const prov = provider();
         if (prov) {
