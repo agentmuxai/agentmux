@@ -7,13 +7,14 @@ import type { AgentViewModel } from "./agent-model";
 import { buildRuntimeArgs, getRuntimeConfig } from "./buildRuntimeArgs";
 import { getProvider, type ProviderDefinition } from "./providers";
 import { createAgentAtoms } from "./state";
-import type { DocumentNode, SubagentLinkNode } from "./types";
+import type { Bookmark, DocumentNode, SubagentLinkNode } from "./types";
 import { openSubagentPane, isSubagentPaneOpen } from "@/app/store/subagent-pane-manager";
 import { useAgentStream } from "./useAgentStream";
 import { parseHistoryLines } from "./parseHistoryLines";
 import { AgentControlBar } from "./components/AgentControlBar";
 import { AgentDocumentView } from "./components/AgentDocumentView";
 import { AgentFooter } from "./components/AgentFooter";
+import { BookmarksPanel } from "./components/BookmarksPanel";
 import { RpcApi } from "@/app/store/wshclientapi";
 import { TabRpcClient } from "@/app/store/wshrpcutil";
 import { waveEventSubscribe } from "@/app/store/wps";
@@ -655,6 +656,16 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
             },
         });
         onCleanup(() => unsubCompleted());
+
+        // Ctrl+B — toggle bookmarks panel
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if (e.ctrlKey && e.key === "b") {
+                e.preventDefault();
+                setShowBookmarks((v) => !v);
+            }
+        };
+        window.addEventListener("keydown", handleKeyDown);
+        onCleanup(() => window.removeEventListener("keydown", handleKeyDown));
     });
 
     // Subscribe to subprocess output and parse into DocumentNodes.
@@ -776,6 +787,102 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         }
     };
 
+    // Session timeline metadata — read from block meta so the minimap knows
+    // the real time range of the session (set by the backend as activity flows).
+    const sessionStartTsMs = createMemo<number | null>(() => {
+        const v = block()?.meta?.["session:start_ts_ms"];
+        return typeof v === "number" ? v : null;
+    });
+    const sessionLastActivityMs = createMemo<number | null>(() => {
+        const v = block()?.meta?.["session:last_activity_ms"];
+        return typeof v === "number" ? v : null;
+    });
+
+    // ── Bookmarks ───────────────────────────────────────────────────────────────
+
+    // Read bookmarks reactively from block meta ("agent:bookmarks").
+    const bookmarks = createMemo<Bookmark[]>(() => {
+        const raw = block()?.meta?.["agent:bookmarks"];
+        if (!Array.isArray(raw)) return [];
+        return raw as Bookmark[];
+    });
+
+    // Derived set of bookmarked nodeIds for O(1) look-up in the renderer.
+    const bookmarkedNodeIds = createMemo<Set<string>>(
+        () => new Set(bookmarks().map((b) => b.nodeId)),
+    );
+
+    // Whether the bookmarks panel is visible.
+    const [showBookmarks, setShowBookmarks] = createSignal(false);
+
+    // Mutable ref to the scrollToNode function exposed by AgentDocumentView.
+    let scrollToNodeFn: ((nodeId: string) => void) | null = null;
+
+    const saveBookmarks = async (next: Bookmark[]): Promise<void> => {
+        await RpcApi.SetMetaCommand(TabRpcClient, {
+            oref: WOS.makeORef("block", model.blockId),
+            meta: { "agent:bookmarks": next },
+        });
+    };
+
+    /** Extract plain text preview from a DocumentNode (≤80 chars). */
+    const nodePreview = (node: DocumentNode): string => {
+        let raw = "";
+        switch (node.type) {
+            case "markdown":    raw = node.content; break;
+            case "user_message": raw = node.message; break;
+            case "tool":        raw = node.summary || node.tool; break;
+            case "agent_message": raw = node.summary || node.message; break;
+            case "section":     raw = node.title; break;
+            case "subagent_link": raw = node.slug || node.subagentId; break;
+        }
+        return raw.replace(/\s+/g, " ").trim().slice(0, 80);
+    };
+
+    const handleBookmark = (node: DocumentNode): void => {
+        const current = bookmarks();
+        const existingIdx = current.findIndex((b) => b.nodeId === node.id);
+        let next: Bookmark[];
+        if (existingIdx >= 0) {
+            // Remove existing bookmark
+            next = current.filter((_, i) => i !== existingIdx);
+        } else {
+            const preview = nodePreview(node);
+            const label = preview.slice(0, 60) || node.id;
+            const newBookmark: Bookmark = {
+                id: crypto.randomUUID(),
+                nodeId: node.id,
+                createdAt: Date.now(),
+                label,
+                preview,
+            };
+            next = [...current, newBookmark];
+            // Open the panel on first bookmark
+            setShowBookmarks(true);
+        }
+        saveBookmarks(next).catch((err) => {
+            log("bookmark", `failed to save: ${err?.message ?? String(err)}`, "warn");
+        });
+    };
+
+    const handleBookmarkDelete = (id: string): void => {
+        const next = bookmarks().filter((b) => b.id !== id);
+        saveBookmarks(next).catch((err) => {
+            log("bookmark", `failed to save: ${err?.message ?? String(err)}`, "warn");
+        });
+    };
+
+    const handleBookmarkRename = (id: string, label: string): void => {
+        const next = bookmarks().map((b) => (b.id === id ? { ...b, label } : b));
+        saveBookmarks(next).catch((err) => {
+            log("bookmark", `failed to save: ${err?.message ?? String(err)}`, "warn");
+        });
+    };
+
+    const handleBookmarkJump = (nodeId: string): void => {
+        if (scrollToNodeFn) scrollToNodeFn(nodeId);
+    };
+
     // Per-pane zoom: read term:zoom from block meta (same key as terminal panes)
     const zoomFactor = createMemo(() => {
         const meta = block()?.meta;
@@ -834,6 +941,15 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 providerId={provider()?.id ?? ""}
             />
 
+            <Show when={showBookmarks()}>
+                <BookmarksPanel
+                    bookmarks={bookmarks}
+                    onJump={handleBookmarkJump}
+                    onDelete={handleBookmarkDelete}
+                    onRename={handleBookmarkRename}
+                />
+            </Show>
+
             <AgentDocumentView
                 documentAtom={agentAtoms().documentAtom}
                 documentStateAtom={agentAtoms().documentStateAtom}
@@ -842,6 +958,11 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 onSubagentClick={handleSubagentClick}
                 onLoadOlder={loadOlder}
                 loadingOlder={loadingOlder}
+                startTsMs={sessionStartTsMs}
+                endTsMs={sessionLastActivityMs}
+                bookmarkedNodeIds={bookmarkedNodeIds}
+                onBookmark={handleBookmark}
+                scrollToNodeRef={(fn) => { scrollToNodeFn = fn; }}
             />
 
             <Show when={loginWaiting()}>

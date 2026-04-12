@@ -43,6 +43,7 @@ fn test_state() -> AppState {
         local_web_url: String::new(),
         subagent_watcher: Arc::new(crate::backend::subagent_watcher::SubagentWatcher::new(event_bus)),
         history_service: Arc::new(crate::backend::history::HistoryService::new()),
+        lan_discovery: None,
     }
 }
 
