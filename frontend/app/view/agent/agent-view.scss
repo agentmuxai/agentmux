@@ -50,6 +50,17 @@
     }
 
     // === Status Log (terminal-style) ===
+    .agent-history-loading {
+        padding: 4px 8px;
+        font-family: var(--fixed-font);
+        font-size: 11px;
+        color: var(--secondary-text-color);
+        opacity: 0.6;
+        text-align: center;
+        border-bottom: 1px solid var(--border-color);
+        margin-bottom: 2px;
+    }
+
     .agent-status-log {
         padding: 2px 4px;
         font-family: var(--fixed-font);
