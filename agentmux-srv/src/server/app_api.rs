@@ -1180,14 +1180,16 @@ async fn invoke_cli_for_digest(
 
     // Pipe the prompt via stdin rather than passing it as a CLI arg — Linux
     // caps individual argv entries at MAX_ARG_STRLEN (~128 KB), and a digest
-    // over 200 lines of session content can easily exceed that. Using `-p`
-    // with an empty string arg tells Claude CLI to read the prompt from stdin.
+    // over 200 lines of session content can easily exceed that.
+    // `kill_on_drop(true)` ensures the child is terminated if the timeout
+    // future below is dropped — tokio `Child` does NOT kill on drop by default.
     let mut child = crate::server::cli_handlers::make_cli_cmd(cli_path)
         .args(["-p", "--output-format", "stream-json", "--verbose"])
         .envs(&auth_env)
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null())
+        .kill_on_drop(true)
         .spawn()
         .map_err(|e| format!("failed to spawn digest CLI: {e}"))?;
 
