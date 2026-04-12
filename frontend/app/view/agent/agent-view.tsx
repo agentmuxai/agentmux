@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { writeText as clipboardWriteText } from "@/util/clipboard";
+import { focusedBlockId } from "@/util/focusutil";
 import { createMemo, createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
 import type { AgentViewModel } from "./agent-model";
 import { buildRuntimeArgs, getRuntimeConfig } from "./buildRuntimeArgs";
@@ -657,9 +658,15 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         });
         onCleanup(() => unsubCompleted());
 
-        // Ctrl+B — toggle bookmarks panel
+        // Ctrl+B — toggle bookmarks panel.
+        // Only fires for THIS pane if it's the currently focused block.
+        // Without this check, Ctrl+B would toggle every open agent pane's
+        // bookmarks panel simultaneously (all panes register the listener
+        // at window level).
         const handleKeyDown = (e: KeyboardEvent) => {
             if (e.ctrlKey && e.key === "b") {
+                const focused = focusedBlockId();
+                if (focused !== model.blockId) return;
                 e.preventDefault();
                 setShowBookmarks((v) => !v);
             }

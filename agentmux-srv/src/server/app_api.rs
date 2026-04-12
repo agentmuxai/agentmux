@@ -592,61 +592,35 @@ fn register_agent_output(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
 fn register_blockfile_line_count(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let broker = state.broker.clone();
-    let filestore = state.filestore.clone();
+    let wstore = state.wstore.clone();
 
     engine.register_handler(
         COMMAND_BLOCKFILE_LINE_COUNT,
         Box::new(move |data, _ctx| {
             let broker = broker.clone();
-            let filestore = filestore.clone();
+            let wstore = wstore.clone();
             Box::pin(async move {
                 let cmd: CommandBlockfileLineCountData = serde_json::from_value(data)
                     .map_err(|e| format!("blockfile:line_count: {e}"))?;
 
                 tracing::info!(block_id = %cmd.block_id, filename = %cmd.filename, "blockfile:line_count");
 
-                // Phase 1.3: Prefer FileStore (persistent, no size cap) over the
-                // WPS broker ring buffer (MAX_PERSIST = 4096 events).
-                //
-                // If FileStore has the file and it is non-empty, count lines in
-                // the persisted bytes. Otherwise fall back to the ring buffer so
-                // sessions that pre-date Phase 1.3 (no FileStore writes yet) still
-                // work correctly.
-                let filestore_count = match filestore.stat(&cmd.block_id, &cmd.filename) {
-                    Ok(Some(ref wf)) if wf.size > 0 => {
-                        match filestore.read_file(&cmd.block_id, &cmd.filename) {
-                            Ok(Some(bytes)) => {
-                                let text = String::from_utf8_lossy(&bytes);
-                                let count = text.lines()
-                                    .filter(|l| !l.trim().is_empty())
-                                    .count() as u64;
-                                Some(count)
-                            }
-                            Ok(None) => None,
-                            Err(e) => {
-                                tracing::warn!(
-                                    block_id = %cmd.block_id,
-                                    filename = %cmd.filename,
-                                    error = %e,
-                                    "blockfile:line_count: filestore read failed, falling back to ring buffer"
-                                );
-                                None
-                            }
+                // Fast path: read session:line_count meta (O(1), maintained
+                // by SessionStatsAccumulator). For "output" filename this is
+                // the authoritative total — matches the unbounded counter
+                // that SessionStats increments on every line. FileStore's
+                // persisted line count will trail meta by up to the debounce
+                // interval (1s), and reading the full file just to count
+                // lines is O(file size) which defeats the point of a fast
+                // line_count endpoint.
+                if cmd.filename == "output" {
+                    if let Ok(Some(block)) = wstore.get::<Block>(&cmd.block_id) {
+                        if let Some(count) = block.meta.get("session:line_count").and_then(|v| v.as_u64()) {
+                            return Ok(Some(serde_json::to_value(
+                                &BlockfileLineCountResult { count },
+                            ).unwrap()));
                         }
                     }
-                    Ok(_) => None, // file absent or empty → fall back
-                    Err(e) => {
-                        tracing::warn!(
-                            block_id = %cmd.block_id,
-                            error = %e,
-                            "blockfile:line_count: filestore stat failed, falling back to ring buffer"
-                        );
-                        None
-                    }
-                };
-
-                if let Some(count) = filestore_count {
-                    return Ok(Some(serde_json::to_value(&BlockfileLineCountResult { count }).unwrap()));
                 }
 
                 // Fallback: count from WPS event ring buffer (capped at MAX_PERSIST = 4096).
