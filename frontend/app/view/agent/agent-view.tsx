@@ -551,12 +551,23 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
 
                     const nodes = parseHistoryLines(rangeResp.lines ?? [], outputFormat());
                     if (nodes.length > 0) {
-                        const [, setDoc] = agentAtoms().documentAtom;
-                        setDoc(nodes);
-                        // Notify useAgentStream to seed its indices from the
-                        // just-loaded history. Safe even if this fires before
-                        // or after useAgentStream mounts — the effect rebuilds
-                        // indices idempotently from current document state.
+                        const [doc, setDoc] = agentAtoms().documentAtom;
+                        // Prepend history to whatever is already in the
+                        // document. If useAgentStream has already captured
+                        // live events during the async history load, we
+                        // must not discard them. Dedupe by id — history
+                        // nodes and live nodes can overlap briefly during
+                        // a reconnect where an in-flight turn is also
+                        // visible in the persisted ring buffer.
+                        setDoc((prev) => {
+                            if (prev.length === 0) return nodes;
+                            const seen = new Set(prev.map((n) => n.id));
+                            const historyFresh = nodes.filter((n) => !seen.has(n.id));
+                            return [...historyFresh, ...prev];
+                        });
+                        // Notify useAgentStream to rebuild its nodeIdSet
+                        // and nodeIndexMap from the merged document so
+                        // subsequent live updates target correct indices.
                         bumpDocumentVersion();
                     }
 
