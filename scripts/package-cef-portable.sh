@@ -86,9 +86,42 @@ fi
 DIR_SIZE=$(du -sh "$PORTABLE" | cut -f1)
 
 # ZIP
+#
+# Tries pwsh 7 first (Compress-Archive with proper module), then falls back to
+# Windows PowerShell 5, then to `tar -a -cf` (bsdtar on Win10+). If *none*
+# succeed the script exits non-zero instead of silently reporting "N/A", which
+# is how a broken packaging run used to produce a portable folder on the
+# desktop with no ZIP beside it.
 cd "$OUTDIR"
 ZIP_NAME="agentmux-cef-$VERSION-x64-portable.zip"
-powershell -Command "Compress-Archive -Path '$(basename "$PORTABLE")/*' -DestinationPath '$ZIP_NAME' -Force" 2>/dev/null || true
+rm -f "$ZIP_NAME"
+
+portable_basename=$(basename "$PORTABLE")
+zip_made=0
+
+if command -v pwsh >/dev/null 2>&1; then
+    if pwsh -Command "Compress-Archive -Path '${portable_basename}/*' -DestinationPath '$ZIP_NAME' -Force" >/dev/null 2>&1; then
+        zip_made=1
+    fi
+fi
+
+if [ "$zip_made" -eq 0 ]; then
+    if powershell -Command "Compress-Archive -Path '${portable_basename}/*' -DestinationPath '$ZIP_NAME' -Force" >/dev/null 2>&1; then
+        zip_made=1
+    fi
+fi
+
+if [ "$zip_made" -eq 0 ]; then
+    if tar -a -cf "$ZIP_NAME" "$portable_basename" >/dev/null 2>&1; then
+        zip_made=1
+    fi
+fi
+
+if [ "$zip_made" -eq 0 ] || [ ! -f "$ZIP_NAME" ]; then
+    echo "ERROR: failed to create $ZIP_NAME — Compress-Archive (pwsh + powershell) and tar -a both failed" >&2
+    exit 1
+fi
+
 ZIP_SIZE=$(du -sh "$ZIP_NAME" 2>/dev/null | cut -f1 || echo "N/A")
 
 echo ""
