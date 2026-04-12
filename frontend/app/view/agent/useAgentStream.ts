@@ -9,7 +9,7 @@
 
 import { getFileSubject } from "@/app/store/wps";
 import { base64ToArray } from "@/util/util";
-import { onCleanup, onMount } from "solid-js";
+import { createEffect, onCleanup, onMount } from "solid-js";
 import { createTranslator } from "./providers/translator-factory";
 import { ClaudeCodeStreamParser } from "./stream-parser";
 import type { SignalPair } from "./state";
@@ -23,6 +23,13 @@ interface UseAgentStreamOpts {
     documentAtom: SignalPair<DocumentNode[]>;
     streamingStateAtom: SignalPair<StreamingState>;
     enabled: boolean;
+    /**
+     * Version signal bumped by external document mutations (e.g. history
+     * load or prepend). When this changes, the hook rebuilds its internal
+     * `nodeIdSet` and `nodeIndexMap` from the current documentAtom so live
+     * updates continue to target the correct nodes.
+     */
+    documentVersion?: () => number;
 }
 
 /**
@@ -34,6 +41,7 @@ export function useAgentStream({
     documentAtom,
     streamingStateAtom,
     enabled,
+    documentVersion,
 }: UseAgentStreamOpts): void {
     const [, setDocument] = documentAtom;
     const [, setStreaming] = streamingStateAtom;
@@ -123,15 +131,34 @@ export function useAgentStream({
         pendingNew = [];
         pendingUpdates = [];
 
-        // Seed the dedup set from any history nodes already in the document
-        // (loaded by the history-load step in agent-view.tsx before this hook
-        // mounts). This prevents live-stream events from re-inserting nodes
-        // that were restored from persisted history.
         const [doc] = documentAtom;
-        const existingNodes = doc();
-        for (let i = 0; i < existingNodes.length; i++) {
-            nodeIdSet.add(existingNodes[i].id);
-            nodeIndexMap.set(existingNodes[i].id, i);
+
+        // Rebuild dedup set + index map from whatever is currently in the
+        // document. Called on mount and whenever `documentVersion()` changes
+        // (history load, history prepend). This keeps live-stream updates
+        // targeting the correct node indices after external mutations.
+        const rebuildIndicesFromDocument = () => {
+            const existingNodes = doc();
+            nodeIdSet = new Set();
+            nodeIndexMap = new Map();
+            for (let i = 0; i < existingNodes.length; i++) {
+                nodeIdSet.add(existingNodes[i].id);
+                nodeIndexMap.set(existingNodes[i].id, i);
+            }
+        };
+
+        // Initial seed — covers history nodes that were loaded before this
+        // hook mounted.
+        rebuildIndicesFromDocument();
+
+        // Reactive rebuild whenever the caller bumps documentVersion after
+        // an external prepend/load. The first invocation runs immediately
+        // (SolidJS semantics) which is fine — it's idempotent.
+        if (documentVersion != null) {
+            createEffect(() => {
+                documentVersion();
+                rebuildIndicesFromDocument();
+            });
         }
 
         setStreaming((prev) => ({ ...prev, active: true, lastEventTime: Date.now() }));

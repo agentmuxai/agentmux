@@ -392,6 +392,13 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
     const [historyTotal, setHistoryTotal] = createSignal(0);
     const [loadingOlder, setLoadingOlder] = createSignal(false);
 
+    // Bumped on every external document mutation (history load, prepend).
+    // useAgentStream watches this and rebuilds its internal nodeIdSet +
+    // nodeIndexMap so live-stream updates continue targeting the right
+    // node indices after the document has been reshaped from outside.
+    const [documentVersion, setDocumentVersion] = createSignal(0);
+    const bumpDocumentVersion = () => setDocumentVersion((v) => v + 1);
+
     // Accumulated terminal-style log lines
     type LogLine = { tag: string; text: string; level?: "info" | "error" | "warn" };
     const [logLines, setLogLines] = createSignal<LogLine[]>([]);
@@ -452,6 +459,9 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
             if (newNodes.length > 0) {
                 const [, setDoc] = agentAtoms().documentAtom;
                 setDoc((prev) => [...newNodes, ...prev]);
+                // Notify useAgentStream to rebuild its index map so live
+                // updates target the correct nodes after the prepend.
+                bumpDocumentVersion();
             }
 
             setHistoryOffset(newOffset);
@@ -543,13 +553,23 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                     if (nodes.length > 0) {
                         const [, setDoc] = agentAtoms().documentAtom;
                         setDoc(nodes);
+                        // Notify useAgentStream to seed its indices from the
+                        // just-loaded history. Safe even if this fires before
+                        // or after useAgentStream mounts — the effect rebuilds
+                        // indices idempotently from current document state.
+                        bumpDocumentVersion();
                     }
 
-                    // Store pagination state for subsequent loadOlder() calls
+                    // Store pagination state for subsequent loadOlder() calls.
+                    // `resp.total` from the backend is the actual available
+                    // line count (clamped to the event ring buffer window),
+                    // not the all-time session:line_count. Use it so the
+                    // frontend never asks for offsets the backend can't serve.
+                    const available = rangeResp.total ?? total;
                     setHistoryOffset(offset);
-                    setHistoryTotal(total);
+                    setHistoryTotal(available);
 
-                    log("history", `loaded ${nodes.length} of ${total} previous messages`);
+                    log("history", `loaded ${nodes.length} of ${available} previous messages`);
                 }
             } catch (err: any) {
                 // Non-fatal — fresh session or backend not ready yet
@@ -626,13 +646,17 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         onCleanup(() => unsubCompleted());
     });
 
-    // Subscribe to subprocess output and parse into DocumentNodes
+    // Subscribe to subprocess output and parse into DocumentNodes.
+    // `documentVersion` is bumped whenever we mutate the document externally
+    // (history load / prepend), causing useAgentStream to rebuild its
+    // nodeIdSet and nodeIndexMap.
     useAgentStream({
         blockId: model.blockId,
         outputFormat: outputFormat(),
         documentAtom: agentAtoms().documentAtom,
         streamingStateAtom: agentAtoms().streamingStateAtom,
         enabled: true,
+        documentVersion,
     });
 
     // Send user message
