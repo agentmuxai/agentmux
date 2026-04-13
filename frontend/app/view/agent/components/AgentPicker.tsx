@@ -93,14 +93,29 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
 
     const openForgeFor = (agent: ForgeAgent) => {
         setCreateMode(false);
+        // Capture the previous tab BEFORE switching — otherwise we can't
+        // tell whether clicking ⚙ on an expanded card means "collapse"
+        // (already on forge) or "switch from identity to forge".
+        const prevTab = expandedTab();
+        const prevId = expandedId();
         setExpandedTab("forge");
-        setExpandedId((prev) => (prev === agent.id && expandedTab() === "forge" ? null : agent.id));
+        if (prevId === agent.id && prevTab === "forge") {
+            setExpandedId(null);
+        } else {
+            setExpandedId(agent.id);
+        }
     };
 
     const openIdentityFor = (agent: ForgeAgent) => {
         setCreateMode(false);
+        const prevTab = expandedTab();
+        const prevId = expandedId();
         setExpandedTab("identity");
-        setExpandedId((prev) => (prev === agent.id && expandedTab() === "identity" ? null : agent.id));
+        if (prevId === agent.id && prevTab === "identity") {
+            setExpandedId(null);
+        } else {
+            setExpandedId(agent.id);
+        }
     };
 
     const openCreateNew = () => {
