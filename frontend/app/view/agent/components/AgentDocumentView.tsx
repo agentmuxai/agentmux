@@ -297,32 +297,52 @@ AgentDocumentView.displayName = "AgentDocumentView";
 
 // ── Node renderer ────────────────────────────────────────────────────────────
 
-const DocumentNodeRenderer = ({
-    node,
-    collapsed,
-    onToggle,
-    toolPinned,
-    onToggleToolPin,
-    onSubagentClick,
-}: {
+// SolidJS reactivity note: props are accessed via `props.X` and NEVER
+// destructured in the parameter list. Destructuring captures mount-time
+// values and breaks reactivity for any prop that changes without triggering
+// the parent to re-create this component. Since the tool pin state
+// (`toolPinned`) lives in documentState — separate from the document array
+// that <For> keys off — pin toggles do NOT re-create DocumentNodeRenderer,
+// so a destructured `toolPinned` would stay stale forever even though the
+// child ToolBlock uses `props.pinned` correctly.
+//
+// See commit adcec38 for the first half of this fix (ToolBlock), and the
+// reagent review on PR #346 that caught this upstream companion.
+
+interface DocumentNodeRendererProps {
     node: DocumentNode;
     collapsed: boolean;
     onToggle: () => void;
     toolPinned: boolean;
     onToggleToolPin: () => void;
     onSubagentClick?: (node: SubagentLinkNode) => void;
-}): JSX.Element => {
-    switch (node.type) {
+}
+
+const DocumentNodeRenderer = (props: DocumentNodeRendererProps): JSX.Element => {
+    switch (props.node.type) {
         case "markdown":
-            return <MarkdownBlock node={node} />;
+            return <MarkdownBlock node={props.node} />;
 
         case "tool":
-            return <ToolBlock node={node} pinned={toolPinned} onTogglePin={onToggleToolPin} />;
+            return (
+                <ToolBlock
+                    node={props.node}
+                    pinned={props.toolPinned}
+                    onTogglePin={props.onToggleToolPin}
+                />
+            );
 
         case "agent_message":
-            return <AgentMessageBlock node={node} collapsed={collapsed} onToggle={onToggle} />;
+            return (
+                <AgentMessageBlock
+                    node={props.node}
+                    collapsed={props.collapsed}
+                    onToggle={props.onToggle}
+                />
+            );
 
-        case "user_message":
+        case "user_message": {
+            const node = props.node;
             return (
                 <div class="agent-user-message">
                     <div class="agent-user-message-content">
@@ -330,11 +350,18 @@ const DocumentNodeRenderer = ({
                     </div>
                 </div>
             );
+        }
 
         case "subagent_link":
-            return <SubagentLinkBlock node={node} onClick={onSubagentClick ?? (() => {})} />;
+            return (
+                <SubagentLinkBlock
+                    node={props.node}
+                    onClick={props.onSubagentClick ?? (() => {})}
+                />
+            );
 
-        case "section":
+        case "section": {
+            const node = props.node;
             return (
                 <div class={`agent-section level-${node.level}`}>
                     <Show when={node.level === 1}>
@@ -348,6 +375,7 @@ const DocumentNodeRenderer = ({
                     </Show>
                 </div>
             );
+        }
 
         default:
             return null;
