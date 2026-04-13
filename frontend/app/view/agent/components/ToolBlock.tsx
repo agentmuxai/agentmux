@@ -29,7 +29,8 @@
  */
 
 import clsx from "clsx";
-import { Show, createSignal, type JSX } from "solid-js";
+import { Show, createEffect, createSignal, onCleanup, type JSX } from "solid-js";
+import { Portal } from "solid-js/web";
 import { createBlock } from "@/store/global";
 import type { ToolNode } from "../types";
 import { BashOutputViewer } from "./BashOutputViewer";
@@ -71,12 +72,21 @@ const OVERLAY_MAX_HEIGHT_PX = 400;
 
 export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
     const [hovered, setHovered] = createSignal(false);
-    // `true` when the overlay should pop UP above the summary row instead of
-    // down below it. Decided on each mouseenter by measuring against the
-    // scroll parent — not reactive to layout changes, just a one-time check
-    // at hover time. Recomputed on every mouseenter so scrolling between
-    // hovers picks up the new position.
+    // Position of the collapsed row in viewport coordinates, recomputed on
+    // mouseenter. The overlay is rendered via a <Portal> to document.body to
+    // escape the paint containment imposed by .agent-document-node-wrapper's
+    // `content-visibility: auto` — otherwise the absolute-positioned overlay
+    // gets clipped at the wrapper's edge and the hover expansion is invisible.
+    const [overlayRect, setOverlayRect] = createSignal<{
+        left: number;
+        right: number;
+        top: number;    // used when overlayUp = false (drop down below the row)
+        bottom: number; // used when overlayUp = true  (pop up above the row)
+        width: number;
+    } | null>(null);
     const [overlayUp, setOverlayUp] = createSignal(false);
+
+    let blockRef: HTMLDivElement | undefined;
 
     // Force-expand rules — override hover/pin when the user must see content.
     // `failed` stays expanded so errors are immediately visible.
@@ -94,26 +104,78 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
 
     const statusIcon = (): string => STATUS_ICON[props.node.status] || "•";
 
-    const handleMouseEnter = (e: MouseEvent) => {
-        // Measure room BEFORE flipping the overlay class — the measurement
-        // is done on the collapsed block (1-line height), so `blockRect.bottom`
-        // is the start-of-overlay position. If there's <400px between that
-        // and the scroll parent's bottom, flip up.
-        const block = e.currentTarget as HTMLElement;
-        const blockRect = block.getBoundingClientRect();
-        const scrollParent = findScrollParent(block);
+    const measure = () => {
+        if (!blockRef) return;
+        const blockRect = blockRef.getBoundingClientRect();
+        const scrollParent = findScrollParent(blockRef);
         const parentBottom = scrollParent
             ? scrollParent.getBoundingClientRect().bottom
             : window.innerHeight;
         const spaceBelow = parentBottom - blockRect.bottom;
         setOverlayUp(spaceBelow < OVERLAY_MAX_HEIGHT_PX);
+        setOverlayRect({
+            left: blockRect.left,
+            right: window.innerWidth - blockRect.right,
+            top: blockRect.bottom,
+            bottom: window.innerHeight - blockRect.top,
+            width: blockRect.width,
+        });
+    };
+
+    // Hover-leave is deferred by a microtask so that mouseleave on the
+    // summary block followed by mouseenter on the portal overlay doesn't
+    // cause a visible collapse. The portal is rendered to document.body,
+    // not as a DOM descendant of the block — a direct onMouseLeave →
+    // setHovered(false) would momentarily hide the overlay as the cursor
+    // transits the one-pixel gap between the summary row and the portal.
+    let leavePending = 0;
+    const handleMouseEnter = () => {
+        if (leavePending) {
+            clearTimeout(leavePending);
+            leavePending = 0;
+        }
+        measure();
         setHovered(true);
     };
 
     const handleMouseLeave = () => {
-        setHovered(false);
-        // overlayUp stays — it'll be recomputed on next mouseenter
+        if (leavePending) clearTimeout(leavePending);
+        leavePending = window.setTimeout(() => {
+            leavePending = 0;
+            setHovered(false);
+        }, 0);
     };
+
+    onCleanup(() => {
+        if (leavePending) clearTimeout(leavePending);
+    });
+
+    // Reposition the portal overlay on scroll so a pinned overlay stays
+    // anchored to its block. Only attached while overlayMode() is active
+    // to avoid one listener per tool block in the document.
+    let scrollParentRef: HTMLElement | null = null;
+    const handleScroll = () => measure();
+
+    createEffect(() => {
+        const active = overlayMode();
+        if (active && blockRef) {
+            scrollParentRef = findScrollParent(blockRef);
+            scrollParentRef?.addEventListener("scroll", handleScroll, { passive: true });
+            window.addEventListener("resize", handleScroll, { passive: true });
+        } else if (scrollParentRef) {
+            scrollParentRef.removeEventListener("scroll", handleScroll);
+            window.removeEventListener("resize", handleScroll);
+            scrollParentRef = null;
+        }
+    });
+
+    onCleanup(() => {
+        if (scrollParentRef) {
+            scrollParentRef.removeEventListener("scroll", handleScroll);
+            window.removeEventListener("resize", handleScroll);
+            scrollParentRef = null;
+        }
+    });
 
     // Render tool-specific content — only evaluated when expanded.
     const renderToolContent = (): JSX.Element => {
@@ -190,8 +252,30 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
         }
     };
 
+    // Overlay style — only meaningful when overlayMode() is true. Computed
+    // from overlayRect() which is set during handleMouseEnter / handleScroll.
+    const overlayStyle = (): Record<string, string> => {
+        const r = overlayRect();
+        if (!r) return { display: "none" };
+        if (overlayUp()) {
+            return {
+                position: "fixed",
+                left: `${r.left}px`,
+                width: `${r.width}px`,
+                bottom: `${r.bottom}px`,
+            };
+        }
+        return {
+            position: "fixed",
+            left: `${r.left}px`,
+            width: `${r.width}px`,
+            top: `${r.top}px`,
+        };
+    };
+
     return (
         <div
+            ref={blockRef}
             class={clsx("agent-tool-block", {
                 collapsed: !expanded(),
                 expanded: expanded(),
@@ -231,10 +315,32 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
                 </Show>
                 <span class="agent-tool-ellipsis">…</span>
             </div>
-            <Show when={expanded()}>
+            {/* Inline content for persistent force-expanded states
+                (running/failed) — paints inside the document flow. */}
+            <Show when={expanded() && !overlayMode()}>
                 <div class="agent-tool-content" onClick={(e) => e.stopPropagation()}>
                     {renderToolContent()}
                 </div>
+            </Show>
+            {/* Overlay content for hover/pin — rendered via <Portal> so it
+                escapes the `.agent-document-node-wrapper`'s paint containment
+                (content-visibility: auto). Without the portal, the overlay
+                gets clipped at the wrapper's edge and hover expansion is
+                invisible. */}
+            <Show when={overlayMode()}>
+                <Portal>
+                    <div
+                        class={clsx("agent-tool-content", "agent-tool-content--portal", {
+                            "overlay-up": overlayUp(),
+                        })}
+                        style={overlayStyle()}
+                        onClick={(e) => e.stopPropagation()}
+                        onMouseEnter={() => setHovered(true)}
+                        onMouseLeave={handleMouseLeave}
+                    >
+                        {renderToolContent()}
+                    </div>
+                </Portal>
             </Show>
         </div>
     );
