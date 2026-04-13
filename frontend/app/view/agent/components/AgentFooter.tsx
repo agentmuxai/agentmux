@@ -17,6 +17,13 @@ interface AgentFooterProps {
      * per animation frame regardless of how many keystrokes queued up.
      */
     onTyping?: () => void;
+    /**
+     * Called on Esc when the textarea is empty (or whitespace only). The
+     * parent sends SIGINT to the agent CLI process — equivalent to Ctrl+C
+     * in a terminal. With text in the textarea, Esc clears instead.
+     * See SPEC_AGENT_PANE_FOLLOWUPS item #9.
+     */
+    onStopAgent?: () => void;
     loading?: boolean;
 }
 
@@ -74,6 +81,23 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
         if (e.key === "Enter" && !e.shiftKey) {
             e.preventDefault();
             handleSend();
+            return;
+        }
+        if (e.key === "Escape") {
+            // Esc semantics (SPEC_AGENT_PANE_FOLLOWUPS item #9):
+            //  - textarea has text → clear it, stay focused
+            //  - textarea is empty → send SIGINT to the agent CLI
+            if (!textareaRef) return;
+            if (textareaRef.value.trim().length > 0) {
+                e.preventDefault();
+                textareaRef.value = "";
+                // Kick the RAF-debounced typing scroll so the footer's
+                // auto-grow collapses and the document stays anchored.
+                props.onTyping?.();
+            } else {
+                e.preventDefault();
+                props.onStopAgent?.();
+            }
         }
     };
 
@@ -89,7 +113,7 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
                     rows={1}
                 />
                 <div class="agent-input-hint">
-                    <span>Enter to send • Shift+Enter for newline</span>
+                    <span>Enter to send • Shift+Enter for newline • Esc to clear / stop</span>
                     <Show when={props.loading}>
                         <span class="agent-loading-spinner">
                             <span class="agent-spinner-dot" />
