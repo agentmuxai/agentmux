@@ -335,7 +335,13 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
                         })}
                         style={overlayStyle()}
                         onClick={(e) => e.stopPropagation()}
-                        onMouseEnter={() => setHovered(true)}
+                        // Use handleMouseEnter (not an inline setHovered(true))
+                        // so the pending leavePending timeout from the block's
+                        // mouseleave is cleared. Otherwise the timeout fires
+                        // on the next tick after the portal's mouseenter
+                        // has set hovered=true, flipping it back to false
+                        // and collapsing the overlay mid-transit.
+                        onMouseEnter={handleMouseEnter}
                         onMouseLeave={handleMouseLeave}
                     >
                         {renderToolContent()}
