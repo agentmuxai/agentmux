@@ -8,11 +8,14 @@
  *
  * PR 2 of specs/SPEC_CONSOLIDATE_FORGE_IDENTITY_INTO_AGENT_2026_04_13.md.
  *
- * Instantiates a dedicated ForgeViewModel on mount (lifetime = panel
- * lifetime) and delegates to the existing ForgeDetail / ForgeForm
- * components. No rewrite of Forge internals — just reuse.
+ * Instantiates a dedicated ForgeViewModel and IdentityViewModel
+ * on mount (lifetime = panel lifetime) and delegates to the existing
+ * ForgeDetail / ForgeForm / IdentityPanel components. No rewrite of
+ * Forge or Identity internals — just reuse.
  *
- * Identity tab is a stub for now; PR 3 wires the IdentityPanel.
+ * The Identity tab currently shows the global account list (same
+ * data as the old identity widget). Per-agent scoping is deferred
+ * to SPEC_FORGE_AGENT_IDENTITY_2026_04_13.md.
  */
 
 import { createEffect, createSignal, onCleanup, onMount, Show, type JSX } from "solid-js";
