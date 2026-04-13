@@ -65,6 +65,14 @@ export interface UseAgentCommands {
     sendMessage: (message: string) => Promise<void>;
     /** Return to the agent picker by clearing the agent-identity meta keys. */
     back: () => Promise<void>;
+    /**
+     * Send SIGINT to the currently running agent CLI process. Invoked
+     * from the composer's Esc handler when the textarea is empty —
+     * equivalent to Ctrl+C in a terminal. Silently no-ops if the
+     * controller rejects the signal (e.g. no process running).
+     * See SPEC_AGENT_PANE_FOLLOWUPS item #9.
+     */
+    stopAgent: () => void;
 }
 
 export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommands {
@@ -165,5 +173,14 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         await opts.backToPicker();
     };
 
-    return { sendMessage, back };
+    const stopAgent = (): void => {
+        RpcApi.ControllerInputCommand(TabRpcClient, {
+            blockid: opts.blockId,
+            signame: "SIGINT",
+        }).catch((err) => {
+            opts.log("warn", `stop failed: ${err?.message ?? String(err)}`, "warn");
+        });
+    };
+
+    return { sendMessage, back, stopAgent };
 }
