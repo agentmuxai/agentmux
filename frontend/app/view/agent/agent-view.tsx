@@ -885,17 +885,6 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         }
     };
 
-    // Session timeline metadata — read from block meta so the minimap knows
-    // the real time range of the session (set by the backend as activity flows).
-    const sessionStartTsMs = createMemo<number | null>(() => {
-        const v = block()?.meta?.["session:start_ts_ms"];
-        return typeof v === "number" ? v : null;
-    });
-    const sessionLastActivityMs = createMemo<number | null>(() => {
-        const v = block()?.meta?.["session:last_activity_ms"];
-        return typeof v === "number" ? v : null;
-    });
-
     // ── Bookmarks ───────────────────────────────────────────────────────────────
 
     // Read bookmarks reactively from block meta ("agent:bookmarks").
@@ -1154,8 +1143,6 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 onSubagentClick={handleSubagentClick}
                 onLoadOlder={loadOlder}
                 loadingOlder={loadingOlder}
-                startTsMs={sessionStartTsMs}
-                endTsMs={sessionLastActivityMs}
                 bookmarkedNodeIds={bookmarkedNodeIds}
                 onBookmark={handleBookmark}
                 scrollToNodeRef={(fn) => { scrollToNodeFn = fn; }}

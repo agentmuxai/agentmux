@@ -11,7 +11,6 @@ import { createEffect, createSignal, For, Show, type Accessor, type JSX, onClean
 import type { SignalPair } from "../state";
 import type { DocumentNode, DocumentState, SubagentLinkNode } from "../types";
 import { AgentMessageBlock } from "./AgentMessageBlock";
-import { AgentTimeline } from "./AgentTimeline";
 import { MarkdownBlock } from "./MarkdownBlock";
 import { SubagentLinkBlock } from "./SubagentLinkBlock";
 import { ToolBlock } from "./ToolBlock";
@@ -33,10 +32,6 @@ interface AgentDocumentViewProps {
     onLoadOlder?: () => Promise<void>;
     /** Whether an older-history load is currently in progress. */
     loadingOlder?: Accessor<boolean>;
-    /** session:start_ts_ms from block meta — enables the timeline minimap. */
-    startTsMs?: Accessor<number | null>;
-    /** session:last_activity_ms from block meta — enables the timeline minimap. */
-    endTsMs?: Accessor<number | null>;
     /** Set of bookmarked node IDs — drives the bookmarked visual indicator. */
     bookmarkedNodeIds?: Accessor<Set<string>>;
     /** Called when the user bookmarks or un-bookmarks a node via context menu. */
@@ -53,15 +48,13 @@ interface AgentDocumentViewProps {
     highlightNodeId?: Accessor<string | null>;
 }
 
-export const AgentDocumentView = ({ documentAtom, documentStateAtom, logLines, authUrl, onSubagentClick, onLoadOlder, loadingOlder, startTsMs, endTsMs, bookmarkedNodeIds, onBookmark, scrollToNodeRef, scrollToBottomRef, highlightNodeId }: AgentDocumentViewProps): JSX.Element => {
+export const AgentDocumentView = ({ documentAtom, documentStateAtom, logLines, authUrl, onSubagentClick, onLoadOlder, loadingOlder, bookmarkedNodeIds, onBookmark, scrollToNodeRef, scrollToBottomRef, highlightNodeId }: AgentDocumentViewProps): JSX.Element => {
     const [document] = documentAtom;
     const [documentState, setDocumentState] = documentStateAtom;
     let scrollRef!: HTMLDivElement;
     let autoScroll = true;
     // Guard against concurrent older-history fetches triggered by scroll
     let loadingOlderInFlight = false;
-    // 0..1 fraction of the current scroll position within the document
-    const [scrollFraction, setScrollFraction] = createSignal(0);
 
     // Scroll to a node by its data-node-id attribute.
     // Exposed to the parent via scrollToNodeRef so BookmarksPanel can call it.
@@ -180,10 +173,6 @@ export const AgentDocumentView = ({ documentAtom, documentStateAtom, logLines, a
         const { scrollTop, scrollHeight, clientHeight } = scrollRef;
         autoScroll = scrollHeight - scrollTop - clientHeight < 50;
 
-        // Update timeline scroll indicator
-        const maxScroll = scrollHeight - clientHeight;
-        setScrollFraction(maxScroll > 0 ? Math.min(1, scrollTop / maxScroll) : 0);
-
         // Trigger older-history load when near the top
         if (
             onLoadOlder &&
@@ -211,18 +200,7 @@ export const AgentDocumentView = ({ documentAtom, documentStateAtom, logLines, a
         }
     };
 
-    // Called when the user clicks the timeline — scroll the document to that position.
-    const handleTimelineJump = (fraction: number) => {
-        if (!scrollRef) return;
-        const { scrollHeight, clientHeight } = scrollRef;
-        const maxScroll = scrollHeight - clientHeight;
-        scrollRef.scrollTop = fraction * maxScroll;
-        // Disable auto-scroll when the user manually jumps to a position
-        autoScroll = fraction >= 0.98;
-    };
-
     return (
-        <div class="agent-document-wrapper">
         <div
             class="agent-document"
             ref={scrollRef}
@@ -328,16 +306,6 @@ export const AgentDocumentView = ({ documentAtom, documentStateAtom, logLines, a
                     );
                 }}
             </For>
-        </div>
-        <Show when={startTsMs != null && endTsMs != null}>
-            <AgentTimeline
-                document={document}
-                startTsMs={startTsMs ?? (() => null)}
-                endTsMs={endTsMs ?? (() => null)}
-                scrollPosition={scrollFraction}
-                onJump={handleTimelineJump}
-            />
-        </Show>
         </div>
     );
 };
