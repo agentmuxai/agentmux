@@ -14,6 +14,7 @@ import { useAgentStream } from "./useAgentStream";
 import { parseHistoryLines } from "./parseHistoryLines";
 import { runLaunchFlow } from "./flows/launch-flow";
 import { useLaunchLogs } from "./hooks/useLaunchLogs";
+import { useSessionDigest } from "./hooks/useSessionDigest";
 import { useHistoryPagination } from "./hooks/useHistoryPagination";
 import { AgentControlBar } from "./components/AgentControlBar";
 import { AgentDocumentView } from "./components/AgentDocumentView";
@@ -91,13 +92,20 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
     const loadOlder = history.loadOlder;
     const documentVersion = history.documentVersion;
 
-    // ── Session digest ──────────────────────────────────────────────────────────
-    // Shows a collapsible AI-generated summary when the user returns to a stale
-    // session (idle >1 hour with >20 lines of new activity).
-    const [digestSummary, setDigestSummary] = createSignal<string | null>(null);
-    const [digestGeneratedAt, setDigestGeneratedAt] = createSignal<number | null>(null);
-    const [digestLoading, setDigestLoading] = createSignal(false);
-    const [digestDismissed, setDigestDismissed] = createSignal(false);
+    // Session digest — owns summary/generatedAt/loading/dismissed signals,
+    // the fetch RPC wrapper, and the auto-trigger that decides whether to
+    // surface or generate a digest on pane open. See hooks/useSessionDigest.ts.
+    const digest = useSessionDigest({
+        blockId: model.blockId,
+        block,
+        log,
+    });
+    const digestSummary = digest.summary;
+    const digestGeneratedAt = digest.generatedAt;
+    const digestLoading = digest.loading;
+    const digestDismissed = digest.dismissed;
+    const fetchDigest = digest.fetch;
+    const dismissDigest = digest.dismiss;
 
     // OAuth URL — shown prominently with a copy button when login is needed
     const [authUrl, setAuthUrl] = createSignal<string | null>(null);
@@ -132,33 +140,8 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
     // loadOlder + initial-history-load are owned by useHistoryPagination
     // (local aliases declared above).
 
-    // Fetch (or regenerate) the session digest via the session:digest RPC.
-    // `force=true` bypasses the cache and re-invokes the Claude CLI.
-    const fetchDigest = async (force = false): Promise<void> => {
-        if (digestLoading()) return;
-        setDigestLoading(true);
-        try {
-            const result = await RpcApi.SessionDigestCommand(TabRpcClient, {
-                block_id: model.blockId,
-                force,
-            }, { timeout: 90000 }); // 60s CLI + headroom
-
-            if (result.summary) {
-                setDigestSummary(result.summary);
-                setDigestGeneratedAt(result.generated_at > 0 ? result.generated_at : null);
-            } else {
-                // Backend returned an empty summary (CLI unavailable, etc.) — hide the banner
-                setDigestSummary(null);
-            }
-        } catch (err: any) {
-            log("digest", `failed to generate session digest: ${err?.message ?? String(err)}`, "warn");
-            setDigestSummary(null);
-        } finally {
-            setDigestLoading(false);
-        }
-    };
-
-    const dismissDigest = () => setDigestDismissed(true);
+    // fetchDigest + dismissDigest are owned by useSessionDigest
+    // (local aliases declared above).
 
     // Runs the full launch flow; can be triggered at mount time or via retry.
     const startLaunchFlow = async () => {
@@ -220,47 +203,8 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         // onMount — fires automatically when the hook mounts. No work
         // here. See hooks/useHistoryPagination.ts.
 
-        // ── Session digest auto-trigger ─────────────────────────────────────────
-        // Decide whether to show (or generate) a digest on pane open.
-        // Conditions: the session was idle for >1 hour AND has >20 lines.
-        // We use block meta for both facts; no extra RPC needed.
-        (() => {
-            const meta = block()?.meta ?? {};
-            const lastActivityMs: number = typeof meta["session:last_activity_ms"] === "number"
-                ? (meta["session:last_activity_ms"] as number)
-                : 0;
-            const lineCount: number = typeof meta["session:line_count"] === "number"
-                ? (meta["session:line_count"] as number)
-                : 0;
-            const cachedDigest = typeof meta["session:digest_summary"] === "string"
-                ? (meta["session:digest_summary"] as string)
-                : null;
-            const cachedDigestAt: number = typeof meta["session:digest_generated_at"] === "number"
-                ? (meta["session:digest_generated_at"] as number)
-                : 0;
-            const digestLastLineCount: number = typeof meta["session:digest_last_line_count"] === "number"
-                ? (meta["session:digest_last_line_count"] as number)
-                : 0;
-
-            const idleMs = lastActivityMs > 0 ? Date.now() - lastActivityMs : 0;
-            const idleOverOneHour = idleMs > 3600000;
-            const linesSinceDigest = lineCount - digestLastLineCount;
-
-            if (cachedDigest) {
-                // Always show the cached digest if available — let the backend decide
-                // on staleness when the user clicks Regenerate.
-                setDigestSummary(cachedDigest);
-                setDigestGeneratedAt(cachedDigestAt > 0 ? cachedDigestAt : null);
-
-                // Auto-regenerate in the background if idle >1h AND stale (>20 new lines)
-                if (idleOverOneHour && linesSinceDigest >= 20) {
-                    fetchDigest(false); // non-forced — backend will regenerate due to line delta
-                }
-            } else if (idleOverOneHour && lineCount > 20) {
-                // No cached digest — auto-generate one (takes 2-5s; show loading state)
-                fetchDigest(false);
-            }
-        })();
+        // Session digest auto-trigger is owned by useSessionDigest's
+        // own onMount (see hooks/useSessionDigest.ts).
 
         // Full launch flow: CLI resolution → auth check → controller registration
         startLaunchFlow();
