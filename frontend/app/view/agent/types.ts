@@ -9,6 +9,18 @@
  */
 
 /**
+ * A single terminal-style log line emitted during the agent launch flow
+ * (CLI resolution, install progress, auth check, login poll, controller
+ * registration). Collected into an array by `useLaunchLogs` and rendered
+ * at the top of `AgentDocumentView` until the agent is ready.
+ */
+export interface LogLine {
+    tag: string; // "agent", "cli", "auth", "env", "error", "install", etc.
+    text: string;
+    level?: "info" | "error" | "warn";
+}
+
+/**
  * Initialization question asked by the CLI during startup
  */
 export interface InitQuestion {
