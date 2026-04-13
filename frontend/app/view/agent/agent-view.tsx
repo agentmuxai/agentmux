@@ -16,6 +16,7 @@ import { runLaunchFlow } from "./flows/launch-flow";
 import { useLaunchLogs } from "./hooks/useLaunchLogs";
 import { useSessionDigest } from "./hooks/useSessionDigest";
 import { useHistoryPagination } from "./hooks/useHistoryPagination";
+import { useInSessionSearch } from "./hooks/useInSessionSearch";
 import { useBookmarks } from "./hooks/useBookmarks";
 import { AgentControlBar } from "./components/AgentControlBar";
 import { AgentDocumentView } from "./components/AgentDocumentView";
@@ -447,82 +448,22 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
     // Called by AgentFooter's onTyping when the user starts composing.
     let scrollToBottomFn: (() => void) | null = null;
 
-    // ── In-session search ───────────────────────────────────────────────────────
-    // Searches over the currently-loaded document slice only. Searching the
-    // full persisted history would require a backend blockfile:search RPC —
-    // out of scope for this PR.
-
-    const [searchVisible, setSearchVisible] = createSignal(false);
-    /** Node IDs whose text content matches the active query. */
-    const [searchMatches, setSearchMatches] = createSignal<string[]>([]);
-    /** 0-based index into searchMatches. -1 when there are no matches. */
-    const [searchCurrentIndex, setSearchCurrentIndex] = createSignal(-1);
-
-    /** Extract searchable plain text from any document node. */
-    const nodeSearchText = (node: DocumentNode): string => {
-        switch (node.type) {
-            case "markdown":      return node.content;
-            case "user_message":  return node.message;
-            case "agent_message": return node.message;
-            case "tool":          return node.tool + " " + JSON.stringify(node.params ?? {});
-            case "section":       return node.title;
-            case "subagent_link": return node.slug + " " + node.subagentId;
-            default:              return "";
-        }
-    };
-
-    const performSearch = (query: string) => {
-        if (!query.trim()) {
-            setSearchMatches([]);
-            setSearchCurrentIndex(-1);
-            return;
-        }
-        const q = query.toLowerCase();
-        const [doc] = agentAtoms().documentAtom;
-        const matches: string[] = [];
-        for (const node of doc()) {
-            if (nodeSearchText(node).toLowerCase().includes(q)) {
-                matches.push(node.id);
-            }
-        }
-        setSearchMatches(matches);
-        const newIndex = matches.length > 0 ? 0 : -1;
-        setSearchCurrentIndex(newIndex);
-        if (newIndex >= 0 && scrollToNodeFn) {
-            scrollToNodeFn(matches[0]);
-        }
-    };
-
-    const searchNext = () => {
-        const matches = searchMatches();
-        if (matches.length === 0) return;
-        const next = (searchCurrentIndex() + 1) % matches.length;
-        setSearchCurrentIndex(next);
-        if (scrollToNodeFn) scrollToNodeFn(matches[next]);
-    };
-
-    const searchPrev = () => {
-        const matches = searchMatches();
-        if (matches.length === 0) return;
-        const prev = (searchCurrentIndex() - 1 + matches.length) % matches.length;
-        setSearchCurrentIndex(prev);
-        if (scrollToNodeFn) scrollToNodeFn(matches[prev]);
-    };
-
-    const searchClose = () => {
-        setSearchVisible(false);
-        setSearchMatches([]);
-        setSearchCurrentIndex(-1);
-    };
-
-    /** Node id of the currently highlighted search result, or null. */
-    const searchHighlightId = createMemo<string | null>(() => {
-        const matches = searchMatches();
-        const idx = searchCurrentIndex();
-        return idx >= 0 && idx < matches.length ? matches[idx] : null;
+    // In-session search — owns matches, current index, navigation, highlight.
+    // Searches over the currently-loaded document slice only. See
+    // hooks/useInSessionSearch.ts.
+    const search = useInSessionSearch({
+        document: agentAtoms().documentAtom[0],
+        jumpTo: (nodeId) => scrollToNodeFn?.(nodeId),
     });
-
-    // Bookmark CRUD + jump owned by useBookmarks (aliases declared above).
+    const searchVisible = search.visible;
+    const setSearchVisible = search.setVisible;
+    const searchCurrentIndex = search.currentIndex;
+    const searchMatchCount = search.matchCount;
+    const performSearch = search.performSearch;
+    const searchNext = search.next;
+    const searchPrev = search.prev;
+    const searchClose = search.close;
+    const searchHighlightId = search.highlightId;
 
     // Per-pane zoom: read term:zoom from block meta (same key as terminal panes)
     const zoomFactor = createMemo(() => {
@@ -598,7 +539,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 onPrev={searchPrev}
                 onClose={searchClose}
                 matchIndex={searchCurrentIndex}
-                matchCount={() => searchMatches().length}
+                matchCount={searchMatchCount}
             />
 
             <Show when={!digestDismissed()}>
