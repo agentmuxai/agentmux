@@ -510,11 +510,23 @@
     }
 
     // === Control Bar ===
+    // Anchored to the bottom of the pane below AgentFooter (see
+    // SPEC_AGENT_PANE_FOLLOWUPS item #7). Border on top so it reads
+    // as a sub-footer visually separated from the composer above.
     .agent-control-bar {
-        border-bottom: 1px solid var(--border-color);
+        border-top: 1px solid var(--border-color);
         background: color-mix(in srgb, var(--main-text-color) 2%, transparent);
         flex-shrink: 0;
         font-size: 11px;
+    }
+
+    // Composer region wraps AgentFooter + AgentControlBar at the pane
+    // bottom. Flex column so the footer sits above the control bar
+    // and the two read as a single unit.
+    .agent-composer-region {
+        display: flex;
+        flex-direction: column;
+        flex-shrink: 0;
     }
 
     .agent-interrupted-banner {
