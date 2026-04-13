@@ -48,6 +48,16 @@ export interface UseAgentCommandsOptions {
      * place (AgentViewModel). See SPEC_AGENT_PANE_FOLLOWUPS item #8.
      */
     backToPicker: () => Promise<void>;
+    /**
+     * Called on the next animation frame after a user_message is
+     * appended to the document via `sendMessage`. AgentPresentationView
+     * wires this to the AgentDocumentView's `scrollToBottomFn` so the
+     * user's own message is guaranteed visible when they press Enter.
+     * Without this, the auto-scroll effect may be skipped if `autoScroll`
+     * was flipped off during the composer's own growth.
+     * See SPEC_AGENT_PANE_FOLLOWUPS item #1.
+     */
+    onSent?: () => void;
 }
 
 export interface UseAgentCommands {
@@ -102,6 +112,15 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
                 summary: "",
             } as DocumentNode,
         ]);
+
+        // Defer the scroll-to-bottom by one animation frame so the
+        // user_message node has a chance to mount in the DOM before the
+        // scroll math runs. Calling it synchronously lands the scroll
+        // ABOVE the new message because scrollHeight doesn't include the
+        // unmounted node yet. See SPEC_AGENT_PANE_FOLLOWUPS item #1.
+        if (opts.onSent) {
+            requestAnimationFrame(() => opts.onSent?.());
+        }
 
         const trimmed = message.trim();
         if (trimmed === "/login") {
