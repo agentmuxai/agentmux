@@ -24,7 +24,6 @@ import { AgentControlBar } from "./components/AgentControlBar";
 import { AgentDocumentView } from "./components/AgentDocumentView";
 import { AgentFooter } from "./components/AgentFooter";
 import { AgentPicker } from "./components/AgentPicker";
-import { AgentPresentationHeader } from "./components/AgentPresentationHeader";
 import { AgentSearchBar } from "./components/AgentSearchBar";
 import { BookmarksPanel } from "./components/BookmarksPanel";
 import { SessionDigestBanner } from "./components/SessionDigestBanner";
@@ -123,9 +122,9 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         documentAtom: agentAtoms().documentAtom,
         log,
         setAuthUrl: status.setAuthUrl,
+        backToPicker: () => model.backToPicker(),
     });
     const handleSendMessage = commands.sendMessage;
-    const handleBack = commands.back;
 
     // ── Jump-to-node + Bookmarks ────────────────────────────────────────────────
 
@@ -212,12 +211,9 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
             style={{ zoom: zoomFactor() }}
             onContextMenu={handleContextMenu}
         >
-            <AgentPresentationHeader
-                block={block}
-                provider={provider}
-                agentId={agentId}
-                onBack={handleBack}
-            />
+            {/* Pane title + back button now live in the block frame header,
+                driven by AgentViewModel.viewName / viewIcon / endIconButtons.
+                See SPEC_AGENT_PANE_FOLLOWUPS item #8. */}
 
             <AgentControlBar
                 blockId={model.blockId}

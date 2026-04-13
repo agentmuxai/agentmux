@@ -509,43 +509,6 @@
         flex-direction: column;
     }
 
-    .agent-pres-header {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        padding: 4px 6px;
-        border-bottom: 1px solid var(--border-color);
-        background: color-mix(in srgb, var(--accent-color) 5%, transparent);
-        flex-shrink: 0;
-    }
-
-    .agent-pres-icon {
-        font-size: 16px;
-    }
-
-    .agent-pres-name {
-        font-size: 13px;
-        font-weight: 600;
-        color: var(--main-text-color);
-        flex: 1;
-    }
-
-    .agent-pres-back {
-        background: none;
-        border: none;
-        color: var(--secondary-text-color);
-        cursor: pointer;
-        font-size: 12px;
-        padding: 2px 6px;
-        border-radius: 3px;
-        transition: color 0.1s, background 0.1s;
-
-        &:hover {
-            color: var(--main-text-color);
-            background: color-mix(in srgb, var(--main-text-color) 8%, transparent);
-        }
-    }
-
     // === Control Bar ===
     .agent-control-bar {
         border-bottom: 1px solid var(--border-color);
