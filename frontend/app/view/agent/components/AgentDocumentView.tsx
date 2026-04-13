@@ -71,7 +71,8 @@ export const AgentDocumentView = ({ documentAtom, documentStateAtom, logLines, a
     // Expose scrollToNode to the parent on mount
     if (scrollToNodeRef) scrollToNodeRef(scrollToNode);
 
-    // Toggle collapsed state for a node
+    // Toggle collapsed state for a node (agent messages only — tool blocks
+    // manage their own expand/collapse via hover + pin).
     const toggleCollapse = (nodeId: string) => {
         setDocumentState((prev) => {
             const collapsed = new Set(prev.collapsedNodes);
@@ -81,6 +82,21 @@ export const AgentDocumentView = ({ documentAtom, documentStateAtom, logLines, a
                 collapsed.add(nodeId);
             }
             return { ...prev, collapsedNodes: collapsed };
+        });
+    };
+
+    // Toggle the "pinned open" state for a tool node. Tool blocks render
+    // collapsed by default — hover expands, click pins. See
+    // docs/specs/tool-collapse.md.
+    const toggleToolPin = (nodeId: string) => {
+        setDocumentState((prev) => {
+            const pinned = new Set(prev.pinnedToolNodes);
+            if (pinned.has(nodeId)) {
+                pinned.delete(nodeId);
+            } else {
+                pinned.add(nodeId);
+            }
+            return { ...prev, pinnedToolNodes: pinned };
         });
     };
 
@@ -255,6 +271,8 @@ export const AgentDocumentView = ({ documentAtom, documentStateAtom, logLines, a
                                 node={node}
                                 collapsed={documentState().collapsedNodes.has(node.id)}
                                 onToggle={() => toggleCollapse(node.id)}
+                                toolPinned={documentState().pinnedToolNodes.has(node.id)}
+                                onToggleToolPin={() => toggleToolPin(node.id)}
                                 onSubagentClick={onSubagentClick}
                             />
                         </div>
@@ -279,28 +297,52 @@ AgentDocumentView.displayName = "AgentDocumentView";
 
 // ── Node renderer ────────────────────────────────────────────────────────────
 
-const DocumentNodeRenderer = ({
-    node,
-    collapsed,
-    onToggle,
-    onSubagentClick,
-}: {
+// SolidJS reactivity note: props are accessed via `props.X` and NEVER
+// destructured in the parameter list. Destructuring captures mount-time
+// values and breaks reactivity for any prop that changes without triggering
+// the parent to re-create this component. Since the tool pin state
+// (`toolPinned`) lives in documentState — separate from the document array
+// that <For> keys off — pin toggles do NOT re-create DocumentNodeRenderer,
+// so a destructured `toolPinned` would stay stale forever even though the
+// child ToolBlock uses `props.pinned` correctly.
+//
+// See commit adcec38 for the first half of this fix (ToolBlock), and the
+// reagent review on PR #346 that caught this upstream companion.
+
+interface DocumentNodeRendererProps {
     node: DocumentNode;
     collapsed: boolean;
     onToggle: () => void;
+    toolPinned: boolean;
+    onToggleToolPin: () => void;
     onSubagentClick?: (node: SubagentLinkNode) => void;
-}): JSX.Element => {
-    switch (node.type) {
+}
+
+const DocumentNodeRenderer = (props: DocumentNodeRendererProps): JSX.Element => {
+    switch (props.node.type) {
         case "markdown":
-            return <MarkdownBlock node={node} />;
+            return <MarkdownBlock node={props.node} />;
 
         case "tool":
-            return <ToolBlock node={node} collapsed={collapsed} onToggle={onToggle} />;
+            return (
+                <ToolBlock
+                    node={props.node}
+                    pinned={props.toolPinned}
+                    onTogglePin={props.onToggleToolPin}
+                />
+            );
 
         case "agent_message":
-            return <AgentMessageBlock node={node} collapsed={collapsed} onToggle={onToggle} />;
+            return (
+                <AgentMessageBlock
+                    node={props.node}
+                    collapsed={props.collapsed}
+                    onToggle={props.onToggle}
+                />
+            );
 
-        case "user_message":
+        case "user_message": {
+            const node = props.node;
             return (
                 <div class="agent-user-message">
                     <div class="agent-user-message-content">
@@ -308,11 +350,18 @@ const DocumentNodeRenderer = ({
                     </div>
                 </div>
             );
+        }
 
         case "subagent_link":
-            return <SubagentLinkBlock node={node} onClick={onSubagentClick ?? (() => {})} />;
+            return (
+                <SubagentLinkBlock
+                    node={props.node}
+                    onClick={props.onSubagentClick ?? (() => {})}
+                />
+            );
 
-        case "section":
+        case "section": {
+            const node = props.node;
             return (
                 <div class={`agent-section level-${node.level}`}>
                     <Show when={node.level === 1}>
@@ -326,6 +375,7 @@ const DocumentNodeRenderer = ({
                     </Show>
                 </div>
             );
+        }
 
         default:
             return null;

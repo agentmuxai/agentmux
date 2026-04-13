@@ -2,11 +2,34 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * ToolBlock - Collapsible tool execution display with smart rendering
+ * ToolBlock - Single-line collapsed-by-default tool display with
+ * hover-to-expand and click-to-pin semantics.
+ *
+ * See docs/specs/tool-collapse.md for the product requirement.
+ *
+ * Behavior:
+ *   - Collapsed (default): one line showing status icon + tool name + ellipsis.
+ *     No wrapping, no content rendered inside.
+ *   - Hover: expands instantly on mouseenter, collapses instantly on mouseleave.
+ *   - Click: pins the expanded state. A pinned-open block stays open even
+ *     after the mouse leaves. Clicking again unpins.
+ *   - Force-expanded regardless of hover/pin state:
+ *       * status === "running" — actively executing
+ *       * status === "failed"  — user needs to see the error
+ *
+ * SolidJS reactivity note:
+ *   Props are accessed via `props.X` (never destructured in the function
+ *   signature). Destructuring a SolidJS component's props captures the
+ *   value at mount time and breaks reactivity for any prop that changes
+ *   without triggering a parent re-render of the component. This bit us
+ *   in an earlier version of this file: `pinned` was destructured, and
+ *   pin toggles — which mutate `documentState` but not the document
+ *   array — never reached the component, so clicking to pin visibly
+ *   worked while hovered but collapsed again on mouseleave.
  */
 
 import clsx from "clsx";
-import { Show, type JSX } from "solid-js";
+import { Show, createSignal, type JSX } from "solid-js";
 import { createBlock } from "@/store/global";
 import type { ToolNode } from "../types";
 import { BashOutputViewer } from "./BashOutputViewer";
@@ -15,13 +38,34 @@ import { DiffViewer } from "./DiffViewer";
 
 interface ToolBlockProps {
     node: ToolNode;
-    collapsed: boolean;
-    onToggle: () => void;
+    /** User has clicked to pin this tool block open. */
+    pinned: boolean;
+    /** Toggle the pinned state (called on click of the collapsed row). */
+    onTogglePin: () => void;
 }
 
-export const ToolBlock = ({ node, collapsed, onToggle }: ToolBlockProps): JSX.Element => {
-    // Render tool-specific content
+const STATUS_ICON: Record<ToolNode["status"], string> = {
+    running: "⏳",
+    success: "✓",
+    failed: "✗",
+};
+
+export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
+    const [hovered, setHovered] = createSignal(false);
+
+    // Force-expand rules — override hover/pin when the user must see content.
+    // `failed` stays expanded so errors are immediately visible.
+    // `running` stays expanded so the user can watch progress.
+    const forceExpanded = () =>
+        props.node.status === "running" || props.node.status === "failed";
+
+    const expanded = () => props.pinned || hovered() || forceExpanded();
+
+    const statusIcon = (): string => STATUS_ICON[props.node.status] || "•";
+
+    // Render tool-specific content — only evaluated when expanded.
     const renderToolContent = (): JSX.Element => {
+        const node = props.node;
         if (node.status === "running") {
             return (
                 <div class="agent-tool-loading">
@@ -97,27 +141,29 @@ export const ToolBlock = ({ node, collapsed, onToggle }: ToolBlockProps): JSX.El
     return (
         <div
             class={clsx("agent-tool-block", {
-                collapsed,
-                expanded: !collapsed,
-                running: node.status === "running",
-                success: node.status === "success",
-                failed: node.status === "failed",
+                collapsed: !expanded(),
+                expanded: expanded(),
+                pinned: props.pinned,
+                running: props.node.status === "running",
+                success: props.node.status === "success",
+                failed: props.node.status === "failed",
             })}
-            onClick={onToggle}
+            onMouseEnter={() => setHovered(true)}
+            onMouseLeave={() => setHovered(false)}
         >
-            <div class="agent-tool-summary">
-                <span class="agent-tool-chevron">{collapsed ? "▸" : "▾"}</span>
-                <span class="agent-tool-name">{node.summary}</span>
-                <Show when={node.duration}>
-                    <span class="agent-tool-duration">({node.duration.toFixed(1)}s)</span>
+            <div class="agent-tool-summary" onClick={props.onTogglePin}>
+                <span class="agent-tool-status-icon">{statusIcon()}</span>
+                <span class="agent-tool-name">{props.node.summary}</span>
+                <Show when={props.node.duration}>
+                    <span class="agent-tool-duration">({props.node.duration.toFixed(1)}s)</span>
                 </Show>
-                <Show when={node.tool === "Agent"}>
+                <Show when={props.node.tool === "Agent"}>
                     <button
                         class="agent-tool-open-pane"
                         title="Open subagent in new pane"
                         onClick={(e) => {
                             e.stopPropagation();
-                            const agentId = (node.params as any).subagent_id || node.id;
+                            const agentId = (props.node.params as any).subagent_id || props.node.id;
                             createBlock({
                                 meta: {
                                     view: "subagent",
@@ -129,8 +175,9 @@ export const ToolBlock = ({ node, collapsed, onToggle }: ToolBlockProps): JSX.El
                         ⧉
                     </button>
                 </Show>
+                <span class="agent-tool-ellipsis">…</span>
             </div>
-            <Show when={!collapsed}>
+            <Show when={expanded()}>
                 <div class="agent-tool-content" onClick={(e) => e.stopPropagation()}>
                     {renderToolContent()}
                 </div>
