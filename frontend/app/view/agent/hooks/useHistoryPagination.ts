@@ -1,0 +1,182 @@
+// Copyright 2024-2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+/**
+ * useHistoryPagination — owns the persisted-session history slice that
+ * sits above the live stream in the agent document.
+ *
+ * Step 5 of specs/SPEC_AGENT_VIEW_MODULARIZATION_2026_04_13.md.
+ *
+ * On mount the hook fires an async initial load: read `session:line_count`
+ * for the block, fetch the trailing 200 lines, prepend them to the
+ * document atom, and store the resulting offset for later page-up calls.
+ * The hook NEVER blocks the UI — failures are non-fatal and just log a
+ * warning. Live-stream events keep flowing through useAgentStream
+ * regardless of whether history is loaded.
+ *
+ * Subsequent page-up calls (the user scrolling near the top of the
+ * document view) call `loadOlder()` which fetches the previous 200-line
+ * page and prepends it. Each prepend bumps `documentVersion`, which
+ * useAgentStream reads to rebuild its dedup set + index map so live
+ * updates target the right node positions after the document is
+ * re-shaped from outside.
+ *
+ * Returns:
+ *   - `historyOffset` — line index where the loaded slice begins
+ *   - `historyTotal`  — actual available line count (clamped to the
+ *                       backend's event ring buffer window, NOT the
+ *                       all-time `session:line_count`)
+ *   - `loadingOlder`  — true while a page-up fetch is in flight
+ *   - `loadOlder`     — async handler the document view calls when the
+ *                       user scrolls near the top
+ *   - `documentVersion` — bumped on every external document mutation;
+ *                         useAgentStream subscribes to this
+ */
+
+import { createSignal, onMount, type Accessor } from "solid-js";
+import { RpcApi } from "@/app/store/wshclientapi";
+import { TabRpcClient } from "@/app/store/wshrpcutil";
+import type { SignalPair } from "../state";
+import type { DocumentNode } from "../types";
+import { parseHistoryLines } from "../parseHistoryLines";
+
+export type LogFn = (tag: string, text: string, level?: "info" | "error" | "warn") => void;
+
+export interface UseHistoryPaginationOptions {
+    blockId: string;
+    documentAtom: SignalPair<DocumentNode[]>;
+    /**
+     * Accessor for the document's stream-event format, e.g.
+     * "claude-stream-json", "codex-json", etc. Passed reactively because
+     * the format may not be available at hook-mount time (block meta
+     * loads asynchronously).
+     */
+    outputFormat: Accessor<string>;
+    log: LogFn;
+}
+
+export interface UseHistoryPagination {
+    historyOffset: Accessor<number>;
+    historyTotal: Accessor<number>;
+    loadingOlder: Accessor<boolean>;
+    loadOlder: () => Promise<void>;
+    documentVersion: Accessor<number>;
+}
+
+const PAGE_SIZE = 200;
+
+export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHistoryPagination {
+    const [historyOffset, setHistoryOffset] = createSignal(0);
+    const [historyTotal, setHistoryTotal] = createSignal(0);
+    const [loadingOlder, setLoadingOlder] = createSignal(false);
+
+    // Bumped on every external document mutation (initial history load +
+    // every loadOlder prepend). useAgentStream reads this and rebuilds
+    // its internal nodeIdSet + nodeIndexMap so live-stream updates
+    // continue targeting the right node indices after the document has
+    // been reshaped from outside.
+    const [documentVersion, setDocumentVersion] = createSignal(0);
+    const bumpDocumentVersion = () => setDocumentVersion((v) => v + 1);
+
+    const [doc, setDoc] = opts.documentAtom;
+
+    /**
+     * Load the previous page of history and prepend to the document.
+     * Called by AgentDocumentView when the user scrolls near the top.
+     * Idempotent at the start-of-history boundary (returns immediately
+     * if `historyOffset === 0`). Guarded against concurrent re-entry.
+     */
+    const loadOlder = async (): Promise<void> => {
+        const currentOffset = historyOffset();
+        if (currentOffset === 0) return; // already at the beginning
+        if (loadingOlder()) return;
+
+        setLoadingOlder(true);
+        try {
+            const newOffset = Math.max(0, currentOffset - PAGE_SIZE);
+            const loadLimit = currentOffset - newOffset;
+
+            const resp = await RpcApi.BlockfileReadRangeCommand(TabRpcClient, {
+                block_id: opts.blockId,
+                filename: "output",
+                offset: newOffset,
+                limit: loadLimit,
+            }, { timeout: 15000 });
+
+            const newNodes = parseHistoryLines(resp.lines ?? [], opts.outputFormat());
+            if (newNodes.length > 0) {
+                setDoc((prev) => [...newNodes, ...prev]);
+                bumpDocumentVersion();
+            }
+
+            setHistoryOffset(newOffset);
+            opts.log("history", `loaded ${newNodes.length} older messages (offset ${newOffset})`);
+        } catch (err: any) {
+            opts.log("history", `failed to load older messages: ${err?.message ?? String(err)}`, "warn");
+        } finally {
+            setLoadingOlder(false);
+        }
+    };
+
+    // Initial load — async, non-blocking, fires immediately on mount.
+    // Reads the latest PAGE_SIZE lines and prepends them. Dedupes by id
+    // against any live events that may have arrived in the meantime
+    // during a reconnect (where in-flight turns can briefly appear in
+    // both the persisted ring buffer and the live stream).
+    onMount(() => {
+        (async () => {
+            try {
+                const countResp = await RpcApi.BlockfileLineCountCommand(TabRpcClient, {
+                    block_id: opts.blockId,
+                    filename: "output",
+                }, { timeout: 5000 });
+
+                const total = countResp?.count ?? 0;
+                if (total === 0) return;
+
+                const offset = Math.max(0, total - PAGE_SIZE);
+                const limit = total - offset;
+
+                const rangeResp = await RpcApi.BlockfileReadRangeCommand(TabRpcClient, {
+                    block_id: opts.blockId,
+                    filename: "output",
+                    offset,
+                    limit,
+                }, { timeout: 15000 });
+
+                const nodes = parseHistoryLines(rangeResp.lines ?? [], opts.outputFormat());
+                if (nodes.length > 0) {
+                    setDoc((prev) => {
+                        if (prev.length === 0) return nodes;
+                        const seen = new Set(prev.map((n) => n.id));
+                        const historyFresh = nodes.filter((n) => !seen.has(n.id));
+                        return [...historyFresh, ...prev];
+                    });
+                    bumpDocumentVersion();
+                }
+
+                // `resp.total` from the backend is the actual available
+                // line count clamped to the event ring buffer window —
+                // NOT the all-time session:line_count meta. Use it so
+                // the frontend never asks for offsets the backend can't
+                // serve.
+                const available = rangeResp.total ?? total;
+                setHistoryOffset(offset);
+                setHistoryTotal(available);
+
+                opts.log("history", `loaded ${nodes.length} of ${available} previous messages`);
+            } catch (err: any) {
+                // Non-fatal — fresh session or backend not ready yet
+                opts.log("history", `could not load history: ${err?.message ?? String(err)}`, "warn");
+            }
+        })();
+    });
+
+    return {
+        historyOffset,
+        historyTotal,
+        loadingOlder,
+        loadOlder,
+        documentVersion,
+    };
+}
