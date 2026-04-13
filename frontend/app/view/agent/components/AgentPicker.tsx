@@ -139,10 +139,19 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                     <div class="agent-picker-empty">
                         <div class="agent-picker-empty-icon">{"\u2726"}</div>
                         <div class="agent-picker-empty-title">No agents configured</div>
-                        <div class="agent-picker-empty-desc">Create an agent in the Forge to get started.</div>
-                        <button class="agent-picker-forge-btn" disabled>
-                            + Create an agent in the Forge
-                        </button>
+                        <div class="agent-picker-empty-desc">
+                            Click the <strong>+ New agent</strong> tile below to create one.
+                        </div>
+                        <NewAgentCard onClick={openCreateNew} />
+                        <Show when={expandedId() === "__new__" && createMode()}>
+                            <AgentCardSettingsPanel
+                                blockId={props.model.blockId}
+                                nodeModel={props.model.nodeModel}
+                                agent={undefined}
+                                initialTab="forge"
+                                onClose={closePanel}
+                            />
+                        </Show>
                     </div>
                 </div>
             }
@@ -201,11 +210,6 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                             </div>
                         </div>
                     </Show>
-                    <div class="agent-picker-footer">
-                        <button class="agent-picker-forge-btn" disabled>
-                            + New agent in Forge
-                        </button>
-                    </div>
                 </div>
             </div>
         </Show>
