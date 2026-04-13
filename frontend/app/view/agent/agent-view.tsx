@@ -287,6 +287,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                     agentId={agentId}
                     onSendMessage={commands.sendMessage}
                     onTyping={() => scrollToBottomFn?.()}
+                    onStopAgent={commands.stopAgent}
                     loading={status.isLoading()}
                 />
                 <AgentControlBar
