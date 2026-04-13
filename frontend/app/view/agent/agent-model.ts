@@ -21,6 +21,7 @@ export class AgentViewModel implements ViewModel {
     viewText: () => string | HeaderElem[];
     viewComponent: ViewComponent;
     noPadding: () => boolean;
+    endIconButtons: () => IconButtonDecl[];
     nodejsError: string | null = null;
 
     constructor(blockId: string, nodeModel: BlockNodeModel) {
@@ -29,11 +30,71 @@ export class AgentViewModel implements ViewModel {
         this.blockAtom = WOS.getWaveObjectAtom<Block>(`block:${blockId}`);
         this.viewComponent = AgentViewWrapper as any;
 
-        this.viewIcon = () => "sparkles";
-        this.viewName = () => "Agent";
+        // Drive the pane's title from block meta — launching an agent sets
+        // `agentName` / `agentIcon` and the frame title automatically picks
+        // them up via the blockAtom subscription. Before this, the title
+        // was the literal string "Agent" regardless of which agent ran.
+        // See SPEC_AGENT_PANE_FOLLOWUPS item #8.
+        this.viewIcon = () => {
+            const meta = this.blockAtom()?.meta;
+            const icon = meta?.["agentIcon"];
+            if (typeof icon === "string" && icon.length > 0) return icon;
+            return "sparkles";
+        };
+        this.viewName = () => {
+            const meta = this.blockAtom()?.meta;
+            const name = meta?.["agentName"];
+            if (typeof name === "string" && name.length > 0) return name;
+            return "Agent";
+        };
         this.viewText = () => [] as HeaderElem[];
         this.noPadding = () => true;
+
+        // Pane-frame header button: when an agent is launched, show a
+        // back-arrow that returns to the picker. Hidden when the pane
+        // is already on the picker screen (no agentId in meta).
+        this.endIconButtons = () => {
+            const agentId = this.blockAtom()?.meta?.["agentId"];
+            if (!agentId) return [];
+            return [
+                {
+                    elemtype: "iconbutton",
+                    icon: "arrow-left",
+                    title: "Back to agent picker",
+                    click: () => {
+                        void this.backToPicker();
+                    },
+                },
+            ];
+        };
     }
+
+    /**
+     * Clear the agent-identity meta keys so AgentViewWrapper falls back
+     * to the picker. Called from the pane-frame back button and from
+     * useAgentCommands.back (which delegates here).
+     */
+    backToPicker = async (): Promise<void> => {
+        const oref = WOS.makeORef("block", this.blockId);
+        try {
+            await RpcApi.SetMetaCommand(TabRpcClient, {
+                oref,
+                meta: {
+                    agentId: null,
+                    agentProvider: null,
+                    agentOutputFormat: null,
+                    agentName: null,
+                    agentIcon: null,
+                    agentCliPath: null,
+                    agentCliArgs: null,
+                    agentBinDir: null,
+                    controller: null,
+                },
+            });
+        } catch {
+            // fail silently — user can manually switch via widget bar
+        }
+    };
 
     /**
      * Launch an agent in presentation view.
