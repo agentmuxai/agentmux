@@ -39,12 +39,20 @@ export const AgentCardSettingsPanel = (props: AgentCardSettingsPanelProps): JSX.
     // so the wave-event subscriptions are cleaned up.
     const forgeModel = new ForgeViewModel(props.blockId, props.nodeModel);
 
+    // Guard for the auto-close effect below. ForgeViewModel initializes
+    // viewAtom to "list" synchronously in its constructor, and createEffect
+    // fires once during component creation (before onMount). Without this
+    // flag the effect would see v === "list" immediately and close the
+    // panel before we've had a chance to call openDetail / startCreate.
+    let mounted = false;
+
     onMount(() => {
         if (props.agent) {
             void forgeModel.openDetail(props.agent);
         } else {
             forgeModel.startCreate();
         }
+        mounted = true;
 
         const handleKey = (e: KeyboardEvent) => {
             if (e.key === "Escape") {
@@ -61,11 +69,13 @@ export const AgentCardSettingsPanel = (props: AgentCardSettingsPanelProps): JSX.
     });
 
     // When the ForgeViewModel view flips back to "list" (e.g. user clicked
-    // the in-panel Back button inside ForgeDetail) we want to close the
-    // whole settings panel — the user explicitly asked to exit.
+    // the in-panel Back button inside ForgeDetail, or saved a create/edit)
+    // we want to close the whole settings panel — the user explicitly
+    // asked to exit. Only fires after mount to avoid the synchronous
+    // initial-run problem described above.
     createEffect(() => {
         const v = forgeModel.viewAtom();
-        if (v === "list") {
+        if (mounted && v === "list") {
             props.onClose();
         }
     });
