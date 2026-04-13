@@ -161,12 +161,26 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
         try {
             // Run from the CEF host (GUI process) so the browser opens correctly on Windows.
             // Returns immediately after spawning — browser opens, frontend polls for completion.
-            await getApi().runCliLogin(
+            //
+            // The host API may return an OAuth URL string captured from the
+            // CLI's stdout (Claude Code does this reliably; other providers
+            // may not). When available, push it into setAuthUrl so the
+            // auth-url box renders above the composer with a Copy button —
+            // the user can paste the URL into their browser manually if the
+            // auto-open didn't fire or got blocked. See
+            // SPEC_AGENT_PANE_FOLLOWUPS item #3.
+            const loginUrl = await getApi().runCliLogin(
                 cliResult.cli_path,
                 provider.authLoginCommand,
                 authEnv ?? {},
             );
-            log("auth", "a browser window should have opened — complete login there");
+            if (loginUrl) {
+                setAuthUrl(loginUrl);
+                log("auth", "OAuth URL captured — browser should open automatically");
+                log("auth", "if it didn't, copy the URL from the box above");
+            } else {
+                log("auth", "a browser window should have opened — complete login there");
+            }
 
             // Poll until authenticated, cancelled, or timed out (5 minutes)
             log("auth", "waiting for login to complete...");
