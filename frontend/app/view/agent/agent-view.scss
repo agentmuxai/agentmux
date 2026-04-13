@@ -782,40 +782,18 @@
             cursor: text;
         }
 
-        // Overlay mode — applied when the block is expanded via hover or
-        // pin (but NOT when running/failed forces it expanded). The content
-        // floats on top of whatever is below in document flow so the
-        // surrounding tools/messages don't get pushed down.
+        // Overlay mode is implemented via a <Portal> to document.body so
+        // the overlay escapes the `content-visibility: auto` paint
+        // containment on `.agent-document-node-wrapper`. Without the
+        // portal, the absolute-positioned overlay would be paint-clipped
+        // at the wrapper's edge and invisible on hover.
         //
-        // The overlay is still a DOM descendant of `.agent-tool-block`, so
-        // `mouseenter`/`mouseleave` on the parent cover both the summary
-        // row and the floating content without any timers or tolerance.
-        &.overlay-mode .agent-tool-content {
-            position: absolute;
-            top: 100%;
-            left: 0;
-            right: 0;
-            z-index: 20;
-            background: var(--main-bg-color);
-            border: 1px solid var(--border-color);
-            border-top: none;
-            border-radius: 0 0 3px 3px;
-            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
-            max-height: min(400px, 60vh);
-            overflow-y: auto;
-            padding: 6px 10px 8px 20px;
-        }
-
-        // Flip variant — when JS detects <400px of room below the block
-        // in its scroll container, the overlay opens UP instead of DOWN.
-        &.overlay-mode.overlay-up .agent-tool-content {
-            top: auto;
-            bottom: 100%;
-            border-top: 1px solid var(--border-color);
-            border-bottom: none;
-            border-radius: 3px 3px 0 0;
-            box-shadow: 0 -6px 20px rgba(0, 0, 0, 0.35);
-        }
+        // See .agent-tool-content--portal below for the portaled element's
+        // visual styling (background, border, shadow, z-index).
+        //
+        // The inline `.agent-tool-content` rule above still applies when
+        // the block is force-expanded (running/failed) — those render
+        // inline in the document flow, not in the portal.
 
         .agent-tool-loading {
             color: var(--secondary-text-color);
@@ -2544,5 +2522,35 @@
         opacity: 0.6;
         font-style: italic;
         color: var(--secondary-text-color);
+    }
+}
+
+// Portal-rendered tool overlay — lives at document.body level so it escapes
+// paint containment on .agent-document-node-wrapper (content-visibility).
+// Positioning is handled inline in the ToolBlock render (fixed, top/left/width
+// computed from the summary row's rect on hover). This rule is top-level
+// rather than nested inside .agent-view because SolidJS <Portal> mounts to
+// document.body by default.
+.agent-tool-content--portal {
+    z-index: 200;
+    background: var(--main-bg-color);
+    border: 1px solid var(--border-color);
+    border-radius: 0 0 3px 3px;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+    max-height: min(400px, 60vh);
+    overflow-y: auto;
+    padding: 6px 10px 8px 20px;
+    cursor: default;
+    user-select: text;
+    font-family: var(--fixed-font, monospace);
+    font-size: 12px;
+    color: var(--main-text-color);
+
+    // Flip variant — overlay opens upward when there isn't enough room
+    // below the block. Swap the border-radius so the rounded side is on
+    // top of the overlay (adjacent to where the summary row is).
+    &.overlay-up {
+        border-radius: 3px 3px 0 0;
+        box-shadow: 0 -6px 20px rgba(0, 0, 0, 0.35);
     }
 }
