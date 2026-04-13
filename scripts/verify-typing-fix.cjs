@@ -14,6 +14,8 @@
 const http = require("http");
 const WebSocket = require("ws");
 const fs = require("fs");
+const os = require("os");
+const path = require("path");
 
 // Allow overriding host:port via CLI so we can talk to a specific running
 // instance when multiple are up (e.g. [::1]:9222 for an IPv6-only instance).
@@ -169,7 +171,7 @@ async function main() {
     console.log(`  collected ${events.length} events`);
 
     // Save the raw trace for post-mortem
-    const outPath = `C:/Users/area54/AppData/Local/Temp/agentmux-trace-after.json`;
+    const outPath = path.join(os.tmpdir(), "agentmux-trace-after.json");
     fs.writeFileSync(outPath, JSON.stringify({ traceEvents: events }));
     console.log(`  saved: ${outPath}`);
 
