@@ -23,6 +23,7 @@ import { AgentControlBar } from "./components/AgentControlBar";
 import { AgentDocumentView } from "./components/AgentDocumentView";
 import { AgentFooter } from "./components/AgentFooter";
 import { AgentPicker } from "./components/AgentPicker";
+import { AgentPresentationHeader } from "./components/AgentPresentationHeader";
 import { AgentSearchBar } from "./components/AgentSearchBar";
 import { BookmarksPanel } from "./components/BookmarksPanel";
 import { SessionDigestBanner } from "./components/SessionDigestBanner";
@@ -502,13 +503,12 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
             style={{ zoom: zoomFactor() }}
             onContextMenu={handleContextMenu}
         >
-            <div class="agent-pres-header">
-                <span class="agent-pres-icon">{block()?.meta?.["agentIcon"] ?? "\u26A1"}</span>
-                <span class="agent-pres-name">{block()?.meta?.["agentName"] ?? provider()?.displayName ?? agentId}</span>
-                <button class="agent-pres-back" onClick={handleBack} title="Back to agents">
-                    {"\u2715"}
-                </button>
-            </div>
+            <AgentPresentationHeader
+                block={block}
+                provider={provider}
+                agentId={agentId}
+                onBack={handleBack}
+            />
 
             <AgentControlBar
                 blockId={model.blockId}
