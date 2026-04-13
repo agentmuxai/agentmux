@@ -50,8 +50,33 @@ const STATUS_ICON: Record<ToolNode["status"], string> = {
     failed: "✗",
 };
 
+// Walk upward from `el` until we find a scrollable ancestor. Used to decide
+// whether the overlay has room to pop down or must flip up.
+function findScrollParent(el: HTMLElement): HTMLElement | null {
+    let parent: HTMLElement | null = el.parentElement;
+    while (parent && parent !== document.body) {
+        const style = getComputedStyle(parent);
+        if (style.overflowY === "auto" || style.overflowY === "scroll") {
+            return parent;
+        }
+        parent = parent.parentElement;
+    }
+    return null;
+}
+
+// CSS max-height cap for the overlay. When there's less than this much space
+// below a tool block in its scroll container, we flip the overlay to open
+// upward instead of downward.
+const OVERLAY_MAX_HEIGHT_PX = 400;
+
 export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
     const [hovered, setHovered] = createSignal(false);
+    // `true` when the overlay should pop UP above the summary row instead of
+    // down below it. Decided on each mouseenter by measuring against the
+    // scroll parent — not reactive to layout changes, just a one-time check
+    // at hover time. Recomputed on every mouseenter so scrolling between
+    // hovers picks up the new position.
+    const [overlayUp, setOverlayUp] = createSignal(false);
 
     // Force-expand rules — override hover/pin when the user must see content.
     // `failed` stays expanded so errors are immediately visible.
@@ -61,7 +86,34 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
 
     const expanded = () => props.pinned || hovered() || forceExpanded();
 
+    // Overlay mode applies ONLY for transient (hover) and explicit (pinned)
+    // expansion — NOT for persistent state (running/failed). Persistent state
+    // stays inline so the user can scroll past it. See
+    // specs/SPEC_TOOL_OVERLAY_AND_SCROLL_ON_TYPE_2026_04_13.md §2.5.
+    const overlayMode = () => (hovered() || props.pinned) && !forceExpanded();
+
     const statusIcon = (): string => STATUS_ICON[props.node.status] || "•";
+
+    const handleMouseEnter = (e: MouseEvent) => {
+        // Measure room BEFORE flipping the overlay class — the measurement
+        // is done on the collapsed block (1-line height), so `blockRect.bottom`
+        // is the start-of-overlay position. If there's <400px between that
+        // and the scroll parent's bottom, flip up.
+        const block = e.currentTarget as HTMLElement;
+        const blockRect = block.getBoundingClientRect();
+        const scrollParent = findScrollParent(block);
+        const parentBottom = scrollParent
+            ? scrollParent.getBoundingClientRect().bottom
+            : window.innerHeight;
+        const spaceBelow = parentBottom - blockRect.bottom;
+        setOverlayUp(spaceBelow < OVERLAY_MAX_HEIGHT_PX);
+        setHovered(true);
+    };
+
+    const handleMouseLeave = () => {
+        setHovered(false);
+        // overlayUp stays — it'll be recomputed on next mouseenter
+    };
 
     // Render tool-specific content — only evaluated when expanded.
     const renderToolContent = (): JSX.Element => {
@@ -144,12 +196,14 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
                 collapsed: !expanded(),
                 expanded: expanded(),
                 pinned: props.pinned,
+                "overlay-mode": overlayMode(),
+                "overlay-up": overlayMode() && overlayUp(),
                 running: props.node.status === "running",
                 success: props.node.status === "success",
                 failed: props.node.status === "failed",
             })}
-            onMouseEnter={() => setHovered(true)}
-            onMouseLeave={() => setHovered(false)}
+            onMouseEnter={handleMouseEnter}
+            onMouseLeave={handleMouseLeave}
         >
             <div class="agent-tool-summary" onClick={props.onTogglePin}>
                 <span class="agent-tool-status-icon">{statusIcon()}</span>

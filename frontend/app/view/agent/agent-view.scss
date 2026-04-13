@@ -609,6 +609,10 @@
 
     // === Tool Block ===
     .agent-tool-block {
+        // position:relative anchors the `.agent-tool-content` absolute
+        // overlay in `.overlay-mode` (hover / pinned). See
+        // specs/SPEC_TOOL_OVERLAY_AND_SCROLL_ON_TYPE_2026_04_13.md §2.
+        position: relative;
         border: none;
         border-left: 2px solid var(--border-color);
         border-radius: 0;
@@ -697,6 +701,41 @@
             cursor: default;
             user-select: text;
             cursor: text;
+        }
+
+        // Overlay mode — applied when the block is expanded via hover or
+        // pin (but NOT when running/failed forces it expanded). The content
+        // floats on top of whatever is below in document flow so the
+        // surrounding tools/messages don't get pushed down.
+        //
+        // The overlay is still a DOM descendant of `.agent-tool-block`, so
+        // `mouseenter`/`mouseleave` on the parent cover both the summary
+        // row and the floating content without any timers or tolerance.
+        &.overlay-mode .agent-tool-content {
+            position: absolute;
+            top: 100%;
+            left: 0;
+            right: 0;
+            z-index: 20;
+            background: var(--main-bg-color);
+            border: 1px solid var(--border-color);
+            border-top: none;
+            border-radius: 0 0 3px 3px;
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+            max-height: min(400px, 60vh);
+            overflow-y: auto;
+            padding: 6px 10px 8px 20px;
+        }
+
+        // Flip variant — when JS detects <400px of room below the block
+        // in its scroll container, the overlay opens UP instead of DOWN.
+        &.overlay-mode.overlay-up .agent-tool-content {
+            top: auto;
+            bottom: 100%;
+            border-top: 1px solid var(--border-color);
+            border-bottom: none;
+            border-radius: 3px 3px 0 0;
+            box-shadow: 0 -6px 20px rgba(0, 0, 0, 0.35);
         }
 
         .agent-tool-loading {
