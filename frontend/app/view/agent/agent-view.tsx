@@ -13,6 +13,7 @@ import { openSubagentPane, isSubagentPaneOpen } from "@/app/store/subagent-pane-
 import { useAgentStream } from "./useAgentStream";
 import { parseHistoryLines } from "./parseHistoryLines";
 import { runLaunchFlow } from "./flows/launch-flow";
+import { useLaunchLogs } from "./hooks/useLaunchLogs";
 import { AgentControlBar } from "./components/AgentControlBar";
 import { AgentDocumentView } from "./components/AgentDocumentView";
 import { AgentFooter } from "./components/AgentFooter";
@@ -84,12 +85,12 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
     const [documentVersion, setDocumentVersion] = createSignal(0);
     const bumpDocumentVersion = () => setDocumentVersion((v) => v + 1);
 
-    // Accumulated terminal-style log lines
-    type LogLine = { tag: string; text: string; level?: "info" | "error" | "warn" };
-    const [logLines, setLogLines] = createSignal<LogLine[]>([]);
-    const log = (tag: string, text: string, level?: "info" | "error" | "warn") => {
-        setLogLines((prev) => [...prev, { tag, text, level: level ?? "info" }]);
-    };
+    // Accumulated terminal-style log lines — managed by useLaunchLogs hook.
+    // `logLines` is the reactive accessor; `log` is the append function
+    // that matches the LogFn signature expected by runLaunchFlow().
+    const launchLogs = useLaunchLogs();
+    const logLines = launchLogs.lines;
+    const log = launchLogs.append;
 
     // OAuth URL — shown prominently with a copy button when login is needed
     const [authUrl, setAuthUrl] = createSignal<string | null>(null);

@@ -9,18 +9,12 @@
 
 import { createEffect, createSignal, For, Show, type Accessor, type JSX, onCleanup } from "solid-js";
 import type { SignalPair } from "../state";
-import type { DocumentNode, DocumentState, SubagentLinkNode } from "../types";
+import type { DocumentNode, DocumentState, LogLine, SubagentLinkNode } from "../types";
 import { AgentMessageBlock } from "./AgentMessageBlock";
 import { MarkdownBlock } from "./MarkdownBlock";
 import { SubagentLinkBlock } from "./SubagentLinkBlock";
 import { ToolBlock } from "./ToolBlock";
 import { ContextMenuModel } from "@/app/store/contextmenu";
-
-export interface LogLine {
-    tag: string;        // "agent", "cli", "auth", "env", "error", etc.
-    text: string;
-    level?: "info" | "error" | "warn";
-}
 
 interface AgentDocumentViewProps {
     documentAtom: SignalPair<DocumentNode[]>;
