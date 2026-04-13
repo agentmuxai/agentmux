@@ -263,6 +263,20 @@
             background: color-mix(in srgb, var(--accent-color) 6%, transparent);
         }
 
+        &--new {
+            border-style: dashed;
+            background: transparent;
+
+            .agent-card-icon {
+                font-weight: bold;
+                color: var(--secondary-text-color);
+            }
+
+            &:hover:not(:disabled) .agent-card-icon {
+                color: var(--accent-color);
+            }
+        }
+
         .agent-card-icon {
             font-size: 22px;
             flex-shrink: 0;
