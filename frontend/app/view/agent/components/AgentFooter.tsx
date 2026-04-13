@@ -10,6 +10,13 @@ import { Show, type JSX } from "solid-js";
 interface AgentFooterProps {
     agentId: string;
     onSendMessage?: (message: string) => void;
+    /**
+     * Called when the user types in the composer. Used to tell the document
+     * view to scroll to the latest content so the composer input is visually
+     * anchored to the most recent message. Fires RAF-debounced — one callback
+     * per animation frame regardless of how many keystrokes queued up.
+     */
+    onTyping?: () => void;
     loading?: boolean;
 }
 
@@ -18,16 +25,38 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
     // avoids re-rendering the component tree on every keystroke.
     //
     // Auto-resize is handled entirely by CSS (`field-sizing: content` on
-    // .agent-input). No `onInput` handler, no `scrollHeight` read — the
-    // browser grows the textarea natively as text wraps. A prior version of
-    // this file had a JS `autoGrow` helper that did
+    // .agent-input). No `scrollHeight` read — the browser grows the textarea
+    // natively as text wraps. A prior version of this file had a JS
+    // `autoGrow` helper that did
     //   el.style.height = "auto"; el.style.height = el.scrollHeight + "px";
     // which forced a synchronous layout on every keystroke. In the agent
     // pane (flex column with a large content-visibility:auto document view
     // above), that layout cost ~22ms per keystroke and blocked character
-    // paint — see docs/analysis/agent-typing-lag-trace-2026-04-12.md for
-    // the full trace analysis.
+    // paint — see docs/analysis/agent-typing-lag-trace-2026-04-12.md.
+    //
+    // There IS now an onInput handler, but it's tightly scoped: one boolean
+    // check + (at most once per frame) a requestAnimationFrame enqueue, no
+    // layout reads. The scroll itself happens in the RAF callback via
+    // `scrollRef.scrollTo({top: MAX_SAFE_INTEGER})` which lets the browser
+    // clamp internally instead of us reading scrollHeight in JS. Target
+    // per-keystroke cost: <2ms. See
+    // specs/SPEC_TOOL_OVERLAY_AND_SCROLL_ON_TYPE_2026_04_13.md §3.4.
     let textareaRef: HTMLTextAreaElement | undefined;
+
+    // RAF debounce for the onTyping callback. Sustained typing in a single
+    // frame collapses to one callback; even rapid typing costs ~1 callback
+    // per 16ms. Flag is per-component-instance (captured in closure).
+    let typingScrollPending = false;
+    const handleInput = () => {
+        const cb = props.onTyping;
+        if (!cb) return;
+        if (typingScrollPending) return;
+        typingScrollPending = true;
+        requestAnimationFrame(() => {
+            typingScrollPending = false;
+            cb();
+        });
+    };
 
     const handleSend = () => {
         if (!textareaRef) return;
@@ -56,6 +85,7 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
                     class="agent-input"
                     placeholder={`Send message to ${props.agentId}...`}
                     onKeyDown={handleKeyDown}
+                    onInput={handleInput}
                     rows={1}
                 />
                 <div class="agent-input-hint">
