@@ -7,9 +7,10 @@
  * When no document nodes exist yet, shows accumulated log lines (terminal-style).
  */
 
-import { createEffect, createSignal, For, Show, type Accessor, type JSX, onCleanup } from "solid-js";
+import { createEffect, For, Show, type Accessor, type JSX, onCleanup } from "solid-js";
 import type { SignalPair } from "../state";
 import type { DocumentNode, DocumentState, LogLine, SubagentLinkNode } from "../types";
+import type { ScrollCommand } from "../hooks/useScrollToNode";
 import { AgentMessageBlock } from "./AgentMessageBlock";
 import { MarkdownBlock } from "./MarkdownBlock";
 import { SubagentLinkBlock } from "./SubagentLinkBlock";
@@ -30,8 +31,13 @@ interface AgentDocumentViewProps {
     bookmarkedNodeIds?: Accessor<Set<string>>;
     /** Called when the user bookmarks or un-bookmarks a node via context menu. */
     onBookmark?: (node: DocumentNode) => void;
-    /** Expose a scrollToNode function to the parent for jump-to-bookmark support. */
-    scrollToNodeRef?: (fn: (nodeId: string) => void) => void;
+    /**
+     * Signal-based jump command. The parent owns a `useScrollToNode`
+     * hook and passes its `command` accessor here; a createEffect
+     * watches for changes and scrolls the target node into view.
+     * Replaces the old mutable `scrollToNodeRef` ref pattern.
+     */
+    scrollCommand?: Accessor<ScrollCommand | null>;
     /**
      * Expose a scrollToBottom function to the parent so the composer can
      * bring the document to the latest content when the user starts typing.
@@ -42,7 +48,7 @@ interface AgentDocumentViewProps {
     highlightNodeId?: Accessor<string | null>;
 }
 
-export const AgentDocumentView = ({ documentAtom, documentStateAtom, logLines, authUrl, onSubagentClick, onLoadOlder, loadingOlder, bookmarkedNodeIds, onBookmark, scrollToNodeRef, scrollToBottomRef, highlightNodeId }: AgentDocumentViewProps): JSX.Element => {
+export const AgentDocumentView = ({ documentAtom, documentStateAtom, logLines, authUrl, onSubagentClick, onLoadOlder, loadingOlder, bookmarkedNodeIds, onBookmark, scrollCommand, scrollToBottomRef, highlightNodeId }: AgentDocumentViewProps): JSX.Element => {
     const [document] = documentAtom;
     const [documentState, setDocumentState] = documentStateAtom;
     let scrollRef!: HTMLDivElement;
@@ -82,8 +88,14 @@ export const AgentDocumentView = ({ documentAtom, documentStateAtom, logLines, a
         autoScroll = false;
     };
 
-    // Expose scrollToNode to the parent on mount
-    if (scrollToNodeRef) scrollToNodeRef(scrollToNode);
+    // React to jump commands emitted by the parent's useScrollToNode hook.
+    // We run the scroll inside our own effect (rather than exposing the
+    // function upward) so the mutable-ref pattern goes away and callers
+    // don't need to touch AgentDocumentView internals.
+    createEffect(() => {
+        const cmd = scrollCommand?.();
+        if (cmd) scrollToNode(cmd.nodeId);
+    });
 
     // Jump to the bottom of the document and re-enable auto-scroll.
     //

@@ -17,6 +17,7 @@ import { useSessionDigest } from "./hooks/useSessionDigest";
 import { useHistoryPagination } from "./hooks/useHistoryPagination";
 import { useInSessionSearch } from "./hooks/useInSessionSearch";
 import { useBookmarks } from "./hooks/useBookmarks";
+import { useScrollToNode } from "./hooks/useScrollToNode";
 import { useAgentKeyboard } from "./hooks/useAgentKeyboard";
 import { AgentControlBar } from "./components/AgentControlBar";
 import { AgentDocumentView } from "./components/AgentDocumentView";
@@ -413,10 +414,12 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         }
     };
 
-    // ── Bookmarks ───────────────────────────────────────────────────────────────
+    // ── Jump-to-node + Bookmarks ────────────────────────────────────────────────
 
-    // Mutable ref to the scrollToNode function exposed by AgentDocumentView.
-    let scrollToNodeFn: ((nodeId: string) => void) | null = null;
+    // Signal-based jump command. AgentDocumentView reacts to changes via a
+    // createEffect and does the DOM scroll inside its own container — no
+    // mutable refs crossing the component boundary. See hooks/useScrollToNode.ts.
+    const scroll = useScrollToNode();
 
     // Bookmarks — owns reactive list, derived id set, panel visibility,
     // and CRUD callbacks. See hooks/useBookmarks.ts.
@@ -424,7 +427,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         blockId: model.blockId,
         block,
         log,
-        jumpTo: (nodeId) => scrollToNodeFn?.(nodeId),
+        jumpTo: scroll.jumpTo,
     });
     const bookmarks = bookmarksHook.bookmarks;
     const bookmarkedNodeIds = bookmarksHook.bookmarkedNodeIds;
@@ -443,7 +446,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
     // hooks/useInSessionSearch.ts.
     const search = useInSessionSearch({
         document: agentAtoms().documentAtom[0],
-        jumpTo: (nodeId) => scrollToNodeFn?.(nodeId),
+        jumpTo: scroll.jumpTo,
     });
     const searchVisible = search.visible;
     const setSearchVisible = search.setVisible;
@@ -552,7 +555,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 loadingOlder={loadingOlder}
                 bookmarkedNodeIds={bookmarkedNodeIds}
                 onBookmark={handleBookmark}
-                scrollToNodeRef={(fn) => { scrollToNodeFn = fn; }}
+                scrollCommand={scroll.command}
                 scrollToBottomRef={(fn) => { scrollToBottomFn = fn; }}
                 highlightNodeId={searchHighlightId}
             />
