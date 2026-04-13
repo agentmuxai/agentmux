@@ -8,11 +8,14 @@
  *
  * PR 2 of specs/SPEC_CONSOLIDATE_FORGE_IDENTITY_INTO_AGENT_2026_04_13.md.
  *
- * Instantiates a dedicated ForgeViewModel on mount (lifetime = panel
- * lifetime) and delegates to the existing ForgeDetail / ForgeForm
- * components. No rewrite of Forge internals — just reuse.
+ * Instantiates a dedicated ForgeViewModel and IdentityViewModel
+ * on mount (lifetime = panel lifetime) and delegates to the existing
+ * ForgeDetail / ForgeForm / IdentityPanel components. No rewrite of
+ * Forge or Identity internals — just reuse.
  *
- * Identity tab is a stub for now; PR 3 wires the IdentityPanel.
+ * The Identity tab currently shows the global account list (same
+ * data as the old identity widget). Per-agent scoping is deferred
+ * to SPEC_FORGE_AGENT_IDENTITY_2026_04_13.md.
  */
 
 import { createEffect, createSignal, onCleanup, onMount, Show, type JSX } from "solid-js";
@@ -20,6 +23,8 @@ import type { BlockNodeModel } from "@/app/block/blocktypes";
 import { ForgeViewModel } from "@/app/view/forge/forge-model";
 import { ForgeDetail } from "@/app/view/forge/components/ForgeDetail";
 import { ForgeForm } from "@/app/view/forge/components/ForgeForm";
+import { IdentityViewModel } from "@/app/view/identity/identity-model";
+import { IdentityPanel } from "@/app/view/identity/identity-view";
 
 export type SettingsTab = "forge" | "identity";
 
@@ -38,6 +43,11 @@ export const AgentCardSettingsPanel = (props: AgentCardSettingsPanelProps): JSX.
     // Dedicated Forge model for this panel session. Disposed on unmount
     // so the wave-event subscriptions are cleaned up.
     const forgeModel = new ForgeViewModel(props.blockId, props.nodeModel);
+
+    // Dedicated Identity model for the Identity tab. Currently shows the
+    // global account list (same as the old identity widget); per-agent
+    // scoping is deferred to SPEC_FORGE_AGENT_IDENTITY_2026_04_13.md.
+    const identityModel = new IdentityViewModel(props.blockId, props.nodeModel);
 
     // Guard for the auto-close effect below. ForgeViewModel initializes
     // viewAtom to "list" synchronously in its constructor, and createEffect
@@ -66,6 +76,7 @@ export const AgentCardSettingsPanel = (props: AgentCardSettingsPanelProps): JSX.
 
     onCleanup(() => {
         forgeModel.dispose();
+        identityModel.dispose();
     });
 
     // When the ForgeViewModel view flips back to "list" (e.g. user clicked
@@ -116,12 +127,7 @@ export const AgentCardSettingsPanel = (props: AgentCardSettingsPanelProps): JSX.
                     </Show>
                 </Show>
                 <Show when={tab() === "identity"}>
-                    <div class="agent-card-settings-identity-stub">
-                        <p>Identity settings for this agent will appear here.</p>
-                        <p class="agent-card-settings-stub-note">
-                            Wired in PR 3 of the consolidation spec.
-                        </p>
-                    </div>
+                    <IdentityPanel model={identityModel} />
                 </Show>
             </div>
         </div>
