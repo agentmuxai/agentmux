@@ -10,7 +10,7 @@ checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
 name = "agentmux-cef"
-version = "0.33.100"
+version = "0.33.103"
 dependencies = [
  "agentmux-common",
  "axum 0.8.8",
@@ -34,7 +34,7 @@ dependencies = [
 
 [[package]]
 name = "agentmux-common"
-version = "0.33.100"
+version = "0.33.103"
 dependencies = [
  "tokio",
  "tracing",
@@ -42,7 +42,7 @@ dependencies = [
 
 [[package]]
 name = "agentmux-launcher"
-version = "0.33.100"
+version = "0.33.103"
 dependencies = [
  "windows-sys 0.59.0",
  "winres",
@@ -50,7 +50,7 @@ dependencies = [
 
 [[package]]
 name = "agentmux-srv"
-version = "0.33.100"
+version = "0.33.103"
 dependencies = [
  "agentmux-common",
  "async-stream",
@@ -90,7 +90,7 @@ dependencies = [
 
 [[package]]
 name = "agentmux-wsh"
-version = "0.33.100"
+version = "0.33.103"
 dependencies = [
  "base64",
  "clap",
@@ -2323,9 +2323,9 @@ dependencies = [
 
 [[package]]
 name = "rustls"
-version = "0.23.37"
+version = "0.23.38"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "758025cb5fccfd3bc2fd74708fd4682be41d99e5dff73c377c0646c6012c73a4"
+checksum = "69f9466fb2c14ea04357e91413efb882e2a6d4a406e625449bc0a5d360d53a21"
 dependencies = [
  "log",
  "once_cell",

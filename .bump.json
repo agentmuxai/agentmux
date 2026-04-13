@@ -34,27 +34,16 @@
   ],
   "lockfiles": [
     {
-      "type": "npm",
-      "strategy": "npm-version",
-      "command": "npm install --package-lock-only",
-      "allowFailure": true
-    },
-    {
       "type": "cargo",
       "command": "cargo generate-lockfile"
     }
   ],
-  "history": {
-    "file": "VERSION_HISTORY.md",
-    "format": "table",
-    "template": "| {{version}}-fork | v0.12.0 | {{date}} | {{agent}} | {{message}} |"
-  },
+  "_npm_lockfile_note": "npm lockfile sync is handled by scripts/bump-wrapper.sh because bump-cli's 'npm-version' strategy fails with 'Unknown error' inside its temporary git state and silently skips the lockfile. Use scripts/bump-wrapper.sh instead of bare bump.",
   "git": {
     "add": [
       "package.json",
       "package-lock.json",
       "Cargo.lock",
-      "VERSION_HISTORY.md",
       "agentmux-srv/Cargo.toml",
       "agentmux-wsh/Cargo.toml",
       "agentmux-cef/Cargo.toml",
