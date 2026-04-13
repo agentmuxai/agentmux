@@ -114,27 +114,11 @@ export function registerDefaultCommands(): void {
             createBlock({ meta: { view: "agent", controller: "cmd", cmd: "", "cmd:args": [], "cmd:interactive": true, "cmd:runonstart": false } }),
     });
     commandRegistry.register({
-        id: "open:forge",
-        label: "Open Forge",
-        category: "Open",
-        icon: "hammer",
-        iconColor: "#a78bfa",
-        execute: () => createBlock({ meta: { view: "forge" } }),
-    });
-    commandRegistry.register({
         id: "open:sysinfo",
         label: "Open System Info",
         category: "Open",
         icon: "chart-line",
         execute: () => createBlock({ meta: { view: "sysinfo" } }),
-    });
-    commandRegistry.register({
-        id: "open:identity",
-        label: "Open Identity",
-        category: "Open",
-        icon: "id-card",
-        iconColor: "#a78bfa",
-        execute: () => createBlock({ meta: { view: "identity" } }),
     });
     commandRegistry.register({
         id: "open:help",
