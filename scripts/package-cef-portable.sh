@@ -6,6 +6,12 @@
 
 set -euo pipefail
 
+# Resolve the repo root BEFORE any `cd` so later path lookups (e.g. the
+# VERSION_HISTORY.md size-table append below) don't get confused by the
+# script's internal working-directory change.
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
 VERSION=$(node -p "require('./package.json').version")
 OUTDIR="${1:-$HOME/Desktop}"
 PORTABLE="$OUTDIR/agentmux-cef-$VERSION-x64-portable"
@@ -125,14 +131,11 @@ fi
 ZIP_SIZE=$(du -sh "$ZIP_NAME" 2>/dev/null | cut -f1 || echo "N/A")
 
 # Append compact size row to VERSION_HISTORY.md under the "## Sizes" table
-# if it exists. Skipped silently if the section isn't there — the script
-# is still the one that creates it on first use, but only if the repo root
-# contains a VERSION_HISTORY.md in the first place.
-REPO_ROOT=""
-if [ -f "$(dirname "$0")/../VERSION_HISTORY.md" ]; then
-    REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-fi
-if [ -n "$REPO_ROOT" ] && grep -q "^## Sizes " "$REPO_ROOT/VERSION_HISTORY.md" 2>/dev/null; then
+# if it exists. REPO_ROOT was captured at the top of the script BEFORE the
+# `cd "$OUTDIR"` above, so it still points at the repo root even though cwd
+# is now the output directory. Skipped silently if the file / section
+# isn't there.
+if [ -f "$REPO_ROOT/VERSION_HISTORY.md" ] && grep -q "^## Sizes " "$REPO_ROOT/VERSION_HISTORY.md" 2>/dev/null; then
     DIR_BYTES=$(find "$PORTABLE" -type f -printf '%s\n' 2>/dev/null | awk '{s+=$1} END {print s+0}')
     ZIP_BYTES=$(stat -c '%s' "$ZIP_NAME" 2>/dev/null || echo 0)
     DIR_MIB=$(awk "BEGIN {printf \"%.1f\", $DIR_BYTES/1024/1024}")
