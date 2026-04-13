@@ -12,8 +12,8 @@ import type { Bookmark, DocumentNode, SubagentLinkNode } from "./types";
 import { openSubagentPane, isSubagentPaneOpen } from "@/app/store/subagent-pane-manager";
 import { useAgentStream } from "./useAgentStream";
 import { parseHistoryLines } from "./parseHistoryLines";
-import { runLaunchFlow } from "./flows/launch-flow";
 import { useLaunchLogs } from "./hooks/useLaunchLogs";
+import { useAgentControllerStatus } from "./hooks/useAgentControllerStatus";
 import { useSessionDigest } from "./hooks/useSessionDigest";
 import { useHistoryPagination } from "./hooks/useHistoryPagination";
 import { useInSessionSearch } from "./hooks/useInSessionSearch";
@@ -109,35 +109,26 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
     const fetchDigest = digest.fetch;
     const dismissDigest = digest.dismiss;
 
-    // OAuth URL — shown prominently with a copy button when login is needed
-    const [authUrl, setAuthUrl] = createSignal<string | null>(null);
-    // Whether to show the retry button (after auth_failed)
-    const [canRetry, setCanRetry] = createSignal(false);
-    // Whether the launch flow is currently running
-    const [flowRunning, setFlowRunning] = createSignal(false);
-    // Whether the agent is ready (launch complete, controller registered)
-    const [agentReady, setAgentReady] = createSignal(false);
-    // Show spinner during launch and until agent is ready.
-    // createMemo ensures derived value is cached and only re-evaluates
-    // when underlying signals change — not on every caller read.
-    const isLoading = createMemo(() => flowRunning() || !agentReady());
-    // Whether we're specifically in the login-polling phase
-    const [loginWaiting, setLoginWaiting] = createSignal(false);
-    // Mutable flag for cancelling the polling loop (set by cancel or onCleanup)
-    let loginCancelled = false;
-
-    // Build auth env for a given provider
-    const buildAuthEnv = async (prov: ReturnType<typeof provider>): Promise<Record<string, string> | undefined> => {
-        if (!prov?.authConfigDirEnvVar || !prov?.authDirName) return undefined;
-        try {
-            const authDir = await getApi().ensureAuthDir(prov.id);
-            const env: Record<string, string> = { [prov.authConfigDirEnvVar]: authDir };
-            if (prov.authExtraEnv) Object.assign(env, prov.authExtraEnv);
-            return env;
-        } catch {
-            return undefined; // non-fatal — fall back to default auth dir
-        }
-    };
+    // Controller status — auth state + launch flow runner.
+    // Owns: authUrl, canRetry, flowRunning, agentReady, isLoading,
+    //       loginWaiting, startLaunchFlow, cancelLogin
+    // See hooks/useAgentControllerStatus.ts.
+    const status = useAgentControllerStatus({
+        blockId: model.blockId,
+        provider,
+        log,
+    });
+    // Local aliases preserve existing call sites without `status.X` churn.
+    // SolidJS accessors are stable function references so aliasing is safe.
+    const authUrl = status.authUrl;
+    const setAuthUrl = status.setAuthUrl;
+    const canRetry = status.canRetry;
+    const flowRunning = status.flowRunning;
+    const agentReady = status.agentReady;
+    const isLoading = status.isLoading;
+    const loginWaiting = status.loginWaiting;
+    const startLaunchFlow = status.startLaunchFlow;
+    const cancelLogin = status.cancelLogin;
 
     // loadOlder + initial-history-load are owned by useHistoryPagination
     // (local aliases declared above).
@@ -145,52 +136,8 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
     // fetchDigest + dismissDigest are owned by useSessionDigest
     // (local aliases declared above).
 
-    // Runs the full launch flow; can be triggered at mount time or via retry.
-    const startLaunchFlow = async () => {
-        if (flowRunning()) return;
-        loginCancelled = false;
-        setFlowRunning(true);
-        setCanRetry(false);
-        const prov = provider();
-        try {
-            const authEnv = await buildAuthEnv(prov);
-            const result = await runLaunchFlow({
-                blockId: model.blockId,
-                provider: prov,
-                log,
-                setAuthUrl,
-                isCancelled: () => loginCancelled,
-                setLoginWaiting,
-                authEnv,
-            });
-            if (result === "success") {
-                setAgentReady(true);
-            } else if (result === "auth_failed" && !loginCancelled) {
-                setCanRetry(true);
-                setAgentReady(true); // clear spinner so retry button is usable
-            }
-        } catch (err: any) {
-            log("error", err?.message ?? String(err), "error");
-            setAgentReady(true); // clear spinner on error
-        } finally {
-            setFlowRunning(false);
-        }
-    };
-
-    // Cancel login: stop polling and kill the background CLI process.
-    const cancelLogin = () => {
-        loginCancelled = true;
-        getApi().cancelCliLogin().catch(() => {});
-        log("auth", "login cancelled", "warn");
-    };
-
-    // If the pane is closed while login is in progress, cancel and kill the CLI process.
-    onCleanup(() => {
-        if (loginWaiting()) {
-            loginCancelled = true;
-            getApi().cancelCliLogin().catch(() => {});
-        }
-    });
+    // startLaunchFlow, cancelLogin, and login-pending onCleanup are owned
+    // by useAgentControllerStatus (local aliases declared above).
 
     onMount(() => {
         const name = block()?.meta?.["agentName"] ?? agentId;
