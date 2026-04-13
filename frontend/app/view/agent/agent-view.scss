@@ -320,6 +320,44 @@
                 cursor: not-allowed;
             }
         }
+
+        .agent-card-icon {
+            font-size: 22px;
+            flex-shrink: 0;
+            width: 28px;
+            text-align: center;
+        }
+
+        .agent-card-info {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            flex: 1;
+            min-width: 0;
+        }
+
+        .agent-card-name {
+            font-size: 13px;
+            font-weight: 500;
+        }
+
+        .agent-card-desc {
+            font-size: 11px;
+            color: var(--secondary-text-color);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .agent-card-spinner {
+            width: 14px;
+            height: 14px;
+            border: 2px solid color-mix(in srgb, var(--accent-color) 25%, transparent);
+            border-top-color: var(--accent-color);
+            border-radius: 50%;
+            animation: agent-spin 0.8s linear infinite;
+            flex-shrink: 0;
+        }
     }
 
     .agent-card-settings-panel {
@@ -391,47 +429,6 @@
             overflow: auto;
             padding: 8px;
             min-height: 200px;
-        }
-
-    }
-
-
-        .agent-card-icon {
-            font-size: 22px;
-            flex-shrink: 0;
-            width: 28px;
-            text-align: center;
-        }
-
-        .agent-card-info {
-            display: flex;
-            flex-direction: column;
-            gap: 2px;
-            flex: 1;
-            min-width: 0;
-        }
-
-        .agent-card-name {
-            font-size: 13px;
-            font-weight: 500;
-        }
-
-        .agent-card-desc {
-            font-size: 11px;
-            color: var(--secondary-text-color);
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-        }
-
-        .agent-card-spinner {
-            width: 14px;
-            height: 14px;
-            border: 2px solid color-mix(in srgb, var(--accent-color) 25%, transparent);
-            border-top-color: var(--accent-color);
-            border-radius: 50%;
-            animation: agent-spin 0.8s linear infinite;
-            flex-shrink: 0;
         }
     }
 
