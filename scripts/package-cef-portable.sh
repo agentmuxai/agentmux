@@ -118,7 +118,12 @@ if [ "$zip_made" -eq 0 ]; then
 fi
 
 if [ "$zip_made" -eq 0 ]; then
-    if tar -a -cf "$ZIP_NAME" "$portable_basename" >/dev/null 2>&1; then
+    # `-C "$portable_basename" .` archives the contents at the ZIP root,
+    # matching Compress-Archive's `-Path '…/*'` behavior above. Without
+    # `-C`, bsdtar wraps everything under a `$portable_basename/` directory
+    # which breaks consumers expecting a flat layout (launcher + runtime/
+    # at the ZIP root).
+    if tar -a -cf "$ZIP_NAME" -C "$portable_basename" . >/dev/null 2>&1; then
         zip_made=1
     fi
 fi

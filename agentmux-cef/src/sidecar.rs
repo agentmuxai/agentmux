@@ -374,19 +374,46 @@ fn parse_estart(line: &str) -> BackendSpawnResult {
 }
 
 /// Deploy the bundled wsh binary.
+///
+/// In a portable build the packager already drops wsh right next to the CEF
+/// host (`runtime/wsh-<ver>-<os>-<arch>.exe`). `find_wsh_binary()` in
+/// agentmux-srv's shellintegration module looks for wsh **alongside the
+/// current executable** — the `exe_dir` — so nothing ever reads
+/// `runtime/bin/wsh-*`. Before this fix, `deploy_wsh` was creating that
+/// `bin/` subdirectory and copying wsh into it on every startup, producing
+/// a dead 1.19 MiB duplicate on disk and a redundant fs operation on every
+/// launch.
+///
+/// The fix: if `find_wsh_source` returns a path that is already *inside*
+/// `app_path`, skip the copy entirely — the spawner will find it in place.
+/// The copy is still performed in dev mode where the source lives in
+/// `dist/bin/` outside the app_path.
 fn deploy_wsh(app_path: &std::path::Path) {
-    let bin_dir = app_path.join("bin");
-    if let Err(e) = std::fs::create_dir_all(&bin_dir) {
-        tracing::warn!("Failed to create bin dir for wsh: {}", e);
-        return;
-    }
-
     // Try versioned name first (e.g., wsh-0.33.44-windows.x64.exe), then plain name (dev mode)
     let bundled_wsh = find_wsh_source(app_path);
     let Some(bundled_wsh) = bundled_wsh else {
         tracing::debug!("Bundled wsh not found in: {}", app_path.display());
         return;
     };
+
+    // Short-circuit: if the bundled wsh already lives directly in app_path,
+    // the shellintegration lookup will find it without any copy. This is
+    // the common case for portable builds.
+    if let (Ok(src_canon), Ok(app_canon)) = (bundled_wsh.canonicalize(), app_path.canonicalize()) {
+        if src_canon.parent() == Some(app_canon.as_path()) {
+            tracing::debug!(
+                source = %bundled_wsh.display(),
+                "wsh already lives in app_path; skipping bin/ deploy"
+            );
+            return;
+        }
+    }
+
+    let bin_dir = app_path.join("bin");
+    if let Err(e) = std::fs::create_dir_all(&bin_dir) {
+        tracing::warn!("Failed to create bin dir for wsh: {}", e);
+        return;
+    }
 
     let version = env!("CARGO_PKG_VERSION");
     let (goos, goarch) = if cfg!(target_os = "macos") {
