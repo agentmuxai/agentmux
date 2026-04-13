@@ -33,6 +33,17 @@ const STATUS_DOT: Record<string, string> = {
 // ── Root view ────────────────────────────────────────────────────────────────
 
 export function IdentityView(props: ViewComponentProps<IdentityViewModel>): JSX.Element {
+    return <IdentityPanel model={props.model} />;
+}
+
+// ── IdentityPanel — reusable body ────────────────────────────────────────────
+//
+// Takes the model directly (no ViewComponentProps wrapper) so it can be
+// composed inside other views — notably the per-agent settings panel
+// in the agent picker. See
+// specs/SPEC_CONSOLIDATE_FORGE_IDENTITY_INTO_AGENT_2026_04_13.md (PR 3).
+
+export function IdentityPanel(props: { model: IdentityViewModel }): JSX.Element {
     const model = props.model;
 
     return (
