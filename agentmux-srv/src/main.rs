@@ -312,6 +312,20 @@ async fn main() {
         tracing::info!("First launch: created initial data");
     }
 
+    // Seed ~/.agentmux/.gitignore so accidental git operations inside the
+    // data directory (e.g. an agent running `git init` or `git clone` in its
+    // cwd) don't stage anything by default. Idempotent — written once per
+    // install; we don't overwrite an existing user-customized file.
+    if let Some(home) = dirs::home_dir() {
+        let data_dir = home.join(".agentmux");
+        if data_dir.is_dir() {
+            let gitignore = data_dir.join(".gitignore");
+            if !gitignore.exists() {
+                let _ = std::fs::write(&gitignore, "*\n!.gitignore\n");
+            }
+        }
+    }
+
     // Self-heal layouts: remove orphaned block nodes that cause blank panes.
     // Runs on every startup to catch any corruption from prior sessions.
     heal_all_layouts(&wstore);
