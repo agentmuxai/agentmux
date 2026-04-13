@@ -15,6 +15,7 @@ import { parseHistoryLines } from "./parseHistoryLines";
 import { AgentControlBar } from "./components/AgentControlBar";
 import { AgentDocumentView } from "./components/AgentDocumentView";
 import { AgentFooter } from "./components/AgentFooter";
+import { AgentPicker } from "./components/AgentPicker";
 import { AgentSearchBar } from "./components/AgentSearchBar";
 import { BookmarksPanel } from "./components/BookmarksPanel";
 import { SessionDigestBanner } from "./components/SessionDigestBanner";
@@ -26,39 +27,6 @@ import { BlockService } from "@/app/store/services";
 import { getApi, staticTabId } from "@/app/store/global";
 import { ContextMenuModel } from "@/app/store/contextmenu";
 import "./agent-view.scss";
-
-// ── useForgeAgents hook ───────────────────────────────────────────────────────
-
-function useForgeAgents(): () => ForgeAgent[] {
-    const [agents, setAgents] = createSignal<ForgeAgent[]>([]);
-
-    onMount(() => {
-        let cancelled = false;
-
-        async function load() {
-            try {
-                const result = await RpcApi.ListForgeAgentsCommand(TabRpcClient);
-                if (!cancelled) setAgents(result ?? []);
-            } catch {
-                // silently ignore
-            }
-        }
-
-        load();
-
-        const unsub = waveEventSubscribe({
-            eventType: "forgeagents:changed",
-            handler: () => load(),
-        });
-
-        onCleanup(() => {
-            cancelled = true;
-            unsub();
-        });
-    });
-
-    return agents;
-}
 
 /**
  * Top-level wrapper — switches between agent picker and presentation view.
@@ -78,99 +46,6 @@ export const AgentViewWrapper = ({ model }: { model: AgentViewModel }): JSX.Elem
 };
 
 AgentViewWrapper.displayName = "AgentViewWrapper";
-
-// ── Agent Picker ────────────────────────────────────────────────────────────────
-
-const AgentPicker = ({ model }: { model: AgentViewModel }): JSX.Element => {
-    const [launching, setLaunching] = createSignal<string | null>(null);
-    const [nodejsError, setNodejsError] = createSignal<string | null>(null);
-    const agents = useForgeAgents();
-
-    const handleSelect = async (agent: ForgeAgent) => {
-        setNodejsError(null);
-        setLaunching(agent.id);
-        try {
-            await model.launchForgeAgent(agent);
-            // Check if launch was blocked by missing Node.js
-            if (model.nodejsError) {
-                setNodejsError(model.nodejsError);
-                model.nodejsError = null;
-            }
-        } catch {
-            // model logs internally
-        } finally {
-            setLaunching(null);
-        }
-    };
-
-    const busy = () => launching() !== null;
-
-    return (
-        <Show
-            when={agents().length > 0}
-            fallback={
-                <div class="agent-view">
-                    <div class="agent-picker-empty">
-                        <div class="agent-picker-empty-icon">{"\u2726"}</div>
-                        <div class="agent-picker-empty-title">No agents configured</div>
-                        <div class="agent-picker-empty-desc">Create an agent in the Forge to get started.</div>
-                        <button class="agent-picker-forge-btn" disabled>
-                            + Create an agent in the Forge
-                        </button>
-                    </div>
-                </div>
-            }
-        >
-            <div class="agent-view">
-                <div class="agent-picker">
-                    <div class="agent-picker-list">
-                        <For each={agents()}>
-                            {(agent) => (
-                                <button
-                                    class={`agent-card${launching() === agent.id ? " agent-card--launching" : ""}`}
-                                    onClick={() => handleSelect(agent)}
-                                    disabled={busy()}
-                                >
-                                    <span class="agent-card-icon">{agent.icon}</span>
-                                    <span class="agent-card-info">
-                                        <span class="agent-card-name">{agent.name}</span>
-                                        <Show when={agent.description}>
-                                            <span class="agent-card-desc">{agent.description}</span>
-                                        </Show>
-                                    </span>
-                                    <Show when={launching() === agent.id}>
-                                        <span class="agent-card-spinner" />
-                                    </Show>
-                                </button>
-                            )}
-                        </For>
-                    </div>
-                    <Show when={nodejsError()}>
-                        <div class="agent-nodejs-notice">
-                            <div class="nodejs-notice-icon">
-                                <i class="fa-solid fa-circle-exclamation" />
-                            </div>
-                            <div class="nodejs-notice-content">
-                                <div class="nodejs-notice-title">Node.js Required</div>
-                                <div class="nodejs-notice-text">{nodejsError()}</div>
-                                <div class="nodejs-notice-hint">
-                                    After installing, restart AgentMux and try again.
-                                </div>
-                            </div>
-                        </div>
-                    </Show>
-                    <div class="agent-picker-footer">
-                        <button class="agent-picker-forge-btn" disabled>
-                            + New agent in Forge
-                        </button>
-                    </div>
-                </div>
-            </div>
-        </Show>
-    );
-};
-
-AgentPicker.displayName = "AgentPicker";
 
 // ── Launch Flow ──────────────────────────────────────────────────────────────────
 
