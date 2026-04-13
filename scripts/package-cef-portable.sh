@@ -124,6 +124,35 @@ fi
 
 ZIP_SIZE=$(du -sh "$ZIP_NAME" 2>/dev/null | cut -f1 || echo "N/A")
 
+# Append compact size row to VERSION_HISTORY.md under the "## Sizes" table
+# if it exists. Skipped silently if the section isn't there — the script
+# is still the one that creates it on first use, but only if the repo root
+# contains a VERSION_HISTORY.md in the first place.
+REPO_ROOT=""
+if [ -f "$(dirname "$0")/../VERSION_HISTORY.md" ]; then
+    REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+fi
+if [ -n "$REPO_ROOT" ] && grep -q "^## Sizes " "$REPO_ROOT/VERSION_HISTORY.md" 2>/dev/null; then
+    DIR_BYTES=$(find "$PORTABLE" -type f -printf '%s\n' 2>/dev/null | awk '{s+=$1} END {print s+0}')
+    ZIP_BYTES=$(stat -c '%s' "$ZIP_NAME" 2>/dev/null || echo 0)
+    DIR_MIB=$(awk "BEGIN {printf \"%.1f\", $DIR_BYTES/1024/1024}")
+    ZIP_MIB=$(awk "BEGIN {printf \"%.1f\", $ZIP_BYTES/1024/1024}")
+    TODAY=$(date +%Y-%m-%d)
+    ROW="| $VERSION | $TODAY | $ZIP_MIB MiB | $DIR_MIB MiB | |"
+
+    # Insert the row immediately after the header separator line of the
+    # Sizes table (the `|---|---|...` line). awk in-place via temp file.
+    awk -v row="$ROW" '
+        /^\| *Version *\| *Date *\| *ZIP/ { in_sizes=1 }
+        { print }
+        in_sizes && /^\|[-:| ]+\|[-:| ]+\|[-:| ]+\|[-:| ]+\|[-:| ]+\|$/ {
+            print row
+            in_sizes=0
+        }
+    ' "$REPO_ROOT/VERSION_HISTORY.md" > "$REPO_ROOT/VERSION_HISTORY.md.tmp" \
+        && mv "$REPO_ROOT/VERSION_HISTORY.md.tmp" "$REPO_ROOT/VERSION_HISTORY.md"
+fi
+
 echo ""
 echo "[SUCCESS] CEF Portable v$VERSION"
 echo "  Directory: $PORTABLE ($DIR_SIZE)"
