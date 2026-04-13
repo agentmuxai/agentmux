@@ -468,32 +468,6 @@
         }
     }
 
-    .agent-picker-footer {
-        flex-shrink: 0;
-        padding-top: 4px;
-        border-top: 1px solid var(--border-color);
-    }
-
-    .agent-picker-forge-btn {
-        width: 100%;
-        padding: 8px;
-        background: transparent;
-        border: 1px dashed var(--border-color);
-        border-radius: 6px;
-        color: var(--secondary-text-color);
-        font-size: 12px;
-        cursor: not-allowed;
-        transition: all 0.15s;
-
-        &:not(:disabled) {
-            cursor: pointer;
-            &:hover {
-                border-color: var(--accent-color);
-                color: var(--accent-color);
-            }
-        }
-    }
-
     // === Picker Empty State ===
     .agent-picker-empty {
         display: flex;
