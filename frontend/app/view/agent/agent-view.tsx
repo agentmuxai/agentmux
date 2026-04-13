@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { writeText as clipboardWriteText } from "@/util/clipboard";
-import { focusedBlockId } from "@/util/focusutil";
 import { createMemo, createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
 import type { AgentViewModel } from "./agent-model";
 import { buildRuntimeArgs, getRuntimeConfig } from "./buildRuntimeArgs";
@@ -12,12 +11,13 @@ import type { Bookmark, DocumentNode, SubagentLinkNode } from "./types";
 import { openSubagentPane, isSubagentPaneOpen } from "@/app/store/subagent-pane-manager";
 import { useAgentStream } from "./useAgentStream";
 import { parseHistoryLines } from "./parseHistoryLines";
+import { runLaunchFlow } from "./flows/launch-flow";
 import { useLaunchLogs } from "./hooks/useLaunchLogs";
-import { useAgentControllerStatus } from "./hooks/useAgentControllerStatus";
 import { useSessionDigest } from "./hooks/useSessionDigest";
 import { useHistoryPagination } from "./hooks/useHistoryPagination";
 import { useInSessionSearch } from "./hooks/useInSessionSearch";
 import { useBookmarks } from "./hooks/useBookmarks";
+import { useAgentKeyboard } from "./hooks/useAgentKeyboard";
 import { AgentControlBar } from "./components/AgentControlBar";
 import { AgentDocumentView } from "./components/AgentDocumentView";
 import { AgentFooter } from "./components/AgentFooter";
@@ -109,26 +109,35 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
     const fetchDigest = digest.fetch;
     const dismissDigest = digest.dismiss;
 
-    // Controller status — auth state + launch flow runner.
-    // Owns: authUrl, canRetry, flowRunning, agentReady, isLoading,
-    //       loginWaiting, startLaunchFlow, cancelLogin
-    // See hooks/useAgentControllerStatus.ts.
-    const status = useAgentControllerStatus({
-        blockId: model.blockId,
-        provider,
-        log,
-    });
-    // Local aliases preserve existing call sites without `status.X` churn.
-    // SolidJS accessors are stable function references so aliasing is safe.
-    const authUrl = status.authUrl;
-    const setAuthUrl = status.setAuthUrl;
-    const canRetry = status.canRetry;
-    const flowRunning = status.flowRunning;
-    const agentReady = status.agentReady;
-    const isLoading = status.isLoading;
-    const loginWaiting = status.loginWaiting;
-    const startLaunchFlow = status.startLaunchFlow;
-    const cancelLogin = status.cancelLogin;
+    // OAuth URL — shown prominently with a copy button when login is needed
+    const [authUrl, setAuthUrl] = createSignal<string | null>(null);
+    // Whether to show the retry button (after auth_failed)
+    const [canRetry, setCanRetry] = createSignal(false);
+    // Whether the launch flow is currently running
+    const [flowRunning, setFlowRunning] = createSignal(false);
+    // Whether the agent is ready (launch complete, controller registered)
+    const [agentReady, setAgentReady] = createSignal(false);
+    // Show spinner during launch and until agent is ready.
+    // createMemo ensures derived value is cached and only re-evaluates
+    // when underlying signals change — not on every caller read.
+    const isLoading = createMemo(() => flowRunning() || !agentReady());
+    // Whether we're specifically in the login-polling phase
+    const [loginWaiting, setLoginWaiting] = createSignal(false);
+    // Mutable flag for cancelling the polling loop (set by cancel or onCleanup)
+    let loginCancelled = false;
+
+    // Build auth env for a given provider
+    const buildAuthEnv = async (prov: ReturnType<typeof provider>): Promise<Record<string, string> | undefined> => {
+        if (!prov?.authConfigDirEnvVar || !prov?.authDirName) return undefined;
+        try {
+            const authDir = await getApi().ensureAuthDir(prov.id);
+            const env: Record<string, string> = { [prov.authConfigDirEnvVar]: authDir };
+            if (prov.authExtraEnv) Object.assign(env, prov.authExtraEnv);
+            return env;
+        } catch {
+            return undefined; // non-fatal — fall back to default auth dir
+        }
+    };
 
     // loadOlder + initial-history-load are owned by useHistoryPagination
     // (local aliases declared above).
@@ -136,8 +145,52 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
     // fetchDigest + dismissDigest are owned by useSessionDigest
     // (local aliases declared above).
 
-    // startLaunchFlow, cancelLogin, and login-pending onCleanup are owned
-    // by useAgentControllerStatus (local aliases declared above).
+    // Runs the full launch flow; can be triggered at mount time or via retry.
+    const startLaunchFlow = async () => {
+        if (flowRunning()) return;
+        loginCancelled = false;
+        setFlowRunning(true);
+        setCanRetry(false);
+        const prov = provider();
+        try {
+            const authEnv = await buildAuthEnv(prov);
+            const result = await runLaunchFlow({
+                blockId: model.blockId,
+                provider: prov,
+                log,
+                setAuthUrl,
+                isCancelled: () => loginCancelled,
+                setLoginWaiting,
+                authEnv,
+            });
+            if (result === "success") {
+                setAgentReady(true);
+            } else if (result === "auth_failed" && !loginCancelled) {
+                setCanRetry(true);
+                setAgentReady(true); // clear spinner so retry button is usable
+            }
+        } catch (err: any) {
+            log("error", err?.message ?? String(err), "error");
+            setAgentReady(true); // clear spinner on error
+        } finally {
+            setFlowRunning(false);
+        }
+    };
+
+    // Cancel login: stop polling and kill the background CLI process.
+    const cancelLogin = () => {
+        loginCancelled = true;
+        getApi().cancelCliLogin().catch(() => {});
+        log("auth", "login cancelled", "warn");
+    };
+
+    // If the pane is closed while login is in progress, cancel and kill the CLI process.
+    onCleanup(() => {
+        if (loginWaiting()) {
+            loginCancelled = true;
+            getApi().cancelCliLogin().catch(() => {});
+        }
+    });
 
     onMount(() => {
         const name = block()?.meta?.["agentName"] ?? agentId;
@@ -223,32 +276,22 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         });
         onCleanup(() => unsubCompleted());
 
-        // Ctrl+B — toggle bookmarks panel.
-        // Ctrl+F — toggle search bar.
-        // Both are scoped to THIS pane via focusedBlockId() so that only the
-        // focused pane responds when multiple agent panes are open.
-        const handleKeyDown = (e: KeyboardEvent) => {
-            const focused = focusedBlockId();
-            if (focused !== model.blockId) return;
+        // Ctrl+B / Ctrl+F handling is owned by useAgentKeyboard (called
+        // at the top level below — hooks can't mount inside onMount).
+    });
 
-            if (e.ctrlKey && e.key === "b") {
-                e.preventDefault();
-                setShowBookmarks((v) => !v);
-            } else if (e.ctrlKey && e.key === "f") {
-                e.preventDefault();
-                // Capture current state BEFORE toggling so we know if this
-                // Ctrl+F press is opening or closing the bar.
-                const wasVisible = searchVisible();
-                if (wasVisible) {
-                    // Second Ctrl+F press closes and clears state.
-                    searchClose();
-                } else {
-                    setSearchVisible(true);
-                }
+    // Pane-scoped Ctrl+B / Ctrl+F listener. See hooks/useAgentKeyboard.ts.
+    useAgentKeyboard({
+        blockId: model.blockId,
+        onToggleBookmarks: () => setShowBookmarks((v) => !v),
+        onToggleSearch: () => {
+            // Second Ctrl+F press closes and clears state.
+            if (searchVisible()) {
+                searchClose();
+            } else {
+                setSearchVisible(true);
             }
-        };
-        window.addEventListener("keydown", handleKeyDown);
-        onCleanup(() => window.removeEventListener("keydown", handleKeyDown));
+        },
     });
 
     // Subscribe to subprocess output and parse into DocumentNodes.
