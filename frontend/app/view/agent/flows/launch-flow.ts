@@ -14,7 +14,7 @@
  *      to `install_progress` events so the caller's log sink sees each npm
  *      line as it happens.
  *   2. Auth check — calls the provider's check-auth command. If unauthenticated,
- *      spawns the login command via the Tauri host (so the browser opens
+ *      spawns the login command via the CEF host (so the browser opens
  *      correctly on Windows), then polls with 2s cadence until authenticated,
  *      cancelled, or 5 minutes elapse.
  *   3. Controller registration — ControllerResync on the tab, read status, log
@@ -159,7 +159,7 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
     if (needsLogin) {
         log("auth", "not authenticated — starting login flow...");
         try {
-            // Run from Tauri host (GUI process) so the browser opens correctly on Windows.
+            // Run from the CEF host (GUI process) so the browser opens correctly on Windows.
             // Returns immediately after spawning — browser opens, frontend polls for completion.
             await getApi().runCliLogin(
                 cliResult.cli_path,
