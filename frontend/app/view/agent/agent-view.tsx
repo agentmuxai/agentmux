@@ -14,6 +14,7 @@ import { useAgentStream } from "./useAgentStream";
 import { parseHistoryLines } from "./parseHistoryLines";
 import { runLaunchFlow } from "./flows/launch-flow";
 import { useLaunchLogs } from "./hooks/useLaunchLogs";
+import { useHistoryPagination } from "./hooks/useHistoryPagination";
 import { AgentControlBar } from "./components/AgentControlBar";
 import { AgentDocumentView } from "./components/AgentDocumentView";
 import { AgentFooter } from "./components/AgentFooter";
@@ -62,13 +63,33 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
 
     const agentAtoms = createMemo(() => createAgentAtoms(model.blockId));
 
-    // ── History pagination state ────────────────────────────────────────────────
-    // These track the window of lines we've loaded from the persisted blockfile.
-    // historyOffset = the line index where the currently-loaded slice starts.
-    // historyTotal  = total lines in the file (from session:line_count meta).
-    const [historyOffset, setHistoryOffset] = createSignal(0);
-    const [historyTotal, setHistoryTotal] = createSignal(0);
-    const [loadingOlder, setLoadingOlder] = createSignal(false);
+    // Accumulated terminal-style log lines — managed by useLaunchLogs hook.
+    // `logLines` is the reactive accessor; `log` is the append function
+    // that matches the LogFn signature expected by runLaunchFlow().
+    // Declared early so subsequent hooks (history, digest, controller
+    // status) can take it as a dependency.
+    const launchLogs = useLaunchLogs();
+    const logLines = launchLogs.lines;
+    const log = launchLogs.append;
+
+    // History pagination — owns historyOffset/historyTotal/loadingOlder,
+    // documentVersion, loadOlder handler, and the initial async history
+    // load that fires on hook mount. See hooks/useHistoryPagination.ts.
+    //
+    // documentVersion is bumped on every external document mutation
+    // (initial load + every loadOlder prepend). useAgentStream subscribes
+    // to it and rebuilds its dedup index after the document is reshaped.
+    const history = useHistoryPagination({
+        blockId: model.blockId,
+        documentAtom: agentAtoms().documentAtom,
+        outputFormat,
+        log,
+    });
+    const historyOffset = history.historyOffset;
+    const historyTotal = history.historyTotal;
+    const loadingOlder = history.loadingOlder;
+    const loadOlder = history.loadOlder;
+    const documentVersion = history.documentVersion;
 
     // ── Session digest ──────────────────────────────────────────────────────────
     // Shows a collapsible AI-generated summary when the user returns to a stale
@@ -77,20 +98,6 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
     const [digestGeneratedAt, setDigestGeneratedAt] = createSignal<number | null>(null);
     const [digestLoading, setDigestLoading] = createSignal(false);
     const [digestDismissed, setDigestDismissed] = createSignal(false);
-
-    // Bumped on every external document mutation (history load, prepend).
-    // useAgentStream watches this and rebuilds its internal nodeIdSet +
-    // nodeIndexMap so live-stream updates continue targeting the right
-    // node indices after the document has been reshaped from outside.
-    const [documentVersion, setDocumentVersion] = createSignal(0);
-    const bumpDocumentVersion = () => setDocumentVersion((v) => v + 1);
-
-    // Accumulated terminal-style log lines — managed by useLaunchLogs hook.
-    // `logLines` is the reactive accessor; `log` is the append function
-    // that matches the LogFn signature expected by runLaunchFlow().
-    const launchLogs = useLaunchLogs();
-    const logLines = launchLogs.lines;
-    const log = launchLogs.append;
 
     // OAuth URL — shown prominently with a copy button when login is needed
     const [authUrl, setAuthUrl] = createSignal<string | null>(null);
@@ -122,42 +129,8 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         }
     };
 
-    // Load the previous page of history (prepend to document).
-    // Called by AgentDocumentView when the user scrolls near the top.
-    const loadOlder = async (): Promise<void> => {
-        const currentOffset = historyOffset();
-        if (currentOffset === 0) return; // already at the beginning
-        if (loadingOlder()) return;
-
-        setLoadingOlder(true);
-        try {
-            const newOffset = Math.max(0, currentOffset - 200);
-            const loadLimit = currentOffset - newOffset;
-
-            const resp = await RpcApi.BlockfileReadRangeCommand(TabRpcClient, {
-                block_id: model.blockId,
-                filename: "output",
-                offset: newOffset,
-                limit: loadLimit,
-            }, { timeout: 15000 });
-
-            const newNodes = parseHistoryLines(resp.lines ?? [], outputFormat());
-            if (newNodes.length > 0) {
-                const [, setDoc] = agentAtoms().documentAtom;
-                setDoc((prev) => [...newNodes, ...prev]);
-                // Notify useAgentStream to rebuild its index map so live
-                // updates target the correct nodes after the prepend.
-                bumpDocumentVersion();
-            }
-
-            setHistoryOffset(newOffset);
-            log("history", `loaded ${newNodes.length} older messages (offset ${newOffset})`);
-        } catch (err: any) {
-            log("history", `failed to load older messages: ${err?.message ?? String(err)}`, "warn");
-        } finally {
-            setLoadingOlder(false);
-        }
-    };
+    // loadOlder + initial-history-load are owned by useHistoryPagination
+    // (local aliases declared above).
 
     // Fetch (or regenerate) the session digest via the session:digest RPC.
     // `force=true` bypasses the cache and re-invokes the Claude CLI.
@@ -243,67 +216,9 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         log("agent", `${name} selected (provider: ${provName})`);
         if (cwd) log("env", `working directory: ${cwd}`);
 
-        // Load persisted session history before starting the live stream.
-        // We do this asynchronously so the UI isn't blocked, but we fire it
-        // immediately so history appears as early as possible.
-        (async () => {
-            try {
-                const countResp = await RpcApi.BlockfileLineCountCommand(TabRpcClient, {
-                    block_id: model.blockId,
-                    filename: "output",
-                }, { timeout: 5000 });
-
-                const total = countResp?.count ?? 0;
-                if (total > 0) {
-                    const pageSize = 200;
-                    const offset = Math.max(0, total - pageSize);
-                    const limit = total - offset;
-
-                    const rangeResp = await RpcApi.BlockfileReadRangeCommand(TabRpcClient, {
-                        block_id: model.blockId,
-                        filename: "output",
-                        offset,
-                        limit,
-                    }, { timeout: 15000 });
-
-                    const nodes = parseHistoryLines(rangeResp.lines ?? [], outputFormat());
-                    if (nodes.length > 0) {
-                        const [doc, setDoc] = agentAtoms().documentAtom;
-                        // Prepend history to whatever is already in the
-                        // document. If useAgentStream has already captured
-                        // live events during the async history load, we
-                        // must not discard them. Dedupe by id — history
-                        // nodes and live nodes can overlap briefly during
-                        // a reconnect where an in-flight turn is also
-                        // visible in the persisted ring buffer.
-                        setDoc((prev) => {
-                            if (prev.length === 0) return nodes;
-                            const seen = new Set(prev.map((n) => n.id));
-                            const historyFresh = nodes.filter((n) => !seen.has(n.id));
-                            return [...historyFresh, ...prev];
-                        });
-                        // Notify useAgentStream to rebuild its nodeIdSet
-                        // and nodeIndexMap from the merged document so
-                        // subsequent live updates target correct indices.
-                        bumpDocumentVersion();
-                    }
-
-                    // Store pagination state for subsequent loadOlder() calls.
-                    // `resp.total` from the backend is the actual available
-                    // line count (clamped to the event ring buffer window),
-                    // not the all-time session:line_count. Use it so the
-                    // frontend never asks for offsets the backend can't serve.
-                    const available = rangeResp.total ?? total;
-                    setHistoryOffset(offset);
-                    setHistoryTotal(available);
-
-                    log("history", `loaded ${nodes.length} of ${available} previous messages`);
-                }
-            } catch (err: any) {
-                // Non-fatal — fresh session or backend not ready yet
-                log("history", `could not load history: ${err?.message ?? String(err)}`, "warn");
-            }
-        })();
+        // Initial history load is owned by useHistoryPagination's own
+        // onMount — fires automatically when the hook mounts. No work
+        // here. See hooks/useHistoryPagination.ts.
 
         // ── Session digest auto-trigger ─────────────────────────────────────────
         // Decide whether to show (or generate) a digest on pane open.
