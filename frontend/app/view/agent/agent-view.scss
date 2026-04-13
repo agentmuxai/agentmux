@@ -1304,6 +1304,14 @@
                 max-height: 200px;
                 overflow-y: auto;
 
+                // Native auto-grow — browser sizes the textarea to its
+                // content without any JS. Supported in Chromium 123+, which
+                // CEF ships (we're on ~133). Replaces the old JS autoGrow
+                // helper in AgentFooter.tsx that forced a synchronous layout
+                // on every keystroke (22ms per keypress in the agent pane).
+                // See docs/analysis/agent-typing-lag-trace-2026-04-12.md.
+                field-sizing: content;
+
                 &:focus {
                     outline: none;
                     border-color: var(--accent-color);

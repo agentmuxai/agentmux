@@ -15,15 +15,19 @@ interface AgentFooterProps {
 
 export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
     // Uncontrolled textarea — DOM owns the value. Reading via ref on send
-    // avoids re-rendering the component tree on every keystroke, which was
-    // causing severe typing lag when the parent's `loading` signal updated
-    // frequently from streaming controller status events.
+    // avoids re-rendering the component tree on every keystroke.
+    //
+    // Auto-resize is handled entirely by CSS (`field-sizing: content` on
+    // .agent-input). No `onInput` handler, no `scrollHeight` read — the
+    // browser grows the textarea natively as text wraps. A prior version of
+    // this file had a JS `autoGrow` helper that did
+    //   el.style.height = "auto"; el.style.height = el.scrollHeight + "px";
+    // which forced a synchronous layout on every keystroke. In the agent
+    // pane (flex column with a large content-visibility:auto document view
+    // above), that layout cost ~22ms per keystroke and blocked character
+    // paint — see docs/analysis/agent-typing-lag-trace-2026-04-12.md for
+    // the full trace analysis.
     let textareaRef: HTMLTextAreaElement | undefined;
-
-    const autoGrow = (el: HTMLTextAreaElement) => {
-        el.style.height = "auto";
-        el.style.height = el.scrollHeight + "px";
-    };
 
     const handleSend = () => {
         if (!textareaRef) return;
@@ -32,7 +36,8 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
         if (props.onSendMessage) {
             props.onSendMessage(message);
             textareaRef.value = "";
-            textareaRef.style.height = "auto";
+            // No style reset — browser's field-sizing handles it
+            // automatically when the content empties.
         }
     };
 
@@ -43,12 +48,6 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
         }
     };
 
-    const handleInput = (e: Event) => {
-        // Only auto-grow — do NOT update a signal here. Keeping the DOM as
-        // the source of truth means keystrokes don't trigger re-renders.
-        autoGrow(e.target as HTMLTextAreaElement);
-    };
-
     return (
         <div class="agent-footer">
             <div class="agent-input-container">
@@ -56,7 +55,6 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
                     ref={textareaRef}
                     class="agent-input"
                     placeholder={`Send message to ${props.agentId}...`}
-                    onInput={handleInput}
                     onKeyDown={handleKeyDown}
                     rows={1}
                 />
