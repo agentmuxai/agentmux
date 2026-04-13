@@ -16,6 +16,7 @@ import { runLaunchFlow } from "./flows/launch-flow";
 import { useLaunchLogs } from "./hooks/useLaunchLogs";
 import { useSessionDigest } from "./hooks/useSessionDigest";
 import { useHistoryPagination } from "./hooks/useHistoryPagination";
+import { useBookmarks } from "./hooks/useBookmarks";
 import { AgentControlBar } from "./components/AgentControlBar";
 import { AgentDocumentView } from "./components/AgentDocumentView";
 import { AgentFooter } from "./components/AgentFooter";
@@ -423,23 +424,25 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
 
     // ── Bookmarks ───────────────────────────────────────────────────────────────
 
-    // Read bookmarks reactively from block meta ("agent:bookmarks").
-    const bookmarks = createMemo<Bookmark[]>(() => {
-        const raw = block()?.meta?.["agent:bookmarks"];
-        if (!Array.isArray(raw)) return [];
-        return raw as Bookmark[];
-    });
-
-    // Derived set of bookmarked nodeIds for O(1) look-up in the renderer.
-    const bookmarkedNodeIds = createMemo<Set<string>>(
-        () => new Set(bookmarks().map((b) => b.nodeId)),
-    );
-
-    // Whether the bookmarks panel is visible.
-    const [showBookmarks, setShowBookmarks] = createSignal(false);
-
     // Mutable ref to the scrollToNode function exposed by AgentDocumentView.
     let scrollToNodeFn: ((nodeId: string) => void) | null = null;
+
+    // Bookmarks — owns reactive list, derived id set, panel visibility,
+    // and CRUD callbacks. See hooks/useBookmarks.ts.
+    const bookmarksHook = useBookmarks({
+        blockId: model.blockId,
+        block,
+        log,
+        jumpTo: (nodeId) => scrollToNodeFn?.(nodeId),
+    });
+    const bookmarks = bookmarksHook.bookmarks;
+    const bookmarkedNodeIds = bookmarksHook.bookmarkedNodeIds;
+    const showBookmarks = bookmarksHook.visible;
+    const setShowBookmarks = bookmarksHook.setVisible;
+    const handleBookmark = bookmarksHook.add;
+    const handleBookmarkDelete = bookmarksHook.remove;
+    const handleBookmarkRename = bookmarksHook.rename;
+    const handleBookmarkJump = bookmarksHook.jump;
     // Mutable ref to the scrollToBottom function exposed by AgentDocumentView.
     // Called by AgentFooter's onTyping when the user starts composing.
     let scrollToBottomFn: (() => void) | null = null;
@@ -519,70 +522,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         return idx >= 0 && idx < matches.length ? matches[idx] : null;
     });
 
-    const saveBookmarks = async (next: Bookmark[]): Promise<void> => {
-        await RpcApi.SetMetaCommand(TabRpcClient, {
-            oref: WOS.makeORef("block", model.blockId),
-            meta: { "agent:bookmarks": next },
-        });
-    };
-
-    /** Extract plain text preview from a DocumentNode (≤80 chars). */
-    const nodePreview = (node: DocumentNode): string => {
-        let raw = "";
-        switch (node.type) {
-            case "markdown":    raw = node.content; break;
-            case "user_message": raw = node.message; break;
-            case "tool":        raw = node.summary || node.tool; break;
-            case "agent_message": raw = node.summary || node.message; break;
-            case "section":     raw = node.title; break;
-            case "subagent_link": raw = node.slug || node.subagentId; break;
-        }
-        return raw.replace(/\s+/g, " ").trim().slice(0, 80);
-    };
-
-    const handleBookmark = (node: DocumentNode): void => {
-        const current = bookmarks();
-        const existingIdx = current.findIndex((b) => b.nodeId === node.id);
-        let next: Bookmark[];
-        if (existingIdx >= 0) {
-            // Remove existing bookmark
-            next = current.filter((_, i) => i !== existingIdx);
-        } else {
-            const preview = nodePreview(node);
-            const label = preview.slice(0, 60) || node.id;
-            const newBookmark: Bookmark = {
-                id: crypto.randomUUID(),
-                nodeId: node.id,
-                createdAt: Date.now(),
-                label,
-                preview,
-            };
-            next = [...current, newBookmark];
-            // Open the panel on first bookmark
-            setShowBookmarks(true);
-        }
-        saveBookmarks(next).catch((err) => {
-            log("bookmark", `failed to save: ${err?.message ?? String(err)}`, "warn");
-        });
-    };
-
-    const handleBookmarkDelete = (id: string): void => {
-        const next = bookmarks().filter((b) => b.id !== id);
-        saveBookmarks(next).catch((err) => {
-            log("bookmark", `failed to save: ${err?.message ?? String(err)}`, "warn");
-        });
-    };
-
-    const handleBookmarkRename = (id: string, label: string): void => {
-        const next = bookmarks().map((b) => (b.id === id ? { ...b, label } : b));
-        saveBookmarks(next).catch((err) => {
-            log("bookmark", `failed to save: ${err?.message ?? String(err)}`, "warn");
-        });
-    };
-
-    const handleBookmarkJump = (nodeId: string): void => {
-        if (scrollToNodeFn) scrollToNodeFn(nodeId);
-    };
+    // Bookmark CRUD + jump owned by useBookmarks (aliases declared above).
 
     // Per-pane zoom: read term:zoom from block meta (same key as terminal panes)
     const zoomFactor = createMemo(() => {
