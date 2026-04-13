@@ -41,6 +41,13 @@ export interface UseAgentCommandsOptions {
     documentAtom: SignalPair<DocumentNode[]>;
     log: LogFn;
     setAuthUrl: (url: string | null) => void;
+    /**
+     * The model-level backToPicker action. The hook delegates to this
+     * rather than owning a duplicate implementation — the pane-frame
+     * header button also calls it, so the logic needs to live in one
+     * place (AgentViewModel). See SPEC_AGENT_PANE_FOLLOWUPS item #8.
+     */
+    backToPicker: () => Promise<void>;
 }
 
 export interface UseAgentCommands {
@@ -133,25 +140,10 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         });
     };
 
+    // Delegate to the model so the pane-frame header button and any other
+    // call sites go through a single implementation.
     const back = async (): Promise<void> => {
-        try {
-            await RpcApi.SetMetaCommand(TabRpcClient, {
-                oref: WOS.makeORef("block", opts.blockId),
-                meta: {
-                    agentId: null,
-                    agentProvider: null,
-                    agentOutputFormat: null,
-                    agentName: null,
-                    agentIcon: null,
-                    agentCliPath: null,
-                    agentCliArgs: null,
-                    agentBinDir: null,
-                    controller: null,
-                },
-            });
-        } catch {
-            // model logs internally
-        }
+        await opts.backToPicker();
     };
 
     return { sendMessage, back };
