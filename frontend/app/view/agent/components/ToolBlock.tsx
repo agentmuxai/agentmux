@@ -9,13 +9,21 @@
  *
  * Behavior:
  *   - Collapsed (default): one line showing status icon + tool name + ellipsis.
- *     No wrapping, no content rendered inside.
- *   - Hover: expands instantly on mouseenter, collapses instantly on mouseleave.
+ *     Applies to ALL statuses — running, success, and failed.
+ *     Running tools show a ⏳ spinner in the summary; failed tools show ✗.
+ *     No content body is rendered in the document flow.
+ *   - Hover: expands via the portal overlay on mouseenter, collapses
+ *     on mouseleave. The portal escapes the `content-visibility: auto`
+ *     paint containment on .agent-document-node-wrapper (see PR #367).
  *   - Click: pins the expanded state. A pinned-open block stays open even
  *     after the mouse leaves. Clicking again unpins.
- *   - Force-expanded regardless of hover/pin state:
- *       * status === "running" — actively executing
- *       * status === "failed"  — user needs to see the error
+ *
+ * Prior behavior removed in SPEC_AGENT_PANE_FOLLOWUPS items #4 + #5:
+ *   running and failed states used to force-expand inline, taking 2+ lines
+ *   per tool. That violated the explicit one-line rule in
+ *   docs/specs/tool-collapse.md and the user's feedback memory. Now all
+ *   statuses collapse by default; progress and error content are still
+ *   accessible via hover/pin.
  *
  * SolidJS reactivity note:
  *   Props are accessed via `props.X` (never destructured in the function
