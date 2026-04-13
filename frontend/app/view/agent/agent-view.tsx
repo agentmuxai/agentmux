@@ -113,6 +113,15 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         documentVersion: history.documentVersion,
     });
 
+    // Mutable ref to the scrollToBottom function exposed by
+    // AgentDocumentView. Called by AgentFooter's onTyping when the user
+    // starts composing AND by useAgentCommands.onSent after the user's
+    // message has been appended to the document (SPEC_AGENT_PANE_FOLLOWUPS
+    // item #1). Declared here so both useAgentCommands and the JSX below
+    // can close over the same reference; assigned once AgentDocumentView
+    // mounts via scrollToBottomRef.
+    let scrollToBottomFn: (() => void) | null = null;
+
     // User-message send + /login /clear slash intercepts + back-to-picker.
     // See hooks/useAgentCommands.ts.
     const commands = useAgentCommands({
@@ -123,6 +132,10 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         log,
         setAuthUrl: status.setAuthUrl,
         backToPicker: () => model.backToPicker(),
+        // Scroll the user's own message into view after Enter. The hook
+        // defers this to the next animation frame so the mounted node is
+        // included in scrollHeight. See SPEC_AGENT_PANE_FOLLOWUPS item #1.
+        onSent: () => scrollToBottomFn?.(),
     });
     const handleSendMessage = commands.sendMessage;
 
@@ -147,11 +160,6 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         document: agentAtoms().documentAtom[0],
         jumpTo: scroll.jumpTo,
     });
-
-    // Mutable ref to the scrollToBottom function exposed by
-    // AgentDocumentView. Called by AgentFooter's onTyping when the user
-    // starts composing.
-    let scrollToBottomFn: (() => void) | null = null;
 
     // Pane-scoped Ctrl+B / Ctrl+F listener. See hooks/useAgentKeyboard.ts.
     useAgentKeyboard({
