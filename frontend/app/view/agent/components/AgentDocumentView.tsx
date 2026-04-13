@@ -71,7 +71,8 @@ export const AgentDocumentView = ({ documentAtom, documentStateAtom, logLines, a
     // Expose scrollToNode to the parent on mount
     if (scrollToNodeRef) scrollToNodeRef(scrollToNode);
 
-    // Toggle collapsed state for a node
+    // Toggle collapsed state for a node (agent messages only — tool blocks
+    // manage their own expand/collapse via hover + pin).
     const toggleCollapse = (nodeId: string) => {
         setDocumentState((prev) => {
             const collapsed = new Set(prev.collapsedNodes);
@@ -81,6 +82,21 @@ export const AgentDocumentView = ({ documentAtom, documentStateAtom, logLines, a
                 collapsed.add(nodeId);
             }
             return { ...prev, collapsedNodes: collapsed };
+        });
+    };
+
+    // Toggle the "pinned open" state for a tool node. Tool blocks render
+    // collapsed by default — hover expands, click pins. See
+    // docs/specs/tool-collapse.md.
+    const toggleToolPin = (nodeId: string) => {
+        setDocumentState((prev) => {
+            const pinned = new Set(prev.pinnedToolNodes);
+            if (pinned.has(nodeId)) {
+                pinned.delete(nodeId);
+            } else {
+                pinned.add(nodeId);
+            }
+            return { ...prev, pinnedToolNodes: pinned };
         });
     };
 
@@ -255,6 +271,8 @@ export const AgentDocumentView = ({ documentAtom, documentStateAtom, logLines, a
                                 node={node}
                                 collapsed={documentState().collapsedNodes.has(node.id)}
                                 onToggle={() => toggleCollapse(node.id)}
+                                toolPinned={documentState().pinnedToolNodes.has(node.id)}
+                                onToggleToolPin={() => toggleToolPin(node.id)}
                                 onSubagentClick={onSubagentClick}
                             />
                         </div>
@@ -283,11 +301,15 @@ const DocumentNodeRenderer = ({
     node,
     collapsed,
     onToggle,
+    toolPinned,
+    onToggleToolPin,
     onSubagentClick,
 }: {
     node: DocumentNode;
     collapsed: boolean;
     onToggle: () => void;
+    toolPinned: boolean;
+    onToggleToolPin: () => void;
     onSubagentClick?: (node: SubagentLinkNode) => void;
 }): JSX.Element => {
     switch (node.type) {
@@ -295,7 +317,7 @@ const DocumentNodeRenderer = ({
             return <MarkdownBlock node={node} />;
 
         case "tool":
-            return <ToolBlock node={node} collapsed={collapsed} onToggle={onToggle} />;
+            return <ToolBlock node={node} pinned={toolPinned} onTogglePin={onToggleToolPin} />;
 
         case "agent_message":
             return <AgentMessageBlock node={node} collapsed={collapsed} onToggle={onToggle} />;

@@ -632,28 +632,65 @@
             border-left: 2px solid var(--error-color);
         }
 
+        // Single-line collapsed summary — see docs/specs/tool-collapse.md.
+        // When the block is collapsed (no `.expanded` class), this row is
+        // the ONLY thing rendered; it must stay on one line regardless of
+        // how long the tool summary is. The trailing ellipsis signals
+        // expandable content.
         .agent-tool-summary {
             display: flex;
             align-items: center;
             gap: 4px;
             padding: 2px 4px;
             user-select: none;
+            // Force single-line regardless of content width
+            white-space: nowrap;
+            overflow: hidden;
+            min-width: 0;
+            max-width: 100%;
 
-            .agent-tool-chevron {
-                color: var(--secondary-text-color);
-                font-size: 10px;
-            }
-
-            .agent-tool-name {
-                flex: 1;
-                font-weight: 500;
-            }
-
-            .agent-tool-duration {
+            .agent-tool-status-icon {
+                flex-shrink: 0;
+                width: 12px;
+                text-align: center;
                 color: var(--secondary-text-color);
                 font-size: 11px;
             }
+
+            .agent-tool-name {
+                flex: 1 1 auto;
+                min-width: 0;
+                font-weight: 500;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+            }
+
+            .agent-tool-duration {
+                flex-shrink: 0;
+                color: var(--secondary-text-color);
+                font-size: 11px;
+            }
+
+            .agent-tool-ellipsis {
+                flex-shrink: 0;
+                margin-left: 4px;
+                color: var(--secondary-text-color);
+                opacity: 0.6;
+                font-size: 11px;
+            }
         }
+
+        // When pinned open, the click-to-pin state gets a subtle accent
+        // on the left border so users can tell they've stuck a block open.
+        &.pinned {
+            border-left: 2px solid var(--accent-color, #a78bfa);
+        }
+
+        // Status icon color variants for the collapsed row
+        &.success .agent-tool-status-icon { color: var(--success-color, #22c55e); }
+        &.failed  .agent-tool-status-icon { color: var(--error-color, #ef4444); }
+        &.running .agent-tool-status-icon { color: var(--warning-color, #eab308); }
 
         .agent-tool-content {
             padding: 0 4px 4px 16px;

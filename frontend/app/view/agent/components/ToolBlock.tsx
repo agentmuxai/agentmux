@@ -2,11 +2,25 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * ToolBlock - Collapsible tool execution display with smart rendering
+ * ToolBlock - Single-line collapsed-by-default tool display with
+ * hover-to-expand and click-to-pin semantics.
+ *
+ * See docs/specs/tool-collapse.md for the product requirement.
+ *
+ * Behavior:
+ *   - Collapsed (default): one line showing status icon + tool name + ellipsis.
+ *     No wrapping, no content rendered inside.
+ *   - Hover: expands instantly on mouseenter, collapses instantly on mouseleave.
+ *   - Click: pins the expanded state. A pinned-open block stays open even
+ *     after the mouse leaves. Clicking again unpins.
+ *   - Force-expanded regardless of hover/pin state:
+ *       * status === "running"       — actively executing
+ *       * status === "failed"        — user needs to see the error
+ *       * status === "needs-approval"— approval UI must be interactable
  */
 
 import clsx from "clsx";
-import { Show, type JSX } from "solid-js";
+import { Show, createSignal, type JSX } from "solid-js";
 import { createBlock } from "@/store/global";
 import type { ToolNode } from "../types";
 import { BashOutputViewer } from "./BashOutputViewer";
@@ -15,12 +29,37 @@ import { DiffViewer } from "./DiffViewer";
 
 interface ToolBlockProps {
     node: ToolNode;
-    collapsed: boolean;
-    onToggle: () => void;
+    /** User has clicked to pin this tool block open. */
+    pinned: boolean;
+    /** Toggle the pinned state (called on click of the collapsed row). */
+    onTogglePin: () => void;
 }
 
-export const ToolBlock = ({ node, collapsed, onToggle }: ToolBlockProps): JSX.Element => {
-    // Render tool-specific content
+const STATUS_ICON = {
+    running: "⏳",
+    success: "✓",
+    failed: "✗",
+    "needs-approval": "?",
+} as const;
+
+export const ToolBlock = ({ node, pinned, onTogglePin }: ToolBlockProps): JSX.Element => {
+    const [hovered, setHovered] = createSignal(false);
+
+    // Force-expand rules — these override hover/pin collapsed state.
+    // `failed` must stay expanded so errors are immediately visible without
+    // the user having to hunt for them. `running` so the user can watch
+    // progress. `needs-approval` so the approval button is always clickable.
+    const forceExpanded = () =>
+        node.status === "running" ||
+        node.status === "failed" ||
+        (node.status as string) === "needs-approval";
+
+    const expanded = () => pinned || hovered() || forceExpanded();
+
+    const statusIcon = (): string =>
+        STATUS_ICON[node.status as keyof typeof STATUS_ICON] || "•";
+
+    // Render tool-specific content — only evaluated when expanded.
     const renderToolContent = (): JSX.Element => {
         if (node.status === "running") {
             return (
@@ -97,16 +136,18 @@ export const ToolBlock = ({ node, collapsed, onToggle }: ToolBlockProps): JSX.El
     return (
         <div
             class={clsx("agent-tool-block", {
-                collapsed,
-                expanded: !collapsed,
+                collapsed: !expanded(),
+                expanded: expanded(),
+                pinned,
                 running: node.status === "running",
                 success: node.status === "success",
                 failed: node.status === "failed",
             })}
-            onClick={onToggle}
+            onMouseEnter={() => setHovered(true)}
+            onMouseLeave={() => setHovered(false)}
         >
-            <div class="agent-tool-summary">
-                <span class="agent-tool-chevron">{collapsed ? "▸" : "▾"}</span>
+            <div class="agent-tool-summary" onClick={onTogglePin}>
+                <span class="agent-tool-status-icon">{statusIcon()}</span>
                 <span class="agent-tool-name">{node.summary}</span>
                 <Show when={node.duration}>
                     <span class="agent-tool-duration">({node.duration.toFixed(1)}s)</span>
@@ -129,8 +170,9 @@ export const ToolBlock = ({ node, collapsed, onToggle }: ToolBlockProps): JSX.El
                         ⧉
                     </button>
                 </Show>
+                <span class="agent-tool-ellipsis">…</span>
             </div>
-            <Show when={!collapsed}>
+            <Show when={expanded()}>
                 <div class="agent-tool-content" onClick={(e) => e.stopPropagation()}>
                     {renderToolContent()}
                 </div>
