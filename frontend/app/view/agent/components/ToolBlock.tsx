@@ -9,13 +9,21 @@
  *
  * Behavior:
  *   - Collapsed (default): one line showing status icon + tool name + ellipsis.
- *     No wrapping, no content rendered inside.
- *   - Hover: expands instantly on mouseenter, collapses instantly on mouseleave.
+ *     Applies to ALL statuses — running, success, and failed.
+ *     Running tools show a ⏳ spinner in the summary; failed tools show ✗.
+ *     No content body is rendered in the document flow.
+ *   - Hover: expands via the portal overlay on mouseenter, collapses
+ *     on mouseleave. The portal escapes the `content-visibility: auto`
+ *     paint containment on .agent-document-node-wrapper (see PR #367).
  *   - Click: pins the expanded state. A pinned-open block stays open even
  *     after the mouse leaves. Clicking again unpins.
- *   - Force-expanded regardless of hover/pin state:
- *       * status === "running" — actively executing
- *       * status === "failed"  — user needs to see the error
+ *
+ * Prior behavior removed in SPEC_AGENT_PANE_FOLLOWUPS items #4 + #5:
+ *   running and failed states used to force-expand inline, taking 2+ lines
+ *   per tool. That violated the explicit one-line rule in
+ *   docs/specs/tool-collapse.md and the user's feedback memory. Now all
+ *   statuses collapse by default; progress and error content are still
+ *   accessible via hover/pin.
  *
  * SolidJS reactivity note:
  *   Props are accessed via `props.X` (never destructured in the function
@@ -88,19 +96,22 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
 
     let blockRef: HTMLDivElement | undefined;
 
-    // Force-expand rules — override hover/pin when the user must see content.
-    // `failed` stays expanded so errors are immediately visible.
-    // `running` stays expanded so the user can watch progress.
-    const forceExpanded = () =>
-        props.node.status === "running" || props.node.status === "failed";
+    // Collapsed-by-default for every status. Running, success, and failed
+    // all get the same one-line treatment (SPEC_AGENT_PANE_FOLLOWUPS items
+    // #4 and #5). Hover reveals the body via the portal overlay; click
+    // pins it open. Progress + error content are still accessible — just
+    // not always-on visually.
+    //
+    // The running state shows a spinner in the collapsed summary; the
+    // failed state shows a red ✗. Both indicate what's happening without
+    // consuming vertical space from the pane.
+    const expanded = () => props.pinned || hovered();
 
-    const expanded = () => props.pinned || hovered() || forceExpanded();
-
-    // Overlay mode applies ONLY for transient (hover) and explicit (pinned)
-    // expansion — NOT for persistent state (running/failed). Persistent state
-    // stays inline so the user can scroll past it. See
-    // specs/SPEC_TOOL_OVERLAY_AND_SCROLL_ON_TYPE_2026_04_13.md §2.5.
-    const overlayMode = () => (hovered() || props.pinned) && !forceExpanded();
+    // All transient / pinned expansion now goes through the portal overlay.
+    // Nothing renders inline in the document flow anymore — so we don't
+    // need a separate `overlayMode` predicate; every expansion IS overlay
+    // mode. Kept as an accessor for parity with the existing SCSS hooks.
+    const overlayMode = () => hovered() || props.pinned;
 
     const statusIcon = (): string => STATUS_ICON[props.node.status] || "•";
 
@@ -315,19 +326,11 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
                 </Show>
                 <span class="agent-tool-ellipsis">…</span>
             </div>
-            {/* Inline content for persistent force-expanded states
-                (running/failed) — paints inside the document flow. */}
-            <Show when={expanded() && !overlayMode()}>
-                <div class="agent-tool-content" onClick={(e) => e.stopPropagation()}>
-                    {renderToolContent()}
-                </div>
-            </Show>
-            {/* Overlay content for hover/pin — rendered via <Portal> so it
-                escapes the `.agent-document-node-wrapper`'s paint containment
-                (content-visibility: auto). Without the portal, the overlay
-                gets clipped at the wrapper's edge and hover expansion is
-                invisible. */}
-            <Show when={overlayMode()}>
+            {/* All expansion now routes through the portal overlay — running,
+                failed, success all collapse by default (SPEC_AGENT_PANE_FOLLOWUPS
+                items #4 and #5). The portal escapes the paint containment on
+                `.agent-document-node-wrapper` (content-visibility: auto). */}
+            <Show when={expanded()}>
                 <Portal>
                     <div
                         class={clsx("agent-tool-content", "agent-tool-content--portal", {
