@@ -59,13 +59,34 @@ export const AgentDocumentView = ({ documentAtom, documentStateAtom, logLines, a
 
     // Scroll to a node by its data-node-id attribute.
     // Exposed to the parent via scrollToNodeRef so BookmarksPanel can call it.
+    //
+    // We deliberately DO NOT use `el.scrollIntoView()` here. scrollIntoView
+    // walks every scrollable ancestor and scrolls each one until the target
+    // is inside its visible region — which in our pane/tab/window nesting
+    // scrolls the outer block frame, pushing the agent pane header and
+    // adjacent pane titles out of the viewport. The symptom is "pane titles
+    // disappear across the entire app when I click a bookmark" — a real bug
+    // reported against 0.33.106.
+    //
+    // Instead, compute the target element's top relative to scrollRef and
+    // set scrollRef.scrollTop directly. That scrolls ONLY the document
+    // container and leaves every ancestor untouched.
+    //
+    // See docs/analysis/agent-pane-rich-features-structure-2026-04-13.md §1.
     const scrollToNode = (nodeId: string) => {
-        const el = scrollRef?.querySelector(`[data-node-id="${nodeId}"]`);
-        if (el) {
-            el.scrollIntoView({ behavior: "smooth", block: "center" });
-            // Disable auto-scroll after a manual jump
-            autoScroll = false;
-        }
+        if (!scrollRef) return;
+        const el = scrollRef.querySelector(`[data-node-id="${nodeId}"]`) as HTMLElement | null;
+        if (!el) return;
+        const elRect = el.getBoundingClientRect();
+        const containerRect = scrollRef.getBoundingClientRect();
+        // Top of el relative to scrollRef's content origin
+        const offsetWithinContainer = elRect.top - containerRect.top + scrollRef.scrollTop;
+        // Center the element in the visible region
+        const centerOffset =
+            offsetWithinContainer - scrollRef.clientHeight / 2 + el.clientHeight / 2;
+        scrollRef.scrollTo({ top: Math.max(0, centerOffset), behavior: "smooth" });
+        // Disable auto-scroll after a manual jump
+        autoScroll = false;
     };
 
     // Expose scrollToNode to the parent on mount
