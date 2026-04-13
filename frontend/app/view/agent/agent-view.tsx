@@ -215,12 +215,6 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 driven by AgentViewModel.viewName / viewIcon / endIconButtons.
                 See SPEC_AGENT_PANE_FOLLOWUPS item #8. */}
 
-            <AgentControlBar
-                blockId={model.blockId}
-                blockAtom={block}
-                providerId={provider()?.id ?? ""}
-            />
-
             <Show when={bookmarks.visible()}>
                 <BookmarksPanel
                     bookmarks={bookmarks.bookmarks}
@@ -280,12 +274,19 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 </div>
             </Show>
 
-            <AgentFooter
-                agentId={agentId}
-                onSendMessage={commands.sendMessage}
-                onTyping={() => scrollToBottomFn?.()}
-                loading={status.isLoading()}
-            />
+            <div class="agent-composer-region">
+                <AgentFooter
+                    agentId={agentId}
+                    onSendMessage={commands.sendMessage}
+                    onTyping={() => scrollToBottomFn?.()}
+                    loading={status.isLoading()}
+                />
+                <AgentControlBar
+                    blockId={model.blockId}
+                    blockAtom={block}
+                    providerId={provider()?.id ?? ""}
+                />
+            </div>
         </div>
     );
 };
