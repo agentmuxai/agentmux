@@ -915,6 +915,9 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
 
     // Mutable ref to the scrollToNode function exposed by AgentDocumentView.
     let scrollToNodeFn: ((nodeId: string) => void) | null = null;
+    // Mutable ref to the scrollToBottom function exposed by AgentDocumentView.
+    // Called by AgentFooter's onTyping when the user starts composing.
+    let scrollToBottomFn: (() => void) | null = null;
 
     // ── In-session search ───────────────────────────────────────────────────────
     // Searches over the currently-loaded document slice only. Searching the
@@ -1156,6 +1159,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 bookmarkedNodeIds={bookmarkedNodeIds}
                 onBookmark={handleBookmark}
                 scrollToNodeRef={(fn) => { scrollToNodeFn = fn; }}
+                scrollToBottomRef={(fn) => { scrollToBottomFn = fn; }}
                 highlightNodeId={searchHighlightId}
             />
 
@@ -1174,7 +1178,12 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 </div>
             </Show>
 
-            <AgentFooter agentId={agentId} onSendMessage={handleSendMessage} loading={isLoading()} />
+            <AgentFooter
+                agentId={agentId}
+                onSendMessage={handleSendMessage}
+                onTyping={() => scrollToBottomFn?.()}
+                loading={isLoading()}
+            />
         </div>
     );
 };

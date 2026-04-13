@@ -43,11 +43,17 @@ interface AgentDocumentViewProps {
     onBookmark?: (node: DocumentNode) => void;
     /** Expose a scrollToNode function to the parent for jump-to-bookmark support. */
     scrollToNodeRef?: (fn: (nodeId: string) => void) => void;
+    /**
+     * Expose a scrollToBottom function to the parent so the composer can
+     * bring the document to the latest content when the user starts typing.
+     * Re-enables auto-scroll as a side effect.
+     */
+    scrollToBottomRef?: (fn: () => void) => void;
     /** The node id of the currently highlighted search match (if any). */
     highlightNodeId?: Accessor<string | null>;
 }
 
-export const AgentDocumentView = ({ documentAtom, documentStateAtom, logLines, authUrl, onSubagentClick, onLoadOlder, loadingOlder, startTsMs, endTsMs, bookmarkedNodeIds, onBookmark, scrollToNodeRef, highlightNodeId }: AgentDocumentViewProps): JSX.Element => {
+export const AgentDocumentView = ({ documentAtom, documentStateAtom, logLines, authUrl, onSubagentClick, onLoadOlder, loadingOlder, startTsMs, endTsMs, bookmarkedNodeIds, onBookmark, scrollToNodeRef, scrollToBottomRef, highlightNodeId }: AgentDocumentViewProps): JSX.Element => {
     const [document] = documentAtom;
     const [documentState, setDocumentState] = documentStateAtom;
     let scrollRef!: HTMLDivElement;
@@ -91,6 +97,28 @@ export const AgentDocumentView = ({ documentAtom, documentStateAtom, logLines, a
 
     // Expose scrollToNode to the parent on mount
     if (scrollToNodeRef) scrollToNodeRef(scrollToNode);
+
+    // Jump to the bottom of the document and re-enable auto-scroll.
+    //
+    // Called by AgentFooter's onInput handler when the user starts typing, so
+    // their composer input is visually anchored to the latest content instead
+    // of floating offscreen at the bottom while older content sits above.
+    //
+    // Named `jumpToBottom` to distinguish from the existing `scrollToBottom`
+    // below, which is gated on `autoScroll` and only runs when new content
+    // arrives. This one is unconditional and also re-enables auto-scroll.
+    //
+    // Uses `Number.MAX_SAFE_INTEGER` instead of reading `scrollHeight` so we
+    // never force a synchronous layout on the keystroke hot path (PR #345's
+    // autoGrow regression was exactly that pattern). The browser clamps to
+    // the actual max internally during compositing.
+    const jumpToBottom = () => {
+        if (!scrollRef) return;
+        autoScroll = true;
+        scrollRef.scrollTo({ top: Number.MAX_SAFE_INTEGER, behavior: "instant" });
+    };
+
+    if (scrollToBottomRef) scrollToBottomRef(jumpToBottom);
 
     // Toggle collapsed state for a node (agent messages only — tool blocks
     // manage their own expand/collapse via hover + pin).
