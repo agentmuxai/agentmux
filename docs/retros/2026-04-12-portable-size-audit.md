@@ -39,7 +39,7 @@ The 0.33.101 directory is actually **~1 MiB *smaller*** than 0.33.91 (a stale du
 | `d3dcompiler_47.dll`                   | 4,741,480    | 4,741,480    | 0            | unchanged |
 | `agentmux-srv` (Rust sidecar)          | 8,991,744    | 9,433,600    | +0.42 MiB    | 2 weeks of features |
 | `agentmux-cef.exe` + launcher (split)  | 2,553,344    | 3,173,376    | +0.59 MiB    | layout changed, see §4 |
-| `wsh-*.exe`                            | ~1,191,424   | 1,191,424    | ~0           | (dedup: -1.19 MiB vs 0.33.91) |
+| `wsh-*.exe`                            | ~1,191,424   | 1,191,424    | 0            | (see §4.3 correction) |
 | Frontend assets (paks, js bundles)     | ~             | ~             | ~+1.1 MiB    | new mermaid/code-splitting artifacts |
 | **Uncompressed total**                 | **324,877,437** | **335,488,382** | **+10.12 MiB** | |
 
@@ -113,11 +113,24 @@ Total launcher+host went from **2,553,344 → 3,173,376** bytes = **+0.59 MiB**.
 
 No single feature moves the needle — it's noise from extra RPC handlers + the `flate2` dependency (for gzip archives).
 
-### 4.3 `wsh` binary deduplication (-1.19 MiB, 0.33.91 → 0.33.101)
+### 4.3 ~~`wsh` binary deduplication~~ — correction
 
-The 0.33.91 build had `wsh-0.33.91-windows.x64.exe` in **both** `runtime/bin/` AND `runtime/`. The portable packaging script ended up copying it twice because the source is both installed to `dist/bin/` and `dist/bin/wsh-*`. The 0.33.101 build has it only in `runtime/`, which is where the CEF host actually launches it from.
+**This section was wrong in the original draft.** The 0.33.91 ZIP was already clean — verified after the fact:
 
-This is unintentional cleanup — whatever prevented the double-copy between 0.33.91 and 0.33.101 is beneficial, but worth tracking down to make sure we're not about to lose the binary somewhere the launcher expects it. **Action:** verify `wsh` still works in the 0.33.101 portable when a terminal pane is opened.
+```
+$ pwsh -Command "Add-Type -AssemblyName System.IO.Compression.FileSystem; \
+    [System.IO.Compression.ZipFile]::OpenRead('agentmux-cef-0.33.91-x64-portable.zip').Entries \
+    | Where FullName -like '*wsh*' | Select FullName, Length"
+FullName                            Length
+--------                            ------
+runtime/wsh-0.33.91-windows.x64.exe 1191424
+```
+
+Only one copy inside the ZIP. The `runtime/bin/wsh-*.exe` file I saw on the extracted folder was created *after* extraction, by the CEF host at runtime. `agentmux-cef/src/sidecar.rs deploy_wsh()` was unconditionally creating a `bin/` subdir under `app_path` and copying wsh into it on every startup — **but nothing reads from that location**. All consumers use `find_wsh_binary()` in `agentmux-srv/src/backend/shellintegration.rs`, which looks alongside the current exe, not inside a `bin/` sub-dir. So the copy was pure dead weight: a wasted 1.19 MiB fs write on every launch.
+
+Real delta for 0.33.91 → 0.33.101 is zero MiB in the ZIP. The only real change was Vite asset-hash reshuffling.
+
+**Follow-up fix:** `deploy_wsh` now short-circuits when the bundled wsh is already inside `app_path`, so the `runtime/bin/` copy stops happening in portable builds. See `specs/SPEC_RETRO_FOLLOWUPS_2026_04_12.md` §4 and the `agenta/retro-followups-runtime` branch.
 
 ### 4.4 Frontend compressibility drift (~+3.8 MiB in the ZIP only)
 

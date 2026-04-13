@@ -197,6 +197,32 @@ impl PersistentSubprocessController {
             }
             if dir_path.exists() {
                 cmd.current_dir(&expanded_dir);
+
+                // 4.2 follow-up: warn loudly if the agent's working directory
+                // contains a nested .git (typically because the agent, or the
+                // user on its behalf, cloned a repo into its cwd). A 3.5 GB
+                // nested clone was found under ~/.agentmux/agents/agentx/ in
+                // an earlier session and confused agents into reading stale
+                // pre-SolidJS code. We can't prevent the clone (the agent is
+                // an external process) so the best we can do is make it
+                // impossible to miss in the logs, with the exact cleanup
+                // command the user needs to run. Single fs::metadata call —
+                // no directory walk.
+                let looks_like_agent_workspace = expanded_dir.contains("/.agentmux/agents/")
+                    || expanded_dir.contains("\\.agentmux\\agents\\");
+                if looks_like_agent_workspace {
+                    let git_dir = dir_path.join(".git");
+                    if git_dir.exists() {
+                        tracing::warn!(
+                            block_id = %self.block_id,
+                            cwd = %expanded_dir,
+                            ".git detected inside agent workspace — this is \
+                             usually an unintended nested clone and can waste \
+                             gigabytes of disk. Clean up with: rm -rf {}/.git",
+                            expanded_dir
+                        );
+                    }
+                }
             }
         }
 
