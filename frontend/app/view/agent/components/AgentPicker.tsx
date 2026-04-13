@@ -17,6 +17,7 @@ import { waveEventSubscribe } from "@/app/store/wps";
 import type { AgentViewModel } from "../agent-model";
 import { AgentCard } from "./AgentCard";
 import { NewAgentCard } from "./NewAgentCard";
+import { AgentCardSettingsPanel, type SettingsTab } from "./AgentCardSettingsPanel";
 
 // ── useForgeAgents hook ───────────────────────────────────────────────────────
 
@@ -66,6 +67,13 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
     const [nodejsError, setNodejsError] = createSignal<string | null>(null);
     const agents = useForgeAgents();
 
+    // Inline settings-panel state: which agent is expanded and which tab
+    // (forge/identity) is active. `null` agentId means "create new" mode.
+    // Session-local only — not persisted to block meta.
+    const [expandedId, setExpandedId] = createSignal<string | null>(null);
+    const [expandedTab, setExpandedTab] = createSignal<SettingsTab>("forge");
+    const [createMode, setCreateMode] = createSignal(false);
+
     const handleSelect = async (agent: ForgeAgent) => {
         setNodejsError(null);
         setLaunching(agent.id);
@@ -81,6 +89,29 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
         } finally {
             setLaunching(null);
         }
+    };
+
+    const openForgeFor = (agent: ForgeAgent) => {
+        setCreateMode(false);
+        setExpandedTab("forge");
+        setExpandedId((prev) => (prev === agent.id && expandedTab() === "forge" ? null : agent.id));
+    };
+
+    const openIdentityFor = (agent: ForgeAgent) => {
+        setCreateMode(false);
+        setExpandedTab("identity");
+        setExpandedId((prev) => (prev === agent.id && expandedTab() === "identity" ? null : agent.id));
+    };
+
+    const openCreateNew = () => {
+        setCreateMode(true);
+        setExpandedTab("forge");
+        setExpandedId("__new__");
+    };
+
+    const closePanel = () => {
+        setExpandedId(null);
+        setCreateMode(false);
     };
 
     const busy = () => launching() !== null;
@@ -106,15 +137,40 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                     <div class="agent-picker-list">
                         <For each={agents()}>
                             {(agent) => (
-                                <AgentCard
-                                    agent={agent}
-                                    launching={launching() === agent.id}
-                                    disabled={busy()}
-                                    onLaunch={handleSelect}
-                                />
+                                <>
+                                    <AgentCard
+                                        agent={agent}
+                                        launching={launching() === agent.id}
+                                        disabled={busy()}
+                                        onLaunch={handleSelect}
+                                        onOpenForge={openForgeFor}
+                                        onOpenIdentity={openIdentityFor}
+                                    />
+                                    <Show when={expandedId() === agent.id && !createMode()}>
+                                        <AgentCardSettingsPanel
+                                            blockId={props.model.blockId}
+                                            nodeModel={props.model.nodeModel}
+                                            agent={agent}
+                                            initialTab={expandedTab()}
+                                            onClose={closePanel}
+                                        />
+                                    </Show>
+                                </>
                             )}
                         </For>
-                        <NewAgentCard disabled={busy()} />
+                        <NewAgentCard
+                            disabled={busy()}
+                            onClick={openCreateNew}
+                        />
+                        <Show when={expandedId() === "__new__" && createMode()}>
+                            <AgentCardSettingsPanel
+                                blockId={props.model.blockId}
+                                nodeModel={props.model.nodeModel}
+                                agent={undefined}
+                                initialTab="forge"
+                                onClose={closePanel}
+                            />
+                        </Show>
                     </div>
                     <Show when={nodejsError()}>
                         <div class="agent-nodejs-notice">
