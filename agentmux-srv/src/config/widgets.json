@@ -17,30 +17,6 @@
             }
         }
     },
-    "defwidget@forge": {
-        "display:order": 2,
-        "icon": "hammer",
-        "color": "#a78bfa",
-        "label": "forge",
-        "description": "Create and manage your agents",
-        "blockdef": {
-            "meta": {
-                "view": "forge"
-            }
-        }
-    },
-    "defwidget@identity": {
-        "display:order": 3,
-        "icon": "id-card",
-        "color": "#a78bfa",
-        "label": "identity",
-        "description": "External account and credential management",
-        "blockdef": {
-            "meta": {
-                "view": "identity"
-            }
-        }
-    },
     "defwidget@swarm": {
         "display:order": 4,
         "display:hidden": true,

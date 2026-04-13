@@ -12,10 +12,8 @@ import {
 import { LauncherViewModel } from "@/app/view/launcher/launcher";
 import { SysinfoViewModel } from "@/app/view/sysinfo/sysinfo";
 import { AgentViewModel } from "@/app/view/agent";
-import { ForgeViewModel } from "@/app/view/forge/forge";
 import { SubagentViewModel } from "@/app/view/subagent/subagent";
 import { SwarmViewModel } from "@/app/view/swarm/swarm";
-import { IdentityViewModel } from "@/app/view/identity/identity";
 import { ErrorBoundary } from "@/element/errorboundary";
 import { CenteredDiv } from "@/element/quickelems";
 import { NodeModel, useDebouncedNodeInnerRect } from "@/layout/index";
@@ -44,17 +42,22 @@ BlockRegistry.set("sysinfo", SysinfoViewModel as any);
 BlockRegistry.set("help", HelpViewModel as any);
 BlockRegistry.set("launcher", LauncherViewModel as any);
 BlockRegistry.set("agent", AgentViewModel as any);
-BlockRegistry.set("forge", ForgeViewModel as any);
 BlockRegistry.set("subagent", SubagentViewModel as any);
 BlockRegistry.set("swarm", SwarmViewModel as any);
-BlockRegistry.set("identity", IdentityViewModel as any);
 
 function makeViewModel(blockId: string, blockView: string, nodeModel: NodeModel): ViewModel {
-    const ctor = BlockRegistry.get(blockView);
+    // Consolidation migration: the forge and identity widgets have been
+    // merged into the agent picker's per-card settings panel. Any saved
+    // pane with view: "forge" or view: "identity" now renders as an
+    // agent pane — the user sees the picker with the ⚙ / 👤 buttons and
+    // can find the same functionality there.
+    // See specs/SPEC_CONSOLIDATE_FORGE_IDENTITY_INTO_AGENT_2026_04_13.md (PR 4).
+    const effectiveView = (blockView === "forge" || blockView === "identity") ? "agent" : blockView;
+    const ctor = BlockRegistry.get(effectiveView);
     if (ctor != null) {
         return new ctor(blockId, nodeModel as any);
     }
-    return makeDefaultViewModel(blockId, blockView);
+    return makeDefaultViewModel(blockId, effectiveView);
 }
 
 function getViewElem(
