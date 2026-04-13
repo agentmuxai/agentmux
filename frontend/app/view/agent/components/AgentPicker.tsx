@@ -15,6 +15,8 @@ import { RpcApi } from "@/app/store/wshclientapi";
 import { TabRpcClient } from "@/app/store/wshrpcutil";
 import { waveEventSubscribe } from "@/app/store/wps";
 import type { AgentViewModel } from "../agent-model";
+import { AgentCard } from "./AgentCard";
+import { NewAgentCard } from "./NewAgentCard";
 
 // ── useForgeAgents hook ───────────────────────────────────────────────────────
 
@@ -104,24 +106,15 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                     <div class="agent-picker-list">
                         <For each={agents()}>
                             {(agent) => (
-                                <button
-                                    class={`agent-card${launching() === agent.id ? " agent-card--launching" : ""}`}
-                                    onClick={() => handleSelect(agent)}
+                                <AgentCard
+                                    agent={agent}
+                                    launching={launching() === agent.id}
                                     disabled={busy()}
-                                >
-                                    <span class="agent-card-icon">{agent.icon}</span>
-                                    <span class="agent-card-info">
-                                        <span class="agent-card-name">{agent.name}</span>
-                                        <Show when={agent.description}>
-                                            <span class="agent-card-desc">{agent.description}</span>
-                                        </Show>
-                                    </span>
-                                    <Show when={launching() === agent.id}>
-                                        <span class="agent-card-spinner" />
-                                    </Show>
-                                </button>
+                                    onLaunch={handleSelect}
+                                />
                             )}
                         </For>
+                        <NewAgentCard disabled={busy()} />
                     </div>
                     <Show when={nodejsError()}>
                         <div class="agent-nodejs-notice">
