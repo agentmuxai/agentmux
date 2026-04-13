@@ -14,6 +14,7 @@ Auto-appended by `scripts/package-cef-portable.sh`. Newest first.
 
 | Version | Date | ZIP (compressed) | Folder (uncompressed) | Note |
 |---------|------|------------------|-----------------------|------|
+| 0.33.110 | 2026-04-13 | 155.5 MiB | 319.9 MiB | |
 | 0.33.102 | 2026-04-12 | 155.5 MiB | 320.0 MiB | post-ultra-long-sessions |
 | 0.33.91 | 2026-04-12 | 151.8 MiB | 320.8 MiB | pre-ultra-long-sessions |
 | (pre-ANGLE) | 2026-03-29 | 147.7 MiB | 309.8 MiB | no libEGL/libGLESv2 |
