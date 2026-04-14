@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["agentmux-srv", "agentmux-wsh", "agentmux-cef", "agentmux-launcher", "agentmux-common"]
+members = ["agentmux-srv", "agentmux-cef", "agentmux-launcher", "agentmux-common"]
 
 [profile.release]
 strip = true

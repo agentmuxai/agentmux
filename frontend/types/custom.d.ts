@@ -349,7 +349,6 @@ declare global {
         blockBg?: Accessor<MetaType>;
         noHeader?: Accessor<boolean>;
         manageConnection?: Accessor<boolean>;
-        filterOutNowsh?: Accessor<boolean>;
         showS3?: Accessor<boolean>;
         noPadding?: Accessor<boolean>;
         searchAtoms?: SearchAtoms;

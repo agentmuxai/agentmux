@@ -31,7 +31,7 @@
 - `task cef:build` - Build CEF host binary
 - `task cef:bundle` - Bundle CEF runtime DLLs
 - `task cef:package:portable` - Portable ZIP
-- `task build:backend` - Rust sidecar binaries (agentmux-srv + agentmux-wsh)
+- `task build:backend` - Rust sidecar binary (agentmux-srv)
 - `task build:frontend` - Frontend only
 - `task test` - Run tests
 - `task clean` - Clean artifacts
@@ -63,7 +63,7 @@ AgentMux uses a **CEF (Chromium Embedded Framework)** host with a **100% Rust ba
 - **agentmux-cef** = CEF host app (Rust, IPC bridge, window management, bundled Chromium)
 - **agentmux-launcher** = 325 KB launcher exe (sets DLL path, spawns CEF host from `runtime/`)
 - **agentmux-srv** = Rust backend sidecar (auto-spawned, don't run manually)
-- **wsh** = Rust shell integration binary (agentmux-wsh crate, must be versioned correctly)
+- **agentmux-common** = Shared utilities used by all the above
 
 **Important:** CEF is the only active host. The Tauri host has been removed. All Go and Electron code has been removed.
 
@@ -137,7 +137,7 @@ bump patch -m "Description"
 # OR: bump minor / bump major / bump 1.2.3
 ```
 
-This updates: `package.json`, `package-lock.json`, `Cargo.lock`, `agentmux-srv/Cargo.toml`, `agentmux-wsh/Cargo.toml`, `agentmux-cef/Cargo.toml`, `agentmux-launcher/Cargo.toml`, `VERSION_HISTORY.md`
+This updates: `package.json`, `package-lock.json`, `Cargo.lock`, `agentmux-srv/Cargo.toml`, `agentmux-cef/Cargo.toml`, `agentmux-launcher/Cargo.toml`, `agentmux-common/Cargo.toml`, `VERSION_HISTORY.md`
 
 **Step 2: Verify consistency**
 ```bash
@@ -190,9 +190,8 @@ npm run coverage               # Generate coverage
 
 ### Backend (Rust)
 ```bash
-task build:backend        # All Rust binaries
-task build:backend:rust   # Backend server only
-task build:wsh            # wsh only
+task build:backend        # Backend server (agentmux-srv)
+task build:backend:rust   # Same (explicit platform target)
 ```
 
 ### Frontend (TypeScript/SolidJS)
@@ -211,13 +210,6 @@ task cef:package:portable   # Portable ZIP (Windows)
 ---
 
 ## Common Issues
-
-### wsh binary not found
-Version mismatch between package.json and built binaries.
-```bash
-task build:backend          # Rebuild
-ls -lh dist/bin/wsh-*       # Verify
-```
 
 ### Title bar shows wrong version
 Ensure `frontend/wave.ts` uses `getApi().getAboutModalDetails().version`

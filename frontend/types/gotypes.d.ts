@@ -46,7 +46,6 @@ declare global {
         displays?: ActivityDisplayType[];
         renderers?: {[key: string]: number};
         blocks?: {[key: string]: number};
-        wshcmds?: {[key: string]: number};
         conn?: {[key: string]: number};
     };
 
@@ -537,9 +536,6 @@ declare global {
 
     // wconfig.ConnKeywords
     type ConnKeywords = {
-        "conn:wshenabled"?: boolean;
-        "conn:askbeforewshinstall"?: boolean;
-        "conn:wshpath"?: string;
         "conn:shellpath"?: string;
         "conn:ignoresshconfig"?: boolean;
         "display:hidden"?: boolean;
@@ -583,15 +579,11 @@ declare global {
     // wshrpc.ConnStatus
     type ConnStatus = {
         status: string;
-        wshenabled: boolean;
         connection: string;
         connected: boolean;
         hasconnected: boolean;
         activeconnnum: number;
         error?: string;
-        wsherror?: string;
-        nowshreason?: string;
-        wshversion?: string;
     };
 
     // wshrpc.CpuDataRequest
@@ -1049,8 +1041,6 @@ declare global {
         "telemetry:interval"?: number;
         "telemetry:numpoints"?: number;
         "conn:*"?: boolean;
-        "conn:askbeforewshinstall"?: boolean;
-        "conn:wshenabled"?: boolean;
         "network:lan_discovery"?: boolean;
     };
 

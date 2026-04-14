@@ -8,11 +8,10 @@
 //!   INIT ─(start)─> RUNNING ─(exit/stop)─> DONE
 //!   DONE ─(resync+force)─> RUNNING
 //!
-//! I/O model (4 async tasks when running):
+//! I/O model (3 async tasks when running):
 //! 1. PTY read loop: process stdout → FileStore + WPS event
 //! 2. Input loop: input channel → process stdin
-//! 3. Output/proxy loop: WSH messages → input channel
-//! 4. Wait loop: monitor process exit, update status
+//! 3. Wait loop: monitor process exit, update status
 
 
 use std::io::Read as _;
@@ -500,12 +499,11 @@ impl Controller for ShellController {
                 c.env("AGENTMUX_LOCAL_URL", &local_url);
             }
 
-            // Set AGENTMUX to the wsh binary path for portable mode detection in scripts
-            if let Some(wsh_path) = crate::backend::shellintegration::find_wsh_binary() {
-                c.env("AGENTMUX", wsh_path.to_string_lossy().as_ref());
-            } else {
-                c.env("AGENTMUX", "1");
-            }
+            // AGENTMUX is a plain "1" sentinel — wsh has been retired.
+            // Shell integrations check for the presence of AGENTMUX but no
+            // longer prepend a path to $PATH based on its value.
+            // See specs/SPEC_RETIRE_WSH_2026_04_12.md.
+            c.env("AGENTMUX", "1");
 
             // Inject cmd:env from wconfig settings and block metadata.
             // Track whether AGENTMUX_AGENT_ID is explicitly set so we know

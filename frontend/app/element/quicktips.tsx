@@ -225,31 +225,6 @@ const QuickTips = (): JSX.Element => {
             <div class="flex flex-col gap-4 p-5 bg-gradient-to-br from-highlightbg/30 to-transparent hover:from-accent-400/5 rounded-lg border border-white/10 hover:border-accent-400/20 transition-all duration-300">
                 <div class="flex items-center gap-2 text-xl font-bold">
                     <div class="w-1 h-6 bg-accent-400 rounded-full" />
-                    <span class="text-foreground">wsh commands</span>
-                </div>
-                <div class="grid grid-cols-1 @md:grid-cols-2 gap-4">
-                    <div class="flex flex-col gap-2 p-4 bg-black/20 rounded-lg border border-accent-400/30 hover:border-accent-400/50 transition-colors">
-                        <code class="font-mono text-sm">
-                            <span class="text-secondary">&gt; </span>
-                            <span class="text-accent-400 font-semibold">wsh view</span>
-                            <span class="text-muted"> [filename|url]</span>
-                        </code>
-                        <div class="text-secondary text-sm mt-1">Preview files, directories, or web URLs</div>
-                    </div>
-                    <div class="flex flex-col gap-2 p-4 bg-black/20 rounded-lg border border-accent-400/30 hover:border-accent-400/50 transition-colors">
-                        <code class="font-mono text-sm">
-                            <span class="text-secondary">&gt; </span>
-                            <span class="text-accent-400 font-semibold">wsh edit</span>
-                            <span class="text-muted"> [filename]</span>
-                        </code>
-                        <div class="text-secondary text-sm mt-1">Edit config and code files</div>
-                    </div>
-                </div>
-            </div>
-
-            <div class="flex flex-col gap-4 p-5 bg-gradient-to-br from-highlightbg/30 to-transparent hover:from-accent-400/5 rounded-lg border border-white/10 hover:border-accent-400/20 transition-all duration-300">
-                <div class="flex items-center gap-2 text-xl font-bold">
-                    <div class="w-1 h-6 bg-accent-400 rounded-full" />
                     <span class="text-foreground">More Tips</span>
                 </div>
                 <div class="flex flex-col gap-2">

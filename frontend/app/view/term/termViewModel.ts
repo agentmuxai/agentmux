@@ -55,7 +55,6 @@ class TermViewModel implements ViewModel {
     viewText: () => HeaderElem[];
     blockBg: () => MetaType;
     manageConnection: () => boolean;
-    filterOutNowsh?: () => boolean;
     connStatus: () => ConnStatus;
     termWshClient: TermWshClient;
     fontSizeAtom: () => number;
@@ -199,8 +198,6 @@ class TermViewModel implements ViewModel {
             const isCmd = this.isCmdController();
             return !isCmd;
         });
-
-        this.filterOutNowsh = createMemo(() => false);
 
         this.termThemeNameAtom = useBlockAtom(blockId, "termthemeatom", () =>
             createMemo<string>(() => {
