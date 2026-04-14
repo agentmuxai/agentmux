@@ -30,7 +30,7 @@
  */
 
 import { parseSlashCommand } from "./parse";
-import type { SlashCommand, SlashCommandContext, SlashResult } from "./types";
+import type { SlashChoice, SlashCommand, SlashCommandContext, SlashResult } from "./types";
 import type { SlashCommandRegistry } from "./registry";
 
 export type DispatchOutcome =
@@ -63,9 +63,10 @@ export async function dispatchSlashCommand(
  * handler. Returns the handler's SlashResult (or a validation-error
  * result if the arg didn't pass).
  *
- * Picker UX (enum with missing required arg) is not yet implemented —
- * that lands in step 2 of the spec. For now, bare `/model` returns an
- * error that lists the choices, matching PR #378's behavior.
+ * For required enum args with no value, opens an inline picker via
+ * ctx.openPicker (step 2 of the spec). The picker resolves with the
+ * selected value or rejects on dismissal — dismissal is surfaced as
+ * a silent ok so we don't spam the log.
  */
 async function runValidatedHandler(
     cmd: SlashCommand,
@@ -77,26 +78,26 @@ async function runValidatedHandler(
     }
 
     if (cmd.arg.kind === "enum") {
+        const choices = typeof cmd.arg.choices === "function" ? cmd.arg.choices(ctx) : cmd.arg.choices;
         if (arg === "") {
             if (cmd.arg.required) {
-                // TODO step 2 — open picker here. For now, fall through to
-                // listing the choices as an error (same UX as PR #378).
-                return {
-                    kind: "error",
-                    message: `/${cmd.name} requires an argument. Try: ${cmd.arg.choices
-                        .map((c) => c.value)
-                        .join(" | ")}`,
-                };
+                try {
+                    const picked = await ctx.openPicker({
+                        title: `Select ${cmd.name}`,
+                        choices,
+                    });
+                    return cmd.handler(ctx, picked);
+                } catch {
+                    return { kind: "ok" };
+                }
             }
             return cmd.handler(ctx, "");
         }
-        const match = cmd.arg.choices.find(
-            (c) => c.value.toLowerCase() === arg.toLowerCase(),
-        );
+        const match = matchEnumChoice(choices, arg);
         if (!match) {
             return {
                 kind: "error",
-                message: `/${cmd.name}: unknown value '${arg}'. Try: ${cmd.arg.choices
+                message: `/${cmd.name}: unknown value '${arg}'. Try: ${choices
                     .map((c) => c.value)
                     .join(" | ")}`,
             };
@@ -114,14 +115,33 @@ async function runValidatedHandler(
         return cmd.handler(ctx, arg);
     }
 
-    // kind === "dynamic" — picker lands in step 2; for now require an explicit arg.
+    // kind === "dynamic" — resolve completions and open picker if empty.
     if (arg === "") {
-        return {
-            kind: "error",
-            message: `/${cmd.name} requires an argument: ${cmd.arg.placeholder}`,
-        };
+        try {
+            const choices = await cmd.arg.completions(ctx);
+            const picked = await ctx.openPicker({
+                title: `Select ${cmd.name}`,
+                choices,
+            });
+            return cmd.handler(ctx, picked);
+        } catch {
+            return { kind: "ok" };
+        }
     }
     return cmd.handler(ctx, arg);
+}
+
+/**
+ * Match an enum arg against its choices. Tries exact value match
+ * first, then aliases. Case-insensitive on both sides.
+ */
+function matchEnumChoice(choices: SlashChoice[], arg: string): SlashChoice | undefined {
+    const a = arg.toLowerCase();
+    return choices.find(
+        (c) =>
+            c.value.toLowerCase() === a ||
+            (c.aliases ?? []).some((alias) => alias.toLowerCase() === a),
+    );
 }
 
 /**
