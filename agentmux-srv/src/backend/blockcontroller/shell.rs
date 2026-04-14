@@ -8,11 +8,10 @@
 //!   INIT ─(start)─> RUNNING ─(exit/stop)─> DONE
 //!   DONE ─(resync+force)─> RUNNING
 //!
-//! I/O model (4 async tasks when running):
+//! I/O model (3 async tasks when running):
 //! 1. PTY read loop: process stdout → FileStore + WPS event
 //! 2. Input loop: input channel → process stdin
-//! 3. Output/proxy loop: WSH messages → input channel
-//! 4. Wait loop: monitor process exit, update status
+//! 3. Wait loop: monitor process exit, update status
 
 
 use std::io::Read as _;

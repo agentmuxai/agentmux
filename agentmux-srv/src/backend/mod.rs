@@ -39,7 +39,6 @@ pub mod rpc_fileutil;
 pub mod wconfig;
 pub mod wcore;
 pub mod wps;
-pub mod wslconn;
 pub mod wshutil;
 
 pub use oref::ORef;

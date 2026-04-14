@@ -281,12 +281,6 @@ pub struct SettingsType {
     #[serde(rename = "conn:*", default, skip_serializing_if = "is_false")]
     pub conn_clear: bool,
 
-    #[serde(rename = "conn:askbeforewshinstall", default, skip_serializing_if = "Option::is_none")]
-    pub conn_ask_before_wsh_install: Option<bool>,
-
-    #[serde(rename = "conn:wshenabled", default, skip_serializing_if = "is_false")]
-    pub conn_wsh_enabled: bool,
-
     // -- Network settings --
     #[serde(rename = "network:lan_discovery", default, skip_serializing_if = "is_false")]
     pub network_lan_discovery: bool,
@@ -502,15 +496,6 @@ pub struct WebBookmark {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ConnKeywords {
     // -- Connection settings --
-    #[serde(rename = "conn:wshenabled", default, skip_serializing_if = "Option::is_none")]
-    pub conn_wsh_enabled: Option<bool>,
-
-    #[serde(rename = "conn:askbeforewshinstall", default, skip_serializing_if = "Option::is_none")]
-    pub conn_ask_before_wsh_install: Option<bool>,
-
-    #[serde(rename = "conn:wshpath", default, skip_serializing_if = "String::is_empty")]
-    pub conn_wsh_path: String,
-
     #[serde(rename = "conn:shellpath", default, skip_serializing_if = "String::is_empty")]
     pub conn_shell_path: String,
 
