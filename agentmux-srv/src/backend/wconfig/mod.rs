@@ -117,7 +117,6 @@ mod tests {
             ai_api_type: "anthropic".to_string(),
             term_font_size: 14.0,
             window_opacity: Some(0.95),
-            conn_wsh_enabled: true,
             ..Default::default()
         };
         let json = serde_json::to_string(&s).unwrap();
@@ -125,7 +124,6 @@ mod tests {
         assert_eq!(parsed.ai_api_type, "anthropic");
         assert_eq!(parsed.term_font_size, 14.0);
         assert_eq!(parsed.window_opacity, Some(0.95));
-        assert!(parsed.conn_wsh_enabled);
     }
 
     // -- TermThemeType serde --
@@ -214,7 +212,6 @@ mod tests {
             ssh_hostname: Some("server.example.com".to_string()),
             ssh_port: Some("2222".to_string()),
             ssh_identity_file: vec!["~/.ssh/id_rsa".to_string()],
-            conn_wsh_enabled: Some(true),
             ..Default::default()
         };
         let json = serde_json::to_string(&kw).unwrap();
@@ -222,14 +219,11 @@ mod tests {
         assert!(json.contains("\"ssh:hostname\":\"server.example.com\""));
         assert!(json.contains("\"ssh:port\":\"2222\""));
         assert!(json.contains("\"ssh:identityfile\":[\"~/.ssh/id_rsa\"]"));
-        assert!(json.contains("\"conn:wshenabled\":true"));
     }
 
     #[test]
     fn test_conn_keywords_from_go_json() {
         let go_json = r#"{
-            "conn:wshenabled": true,
-            "conn:askbeforewshinstall": false,
             "ssh:user": "deploy",
             "ssh:hostname": "prod.example.com",
             "ssh:port": "22",
@@ -240,7 +234,6 @@ mod tests {
             "cmd:env": {"NODE_ENV": "production"}
         }"#;
         let parsed: ConnKeywords = serde_json::from_str(go_json).unwrap();
-        assert_eq!(parsed.conn_wsh_enabled, Some(true));
         assert_eq!(parsed.ssh_user, Some("deploy".to_string()));
         assert_eq!(parsed.ssh_identity_file.len(), 2);
         assert_eq!(parsed.ssh_pubkey_authentication, Some(true));

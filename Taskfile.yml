@@ -100,10 +100,9 @@ tasks:
             VITE_PLATFORM: "{{OS}}"
 
     build:backend:
-        desc: Build the agentmux-srv and agentmux-wsh Rust components.
+        desc: Build the agentmux-srv Rust component.
         cmds:
             - task: build:backend:rust
-            - task: build:wsh
 
     # ========================================
     # Rust Backend Build Tasks
@@ -140,45 +139,8 @@ tasks:
             - cmd: powershell -Command "New-Item -ItemType Directory -Force -Path dist/bin | Out-Null; Copy-Item target/release/agentmux-srv.exe dist/bin/agentmux-srv-{{.VERSION}}-windows.x64.exe -Force"
             - echo "✓ Built agentmux-srv for Windows (dist/bin/agentmux-srv-{{.VERSION}}-windows.x64.exe)"
 
-    # ========================================
-    # agentmux-wsh (Rust) Build Tasks
-    # ========================================
-
-    build:wsh:
-        desc: Build the agentmux-wsh component for the current platform.
-        cmds:
-            - task: build:wsh:{{OS}}
-        sources:
-            - "agentmux-wsh/src/**/*.rs"
-            - "agentmux-wsh/Cargo.toml"
-        generates:
-            - "dist/bin/wsh*"
-
-    build:wsh:windows:
-        internal: true
-        platforms: [windows]
-        cmds:
-            - cargo build --release -p agentmux-wsh
-            - cmd: powershell -Command "New-Item -ItemType Directory -Force -Path dist/bin | Out-Null; Copy-Item target/release/wsh.exe dist/bin/wsh-{{.VERSION}}-windows.x64.exe -Force"
-            - echo "✓ Built agentmux-wsh for Windows (dist/bin/wsh-{{.VERSION}}-windows.x64.exe)"
-
-    build:wsh:darwin:
-        internal: true
-        platforms: [darwin]
-        cmds:
-            - bash -c 'source "$HOME/.cargo/env" 2>/dev/null; PATH="$HOME/.cargo/bin:$PATH" cargo build --release -p agentmux-wsh'
-            - mkdir -p dist/bin
-            - cp target/release/wsh dist/bin/wsh-{{.VERSION}}-darwin.arm64
-            - echo "✓ Built agentmux-wsh for macOS (dist/bin/wsh-{{.VERSION}}-darwin.arm64)"
-
-    build:wsh:linux:
-        internal: true
-        platforms: [linux]
-        cmds:
-            - bash -c 'source "$HOME/.cargo/env" 2>/dev/null; PATH="$HOME/.cargo/bin:$PATH" cargo build --release -p agentmux-wsh'
-            - mkdir -p dist/bin
-            - cp target/release/wsh dist/bin/wsh-{{.VERSION}}-linux.x64
-            - echo "✓ Built agentmux-wsh for Linux (dist/bin/wsh-{{.VERSION}}-linux.x64)"
+    # agentmux-wsh build tasks removed — wsh has been retired.
+    # See specs/SPEC_RETIRE_WSH_2026_04_12.md.
 
     outdated:
         desc: Check for outdated packages using npm-check-updates.
@@ -243,15 +205,8 @@ tasks:
         cmd: |
             wingetcreate update {{.WINGET_PACKAGE}} -s -v {{.UP_VERSION}} -u "https://{{.RELEASES_BUCKET}}/{{.APP_NAME}}-win32-x64-{{.UP_VERSION}}.msi" -t {{.GITHUB_TOKEN}}
 
-    dev:installwsh:
-        desc: Quick shortcut to rebuild agentmux-wsh and install for macOS arm64
-        platforms: [darwin]
-        requires:
-            vars:
-                - VERSION
-        cmds:
-            - task: build:wsh:darwin
-            - cp dist/bin/wsh-{{.VERSION}}-darwin.arm64 ~/Library/Application\ Support/agentmux-dev/bin/wsh
+    # dev:installwsh removed — wsh has been retired.
+    # See specs/SPEC_RETIRE_WSH_2026_04_12.md.
 
     dev:clearconfig:
         desc: Clear the config directory for agentmux-dev

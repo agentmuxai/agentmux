@@ -27,7 +27,6 @@ class SysinfoViewModel implements ViewModel {
     metrics: () => string[];
     connection: () => string;
     manageConnection: () => boolean;
-    filterOutNowsh: () => boolean;
     connStatus: () => ConnStatus;
     plotMetaAtom: SignalAtom<Map<string, TimeSeriesMeta>>;
     plotTypeSelectedAtom: () => string;
@@ -99,7 +98,6 @@ class SysinfoViewModel implements ViewModel {
         this.loadingAtom = createSignalAtom(true);
         this.plotMetaAtom = createSignalAtom(new Map(Object.entries(DefaultPlotMeta)));
         this.manageConnection = createMemo(() => true);
-        this.filterOutNowsh = createMemo(() => true);
 
         this.numPoints = createMemo(() => {
             const fullConfig = atoms.fullConfigAtom();

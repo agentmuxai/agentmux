@@ -754,7 +754,6 @@ function makeDefaultConnStatus(conn: string, connected: boolean, hasconnected: b
         status: connected ? "connected" : "disconnected",
         hasconnected,
         activeconnnum: 0,
-        wshenabled: false,
     };
 }
 

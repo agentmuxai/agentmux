@@ -18,7 +18,6 @@ pub const WAVE_DATA_HOME_ENV: &str = "AGENTMUX_DATA_HOME";
 pub const WAVE_APP_PATH_ENV: &str = "AGENTMUX_APP_PATH";
 pub const WAVE_DEV_ENV: &str = "AGENTMUX_DEV";
 pub const WAVE_DEV_VITE_ENV: &str = "AGENTMUX_DEV_VITE";
-pub const WAVE_WSH_FORCE_UPDATE_ENV: &str = "AGENTMUX_WSHFORCEUPDATE";
 pub const WAVE_JWT_TOKEN_ENV: &str = "AGENTMUX_JWT";
 pub const WAVE_SWAP_TOKEN_ENV: &str = "AGENTMUX_SWAPTOKEN";
 
@@ -30,8 +29,6 @@ pub const REMOTE_DOMAIN_SOCKET_BASE_NAME: &str = "wave-remote.sock";
 pub const WAVE_DB_DIR: &str = "db";
 pub const CONFIG_DIR: &str = "config";
 pub const REMOTE_WAVE_HOME_DIR_NAME: &str = ".agentmux";
-pub const REMOTE_WSH_BIN_DIR_NAME: &str = "bin";
-pub const REMOTE_FULL_WSH_BIN_PATH: &str = "~/.agentmux/bin/wsh";
 pub const REMOTE_FULL_DOMAIN_SOCKET_PATH: &str = "~/.agentmux/wave-remote.sock";
 
 // ---- Version info (set at startup) ----
@@ -299,16 +296,6 @@ pub fn get_system_summary() -> String {
     )
 }
 
-/// Validate that wsh is supported on the given os/arch combination.
-pub fn validate_wsh_supported_arch(os: &str, arch: &str) -> Result<(), String> {
-    match (os, arch) {
-        ("linux", "amd64" | "x86_64" | "arm64" | "aarch64") => Ok(()),
-        ("darwin", "amd64" | "x86_64" | "arm64" | "aarch64") => Ok(()),
-        ("windows", "amd64" | "x86_64" | "arm64" | "aarch64") => Ok(()),
-        _ => Err(format!("unsupported os/arch combination: {}/{}", os, arch)),
-    }
-}
-
 /// Determine the system language.
 pub fn determine_lang() -> String {
     env::var("LANG")
@@ -448,15 +435,6 @@ mod tests {
     fn test_system_summary() {
         let summary = get_system_summary();
         assert!(!summary.is_empty());
-    }
-
-    #[test]
-    fn test_validate_wsh_supported_arch() {
-        assert!(validate_wsh_supported_arch("linux", "amd64").is_ok());
-        assert!(validate_wsh_supported_arch("darwin", "arm64").is_ok());
-        assert!(validate_wsh_supported_arch("windows", "x86_64").is_ok());
-        assert!(validate_wsh_supported_arch("freebsd", "amd64").is_err());
-        assert!(validate_wsh_supported_arch("linux", "mips").is_err());
     }
 
     #[test]

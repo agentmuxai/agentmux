@@ -73,10 +73,10 @@ pub async fn spawn_backend(state: &Arc<AppState>) -> Result<BackendSpawnResult, 
 
     let app_path_str = app_path.to_string_lossy().to_string();
 
-    // 5. Deploy wsh binary
-    deploy_wsh(&app_path);
+    // wsh has been retired — see specs/SPEC_RETIRE_WSH_2026_04_12.md.
+    // No binary to deploy anymore.
 
-    // 6. Spawn the process
+    // Spawn the process
     let auth_key = state.auth_key.lock().clone();
     tracing::info!(
         "Spawning agentmux-srv with auth key: {}...",
@@ -333,7 +333,7 @@ fn resolve_backend_binary(
             entries
                 .filter_map(|e| e.ok())
                 .map(|e| e.file_name().to_string_lossy().to_string())
-                .filter(|n| n.contains("agentmux") || n.contains("srv") || n.contains("wsh"))
+                .filter(|n| n.contains("agentmux") || n.contains("srv"))
                 .collect::<Vec<_>>()
                 .join(", ")
         })
@@ -371,134 +371,6 @@ fn parse_estart(line: &str) -> BackendSpawnResult {
         version: get("version:"),
         instance_id: get("instance:"),
     }
-}
-
-/// Deploy the bundled wsh binary.
-///
-/// In a portable build the packager already drops wsh right next to the CEF
-/// host (`runtime/wsh-<ver>-<os>-<arch>.exe`). `find_wsh_binary()` in
-/// agentmux-srv's shellintegration module looks for wsh **alongside the
-/// current executable** — the `exe_dir` — so nothing ever reads
-/// `runtime/bin/wsh-*`. Before this fix, `deploy_wsh` was creating that
-/// `bin/` subdirectory and copying wsh into it on every startup, producing
-/// a dead 1.19 MiB duplicate on disk and a redundant fs operation on every
-/// launch.
-///
-/// The fix: if `find_wsh_source` returns a path that is already *inside*
-/// `app_path`, skip the copy entirely — the spawner will find it in place.
-/// The copy is still performed in dev mode where the source lives in
-/// `dist/bin/` outside the app_path.
-fn deploy_wsh(app_path: &std::path::Path) {
-    // Try versioned name first (e.g., wsh-0.33.44-windows.x64.exe), then plain name (dev mode)
-    let bundled_wsh = find_wsh_source(app_path);
-    let Some(bundled_wsh) = bundled_wsh else {
-        tracing::debug!("Bundled wsh not found in: {}", app_path.display());
-        return;
-    };
-
-    // Short-circuit: if the bundled wsh already lives directly in app_path,
-    // the shellintegration lookup will find it without any copy. This is
-    // the common case for portable builds.
-    if let (Ok(src_canon), Ok(app_canon)) = (bundled_wsh.canonicalize(), app_path.canonicalize()) {
-        if src_canon.parent() == Some(app_canon.as_path()) {
-            tracing::debug!(
-                source = %bundled_wsh.display(),
-                "wsh already lives in app_path; skipping bin/ deploy"
-            );
-            return;
-        }
-    }
-
-    let bin_dir = app_path.join("bin");
-    if let Err(e) = std::fs::create_dir_all(&bin_dir) {
-        tracing::warn!("Failed to create bin dir for wsh: {}", e);
-        return;
-    }
-
-    let version = env!("CARGO_PKG_VERSION");
-    let (goos, goarch) = if cfg!(target_os = "macos") {
-        (
-            "darwin",
-            if cfg!(target_arch = "aarch64") {
-                "arm64"
-            } else {
-                "x64"
-            },
-        )
-    } else if cfg!(target_os = "linux") {
-        (
-            "linux",
-            if cfg!(target_arch = "aarch64") {
-                "arm64"
-            } else {
-                "x64"
-            },
-        )
-    } else {
-        (
-            "windows",
-            if cfg!(target_arch = "aarch64") {
-                "arm64"
-            } else {
-                "x64"
-            },
-        )
-    };
-
-    let exe_suffix = if cfg!(windows) { ".exe" } else { "" };
-    let wsh_name = format!("wsh-{}-{}.{}{}", version, goos, goarch, exe_suffix);
-    let dest = bin_dir.join(&wsh_name);
-
-    if dest.exists() {
-        return; // already deployed
-    }
-
-    if let Err(e) = std::fs::copy(&bundled_wsh, &dest) {
-        tracing::warn!("Failed to copy wsh to {}: {}", dest.display(), e);
-        return;
-    }
-
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(&dest, std::fs::Permissions::from_mode(0o755));
-    }
-
-    tracing::info!("Deployed wsh to: {}", dest.display());
-}
-
-/// Find the bundled wsh binary — versioned name first, then plain name for dev mode.
-fn find_wsh_source(app_path: &std::path::Path) -> Option<std::path::PathBuf> {
-    let ext = if cfg!(windows) { ".exe" } else { "" };
-
-    // 1. Try versioned name matching this build's version (e.g., wsh-0.33.44-windows.x64.exe)
-    let version = env!("CARGO_PKG_VERSION");
-    let arch = if cfg!(target_arch = "aarch64") { "arm64" } else { "x64" };
-    let os = if cfg!(target_os = "macos") { "darwin" } else if cfg!(target_os = "linux") { "linux" } else { "windows" };
-    let versioned = format!("wsh-{}-{}.{}{}", version, os, arch, ext);
-    let path = app_path.join(&versioned);
-    if path.exists() {
-        return Some(path);
-    }
-
-    // 2. Scan for any wsh-*.exe
-    if let Ok(entries) = std::fs::read_dir(app_path) {
-        for entry in entries.flatten() {
-            let name = entry.file_name();
-            let name = name.to_string_lossy();
-            if name.starts_with("wsh-") && name.ends_with(ext) {
-                return Some(entry.path());
-            }
-        }
-    }
-
-    // 3. Plain name (dev mode)
-    let plain = app_path.join(format!("wsh{}", ext));
-    if plain.exists() {
-        return Some(plain);
-    }
-
-    None
 }
 
 /// Create a Windows Job Object and assign the child process to it.

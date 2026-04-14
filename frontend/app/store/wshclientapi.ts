@@ -67,19 +67,9 @@ class RpcApiType {
         return client.wshRpcCall("connlistaws", null, opts);
     }
 
-    // command "connreinstallwsh" [call]
-    ConnReinstallWshCommand(client: WshClient, data: ConnExtData, opts?: RpcOpts): Promise<void> {
-        return client.wshRpcCall("connreinstallwsh", data, opts);
-    }
-
     // command "connstatus" [call]
     ConnStatusCommand(client: WshClient, opts?: RpcOpts): Promise<ConnStatus[]> {
         return client.wshRpcCall("connstatus", null, opts);
-    }
-
-    // command "connupdatewsh" [call]
-    ConnUpdateWshCommand(client: WshClient, data: RemoteInfo, opts?: RpcOpts): Promise<boolean> {
-        return client.wshRpcCall("connupdatewsh", data, opts);
     }
 
     // command "controllerappendoutput" [call]
@@ -122,10 +112,6 @@ class RpcApiType {
         return client.wshRpcCall("deletesubblock", data, opts);
     }
 
-    // command "dismisswshfail" [call]
-    DismissWshFailCommand(client: WshClient, data: string, opts?: RpcOpts): Promise<void> {
-        return client.wshRpcCall("dismisswshfail", data, opts);
-    }
 
     // command "dispose" [call]
     DisposeCommand(client: WshClient, data: CommandDisposeData, opts?: RpcOpts): Promise<void> {

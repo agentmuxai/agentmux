@@ -54,13 +54,8 @@ READMEEOF
 cp target/release/agentmux-cef.exe "$PORTABLE/runtime/agentmux-cef-$VERSION.exe"
 cp dist/bin/agentmux-srv-$VERSION-windows.x64.exe "$PORTABLE/runtime/"
 
-# wsh — keep versioned filename for WER/Event Viewer identification
-WSH="dist/bin/wsh-$VERSION-windows.x64.exe"
-if [ -f "$WSH" ]; then
-    cp "$WSH" "$PORTABLE/runtime/"
-else
-    echo "Warning: $WSH not found"
-fi
+# wsh has been retired — see specs/SPEC_RETIRE_WSH_2026_04_12.md. No binary
+# to ship anymore; AGENTMUX env var is now a plain "1" sentinel.
 
 # Frontend
 cp -r dist/frontend/* "$PORTABLE/runtime/frontend/"

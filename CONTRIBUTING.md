@@ -57,14 +57,14 @@ AgentMux is a **Tauri v2** desktop application with a **100% Rust backend**.
 
 ```
 agentmux/
-├── src-tauri/          # Tauri v2 shell (Rust + WebView2)
-├── agentmux-srv/     # Rust async backend server (Tokio + Axum)
-├── agentmux-wsh/             # Rust shell integration binary
-├── frontend/           # React 19 + TypeScript UI (Vite)
-├── docs/               # Architecture docs, specs, guides
-├── schema/             # JSON schema definitions
-├── scripts/            # Build and version management scripts
-└── Taskfile.yml        # Build task definitions
+├── agentmux-cef/         # CEF host app (Rust + cef-rs + bundled Chromium)
+├── agentmux-launcher/    # Portable launcher (325 KB)
+├── agentmux-srv/         # Rust async backend server (Tokio + Axum)
+├── agentmux-common/      # Shared utilities across the Rust crates
+├── frontend/             # SolidJS + TypeScript UI (Vite)
+├── docs/                 # Architecture docs, specs, guides
+├── scripts/              # Build and version management scripts
+└── Taskfile.yml          # Build task definitions
 ```
 
 ### Frontend (`frontend/`)
@@ -107,20 +107,12 @@ The async backend server — auto-spawned by Tauri, never launched manually. Han
 
 Changes here require `task build:backend` followed by restarting `task dev`.
 
-### Shell Helper (`agentmux-wsh/`)
-
-A small Rust binary (1.1 MB) deployed to remote hosts for multiplexed terminal sessions and file streaming. Communicates with the backend via WebSocket.
-
-Changes here require `task build:wsh`.
-
 ### Communication Flow
 
 ```
-Frontend (React)
-    ↕  Tauri IPC (window/platform commands)
-Tauri Shell (src-tauri)
+Frontend (SolidJS)
+    ↕  CEF IPC (window/platform commands)
+agentmux-cef (CEF host)
     ↕  WebSocket / JSON-RPC 2.0
 agentmux-srv (Rust backend)
-    ↕  WebSocket / wshrpc
-agentmux-wsh (remote hosts)
 ```

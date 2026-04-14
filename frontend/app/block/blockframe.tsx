@@ -176,7 +176,6 @@ function BlockFrame_Header(props: BlockFrameProps & { changeConnModalAtom: util.
     const dragHandleRef = props.preview ? null : props.nodeModel.dragHandleRef;
     const connName = blockData()?.meta?.connection;
     const connStatus = util.useAtomValueSafe(getConnStatusAtom(connName));
-    const wshProblem = connName && !connStatus?.wshenabled && connStatus?.status == "connected";
 
     // Track previous magnified state for one-time activity report
     let prevMagnifiedState = props.nodeModel.isMagnified();
@@ -273,13 +272,6 @@ function BlockFrame_Header(props: BlockFrameProps & { changeConnModalAtom: util.
             </div>
         );
     }
-    const wshInstallButton: IconButtonDecl = {
-        elemtype: "iconbutton",
-        icon: "link-slash",
-        title: "wsh is not installed for this connection",
-    };
-    const showNoWshButton = manageConnection && wshProblem && !util.isBlank(connName) && !connName.startsWith("aws:");
-
     const headerStyle = createMemo<JSX.CSSProperties>(() => {
         const style: JSX.CSSProperties = {};
         const ac = agentColor();
@@ -313,9 +305,6 @@ function BlockFrame_Header(props: BlockFrameProps & { changeConnModalAtom: util.
                     connection={blockData()?.meta?.connection}
                     changeConnModalAtom={props.changeConnModalAtom}
                 />
-            </Show>
-            <Show when={showNoWshButton}>
-                <IconButton decl={wshInstallButton} className="block-frame-header-iconbutton" />
             </Show>
             <div class="block-frame-textelems-wrapper">{headerTextElems}</div>
             <div class="block-frame-end-icons">
@@ -393,8 +382,6 @@ function ConnStatusOverlay({
     const [width, setWidth] = createSignal<number>(null);
     let overlayRef: HTMLDivElement;
     const [showError, setShowError] = createSignal(false);
-    const fullConfig = atoms.fullConfigAtom();
-    const [showWshError, setShowWshError] = createSignal(false);
 
     onMount(() => {
         const rszObs = new ResizeObserver((entries) => {
@@ -416,17 +403,6 @@ function ConnStatusOverlay({
         }
     });
 
-    createEffect(() => {
-        const cs = connStatus();
-        const wshConfigEnabled = fullConfig?.connections?.[connName()]?.["conn:wshenabled"] ?? true;
-        const showWshErrorTemp =
-            cs?.status == "connected" &&
-            cs?.wsherror &&
-            cs?.wsherror != "" &&
-            wshConfigEnabled;
-        setShowWshError(showWshErrorTemp);
-    });
-
     const handleTryReconnect = () => {
         const prtn = RpcApi.ConnConnectCommand(
             TabRpcClient,
@@ -434,29 +410,6 @@ function ConnStatusOverlay({
             { timeout: 60000 }
         );
         prtn.catch((e) => console.log("error reconnecting", connName(), e));
-    };
-
-    const handleDisableWsh = async () => {
-        const metamaptype: unknown = {
-            "conn:wshenabled": false,
-        };
-        const data: ConnConfigRequest = {
-            host: connName(),
-            metamaptype: metamaptype,
-        };
-        try {
-            await RpcApi.SetConnectionsConfigCommand(TabRpcClient, data);
-        } catch (e) {
-            console.log("problem setting connection config: ", e);
-        }
-    };
-
-    const handleRemoveWshError = async () => {
-        try {
-            await RpcApi.DismissWshFailCommand(TabRpcClient, connName());
-        } catch (e) {
-            console.log("unable to dismiss wsh error: ", e);
-        }
     };
 
     const statusText = createMemo(() => {
@@ -486,38 +439,25 @@ function ConnStatusOverlay({
         if (showError()) {
             errTexts.push(`error: ${connStatus()?.error}`);
         }
-        if (showWshError()) {
-            errTexts.push(`unable to use wsh: ${connStatus()?.wsherror}`);
-        }
         const textToCopy = errTexts.join("\n");
         await clipboardWriteText(textToCopy);
     };
 
     return (
-        <Show when={showWshError() || (!isLayoutMode && connStatus()?.status !== "connected" && !connModalOpen)}>
+        <Show when={!isLayoutMode && connStatus()?.status !== "connected" && !connModalOpen}>
             <div class="connstatus-overlay" ref={(el) => { overlayRef = el; }}>
                 <div class="connstatus-content">
-                    <div class={clsx("connstatus-status-icon-wrapper", { "has-error": showError() || showWshError() })}>
+                    <div class={clsx("connstatus-status-icon-wrapper", { "has-error": showError() })}>
                         <Show when={showIcon()}>
                             <i class="fa-solid fa-triangle-exclamation"></i>
                         </Show>
                         <div class="connstatus-status ellipsis">
                             <div class="connstatus-status-text">{statusText()}</div>
-                            <Show when={showError() || showWshError()}>
+                            <Show when={showError()}>
                                 <div class="connstatus-error" style={{ "overflow-y": "auto" }}>
                                     <CopyButton className="copy-button" onClick={handleCopy} title="Copy" />
-                                    <Show when={showError()}>
-                                        <div>error: {connStatus()?.error}</div>
-                                    </Show>
-                                    <Show when={showWshError()}>
-                                        <div>unable to use wsh: {connStatus()?.wsherror}</div>
-                                    </Show>
+                                    <div>error: {connStatus()?.error}</div>
                                 </div>
-                            </Show>
-                            <Show when={showWshError()}>
-                                <Button className={reconClassName()} onClick={handleDisableWsh}>
-                                    always disable wsh
-                                </Button>
                             </Show>
                         </div>
                     </div>
@@ -531,11 +471,6 @@ function ConnStatusOverlay({
                                     <i class="fa-sharp fa-solid fa-rotate-right"></i>
                                 </Show>
                             </Button>
-                        </div>
-                    </Show>
-                    <Show when={showWshError()}>
-                        <div class="connstatus-actions">
-                            <Button className={`fa-xmark fa-solid ${reconClassName()}`} onClick={handleRemoveWshError} />
                         </div>
                     </Show>
                 </div>
