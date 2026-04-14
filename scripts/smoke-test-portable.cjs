@@ -72,12 +72,21 @@ function diskChecks() {
     const runtimeDir = path.join(PORTABLE_DIR, "runtime");
     push("runtime/ exists", fs.existsSync(runtimeDir));
 
-    // wsh should be alongside the CEF exe, NOT inside runtime/bin/
-    const wshRoot = path.join(runtimeDir, `wsh-${DEFAULT_VERSION}-windows.x64.exe`);
+    // wsh has been retired — see specs/SPEC_RETIRE_WSH_2026_04_12.md.
+    // The runtime/ directory MUST NOT contain wsh-*.exe any more.
+    const wshGlob = fs
+        .readdirSync(runtimeDir)
+        .filter((f) => f.startsWith("wsh-") || f === "wsh.exe");
     push(
-        "wsh at runtime root (packaged)",
-        fs.existsSync(wshRoot),
-        fs.existsSync(wshRoot) ? `${fs.statSync(wshRoot).size} bytes` : "missing"
+        "wsh absent from runtime (retired)",
+        wshGlob.length === 0,
+        wshGlob.length === 0 ? "none" : `found: ${wshGlob.join(", ")}`
+    );
+
+    // runtime/bin/ must not be created either — this was the deploy_wsh target.
+    push(
+        "runtime/bin/ absent (deploy_wsh retired)",
+        !fs.existsSync(path.join(runtimeDir, "bin"))
     );
 
     // srv, cef, launcher
