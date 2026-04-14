@@ -29,6 +29,24 @@ export interface SlashChoice {
     description?: string;
     /** Render this option as the currently-active selection. */
     current?: boolean;
+    /**
+     * Alternate text representations that resolve to this choice when
+     * typed inline. The picker only displays `value`; aliases keep
+     * PR #378 backwards-compat (e.g. `/model claude-sonnet` → `sonnet`).
+     */
+    aliases?: string[];
+}
+
+/**
+ * Spec passed to `ctx.openPicker(...)`. The dispatcher builds this
+ * from a command's enum/dynamic arg when the user submits a bare
+ * `/cmd` and the command requires an argument. The picker UI reads
+ * choices and resolves the promise with the selected value (or
+ * rejects on dismiss).
+ */
+export interface SlashPickerSpec {
+    title: string;
+    choices: SlashChoice[];
 }
 
 /**
@@ -37,7 +55,19 @@ export interface SlashChoice {
  */
 export type SlashArg =
     | { kind: "none" }
-    | { kind: "enum"; choices: SlashChoice[]; required: boolean; defaultLabel?: string }
+    | {
+          kind: "enum";
+          /**
+           * Either a static array of choices or a factory that receives ctx
+           * and returns the choices fresh on every invocation. The factory
+           * form lets commands mark the currently-active option (`current:
+           * true`) by reading reactive state at picker-open time — e.g.
+           * `/model` highlights the active model in the picker.
+           */
+          choices: SlashChoice[] | ((ctx: SlashCommandContext) => SlashChoice[]);
+          required: boolean;
+          defaultLabel?: string;
+      }
     | { kind: "freeform"; placeholder: string; required: boolean }
     | {
           kind: "dynamic";
@@ -92,6 +122,12 @@ export interface SlashCommandContext {
     log: LogFn;
     /** Set the OAuth URL for /login. */
     setAuthUrl: (url: string | null) => void;
+    /**
+     * Open the inline picker. Returns a promise that resolves with the
+     * selected value, or rejects if the user dismisses (Esc / click-outside).
+     * Set by useAgentCommands; the dispatcher only sees the function.
+     */
+    openPicker: (spec: SlashPickerSpec) => Promise<string>;
 }
 
 /**
