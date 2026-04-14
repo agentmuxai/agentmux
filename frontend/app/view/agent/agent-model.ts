@@ -233,8 +233,13 @@ export class AgentViewModel implements ViewModel {
             Logger.error("agent", "Failed to load forge skills", { error: String(e) });
         }
 
-        // Determine working directory
-        const workDir = agent.working_directory || `~/.agentmux/agents/${agent.name.toLowerCase().replace(/[^a-z0-9-_]/g, "-")}`;
+        // Determine working directory. Use the agent's stable slug
+        // (Step 1 of SPEC_AGENT_IDENTITY_RESTRUCTURE_2026_04_14.md) so
+        // renaming the agent doesn't move the directory on disk.
+        // Falls back to the legacy name-derived form if slug is empty
+        // (defensive — the v4 migration backfills slug for every row).
+        const slug = agent.slug || agent.name.toLowerCase().replace(/[^a-z0-9-_]/g, "-");
+        const workDir = agent.working_directory || `~/.agentmux/agents/${slug}`;
 
         // Build CLI args: use persistent args if available, otherwise standard launch args
         const isPersistent = provider.controllerType === "persistent";
@@ -265,10 +270,25 @@ export class AgentViewModel implements ViewModel {
             }
         }
 
-        // Per-agent GitHub config isolation
-        const agentSlug = agent.name.toLowerCase().replace(/[^a-z0-9-_]/g, "-");
-        envVars["GH_CONFIG_DIR"] = `~/.agentmux/config/gh-${agentSlug}`;
+        // Per-agent GitHub config isolation — keyed by the stable
+        // slug so renaming doesn't orphan ~/.agentmux/config/gh-<old>.
+        envVars["GH_CONFIG_DIR"] = `~/.agentmux/config/gh-${slug}`;
+
+        // AGENTMUX_AGENT_ID stays as the display name for backwards
+        // compat: shell integration scripts (bash.sh / zsh.sh / pwsh.ps1)
+        // emit OSC sequences carrying this value as the terminal pane
+        // label, and agentmux-mcp routes inter-agent messages by it.
+        // Flipping to slug here would change visible labels and break
+        // routing — that's a separate coordinated migration.
         envVars["AGENTMUX_AGENT_ID"] = agent.name;
+        // New, additive: the stable slug (Step 2 of identity
+        // restructure). Downstream code can opt into reading this
+        // when it needs the rename-stable form.
+        envVars["AGENTMUX_AGENT_SLUG"] = slug;
+        // Explicit display alias. Today identical to AGENTMUX_AGENT_ID
+        // — once Step 4's downstream coordination flips ID to the
+        // slug, DISPLAY remains the human-readable label.
+        envVars["AGENTMUX_AGENT_DISPLAY"] = agent.name;
 
         // Provider auth isolation: shared per-version auth dir (not per-agent)
         // Each AgentMux version gets its own auth space via the Tauri app data dir,
@@ -381,6 +401,7 @@ function buildConfigFiles(
     if (agent) {
         templateVars["AGENT"] = agent.name;
         templateVars["AGENT_DISPLAY"] = agent.name;
+        templateVars["AGENT_SLUG"] = agent.slug || agent.name.toLowerCase().replace(/[^a-z0-9-_]/g, "-");
         templateVars["WORKING_DIR"] = agent.working_directory || "";
         templateVars["AGENT_ID"] = agent.id;
     }
