@@ -53,8 +53,13 @@ pub fn register_forge_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     .duration_since(UNIX_EPOCH)
                     .unwrap_or_default()
                     .as_millis() as i64;
-                let agent = ForgeAgent {
+                // slug is empty here — forge_insert auto-derives it
+                // from name AND collision-resolves AND mutates the
+                // struct so we serialize the resolved value back to
+                // the frontend (not "").
+                let mut agent = ForgeAgent {
                     id: uuid::Uuid::new_v4().to_string(),
+                    slug: String::new(),
                     name: cmd.name,
                     icon: cmd.icon,
                     provider: cmd.provider,
@@ -71,7 +76,7 @@ pub fn register_forge_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     agent_bus_id: cmd.agent_bus_id,
                     is_seeded: 0,
                 };
-                wstore.forge_insert(&agent).map_err(|e| format!("createforgeagent: {e}"))?;
+                wstore.forge_insert(&mut agent).map_err(|e| format!("createforgeagent: {e}"))?;
                 broker.publish(crate::backend::wps::WaveEvent {
                     event: "forgeagents:changed".to_string(),
                     scopes: vec![],
@@ -99,8 +104,12 @@ pub fn register_forge_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 let existing = wstore.forge_list().map_err(|e| format!("updateforgeagent: {e}"))?;
                 let old = existing.iter().find(|a| a.id == cmd.id)
                     .ok_or_else(|| format!("updateforgeagent: agent {} not found", cmd.id))?;
+                // slug is preserved from the existing row — it's
+                // immutable after creation. The update path never
+                // accepts a new slug from the client.
                 let agent = ForgeAgent {
                     id: cmd.id,
+                    slug: old.slug.clone(),
                     name: cmd.name,
                     icon: cmd.icon,
                     provider: cmd.provider,
@@ -443,9 +452,12 @@ pub fn register_forge_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     }
                 }
 
-                // Create the agent
-                let agent = ForgeAgent {
+                // Create the agent — slug is empty, forge_insert will
+                // auto-derive from agent_name and mutate the struct
+                // so the resolved slug is returned to the frontend.
+                let mut agent = ForgeAgent {
                     id: uuid::Uuid::new_v4().to_string(),
+                    slug: String::new(),
                     name: cmd.agent_name.clone(),
                     icon: "\u{2726}".to_string(),
                     provider,
@@ -462,7 +474,7 @@ pub fn register_forge_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     agent_bus_id: String::new(),
                     is_seeded: 0,
                 };
-                wstore.forge_insert(&agent).map_err(|e| format!("importforgefromclaw: {e}"))?;
+                wstore.forge_insert(&mut agent).map_err(|e| format!("importforgefromclaw: {e}"))?;
 
                 // Read CLAUDE.md → agentmd content
                 let claude_md_path = workspace_path.join("CLAUDE.md");
