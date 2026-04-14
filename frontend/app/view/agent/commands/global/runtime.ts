@@ -55,15 +55,20 @@ const PERMISSION_ALIASES: Record<string, PermissionMode> = {
     "": "default",
 };
 
+type RuntimeUpdateResult =
+    | { ok: true; updated: AgentRuntimeConfig }
+    | { ok: false; error: string };
+
 /**
  * Mutate block.meta["agent:runtime"] with a partial runtime config.
- * Returns the merged config on success, null on RPC failure — callers
- * check and skip the success message if the mutation didn't land.
+ * Returns the merged config on success or the underlying error
+ * message on RPC failure. Callers fold the error into a SlashResult
+ * so the user sees the real reason instead of a generic "failed".
  */
 async function updateRuntime(
     ctx: SlashCommandContext,
     patch: Partial<AgentRuntimeConfig>,
-): Promise<AgentRuntimeConfig | null> {
+): Promise<RuntimeUpdateResult> {
     const current = getRuntimeConfig(ctx.block()?.meta);
     const updated: AgentRuntimeConfig = { ...current, ...patch };
     try {
@@ -71,10 +76,14 @@ async function updateRuntime(
             oref: WOS.makeORef("block", ctx.blockId),
             meta: { "agent:runtime": updated },
         });
-        return updated;
+        return { ok: true, updated };
     } catch (err: any) {
-        return null;
+        return { ok: false, error: err?.message ?? String(err) };
     }
+}
+
+function runtimeError(error: string): SlashResult {
+    return { kind: "error", message: `failed to update runtime config: ${error}` };
 }
 
 export const modelCommand: SlashCommand = {
@@ -92,11 +101,9 @@ export const modelCommand: SlashCommand = {
             };
         }
         const model = MODEL_ALIASES[key];
-        const updated = await updateRuntime(ctx, { model });
-        if (!updated) {
-            return { kind: "error", message: "failed to update runtime config" };
-        }
-        const label = updated.model ?? "default";
+        const result = await updateRuntime(ctx, { model });
+        if (result.ok === false) return runtimeError(result.error);
+        const label = result.updated.model ?? "default";
         return { kind: "ok", message: `model set to ${label} (applies to next turn)` };
     },
 };
@@ -116,11 +123,9 @@ export const effortCommand: SlashCommand = {
             };
         }
         const effort = EFFORT_ALIASES[key];
-        const updated = await updateRuntime(ctx, { effort });
-        if (!updated) {
-            return { kind: "error", message: "failed to update runtime config" };
-        }
-        const label = updated.effort ?? "default";
+        const result = await updateRuntime(ctx, { effort });
+        if (result.ok === false) return runtimeError(result.error);
+        const label = result.updated.effort ?? "default";
         return { kind: "ok", message: `effort set to ${label} (applies to next turn)` };
     },
 };
@@ -141,13 +146,11 @@ export const permissionModeCommand: SlashCommand = {
             };
         }
         const mode = PERMISSION_ALIASES[key];
-        const updated = await updateRuntime(ctx, { permissionMode: mode });
-        if (!updated) {
-            return { kind: "error", message: "failed to update runtime config" };
-        }
+        const result = await updateRuntime(ctx, { permissionMode: mode });
+        if (result.ok === false) return runtimeError(result.error);
         return {
             kind: "ok",
-            message: `permission mode set to ${updated.permissionMode} (applies to next turn)`,
+            message: `permission mode set to ${result.updated.permissionMode} (applies to next turn)`,
         };
     },
 };
@@ -173,13 +176,11 @@ export const bypassCommand: SlashCommand = {
                 message: `/bypass: unknown arg '${arg}'. Use '/bypass' to enable or '/bypass off' to disable.`,
             };
         }
-        const updated = await updateRuntime(ctx, patch);
-        if (!updated) {
-            return { kind: "error", message: "failed to update runtime config" };
-        }
+        const result = await updateRuntime(ctx, patch);
+        if (result.ok === false) return runtimeError(result.error);
         return {
             kind: "ok",
-            message: `permission mode set to ${updated.permissionMode} (applies to next turn)`,
+            message: `permission mode set to ${result.updated.permissionMode} (applies to next turn)`,
         };
     },
 };
@@ -191,10 +192,8 @@ export const planCommand: SlashCommand = {
     arg: { kind: "none" },
     availability: "any-agent",
     handler: async (ctx): Promise<SlashResult> => {
-        const updated = await updateRuntime(ctx, { permissionMode: "plan" });
-        if (!updated) {
-            return { kind: "error", message: "failed to update runtime config" };
-        }
+        const result = await updateRuntime(ctx, { permissionMode: "plan" });
+        if (result.ok === false) return runtimeError(result.error);
         return { kind: "ok", message: "permission mode set to plan (applies to next turn)" };
     },
 };
