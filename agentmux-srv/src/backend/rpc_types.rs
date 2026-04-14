@@ -219,15 +219,15 @@ pub const COMMAND_SET_VAR: &str = "setvar";
 pub const COMMAND_CONN_STATUS: &str = "connstatus";
 pub const COMMAND_WSL_STATUS: &str = "wslstatus";
 pub const COMMAND_CONN_ENSURE: &str = "connensure";
-pub const COMMAND_CONN_REINSTALL_WSH: &str = "connreinstallwsh";
 pub const COMMAND_CONN_CONNECT: &str = "connconnect";
 pub const COMMAND_CONN_DISCONNECT: &str = "conndisconnect";
 pub const COMMAND_CONN_LIST: &str = "connlist";
 pub const COMMAND_CONN_LIST_AWS: &str = "connlistaws";
 pub const COMMAND_WSL_LIST: &str = "wsllist";
 pub const COMMAND_WSL_DEFAULT_DISTRO: &str = "wsldefaultdistro";
-pub const COMMAND_DISMISS_WSH_FAIL: &str = "dismisswshfail";
-pub const COMMAND_CONN_UPDATE_WSH: &str = "updatewsh";
+// COMMAND_CONN_REINSTALL_WSH / COMMAND_CONN_UPDATE_WSH / COMMAND_DISMISS_WSH_FAIL
+// have been removed — wsh has been retired. See
+// specs/SPEC_RETIRE_WSH_2026_04_12.md.
 
 // Workspace commands
 pub const COMMAND_WORKSPACE_LIST: &str = "workspacelist";

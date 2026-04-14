@@ -2,12 +2,8 @@
 # Deployed to: ~/.agentmux/shell/zsh/.zshrc
 # Loaded via: ZDOTDIR=~/.agentmux/shell/zsh (zsh picks up .zshrc automatically)
 
-# Add wsh to PATH via the AGENTMUX executable path (portable mode support)
-if [ -n "$AGENTMUX" ] && [ "$AGENTMUX" != "1" ]; then
-    _agentmux_app_dir="$(dirname "$AGENTMUX")"
-    export PATH="$_agentmux_app_dir:$PATH"
-    unset _agentmux_app_dir
-fi
+# wsh has been retired — AGENTMUX is now a plain "1" sentinel.
+# See specs/SPEC_RETIRE_WSH_2026_04_12.md.
 
 # Source login profile (Homebrew shellenv and other login-shell setup live here)
 if [ -f ~/.zprofile ]; then

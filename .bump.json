@@ -12,11 +12,6 @@
       "path": "package.version"
     },
     {
-      "file": "agentmux-wsh/Cargo.toml",
-      "type": "toml",
-      "path": "package.version"
-    },
-    {
       "file": "agentmux-cef/Cargo.toml",
       "type": "toml",
       "path": "package.version"
@@ -45,7 +40,6 @@
       "package-lock.json",
       "Cargo.lock",
       "agentmux-srv/Cargo.toml",
-      "agentmux-wsh/Cargo.toml",
       "agentmux-cef/Cargo.toml",
       "agentmux-launcher/Cargo.toml",
       "agentmux-common/Cargo.toml"
