@@ -98,23 +98,30 @@ export function SlashHelpPanel(props: SlashHelpPanelProps): JSX.Element {
                         <div class="slash-help__group">
                             <div class="slash-help__group-label">{group.label}</div>
                             <For each={group.commands}>
-                                {(cmd) => (
-                                    <div
-                                        class="slash-help__row"
-                                        role="button"
-                                        tabIndex={0}
-                                        onClick={() => props.onInvoke(cmd)}
-                                    >
-                                        <span class="slash-help__name">/{cmd.name}</span>
-                                        {(cmd.aliases ?? []).length > 0 && (
-                                            <span class="slash-help__aliases">
-                                                {(cmd.aliases ?? []).map((a) => `/${a}`).join(" · ")}
-                                            </span>
-                                        )}
-                                        <span class="slash-help__arg">{argHint(cmd)}</span>
-                                        <span class="slash-help__description">{cmd.description}</span>
-                                    </div>
-                                )}
+                                {(cmd) => {
+                                    const activate = () => props.onInvoke(cmd);
+                                    const onKeyDown = (e: KeyboardEvent) => {
+                                        if (e.key === "Enter" || e.key === " ") {
+                                            e.preventDefault();
+                                            activate();
+                                        }
+                                    };
+                                    const aliasText = (cmd.aliases ?? []).map((a) => `/${a}`).join(" · ");
+                                    return (
+                                        <div
+                                            class="slash-help__row"
+                                            role="button"
+                                            tabIndex={0}
+                                            onClick={activate}
+                                            onKeyDown={onKeyDown}
+                                        >
+                                            <span class="slash-help__name">/{cmd.name}</span>
+                                            <span class="slash-help__aliases">{aliasText}</span>
+                                            <span class="slash-help__arg">{argHint(cmd)}</span>
+                                            <span class="slash-help__description">{cmd.description}</span>
+                                        </div>
+                                    );
+                                }}
                             </For>
                         </div>
                     )}
