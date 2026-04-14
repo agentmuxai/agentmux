@@ -1213,6 +1213,34 @@
     }
 
     // === Diff Viewer ===
+    // === Shared Shiki highlighted-code base ===
+    // Shiki emits <pre><code> with <span class="line"> per line.
+    // We wrap in our own <pre class="agent-highlighted-code"> and inject innerHTML.
+    .agent-highlighted-code {
+        font-family: var(--termfontfamily, "JetBrains Mono", monospace);
+        font-size: 12px;
+        line-height: 1.5;
+        margin: 0;
+        overflow-x: auto;
+        background: transparent; // Shiki adds its own bg on the <code> element
+        color: var(--main-text-color);
+        white-space: pre;
+
+        // Shiki wraps each line in <span class="line"> — give lines display:block
+        // so backgrounds and padding work correctly.
+        :global(.line) {
+            display: block;
+            padding: 0 6px;
+            min-height: 1.5em;
+        }
+
+        // Shiki adds background-color on the <pre> via inline style — remove it
+        // so our themed background (from the parent container) wins.
+        &[style*="background"] {
+            background: transparent !important;
+        }
+    }
+
     .agent-diff {
         background: var(--main-bg-color);
         border: none;
@@ -1228,6 +1256,7 @@
             border-bottom: 1px solid var(--border-color);
         }
 
+        // Plain-render diff classes (used before Shiki resolves and as fallback)
         .agent-diff-add {
             background: color-mix(in srgb, green 15%, transparent);
             color: #a0ffa0;
@@ -1245,6 +1274,46 @@
 
         .agent-diff-ctx {
             color: var(--secondary-text-color);
+        }
+
+        // Highlighted variant wrapper: header stays as a div, Shiki content
+        // goes into a separate <pre> so innerHTML doesn't destroy the header.
+        .agent-diff-highlighted-body {
+            margin: 0;
+            padding: 0;
+            background: transparent;
+            border: none;
+            overflow-x: auto;
+        }
+
+        // Highlighted variant: Shiki emits <span class="line agent-diff-add">
+        // so the same colour rules above apply automatically. We additionally
+        // strip the Shiki-generated span colour on add/del lines so our
+        // contrasting palette (not Shiki's) wins for the diff chrome.
+        &.agent-diff--highlighted {
+            :global(.line.agent-diff-add) {
+                background: color-mix(in srgb, green 15%, transparent);
+                // Shiki token colours are preserved; only the line bg is forced.
+            }
+            :global(.line.agent-diff-del) {
+                background: color-mix(in srgb, red 15%, transparent);
+            }
+            :global(.line.agent-diff-hunk) {
+                background: color-mix(in srgb, blue 10%, transparent);
+                color: var(--accent-color);
+            }
+            :global(.line.agent-diff-ctx) {
+                // default Shiki token colours — no override needed
+            }
+            :global(.agent-diff-marker) {
+                opacity: 0.6;
+                user-select: none;
+                margin-right: 2px;
+            }
+            :global(.agent-diff-hunk-text) {
+                color: var(--accent-color);
+                opacity: 0.8;
+            }
         }
     }
 
@@ -1267,10 +1336,29 @@
             background: color-mix(in srgb, var(--main-text-color) 5%, transparent);
             padding: 3px 6px;
             border-bottom: 1px solid var(--border-color);
+            display: flex;
+            align-items: baseline;
+            gap: 6px;
 
             .agent-bash-dollar {
                 color: var(--accent-color);
-                margin-right: 8px;
+                flex-shrink: 0;
+            }
+
+            // HighlightedCode inside the cmd row: inline, no extra padding/bg
+            .agent-bash-cmd-code {
+                flex: 1;
+                margin: 0;
+                padding: 0;
+                background: transparent;
+                border: none;
+                overflow: visible;
+                white-space: pre-wrap;
+
+                :global(.line) {
+                    display: inline;
+                    padding: 0;
+                }
             }
         }
 
@@ -1503,11 +1591,14 @@
         .agent-tool-read-content {
             background: var(--main-bg-color);
             border: 1px solid var(--border-color);
-            padding: 4px 6px;
             border-radius: 3px;
             max-height: 400px;
             overflow-y: auto;
             margin: 0;
+            // Shiki <pre> override: ensure our bg wins
+            &[style*="background"] {
+                background: var(--main-bg-color) !important;
+            }
         }
     }
 
