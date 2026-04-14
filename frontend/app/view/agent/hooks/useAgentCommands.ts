@@ -30,7 +30,7 @@ import * as WOS from "@/app/store/wos";
 import { buildRuntimeArgs, getRuntimeConfig } from "../buildRuntimeArgs";
 import { dispatchSlashCommand } from "../commands/dispatch";
 import { buildRegistry } from "../commands/registry";
-import type { SlashCommandContext, SlashPickerSpec } from "../commands/types";
+import type { SlashCommand, SlashCommandContext, SlashPickerSpec } from "../commands/types";
 import type { ProviderDefinition } from "../providers";
 import type { SignalPair } from "../state";
 import type { DocumentNode } from "../types";
@@ -86,6 +86,14 @@ export interface UseAgentCommands {
     resolvePicker: (value: string) => void;
     /** Reject the picker promise (Esc / dismiss). */
     dismissPicker: () => void;
+    /**
+     * Autocomplete completions for the composer. Returns commands
+     * available in the current context whose name or alias starts
+     * with the given prefix (no leading slash). Sorted by category
+     * then name. Consumed by AgentFooter to render the inline
+     * autocomplete dropdown.
+     */
+    completions: (prefix: string) => SlashCommand[];
 }
 
 // Runtime-config + auth slash commands (/model /effort /permission-mode
@@ -140,6 +148,23 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         r?.();
     };
 
+    // Build the SlashCommandContext bundle. Used by sendMessage's
+    // dispatch and by completions(); both need the same view of the
+    // pane's reactive state.
+    const buildCommandContext = (): SlashCommandContext => ({
+        blockId: opts.blockId,
+        provider: opts.provider,
+        block: opts.block,
+        documentAtom: opts.documentAtom,
+        log: opts.log,
+        setAuthUrl: opts.setAuthUrl,
+        openPicker,
+    });
+
+    const completions = (prefix: string): SlashCommand[] => {
+        return registry().completions(prefix, buildCommandContext());
+    };
+
     const sendMessage = async (message: string): Promise<void> => {
         setDocument((prev) => [
             ...prev,
@@ -168,16 +193,7 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         // through to AgentInputCommand via the "passthrough" outcome.
         const trimmed = message.trim();
         if (trimmed.startsWith("/")) {
-            const ctx: SlashCommandContext = {
-                blockId: opts.blockId,
-                provider: opts.provider,
-                block: opts.block,
-                documentAtom: opts.documentAtom,
-                log: opts.log,
-                setAuthUrl: opts.setAuthUrl,
-                openPicker,
-            };
-            const outcome = await dispatchSlashCommand(trimmed, registry(), ctx);
+            const outcome = await dispatchSlashCommand(trimmed, registry(), buildCommandContext());
             if (outcome.kind === "handled") return;
         }
 
@@ -222,5 +238,13 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         });
     };
 
-    return { sendMessage, back, stopAgent, pickerSpec, resolvePicker, dismissPicker };
+    return {
+        sendMessage,
+        back,
+        stopAgent,
+        pickerSpec,
+        resolvePicker,
+        dismissPicker,
+        completions,
+    };
 }
