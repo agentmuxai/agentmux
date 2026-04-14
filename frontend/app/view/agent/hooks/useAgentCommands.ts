@@ -31,7 +31,7 @@ import { getApi } from "@/app/store/global";
 import { buildRuntimeArgs, getRuntimeConfig } from "../buildRuntimeArgs";
 import type { ProviderDefinition } from "../providers";
 import type { SignalPair } from "../state";
-import type { DocumentNode } from "../types";
+import type { AgentRuntimeConfig, DocumentNode, EffortLevel, ModelChoice, PermissionMode } from "../types";
 import type { LogFn } from "./useAgentControllerStatus";
 
 export interface UseAgentCommandsOptions {
@@ -75,8 +75,187 @@ export interface UseAgentCommands {
     stopAgent: () => void;
 }
 
+// ── Runtime-config slash-command helpers ───────────────────────────────────
+//
+// The Claude Code CLI runs in non-interactive stream-json mode, so the user's
+// slash commands (e.g. `/model sonnet`) reach the model as raw text instead
+// of being handled by the CLI's own dispatcher. We intercept the well-known
+// runtime-config commands here and map them to `block.meta["agent:runtime"]`
+// mutations — the exact same path the AgentControlBar dropdowns use. Takes
+// effect on the NEXT turn (runtime args are rebuilt in sendMessage below
+// before each RPC invocation).
+//
+// Non-runtime commands are listed below as "recognized but not supported in
+// stream-json mode" so the user gets a helpful error instead of silently
+// sending `/memory` as a user message to the model.
+
+const MODEL_ALIASES: Record<string, ModelChoice> = {
+    "opus": "opus",
+    "sonnet": "sonnet",
+    "haiku": "haiku",
+    "claude-opus": "opus",
+    "claude-sonnet": "sonnet",
+    "claude-haiku": "haiku",
+    "default": null,
+    "": null,
+};
+
+const EFFORT_ALIASES: Record<string, EffortLevel> = {
+    "low": "low",
+    "medium": "medium",
+    "med": "medium",
+    "high": "high",
+    "max": "max",
+    "default": null,
+    "": null,
+};
+
+const PERMISSION_ALIASES: Record<string, PermissionMode> = {
+    "bypass": "bypass",
+    "dangerous": "bypass",
+    "skip": "bypass",
+    "dangerously-skip-permissions": "bypass",
+    "auto": "auto",
+    "accept": "acceptEdits",
+    "acceptedits": "acceptEdits",
+    "accept-edits": "acceptEdits",
+    "plan": "plan",
+    "default": "default",
+    "": "default",
+};
+
+/** Parse `/command arg` → `["command", "arg"]`. Leading slash stripped. */
+function parseSlashCommand(input: string): [string, string] {
+    const trimmed = input.trim();
+    if (!trimmed.startsWith("/")) return ["", ""];
+    const rest = trimmed.slice(1);
+    const spaceIdx = rest.indexOf(" ");
+    if (spaceIdx < 0) return [rest.toLowerCase(), ""];
+    return [rest.slice(0, spaceIdx).toLowerCase(), rest.slice(spaceIdx + 1).trim()];
+}
+
+/** True if `input` is a known slash command we handle client-side. */
+function isRuntimeSlashCommand(name: string): boolean {
+    return (
+        name === "model" ||
+        name === "effort" ||
+        name === "permission-mode" ||
+        name === "permission" ||
+        name === "perm" ||
+        name === "bypass" ||
+        name === "plan" ||
+        name === "runtime"
+    );
+}
+
 export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommands {
     const [, setDocument] = opts.documentAtom;
+
+    // Mutate block.meta["agent:runtime"] with a partial runtime config, the
+    // same way AgentControlBar.updateRuntime does. Returns the merged config
+    // so the caller can log it.
+    const updateRuntime = async (patch: Partial<AgentRuntimeConfig>): Promise<AgentRuntimeConfig> => {
+        const current = getRuntimeConfig(opts.block()?.meta);
+        const updated: AgentRuntimeConfig = { ...current, ...patch };
+        try {
+            await RpcApi.SetMetaCommand(TabRpcClient, {
+                oref: WOS.makeORef("block", opts.blockId),
+                meta: { "agent:runtime": updated },
+            });
+        } catch (err: any) {
+            opts.log("error", `failed to update runtime config: ${err?.message ?? String(err)}`, "error");
+        }
+        return updated;
+    };
+
+    const handleModelCommand = async (arg: string): Promise<void> => {
+        const key = arg.toLowerCase();
+        if (!(key in MODEL_ALIASES)) {
+            opts.log(
+                "system",
+                `/model: unknown model '${arg}'. Try: opus | sonnet | haiku | default`,
+                "warn",
+            );
+            return;
+        }
+        const model = MODEL_ALIASES[key];
+        const updated = await updateRuntime({ model });
+        const label = updated.model ?? "default";
+        opts.log("system", `model set to ${label} (applies to next turn)`);
+    };
+
+    const handleEffortCommand = async (arg: string): Promise<void> => {
+        const key = arg.toLowerCase();
+        if (!(key in EFFORT_ALIASES)) {
+            opts.log(
+                "system",
+                `/effort: unknown level '${arg}'. Try: low | medium | high | max | default`,
+                "warn",
+            );
+            return;
+        }
+        const effort = EFFORT_ALIASES[key];
+        const updated = await updateRuntime({ effort });
+        const label = updated.effort ?? "default";
+        opts.log("system", `effort set to ${label} (applies to next turn)`);
+    };
+
+    const handlePermissionModeCommand = async (arg: string): Promise<void> => {
+        const key = arg.toLowerCase();
+        if (!(key in PERMISSION_ALIASES)) {
+            opts.log(
+                "system",
+                `/permission-mode: unknown mode '${arg}'. Try: bypass | auto | accept | plan | default`,
+                "warn",
+            );
+            return;
+        }
+        const mode = PERMISSION_ALIASES[key];
+        const updated = await updateRuntime({ permissionMode: mode });
+        opts.log("system", `permission mode set to ${updated.permissionMode} (applies to next turn)`);
+    };
+
+    const handleRuntimeCommand = async (): Promise<void> => {
+        const r = getRuntimeConfig(opts.block()?.meta);
+        const parts = [
+            `permission: ${r.permissionMode}`,
+            `model: ${r.model ?? "default"}`,
+            `effort: ${r.effort ?? "default"}`,
+        ];
+        opts.log("system", `runtime config — ${parts.join(" · ")}`);
+    };
+
+    const dispatchRuntimeSlashCommand = async (name: string, arg: string): Promise<void> => {
+        switch (name) {
+            case "model":
+                await handleModelCommand(arg);
+                return;
+            case "effort":
+                await handleEffortCommand(arg);
+                return;
+            case "permission-mode":
+            case "permission":
+            case "perm":
+                await handlePermissionModeCommand(arg);
+                return;
+            case "bypass":
+                // Shortcut: `/bypass` with no arg sets permissionMode=bypass;
+                // `/bypass off` reverts to default.
+                if (arg.toLowerCase() === "off" || arg.toLowerCase() === "default") {
+                    await handlePermissionModeCommand("default");
+                } else {
+                    await handlePermissionModeCommand("bypass");
+                }
+                return;
+            case "plan":
+                // Shortcut: `/plan` = permission-mode plan
+                await handlePermissionModeCommand("plan");
+                return;
+            case "runtime":
+                await handleRuntimeCommand();
+                return;
+        }
+    };
 
     const runLoginCommand = async (): Promise<void> => {
         const prov = opts.provider();
@@ -139,6 +318,21 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
             setDocument([]);
             opts.log("system", "chat cleared");
             return;
+        }
+
+        // Intercept runtime-config slash commands (/model, /effort,
+        // /permission-mode, /bypass, /plan, /runtime). AgentMux drives
+        // Claude in stream-json mode, so the CLI never sees these as
+        // control commands — it treats them as user text and Claude
+        // replies "not a command". We handle them client-side and mutate
+        // block.meta["agent:runtime"] so they take effect on the NEXT
+        // turn via the runtime-args rebuild below.
+        if (trimmed.startsWith("/")) {
+            const [name, arg] = parseSlashCommand(trimmed);
+            if (isRuntimeSlashCommand(name)) {
+                await dispatchRuntimeSlashCommand(name, arg);
+                return;
+            }
         }
 
         // Apply runtime args (permission mode, model, effort) before this turn.
