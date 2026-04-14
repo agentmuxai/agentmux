@@ -5,7 +5,9 @@
  * AgentFooter - Minimal Claude Code-style input
  */
 
-import { Show, type JSX } from "solid-js";
+import { Show, createMemo, createSignal, type JSX } from "solid-js";
+import type { SlashCommand } from "../commands/types";
+import { SlashAutocomplete } from "./SlashAutocomplete";
 
 interface AgentFooterProps {
     agentId: string;
@@ -25,6 +27,13 @@ interface AgentFooterProps {
      */
     onStopAgent?: () => void;
     loading?: boolean;
+    /**
+     * Slash command completions. When the textarea value matches
+     * `^/\w*$` (no space), AgentFooter calls this with the prefix
+     * (no leading slash) and renders the SlashAutocomplete dropdown.
+     * If absent, autocomplete is disabled.
+     */
+    getCompletions?: (prefix: string) => SlashCommand[];
 }
 
 export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
@@ -50,11 +59,51 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
     // specs/SPEC_TOOL_OVERLAY_AND_SCROLL_ON_TYPE_2026_04_13.md §3.4.
     let textareaRef: HTMLTextAreaElement | undefined;
 
+    // ── Slash autocomplete state ──────────────────────────────────────
+    // Tracks the current `/prefix` (without the leading slash) when the
+    // textarea matches `^/\w*$`. Null = dropdown hidden. Reading the
+    // value via signal lets the dropdown re-render reactively without
+    // controlling the textarea.
+    const [autocompletePrefix, setAutocompletePrefix] = createSignal<string | null>(null);
+    const [autocompleteIndex, setAutocompleteIndex] = createSignal(0);
+
+    const completions = createMemo<SlashCommand[]>(() => {
+        const p = autocompletePrefix();
+        if (p === null || !props.getCompletions) return [];
+        return props.getCompletions(p);
+    });
+
+    const updateAutocomplete = (): void => {
+        if (!textareaRef) return;
+        const val = textareaRef.value;
+        // Show the dropdown only when the value starts with `/` AND
+        // contains no space — once the user types past the command name
+        // they're filling in args, not picking a command.
+        if (val.startsWith("/") && !val.includes(" ") && !val.includes("\n")) {
+            const prefix = val.slice(1);
+            if (autocompletePrefix() !== prefix) {
+                setAutocompletePrefix(prefix);
+                setAutocompleteIndex(0);
+            }
+        } else if (autocompletePrefix() !== null) {
+            setAutocompletePrefix(null);
+        }
+    };
+
+    const acceptCompletion = (cmd: SlashCommand): void => {
+        if (!textareaRef) return;
+        textareaRef.value = `/${cmd.name} `;
+        setAutocompletePrefix(null);
+        textareaRef.focus();
+        props.onTyping?.();
+    };
+
     // RAF debounce for the onTyping callback. Sustained typing in a single
     // frame collapses to one callback; even rapid typing costs ~1 callback
     // per 16ms. Flag is per-component-instance (captured in closure).
     let typingScrollPending = false;
     const handleInput = () => {
+        updateAutocomplete();
         const cb = props.onTyping;
         if (!cb) return;
         if (typingScrollPending) return;
@@ -78,6 +127,33 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
     };
 
     const handleKeyDown = (e: KeyboardEvent) => {
+        // Autocomplete keys take precedence when the dropdown is open
+        // and has at least one match. Tab/Enter accept the selection;
+        // arrows navigate; Esc dismisses without affecting text.
+        if (autocompletePrefix() !== null && completions().length > 0) {
+            const list = completions();
+            if (e.key === "ArrowDown") {
+                e.preventDefault();
+                setAutocompleteIndex((i) => (i + 1) % list.length);
+                return;
+            }
+            if (e.key === "ArrowUp") {
+                e.preventDefault();
+                setAutocompleteIndex((i) => (i - 1 + list.length) % list.length);
+                return;
+            }
+            if (e.key === "Tab" || e.key === "Enter") {
+                e.preventDefault();
+                const match = list[autocompleteIndex()];
+                if (match) acceptCompletion(match);
+                return;
+            }
+            if (e.key === "Escape") {
+                e.preventDefault();
+                setAutocompletePrefix(null);
+                return;
+            }
+        }
         if (e.key === "Enter" && !e.shiftKey) {
             e.preventDefault();
             handleSend();
@@ -104,6 +180,14 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
     return (
         <div class="agent-footer">
             <div class="agent-input-container">
+                <Show when={autocompletePrefix() !== null && completions().length > 0}>
+                    <SlashAutocomplete
+                        completions={completions()}
+                        selectedIndex={autocompleteIndex()}
+                        onHover={(idx) => setAutocompleteIndex(idx)}
+                        onSelect={acceptCompletion}
+                    />
+                </Show>
                 <textarea
                     ref={textareaRef}
                     class="agent-input"
