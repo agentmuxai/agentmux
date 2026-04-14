@@ -128,6 +128,11 @@ export interface SlashCommandContext {
      * Set by useAgentCommands; the dispatcher only sees the function.
      */
     openPicker: (spec: SlashPickerSpec) => Promise<string>;
+    /**
+     * Show the slash command help panel. Wired by useAgentCommands to
+     * a `helpVisible` signal that AgentPresentationView reads.
+     */
+    openHelp: () => void;
 }
 
 /**
