@@ -198,6 +198,11 @@ declare global {
     // ForgeAgent
     type ForgeAgent = {
         id: string;
+        // Stable, filesystem-safe identifier. Drives working dir, env vars,
+        // and cross-references. NEVER changes — distinct from `name` which
+        // is the renameable display. See
+        // specs/SPEC_AGENT_IDENTITY_RESTRUCTURE_2026_04_14.md.
+        slug: string;
         name: string;
         icon: string;
         provider: string;

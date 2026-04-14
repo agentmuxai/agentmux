@@ -10,7 +10,7 @@ checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
 name = "agentmux-cef"
-version = "0.33.156"
+version = "0.33.158"
 dependencies = [
  "agentmux-common",
  "axum 0.8.9",
@@ -34,7 +34,7 @@ dependencies = [
 
 [[package]]
 name = "agentmux-common"
-version = "0.33.156"
+version = "0.33.158"
 dependencies = [
  "tokio",
  "tracing",
@@ -42,7 +42,7 @@ dependencies = [
 
 [[package]]
 name = "agentmux-launcher"
-version = "0.33.156"
+version = "0.33.158"
 dependencies = [
  "windows-sys 0.59.0",
  "winres",
@@ -50,7 +50,7 @@ dependencies = [
 
 [[package]]
 name = "agentmux-srv"
-version = "0.33.156"
+version = "0.33.158"
 dependencies = [
  "agentmux-common",
  "async-stream",
@@ -1124,9 +1124,9 @@ dependencies = [
 
 [[package]]
 name = "hyper-rustls"
-version = "0.27.8"
+version = "0.27.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c2b52f86d1d4bc0d6b4e6826d960b1b333217e07d36b882dca570a5e1c48895b"
+checksum = "33ca68d021ef39cf6463ab54c1d0f5daf03377b70561305bb89a8f83aab66e0f"
 dependencies = [
  "http",
  "hyper",
