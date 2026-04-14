@@ -67,6 +67,9 @@ export function ForgeDetail(props: { model: ForgeViewModel }): JSX.Element {
                                         <span class={`forge-agent-type-badge forge-agent-type-${agentVal().agent_type}`}>{detailTypeBadge()}</span>
                                     </Show>
                                 </div>
+                                <Show when={agentVal().slug}>
+                                    <span class="forge-detail-slug">{agentVal().slug}</span>
+                                </Show>
                                 <span class="forge-detail-sub">
                                     {providerLabel()}
                                     {agentVal().description ? ` \u2022 ${agentVal().description}` : ""}
