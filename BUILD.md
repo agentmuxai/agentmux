@@ -13,7 +13,7 @@ These instructions cover setting up dependencies and building AgentMux from sour
 | Tool | Version | Purpose |
 |------|---------|---------|
 | **Node.js** | v22 LTS | Frontend build (React/Vite) |
-| **Rust** | 1.77+ | Backend (agentmux-srv, agentmux-wsh) + Tauri |
+| **Rust** | 1.77+ | Backend (agentmux-srv) + CEF host (agentmux-cef) |
 | **Task** | Latest | Build orchestration |
 
 > **Note:** Go and Zig are no longer required. The backend is 100% Rust since v0.31.0.
@@ -121,10 +121,10 @@ Features:
 
 ### Backend Rebuild
 
-If you modify Rust backend code (`agentmux-srv/src/` or `agentmux-wsh/src/`):
+If you modify Rust backend code (`agentmux-srv/src/`):
 
 ```bash
-# Rebuild Rust binaries
+# Rebuild Rust binary
 task build:backend
 
 # Then restart dev server
@@ -133,7 +133,6 @@ task dev
 
 This rebuilds:
 - `dist/bin/agentmux-srv-{version}-{platform}.{arch}.exe` (backend server)
-- `dist/bin/wsh-{version}-{platform}.{arch}.exe` (shell integration)
 
 ---
 
@@ -196,9 +195,8 @@ task dev
 
 # 4. Make changes to code
 # - Frontend (frontend/): Auto-reloads
-# - Tauri shell (src-tauri/src/): Auto-rebuilds
 # - Rust backend (agentmux-srv/src/): Run `task build:backend`, restart dev
-# - wsh (agentmux-wsh/src/): Run `task build:wsh`, restart dev
+# - CEF host (agentmux-cef/src/): Run `task cef:build`, restart dev
 
 # 5. Test changes in running app
 
@@ -224,21 +222,18 @@ After building, you'll have:
 
 ```
 dist/bin/
-├── agentmux-srv-{version}-windows.x64.exe       # Rust backend (sidecar)
-└── wsh-{version}-windows.x64.exe                # Shell integration
+└── agentmux-srv-{version}-windows.x64.exe       # Rust backend (sidecar)
 
 target/release/
 ├── agentmux-cef.exe                              # CEF host
 └── agentmux-launcher.exe                         # Portable launcher
-        └── AgentMux_{version}_x64-setup.exe     # Installer
 
 ~/Desktop/
-└── agentmux-cef-{version}-x64-portable/        # Portable build
+└── agentmux-cef-{version}-x64-portable/         # Portable build
     ├── agentmux.exe                             # Launcher
     └── runtime/
-        ├── agentmux-cef.exe                     # CEF host
+        ├── agentmux-cef-{version}.exe           # CEF host
         ├── agentmux-srv-{version}-windows.x64.exe  # Backend
-        ├── wsh.exe                              # Shell integration
         ├── libcef.dll                           # CEF runtime
         └── frontend/                            # Web UI
 ```
@@ -247,13 +242,11 @@ target/release/
 
 | Component | Size | Purpose |
 |-----------|------|---------|
-| `agentmux.exe` | ~14 MB | Tauri app (Rust + WebView2) |
+| `agentmux.exe` (launcher) | ~325 KB | Portable launcher |
+| `agentmux-cef.exe` | ~8 MB | CEF host (Rust + cef-rs) |
 | `agentmux-srv.exe` | ~4 MB | Rust async backend server |
-| `wsh.exe` | ~1.1 MB | Shell integration binary |
-| **Total runtime** | ~19 MB | All components |
-| **Portable ZIP** | ~18 MB | Compressed (v0.31.10) |
-
-Compare to the old Go backend: ~25 MB for backend alone, ~58 MB total runtime.
+| CEF runtime (libcef + paks) | ~160 MB | Bundled Chromium |
+| **Portable ZIP** | ~156 MB | Compressed with CEF bundle |
 
 ---
 
@@ -302,7 +295,6 @@ task build:backend
 
 # Verify binaries exist
 ls -lh dist/bin/agentmux-srv-*
-ls -lh dist/bin/wsh-*
 ```
 
 ### Issue: Tauri build fails with linker errors

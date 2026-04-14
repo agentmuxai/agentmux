@@ -2,14 +2,8 @@
 # Deployed to: ~/.agentmux/shell/pwsh/wavepwsh.ps1
 # Loaded via: pwsh -ExecutionPolicy Bypass -NoExit -File <this-file>
 
-# Add wsh to PATH via the AGENTMUX executable path (portable mode support)
-if ($env:AGENTMUX -and $env:AGENTMUX -ne "1") {
-    $agentmuxAppDir = Split-Path -Parent $env:AGENTMUX
-    if ($agentmuxAppDir -and (Test-Path $agentmuxAppDir)) {
-        $env:PATH = $agentmuxAppDir + [System.IO.Path]::PathSeparator + $env:PATH
-    }
-    Remove-Variable -Name agentmuxAppDir -ErrorAction SilentlyContinue
-}
+# wsh has been retired — AGENTMUX is now a plain "1" sentinel.
+# See specs/SPEC_RETIRE_WSH_2026_04_12.md.
 
 # ─── Shell Integration ────────────────────────────────────────────────────────
 

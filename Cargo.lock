@@ -10,7 +10,7 @@ checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
 name = "agentmux-cef"
-version = "0.33.141"
+version = "0.33.142"
 dependencies = [
  "agentmux-common",
  "axum 0.8.8",
@@ -34,7 +34,7 @@ dependencies = [
 
 [[package]]
 name = "agentmux-common"
-version = "0.33.141"
+version = "0.33.142"
 dependencies = [
  "tokio",
  "tracing",
@@ -42,7 +42,7 @@ dependencies = [
 
 [[package]]
 name = "agentmux-launcher"
-version = "0.33.141"
+version = "0.33.142"
 dependencies = [
  "windows-sys 0.59.0",
  "winres",
@@ -50,7 +50,7 @@ dependencies = [
 
 [[package]]
 name = "agentmux-srv"
-version = "0.33.141"
+version = "0.33.142"
 dependencies = [
  "agentmux-common",
  "async-stream",
@@ -85,23 +85,6 @@ dependencies = [
  "tracing-subscriber",
  "uuid",
  "whoami",
- "winres",
-]
-
-[[package]]
-name = "agentmux-wsh"
-version = "0.33.141"
-dependencies = [
- "base64",
- "clap",
- "dirs",
- "futures-util",
- "serde",
- "serde_json",
- "tokio",
- "tokio-tungstenite 0.26.2",
- "url",
- "uuid",
  "winres",
 ]
 
@@ -266,7 +249,7 @@ dependencies = [
  "sha1",
  "sync_wrapper",
  "tokio",
- "tokio-tungstenite 0.24.0",
+ "tokio-tungstenite",
  "tower",
  "tower-layer",
  "tower-service",
@@ -931,17 +914,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7e3450815272ef58cec6d564423f6e755e25379b217b0bc688e295ba24df6b1d"
 
 [[package]]
-name = "futures-macro"
-version = "0.3.32"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e835b70203e41293343137df5c0664546da5745f82ec9b84d40be8336958447b"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
-]
-
-[[package]]
 name = "futures-sink"
 version = "0.3.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -960,7 +932,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "389ca41296e6190b48053de0321d02a77f32f8a5d2461dd38762c0593805c6d6"
 dependencies = [
  "futures-core",
- "futures-macro",
  "futures-sink",
  "futures-task",
  "pin-project-lite",
@@ -2856,19 +2827,7 @@ dependencies = [
  "futures-util",
  "log",
  "tokio",
- "tungstenite 0.24.0",
-]
-
-[[package]]
-name = "tokio-tungstenite"
-version = "0.26.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7a9daff607c6d2bf6c16fd681ccb7eecc83e4e2cdc1ca067ffaadfca5de7f084"
-dependencies = [
- "futures-util",
- "log",
- "tokio",
- "tungstenite 0.26.2",
+ "tungstenite",
 ]
 
 [[package]]
@@ -3057,23 +3016,6 @@ dependencies = [
  "rand 0.8.5",
  "sha1",
  "thiserror 1.0.69",
- "utf-8",
-]
-
-[[package]]
-name = "tungstenite"
-version = "0.26.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4793cb5e56680ecbb1d843515b23b6de9a75eb04b66643e256a396d43be33c13"
-dependencies = [
- "bytes",
- "data-encoding",
- "http",
- "httparse",
- "log",
- "rand 0.9.4",
- "sha1",
- "thiserror 2.0.18",
  "utf-8",
 ]
 

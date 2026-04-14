@@ -9,7 +9,7 @@
 //! OSC 16162;E commands carrying `AGENTMUX_AGENT_ID`, enabling per-pane title
 //! and color to work.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 // ─── Embedded scripts ────────────────────────────────────────────────────────
 
@@ -164,36 +164,8 @@ pub fn get_shell_startup(
     }
 }
 
-/// Find the wsh binary deployed alongside the current executable.
-/// Returns the path if found, or None.
-pub fn find_wsh_binary() -> Option<PathBuf> {
-    let exe_dir = std::env::current_exe().ok()?.parent()?.to_path_buf();
-    let version = env!("CARGO_PKG_VERSION");
-
-    // Try versioned name (matches package-portable.ps1 naming)
-    let versioned = if cfg!(windows) {
-        exe_dir.join(format!("wsh-{}-windows.x64.exe", version))
-    } else if cfg!(target_os = "macos") {
-        exe_dir.join(format!("wsh-{}-darwin.arm64", version))
-    } else {
-        exe_dir.join(format!("wsh-{}-linux.amd64", version))
-    };
-    if versioned.exists() {
-        return Some(versioned);
-    }
-
-    // Fallback: plain wsh / wsh.exe
-    let plain = if cfg!(windows) {
-        exe_dir.join("wsh.exe")
-    } else {
-        exe_dir.join("wsh")
-    };
-    if plain.exists() {
-        return Some(plain);
-    }
-
-    None
-}
+// wsh has been retired — see specs/SPEC_RETIRE_WSH_2026_04_12.md.
+// The `AGENTMUX` env var is now a plain "1" sentinel, not a path.
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 

@@ -2,14 +2,8 @@
 # Deployed to: ~/.agentmux/shell/fish/wave.fish
 # Loaded via: fish -C "source <this-file>"
 
-# Add wsh to PATH via the AGENTMUX executable path (portable mode support)
-if set -q AGENTMUX; and test "$AGENTMUX" != "1"
-    set _agentmux_app_dir (dirname "$AGENTMUX")
-    if test -d "$_agentmux_app_dir"
-        fish_add_path --prepend "$_agentmux_app_dir"
-    end
-    set -e _agentmux_app_dir
-end
+# wsh has been retired — AGENTMUX is now a plain "1" sentinel.
+# See specs/SPEC_RETIRE_WSH_2026_04_12.md.
 
 # ─── Shell Integration ────────────────────────────────────────────────────────
 
