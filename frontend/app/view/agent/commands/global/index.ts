@@ -9,6 +9,7 @@
 
 import type { SlashCommandRegistry } from "../registry";
 import { clearCommand } from "./clear";
+import { helpCommand } from "./help";
 import { loginCommand } from "./login";
 import { RUNTIME_COMMANDS } from "./runtime";
 
@@ -18,4 +19,5 @@ export function registerGlobalCommands(registry: SlashCommandRegistry): void {
     }
     registry.register(loginCommand);
     registry.register(clearCommand);
+    registry.register(helpCommand);
 }

@@ -26,6 +26,7 @@ import { AgentFooter } from "./components/AgentFooter";
 import { AgentPicker } from "./components/AgentPicker";
 import { AgentSearchBar } from "./components/AgentSearchBar";
 import { SlashCommandPicker } from "./components/SlashCommandPicker";
+import { SlashHelpPanel } from "./components/SlashHelpPanel";
 import { BookmarksPanel } from "./components/BookmarksPanel";
 import { SessionDigestBanner } from "./components/SessionDigestBanner";
 import { ContextMenuModel } from "@/app/store/contextmenu";
@@ -284,6 +285,16 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
             </Show>
 
             <div class="agent-composer-region">
+                <Show when={commands.helpVisible()}>
+                    <SlashHelpPanel
+                        commands={commands.availableCommands()}
+                        onInvoke={(cmd) => {
+                            commands.closeHelp();
+                            void commands.sendMessage(`/${cmd.name}`);
+                        }}
+                        onClose={commands.closeHelp}
+                    />
+                </Show>
                 <Show when={commands.pickerSpec()}>
                     {(spec) => (
                         <SlashCommandPicker
