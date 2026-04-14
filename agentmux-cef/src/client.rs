@@ -364,6 +364,259 @@ impl AgentMuxHandler {
         let uri = CefString::from(data_uri.as_str());
         frame.load_url(Some(&uri));
     }
+
+    /// Render-process terminated — typically OOM, a renderer-side panic, or
+    /// some native bug inside CEF/Chromium. Without this hook the window
+    /// just turns white. We log the cause and replace the white page with
+    /// a recovery HTML page that offers Reload / Quit buttons.
+    ///
+    /// See specs/SPEC_GRACEFUL_CRASH_HANDLING_2026_04_13.md (PR 1).
+    fn on_render_process_terminated(
+        &mut self,
+        browser: Option<&mut Browser>,
+        status: TerminationStatus,
+        error_code: i32,
+        error_string: Option<&CefString>,
+    ) {
+        let reason = if status == TerminationStatus::PROCESS_OOM {
+            "out of memory"
+        } else if status == TerminationStatus::PROCESS_CRASHED {
+            "renderer process crashed"
+        } else if status == TerminationStatus::ABNORMAL_TERMINATION {
+            "abnormal termination"
+        } else {
+            "renderer process terminated"
+        };
+
+        let detail = error_string.map(CefString::to_string).unwrap_or_default();
+        tracing::error!(
+            target: "crash",
+            kind = "renderer_terminated",
+            reason,
+            error_code,
+            detail = %detail,
+            "{}", reason,
+        );
+
+        // Resolve the real frontend URL so the Reload button can navigate
+        // back to the live app instead of reloading the recovery page
+        // itself. Matches the format used by
+        // commands::window::resolve_frontend_base_url and its callers
+        // (see window.rs:400, window.rs:430, drag.rs:294 — all use the
+        // same ipc_port / ipc_token query params).
+        let base_url = crate::commands::window::resolve_frontend_base_url(self.ipc_port);
+        let separator = if base_url.contains('?') { "&" } else { "?" };
+        let app_url = format!(
+            "{}{}ipc_port={}&ipc_token={}",
+            base_url, separator, self.ipc_port, self.state.ipc_token
+        );
+
+        let detail_block = if detail.is_empty() {
+            String::new()
+        } else {
+            format!("<p class=\"detail\"><code>{}</code></p>", html_escape(&detail))
+        };
+
+        // Build the recovery page. Plain HTML+CSS, no JS dependencies
+        // beyond a single click handler, so it renders even if the
+        // frontend bundle is dead. The Reload button navigates directly
+        // to the real app URL (NOT location.reload() — that would just
+        // re-render the same data: URL). CEF will spawn a fresh renderer
+        // subprocess for the navigation.
+        //
+        // NOTE on ipc_token exposure: the token is already present in
+        // the live app URL that was loaded before the crash (it's in
+        // the location bar for the dead renderer's process). Embedding
+        // it in the recovery HTML that runs inside the same browser
+        // doesn't extend its reach — the HTML is ephemeral, not
+        // persisted to disk, and `window.close()` or the next crash
+        // clears it.
+        let html = format!(
+            r#"<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>AgentMux — Recovery</title>
+    <style>
+        :root {{
+            color-scheme: dark;
+        }}
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #1e1e2e;
+            color: #cdd6f4;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            padding: 24px;
+            box-sizing: border-box;
+        }}
+        .recovery {{
+            text-align: center;
+            max-width: 540px;
+            padding: 36px;
+            background: #181825;
+            border: 1px solid #313244;
+            border-radius: 10px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+        }}
+        .icon {{
+            font-size: 36px;
+            line-height: 1;
+            margin-bottom: 12px;
+        }}
+        h1 {{
+            color: #f9e2af;
+            font-size: 22px;
+            margin: 0 0 6px 0;
+        }}
+        .reason {{
+            color: #a6adc8;
+            font-size: 14px;
+            margin: 0 0 20px 0;
+            font-style: italic;
+        }}
+        p {{
+            color: #bac2de;
+            line-height: 1.55;
+            margin: 0 0 12px 0;
+            font-size: 14px;
+        }}
+        .detail code {{
+            display: inline-block;
+            background: #313244;
+            color: #f38ba8;
+            padding: 6px 10px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-family: ui-monospace, 'Cascadia Code', Menlo, Consolas, monospace;
+            word-break: break-all;
+            text-align: left;
+            max-width: 100%;
+        }}
+        .actions {{
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+            margin-top: 24px;
+            flex-wrap: wrap;
+        }}
+        button {{
+            padding: 10px 22px;
+            border: 1px solid #45475a;
+            border-radius: 6px;
+            background: #313244;
+            color: #cdd6f4;
+            cursor: pointer;
+            font-size: 13px;
+            font-family: inherit;
+            transition: background 0.1s, border-color 0.1s;
+        }}
+        button:hover {{
+            background: #45475a;
+            border-color: #585b70;
+        }}
+        button.primary {{
+            background: #89b4fa;
+            color: #1e1e2e;
+            border-color: #89b4fa;
+            font-weight: 600;
+        }}
+        button.primary:hover {{
+            background: #74a0f8;
+            border-color: #74a0f8;
+        }}
+        .footer {{
+            color: #6c7086;
+            font-size: 11px;
+            margin-top: 18px;
+            font-family: ui-monospace, monospace;
+        }}
+    </style>
+</head>
+<body>
+    <div class="recovery" role="alertdialog" aria-labelledby="title">
+        <div class="icon">⚠</div>
+        <h1 id="title">AgentMux hit a problem</h1>
+        <p class="reason">Reason: {reason_safe}</p>
+        {detail_block}
+        <p>Your open sessions are saved on disk. Reloading will bring you back where you left off.</p>
+        <div class="actions">
+            <button class="primary" id="reload-btn">Reload window</button>
+            <button onclick="window.close()">Quit</button>
+        </div>
+        <div class="footer">error_code={error_code}</div>
+    </div>
+    <script>
+        // The Reload button navigates to the live app URL (not
+        // location.reload, which would just re-render this data: page).
+        // The URL is injected by the host at HTML-build time.
+        document.getElementById('reload-btn').addEventListener('click', function() {{
+            location.href = {app_url_js};
+        }});
+    </script>
+</body>
+</html>"#,
+            reason_safe = html_escape(reason),
+            detail_block = detail_block,
+            error_code = error_code,
+            app_url_js = js_string_literal(&app_url),
+        );
+
+        // Load the recovery page in the main frame of the dead browser.
+        // The renderer subprocess will be re-spawned by CEF when we
+        // navigate, so the new page mounts in a fresh process.
+        if let Some(b) = browser {
+            if let Some(frame) = b.main_frame() {
+                let b64 = cef::base64_encode(Some(html.as_bytes()));
+                let b64_str = CefString::from(&b64).to_string();
+                let data_uri = format!("data:text/html;base64,{}", b64_str);
+                let uri = CefString::from(data_uri.as_str());
+                frame.load_url(Some(&uri));
+            }
+        }
+    }
+}
+
+/// Quote a string as a JavaScript string literal — escape backslashes,
+/// quotes, and newlines so it's safe to embed inside `<script>` via
+/// `format!`. Used by the recovery page to inject the app URL for the
+/// Reload button's navigation target.
+fn js_string_literal(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('"');
+    for c in s.chars() {
+        match c {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            '<' => out.push_str("\\u003c"), // defense against </script> injection
+            '>' => out.push_str("\\u003e"),
+            '&' => out.push_str("\\u0026"),
+            c if (c as u32) < 0x20 => {
+                out.push_str(&format!("\\u{:04x}", c as u32));
+            }
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}
+
+/// Minimal HTML escape for the recovery page. Only the characters that
+/// would break the `format!`-templated string need attention; the input
+/// (CEF status enum + cef-provided error string) is trusted but may
+/// contain `&` / `<` / `>` in some failure modes.
+fn html_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&#39;")
 }
 
 // ---------------------------------------------------------------------------
@@ -390,6 +643,10 @@ wrap_client! {
 
         fn load_handler(&self) -> Option<LoadHandler> {
             Some(AgentMuxLoadHandler::new(self.inner.clone()))
+        }
+
+        fn request_handler(&self) -> Option<RequestHandler> {
+            Some(AgentMuxRequestHandler::new(self.inner.clone()))
         }
     }
 }
@@ -512,6 +769,33 @@ wrap_load_handler! {
         ) {
             let mut inner = self.inner.lock();
             inner.on_load_error(browser, frame, error_code, error_text, failed_url);
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// RequestHandler — render-process termination (white-screen recovery)
+// ---------------------------------------------------------------------------
+//
+// We only override `on_render_process_terminated` here. Everything else
+// inherits the default (no-op) implementations from the cef-rs trait.
+// See SPEC_GRACEFUL_CRASH_HANDLING_2026_04_13.md (PR 1).
+
+wrap_request_handler! {
+    struct AgentMuxRequestHandler {
+        inner: Arc<Mutex<AgentMuxHandler>>,
+    }
+
+    impl RequestHandler {
+        fn on_render_process_terminated(
+            &self,
+            browser: Option<&mut Browser>,
+            status: TerminationStatus,
+            error_code: ::std::os::raw::c_int,
+            error_string: Option<&CefString>,
+        ) {
+            let mut inner = self.inner.lock();
+            inner.on_render_process_terminated(browser, status, error_code, error_string);
         }
     }
 }
