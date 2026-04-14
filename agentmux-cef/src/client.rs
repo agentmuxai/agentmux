@@ -398,21 +398,39 @@ impl AgentMuxHandler {
             "{}", reason,
         );
 
-        // Build the recovery page. Plain HTML+CSS, no JS dependencies, so
-        // it renders even if the frontend bundle is dead. The Reload button
-        // calls history.go(0), which forces a navigation refresh from the
-        // current URL — for a `data:` URL that won't go anywhere, but the
-        // host injects a real frontend URL via load_url() once the user
-        // triggers it via the JS bridge `window.__AGENTMUX_RECOVER__`.
-        // (For now the JS bridge is not wired; users see Reload as a
-        // visual affordance and can use the system Quit / close window
-        // buttons to exit cleanly.)
+        // Resolve the real frontend URL so the Reload button can navigate
+        // back to the live app instead of reloading the recovery page
+        // itself. Matches the format used by
+        // commands::window::resolve_frontend_base_url and its callers
+        // (see window.rs:400, window.rs:430, drag.rs:294 — all use the
+        // same ipc_port / ipc_token query params).
+        let base_url = crate::commands::window::resolve_frontend_base_url(self.ipc_port);
+        let separator = if base_url.contains('?') { "&" } else { "?" };
+        let app_url = format!(
+            "{}{}ipc_port={}&ipc_token={}",
+            base_url, separator, self.ipc_port, self.state.ipc_token
+        );
+
         let detail_block = if detail.is_empty() {
             String::new()
         } else {
             format!("<p class=\"detail\"><code>{}</code></p>", html_escape(&detail))
         };
 
+        // Build the recovery page. Plain HTML+CSS, no JS dependencies
+        // beyond a single click handler, so it renders even if the
+        // frontend bundle is dead. The Reload button navigates directly
+        // to the real app URL (NOT location.reload() — that would just
+        // re-render the same data: URL). CEF will spawn a fresh renderer
+        // subprocess for the navigation.
+        //
+        // NOTE on ipc_token exposure: the token is already present in
+        // the live app URL that was loaded before the crash (it's in
+        // the location bar for the dead renderer's process). Embedding
+        // it in the recovery HTML that runs inside the same browser
+        // doesn't extend its reach — the HTML is ephemeral, not
+        // persisted to disk, and `window.close()` or the next crash
+        // clears it.
         let html = format!(
             r#"<!DOCTYPE html>
 <html lang="en">
@@ -524,18 +542,27 @@ impl AgentMuxHandler {
         <h1 id="title">AgentMux hit a problem</h1>
         <p class="reason">Reason: {reason_safe}</p>
         {detail_block}
-        <p>Your open sessions are saved on disk. Reloading should bring you back where you left off.</p>
+        <p>Your open sessions are saved on disk. Reloading will bring you back where you left off.</p>
         <div class="actions">
-            <button class="primary" onclick="location.reload()">Reload window</button>
+            <button class="primary" id="reload-btn">Reload window</button>
             <button onclick="window.close()">Quit</button>
         </div>
         <div class="footer">error_code={error_code}</div>
     </div>
+    <script>
+        // The Reload button navigates to the live app URL (not
+        // location.reload, which would just re-render this data: page).
+        // The URL is injected by the host at HTML-build time.
+        document.getElementById('reload-btn').addEventListener('click', function() {{
+            location.href = {app_url_js};
+        }});
+    </script>
 </body>
 </html>"#,
             reason_safe = html_escape(reason),
             detail_block = detail_block,
             error_code = error_code,
+            app_url_js = js_string_literal(&app_url),
         );
 
         // Load the recovery page in the main frame of the dead browser.
@@ -551,6 +578,33 @@ impl AgentMuxHandler {
             }
         }
     }
+}
+
+/// Quote a string as a JavaScript string literal — escape backslashes,
+/// quotes, and newlines so it's safe to embed inside `<script>` via
+/// `format!`. Used by the recovery page to inject the app URL for the
+/// Reload button's navigation target.
+fn js_string_literal(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('"');
+    for c in s.chars() {
+        match c {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            '<' => out.push_str("\\u003c"), // defense against </script> injection
+            '>' => out.push_str("\\u003e"),
+            '&' => out.push_str("\\u0026"),
+            c if (c as u32) < 0x20 => {
+                out.push_str(&format!("\\u{:04x}", c as u32));
+            }
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
 }
 
 /// Minimal HTML escape for the recovery page. Only the characters that
