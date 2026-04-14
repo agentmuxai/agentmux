@@ -333,7 +333,7 @@ fn resolve_backend_binary(
             entries
                 .filter_map(|e| e.ok())
                 .map(|e| e.file_name().to_string_lossy().to_string())
-                .filter(|n| n.contains("agentmux") || n.contains("srv") || n.contains("wsh"))
+                .filter(|n| n.contains("agentmux") || n.contains("srv"))
                 .collect::<Vec<_>>()
                 .join(", ")
         })
@@ -373,8 +373,6 @@ fn parse_estart(line: &str) -> BackendSpawnResult {
     }
 }
 
-/// Deploy the bundled wsh binary.
-///
 /// Create a Windows Job Object and assign the child process to it.
 #[cfg(target_os = "windows")]
 fn create_job_object_for_child(pid: u32) -> Result<*mut std::ffi::c_void, String> {

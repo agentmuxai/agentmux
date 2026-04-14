@@ -59,8 +59,6 @@ pub const META_KEY_CMD_ARGS: &str = "cmd:args";
 pub const META_KEY_CMD_ENV: &str = "cmd:env";
 #[allow(dead_code)]
 pub const META_KEY_CMD_JWT: &str = "cmd:jwt";
-#[allow(dead_code)]
-pub const META_KEY_CMD_NO_WSH: &str = "cmd:nowsh";
 pub const META_KEY_CMD_RUN_ON_START: &str = "cmd:runonstart";
 pub const META_KEY_CMD_RUN_ONCE: &str = "cmd:runonce";
 pub const META_KEY_CMD_CLEAR_ON_START: &str = "cmd:clearonstart";

@@ -104,8 +104,6 @@ pub struct CommandOpts {
     pub env: HashMap<String, String>,
     /// Whether to include JWT token in environment.
     pub force_jwt: bool,
-    /// Whether WSH protocol is disabled.
-    pub no_wsh: bool,
 }
 
 // ---- ShellProc ----
@@ -491,7 +489,6 @@ mod tests {
         assert!(opts.shell_opts.is_empty());
         assert!(opts.env.is_empty());
         assert!(!opts.force_jwt);
-        assert!(!opts.no_wsh);
     }
 
     #[test]

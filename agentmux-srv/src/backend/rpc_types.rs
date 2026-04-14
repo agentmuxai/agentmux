@@ -210,7 +210,6 @@ pub const COMMAND_REMOTE_INSTALL_RC_FILES: &str = "remoteinstallrcfiles";
 
 // Info/activity commands
 pub const COMMAND_APP_INFO: &str = "waveinfo";
-pub const COMMAND_WSH_ACTIVITY: &str = "wshactivity";
 pub const COMMAND_ACTIVITY: &str = "activity";
 pub const COMMAND_GET_VAR: &str = "getvar";
 pub const COMMAND_SET_VAR: &str = "setvar";
@@ -911,8 +910,6 @@ pub struct WorkspaceInfoData {
 pub struct ConnStatus {
     pub status: String,
     #[serde(default)]
-    pub wshenabled: bool,
-    #[serde(default)]
     pub connection: String,
     #[serde(default)]
     pub connected: bool,
@@ -922,12 +919,6 @@ pub struct ConnStatus {
     pub activeconnnum: i32,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub error: String,
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub wsherror: String,
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub nowshreason: String,
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub wshversion: String,
 }
 
 /// Matches Go's `WaveNotificationOptions`
@@ -1405,7 +1396,6 @@ mod tests {
             status: "connected".to_string(),
             connection: "ssh:myhost".to_string(),
             connected: true,
-            wshenabled: true,
             ..Default::default()
         };
         let json = serde_json::to_string(&status).unwrap();
