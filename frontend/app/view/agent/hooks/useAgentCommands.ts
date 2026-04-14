@@ -94,6 +94,18 @@ export interface UseAgentCommands {
      * autocomplete dropdown.
      */
     completions: (prefix: string) => SlashCommand[];
+    /**
+     * Help panel state. /help sets this to true via ctx.openHelp;
+     * AgentPresentationView reads it to mount <SlashHelpPanel />.
+     */
+    helpVisible: Accessor<boolean>;
+    /** Close the help panel (Esc / close button / row click). */
+    closeHelp: () => void;
+    /**
+     * Every command currently available in this pane (post-availability
+     * filter). Consumed by SlashHelpPanel to render the grouped list.
+     */
+    availableCommands: () => SlashCommand[];
 }
 
 // Runtime-config + auth slash commands (/model /effort /permission-mode
@@ -148,6 +160,17 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         r?.();
     };
 
+    // ── Help panel state ──────────────────────────────────────────────
+    // /help calls ctx.openHelp(); the view reads helpVisible() and
+    // mounts <SlashHelpPanel />. Stays open until the user dismisses.
+    const [helpVisible, setHelpVisible] = createSignal(false);
+    const openHelp = (): void => {
+        setHelpVisible(true);
+    };
+    const closeHelp = (): void => {
+        setHelpVisible(false);
+    };
+
     // Build the SlashCommandContext bundle. Used by sendMessage's
     // dispatch and by completions(); both need the same view of the
     // pane's reactive state.
@@ -159,10 +182,15 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         log: opts.log,
         setAuthUrl: opts.setAuthUrl,
         openPicker,
+        openHelp,
     });
 
     const completions = (prefix: string): SlashCommand[] => {
         return registry().completions(prefix, buildCommandContext());
+    };
+
+    const availableCommands = (): SlashCommand[] => {
+        return registry().list(buildCommandContext());
     };
 
     const sendMessage = async (message: string): Promise<void> => {
@@ -246,5 +274,8 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         resolvePicker,
         dismissPicker,
         completions,
+        helpVisible,
+        closeHelp,
+        availableCommands,
     };
 }
