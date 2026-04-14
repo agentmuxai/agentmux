@@ -26,14 +26,12 @@ import { createEffect, createSignal, onMount, type Accessor } from "solid-js";
 function filterConnections(
     connList: Array<string>,
     connSelected: string,
-    fullConfig: FullConfigType,
-    filterOutNowsh: boolean
+    fullConfig: FullConfigType
 ): Array<string> {
     const connectionsConfig = fullConfig.connections;
     return connList.filter((conn) => {
         const hidden = connectionsConfig?.[conn]?.["display:hidden"] ?? false;
-        const wshEnabled = connectionsConfig?.[conn]?.["conn:wshenabled"] ?? true;
-        return conn.includes(connSelected) && !hidden && (wshEnabled || !filterOutNowsh);
+        return conn.includes(connSelected) && !hidden;
     });
 }
 
@@ -163,10 +161,9 @@ function getLocalSuggestions(
     connection: string,
     connSelected: string,
     connStatusMap: Map<string, ConnStatus>,
-    fullConfig: FullConfigType,
-    filterOutNowsh: boolean
+    fullConfig: FullConfigType
 ): SuggestionConnectionScope | null {
-    const wslFiltered = filterConnections(connList, connSelected, fullConfig, filterOutNowsh);
+    const wslFiltered = filterConnections(connList, connSelected, fullConfig);
     const wslSuggestionItems = createWslSuggestionItems(wslFiltered, connection, connStatusMap);
     const localSuggestionItem = createFilteredLocalSuggestionItem(localName, connection, connSelected);
     const combinedSuggestionItems = [...localSuggestionItem, ...wslSuggestionItems];
@@ -186,10 +183,9 @@ function getRemoteSuggestions(
     connection: string,
     connSelected: string,
     connStatusMap: Map<string, ConnStatus>,
-    fullConfig: FullConfigType,
-    filterOutNowsh: boolean
+    fullConfig: FullConfigType
 ): SuggestionConnectionScope | null {
-    const filtered = filterConnections(connList, connSelected, fullConfig, filterOutNowsh);
+    const filtered = filterConnections(connList, connSelected, fullConfig);
     const suggestionItems = createRemoteSuggestionItems(filtered, connection, connStatusMap);
     const sortedSuggestionItems = sortConnSuggestionItems(suggestionItems, fullConfig);
     if (sortedSuggestionItems.length == 0) {
@@ -207,10 +203,9 @@ function getS3Suggestions(
     connection: string,
     connSelected: string,
     connStatusMap: Map<string, ConnStatus>,
-    fullConfig: FullConfigType,
-    filterOutNowsh: boolean
+    fullConfig: FullConfigType
 ): SuggestionConnectionScope | null {
-    const filtered = filterConnections(s3Profiles, connSelected, fullConfig, filterOutNowsh);
+    const filtered = filterConnections(s3Profiles, connSelected, fullConfig);
     const s3Items = createS3SuggestionItems(filtered, connStatusMap, connection);
     const sortedS3Items = sortConnSuggestionItems(s3Items, fullConfig);
     if (sortedS3Items.length == 0) {
@@ -333,7 +328,6 @@ const ChangeConnectionBlockModal = ({
     const allConnStatus = atoms.allConnStatus;
     const [rowIndex, setRowIndex] = createSignal(0);
     const fullConfig = () => atoms.fullConfigAtom();
-    const filterOutNowsh = () => (viewModel.filterOutNowsh ? viewModel.filterOutNowsh() : true);
     const showS3 = () => (viewModel.showS3 ? viewModel.showS3() : false);
 
     createEffect(() => {
@@ -422,16 +416,14 @@ const ChangeConnectionBlockModal = ({
             conn,
             connSelected(),
             connStatusMap,
-            fc,
-            filterOutNowsh()
+            fc
         );
         const remoteSuggestions = getRemoteSuggestions(
             connList(),
             conn,
             connSelected(),
             connStatusMap,
-            fc,
-            filterOutNowsh()
+            fc
         );
         let s3Suggestions: SuggestionConnectionScope = null;
         if (showS3()) {
@@ -440,8 +432,7 @@ const ChangeConnectionBlockModal = ({
                 conn,
                 connSelected(),
                 connStatusMap,
-                fc,
-                filterOutNowsh()
+                fc
             );
         }
         const connectionsEditItem = getConnectionsEditItem(setChangeConnModalOpen, connSelected());
