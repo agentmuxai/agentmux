@@ -383,7 +383,13 @@
         border-radius: 6px;
         background: color-mix(in srgb, var(--main-bg-color) 95%, transparent);
         overflow: hidden;
+        // Guarantee a visible content area below the header. Without
+        // an explicit minimum the panel collapses to just its border
+        // (the "blue line" bug) because the picker-list parent is
+        // `flex: 1` and this panel had no `flex-shrink: 0` floor.
+        min-height: 320px;
         max-height: 60vh;
+        flex-shrink: 0;
         display: flex;
         flex-direction: column;
 
@@ -445,7 +451,21 @@
             flex: 1;
             overflow: auto;
             padding: 8px;
-            min-height: 200px;
+            min-height: 0;
+
+            // ForgeDetail / IdentityPanel were designed for full-pane
+            // rendering and set `height: 100%` on their root. Percent
+            // heights don't resolve inside this flex container because
+            // the panel is sized by content (capped at 60vh), so the
+            // 100% chain collapses to 0 and the body renders empty —
+            // which combined with the panel's 1px accent border shows
+            // as just a horizontal blue line under the agent card.
+            // Override: let them flow naturally + fill available space.
+            .forge-pane,
+            .identity-view {
+                height: auto;
+                min-height: 100%;
+            }
         }
     }
 
