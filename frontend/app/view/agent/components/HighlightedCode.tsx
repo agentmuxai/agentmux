@@ -39,12 +39,12 @@ const CAP_BYTES = 200 * 1024; // 200 KB
 const CAP_LINES = 2000;
 
 // Module-level cache: ToolNode objects are immutable, so the same
-// (code, lang) pair always produces the same HTML. Key on the code
-// string itself since ToolNode isn't always available at call sites.
+// (code, lang) pair always produces the same HTML. Key on the full code +
+// lang string — no collision risk, and the code is already in memory.
 const highlightCache = new Map<string, string>();
 
 function cacheKey(code: string, lang: string): string {
-    return `${lang}:${code.length}:${code.slice(0, 64)}`;
+    return `${lang}:${code}`;
 }
 
 interface HighlightedCodeProps {

@@ -77,7 +77,7 @@ export const DiffViewer = (props: DiffViewerProps): JSX.Element => {
         const lines = parseDiffLines(d);
         if (lines.length > CAP_LINES) return; // fall back to plain render
 
-        const key = `${fp}::${d.length}::${d.slice(0, 64)}`;
+        const key = `${fp}::${d}`;
         if (diffCache.has(key)) {
             setHighlightedHtml(diffCache.get(key)!);
             return;
@@ -196,9 +196,12 @@ export const DiffViewer = (props: DiffViewerProps): JSX.Element => {
             when={highlightedHtml() !== null}
             fallback={<PlainDiff />}
         >
-            <pre ref={preEl} class="agent-diff agent-diff--highlighted">
+            {/* Header lives outside the <pre> so that innerHTML = shikiHtml
+                does not overwrite it. The <pre> receives only Shiki content. */}
+            <div class="agent-diff agent-diff--highlighted">
                 <div class="agent-diff-header">{filePath()}</div>
-            </pre>
+                <pre ref={preEl} class="agent-diff-highlighted-body" />
+            </div>
         </Show>
     );
 };
