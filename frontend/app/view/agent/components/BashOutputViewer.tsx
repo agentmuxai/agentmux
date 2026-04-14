@@ -8,6 +8,7 @@
 import clsx from "clsx";
 import { Show, type JSX } from "solid-js";
 import type { BashParams, BashResult } from "../types";
+import { HighlightedCode } from "./HighlightedCode";
 
 interface BashOutputViewerProps {
     params: BashParams;
@@ -21,7 +22,12 @@ export const BashOutputViewer = ({ params, result }: BashOutputViewerProps): JSX
     return (
         <div class="agent-bash">
             <div class="agent-bash-cmd">
-                <span class="agent-bash-dollar">$</span> {params.command}
+                <span class="agent-bash-dollar">$</span>
+                <HighlightedCode
+                    code={params.command}
+                    lang="bash"
+                    class="agent-bash-cmd-code"
+                />
             </div>
             <Show when={hasOutput}>
                 <pre class={clsx("agent-bash-output", { "has-error": hasError })}>

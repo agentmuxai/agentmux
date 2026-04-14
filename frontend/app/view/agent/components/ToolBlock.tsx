@@ -44,6 +44,8 @@ import type { ToolNode } from "../types";
 import { BashOutputViewer } from "./BashOutputViewer";
 import { CompactResult } from "./CompactResult";
 import { DiffViewer } from "./DiffViewer";
+import { HighlightedCode } from "./HighlightedCode";
+import { detectLanguage } from "./detectLanguage";
 
 interface ToolBlockProps {
     node: ToolNode;
@@ -206,19 +208,29 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
             case "Bash":
                 return <BashOutputViewer params={node.params as any} result={node.result as any} />;
 
-            case "Read":
+            case "Read": {
+                const filePath = (node.params as any).file_path ?? "";
+                const content: string | undefined = (node.result as any)?.content;
                 return (
                     <div class="agent-tool-read">
-                        <div class="agent-tool-file-path">{(node.params as any).file_path}</div>
-                        <Show when={node.result}>
-                            {(node.result as any).content ? (
-                                <pre class="agent-tool-read-content">{(node.result as any).content}</pre>
-                            ) : (
-                                <CompactResult tool={node.tool} params={node.params as any} result={node.result} />
-                            )}
+                        <div class="agent-tool-file-path">{filePath}</div>
+                        <Show
+                            when={content}
+                            fallback={
+                                <Show when={node.result}>
+                                    <CompactResult tool={node.tool} params={node.params as any} result={node.result} />
+                                </Show>
+                            }
+                        >
+                            <HighlightedCode
+                                code={content!}
+                                lang={detectLanguage(filePath, content!.split("\n")[0])}
+                                class="agent-tool-read-content"
+                            />
                         </Show>
                     </div>
                 );
+            }
 
             case "Write":
                 return (
