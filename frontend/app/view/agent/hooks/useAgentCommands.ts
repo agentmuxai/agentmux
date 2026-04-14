@@ -23,14 +23,14 @@
  * flags (permission mode, model, effort) take effect on this turn.
  */
 
-import { type Accessor, createMemo } from "solid-js";
+import { type Accessor, createMemo, createSignal } from "solid-js";
 import { RpcApi } from "@/app/store/wshclientapi";
 import { TabRpcClient } from "@/app/store/wshrpcutil";
 import * as WOS from "@/app/store/wos";
 import { buildRuntimeArgs, getRuntimeConfig } from "../buildRuntimeArgs";
 import { dispatchSlashCommand } from "../commands/dispatch";
 import { buildRegistry } from "../commands/registry";
-import type { SlashCommandContext } from "../commands/types";
+import type { SlashCommandContext, SlashPickerSpec } from "../commands/types";
 import type { ProviderDefinition } from "../providers";
 import type { SignalPair } from "../state";
 import type { DocumentNode } from "../types";
@@ -63,7 +63,7 @@ export interface UseAgentCommandsOptions {
 }
 
 export interface UseAgentCommands {
-    /** Send a user message. Handles `/login` and `/clear` as special cases. */
+    /** Send a user message. Slash commands are intercepted via the registry. */
     sendMessage: (message: string) => Promise<void>;
     /** Return to the agent picker by clearing the agent-identity meta keys. */
     back: () => Promise<void>;
@@ -75,6 +75,17 @@ export interface UseAgentCommands {
      * See SPEC_AGENT_PANE_FOLLOWUPS item #9.
      */
     stopAgent: () => void;
+    /**
+     * Inline picker state. Non-null when a slash command needs to
+     * resolve a required enum/dynamic arg via the picker UI. The
+     * AgentPresentationView reads this to decide whether to render
+     * <SlashCommandPicker /> above the composer.
+     */
+    pickerSpec: Accessor<SlashPickerSpec | null>;
+    /** Resolve the picker promise with the chosen value. */
+    resolvePicker: (value: string) => void;
+    /** Reject the picker promise (Esc / dismiss). */
+    dismissPicker: () => void;
 }
 
 // Runtime-config + auth slash commands (/model /effort /permission-mode
@@ -92,6 +103,42 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
     // provider-scoped commands swap in/out. Global commands are
     // registered first and can't be shadowed (see registry.register).
     const registry = createMemo(() => buildRegistry(opts.provider()));
+
+    // ── Inline picker state ───────────────────────────────────────────
+    // The dispatcher calls `ctx.openPicker(spec)` for required enum/
+    // dynamic args; this hook hands back a Promise that resolves when
+    // the user picks (or rejects on Esc). The picker spec signal is
+    // consumed by AgentPresentationView to render the picker overlay.
+    const [pickerSpec, setPickerSpec] = createSignal<SlashPickerSpec | null>(null);
+    let pickerResolver: ((value: string) => void) | null = null;
+    let pickerRejecter: (() => void) | null = null;
+
+    const openPicker = (spec: SlashPickerSpec): Promise<string> => {
+        // If a previous picker is still open (shouldn't happen because
+        // dispatch awaits), dismiss it cleanly so the new one wins.
+        pickerRejecter?.();
+        return new Promise<string>((resolve, reject) => {
+            pickerResolver = resolve;
+            pickerRejecter = reject;
+            setPickerSpec(spec);
+        });
+    };
+
+    const resolvePicker = (value: string): void => {
+        const r = pickerResolver;
+        pickerResolver = null;
+        pickerRejecter = null;
+        setPickerSpec(null);
+        r?.(value);
+    };
+
+    const dismissPicker = (): void => {
+        const r = pickerRejecter;
+        pickerResolver = null;
+        pickerRejecter = null;
+        setPickerSpec(null);
+        r?.();
+    };
 
     const sendMessage = async (message: string): Promise<void> => {
         setDocument((prev) => [
@@ -128,6 +175,7 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
                 documentAtom: opts.documentAtom,
                 log: opts.log,
                 setAuthUrl: opts.setAuthUrl,
+                openPicker,
             };
             const outcome = await dispatchSlashCommand(trimmed, registry(), ctx);
             if (outcome.kind === "handled") return;
@@ -174,5 +222,5 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         });
     };
 
-    return { sendMessage, back, stopAgent };
+    return { sendMessage, back, stopAgent, pickerSpec, resolvePicker, dismissPicker };
 }

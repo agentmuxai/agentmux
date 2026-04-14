@@ -3,12 +3,17 @@
 
 /**
  * Runtime-config slash commands: /model /effort /permission-mode /bypass
- * /plan /runtime. Migrated from the inline switch in
- * useAgentCommands.sendMessage (PR #378) into the registry.
+ * /plan /runtime.
  *
- * Step 1 of specs/SPEC_SLASH_COMMAND_ARCHITECTURE_2026_04_14.md —
- * behavior is intentionally identical to #378. Enum/picker work lands
- * in step 2.
+ * Step 2 of specs/SPEC_SLASH_COMMAND_ARCHITECTURE_2026_04_14.md —
+ * /model, /effort, and /permission-mode are now `enum` arg kind so a
+ * bare `/model` opens the inline picker. Aliases (e.g.
+ * `claude-sonnet` → `sonnet`) live on each SlashChoice for backwards
+ * compatibility with PR #378's parsing.
+ *
+ * The `choices` factory reads the current runtime config so the picker
+ * marks the active option — the user opens `/model`, sees `Opus
+ * (current)`, and Enter is a no-op confirmation.
  */
 
 import { RpcApi } from "@/app/store/wshclientapi";
@@ -16,44 +21,7 @@ import { TabRpcClient } from "@/app/store/wshrpcutil";
 import * as WOS from "@/app/store/wos";
 import { getRuntimeConfig } from "../../buildRuntimeArgs";
 import type { AgentRuntimeConfig, EffortLevel, ModelChoice, PermissionMode } from "../../types";
-import type { SlashCommand, SlashCommandContext, SlashResult } from "../types";
-
-// Alias tables — preserved from PR #378 so `/model claude-sonnet` and
-// `/effort med` keep working. Step 2 replaces these with picker enums.
-const MODEL_ALIASES: Record<string, ModelChoice> = {
-    "opus": "opus",
-    "sonnet": "sonnet",
-    "haiku": "haiku",
-    "claude-opus": "opus",
-    "claude-sonnet": "sonnet",
-    "claude-haiku": "haiku",
-    "default": null,
-    "": null,
-};
-
-const EFFORT_ALIASES: Record<string, EffortLevel> = {
-    "low": "low",
-    "medium": "medium",
-    "med": "medium",
-    "high": "high",
-    "max": "max",
-    "default": null,
-    "": null,
-};
-
-const PERMISSION_ALIASES: Record<string, PermissionMode> = {
-    "bypass": "bypass",
-    "dangerous": "bypass",
-    "skip": "bypass",
-    "dangerously-skip-permissions": "bypass",
-    "auto": "auto",
-    "accept": "acceptEdits",
-    "acceptedits": "acceptEdits",
-    "accept-edits": "acceptEdits",
-    "plan": "plan",
-    "default": "default",
-    "": "default",
-};
+import type { SlashChoice, SlashCommand, SlashCommandContext, SlashResult } from "../types";
 
 type RuntimeUpdateResult =
     | { ok: true; updated: AgentRuntimeConfig }
@@ -86,21 +54,32 @@ function runtimeError(error: string): SlashResult {
     return { kind: "error", message: `failed to update runtime config: ${error}` };
 }
 
+// ── /model ────────────────────────────────────────────────────────────
+
+function modelChoices(ctx: SlashCommandContext): SlashChoice[] {
+    const current = getRuntimeConfig(ctx.block()?.meta).model;
+    const make = (value: string, label: string, description: string, model: ModelChoice): SlashChoice => ({
+        value,
+        label,
+        description,
+        current: current === model,
+    });
+    return [
+        { ...make("opus", "Opus", "Claude Opus — highest quality", "opus"), aliases: ["claude-opus"] },
+        { ...make("sonnet", "Sonnet", "Claude Sonnet — balanced", "sonnet"), aliases: ["claude-sonnet"] },
+        { ...make("haiku", "Haiku", "Claude Haiku — fastest", "haiku"), aliases: ["claude-haiku"] },
+        make("default", "Default", "Provider default", null),
+    ];
+}
+
 export const modelCommand: SlashCommand = {
     name: "model",
     category: "runtime",
     description: "Change the active model (applies to next turn)",
-    arg: { kind: "freeform", placeholder: "opus | sonnet | haiku | default", required: false },
+    arg: { kind: "enum", required: true, choices: modelChoices },
     availability: "any-agent",
     handler: async (ctx, arg): Promise<SlashResult> => {
-        const key = arg.toLowerCase();
-        if (!(key in MODEL_ALIASES)) {
-            return {
-                kind: "error",
-                message: `/model: unknown model '${arg}'. Try: opus | sonnet | haiku | default`,
-            };
-        }
-        const model = MODEL_ALIASES[key];
+        const model: ModelChoice = arg === "default" ? null : (arg as ModelChoice);
         const result = await updateRuntime(ctx, { model });
         if (result.ok === false) return runtimeError(result.error);
         const label = result.updated.model ?? "default";
@@ -108,21 +87,40 @@ export const modelCommand: SlashCommand = {
     },
 };
 
+// ── /effort ───────────────────────────────────────────────────────────
+
+function effortChoices(ctx: SlashCommandContext): SlashChoice[] {
+    const current = getRuntimeConfig(ctx.block()?.meta).effort;
+    const make = (
+        value: string,
+        label: string,
+        description: string,
+        effort: EffortLevel,
+        aliases?: string[],
+    ): SlashChoice => ({
+        value,
+        label,
+        description,
+        current: current === effort,
+        aliases,
+    });
+    return [
+        make("low", "Low", "Minimal reasoning effort", "low"),
+        make("medium", "Medium", "Balanced reasoning effort", "medium", ["med"]),
+        make("high", "High", "High reasoning effort", "high"),
+        make("max", "Max", "Maximum reasoning effort", "max"),
+        make("default", "Default", "Provider default", null),
+    ];
+}
+
 export const effortCommand: SlashCommand = {
     name: "effort",
     category: "runtime",
     description: "Change reasoning effort level (applies to next turn)",
-    arg: { kind: "freeform", placeholder: "low | medium | high | max | default", required: false },
+    arg: { kind: "enum", required: true, choices: effortChoices },
     availability: "any-agent",
     handler: async (ctx, arg): Promise<SlashResult> => {
-        const key = arg.toLowerCase();
-        if (!(key in EFFORT_ALIASES)) {
-            return {
-                kind: "error",
-                message: `/effort: unknown level '${arg}'. Try: low | medium | high | max | default`,
-            };
-        }
-        const effort = EFFORT_ALIASES[key];
+        const effort: EffortLevel = arg === "default" ? null : (arg as EffortLevel);
         const result = await updateRuntime(ctx, { effort });
         if (result.ok === false) return runtimeError(result.error);
         const label = result.updated.effort ?? "default";
@@ -130,23 +128,49 @@ export const effortCommand: SlashCommand = {
     },
 };
 
+// ── /permission-mode ──────────────────────────────────────────────────
+
+function permissionChoices(ctx: SlashCommandContext): SlashChoice[] {
+    const current = getRuntimeConfig(ctx.block()?.meta).permissionMode;
+    const make = (
+        value: string,
+        label: string,
+        description: string,
+        mode: PermissionMode,
+        aliases?: string[],
+    ): SlashChoice => ({
+        value,
+        label,
+        description,
+        current: current === mode,
+        aliases,
+    });
+    return [
+        make("default", "Default", "Standard permission prompts", "default"),
+        make("auto", "Auto", "Auto-approve safe operations", "auto"),
+        make("acceptEdits", "Accept Edits", "Auto-approve file edits", "acceptEdits", [
+            "accept",
+            "acceptedits",
+            "accept-edits",
+        ]),
+        make("plan", "Plan", "No tool execution — read-only planning", "plan"),
+        make("bypass", "Bypass", "Skip all permission prompts (dangerous)", "bypass", [
+            "dangerous",
+            "skip",
+            "dangerously-skip-permissions",
+        ]),
+    ];
+}
+
 export const permissionModeCommand: SlashCommand = {
     name: "permission-mode",
     aliases: ["permission", "perm"],
     category: "runtime",
     description: "Change permission mode (applies to next turn)",
-    arg: { kind: "freeform", placeholder: "bypass | auto | accept | plan | default", required: false },
+    arg: { kind: "enum", required: true, choices: permissionChoices },
     availability: "any-agent",
     handler: async (ctx, arg): Promise<SlashResult> => {
-        const key = arg.toLowerCase();
-        if (!(key in PERMISSION_ALIASES)) {
-            return {
-                kind: "error",
-                message: `/permission-mode: unknown mode '${arg}'. Try: bypass | auto | accept | plan | default`,
-            };
-        }
-        const mode = PERMISSION_ALIASES[key];
-        const result = await updateRuntime(ctx, { permissionMode: mode });
+        const result = await updateRuntime(ctx, { permissionMode: arg as PermissionMode });
         if (result.ok === false) return runtimeError(result.error);
         return {
             kind: "ok",
@@ -155,12 +179,15 @@ export const permissionModeCommand: SlashCommand = {
     },
 };
 
+// ── /bypass ───────────────────────────────────────────────────────────
+// Shortcut: bare `/bypass` enables; `/bypass off` (or `default`) reverts.
+// Not an enum because the no-arg case has the *opposite* meaning of
+// /model — bare `/bypass` should DO something, not open a picker.
+
 export const bypassCommand: SlashCommand = {
     name: "bypass",
     category: "runtime",
     description: "Enable permission bypass for the next turn (dangerous)",
-    // Shortcut: bare `/bypass` enables; `/bypass off` or `/bypass default`
-    // reverts. Any other arg is a typo — warn instead of silently enabling.
     arg: { kind: "freeform", placeholder: "(empty) | off | default", required: false },
     availability: "any-agent",
     handler: async (ctx, arg): Promise<SlashResult> => {
@@ -185,6 +212,8 @@ export const bypassCommand: SlashCommand = {
     },
 };
 
+// ── /plan ─────────────────────────────────────────────────────────────
+
 export const planCommand: SlashCommand = {
     name: "plan",
     category: "runtime",
@@ -197,6 +226,8 @@ export const planCommand: SlashCommand = {
         return { kind: "ok", message: "permission mode set to plan (applies to next turn)" };
     },
 };
+
+// ── /runtime ──────────────────────────────────────────────────────────
 
 export const runtimeCommand: SlashCommand = {
     name: "runtime",
