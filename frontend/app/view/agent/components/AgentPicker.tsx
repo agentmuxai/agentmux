@@ -13,6 +13,7 @@
 import { createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
 import { RpcApi } from "@/app/store/wshclientapi";
 import { TabRpcClient } from "@/app/store/wshrpcutil";
+import { atoms, WOS } from "@/app/store/global";
 import { waveEventSubscribe } from "@/app/store/wps";
 import type { AgentViewModel } from "../agent-model";
 import { AgentCard } from "./AgentCard";
@@ -129,6 +130,71 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
         setCreateMode(false);
     };
 
+    /**
+     * Validate + execute an inline rename from AgentCard.
+     * Returns null on success, or an error string to display inline.
+     */
+    const handleRename = async (agent: ForgeAgent, newName: string): Promise<string | null> => {
+        const trimmed = newName.trim();
+        if (!trimmed) return "Name cannot be empty";
+        if (trimmed.length > 64) return "Name must be 64 characters or fewer";
+
+        // Uniqueness check (case-insensitive, exclude self)
+        const lc = trimmed.toLowerCase();
+        const collision = agents().find(
+            (a) => a.id !== agent.id && a.name.toLowerCase() === lc
+        );
+        if (collision) return `Name "${trimmed}" is already taken`;
+
+        try {
+            await RpcApi.UpdateForgeAgentCommand(TabRpcClient, {
+                id: agent.id,
+                name: trimmed,
+                icon: agent.icon,
+                provider: agent.provider,
+                description: agent.description,
+                working_directory: agent.working_directory,
+                shell: agent.shell,
+                provider_flags: agent.provider_flags,
+                auto_start: agent.auto_start,
+                restart_on_crash: agent.restart_on_crash,
+                idle_timeout_minutes: agent.idle_timeout_minutes,
+                agent_type: agent.agent_type,
+                environment: agent.environment,
+                agent_bus_id: agent.agent_bus_id,
+            });
+            // Sync the display name in the block meta of any pane running this agent
+            void syncAgentNameInOpenPanes(agent.id, trimmed);
+            return null;
+        } catch (e: any) {
+            return String(e?.message ?? e);
+        }
+    };
+
+    /**
+     * After a rename, find any open agent panes running this agent and update
+     * their block meta agentName so the pane-frame title refreshes immediately.
+     */
+    const syncAgentNameInOpenPanes = async (agentId: string, newName: string): Promise<void> => {
+        try {
+            const tabId = atoms.staticTabId();
+            if (!tabId) return;
+            const tab = WOS.getWaveObjectAtom<Tab>(`tab:${tabId}`)();
+            if (!tab?.blockids) return;
+            for (const blockId of tab.blockids) {
+                const block = WOS.getWaveObjectAtom<Block>(`block:${blockId}`)();
+                if (block?.meta?.["agentId"] === agentId) {
+                    await RpcApi.SetMetaCommand(TabRpcClient, {
+                        oref: WOS.makeORef("block", blockId),
+                        meta: { agentName: newName },
+                    });
+                }
+            }
+        } catch {
+            // best-effort — pane title will update on next interaction
+        }
+    };
+
     const busy = () => launching() !== null;
 
     return (
@@ -169,6 +235,7 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                                         onLaunch={handleSelect}
                                         onOpenForge={openForgeFor}
                                         onOpenIdentity={openIdentityFor}
+                                        onRename={handleRename}
                                     />
                                     <Show when={expandedId() === agent.id && !createMode()}>
                                         <AgentCardSettingsPanel
