@@ -153,8 +153,11 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
 
     // Mutate block.meta["agent:runtime"] with a partial runtime config, the
     // same way AgentControlBar.updateRuntime does. Returns the merged config
-    // so the caller can log it.
-    const updateRuntime = async (patch: Partial<AgentRuntimeConfig>): Promise<AgentRuntimeConfig> => {
+    // on success, null on RPC failure — callers check the return value and
+    // skip the user-visible confirmation if the mutation didn't actually
+    // land (otherwise we log "model set to X" right alongside the error
+    // from SetMetaCommand, which reagent flagged as a false-success path).
+    const updateRuntime = async (patch: Partial<AgentRuntimeConfig>): Promise<AgentRuntimeConfig | null> => {
         const current = getRuntimeConfig(opts.block()?.meta);
         const updated: AgentRuntimeConfig = { ...current, ...patch };
         try {
@@ -162,10 +165,11 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
                 oref: WOS.makeORef("block", opts.blockId),
                 meta: { "agent:runtime": updated },
             });
+            return updated;
         } catch (err: any) {
             opts.log("error", `failed to update runtime config: ${err?.message ?? String(err)}`, "error");
+            return null;
         }
-        return updated;
     };
 
     const handleModelCommand = async (arg: string): Promise<void> => {
@@ -180,6 +184,7 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         }
         const model = MODEL_ALIASES[key];
         const updated = await updateRuntime({ model });
+        if (!updated) return;
         const label = updated.model ?? "default";
         opts.log("system", `model set to ${label} (applies to next turn)`);
     };
@@ -196,6 +201,7 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         }
         const effort = EFFORT_ALIASES[key];
         const updated = await updateRuntime({ effort });
+        if (!updated) return;
         const label = updated.effort ?? "default";
         opts.log("system", `effort set to ${label} (applies to next turn)`);
     };
@@ -212,6 +218,7 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         }
         const mode = PERMISSION_ALIASES[key];
         const updated = await updateRuntime({ permissionMode: mode });
+        if (!updated) return;
         opts.log("system", `permission mode set to ${updated.permissionMode} (applies to next turn)`);
     };
 
@@ -238,15 +245,26 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
             case "perm":
                 await handlePermissionModeCommand(arg);
                 return;
-            case "bypass":
-                // Shortcut: `/bypass` with no arg sets permissionMode=bypass;
-                // `/bypass off` reverts to default.
-                if (arg.toLowerCase() === "off" || arg.toLowerCase() === "default") {
+            case "bypass": {
+                // Shortcut: `/bypass` with no arg enables permission bypass;
+                // `/bypass off` or `/bypass default` reverts to default. Any
+                // other arg is a typo — warn instead of silently enabling
+                // dangerous mode, since bypass disables permission prompts
+                // and a typo like `/bypass of` shouldn't be load-bearing.
+                const bypassArg = arg.toLowerCase();
+                if (bypassArg === "") {
+                    await handlePermissionModeCommand("bypass");
+                } else if (bypassArg === "off" || bypassArg === "default") {
                     await handlePermissionModeCommand("default");
                 } else {
-                    await handlePermissionModeCommand("bypass");
+                    opts.log(
+                        "system",
+                        `/bypass: unknown arg '${arg}'. Use '/bypass' to enable or '/bypass off' to disable.`,
+                        "warn",
+                    );
                 }
                 return;
+            }
             case "plan":
                 // Shortcut: `/plan` = permission-mode plan
                 await handlePermissionModeCommand("plan");
