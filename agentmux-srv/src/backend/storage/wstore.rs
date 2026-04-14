@@ -555,14 +555,40 @@ impl WaveStore {
         Ok(rows)
     }
 
-    /// Insert a new forge agent. Auto-derives slug from name if empty.
-    pub fn forge_insert(&self, agent: &ForgeAgent) -> Result<(), StoreError> {
+    /// Insert a new forge agent. Auto-derives slug from name if empty,
+    /// resolves collisions by appending `-2`, `-3`, etc., and mutates
+    /// `agent.slug` so the caller sees the resolved value (important
+    /// for handlers that serialize the struct back to the frontend
+    /// after insert).
+    ///
+    /// The collision check + insert run under a single mutex lock,
+    /// so this is race-safe against concurrent inserts on the same
+    /// connection.
+    pub fn forge_insert(&self, agent: &mut ForgeAgent) -> Result<(), StoreError> {
         let conn = self.conn.lock().unwrap();
-        let slug = if agent.slug.is_empty() {
+        let base = if agent.slug.is_empty() {
             derive_slug(&agent.name)
         } else {
             agent.slug.clone()
         };
+        // Collision-resolve: scan for existing slugs matching base or
+        // base-N. The migration backfill does the same dance for
+        // pre-existing rows (see run_forge_v4_migrations).
+        let mut candidate = base.clone();
+        let mut n: u32 = 2;
+        loop {
+            let count: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM db_forge_agents WHERE slug = ?1",
+                params![candidate],
+                |row| row.get(0),
+            )?;
+            if count == 0 {
+                break;
+            }
+            candidate = format!("{}-{}", base, n);
+            n += 1;
+        }
+        agent.slug = candidate;
         conn.execute(
             "INSERT INTO db_forge_agents (id, slug, name, icon, provider, description,
              working_directory, shell, provider_flags, auto_start, restart_on_crash,
@@ -570,7 +596,7 @@ impl WaveStore {
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
             params![
                 agent.id,
-                slug,
+                agent.slug,
                 agent.name,
                 agent.icon,
                 agent.provider,
@@ -1211,5 +1237,103 @@ mod tests {
         // Verify the insert was rolled back
         let ws = store.get::<Workspace>("ws-rollback").unwrap();
         assert!(ws.is_none());
+    }
+
+    #[test]
+    fn test_forge_insert_collision_resolves_at_runtime() {
+        // Two agents whose names derive to the same slug must both
+        // insert successfully, with the second getting a `-2` suffix.
+        // This exercises the runtime collision-resolution path in
+        // forge_insert (separate from the migration backfill path
+        // tested in migrations.rs).
+        let store = make_store();
+
+        let mut a1 = ForgeAgent {
+            id: "id-a".to_string(),
+            slug: String::new(),
+            name: "Agent X".to_string(),
+            icon: "✦".to_string(),
+            provider: "claude".to_string(),
+            description: String::new(),
+            working_directory: String::new(),
+            shell: String::new(),
+            provider_flags: String::new(),
+            auto_start: 0,
+            restart_on_crash: 0,
+            idle_timeout_minutes: 0,
+            created_at: 0,
+            agent_type: "host".to_string(),
+            environment: String::new(),
+            agent_bus_id: String::new(),
+            is_seeded: 0,
+        };
+        store.forge_insert(&mut a1).unwrap();
+        // "Agent X" → "agent-x"
+        assert_eq!(a1.slug, "agent-x");
+
+        let mut a2 = ForgeAgent {
+            id: "id-b".to_string(),
+            // Different surface form, derives to the same slug
+            name: "agent x".to_string(),
+            ..a1.clone()
+        };
+        a2.slug = String::new();
+        store.forge_insert(&mut a2).unwrap();
+        assert_eq!(a2.slug, "agent-x-2");
+
+        let mut a3 = ForgeAgent {
+            id: "id-c".to_string(),
+            name: "AGENT-X".to_string(),
+            ..a1.clone()
+        };
+        a3.slug = String::new();
+        store.forge_insert(&mut a3).unwrap();
+        assert_eq!(a3.slug, "agent-x-3");
+
+        // Verify the underlying rows actually got written
+        let listed = store.forge_list().unwrap();
+        let slugs: Vec<&str> = listed.iter().map(|a| a.slug.as_str()).collect();
+        assert!(slugs.contains(&"agent-x"));
+        assert!(slugs.contains(&"agent-x-2"));
+        assert!(slugs.contains(&"agent-x-3"));
+    }
+
+    #[test]
+    fn test_forge_insert_explicit_slug_collision_resolves() {
+        // When a caller passes an explicit (non-empty) slug that
+        // already exists, forge_insert still resolves the collision
+        // via suffixing — guards against the seed pre-loading the
+        // same slug twice or any other "I know the slug" path.
+        let store = make_store();
+
+        let mut a1 = ForgeAgent {
+            id: "id-a".to_string(),
+            slug: "explicit".to_string(),
+            name: "First".to_string(),
+            icon: "✦".to_string(),
+            provider: "claude".to_string(),
+            description: String::new(),
+            working_directory: String::new(),
+            shell: String::new(),
+            provider_flags: String::new(),
+            auto_start: 0,
+            restart_on_crash: 0,
+            idle_timeout_minutes: 0,
+            created_at: 0,
+            agent_type: "host".to_string(),
+            environment: String::new(),
+            agent_bus_id: String::new(),
+            is_seeded: 0,
+        };
+        store.forge_insert(&mut a1).unwrap();
+        assert_eq!(a1.slug, "explicit");
+
+        let mut a2 = ForgeAgent {
+            id: "id-b".to_string(),
+            ..a1.clone()
+        };
+        a2.slug = "explicit".to_string();
+        store.forge_insert(&mut a2).unwrap();
+        assert_eq!(a2.slug, "explicit-2");
     }
 }

@@ -54,10 +54,10 @@ pub fn register_forge_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     .unwrap_or_default()
                     .as_millis() as i64;
                 // slug is empty here — forge_insert auto-derives it
-                // from name. Once Step 3 of the identity restructure
-                // lands, the create-agent UI can supply an explicit
-                // slug at creation; for now we let the backend pick.
-                let agent = ForgeAgent {
+                // from name AND collision-resolves AND mutates the
+                // struct so we serialize the resolved value back to
+                // the frontend (not "").
+                let mut agent = ForgeAgent {
                     id: uuid::Uuid::new_v4().to_string(),
                     slug: String::new(),
                     name: cmd.name,
@@ -76,7 +76,7 @@ pub fn register_forge_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     agent_bus_id: cmd.agent_bus_id,
                     is_seeded: 0,
                 };
-                wstore.forge_insert(&agent).map_err(|e| format!("createforgeagent: {e}"))?;
+                wstore.forge_insert(&mut agent).map_err(|e| format!("createforgeagent: {e}"))?;
                 broker.publish(crate::backend::wps::WaveEvent {
                     event: "forgeagents:changed".to_string(),
                     scopes: vec![],
@@ -453,8 +453,9 @@ pub fn register_forge_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 }
 
                 // Create the agent — slug is empty, forge_insert will
-                // auto-derive from agent_name.
-                let agent = ForgeAgent {
+                // auto-derive from agent_name and mutate the struct
+                // so the resolved slug is returned to the frontend.
+                let mut agent = ForgeAgent {
                     id: uuid::Uuid::new_v4().to_string(),
                     slug: String::new(),
                     name: cmd.agent_name.clone(),
@@ -473,7 +474,7 @@ pub fn register_forge_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     agent_bus_id: String::new(),
                     is_seeded: 0,
                 };
-                wstore.forge_insert(&agent).map_err(|e| format!("importforgefromclaw: {e}"))?;
+                wstore.forge_insert(&mut agent).map_err(|e| format!("importforgefromclaw: {e}"))?;
 
                 // Read CLAUDE.md → agentmd content
                 let claude_md_path = workspace_path.join("CLAUDE.md");

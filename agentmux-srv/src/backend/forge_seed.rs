@@ -119,9 +119,9 @@ pub fn seed_forge_agents(wstore: &Arc<WaveStore>) -> Result<SeedReport, StoreErr
 
         // Insert agent. For seeded agents, the manifest `id` is already
         // a human-readable slug-form string (agentx, agent1, etc.), so
-        // reuse it as the slug. For user-created agents, forge_insert
-        // auto-derives slug from name if the field is empty.
-        let agent = ForgeAgent {
+        // reuse it as the slug. forge_insert collision-resolves if
+        // needed and mutates the slug field in place.
+        let mut agent = ForgeAgent {
             id: agent_def.id.clone(),
             slug: agent_def.id.clone(),
             name: agent_def.name.clone(),
@@ -140,7 +140,7 @@ pub fn seed_forge_agents(wstore: &Arc<WaveStore>) -> Result<SeedReport, StoreErr
             agent_bus_id: agent_def.agent_bus_id.clone(),
             is_seeded: 1,
         };
-        wstore.forge_insert(&agent)?;
+        wstore.forge_insert(&mut agent)?;
 
         // Insert content blobs
         let content_pairs = [
@@ -289,7 +289,7 @@ fn reseed_if_needed(
 
     // Upsert agents from manifest
     for agent_def in &manifest.agents {
-        let agent = ForgeAgent {
+        let mut agent = ForgeAgent {
             id: agent_def.id.clone(),
             slug: agent_def.id.clone(),
             name: agent_def.name.clone(),
@@ -313,7 +313,7 @@ fn reseed_if_needed(
             wstore.forge_update(&agent)?;
             updated += 1;
         } else {
-            wstore.forge_insert(&agent)?;
+            wstore.forge_insert(&mut agent)?;
             created += 1;
         }
     }
