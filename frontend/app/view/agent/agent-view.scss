@@ -366,6 +366,73 @@
             text-overflow: ellipsis;
         }
 
+        .agent-card-slug {
+            font-size: 10px;
+            color: color-mix(in srgb, var(--secondary-text-color) 65%, transparent);
+            font-family: var(--termfontfamily, monospace);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        // Inline rename row — replaces the name span while editing
+        .agent-card-rename-row {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .agent-card-rename-input {
+            flex: 1;
+            min-width: 0;
+            font-size: 13px;
+            font-weight: 500;
+            font-family: inherit;
+            color: var(--main-text-color);
+            background: color-mix(in srgb, var(--main-text-color) 6%, transparent);
+            border: 1px solid var(--accent-color);
+            border-radius: 3px;
+            padding: 1px 5px;
+            outline: none;
+
+            &.agent-card-rename-input--error {
+                border-color: var(--error-color, #e55);
+            }
+        }
+
+        .agent-card-rename-btn {
+            width: 22px;
+            height: 22px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0;
+            border: 1px solid var(--border-color);
+            background: color-mix(in srgb, var(--main-text-color) 5%, transparent);
+            border-radius: 3px;
+            color: var(--main-text-color);
+            font-size: 11px;
+            cursor: pointer;
+            flex-shrink: 0;
+
+            &:hover {
+                border-color: var(--accent-color);
+                background: color-mix(in srgb, var(--accent-color) 15%, transparent);
+            }
+
+            &--confirm:hover {
+                color: var(--success-color, #4c8);
+                border-color: var(--success-color, #4c8);
+                background: color-mix(in srgb, var(--success-color, #4c8) 15%, transparent);
+            }
+
+            &--cancel:hover {
+                color: var(--error-color, #e55);
+                border-color: var(--error-color, #e55);
+                background: color-mix(in srgb, var(--error-color, #e55) 15%, transparent);
+            }
+        }
+
         .agent-card-spinner {
             width: 14px;
             height: 14px;
