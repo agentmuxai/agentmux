@@ -400,6 +400,13 @@ impl<'a> StoreTx<'a> {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ForgeAgent {
     pub id: String,
+    /// Stable, filesystem-safe identifier. Drives working directory,
+    /// env var keys (AGENTMUX_AGENT_ID), and cross-references.
+    /// NEVER changes after creation — distinct from `name` which is
+    /// the renameable display. See
+    /// specs/SPEC_AGENT_IDENTITY_RESTRUCTURE_2026_04_14.md.
+    #[serde(default)]
+    pub slug: String,
     pub name: String,
     pub icon: String,
     pub provider: String,
@@ -425,6 +432,35 @@ pub struct ForgeAgent {
     pub agent_bus_id: String,
     #[serde(default)]
     pub is_seeded: i64,
+}
+
+/// Derive a filesystem-safe slug from a display name. Lowercase,
+/// ASCII alphanumeric + dash/underscore, consecutive dashes collapsed,
+/// trimmed to 64 chars. Returns `"agent"` if the input has no valid
+/// characters (defensive fallback).
+pub fn derive_slug(name: &str) -> String {
+    let filtered: String = name
+        .to_lowercase()
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '-'
+            }
+        })
+        .collect();
+    let collapsed: String = filtered
+        .split('-')
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>()
+        .join("-");
+    let trimmed: String = collapsed.chars().take(64).collect();
+    if trimmed.is_empty() {
+        "agent".to_string()
+    } else {
+        trimmed
+    }
 }
 
 fn default_agent_type() -> String {
@@ -468,7 +504,7 @@ impl WaveStore {
     pub fn forge_list(&self) -> Result<Vec<ForgeAgent>, StoreError> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT id, name, icon, provider, description, working_directory, shell,
+            "SELECT id, slug, name, icon, provider, description, working_directory, shell,
                     provider_flags, auto_start, restart_on_crash, idle_timeout_minutes, created_at,
                     agent_type, environment, agent_bus_id, is_seeded
              FROM db_forge_agents ORDER BY created_at ASC",
@@ -476,21 +512,22 @@ impl WaveStore {
         let rows = stmt.query_map([], |row| {
             Ok(ForgeAgent {
                 id: row.get(0)?,
-                name: row.get(1)?,
-                icon: row.get(2)?,
-                provider: row.get(3)?,
-                description: row.get(4)?,
-                working_directory: row.get(5)?,
-                shell: row.get(6)?,
-                provider_flags: row.get(7)?,
-                auto_start: row.get(8)?,
-                restart_on_crash: row.get(9)?,
-                idle_timeout_minutes: row.get(10)?,
-                created_at: row.get(11)?,
-                agent_type: row.get(12)?,
-                environment: row.get(13)?,
-                agent_bus_id: row.get(14)?,
-                is_seeded: row.get(15)?,
+                slug: row.get(1)?,
+                name: row.get(2)?,
+                icon: row.get(3)?,
+                provider: row.get(4)?,
+                description: row.get(5)?,
+                working_directory: row.get(6)?,
+                shell: row.get(7)?,
+                provider_flags: row.get(8)?,
+                auto_start: row.get(9)?,
+                restart_on_crash: row.get(10)?,
+                idle_timeout_minutes: row.get(11)?,
+                created_at: row.get(12)?,
+                agent_type: row.get(13)?,
+                environment: row.get(14)?,
+                agent_bus_id: row.get(15)?,
+                is_seeded: row.get(16)?,
             })
         })?;
         let mut agents = Vec::new();
@@ -518,16 +555,22 @@ impl WaveStore {
         Ok(rows)
     }
 
-    /// Insert a new forge agent.
+    /// Insert a new forge agent. Auto-derives slug from name if empty.
     pub fn forge_insert(&self, agent: &ForgeAgent) -> Result<(), StoreError> {
         let conn = self.conn.lock().unwrap();
+        let slug = if agent.slug.is_empty() {
+            derive_slug(&agent.name)
+        } else {
+            agent.slug.clone()
+        };
         conn.execute(
-            "INSERT INTO db_forge_agents (id, name, icon, provider, description,
+            "INSERT INTO db_forge_agents (id, slug, name, icon, provider, description,
              working_directory, shell, provider_flags, auto_start, restart_on_crash,
              idle_timeout_minutes, created_at, agent_type, environment, agent_bus_id, is_seeded)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
             params![
                 agent.id,
+                slug,
                 agent.name,
                 agent.icon,
                 agent.provider,

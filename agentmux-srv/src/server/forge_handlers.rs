@@ -53,8 +53,13 @@ pub fn register_forge_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     .duration_since(UNIX_EPOCH)
                     .unwrap_or_default()
                     .as_millis() as i64;
+                // slug is empty here — forge_insert auto-derives it
+                // from name. Once Step 3 of the identity restructure
+                // lands, the create-agent UI can supply an explicit
+                // slug at creation; for now we let the backend pick.
                 let agent = ForgeAgent {
                     id: uuid::Uuid::new_v4().to_string(),
+                    slug: String::new(),
                     name: cmd.name,
                     icon: cmd.icon,
                     provider: cmd.provider,
@@ -99,8 +104,12 @@ pub fn register_forge_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 let existing = wstore.forge_list().map_err(|e| format!("updateforgeagent: {e}"))?;
                 let old = existing.iter().find(|a| a.id == cmd.id)
                     .ok_or_else(|| format!("updateforgeagent: agent {} not found", cmd.id))?;
+                // slug is preserved from the existing row — it's
+                // immutable after creation. The update path never
+                // accepts a new slug from the client.
                 let agent = ForgeAgent {
                     id: cmd.id,
+                    slug: old.slug.clone(),
                     name: cmd.name,
                     icon: cmd.icon,
                     provider: cmd.provider,
@@ -443,9 +452,11 @@ pub fn register_forge_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     }
                 }
 
-                // Create the agent
+                // Create the agent — slug is empty, forge_insert will
+                // auto-derive from agent_name.
                 let agent = ForgeAgent {
                     id: uuid::Uuid::new_v4().to_string(),
+                    slug: String::new(),
                     name: cmd.agent_name.clone(),
                     icon: "\u{2726}".to_string(),
                     provider,
