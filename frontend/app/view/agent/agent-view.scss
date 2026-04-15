@@ -273,6 +273,125 @@
         }
     }
 
+    // === Focused Overlay (title-bar action buttons: rename / forge / identity) ===
+    .agent-focused-overlay {
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        // Cover top ~50% of chat area — same proportion as the picker overlay.
+        height: 50%;
+        z-index: 20;
+        display: flex;
+        flex-direction: column;
+    }
+
+    .agent-focused-panel {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        background: var(--panel-bg-color, var(--main-bg-color));
+        border-bottom: 1px solid var(--border-color, rgba(255, 255, 255, 0.12));
+        overflow: hidden;
+
+        // Reuse agent-card-settings-panel styles inside this panel.
+        .agent-card-settings-panel {
+            flex: 1;
+            overflow: hidden;
+        }
+    }
+
+    .agent-focused-panel-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 8px 12px;
+        border-bottom: 1px solid var(--border-color, rgba(255, 255, 255, 0.1));
+        flex-shrink: 0;
+    }
+
+    .agent-focused-panel-title {
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--main-text-color);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        opacity: 0.7;
+    }
+
+    .agent-focused-panel-close {
+        background: none;
+        border: none;
+        cursor: pointer;
+        color: var(--secondary-text-color);
+        font-size: 12px;
+        padding: 2px 4px;
+        border-radius: 3px;
+        line-height: 1;
+
+        &:hover {
+            background: rgba(255, 255, 255, 0.08);
+            color: var(--main-text-color);
+        }
+    }
+
+    .agent-focused-panel-body {
+        flex: 1;
+        overflow: auto;
+        padding: 12px;
+    }
+
+    .agent-focused-rename {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        padding: 16px;
+
+        .agent-card-rename-input {
+            width: 100%;
+        }
+    }
+
+    .agent-focused-rename-error {
+        font-size: 12px;
+        color: var(--error-color, #e55);
+    }
+
+    .agent-focused-rename-actions {
+        display: flex;
+        gap: 8px;
+        margin-top: 4px;
+    }
+
+    .agent-focused-rename-btn {
+        padding: 4px 12px;
+        border-radius: 4px;
+        font-size: 12px;
+        cursor: pointer;
+        border: 1px solid var(--border-color, rgba(255, 255, 255, 0.2));
+        background: rgba(255, 255, 255, 0.05);
+        color: var(--main-text-color);
+
+        &:hover:not(:disabled) {
+            background: rgba(255, 255, 255, 0.1);
+        }
+
+        &:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        &--confirm {
+            background: var(--accent-color, #4a9eff);
+            border-color: var(--accent-color, #4a9eff);
+            color: #fff;
+
+            &:hover:not(:disabled) {
+                filter: brightness(1.1);
+            }
+        }
+    }
+
     // === Agent Picker ===
     .agent-picker {
         display: flex;

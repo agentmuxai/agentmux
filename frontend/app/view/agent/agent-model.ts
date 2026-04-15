@@ -10,6 +10,8 @@ import { AgentViewWrapper } from "./agent-view";
 import { PROVIDERS, resolveProviderAlias } from "./providers";
 import { Logger } from "@/util/logger";
 
+export type OverlayTab = "rename" | "forge" | "identity";
+
 export class AgentViewModel implements ViewModel {
     viewType = "agent";
     blockId: string;
@@ -23,6 +25,11 @@ export class AgentViewModel implements ViewModel {
     noPadding: () => boolean;
     endIconButtons: () => IconButtonDecl[];
     nodejsError: string | null = null;
+
+    // Callback wired by AgentPresentationView on mount so the title-bar
+    // buttons can open the focused overlay without holding a SolidJS signal
+    // in the model (signals must live inside the component tree).
+    _setOverlayTab: ((tab: OverlayTab | null) => void) | null = null;
 
     constructor(blockId: string, nodeModel: BlockNodeModel) {
         this.blockId = blockId;
@@ -50,13 +57,32 @@ export class AgentViewModel implements ViewModel {
         this.viewText = () => [] as HeaderElem[];
         this.noPadding = () => true;
 
-        // Pane-frame header button: when an agent is launched, show a
-        // back-arrow that returns to the picker. Hidden when the pane
-        // is already on the picker screen (no agentId in meta).
+        // Pane-frame header buttons: when an agent is loaded show ✏ ⚙ 👤 ← .
+        // Hidden when no agent is loaded (picker screen).
+        // Buttons call this._setOverlayTab which is wired by AgentPresentationView
+        // on mount — keeps SolidJS signals inside the component tree.
         this.endIconButtons = () => {
             const agentId = this.blockAtom()?.meta?.["agentId"];
             if (!agentId) return [];
             return [
+                {
+                    elemtype: "iconbutton",
+                    icon: "pencil",
+                    title: "Rename this agent",
+                    click: () => { this._setOverlayTab?.("rename"); },
+                },
+                {
+                    elemtype: "iconbutton",
+                    icon: "gear",
+                    title: "Configure in Forge",
+                    click: () => { this._setOverlayTab?.("forge"); },
+                },
+                {
+                    elemtype: "iconbutton",
+                    icon: "user",
+                    title: "Manage identity",
+                    click: () => { this._setOverlayTab?.("identity"); },
+                },
                 {
                     elemtype: "iconbutton",
                     icon: "arrow-left",
@@ -289,6 +315,20 @@ export class AgentViewModel implements ViewModel {
         // — once Step 4's downstream coordination flips ID to the
         // slug, DISPLAY remains the human-readable label.
         envVars["AGENTMUX_AGENT_DISPLAY"] = agent.name;
+
+        // Git identity — prevents "Please tell me who you are" errors when
+        // the host machine has no global git config. Derived from the agent's
+        // display name + slug-based placeholder email. The Identity panel can
+        // supply a real email in a follow-on, but this fallback is safe and
+        // satisfies git's format requirement unconditionally.
+        envVars["GIT_AUTHOR_NAME"]     = agent.name;
+        envVars["GIT_AUTHOR_EMAIL"]    = `${slug}@agents.local`;
+        envVars["GIT_COMMITTER_NAME"]  = agent.name;
+        envVars["GIT_COMMITTER_EMAIL"] = `${slug}@agents.local`;
+        // Note: GIT_CONFIG_GLOBAL is intentionally NOT set here.
+        // Git does not shell-expand ~ in env vars, so "~/.agentmux/..." would
+        // create a literal ~ folder relative to the cwd. The 4 env vars above
+        // are sufficient for the common case.
 
         // Provider auth isolation: shared per-version auth dir (not per-agent)
         // Each AgentMux version gets its own auth space via the Tauri app data dir,
