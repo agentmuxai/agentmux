@@ -15,9 +15,8 @@
 
 | Command | Use When | Auto-Updates? |
 |---------|----------|---------------|
-| `task dev` | **Development** (CEF host + Vite hot reload) | Yes - hot reload |
-| `task cef:package:portable` | **Portable release builds** | No |
-**Note:** The Tauri host has been removed. All development uses the CEF host.
+| `task dev` | **Development** (Vite hot reload) | Yes - hot reload |
+| `task package` | **Portable release builds** | No |
 
 ### Build System
 
@@ -27,10 +26,10 @@
 - Run `task --list` to see all available commands
 
 **Common Tasks:**
-- `task dev` - Development mode (CEF + Vite)
-- `task cef:build` - Build CEF host binary
-- `task cef:bundle` - Bundle CEF runtime DLLs
-- `task cef:package:portable` - Portable ZIP
+- `task dev` - Development mode (Vite + host)
+- `task package` - Portable ZIP (Windows)
+- `task build:host` - Build host binary
+- `task bundle` - Bundle runtime DLLs
 - `task build:backend` - Rust sidecar binary (agentmux-srv)
 - `task build:frontend` - Frontend only
 - `task test` - Run tests
@@ -54,7 +53,7 @@ On this dev machine, Ninja is at `/c/Systems/bin/ninja.exe` (copied from VS 2022
 
 - **TypeScript/SolidJS** - Auto-reloads in `task dev`
 - **Rust backend** - `task build:backend` then restart `task dev`
-- **Test package** - `task cef:package:portable` then extract ZIP
+- **Test package** - `task package` then extract ZIP
 
 ### Architecture
 
@@ -200,11 +199,11 @@ npm run build:dev    # Development build
 npm run build:prod   # Production build
 ```
 
-### Package Release (CEF)
+### Package Release
 ```bash
-task cef:build              # Build CEF host binary
-task cef:bundle             # Bundle CEF runtime DLLs
-task cef:package:portable   # Portable ZIP (Windows)
+task build:host     # Build host binary
+task bundle         # Bundle runtime DLLs
+task package        # Portable ZIP (Windows)
 ```
 
 ---

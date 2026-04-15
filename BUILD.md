@@ -138,24 +138,13 @@ This rebuilds:
 
 ### Production Build
 
-Create a production Tauri build with installer:
+Create a portable build (Windows):
 
 ```bash
 task package
 ```
 
-Output locations:
-- **Windows:** `src-tauri/target/release/bundle/nsis/AgentMux_{version}_x64-setup.exe`
-- **macOS:** `src-tauri/target/release/bundle/dmg/AgentMux_{version}_x64.dmg`
-- **Linux:** `src-tauri/target/release/bundle/deb/agentmux_{version}_amd64.deb`
-
-For a portable ZIP (Windows):
-
-```bash
-task package:portable
-```
-
-Output: `dist/agentmux-{version}-x64-portable.zip`
+Output: `~/Desktop/agentmux-{version}-x64-portable/` and `.zip`
 
 ---
 
@@ -196,7 +185,7 @@ task dev
 # 4. Make changes to code
 # - Frontend (frontend/): Auto-reloads
 # - Rust backend (agentmux-srv/src/): Run `task build:backend`, restart dev
-# - CEF host (agentmux-cef/src/): Run `task cef:build`, restart dev
+# - CEF host (agentmux-cef/src/): Run `task build:host`, restart dev
 
 # 5. Test changes in running app
 
@@ -363,11 +352,11 @@ Artifacts are uploaded to GitHub Releases on tagged commits.
 # 2. Rebuild Rust binaries
 task build:backend
 
-# 3. Build Tauri package
+# 3. Build portable package
 task package
 
-# 4. Test installer
-# Install from src-tauri/target/release/bundle/
+# 4. Test portable build
+# Extract and run from ~/Desktop/agentmux-{version}-x64-portable/
 
 # 5. Tag and push
 git push origin main --tags
@@ -442,8 +431,9 @@ npx tauri build
 |------|---------|
 | **Development** | `task dev` |
 | **Rebuild Rust backend** | `task build:backend` |
-| **Production build** | `task package` |
-| **Portable ZIP** | `task package:portable` |
+| **Build host** | `task build:host` |
+| **Bundle runtime** | `task bundle` |
+| **Portable ZIP** | `task package` |
 | **Bump version** | `./bump-version.sh patch` |
 | **Run tests** | `npm test` |
 | **Verify versions** | `bump verify` |
