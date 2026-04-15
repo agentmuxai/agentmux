@@ -126,7 +126,12 @@ pub fn register_forge_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     environment: cmd.environment,
                     agent_bus_id: cmd.agent_bus_id,
                     is_seeded: old.is_seeded,
-                    accounts: cmd.accounts,
+                    // Preserve existing accounts when the caller omits the field
+                    // (cmd.accounts defaults to "" via #[serde(default)]). Callers
+                    // that only update name/icon/etc. (ForgeForm, AgentPicker rename)
+                    // don't carry accounts, so falling back to old.accounts prevents
+                    // silently wiping saved assignments.
+                    accounts: if cmd.accounts.is_empty() { old.accounts.clone() } else { cmd.accounts },
                 };
                 let found = wstore.forge_update(&agent).map_err(|e| format!("updateforgeagent: {e}"))?;
                 if !found {
