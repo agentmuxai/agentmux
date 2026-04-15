@@ -10,6 +10,13 @@ use cef::*;
 use std::sync::Arc;
 use parking_lot::Mutex;
 
+// The native OS key event type differs per platform. On macOS/Linux it is an
+// opaque `*mut u8` (NSEvent* / XEvent*); on Windows it is `cef::sys::MSG`.
+#[cfg(windows)]
+type NativeKeyEvent = cef::sys::MSG;
+#[cfg(not(windows))]
+type NativeKeyEvent = u8;
+
 use crate::state::AppState;
 
 /// Write a debug line to `%TEMP%\agentmux-close-debug.txt`.
@@ -673,7 +680,7 @@ wrap_keyboard_handler! {
             &self,
             _browser: Option<&mut Browser>,
             event: Option<&KeyEvent>,
-            _os_event: Option<&mut cef::sys::MSG>,
+            _os_event: *mut NativeKeyEvent,
             is_keyboard_shortcut: Option<&mut ::std::os::raw::c_int>,
         ) -> ::std::os::raw::c_int {
             if let Some(ev) = event {
