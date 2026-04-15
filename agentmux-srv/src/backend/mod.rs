@@ -40,5 +40,6 @@ pub mod wconfig;
 pub mod wcore;
 pub mod wps;
 pub mod wshutil;
+pub mod tool_store;
 
 pub use oref::ORef;
