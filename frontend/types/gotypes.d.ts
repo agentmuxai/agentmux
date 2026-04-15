@@ -218,6 +218,13 @@ declare global {
         environment: string;
         agent_bus_id: string;
         is_seeded: number;
+        /**
+         * JSON-encoded per-provider account refs.
+         * Shape: `{"github":"acct-id"|null,"aws":"acct-id"|null,...}`
+         * Empty string = no accounts assigned. See identity-model.ts for
+         * parseAgentAccounts() / serializeAgentAccounts() helpers.
+         */
+        accounts?: string;
     };
 
     // ForgeContent
@@ -261,6 +268,8 @@ declare global {
         agent_type?: string;
         environment?: string;
         agent_bus_id?: string;
+        /** JSON-encoded per-provider account refs. See ForgeAgent.accounts. */
+        accounts?: string;
     };
 
     // CommandDeleteForgeAgentData

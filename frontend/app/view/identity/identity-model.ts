@@ -38,10 +38,52 @@ export interface Account {
     display_name?: string;
     secret_ref: SecretRef;
     context: AccountContext;
+    /**
+     * @deprecated Derive from the agent-side reverse index instead.
+     * Kept for backwards compatibility. Do not write new code that
+     * reads this field — use parseAgentAccounts(agent) on ForgeAgent.
+     * Scheduled for removal after SPEC_AGENT_IDENTITY_RESTRUCTURE Step 4
+     * is fully rolled out.
+     */
     assigned_agents: string[];
     status: AccountStatus;
     created_at: string;
     updated_at: string;
+}
+
+/**
+ * Per-provider account references stored on a ForgeAgent.
+ * A null value means no account is assigned for that provider.
+ */
+export type AgentAccounts = Partial<Record<AccountProvider, string | null>>;
+
+/** Parse the JSON-encoded accounts blob from a ForgeAgent. */
+export function parseAgentAccounts(agent: ForgeAgent): AgentAccounts {
+    if (!agent.accounts) return {};
+    try {
+        return JSON.parse(agent.accounts) as AgentAccounts;
+    } catch {
+        return {};
+    }
+}
+
+/** Serialize AgentAccounts back to the JSON blob stored on ForgeAgent. */
+export function serializeAgentAccounts(accounts: AgentAccounts): string {
+    return JSON.stringify(accounts);
+}
+
+/**
+ * Return the IDs of agents that reference this account (reverse index).
+ * Used by the global Identity panel to show "assigned agents" without
+ * reading the deprecated Account.assigned_agents field.
+ */
+export function agentsAssignedToAccount(accountId: string, agents: ForgeAgent[]): string[] {
+    return agents
+        .filter((a) => {
+            const accs = parseAgentAccounts(a);
+            return Object.values(accs).includes(accountId);
+        })
+        .map((a) => a.name);
 }
 
 export const PROVIDER_LABELS: Record<AccountProvider, string> = {

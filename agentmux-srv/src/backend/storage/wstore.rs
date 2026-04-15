@@ -432,6 +432,12 @@ pub struct ForgeAgent {
     pub agent_bus_id: String,
     #[serde(default)]
     pub is_seeded: i64,
+    /// JSON-encoded per-provider account references.
+    /// Shape: `{"github":"acct-id"|null,"aws":"acct-id"|null,...}`
+    /// Null or missing provider key = no account assigned for that provider.
+    /// See SPEC_AGENT_IDENTITY_RESTRUCTURE_2026_04_14.md §3.3.
+    #[serde(default)]
+    pub accounts: String,
 }
 
 /// Derive a filesystem-safe slug from a display name. Lowercase,
@@ -506,7 +512,7 @@ impl WaveStore {
         let mut stmt = conn.prepare(
             "SELECT id, slug, name, icon, provider, description, working_directory, shell,
                     provider_flags, auto_start, restart_on_crash, idle_timeout_minutes, created_at,
-                    agent_type, environment, agent_bus_id, is_seeded
+                    agent_type, environment, agent_bus_id, is_seeded, accounts
              FROM db_forge_agents ORDER BY created_at ASC",
         )?;
         let rows = stmt.query_map([], |row| {
@@ -528,6 +534,7 @@ impl WaveStore {
                 environment: row.get(14)?,
                 agent_bus_id: row.get(15)?,
                 is_seeded: row.get(16)?,
+                accounts: row.get(17)?,
             })
         })?;
         let mut agents = Vec::new();
@@ -592,8 +599,9 @@ impl WaveStore {
         conn.execute(
             "INSERT INTO db_forge_agents (id, slug, name, icon, provider, description,
              working_directory, shell, provider_flags, auto_start, restart_on_crash,
-             idle_timeout_minutes, created_at, agent_type, environment, agent_bus_id, is_seeded)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
+             idle_timeout_minutes, created_at, agent_type, environment, agent_bus_id,
+             is_seeded, accounts)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
             params![
                 agent.id,
                 agent.slug,
@@ -611,7 +619,8 @@ impl WaveStore {
                 agent.agent_type,
                 agent.environment,
                 agent.agent_bus_id,
-                agent.is_seeded
+                agent.is_seeded,
+                agent.accounts
             ],
         )?;
         Ok(())
@@ -624,8 +633,8 @@ impl WaveStore {
             "UPDATE db_forge_agents SET name=?1, icon=?2, provider=?3, description=?4,
              working_directory=?5, shell=?6, provider_flags=?7, auto_start=?8,
              restart_on_crash=?9, idle_timeout_minutes=?10,
-             agent_type=?11, environment=?12, agent_bus_id=?13
-             WHERE id=?14",
+             agent_type=?11, environment=?12, agent_bus_id=?13, accounts=?14
+             WHERE id=?15",
             params![
                 agent.name,
                 agent.icon,
@@ -640,6 +649,7 @@ impl WaveStore {
                 agent.agent_type,
                 agent.environment,
                 agent.agent_bus_id,
+                agent.accounts,
                 agent.id
             ],
         )?;
