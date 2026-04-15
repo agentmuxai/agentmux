@@ -1,7 +1,7 @@
 // Copyright 2025, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { StreamEvent } from "../types";
+import type { SessionStats, StreamEvent } from "../types";
 import type { OutputTranslator } from "./translator";
 
 /**
@@ -52,6 +52,15 @@ export class ClaudeTranslator implements OutputTranslator {
             return this.handleUserMessage(rawEvent.message);
         }
 
+        // Case 5a: Top-level "result" event — session complete with stats
+        if (rawEvent.type === "result") {
+            const stats: SessionStats = {};
+            if (typeof rawEvent.cost_usd === "number") stats.cost_usd = rawEvent.cost_usd;
+            if (typeof rawEvent.duration_ms === "number") stats.duration_ms = rawEvent.duration_ms;
+            if (typeof rawEvent.num_turns === "number") stats.num_turns = rawEvent.num_turns;
+            return [{ type: "session_end", stats }];
+        }
+
         // Case 5: Raw Anthropic API event (content_block_delta, etc.)
         if (this.isAnthropicEvent(rawEvent)) {
             return this.translateInnerEvent(rawEvent);
@@ -76,6 +85,7 @@ export class ClaudeTranslator implements OutputTranslator {
             "tool_result",
             "agent_message",
             "user_message",
+            "session_end",
         ];
         return streamTypes.includes(event.type);
     }
