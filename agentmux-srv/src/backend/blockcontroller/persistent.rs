@@ -242,6 +242,12 @@ impl PersistentSubprocessController {
         })?;
 
         let pid = child.id().unwrap_or(0);
+
+        // Notify health monitor that a turn is starting. This arms the Stalled
+        // (30 s) and Dead (120 s) thresholds so the frontend learns the agent
+        // is not responding rather than silently waiting forever.
+        self.health_monitor.set_active_turn(true);
+
         tracing::info!(
             block_id = %self.block_id,
             pid = pid,
@@ -417,11 +423,28 @@ impl PersistentSubprocessController {
             tracing::info!(block_id = %block_id_read, "persistent stdout reader finished");
         });
 
+        // Spawn health watchdog — checks every 5 s while turn is active.
+        // Emits `agenthealth` WPS events when the process stalls (30 s) or
+        // dies (120 s) without producing meaningful output, giving the
+        // frontend enough signal to show a "not responding" warning.
+        let health_watchdog = Arc::clone(&self.health_monitor);
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(5));
+            loop {
+                interval.tick().await;
+                if !health_watchdog.is_active_turn() {
+                    break;
+                }
+                health_watchdog.check();
+            }
+        });
+
         // Spawn process waiter task
         let block_id_wait = self.block_id.clone();
         let inner_wait = Arc::clone(&self.inner);
         let broker_wait = self.broker.clone();
         let wstore_wait = self.wstore.clone();
+        let health_wait = Arc::clone(&self.health_monitor);
 
         tokio::spawn(async move {
             tokio::select! {
@@ -432,6 +455,9 @@ impl PersistentSubprocessController {
                         exit_code = exit_code,
                         "persistent process exited"
                     );
+
+                    // Notify health monitor so Stalled/Dead watchdog stops.
+                    health_wait.set_exited(exit_code);
 
                     let mut inner = inner_wait.lock().unwrap();
                     inner.proc_exit_code = exit_code;
@@ -481,6 +507,8 @@ impl PersistentSubprocessController {
                             }
                         }
                     }
+
+                    health_wait.set_exited(-1);
 
                     let mut inner = inner_wait.lock().unwrap();
                     inner.proc_exit_code = -1;
