@@ -12,6 +12,7 @@ import { clearCommand } from "./clear";
 import { helpCommand } from "./help";
 import { loginCommand } from "./login";
 import { RUNTIME_COMMANDS } from "./runtime";
+import { toolsCommand } from "./tools";
 
 export function registerGlobalCommands(registry: SlashCommandRegistry): void {
     for (const cmd of RUNTIME_COMMANDS) {
@@ -20,4 +21,5 @@ export function registerGlobalCommands(registry: SlashCommandRegistry): void {
     registry.register(loginCommand);
     registry.register(clearCommand);
     registry.register(helpCommand);
+    registry.register(toolsCommand);
 }

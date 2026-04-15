@@ -31,7 +31,7 @@ done
 rm -rf "$PORTABLE" "$ZIPPATH"
 
 # Create structure
-mkdir -p "$PORTABLE/runtime/locales" "$PORTABLE/runtime/frontend"
+mkdir -p "$PORTABLE/runtime/locales" "$PORTABLE/runtime/frontend" "$PORTABLE/runtime/tools/bin"
 
 # Launcher in root
 cp target/release/agentmux-launcher.exe "$PORTABLE/agentmux.exe"
@@ -74,6 +74,68 @@ cp dist/cef/chrome_100_percent.pak dist/cef/chrome_200_percent.pak dist/cef/reso
 
 # Locale (en-US only)
 cp dist/cef/locales/en-US.pak "$PORTABLE/runtime/locales/" 2>/dev/null || true
+
+# Bundled tools — jq and rg ship inside runtime/tools/bin/ so agents work
+# offline without any /tools install step.
+TOOLS_BIN="$PORTABLE/runtime/tools/bin"
+TOOLS_CACHE="$HOME/.agentmux/tool-build-cache"
+mkdir -p "$TOOLS_CACHE"
+
+bundle_tool() {
+    local name="$1" url="$2" sha256_expected="$3" archive_path="$4"
+    local dest="$TOOLS_BIN/$name"
+    local cache_key="$TOOLS_CACHE/${name}-$(echo "$url" | md5sum | cut -c1-8)"
+
+    # Use cached download if present and sha256 matches
+    if [ -f "$cache_key" ]; then
+        local actual
+        actual=$(sha256sum "$cache_key" | cut -d' ' -f1)
+        if [ "$actual" = "$sha256_expected" ]; then
+            echo "  [tools] $name: using cached download"
+        else
+            echo "  [tools] $name: cache sha256 mismatch, re-downloading"
+            rm -f "$cache_key"
+        fi
+    fi
+
+    if [ ! -f "$cache_key" ]; then
+        echo "  [tools] $name: downloading from $url"
+        curl -fsSL "$url" -o "$cache_key"
+        local actual
+        actual=$(sha256sum "$cache_key" | cut -d' ' -f1)
+        if [ "$actual" != "$sha256_expected" ]; then
+            echo "ERROR: sha256 mismatch for $name! expected=$sha256_expected got=$actual" >&2
+            rm -f "$cache_key"
+            exit 1
+        fi
+    fi
+
+    if [ -z "$archive_path" ]; then
+        # Direct binary
+        cp "$cache_key" "$dest"
+    else
+        # ZIP: extract specific file
+        local tmpdir
+        tmpdir=$(mktemp -d)
+        unzip -q "$cache_key" "$archive_path" -d "$tmpdir"
+        cp "$tmpdir/$archive_path" "$dest"
+        rm -rf "$tmpdir"
+    fi
+    chmod +x "$dest" 2>/dev/null || true
+    echo "  [tools] $name: bundled → $dest"
+}
+
+echo "Bundling tools into runtime/tools/bin/ ..."
+bundle_tool \
+    "jq.exe" \
+    "https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-windows-amd64.exe" \
+    "7451fbbf37feffb9bf262bd97c54f0da558c63f0748e64152dd87b0a07b6d6ab" \
+    ""
+bundle_tool \
+    "rg.exe" \
+    "https://github.com/BurntSushi/ripgrep/releases/download/14.1.1/ripgrep-14.1.1-x86_64-pc-windows-msvc.zip" \
+    "d0f534024c42afd6cb4d38907c25cd2b249b79bbe6cc1dbee8e3e37c2b6e25a1" \
+    "ripgrep-14.1.1-x86_64-pc-windows-msvc/rg.exe"
 
 # Verify versions match
 CEF_VER=$(grep -ao "$VERSION" "$PORTABLE/runtime/agentmux-$VERSION.exe" | head -1)
