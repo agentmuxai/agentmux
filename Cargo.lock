@@ -10,7 +10,7 @@ checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
 name = "agentmux-cef"
-version = "0.33.163"
+version = "0.33.164"
 dependencies = [
  "agentmux-common",
  "axum 0.8.9",
@@ -34,7 +34,7 @@ dependencies = [
 
 [[package]]
 name = "agentmux-common"
-version = "0.33.163"
+version = "0.33.164"
 dependencies = [
  "tokio",
  "tracing",
@@ -42,7 +42,7 @@ dependencies = [
 
 [[package]]
 name = "agentmux-launcher"
-version = "0.33.163"
+version = "0.33.164"
 dependencies = [
  "windows-sys 0.59.0",
  "winres",
@@ -50,7 +50,7 @@ dependencies = [
 
 [[package]]
 name = "agentmux-srv"
-version = "0.33.163"
+version = "0.33.164"
 dependencies = [
  "agentmux-common",
  "async-stream",
@@ -2782,9 +2782,9 @@ checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
 
 [[package]]
 name = "tokio"
-version = "1.51.1"
+version = "1.52.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f66bf9585cda4b724d3e78ab34b73fb2bbaba9011b9bfdf69dc836382ea13b8c"
+checksum = "a91135f59b1cbf38c91e73cf3386fca9bb77915c45ce2771460c9d92f0f3d776"
 dependencies = [
  "bytes",
  "libc",
