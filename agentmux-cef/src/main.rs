@@ -109,6 +109,14 @@ fn main() {
 
     tracing::info!("Initializing CEF browser process");
 
+    // macOS 26 Tahoe compat: CEF 146 calls a private NSApplication selector during
+    // NSDraggingSession setup that was removed in macOS 26. Swizzle
+    // doesNotRecognizeSelector: on NSApplication to log the selector name and
+    // return without throwing NSInvalidArgumentException, allowing drag to proceed.
+    // See: docs/investigations/tab-drag-tearoff-crash-macos.md
+    #[cfg(target_os = "macos")]
+    unsafe { patch_nsapp_unrecognized_selector() };
+
     // Single-instance check: if another instance of the same version is
     // running, send it a "new window" request via its IPC server and exit.
     // Uses a named mutex for detection and a port file for communication.
@@ -207,14 +215,31 @@ fn main() {
         .and_then(|p| p.parent().map(|d| d.to_path_buf()))
         .unwrap_or_default();
     let runtime_dir = exe_dir.join("runtime");
-    let base_dir = if runtime_dir.exists() {
+    let _base_dir = if runtime_dir.exists() {
         runtime_dir
     } else {
         // Dev mode: resources are flat alongside the exe in dist/cef/
         exe_dir.clone()
     };
-    let resources_dir = CefString::from(base_dir.to_str().unwrap_or(""));
-    let locales_dir = CefString::from(base_dir.join("locales").to_str().unwrap_or(""));
+    // On macOS, pak files and locale paks live inside the CEF framework's
+    // Resources/ directory — not alongside the executable. The framework is
+    // at {exe_dir}/../Frameworks/ (resolved by library_loader above).
+    // Pass that path for both resources_dir and locales_dir so CEF finds
+    // chrome_*.pak, resources.pak, icudtl.dat, and the *.lproj/locale.pak files.
+    #[cfg(target_os = "macos")]
+    let (resources_dir, locales_dir) = {
+        let fw_resources = exe_dir
+            .join("../Frameworks/Chromium Embedded Framework.framework/Resources");
+        // canonicalize() resolves ".." so CEF receives a clean absolute path.
+        let fw_resources = fw_resources.canonicalize().unwrap_or(fw_resources);
+        let s = fw_resources.to_str().unwrap_or("").to_owned();
+        (CefString::from(s.as_str()), CefString::from(s.as_str()))
+    };
+    #[cfg(not(target_os = "macos"))]
+    let (resources_dir, locales_dir) = (
+        CefString::from(_base_dir.to_str().unwrap_or("")),
+        CefString::from(_base_dir.join("locales").to_str().unwrap_or("")),
+    );
 
     // Reuse data_dir from single-instance check as CEF cache path.
     // Remove stale lockfile from a previous killed run.
@@ -227,6 +252,14 @@ fn main() {
     let cache_dir = CefString::from(data_dir.to_str().unwrap_or(""));
 
     // Configure CEF settings.
+    // On macOS, tell CEF exactly where the framework lives so it can load ICU
+    // and register the bundle correctly — required when running outside a .app.
+    #[cfg(target_os = "macos")]
+    let framework_dir = {
+        let p = exe_dir.join("../Frameworks/Chromium Embedded Framework.framework");
+        p.canonicalize().unwrap_or(p)
+    };
+
     let settings = Settings {
         no_sandbox: 1,
         background_color: 0xFF000000,
@@ -238,6 +271,8 @@ fn main() {
         browser_subprocess_path: CefString::from(
             std::env::current_exe().unwrap().to_str().unwrap_or("")
         ),
+        #[cfg(target_os = "macos")]
+        framework_dir_path: CefString::from(framework_dir.to_str().unwrap_or("")),
         ..Default::default()
     };
 
@@ -288,6 +323,114 @@ fn main() {
     let _ = std::fs::remove_file(&port_file);
 
     tracing::info!("AgentMux CEF host shutdown complete");
+}
+
+/// macOS 26 Tahoe compat: CEF 146 calls private NSApplication selectors (e.g.
+/// `isHandlingSendEvent`) during NSDraggingSession setup that were removed in macOS 26.
+///
+/// The correct fix is to hook `+[NSApplication resolveInstanceMethod:]` — the earliest
+/// point in the ObjC dispatch chain — so missing selectors get a void stub before the
+/// forwarding machinery (`___forwarding___`) is invoked. Swizzling `doesNotRecognizeSelector:`
+/// is wrong here: that method is called FROM inside `___forwarding___`, and returning
+/// normally from it (without throwing) corrupts the forwarding state and causes a second
+/// crash inside `___forwarding___` itself.
+///
+/// Return-type-aware stubs: `isHandlingSendEvent` and similar BOOL guard getters must
+/// return 0 (NO). A void stub leaves x0 = self (truthy), causing CEF to think the app
+/// is already handling a send event and skip normal event routing — breaking window drag.
+/// All other unknown selectors get a void stub, which is safe.
+///
+/// Safety: Called once before CEF initializes. NSApplication is a singleton; adding a
+/// `resolveInstanceMethod:` implementation on its metaclass is safe at startup.
+#[cfg(target_os = "macos")]
+unsafe fn patch_nsapp_unrecognized_selector() {
+    use std::ffi::{c_char, c_void};
+
+    type Id  = *mut c_void;
+    type Sel = *const c_void;
+    type Class = *mut c_void;
+
+    extern "C" {
+        fn objc_getClass(name: *const c_char) -> Class;
+        fn object_getClass(obj: Id) -> Class;           // on a Class obj → returns metaclass
+        fn sel_registerName(name: *const c_char) -> Sel;
+        fn sel_getName(sel: Sel) -> *const c_char;
+        fn class_addMethod(
+            cls: Class,
+            sel: Sel,
+            imp: usize,
+            types: *const c_char,
+        ) -> u8; // BOOL
+    }
+
+    // Generic void stub for unknown selectors that return nothing (or whose
+    // return value is not used by callers).
+    unsafe extern "C" fn void_stub(_self: Id, _cmd: Sel) {}
+
+    // BOOL stub returning 0 (NO) for guard-style getters. On ARM64, a void stub
+    // leaves x0 = self (non-nil = truthy), which breaks callers like CEF's
+    // sendEvent: guard that skips event routing when isHandlingSendEvent returns YES.
+    unsafe extern "C" fn bool_no_stub(_self: Id, _cmd: Sel) -> u8 { 0 }
+
+    // +resolveInstanceMethod: injected into NSApplication metaclass.
+    // Called by the ObjC runtime the first time an unknown selector is sent to
+    // an NSApplication instance — before ___forwarding___ is ever entered.
+    // We add a typed stub and return YES so the runtime retries the send.
+    unsafe extern "C" fn resolve_instance_method_impl(
+        cls:  Class,
+        _cmd: Sel,
+        sel:  Sel,
+    ) -> u8 {
+        let name = {
+            let ptr = sel_getName(sel);
+            if ptr.is_null() { "<unknown>".to_owned() }
+            else { std::ffi::CStr::from_ptr(ptr).to_string_lossy().into_owned() }
+        };
+
+        // These selectors return BOOL and callers act on the value.
+        // Returning truthy (garbage from a void stub) breaks event routing and
+        // prevents window drag from receiving mouse events.
+        const BOOL_NO_SELECTORS: &[&str] = &[
+            "isHandlingSendEvent",
+            "isSendingEvent",
+        ];
+
+        if BOOL_NO_SELECTORS.contains(&name.as_str()) {
+            tracing::warn!(selector = %name, "macOS 26 compat: adding BOOL(NO) stub");
+            class_addMethod(cls, sel, bool_no_stub as usize, b"c@:\0".as_ptr() as _);
+        } else {
+            tracing::warn!(selector = %name, "macOS 26 compat: adding void stub");
+            class_addMethod(cls, sel, void_stub as usize, b"v@:\0".as_ptr() as _);
+        }
+        1 // YES — resolved; runtime retries the original send
+    }
+
+    let cls = objc_getClass(b"NSApplication\0".as_ptr() as _);
+    if cls.is_null() {
+        tracing::warn!("macOS 26 compat: NSApplication class not found");
+        return;
+    }
+
+    // The metaclass is the "class object" of a class; class methods live there.
+    let metacls = object_getClass(cls as Id);
+    if metacls.is_null() {
+        tracing::warn!("macOS 26 compat: NSApplication metaclass not found");
+        return;
+    }
+
+    let sel = sel_registerName(b"resolveInstanceMethod:\0".as_ptr() as _);
+    // "c@::" = BOOL return, id (Class), SEL (cmd), SEL (queried selector)
+    let added = class_addMethod(
+        metacls,
+        sel,
+        resolve_instance_method_impl as usize,
+        b"c@::\0".as_ptr() as _,
+    );
+    if added != 0 {
+        tracing::info!("macOS 26 compat: injected resolveInstanceMethod: into NSApplication metaclass");
+    } else {
+        tracing::warn!("macOS 26 compat: class_addMethod failed (method already exists?)");
+    }
 }
 
 /// Initialize tracing with dual output: rolling daily log file + human-readable stderr.

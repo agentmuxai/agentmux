@@ -71,10 +71,74 @@ tasks:
             - echo "MSIX packaging not yet implemented for CEF host. Old Tauri script was removed."
 
     package:macos:
-        desc: "[TODO] Package the application for macOS (CEF). Not yet implemented."
+        desc: Package the application for macOS (.app + DMG). Outputs to ~/Desktop.
         platforms: [darwin]
+        deps: [build:frontend, build:backend, cef:build]
         cmds:
-            - echo "macOS CEF packaging not yet implemented. Use cef:package:portable on Windows."
+            - task: cef:bundle
+            - |
+                VERSION=$(node -p "require('./package.json').version")
+                ARCH="arm64"
+                APP="dist/AgentMux.app"
+                MACOS="$APP/Contents/MacOS"
+                FRAMEWORKS="$APP/Contents/Frameworks"
+
+                # Scaffold .app structure
+                rm -rf "$APP"
+                mkdir -p "$MACOS" "$FRAMEWORKS" "$APP/Contents/Resources"
+
+                # CEF host binary (CFBundleExecutable)
+                cp dist/cef/agentmux-cef "$MACOS/agentmux-cef"
+                chmod +x "$MACOS/agentmux-cef"
+
+                # CEF framework — library_loader resolves {exe_dir}/../Frameworks/
+                # which maps to Contents/MacOS/../Frameworks = Contents/Frameworks/ ✓
+                rsync -a "dist/Frameworks/Chromium Embedded Framework.framework" "$FRAMEWORKS/"
+
+                # Backend sidecar — versioned name in exe_dir (sidecar.rs lookup order 1)
+                cp "dist/bin/agentmux-srv-${VERSION}-darwin.${ARCH}" \
+                   "$MACOS/agentmux-srv-${VERSION}-darwin.${ARCH}"
+                chmod +x "$MACOS/agentmux-srv-${VERSION}-darwin.${ARCH}"
+
+                # Built frontend — IPC server serves from {exe_dir}/frontend/
+                cp -r dist/frontend "$MACOS/frontend"
+
+                # App icon
+                [ -f build/icon.icns ] && \
+                  cp build/icon.icns "$APP/Contents/Resources/AgentMux.icns"
+
+                # Info.plist
+                BUNDLE_ID="ai.agentmux.app.v$(echo $VERSION | tr '.' '-')"
+                printf '%s\n' \
+                  '<?xml version="1.0" encoding="UTF-8"?>' \
+                  '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' \
+                  '<plist version="1.0"><dict>' \
+                  "  <key>CFBundleIdentifier</key>      <string>${BUNDLE_ID}</string>" \
+                  '  <key>CFBundleName</key>            <string>AgentMux</string>' \
+                  '  <key>CFBundleDisplayName</key>     <string>AgentMux</string>' \
+                  '  <key>CFBundleExecutable</key>      <string>agentmux-cef</string>' \
+                  "  <key>CFBundleVersion</key>         <string>${VERSION}</string>" \
+                  "  <key>CFBundleShortVersionString</key> <string>${VERSION}</string>" \
+                  '  <key>CFBundleIconFile</key>        <string>AgentMux</string>' \
+                  '  <key>LSMinimumSystemVersion</key>  <string>12.0</string>' \
+                  '  <key>NSHighResolutionCapable</key> <true/>' \
+                  '  <key>NSRequiresAquaSystemAppearance</key> <false/>' \
+                  '  <key>com.apple.security.cs.allow-jit</key> <true/>' \
+                  '  <key>com.apple.security.cs.allow-unsigned-executable-memory</key> <true/>' \
+                  '  <key>com.apple.security.cs.disable-library-validation</key> <true/>' \
+                  '</dict></plist>' \
+                  > "$APP/Contents/Info.plist"
+                echo "✓ Built AgentMux.app (v${VERSION})"
+
+            - |
+                VERSION=$(node -p "require('./package.json').version")
+                xattr -cr dist/AgentMux.app 2>/dev/null || true
+                DMG="dist/AgentMux_${VERSION}_aarch64.dmg"
+                hdiutil create -volname "AgentMux ${VERSION}" \
+                  -srcfolder dist/AgentMux.app -ov -format UDZO "$DMG"
+                xattr -d com.apple.quarantine "$DMG" 2>/dev/null || true
+                cp "$DMG" ~/Desktop/
+                echo "✓ DMG → ~/Desktop/AgentMux_${VERSION}_aarch64.dmg"
 
 
     package:portable:linux:
@@ -431,7 +495,44 @@ tasks:
         internal: true
         platforms: [darwin]
         cmds:
-            - echo "macOS CEF bundling not yet implemented"
+            - |
+                VERSION=$(node -p "require('./package.json').version")
+                ARCH="arm64"
+
+                # 1. Locate CEF framework in build output
+                CEF_FW=$(find target -type d -name "Chromium Embedded Framework.framework" \
+                  -path "*/cef-dll-sys*/out/*" 2>/dev/null | head -1)
+                if [ -z "$CEF_FW" ]; then
+                  echo "❌ Chromium Embedded Framework.framework not found — run cef:build first"
+                  exit 1
+                fi
+                echo "Found CEF framework: $CEF_FW"
+
+                # 2. Copy framework to dist/Frameworks/
+                # library_loader resolves {exe_dir}/../Frameworks/ so it must be one level
+                # above dist/cef/ — i.e. dist/Frameworks/
+                mkdir -p dist/Frameworks
+                rsync -a --delete "$CEF_FW" dist/Frameworks/
+
+                # 3. Strip all non-English lproj dirs from framework (~50 MB saved)
+                find "dist/Frameworks/Chromium Embedded Framework.framework/Resources" \
+                  -maxdepth 1 -name "*.lproj" ! -name "en.lproj" -exec rm -rf {} + 2>/dev/null || true
+
+                echo "✓ CEF framework → dist/Frameworks/"
+
+            - |
+                VERSION=$(node -p "require('./package.json').version")
+                ARCH="arm64"
+
+                # 4. Versioned sidecar (sidecar.rs looks for {exe_dir}/agentmux-srv-{VERSION}-darwin.arm64)
+                cp "dist/bin/agentmux-srv-${VERSION}-darwin.${ARCH}" \
+                   "dist/cef/agentmux-srv-${VERSION}-darwin.${ARCH}"
+
+                # 5. Built frontend (IPC server serves from {exe_dir}/frontend/)
+                rm -rf dist/cef/frontend
+                cp -r dist/frontend dist/cef/frontend
+
+                echo "✓ Bundled macOS runtime to dist/cef/"
 
     cef:bundle:linux:
         internal: true

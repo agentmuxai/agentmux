@@ -262,6 +262,17 @@ wrap_app! {
                 let rpl_key = CefString::from("renderer-process-limit");
                 let rpl_val = CefString::from("1");
                 cmd.append_switch_with_value(Some(&rpl_key), Some(&rpl_val));
+
+                // Bypass macOS Keychain for Chromium's OSCrypt/SafeStorage.
+                // Without this, Chromium prompts the user to allow keychain
+                // access on every launch to store a cookie-encryption key.
+                // AgentMux doesn't store browser passwords so mock keychain
+                // is safe and eliminates the OS security dialog entirely.
+                #[cfg(target_os = "macos")]
+                {
+                    let mk_key = CefString::from("use-mock-keychain");
+                    cmd.append_switch(Some(&mk_key));
+                }
             }
         }
 
