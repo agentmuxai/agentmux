@@ -88,10 +88,15 @@
         transition: background 0.1s;
 
         &:hover {
-            white-space: pre-wrap;
+            // Keep single-line — overflow horizontally, never change height.
+            // pre-wrap caused the line to reflow into multiple rows on hover,
+            // shifting every sibling and "twitching" the whole log panel.
+            white-space: nowrap;
             overflow: visible;
             text-overflow: clip;
             background: color-mix(in srgb, var(--main-text-color) 4%, transparent);
+            position: relative;
+            z-index: 5;
         }
 
         &--error {

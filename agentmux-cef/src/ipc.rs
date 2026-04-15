@@ -256,7 +256,7 @@ async fn route_command(
         "get_provider_config" => commands::providers::get_provider_config(state),
         "save_provider_config" => commands::providers::save_provider_config(state, args),
         "get_provider_install_info" => commands::providers::get_provider_install_info(args),
-        "set_provider_auth" => commands::providers::set_provider_auth(state, args),
+        "set_provider_auth" => commands::providers::set_provider_auth(state, args).await,
         "clear_provider_auth" => commands::providers::clear_provider_auth(state, args),
         "get_provider_auth_status" => commands::providers::get_provider_auth_status(state, args),
         "check_cli_auth_status" => commands::providers::check_cli_auth_status(args).await,
