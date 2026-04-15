@@ -210,6 +210,16 @@ export interface SessionStats {
 }
 
 /**
+ * Live token counts accumulated during the current turn.
+ * input is set from message_start.message.usage.input_tokens.
+ * output accumulates from message_delta.usage.output_tokens.
+ */
+export interface TurnTokens {
+    input: number;
+    output: number;
+}
+
+/**
  * Stream events from Claude Code NDJSON output
  */
 export type StreamEvent =

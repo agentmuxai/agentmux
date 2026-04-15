@@ -13,7 +13,7 @@ import { createEffect, onCleanup, onMount, untrack } from "solid-js";
 import { createTranslator } from "./providers/translator-factory";
 import { ClaudeCodeStreamParser } from "./stream-parser";
 import type { SignalPair } from "./state";
-import type { DocumentNode, SessionStats, StreamingState } from "./types";
+import type { DocumentNode, SessionStats, StreamingState, TurnTokens } from "./types";
 
 const OutputFileName = "output";
 
@@ -24,6 +24,7 @@ interface UseAgentStreamOpts {
     streamingStateAtom: SignalPair<StreamingState>;
     sessionStatsAtom: SignalPair<SessionStats | null>;
     currentToolAtom: SignalPair<string | null>;
+    turnTokensAtom: SignalPair<TurnTokens | null>;
     enabled: boolean;
     /**
      * Version signal bumped by external document mutations (e.g. history
@@ -44,6 +45,7 @@ export function useAgentStream({
     streamingStateAtom,
     sessionStatsAtom,
     currentToolAtom,
+    turnTokensAtom,
     enabled,
     documentVersion,
 }: UseAgentStreamOpts): void {
@@ -51,6 +53,7 @@ export function useAgentStream({
     const [, setStreaming] = streamingStateAtom;
     const [, setSessionStats] = sessionStatsAtom;
     const [, setCurrentTool] = currentToolAtom;
+    const [, setTurnTokens] = turnTokensAtom;
 
     // Mutable state that doesn't trigger re-renders
     let lineBuffer = "";
@@ -184,6 +187,7 @@ export function useAgentStream({
                 setDocument([]);
                 setSessionStats(null);
                 setCurrentTool(null);
+                setTurnTokens(null);
                 lineBuffer = "";
                 translator.reset();
                 parser.reset();
@@ -247,6 +251,24 @@ export function useAgentStream({
                     continue;
                 }
 
+                // Extract live token counts from Anthropic stream events before
+                // the translator discards them. message_start carries input_tokens
+                // for this turn; message_delta carries the running output_tokens.
+                {
+                    const inner = rawEvent.type === "stream_event" ? rawEvent.event : rawEvent;
+                    if (inner?.type === "message_start") {
+                        const inputTok = inner.message?.usage?.input_tokens as number | undefined;
+                        if (inputTok != null) {
+                            setTurnTokens((prev) => ({ input: inputTok, output: prev?.output ?? 0 }));
+                        }
+                    } else if (inner?.type === "message_delta") {
+                        const outputTok = inner.usage?.output_tokens as number | undefined;
+                        if (outputTok != null) {
+                            setTurnTokens((prev) => ({ input: prev?.input ?? 0, output: outputTok }));
+                        }
+                    }
+                }
+
                 // Translate provider-specific format → StreamEvent[]
                 const streamEvents = translator.translate(rawEvent);
 
@@ -256,6 +278,7 @@ export function useAgentStream({
                     if (event.type === "session_end") {
                         setSessionStats(event.stats ?? null);
                         setCurrentTool(null);
+                        setTurnTokens(null);
                         continue;
                     }
                     // Track the currently-running tool for the status line

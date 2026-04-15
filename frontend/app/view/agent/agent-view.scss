@@ -1962,6 +1962,23 @@
                 &.agent-status-line--loading {
                     color: #8cc8ff;
                     opacity: 1;
+                    // Stretch to fill the line so left phrase and right
+                    // (tokens + elapsed) sit at opposite ends.
+                    width: 100%;
+
+                    .agent-status-left {
+                        flex: 1;
+                        min-width: 0;
+                        overflow: hidden;
+                        text-overflow: ellipsis;
+                        white-space: nowrap;
+                    }
+
+                    .agent-status-right {
+                        flex-shrink: 0;
+                        opacity: 0.7;
+                        margin-left: 8px;
+                    }
                 }
 
                 &.agent-status-line--stats {
