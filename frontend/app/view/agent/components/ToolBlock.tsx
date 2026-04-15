@@ -280,18 +280,24 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
     const overlayStyle = (): Record<string, string> => {
         const r = overlayRect();
         if (!r) return { display: "none" };
+        // Use min-width (not width) so the overlay can grow rightward for wide
+        // content without creating a horizontal scrollbar on the document.
+        // Clamp right edge to viewport so the overlay never bleeds off-screen.
+        const maxRight = window.innerWidth - r.left - 16;
         if (overlayUp()) {
             return {
                 position: "fixed",
                 left: `${r.left}px`,
-                width: `${r.width}px`,
+                minWidth: `${r.width}px`,
+                maxWidth: `${maxRight}px`,
                 bottom: `${r.bottom}px`,
             };
         }
         return {
             position: "fixed",
             left: `${r.left}px`,
-            width: `${r.width}px`,
+            minWidth: `${r.width}px`,
+            maxWidth: `${maxRight}px`,
             top: `${r.top}px`,
         };
     };

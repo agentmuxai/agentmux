@@ -25,6 +25,7 @@ interface UseAgentStreamOpts {
     sessionStatsAtom: SignalPair<SessionStats | null>;
     currentToolAtom: SignalPair<string | null>;
     turnTokensAtom: SignalPair<TurnTokens | null>;
+    turnActiveAtom: SignalPair<boolean>;
     enabled: boolean;
     /**
      * Version signal bumped by external document mutations (e.g. history
@@ -46,12 +47,14 @@ export function useAgentStream({
     sessionStatsAtom,
     currentToolAtom,
     turnTokensAtom,
+    turnActiveAtom,
     enabled,
     documentVersion,
 }: UseAgentStreamOpts): void {
     const [, setDocument] = documentAtom;
     const [, setStreaming] = streamingStateAtom;
     const [, setSessionStats] = sessionStatsAtom;
+    const [, setTurnActive] = turnActiveAtom;
     const [, setCurrentTool] = currentToolAtom;
     const [, setTurnTokens] = turnTokensAtom;
 
@@ -188,6 +191,7 @@ export function useAgentStream({
                 setSessionStats(null);
                 setCurrentTool(null);
                 setTurnTokens(null);
+                setTurnActive(false);
                 lineBuffer = "";
                 translator.reset();
                 parser.reset();
@@ -279,6 +283,7 @@ export function useAgentStream({
                         setSessionStats(event.stats ?? null);
                         setCurrentTool(null);
                         setTurnTokens(null);
+                        setTurnActive(false);
                         continue;
                     }
                     // Track the currently-running tool for the status line
@@ -309,6 +314,9 @@ export function useAgentStream({
             if (flushRafId != null) { cancelAnimationFrame(flushRafId); flushRafId = null; }
             subscription.unsubscribe();
             setStreaming((prev) => ({ ...prev, active: false }));
+            // Clear turn-active on teardown so a crash/exit without session_end
+            // doesn't leave the status line showing "Working…" permanently.
+            setTurnActive(false);
         });
     });
 }
