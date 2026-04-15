@@ -533,7 +533,7 @@ tasks:
             - task: build:backend
             - task: cef:build
             - task: cef:bundle
-            - bash scripts/package-cef-portable.sh
+            - bash scripts/package-portable.sh
 
     cef:clean:
         desc: Clean CEF build artifacts.

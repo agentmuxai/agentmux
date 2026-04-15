@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Package AgentMux CEF as a portable directory + ZIP (Windows x64).
-# Usage: bash scripts/package-cef-portable.sh [output-dir]
+# Package AgentMux as a portable directory + ZIP (Windows x64).
+# Usage: bash scripts/package-portable.sh [output-dir]
 #
-# Default output: ~/Desktop/agentmux-cef-{version}-x64-portable/
+# Default output: ~/Desktop/agentmux-{version}-x64-portable/
 
 set -euo pipefail
 
@@ -14,10 +14,10 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 VERSION=$(node -p "require('./package.json').version")
 OUTDIR="${1:-$HOME/Desktop}"
-PORTABLE="$OUTDIR/agentmux-cef-$VERSION-x64-portable"
-ZIPPATH="$OUTDIR/agentmux-cef-$VERSION-x64-portable.zip"
+PORTABLE="$OUTDIR/agentmux-$VERSION-x64-portable"
+ZIPPATH="$OUTDIR/agentmux-$VERSION-x64-portable.zip"
 
-echo "Packaging AgentMux CEF v$VERSION Portable..."
+echo "Packaging AgentMux v$VERSION Portable..."
 
 # Verify required files
 for f in target/release/agentmux-cef.exe dist/cef/libcef.dll dist/bin/agentmux-srv-$VERSION-windows.x64.exe dist/frontend/index.html target/release/agentmux-launcher.exe; do
@@ -51,7 +51,7 @@ Requirements:
 READMEEOF
 
 # Runtime binaries — versioned filenames so WER dumps & Event Viewer show versions
-cp target/release/agentmux-cef.exe "$PORTABLE/runtime/agentmux-cef-$VERSION.exe"
+cp target/release/agentmux-cef.exe "$PORTABLE/runtime/agentmux-$VERSION.exe"
 cp dist/bin/agentmux-srv-$VERSION-windows.x64.exe "$PORTABLE/runtime/"
 
 # wsh has been retired — see specs/SPEC_RETIRE_WSH_2026_04_12.md. No binary
@@ -76,7 +76,7 @@ cp dist/cef/chrome_100_percent.pak dist/cef/chrome_200_percent.pak dist/cef/reso
 cp dist/cef/locales/en-US.pak "$PORTABLE/runtime/locales/" 2>/dev/null || true
 
 # Verify versions match
-CEF_VER=$(grep -ao "$VERSION" "$PORTABLE/runtime/agentmux-cef-$VERSION.exe" | head -1)
+CEF_VER=$(grep -ao "$VERSION" "$PORTABLE/runtime/agentmux-$VERSION.exe" | head -1)
 SRV_VER=$(grep -ao "$VERSION" "$PORTABLE/runtime/agentmux-srv-$VERSION-windows.x64.exe" | head -1)
 if [ "$CEF_VER" != "$VERSION" ] || [ "$SRV_VER" != "$VERSION" ]; then
     echo "ERROR: Binary version mismatch! CEF=$CEF_VER SRV=$SRV_VER expected=$VERSION" >&2
@@ -94,7 +94,7 @@ DIR_SIZE=$(du -sh "$PORTABLE" | cut -f1)
 # is how a broken packaging run used to produce a portable folder on the
 # desktop with no ZIP beside it.
 cd "$OUTDIR"
-ZIP_NAME="agentmux-cef-$VERSION-x64-portable.zip"
+ZIP_NAME="agentmux-$VERSION-x64-portable.zip"
 rm -f "$ZIP_NAME"
 
 portable_basename=$(basename "$PORTABLE")
@@ -157,6 +157,6 @@ if [ -f "$REPO_ROOT/VERSION_HISTORY.md" ] && grep -q "^## Sizes " "$REPO_ROOT/VE
 fi
 
 echo ""
-echo "[SUCCESS] CEF Portable v$VERSION"
+echo "[SUCCESS] Portable v$VERSION"
 echo "  Directory: $PORTABLE ($DIR_SIZE)"
 echo "  ZIP: $ZIPPATH ($ZIP_SIZE)"
