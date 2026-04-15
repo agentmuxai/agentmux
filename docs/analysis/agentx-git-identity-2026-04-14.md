@@ -315,3 +315,34 @@ immediately get the right workspace.
 6. Have AgentX attempt a trivial commit (e.g. `git init` + touch
    + commit a scratch file). Should succeed as `AgentX-asaf
    <agentx@asaf.cc>`.
+
+---
+
+## 8. Relationship to SPEC_AGENT_IDENTITY_RESTRUCTURE (Steps 1–4, merged v0.33.164)
+
+The identity restructure spec (merged April 2026) splits `ForgeAgent.name`
+into two fields:
+
+| Field | Value for AgentX | Role |
+|-------|-----------------|------|
+| `slug` | `agentx` | Stable filesystem key — drives working dir, `GH_CONFIG_DIR`, `AGENTMUX_AGENT_ID` |
+| `name` | `AgentX` (renameable) | Display only — pane title, picker card |
+
+**Impact on this report's fix:**
+
+- The working directory path `~/.agentmux/agents/agentx/` is now keyed
+  by `slug`, not `name`. Renaming "AgentX" to "Alex" in the UI no longer
+  moves any files on disk.
+- `AGENTMUX_AGENT_ID` is the slug (`agentx`). Claw and downstream MCPs
+  that key by this env var are stable through renames.
+- `AGENTMUX_AGENT_DISPLAY` carries the current display name (`AgentX` or
+  whatever the user renamed it to). Prompt templates that want the
+  human-readable name should use `{{AGENTMUX_AGENT_DISPLAY}}` — this is
+  the claw-side follow-up tracked in §5 of the spec.
+
+**For claw integration:** `~/.agentmux/agents/<slug>/` is guaranteed
+immutable once the agent is created. Claw scripts that resolve workspace
+paths (e.g. `~/.claw/agentx-workspace/`) can rely on the slug never
+changing. The claw `templates/host/CLAUDE.md` should be updated to
+reference `$AGENTMUX_AGENT_DISPLAY` instead of a hardcoded agent name —
+tracked as a follow-up PR on the claw side.
