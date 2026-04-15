@@ -8,6 +8,7 @@
  */
 
 import { createEffect, createSignal, For, Show, type Accessor, type JSX, onCleanup } from "solid-js";
+import { Portal } from "solid-js/web";
 import type { SignalPair } from "../state";
 import type { DocumentNode, DocumentState, LogLine, SubagentLinkNode } from "../types";
 import type { ScrollCommand } from "../hooks/useScrollToNode";
@@ -57,6 +58,24 @@ export const AgentDocumentView = ({ documentAtom, documentStateAtom, logLines, a
     let autoScroll = true;
     // Guard against concurrent older-history fetches triggered by scroll
     let loadingOlderInFlight = false;
+
+    // Shared hover state for log line full-text overlay.
+    // One Portal renders the active line's full text at its viewport position.
+    // Using a single shared signal (not per-line) avoids creating N signals in <For>.
+    type LogHover = { text: string; level?: "error" | "warn"; top: number; left: number; width: number };
+    const [logHover, setLogHover] = createSignal<LogHover | null>(null);
+    let logLeavePending = 0;
+    const handleLogEnter = (e: MouseEvent, line: LogLine) => {
+        if (logLeavePending) { clearTimeout(logLeavePending); logLeavePending = 0; }
+        const el = e.currentTarget as HTMLElement;
+        const r = el.getBoundingClientRect();
+        setLogHover({ text: `[${line.tag}] ${line.text}`, level: line.level, top: r.top, left: r.left, width: r.width });
+    };
+    const handleLogLeave = () => {
+        if (logLeavePending) clearTimeout(logLeavePending);
+        logLeavePending = window.setTimeout(() => { logLeavePending = 0; setLogHover(null); }, 80);
+    };
+    onCleanup(() => { if (logLeavePending) clearTimeout(logLeavePending); });
 
     // Scroll to a node by its data-node-id attribute.
     // Exposed to the parent via scrollToNodeRef so BookmarksPanel can call it.
@@ -230,11 +249,39 @@ export const AgentDocumentView = ({ documentAtom, documentStateAtom, logLines, a
                                     "agent-status-line--error": line.level === "error",
                                     "agent-status-line--warn": line.level === "warn",
                                 }}
+                                onMouseEnter={(e) => handleLogEnter(e, line)}
+                                onMouseLeave={handleLogLeave}
                             >
                                 <span class="agent-status-tag">[{line.tag}]</span> {line.text}
                             </div>
                         )}
                     </For>
+                    {/* Full-text hover overlay — Portal escapes the scroll container's
+                        overflow:auto clipping so the complete line text is visible. */}
+                    <Show when={logHover()}>
+                        {(h) => (
+                            <Portal>
+                                <div
+                                    class="agent-log-hover-overlay"
+                                    classList={{
+                                        "agent-log-hover-overlay--error": h().level === "error",
+                                        "agent-log-hover-overlay--warn": h().level === "warn",
+                                    }}
+                                    style={{
+                                        position: "fixed",
+                                        top: `${h().top}px`,
+                                        left: `${h().left}px`,
+                                        "min-width": `${h().width}px`,
+                                        "max-width": `calc(100vw - ${h().left}px - 16px)`,
+                                    }}
+                                    onMouseEnter={() => { if (logLeavePending) { clearTimeout(logLeavePending); logLeavePending = 0; } }}
+                                    onMouseLeave={handleLogLeave}
+                                >
+                                    {h().text}
+                                </div>
+                            </Portal>
+                        )}
+                    </Show>
                     <Show when={authUrl?.()}>
                         {(url) => {
                             const [pasteCode, setPasteCode] = createSignal("");

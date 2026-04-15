@@ -186,13 +186,17 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
             );
             if (loginUrl) {
                 setAuthUrl(loginUrl);
-                // Open the URL in the system browser. If it doesn't open,
-                // the user can copy from the URL box above the composer.
-                try { getApi().openExternal(loginUrl); } catch { /* non-fatal */ }
-                log("auth", "browser opened — complete login there");
-                log("auth", "if it didn't open, copy the URL from the box above");
+                log("auth", "opening browser...");
+                try {
+                    getApi().openExternal(loginUrl);
+                    log("auth", "browser opened — complete login there");
+                } catch (err: any) {
+                    log("auth", `browser did not open: ${err?.message ?? String(err)}`, "warn");
+                    log("auth", "copy the URL from the box above and open it manually", "warn");
+                }
             } else {
-                log("auth", "a browser window should have opened — complete login there");
+                log("auth", "attempting to open browser for login...");
+                log("auth", "if no browser opened, run the login command manually", "warn");
             }
 
             // Poll until authenticated, cancelled, or timed out (5 minutes)
