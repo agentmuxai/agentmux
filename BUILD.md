@@ -229,10 +229,10 @@ target/release/
 └── agentmux-launcher.exe                         # Portable launcher
 
 ~/Desktop/
-└── agentmux-cef-{version}-x64-portable/         # Portable build
+└── agentmux-{version}-x64-portable/             # Portable build
     ├── agentmux.exe                             # Launcher
     └── runtime/
-        ├── agentmux-cef-{version}.exe           # CEF host
+        ├── agentmux-{version}.exe               # CEF host
         ├── agentmux-srv-{version}-windows.x64.exe  # Backend
         ├── libcef.dll                           # CEF runtime
         └── frontend/                            # Web UI
