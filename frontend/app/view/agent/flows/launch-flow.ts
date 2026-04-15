@@ -131,10 +131,18 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
         log("cli", `found: ${cliResult.cli_path} (${cliResult.version})`);
     }
 
-    // Update block meta with resolved absolute path
+    // Update block meta with resolved CLI path and auth env vars.
+    // cmd:env is read by AgentInputCommand when spawning the subprocess —
+    // it must include CLAUDE_CONFIG_DIR (or equivalent) so the subprocess
+    // uses the same isolated auth dir that was validated in Phase 2.
+    // Without this, the subprocess runs without the env var and falls back
+    // to the global ~/.claude/ dir, failing auth silently after login.
     await RpcApi.SetMetaCommand(TabRpcClient, {
         oref,
-        meta: { cmd: cliResult.cli_path },
+        meta: {
+            cmd: cliResult.cli_path,
+            ...(authEnv && Object.keys(authEnv).length > 0 ? { "cmd:env": authEnv } : {}),
+        },
     });
 
     // Phase 2: Auth Check → auto-login if not authenticated
