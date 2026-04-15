@@ -282,6 +282,19 @@ export const AgentDocumentView = ({ documentAtom, documentStateAtom, logLines, a
                                         />
                                         <button
                                             class="agent-auth-url-copy"
+                                            title="Paste from clipboard"
+                                            onClick={() => {
+                                                import("@/util/clipboard").then(c => c.readText()).then(text => {
+                                                    if (text) setPasteCode(text.trim());
+                                                }).catch(() => {
+                                                    setPasteResult("Could not read clipboard — paste manually");
+                                                });
+                                            }}
+                                        >
+                                            Paste
+                                        </button>
+                                        <button
+                                            class="agent-auth-url-copy"
                                             onClick={handleSubmitCode}
                                             disabled={!pasteCode().trim() || pasting()}
                                         >
