@@ -1,6 +1,6 @@
 [package]
 name = "agentmux-srv"
-version = "0.33.165"
+version = "0.33.168"
 edition = "2021"
 description = "AgentMux Rust backend server"
 
@@ -39,6 +39,10 @@ notify = "7"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 mdns-sd = "0.12"
 flate2 = "1"
+sha2 = "0.10"
+hex = "0.4"
+zip = { version = "2", default-features = false, features = ["deflate"] }
+tar = "0.4"
 
 [target.'cfg(windows)'.dependencies]
 # Out-of-process crash dump capture via VEH + named-pipe IPC.

@@ -201,6 +201,15 @@ export interface SubagentLinkNode {
 }
 
 /**
+ * Stats from a completed agent session (from the Claude CLI `result` event).
+ */
+export interface SessionStats {
+    cost_usd?: number;    // from result.cost_usd
+    duration_ms?: number; // from result.duration_ms
+    num_turns?: number;   // from result.num_turns
+}
+
+/**
  * Stream events from Claude Code NDJSON output
  */
 export type StreamEvent =
@@ -209,7 +218,8 @@ export type StreamEvent =
     | ToolCallEvent
     | ToolResultEvent
     | AgentMessageEvent
-    | UserMessageEvent;
+    | UserMessageEvent
+    | SessionEndEvent;
 
 export interface TextEvent {
     type: "text";
@@ -251,6 +261,11 @@ export interface UserMessageEvent {
     type: "user_message";
     message: string;
     timestamp?: number;
+}
+
+export interface SessionEndEvent {
+    type: "session_end";
+    stats: SessionStats;
 }
 
 /**

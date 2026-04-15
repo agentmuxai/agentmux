@@ -15,6 +15,7 @@ import {
     DocumentNode,
     DocumentState,
     MessageRouterState,
+    SessionStats,
     StreamingState,
     UserInfo,
 } from "./types";
@@ -38,6 +39,8 @@ export interface AgentAtoms {
     providerConfigAtom: SignalPair<ProviderConfig | null>;
     sessionIdAtom: SignalPair<string>;
     rawOutputAtom: SignalPair<string>;
+    sessionStatsAtom: SignalPair<SessionStats | null>;
+    currentToolAtom: SignalPair<string | null>;
 }
 
 /**
@@ -84,5 +87,7 @@ export function createAgentAtoms(agentId: string): AgentAtoms {
         providerConfigAtom: createSignal<ProviderConfig | null>(null),
         sessionIdAtom: createSignal<string>(""),
         rawOutputAtom: createSignal<string>(""),
+        sessionStatsAtom: createSignal<SessionStats | null>(null),
+        currentToolAtom: createSignal<string | null>(null),
     };
 }

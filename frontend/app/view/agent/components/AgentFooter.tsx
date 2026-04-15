@@ -7,11 +7,12 @@
 
 import { Show, createMemo, createSignal, type JSX } from "solid-js";
 import type { SlashCommand } from "../commands/types";
+import type { SessionStats } from "../types";
 import { SlashAutocomplete } from "./SlashAutocomplete";
 
 interface AgentFooterProps {
     agentId: string;
-    onSendMessage?: (message: string) => void;
+    onSendMessage?: (message: string) => void | Promise<void>;
     /**
      * Called when the user types in the composer. Used to tell the document
      * view to scroll to the latest content so the composer input is visually
@@ -34,6 +35,10 @@ interface AgentFooterProps {
      * If absent, autocomplete is disabled.
      */
     getCompletions?: (prefix: string) => SlashCommand[];
+    /** Name of the currently-running tool (from the last tool_call event). */
+    currentTool?: string | null;
+    /** Stats from the last completed session. Displayed until the next send. */
+    sessionStats?: SessionStats | null;
 }
 
 export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
@@ -121,8 +126,11 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
         if (props.onSendMessage) {
             props.onSendMessage(message);
             textareaRef.value = "";
-            // No style reset — browser's field-sizing handles it
-            // automatically when the content empties.
+            setAutocompletePrefix(null);
+            // Scroll the new user message into view. SolidJS flushes the
+            // document signal synchronously before this point, so jumpToBottom
+            // will include the just-added node in scrollHeight.
+            props.onTyping?.();
         }
     };
 
@@ -142,10 +150,21 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
                 setAutocompleteIndex((i) => (i - 1 + list.length) % list.length);
                 return;
             }
-            if (e.key === "Tab" || e.key === "Enter") {
+            if (e.key === "Tab") {
+                // Tab: fill in the command name for further editing (e.g. adding args)
                 e.preventDefault();
                 const match = list[autocompleteIndex()];
                 if (match) acceptCompletion(match);
+                return;
+            }
+            if (e.key === "Enter") {
+                // Enter: select and send immediately — no second Enter needed
+                e.preventDefault();
+                const match = list[autocompleteIndex()];
+                if (match) {
+                    acceptCompletion(match);
+                    handleSend();
+                }
                 return;
             }
             if (e.key === "Escape") {
@@ -177,6 +196,40 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
         }
     };
 
+    const statusLine = (): JSX.Element => {
+        if (props.loading) {
+            return (
+                <span class="agent-status-line agent-status-line--loading">
+                    <span class="agent-spinner-dot" />
+                    {props.currentTool ? props.currentTool : "Thinking\u2026"}
+                </span>
+            );
+        }
+        const stats = props.sessionStats;
+        if (!stats) return <span class="agent-status-line" />;
+
+        const parts: string[] = [];
+        if (stats.cost_usd != null) parts.push(`$${stats.cost_usd.toFixed(3)}`);
+        if (stats.duration_ms != null) {
+            const s = Math.round(stats.duration_ms / 1000);
+            if (s < 60) {
+                parts.push(`${Math.max(1, s)}s`);
+            } else {
+                parts.push(`${Math.floor(s / 60)}m ${s % 60}s`);
+            }
+        }
+        if (stats.num_turns) {
+            parts.push(`${stats.num_turns} ${stats.num_turns === 1 ? "turn" : "turns"}`);
+        }
+        if (parts.length === 0) return <span class="agent-status-line" />;
+
+        return (
+            <span class="agent-status-line agent-status-line--stats">
+                {parts.join("  \u00b7  ")}
+            </span>
+        );
+    };
+
     return (
         <div class="agent-footer">
             <div class="agent-input-container">
@@ -196,14 +249,9 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
                     onInput={handleInput}
                     rows={1}
                 />
+                {statusLine()}
                 <div class="agent-input-hint">
                     <span>Enter to send • Shift+Enter for newline • Esc to clear / stop</span>
-                    <Show when={props.loading}>
-                        <span class="agent-loading-spinner">
-                            <span class="agent-spinner-dot" />
-                            loading
-                        </span>
-                    </Show>
                 </div>
             </div>
         </div>
