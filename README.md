@@ -81,6 +81,28 @@ Available from the top bar (right side) or the window header right-click menu:
 | **Help** | circle-question | Built-in documentation and help |
 | **DevTools** | code | Toggle WebView developer tools |
 
+## Agents
+
+Each agent has two names:
+
+| Field | Purpose | Changeable? |
+|-------|---------|-------------|
+| **Display name** | Shown in the picker, pane title, notifications | ✅ Yes — rename any time |
+| **Slug** | Drives `~/.agentmux/agents/<slug>/`, `GH_CONFIG_DIR`, `AGENTMUX_AGENT_ID` | ❌ No — set once at creation |
+
+### How to rename an agent
+
+1. Open the **Forge** widget (or hover an agent card in the Agent picker).
+2. Click the ✏ pencil icon next to the agent's name.
+3. Type the new display name and press **Enter** (or click ✓). Press **Esc** to cancel.
+4. The picker card and any open pane titles update immediately.
+
+Nothing on disk moves — working directories, GitHub CLI config dirs, and env vars all key off the immutable slug, so renaming is always safe.
+
+### Agent identity (accounts)
+
+Click the 👤 button on any agent card to assign external accounts (GitHub PAT, AWS profile, Anthropic API key, etc.) to that agent. Accounts are stored per-agent and survive renames. You can swap, add, or unassign accounts at any time without restarting the agent.
+
 ## Architecture
 
 ```
