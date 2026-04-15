@@ -22,7 +22,7 @@ import { useControllerStatusEvents } from "./hooks/useControllerStatusEvents";
 import { useAgentCommands } from "./hooks/useAgentCommands";
 import { AgentControlBar } from "./components/AgentControlBar";
 import { AgentDocumentView } from "./components/AgentDocumentView";
-import { AgentFooter } from "./components/AgentFooter";
+import { AgentFooter, AgentStatusLine } from "./components/AgentFooter";
 import { AgentPicker } from "./components/AgentPicker";
 import { AgentSearchBar } from "./components/AgentSearchBar";
 import { SlashCommandPicker } from "./components/SlashCommandPicker";
@@ -129,6 +129,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         streamingStateAtom: agentAtoms().streamingStateAtom,
         sessionStatsAtom: agentAtoms().sessionStatsAtom,
         currentToolAtom: agentAtoms().currentToolAtom,
+        turnTokensAtom: agentAtoms().turnTokensAtom,
         enabled: true,
         documentVersion: history.documentVersion,
     });
@@ -329,6 +330,12 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                         />
                     )}
                 </Show>
+                <AgentStatusLine
+                    loading={status.isLoading()}
+                    currentTool={agentAtoms().currentToolAtom[0]()}
+                    sessionStats={agentAtoms().sessionStatsAtom[0]()}
+                    turnTokens={agentAtoms().turnTokensAtom[0]()}
+                />
                 <AgentControlBar
                     blockId={model.blockId}
                     blockAtom={block}
@@ -339,10 +346,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                     onSendMessage={handleSendMessage}
                     onTyping={() => scrollToBottomFn?.()}
                     onStopAgent={commands.stopAgent}
-                    loading={status.isLoading()}
                     getCompletions={commands.completions}
-                    currentTool={agentAtoms().currentToolAtom[0]()}
-                    sessionStats={agentAtoms().sessionStatsAtom[0]()}
                 />
             </div>
         </div>

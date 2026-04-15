@@ -17,6 +17,7 @@ import {
     MessageRouterState,
     SessionStats,
     StreamingState,
+    TurnTokens,
     UserInfo,
 } from "./types";
 
@@ -41,6 +42,7 @@ export interface AgentAtoms {
     rawOutputAtom: SignalPair<string>;
     sessionStatsAtom: SignalPair<SessionStats | null>;
     currentToolAtom: SignalPair<string | null>;
+    turnTokensAtom: SignalPair<TurnTokens | null>;
 }
 
 /**
@@ -89,5 +91,6 @@ export function createAgentAtoms(agentId: string): AgentAtoms {
         rawOutputAtom: createSignal<string>(""),
         sessionStatsAtom: createSignal<SessionStats | null>(null),
         currentToolAtom: createSignal<string | null>(null),
+        turnTokensAtom: createSignal<TurnTokens | null>(null),
     };
 }
