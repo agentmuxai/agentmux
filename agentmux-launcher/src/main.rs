@@ -2,7 +2,7 @@
 //
 // This tiny exe lives at the top of the portable directory. It:
 // 1. Adds runtime/ to the DLL search path (so libcef.dll is found)
-// 2. Spawns runtime/agentmux-cef.exe with the same arguments
+// 2. Spawns runtime/agentmux-<version>.exe with the same arguments
 // 3. Waits for it to exit and forwards the exit code
 //
 // This is needed because libcef.dll is a load-time dependency of the CEF
@@ -113,30 +113,45 @@ fn dirs_fallback_home() -> std::path::PathBuf {
 }
 
 /// Find the CEF host binary in the runtime directory.
-/// Tries versioned name first (agentmux-cef-X.Y.Z.exe), then plain name (dev mode).
+/// Tries versioned name first (agentmux-X.Y.Z.exe), then the old
+/// agentmux-cef-X.Y.Z.exe pattern for backwards compat, then plain
+/// agentmux-cef.exe (dev mode).
 fn find_cef_binary(runtime_dir: &std::path::Path) -> std::path::PathBuf {
     let ext = if cfg!(target_os = "windows") { ".exe" } else { "" };
 
-    // 1. Try exact versioned name matching this launcher's version
-    let versioned = format!("agentmux-cef-{}{}", env!("CARGO_PKG_VERSION"), ext);
+    // 1. Try exact versioned name matching this launcher's version (new naming)
+    let versioned = format!("agentmux-{}{}", env!("CARGO_PKG_VERSION"), ext);
     let versioned_path = runtime_dir.join(&versioned);
     if versioned_path.exists() {
         return versioned_path;
     }
 
-    // 2. Scan for any agentmux-cef-*.exe (handles version mismatch between launcher and CEF)
+    // 2. Scan for any agentmux-<version>.exe — handles minor version mismatch
+    //    between launcher and CEF host (new naming, no "cef" in artifact name)
     if let Ok(entries) = std::fs::read_dir(runtime_dir) {
-        let prefix = format!("agentmux-cef-");
-        let suffix = ext;
+        let prefix = "agentmux-";
+        let cef_prefix = "agentmux-cef";
         for entry in entries.flatten() {
             let name = entry.file_name();
             let name = name.to_string_lossy();
-            if name.starts_with(&prefix) && name.ends_with(suffix) && name != format!("agentmux-cef{}", suffix) {
+            // Match agentmux-<version>.exe but not agentmux-cef*.exe or agentmux-srv*.exe
+            if name.starts_with(prefix)
+                && !name.starts_with(cef_prefix)
+                && !name.starts_with("agentmux-srv")
+                && name.ends_with(ext)
+            {
                 return entry.path();
             }
         }
     }
 
-    // 3. Fall back to plain name (dev mode)
+    // 3. Backwards compat: old naming used agentmux-cef-<version>.exe
+    let versioned_old = format!("agentmux-cef-{}{}", env!("CARGO_PKG_VERSION"), ext);
+    let versioned_old_path = runtime_dir.join(&versioned_old);
+    if versioned_old_path.exists() {
+        return versioned_old_path;
+    }
+
+    // 4. Fall back to plain name (dev mode)
     runtime_dir.join(format!("agentmux-cef{}", ext))
 }
