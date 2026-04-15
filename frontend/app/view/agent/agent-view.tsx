@@ -82,7 +82,23 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
 
     // Auth + launch flow state and the onCleanup that kills the CLI
     // if the pane closes mid-login.
-    const status = useAgentControllerStatus({ blockId: model.blockId, provider, log });
+    const [, setDocument] = agentAtoms().documentAtom;
+    const status = useAgentControllerStatus({
+        blockId: model.blockId,
+        provider,
+        log,
+        onLoginSuccess: (email) => {
+            const display = email ? `Logged in as **${email}**` : "Login successful";
+            setDocument((prev) => [
+                ...prev,
+                {
+                    type: "markdown",
+                    id: `login_success_${Date.now()}`,
+                    content: `\u2713 ${display}`,
+                } as import("./types").MarkdownNode,
+            ]);
+        },
+    });
 
     onMount(() => {
         const name = block()?.meta?.["agentName"] ?? agentId;
