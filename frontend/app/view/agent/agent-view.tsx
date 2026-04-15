@@ -283,6 +283,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 documentStateAtom={agentAtoms().documentStateAtom}
                 logLines={logLines}
                 authUrl={status.authUrl}
+                authProviderId={provider()?.id ?? providerKey()}
                 onSubagentClick={handleSubagentClick}
                 onLoadOlder={history.loadOlder}
                 loadingOlder={history.loadingOlder}

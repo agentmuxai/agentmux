@@ -22,6 +22,8 @@ interface AgentDocumentViewProps {
     documentStateAtom: SignalPair<DocumentState>;
     logLines: Accessor<LogLine[]>;
     authUrl?: Accessor<string | null>;
+    /** Provider ID for the active auth flow — used when submitting a pasted auth code. */
+    authProviderId?: string;
     onSubagentClick?: (node: SubagentLinkNode) => void;
     /** Called when the user scrolls near the top — load the previous page of history. */
     onLoadOlder?: () => Promise<void>;
@@ -48,7 +50,7 @@ interface AgentDocumentViewProps {
     highlightNodeId?: Accessor<string | null>;
 }
 
-export const AgentDocumentView = ({ documentAtom, documentStateAtom, logLines, authUrl, onSubagentClick, onLoadOlder, loadingOlder, bookmarkedNodeIds, onBookmark, scrollCommand, scrollToBottomRef, highlightNodeId }: AgentDocumentViewProps): JSX.Element => {
+export const AgentDocumentView = ({ documentAtom, documentStateAtom, logLines, authUrl, authProviderId, onSubagentClick, onLoadOlder, loadingOlder, bookmarkedNodeIds, onBookmark, scrollCommand, scrollToBottomRef, highlightNodeId }: AgentDocumentViewProps): JSX.Element => {
     const [document] = documentAtom;
     const [documentState, setDocumentState] = documentStateAtom;
     let scrollRef!: HTMLDivElement;
@@ -246,7 +248,7 @@ export const AgentDocumentView = ({ documentAtom, documentStateAtom, logLines, a
                                 setPasteResult(null);
                                 try {
                                     const { getApi } = await import("@/app/store/global");
-                                    await getApi().setProviderAuth("claude", code);
+                                    await getApi().setProviderAuth(authProviderId ?? "claude", code);
                                     setPasteResult("Code accepted — waiting for confirmation...");
                                     setPasteCode("");
                                 } catch (err: any) {
