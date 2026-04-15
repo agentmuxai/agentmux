@@ -97,7 +97,7 @@ const ING_TO_ED_EXCEPTIONS: Record<string, string> = {
 function ingToEd(phrase: string): string {
     if (ING_TO_ED_EXCEPTIONS[phrase]) return ING_TO_ED_EXCEPTIONS[phrase];
     if (phrase.endsWith("ing")) return phrase.slice(0, -3) + "ed";
-    if (phrase.endsWith("in'")) return phrase.slice(0, -3) + "ped";
+    if (phrase.endsWith("in'")) return phrase.slice(0, -3) + "ed";
     return phrase;
 }
 
