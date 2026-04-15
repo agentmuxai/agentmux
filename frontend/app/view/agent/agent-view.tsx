@@ -129,6 +129,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         streamingStateAtom: agentAtoms().streamingStateAtom,
         sessionStatsAtom: agentAtoms().sessionStatsAtom,
         currentToolAtom: agentAtoms().currentToolAtom,
+        turnTokensAtom: agentAtoms().turnTokensAtom,
         enabled: true,
         documentVersion: history.documentVersion,
     });
@@ -333,6 +334,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                     loading={status.isLoading()}
                     currentTool={agentAtoms().currentToolAtom[0]()}
                     sessionStats={agentAtoms().sessionStatsAtom[0]()}
+                    turnTokens={agentAtoms().turnTokensAtom[0]()}
                 />
                 <AgentControlBar
                     blockId={model.blockId}

@@ -7,87 +7,13 @@
 
 import { Show, createEffect, createMemo, createSignal, onCleanup, type JSX } from "solid-js";
 import type { SlashCommand } from "../commands/types";
-import type { SessionStats } from "../types";
+import type { SessionStats, TurnTokens } from "../types";
 import { SlashAutocomplete } from "./SlashAutocomplete";
 
 // ── AgentStatusLine ───────────────────────────────────────────────────────────
 // Displayed above the control bar. Shows a cycling thinking phrase while the
 // agent is processing, then the last phrase converted to past tense + session
 // stats when the turn completes.
-
-/** Convert "Synthesizing" → "Synthesized", "Beboppin'" → "Bebopped". */
-function ingToEd(phrase: string): string {
-    if (phrase.endsWith("ing")) return phrase.slice(0, -3) + "ed";
-    if (phrase.endsWith("in'")) return phrase.slice(0, -3) + "ped";
-    return phrase;
-}
-
-interface AgentStatusLineProps {
-    loading?: boolean;
-    currentTool?: string | null;
-    sessionStats?: SessionStats | null;
-}
-
-export const AgentStatusLine = (props: AgentStatusLineProps): JSX.Element => {
-    const [phrase, setPhrase] = createSignal(pickThinkingPhrase());
-    // Capture the last active phrase so we can convert it to past tense when done.
-    const [lastPhrase, setLastPhrase] = createSignal(pickThinkingPhrase());
-
-    createEffect(() => {
-        if (!props.loading || props.currentTool) return;
-        setPhrase(pickThinkingPhrase());
-        const id = setInterval(() => {
-            setPhrase((prev) => {
-                const next = pickThinkingPhrase(prev);
-                setLastPhrase(next);
-                return next;
-            });
-        }, 30000);
-        onCleanup(() => clearInterval(id));
-    });
-
-    // When loading starts, seed lastPhrase from current phrase.
-    createEffect(() => {
-        if (props.loading && !props.currentTool) {
-            setLastPhrase(phrase());
-        }
-    });
-
-    const render = (): JSX.Element => {
-        if (props.loading) {
-            return (
-                <span class="agent-status-line agent-status-line--loading">
-                    <span class="agent-spinner-dot" />
-                    {props.currentTool ? props.currentTool : `${phrase()}\u2026`}
-                </span>
-            );
-        }
-
-        const stats = props.sessionStats;
-        if (!stats) return <span class="agent-status-line" />;
-
-        const parts: string[] = [];
-        parts.push(ingToEd(lastPhrase()));
-        if (stats.cost_usd != null) parts.push(`$${stats.cost_usd.toFixed(3)}`);
-        if (stats.duration_ms != null) {
-            const s = Math.round(stats.duration_ms / 1000);
-            parts.push(s < 60 ? `${Math.max(1, s)}s` : `${Math.floor(s / 60)}m ${s % 60}s`);
-        }
-        if (stats.num_turns) {
-            parts.push(`${stats.num_turns} ${stats.num_turns === 1 ? "turn" : "turns"}`);
-        }
-
-        return (
-            <span class="agent-status-line agent-status-line--stats">
-                {parts.join("  \u00b7  ")}
-            </span>
-        );
-    };
-
-    return render();
-};
-
-AgentStatusLine.displayName = "AgentStatusLine";
 
 // Thinking phrases sourced from Claude Code's cli.js, with AgentMux additions.
 // Displayed in the status line while the agent is processing (no tool active).
@@ -157,6 +83,121 @@ function pickThinkingPhrase(exclude?: string): string {
     } while (candidate === exclude && THINKING_PHRASES.length > 1);
     return candidate;
 }
+
+// Exception map for irregular -ing → past-tense conversions.
+const ING_TO_ED_EXCEPTIONS: Record<string, string> = {
+    Thinking: "Thought",
+    Doing: "Done",
+    Spinning: "Spun",
+    Flowing: "Flowed",   // regular, but guarded for clarity
+    Forging: "Forged",
+};
+
+/** Convert "Synthesizing" → "Synthesized", "Thinking" → "Thought". */
+function ingToEd(phrase: string): string {
+    if (ING_TO_ED_EXCEPTIONS[phrase]) return ING_TO_ED_EXCEPTIONS[phrase];
+    if (phrase.endsWith("ing")) return phrase.slice(0, -3) + "ed";
+    if (phrase.endsWith("in'")) return phrase.slice(0, -3) + "ped";
+    return phrase;
+}
+
+function fmtElapsed(ms: number): string {
+    const s = Math.floor(ms / 1000);
+    return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
+}
+
+function fmtTokens(t: TurnTokens): string {
+    const fmt = (n: number) => n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
+    return `\u2191${fmt(t.input)} \u2193${fmt(t.output)}`;
+}
+
+interface AgentStatusLineProps {
+    loading?: boolean;
+    currentTool?: string | null;
+    sessionStats?: SessionStats | null;
+    turnTokens?: TurnTokens | null;
+}
+
+export const AgentStatusLine = (props: AgentStatusLineProps): JSX.Element => {
+    const [phrase, setPhrase] = createSignal(pickThinkingPhrase());
+    const [lastPhrase, setLastPhrase] = createSignal(pickThinkingPhrase());
+    const [elapsedMs, setElapsedMs] = createSignal(0);
+
+    // Phrase cycling: 30s interval while loading without a tool name.
+    createEffect(() => {
+        if (!props.loading || props.currentTool) return;
+        setPhrase(pickThinkingPhrase());
+        const id = setInterval(() => {
+            setPhrase((prev) => {
+                const next = pickThinkingPhrase(prev);
+                setLastPhrase(next);
+                return next;
+            });
+        }, 30000);
+        onCleanup(() => clearInterval(id));
+    });
+
+    // Elapsed timer: reset to 0 and tick every second while loading.
+    createEffect(() => {
+        if (!props.loading) return;
+        const start = Date.now();
+        setElapsedMs(0);
+        const id = setInterval(() => setElapsedMs(Date.now() - start), 1000);
+        onCleanup(() => clearInterval(id));
+    });
+
+    // Seed lastPhrase when loading begins.
+    createEffect(() => {
+        if (props.loading && !props.currentTool) setLastPhrase(phrase());
+    });
+
+    // Reactive derived values used in both branches.
+    const statsText = createMemo((): string | null => {
+        const stats = props.sessionStats;
+        if (!stats) return null;
+        const parts: string[] = [];
+        parts.push(ingToEd(lastPhrase()));
+        if (stats.cost_usd != null) parts.push(`$${stats.cost_usd.toFixed(3)}`);
+        if (stats.duration_ms != null) {
+            const s = Math.round(stats.duration_ms / 1000);
+            parts.push(s < 60 ? `${Math.max(1, s)}s` : `${Math.floor(s / 60)}m ${s % 60}s`);
+        }
+        if (stats.num_turns) {
+            parts.push(`${stats.num_turns} ${stats.num_turns === 1 ? "turn" : "turns"}`);
+        }
+        return parts.join("  \u00b7  ");
+    });
+
+    const rightText = createMemo((): string => {
+        const right: string[] = [];
+        if (props.turnTokens) right.push(fmtTokens(props.turnTokens));
+        right.push(fmtElapsed(elapsedMs()));
+        return right.join("  \u00b7  ");
+    });
+
+    return (
+        <Show
+            when={props.loading}
+            fallback={
+                <Show when={statsText()} fallback={<span class="agent-status-line" />}>
+                    <span class="agent-status-line agent-status-line--stats">
+                        {statsText()}
+                    </span>
+                </Show>
+            }
+        >
+            <span class="agent-status-line agent-status-line--loading">
+                <span class="agent-spinner-dot" />
+                <span class="agent-status-left">
+                    {props.currentTool ? props.currentTool : `${phrase()}\u2026`}
+                </span>
+                <span class="agent-status-right">{rightText()}</span>
+            </span>
+        </Show>
+    );
+};
+
+AgentStatusLine.displayName = "AgentStatusLine";
 
 interface AgentFooterProps {
     agentId: string;
