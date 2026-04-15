@@ -329,40 +329,10 @@ export interface StreamingState {
 }
 
 /**
- * Agent process state
+ * Shared logging callback passed into hooks and flows.
+ * Implementations append a tagged line to the launch-log document.
  */
-export interface AgentProcessState {
-    pid?: number;
-    agentId: string;
-    status: "idle" | "running" | "paused" | "failed";
-    canRestart: boolean;
-    canKill: boolean;
-}
-
-/**
- * Message router state (backend connection)
- */
-export interface MessageRouterState {
-    backend: "local" | "cloud"; // agentmux backend vs agentbus
-    connected: boolean;
-    endpoint: string;
-}
-
-/**
- * Claude Code authentication state
- */
-export interface AuthState {
-    status: "disconnected" | "connecting" | "awaiting_browser" | "connected" | "error";
-    error?: string;
-}
-
-/**
- * Claude Code user information
- */
-export interface UserInfo {
-    email: string;
-    name?: string;
-}
+export type LogFn = (tag: string, text: string, level?: "info" | "error" | "warn") => void;
 
 /**
  * Runtime configuration for agent pane controls.

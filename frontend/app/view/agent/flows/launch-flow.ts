@@ -38,7 +38,8 @@ import { BlockService } from "@/app/store/services";
 import { getApi, staticTabId } from "@/app/store/global";
 import type { ProviderDefinition } from "../providers";
 
-export type LogFn = (tag: string, text: string, level?: "info" | "error" | "warn") => void;
+import type { LogFn } from "../types";
+export type { LogFn };
 
 export interface LaunchFlowOptions {
     blockId: string;

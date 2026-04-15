@@ -33,7 +33,8 @@ import { TabRpcClient } from "@/app/store/wshrpcutil";
 import * as WOS from "@/app/store/wos";
 import type { Bookmark, DocumentNode } from "../types";
 
-export type LogFn = (tag: string, text: string, level?: "info" | "error" | "warn") => void;
+import type { LogFn } from "../types";
+export type { LogFn };
 
 export interface UseBookmarksOptions {
     blockId: string;

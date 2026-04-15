@@ -38,7 +38,8 @@ import { getApi } from "@/app/store/global";
 import { runLaunchFlow } from "../flows/launch-flow";
 import type { ProviderDefinition } from "../providers";
 
-export type LogFn = (tag: string, text: string, level?: "info" | "error" | "warn") => void;
+import type { LogFn } from "../types";
+export type { LogFn };
 
 export interface UseAgentControllerStatusOptions {
     blockId: string;

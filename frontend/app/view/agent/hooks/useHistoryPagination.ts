@@ -40,7 +40,8 @@ import type { SignalPair } from "../state";
 import type { DocumentNode } from "../types";
 import { parseHistoryLines } from "../parseHistoryLines";
 
-export type LogFn = (tag: string, text: string, level?: "info" | "error" | "warn") => void;
+import type { LogFn } from "../types";
+export type { LogFn };
 
 export interface UseHistoryPaginationOptions {
     blockId: string;
