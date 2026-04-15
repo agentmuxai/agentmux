@@ -139,6 +139,7 @@ pub fn seed_forge_agents(wstore: &Arc<WaveStore>) -> Result<SeedReport, StoreErr
             environment: agent_def.environment.clone(),
             agent_bus_id: agent_def.agent_bus_id.clone(),
             is_seeded: 1,
+            accounts: String::new(),
         };
         wstore.forge_insert(&mut agent)?;
 
@@ -307,6 +308,7 @@ fn reseed_if_needed(
             environment: agent_def.environment.clone(),
             agent_bus_id: agent_def.agent_bus_id.clone(),
             is_seeded: 1,
+            accounts: String::new(),
         };
 
         if existing_map.contains_key(agent_def.id.as_str()) {

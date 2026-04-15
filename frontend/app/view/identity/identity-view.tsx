@@ -347,7 +347,7 @@ function AssignmentsTab({ model }: { model: IdentityViewModel }): JSX.Element {
 
 // ── Add/Edit form ─────────────────────────────────────────────────────────────
 
-function AccountForm({ model }: { model: IdentityViewModel }): JSX.Element {
+export function AccountForm({ model }: { model: IdentityViewModel }): JSX.Element {
     const editing = () => model.editingAccountAtom();
     const isEdit = () => editing() !== null;
 

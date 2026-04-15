@@ -78,6 +78,7 @@ pub fn run_forge_migrations(conn: &Connection) -> Result<(), StoreError> {
     run_forge_v2_migrations(conn)?;
     run_forge_v3_migrations(conn)?;
     run_forge_v4_migrations(conn)?;
+    run_forge_v5_migrations(conn)?;
     Ok(())
 }
 
@@ -261,6 +262,32 @@ pub fn run_forge_v4_migrations(conn: &Connection) -> Result<(), StoreError> {
              ON db_forge_agents(slug)",
     )?;
 
+    Ok(())
+}
+
+/// Forge v5 migrations: add `accounts` column — JSON-encoded per-provider
+/// account references owned by each agent.
+/// Shape: `{"github":"acct-id"|null,"aws":"acct-id"|null,...}`
+/// Empty string = no accounts assigned. Existing rows default to ''.
+///
+/// See SPEC_AGENT_IDENTITY_RESTRUCTURE_2026_04_14.md §3.3.
+pub fn run_forge_v5_migrations(conn: &Connection) -> Result<(), StoreError> {
+    match conn.execute_batch(
+        "ALTER TABLE db_forge_agents ADD COLUMN accounts TEXT NOT NULL DEFAULT ''",
+    ) {
+        Ok(_) => {}
+        Err(e) => {
+            let msg = e.to_string();
+            if !msg.contains("duplicate column") {
+                return Err(StoreError::Sqlite(match e {
+                    rusqlite::Error::SqliteFailure(code, _) => {
+                        rusqlite::Error::SqliteFailure(code, Some(msg))
+                    }
+                    other => other,
+                }));
+            }
+        }
+    }
     Ok(())
 }
 
