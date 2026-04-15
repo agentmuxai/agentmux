@@ -313,7 +313,7 @@ pub fn get_provider_install_info(args: &serde_json::Value) -> Result<serde_json:
 }
 
 /// Store an auth token for a provider.
-pub fn set_provider_auth(state: &Arc<AppState>, args: &serde_json::Value) -> Result<serde_json::Value, String> {
+pub async fn set_provider_auth(state: &Arc<AppState>, args: &serde_json::Value) -> Result<serde_json::Value, String> {
     let provider = args
         .get("provider")
         .and_then(|v| v.as_str())
@@ -323,6 +323,27 @@ pub fn set_provider_auth(state: &Arc<AppState>, args: &serde_json::Value) -> Res
         .and_then(|v| v.as_str())
         .ok_or_else(|| "Missing token".to_string())?;
 
+    // For Claude (and any CLI-based provider), deliver the auth code directly
+    // to the running login process via its piped stdin. The CLI prints the
+    // OAuth URL, then waits for the user to paste the device code on stdin.
+    // Without this, the code went to our own config file (wrong) and the CLI
+    // never received it, so the polling loop ran forever.
+    let maybe_stdin = state.cli_login_stdin.lock().take();
+    if let Some(mut child_stdin) = maybe_stdin {
+        tracing::info!(provider = %provider, "set_provider_auth: delivering code to CLI stdin");
+        use tokio::io::AsyncWriteExt;
+        let payload = format!("{}\n", token);
+        if let Err(e) = child_stdin.write_all(payload.as_bytes()).await {
+            tracing::warn!(error = %e, "set_provider_auth: failed to write to CLI stdin");
+            return Err(format!("Failed to deliver auth code to CLI: {e}"));
+        }
+        let _ = child_stdin.flush().await;
+        // Don't put stdin back — it's single-use (one code per login flow).
+        return Ok(serde_json::Value::Null);
+    }
+
+    // Fallback for providers that use AgentMux's own config-file auth
+    // (non-CLI providers, or when no login process is running).
     tracing::info!("Setting auth token for provider: {}", provider);
     let cfg_dir = get_config_dir(state)?;
     let mut config = load_config(&cfg_dir)?;

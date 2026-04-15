@@ -162,6 +162,10 @@ pub struct AppState {
     /// Cancellation channel for an in-progress CLI login process
     pub cli_login_cancel: Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
 
+    /// Stdin handle for the running CLI login child process.
+    /// Written to by `set_provider_auth` to deliver the OAuth device code.
+    pub cli_login_stdin: Mutex<Option<tokio::process::ChildStdin>>,
+
     /// IPC HTTP server port
     pub ipc_port: Mutex<u16>,
 
@@ -209,6 +213,7 @@ impl Default for AppState {
             window_init_status: Mutex::new(String::new()),
             window_instance_registry: Mutex::new(WindowInstanceRegistry::new()),
             cli_login_cancel: Mutex::new(None),
+            cli_login_stdin: Mutex::new(None),
             ipc_port: Mutex::new(0),
             ipc_token: uuid::Uuid::new_v4().to_string(),
             browsers: Mutex::new(HashMap::new()),
