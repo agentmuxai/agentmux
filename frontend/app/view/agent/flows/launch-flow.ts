@@ -186,8 +186,11 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
             );
             if (loginUrl) {
                 setAuthUrl(loginUrl);
-                log("auth", "OAuth URL captured — browser should open automatically");
-                log("auth", "if it didn't, copy the URL from the box above");
+                // Open the URL in the system browser. If it doesn't open,
+                // the user can copy from the URL box above the composer.
+                try { getApi().openExternal(loginUrl); } catch { /* non-fatal */ }
+                log("auth", "browser opened — complete login there");
+                log("auth", "if it didn't open, copy the URL from the box above");
             } else {
                 log("auth", "a browser window should have opened — complete login there");
             }

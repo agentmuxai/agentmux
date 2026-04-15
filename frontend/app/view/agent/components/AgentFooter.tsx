@@ -15,90 +15,12 @@ import { SlashAutocomplete } from "./SlashAutocomplete";
 // agent is processing, then the last phrase converted to past tense + session
 // stats when the turn completes.
 
-// Thinking phrases sourced from Claude Code's cli.js, with AgentMux additions.
-// Displayed in the status line while the agent is processing (no tool active).
-const THINKING_PHRASES: string[] = [
-    "Accomplishing", "Actioning", "Actualizing", "Architecting",
-    "Baking", "Beaming", "Beboppin'", "Befuddling", "Billowing",
-    "Blanching", "Bloviating", "Boogieing", "Boondoggling", "Booping",
-    "Bootstrapping", "Brewing", "Bunning", "Burrowing",
-    "Calculating", "Canoodling", "Caramelizing", "Cascading", "Catapulting",
-    "Cerebrating", "Channeling", "Choreographing", "Churning", "Clauding",
-    "Coalescing", "Cogitating", "Combobulating", "Composing", "Computing",
-    "Concocting", "Considering", "Contemplating", "Cooking", "Crafting",
-    "Creating", "Crunching", "Crystallizing", "Cultivating",
-    "Deciphering", "Deliberating", "Determining", "Dilly-dallying",
-    "Discombobulating", "Doing", "Doodling", "Drizzling",
-    "Ebbing", "Effecting", "Elucidating", "Embellishing", "Enchanting",
-    "Envisioning", "Evaporating",
-    "Fermenting", "Fiddle-faddling", "Finagling", "Flambéing",
-    "Flibbertigibbeting", "Flowing", "Flummoxing", "Fluttering", "Forging",
-    "Forming", "Frolicking", "Frosting",
-    "Gallivanting", "Galloping", "Garnishing", "Generating", "Gesticulating",
-    "Germinating", "Gitifying", "Grooving", "Gusting",
-    "Harmonizing", "Hashing", "Hatching", "Herding", "Honking",
-    "Hullaballooing", "Hyperspacing",
-    "Ideating", "Imagining", "Improvising", "Incubating", "Inferring",
-    "Infusing", "Ionizing",
-    "Jitterbugging", "Julienning",
-    "Kneading",
-    "Leavening", "Levitating", "Lollygagging",
-    "Manifesting", "Marinating", "Meandering", "Metamorphosing", "Misting",
-    "Moonwalking", "Moseying", "Mulling", "Mustering", "Musing",
-    "Nebulizing", "Nesting", "Newspapering", "Noodling", "Nucleating",
-    "Orbiting", "Orchestrating", "Osmosing",
-    "Perambulating", "Percolating", "Perusing", "Philosophising",
-    "Photosynthesizing", "Pollinating", "Pondering", "Pontificating",
-    "Pouncing", "Precipitating", "Prestidigitating", "Processing",
-    "Proofing", "Propagating", "Puttering", "Puzzling",
-    "Quantumizing",
-    "Razzle-dazzling", "Razzmatazzing", "Recombobulating", "Reticulating",
-    "Roosting", "Ruminating",
-    "Sautéing", "Scampering", "Schlepping", "Scurrying", "Seasoning",
-    "Shenaniganing", "Shimmying", "Simmering", "Skedaddling", "Sketching",
-    "Slithering", "Smooshing", "Sock-hopping", "Spelunking", "Spinning",
-    "Sprouting", "Stewing", "Sublimating", "Swirling", "Swooping",
-    "Symbioting", "Synthesizing",
-    "Tempering", "Thinking", "Thundering", "Tinkering", "Tomfoolering",
-    "Topsy-turvying", "Transfiguring", "Transmuting", "Twisting",
-    "Undulating", "Unfurling", "Unravelling",
-    "Vibing",
-    "Waddling", "Wandering", "Warping", "Whatchamacalliting",
-    "Whirlpooling", "Whirring", "Whisking", "Wibbling", "Working",
-    "Wrangling",
-    "Zesting", "Zigzagging",
-    // AgentMux additions
-    "Agentifying", "Autonomizing", "Calibrating", "Channelling",
-    "Conspiring", "Daydreaming", "Defragging", "Dispatching",
-    "Extrapolating", "Hyperlooping", "Interpolating",
-    "Muxing", "Optimizing", "Parallelizing", "Pathfinding",
-    "Quantizing", "Recalibrating", "Sequencing", "Strategizing",
-    "Swarmifying", "Tokenizing", "Transcribing", "Vectorizing",
-];
-
-function pickThinkingPhrase(exclude?: string): string {
-    let candidate: string;
-    do {
-        candidate = THINKING_PHRASES[Math.floor(Math.random() * THINKING_PHRASES.length)];
-    } while (candidate === exclude && THINKING_PHRASES.length > 1);
-    return candidate;
+function pickThinkingPhrase(_exclude?: string): string {
+    return "Working";
 }
 
-// Exception map for irregular -ing → past-tense conversions.
-const ING_TO_ED_EXCEPTIONS: Record<string, string> = {
-    Thinking: "Thought",
-    Doing: "Done",
-    Spinning: "Spun",
-    Flowing: "Flowed",   // regular, but guarded for clarity
-    Forging: "Forged",
-};
-
-/** Convert "Synthesizing" → "Synthesized", "Thinking" → "Thought". */
-function ingToEd(phrase: string): string {
-    if (ING_TO_ED_EXCEPTIONS[phrase]) return ING_TO_ED_EXCEPTIONS[phrase];
-    if (phrase.endsWith("ing")) return phrase.slice(0, -3) + "ed";
-    if (phrase.endsWith("in'")) return phrase.slice(0, -3) + "ed";
-    return phrase;
+function ingToEd(_phrase: string): string {
+    return "Worked";
 }
 
 function fmtElapsed(ms: number): string {

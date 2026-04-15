@@ -295,13 +295,6 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 highlightNodeId={search.highlightId}
             />
 
-            <Show when={status.loginWaiting()}>
-                <div class="agent-retry-bar">
-                    <button class="agent-retry-btn agent-retry-btn--cancel" onClick={status.cancelLogin}>
-                        Cancel Login
-                    </button>
-                </div>
-            </Show>
             <Show when={status.canRetry()}>
                 <div class="agent-retry-bar">
                     <button class="agent-retry-btn" onClick={status.startLaunchFlow}>
