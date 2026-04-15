@@ -1200,6 +1200,35 @@ pub struct CommandImportForgeFromClawData {
 }
 
 // ====================================================================
+// Tool store commands
+// ====================================================================
+
+pub const COMMAND_GET_TOOL_STATUS: &str = "gettoolstatus";
+pub const COMMAND_INSTALL_TOOL: &str = "installtool";
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct CommandInstallToolData {
+    pub tool_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GetToolStatusResult {
+    pub tools: Vec<crate::backend::tool_store::ToolStatusEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InstallToolResult {
+    pub installed: Vec<String>,
+    pub failed: Vec<InstallFailure>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InstallFailure {
+    pub id: String,
+    pub error: String,
+}
+
+// ====================================================================
 // Tests
 // ====================================================================
 

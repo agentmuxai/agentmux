@@ -505,6 +505,33 @@ impl Controller for ShellController {
             // See specs/SPEC_RETIRE_WSH_2026_04_12.md.
             c.env("AGENTMUX", "1");
 
+            // Append AgentMux-managed tool dirs to PATH so agents can use
+            // jq, rg, etc. without the host having them installed system-wide.
+            // Appended (not prepended) so system PATH always wins.
+            {
+                let sep = if cfg!(windows) { ";" } else { ":" };
+                let current_path = std::env::var("PATH").unwrap_or_default();
+                let mut extra: Vec<String> = Vec::new();
+
+                // User-managed store (~/.agentmux/tools/bin/)
+                if let Some(user_bin) = crate::backend::tool_store::user_tools_dir() {
+                    if user_bin.exists() {
+                        extra.push(user_bin.to_string_lossy().into_owned());
+                    }
+                }
+
+                // Bundled store (ships with the app, e.g. runtime/tools/bin/)
+                if let Some(bundled_bin) = crate::backend::tool_store::bundled_tools_dir() {
+                    if bundled_bin.exists() {
+                        extra.push(bundled_bin.to_string_lossy().into_owned());
+                    }
+                }
+
+                if !extra.is_empty() {
+                    c.env("PATH", format!("{current_path}{sep}{}", extra.join(sep)));
+                }
+            }
+
             // Inject cmd:env from wconfig settings and block metadata.
             // Track whether AGENTMUX_AGENT_ID is explicitly set so we know
             // whether to apply the backward-compat WAVEMUX bridge.

@@ -589,6 +589,16 @@ class RpcApiType {
         return client.wshRpcCall("runclilogin", data, opts);
     }
 
+    // command "gettoolstatus" [call]
+    GetToolStatusCommand(client: WshClient, opts?: RpcOpts): Promise<GetToolStatusResult> {
+        return client.wshRpcCall("gettoolstatus", {}, opts);
+    }
+
+    // command "installtool" [call]
+    InstallToolCommand(client: WshClient, data: CommandInstallToolData, opts?: RpcOpts): Promise<InstallToolResult> {
+        return client.wshRpcCall("installtool", data, opts);
+    }
+
     // command "blockfile:line_count" [call]
     BlockfileLineCountCommand(client: WshClient, data: CommandBlockfileLineCountData, opts?: RpcOpts): Promise<BlockfileLineCountResult> {
         return client.wshRpcCall("blockfile:line_count", data, opts);
