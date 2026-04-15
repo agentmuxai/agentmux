@@ -314,6 +314,9 @@ export function useAgentStream({
             if (flushRafId != null) { cancelAnimationFrame(flushRafId); flushRafId = null; }
             subscription.unsubscribe();
             setStreaming((prev) => ({ ...prev, active: false }));
+            // Clear turn-active on teardown so a crash/exit without session_end
+            // doesn't leave the status line showing "Working…" permanently.
+            setTurnActive(false);
         });
     });
 }
