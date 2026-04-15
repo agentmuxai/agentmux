@@ -32,6 +32,7 @@ rm -rf "$PORTABLE" "$ZIPPATH"
 
 # Create structure
 mkdir -p "$PORTABLE/runtime/locales" "$PORTABLE/runtime/frontend" "$PORTABLE/runtime/tools/bin"
+mkdir -p "$PORTABLE/data"
 
 # Launcher in root
 cp target/release/agentmux-launcher.exe "$PORTABLE/agentmux.exe"
@@ -48,7 +49,24 @@ Requirements:
   - Windows 10/11 x64
   - No installation needed
   - No admin rights required
+
+Data:
+  All user data (sessions, settings, logs) is stored in the data/ folder
+  next to agentmux.exe. Back it up or move it along with this folder.
 READMEEOF
+
+# data/ placeholder so the folder is visible immediately after extraction
+cat > "$PORTABLE/data/README.txt" <<DATAEOF
+AgentMux user data
+
+This folder contains your sessions, settings, and logs.
+It is safe to back up. Do not delete it while AgentMux is running.
+
+  data/config/   — settings.json, keybindings.json
+  data/db/       — session history and block state
+  data/logs/     — host and sidecar log files
+  data/cef/      — browser cache (safe to delete when app is closed)
+DATAEOF
 
 # Runtime binaries — versioned filenames so WER dumps & Event Viewer show versions
 cp target/release/agentmux-cef.exe "$PORTABLE/runtime/agentmux-$VERSION.exe"
