@@ -69,7 +69,8 @@ export const AgentDocumentView = ({ documentAtom, documentStateAtom, logLines, a
         if (logLeavePending) { clearTimeout(logLeavePending); logLeavePending = 0; }
         const el = e.currentTarget as HTMLElement;
         const r = el.getBoundingClientRect();
-        setLogHover({ text: `[${line.tag}] ${line.text}`, level: line.level, top: r.top, left: r.left, width: r.width });
+        const hoverLevel = line.level === "error" || line.level === "warn" ? line.level : undefined;
+        setLogHover({ text: `[${line.tag}] ${line.text}`, level: hoverLevel, top: r.top, left: r.left, width: r.width });
     };
     const handleLogLeave = () => {
         if (logLeavePending) clearTimeout(logLeavePending);
