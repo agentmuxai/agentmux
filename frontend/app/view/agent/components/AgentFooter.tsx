@@ -195,7 +195,7 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
         if (!stats) return <span class="agent-status-line" />;
 
         const parts: string[] = [];
-        if (stats.cost_usd) parts.push(`$${stats.cost_usd.toFixed(3)}`);
+        if (stats.cost_usd != null) parts.push(`$${stats.cost_usd.toFixed(3)}`);
         if (stats.duration_ms != null) {
             const s = Math.round(stats.duration_ms / 1000);
             if (s < 60) {
