@@ -7,24 +7,23 @@
  * agent.
  *
  * PR 2 of specs/SPEC_CONSOLIDATE_FORGE_IDENTITY_INTO_AGENT_2026_04_13.md.
- *
- * Instantiates a dedicated ForgeViewModel and IdentityViewModel
- * on mount (lifetime = panel lifetime) and delegates to the existing
- * ForgeDetail / ForgeForm / IdentityPanel components. No rewrite of
- * Forge or Identity internals — just reuse.
- *
- * The Identity tab currently shows the global account list (same
- * data as the old identity widget). Per-agent scoping is deferred
- * to SPEC_FORGE_AGENT_IDENTITY_2026_04_13.md.
+ * Identity tab upgraded to agent-scoped view in Step 4 of
+ * SPEC_AGENT_IDENTITY_RESTRUCTURE_2026_04_14.md.
  */
 
 import { createEffect, createSignal, onCleanup, onMount, Show, type JSX } from "solid-js";
 import type { BlockNodeModel } from "@/app/block/blocktypes";
+import { RpcApi } from "@/app/store/wshclientapi";
+import { TabRpcClient } from "@/app/store/wshrpcutil";
 import { ForgeViewModel } from "@/app/view/forge/forge-model";
 import { ForgeDetail } from "@/app/view/forge/components/ForgeDetail";
 import { ForgeForm } from "@/app/view/forge/components/ForgeForm";
-import { IdentityViewModel } from "@/app/view/identity/identity-model";
-import { IdentityPanel } from "@/app/view/identity/identity-view";
+import {
+    type AgentAccounts,
+    IdentityViewModel,
+    serializeAgentAccounts,
+} from "@/app/view/identity/identity-model";
+import { AgentIdentityPanel } from "./AgentIdentityPanel";
 
 export type SettingsTab = "forge" | "identity";
 
@@ -91,6 +90,30 @@ export const AgentCardSettingsPanel = (props: AgentCardSettingsPanelProps): JSX.
         }
     });
 
+    // Persist updated account assignments to the backend. Sends a full
+    // UpdateForgeAgentCommand with the existing agent fields + new accounts.
+    const handleAccountsUpdate = async (newAccounts: AgentAccounts): Promise<void> => {
+        const agent = props.agent;
+        if (!agent) return;
+        await RpcApi.UpdateForgeAgentCommand(TabRpcClient, {
+            id: agent.id,
+            name: agent.name,
+            icon: agent.icon,
+            provider: agent.provider,
+            description: agent.description,
+            working_directory: agent.working_directory,
+            shell: agent.shell,
+            provider_flags: agent.provider_flags,
+            auto_start: agent.auto_start,
+            restart_on_crash: agent.restart_on_crash,
+            idle_timeout_minutes: agent.idle_timeout_minutes,
+            agent_type: agent.agent_type,
+            environment: agent.environment,
+            agent_bus_id: agent.agent_bus_id,
+            accounts: serializeAgentAccounts(newAccounts),
+        });
+    };
+
     return (
         <div class="agent-card-settings-panel">
             <div class="agent-card-settings-header">
@@ -127,7 +150,20 @@ export const AgentCardSettingsPanel = (props: AgentCardSettingsPanelProps): JSX.
                     </Show>
                 </Show>
                 <Show when={tab() === "identity"}>
-                    <IdentityPanel model={identityModel} />
+                    <Show
+                        when={props.agent}
+                        fallback={
+                            <div class="agent-identity-unsaved">
+                                Save the agent first to assign accounts.
+                            </div>
+                        }
+                    >
+                        <AgentIdentityPanel
+                            agent={props.agent!}
+                            model={identityModel}
+                            onUpdate={handleAccountsUpdate}
+                        />
+                    </Show>
                 </Show>
             </div>
         </div>
