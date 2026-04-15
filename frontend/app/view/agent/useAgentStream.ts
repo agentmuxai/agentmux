@@ -100,12 +100,24 @@ export function useAgentStream({
                 }
             }
 
-            // Append new nodes
+            // Append new nodes — but guard against the race where a
+            // documentVersion rebuild placed the node into the doc externally
+            // (e.g. history load completed between the node entering pendingNew
+            // and this RAF firing). If nodeIndexMap already has a valid entry
+            // for the node, update in-place instead of appending to prevent
+            // duplicates.
             if (batchNew.length > 0) {
-                const baseIdx = result.length;
                 for (let i = 0; i < batchNew.length; i++) {
-                    nodeIndexMap.set(batchNew[i].id, baseIdx + i);
-                    result.push(batchNew[i]);
+                    const n = batchNew[i];
+                    const existingIdx = nodeIndexMap.get(n.id);
+                    if (existingIdx != null && existingIdx < result.length) {
+                        // Already in doc (placed by an external mutation while
+                        // this node was queued). Update in-place.
+                        result[existingIdx] = n;
+                    } else {
+                        nodeIndexMap.set(n.id, result.length);
+                        result.push(n);
+                    }
                 }
                 mutated = true;
             }
@@ -171,7 +183,16 @@ export function useAgentStream({
         if (documentVersion != null) {
             createEffect(() => {
                 documentVersion();
+                // Re-add IDs from pending buffers AFTER rebuilding from the
+                // document so subsequent stream events for in-flight nodes are
+                // still routed as updates (not new nodes). Without this, a
+                // rebuild clears their dedup protection and the next delta
+                // creates a second entry for the same node.
+                const beforePendingNew = pendingNew.slice();
+                const beforePendingUpdates = pendingUpdates.slice();
                 rebuildIndicesFromDocument();
+                for (const n of beforePendingNew) nodeIdSet.add(n.id);
+                for (const n of beforePendingUpdates) nodeIdSet.add(n.id);
             });
         }
 
