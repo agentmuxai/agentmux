@@ -21,7 +21,6 @@
     "build": "task build:frontend",
     "build:backend": "task build:backend",
     "package": "task package",
-    "package:portable": "task package:portable",
     "test": "vitest",
     "coverage": "vitest run --coverage",
     "clean": "task clean"
