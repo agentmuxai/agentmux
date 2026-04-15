@@ -179,7 +179,7 @@ export const AgentDocumentView = ({ documentAtom, documentStateAtom, logLines, a
     const handleScroll = () => {
         if (!scrollRef) return;
         const { scrollTop, scrollHeight, clientHeight } = scrollRef;
-        autoScroll = scrollHeight - scrollTop - clientHeight < 50;
+        autoScroll = scrollHeight - scrollTop - clientHeight < 200;
 
         // Trigger older-history load when near the top
         if (

@@ -130,6 +130,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         sessionStatsAtom: agentAtoms().sessionStatsAtom,
         currentToolAtom: agentAtoms().currentToolAtom,
         turnTokensAtom: agentAtoms().turnTokensAtom,
+        turnActiveAtom: agentAtoms().turnActiveAtom,
         enabled: true,
         documentVersion: history.documentVersion,
     });
@@ -159,10 +160,12 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         onSent: () => scrollToBottomFn?.(),
     });
 
-    // Clear session stats when the user sends a new message.
+    // Clear session stats and mark turn as active when the user sends a message.
     const [, setSessionStats] = agentAtoms().sessionStatsAtom;
+    const [, setTurnActive] = agentAtoms().turnActiveAtom;
     const handleSendMessage = (message: string): Promise<void> => {
         setSessionStats(null);
+        setTurnActive(true);
         return commands.sendMessage(message);
     };
 
@@ -324,7 +327,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                     )}
                 </Show>
                 <AgentStatusLine
-                    loading={status.isLoading()}
+                    loading={status.isLoading() || agentAtoms().turnActiveAtom[0]()}
                     currentTool={agentAtoms().currentToolAtom[0]()}
                     sessionStats={agentAtoms().sessionStatsAtom[0]()}
                     turnTokens={agentAtoms().turnTokensAtom[0]()}

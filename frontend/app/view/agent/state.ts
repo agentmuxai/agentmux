@@ -43,6 +43,8 @@ export interface AgentAtoms {
     sessionStatsAtom: SignalPair<SessionStats | null>;
     currentToolAtom: SignalPair<string | null>;
     turnTokensAtom: SignalPair<TurnTokens | null>;
+    /** True from the moment the user sends a message until session_end arrives. */
+    turnActiveAtom: SignalPair<boolean>;
 }
 
 /**
@@ -92,5 +94,6 @@ export function createAgentAtoms(agentId: string): AgentAtoms {
         sessionStatsAtom: createSignal<SessionStats | null>(null),
         currentToolAtom: createSignal<string | null>(null),
         turnTokensAtom: createSignal<TurnTokens | null>(null),
+        turnActiveAtom: createSignal<boolean>(false),
     };
 }
