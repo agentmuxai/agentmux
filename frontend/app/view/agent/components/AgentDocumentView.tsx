@@ -286,6 +286,8 @@ export const AgentDocumentView = ({ documentAtom, documentStateAtom, logLines, a
                                             onClick={() => {
                                                 import("@/util/clipboard").then(c => c.readText()).then(text => {
                                                     if (text) setPasteCode(text.trim());
+                                                }).catch(() => {
+                                                    setPasteResult("Could not read clipboard — paste manually");
                                                 });
                                             }}
                                         >
