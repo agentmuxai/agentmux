@@ -48,6 +48,8 @@ export interface LaunchFlowOptions {
     isCancelled: () => boolean;
     setLoginWaiting: (v: boolean) => void;
     authEnv?: Record<string, string>;
+    /** Called once when login is confirmed — append a success message to the chat. */
+    onLoginSuccess?: (email: string | null) => void;
 }
 
 export type LaunchFlowResult = "success" | "auth_failed" | "fatal";
@@ -199,6 +201,7 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
                     if (recheckResult.authenticated) {
                         const emailPart = recheckResult.email ? ` as ${recheckResult.email}` : "";
                         log("auth", `authenticated${emailPart}`);
+                        opts.onLoginSuccess?.(recheckResult.email ?? null);
                         authenticated = true;
                         break;
                     }

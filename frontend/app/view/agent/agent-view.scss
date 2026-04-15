@@ -177,6 +177,48 @@
         }
     }
 
+    .agent-auth-paste-row {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        margin-top: 8px;
+
+        .agent-auth-paste-input {
+            flex: 1;
+            padding: 6px 10px;
+            background: rgba(0, 0, 0, 0.35);
+            border: 1px solid rgba(74, 158, 255, 0.3);
+            border-radius: 4px;
+            color: var(--main-text-color);
+            font-size: 11px;
+            font-family: var(--fixed-font, monospace);
+            outline: none;
+
+            &:focus {
+                border-color: #4a9eff;
+            }
+
+            &::placeholder {
+                color: rgba(140, 200, 255, 0.4);
+            }
+        }
+
+        .agent-auth-url-copy {
+            position: static;
+            transform: none;
+            opacity: 1;
+            &:hover { background: #6bb0ff; }
+            &:disabled { opacity: 0.4; cursor: default; }
+        }
+    }
+
+    .agent-auth-paste-result {
+        margin-top: 5px;
+        font-size: 10px;
+        color: #8cc8ff;
+        opacity: 0.8;
+    }
+
     // === Retry Login Bar ===
     .agent-retry-bar {
         flex-shrink: 0;

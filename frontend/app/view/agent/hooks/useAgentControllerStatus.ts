@@ -44,6 +44,7 @@ export interface UseAgentControllerStatusOptions {
     blockId: string;
     provider: Accessor<ProviderDefinition | undefined>;
     log: LogFn;
+    onLoginSuccess?: (email: string | null) => void;
 }
 
 export interface UseAgentControllerStatus {
@@ -110,6 +111,7 @@ export function useAgentControllerStatus(
                 isCancelled: () => loginCancelled,
                 setLoginWaiting,
                 authEnv,
+                onLoginSuccess: opts.onLoginSuccess,
             });
             if (result === "success") {
                 setAgentReady(true);

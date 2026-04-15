@@ -126,8 +126,11 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
         if (props.onSendMessage) {
             props.onSendMessage(message);
             textareaRef.value = "";
-            // No style reset — browser's field-sizing handles it
-            // automatically when the content empties.
+            setAutocompletePrefix(null);
+            // Scroll the new user message into view. SolidJS flushes the
+            // document signal synchronously before this point, so jumpToBottom
+            // will include the just-added node in scrollHeight.
+            props.onTyping?.();
         }
     };
 
@@ -147,10 +150,21 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
                 setAutocompleteIndex((i) => (i - 1 + list.length) % list.length);
                 return;
             }
-            if (e.key === "Tab" || e.key === "Enter") {
+            if (e.key === "Tab") {
+                // Tab: fill in the command name for further editing (e.g. adding args)
                 e.preventDefault();
                 const match = list[autocompleteIndex()];
                 if (match) acceptCompletion(match);
+                return;
+            }
+            if (e.key === "Enter") {
+                // Enter: select and send immediately — no second Enter needed
+                e.preventDefault();
+                const match = list[autocompleteIndex()];
+                if (match) {
+                    acceptCompletion(match);
+                    handleSend();
+                }
                 return;
             }
             if (e.key === "Escape") {

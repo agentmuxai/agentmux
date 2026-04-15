@@ -7,7 +7,7 @@
  * When no document nodes exist yet, shows accumulated log lines (terminal-style).
  */
 
-import { createEffect, For, Show, type Accessor, type JSX, onCleanup } from "solid-js";
+import { createEffect, createSignal, For, Show, type Accessor, type JSX, onCleanup } from "solid-js";
 import type { SignalPair } from "../state";
 import type { DocumentNode, DocumentState, LogLine, SubagentLinkNode } from "../types";
 import type { ScrollCommand } from "../hooks/useScrollToNode";
@@ -234,21 +234,64 @@ export const AgentDocumentView = ({ documentAtom, documentStateAtom, logLines, a
                         )}
                     </For>
                     <Show when={authUrl?.()}>
-                        {(url) => (
-                            <div class="agent-auth-url-box">
-                                <div class="agent-auth-url-label">Login URL (if browser didn't open):</div>
-                                <div class="agent-auth-url-row">
-                                    <span class="agent-auth-url-text">{url()}</span>
-                                    <button
-                                        class="agent-auth-url-copy"
-                                        onClick={() => { import("@/util/clipboard").then(c => c.writeText(url())); }}
-                                        title="Copy URL"
-                                    >
-                                        Copy
-                                    </button>
+                        {(url) => {
+                            const [pasteCode, setPasteCode] = createSignal("");
+                            const [pasting, setPasting] = createSignal(false);
+                            const [pasteResult, setPasteResult] = createSignal<string | null>(null);
+
+                            const handleSubmitCode = async () => {
+                                const code = pasteCode().trim();
+                                if (!code) return;
+                                setPasting(true);
+                                setPasteResult(null);
+                                try {
+                                    const { getApi } = await import("@/app/store/global");
+                                    await getApi().setProviderAuth("claude", code);
+                                    setPasteResult("Code accepted — waiting for confirmation...");
+                                    setPasteCode("");
+                                } catch (err: any) {
+                                    setPasteResult(`Error: ${err?.message ?? String(err)}`);
+                                } finally {
+                                    setPasting(false);
+                                }
+                            };
+
+                            return (
+                                <div class="agent-auth-url-box">
+                                    <div class="agent-auth-url-label">Open this URL to log in:</div>
+                                    <div class="agent-auth-url-row">
+                                        <span class="agent-auth-url-text">{url()}</span>
+                                        <button
+                                            class="agent-auth-url-copy"
+                                            onClick={() => { import("@/util/clipboard").then(c => c.writeText(url())); }}
+                                            title="Copy URL"
+                                        >
+                                            Copy
+                                        </button>
+                                    </div>
+                                    <div class="agent-auth-paste-row">
+                                        <input
+                                            class="agent-auth-paste-input"
+                                            type="text"
+                                            placeholder="Paste auth code from Anthropic..."
+                                            value={pasteCode()}
+                                            onInput={(e) => setPasteCode((e.target as HTMLInputElement).value)}
+                                            onKeyDown={(e) => { if (e.key === "Enter") void handleSubmitCode(); }}
+                                        />
+                                        <button
+                                            class="agent-auth-url-copy"
+                                            onClick={handleSubmitCode}
+                                            disabled={!pasteCode().trim() || pasting()}
+                                        >
+                                            {pasting() ? "..." : "Submit"}
+                                        </button>
+                                    </div>
+                                    <Show when={pasteResult()}>
+                                        <div class="agent-auth-paste-result">{pasteResult()}</div>
+                                    </Show>
                                 </div>
-                            </div>
-                        )}
+                            );
+                        }}
                     </Show>
                 </div>
             </Show>
