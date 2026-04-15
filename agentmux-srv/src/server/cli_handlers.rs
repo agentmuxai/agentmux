@@ -218,82 +218,13 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     .map_err(|e| format!("checkcliauth: {e}"))?;
                 tracing::info!(cli = %cmd.cli_path, "CheckCliAuth");
 
-                // Fast path: read credentials file directly (Claude)
-                if cmd.cli_path.contains("claude") {
-                    // Check isolated auth dir first (CLAUDE_CONFIG_DIR), then fall back
-                    // to global ~/.claude/. Users may be authenticated globally but not
-                    // yet in the per-version isolated dir.
-                    let home = std::env::var("HOME")
-                        .or_else(|_| std::env::var("USERPROFILE"))
-                        .unwrap_or_default();
-                    let global_creds = format!("{}/.claude/.credentials.json", home);
-
-                    let mut creds_candidates: Vec<String> = Vec::new();
-                    if let Some(config_dir) = cmd.auth_env.get("CLAUDE_CONFIG_DIR") {
-                        creds_candidates.push(format!("{}/.credentials.json", config_dir));
-                    }
-                    creds_candidates.push(global_creds);
-
-                    // Try each candidate path — first one with valid credentials wins
-                    let creds_path = creds_candidates.iter()
-                        .find(|p| std::path::Path::new(p.as_str()).exists())
-                        .cloned()
-                        .unwrap_or_else(|| creds_candidates.last().unwrap().clone());
-
-                    if let Ok(content) = std::fs::read_to_string(&creds_path) {
-                        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
-                            // Check claudeAiOauth credentials
-                            let oauth = json.get("claudeAiOauth");
-                            let has_token = oauth
-                                .and_then(|o| o.get("accessToken"))
-                                .and_then(|v| v.as_str())
-                                .map(|s| !s.is_empty())
-                                .unwrap_or(false);
-
-                            let has_refresh = oauth
-                                .and_then(|o| o.get("refreshToken"))
-                                .and_then(|v| v.as_str())
-                                .map(|s| !s.is_empty())
-                                .unwrap_or(false);
-
-                            // Authenticated if we have an access token OR a refresh token
-                            // (CLI auto-refreshes expired tokens transparently)
-                            let authenticated = has_token || has_refresh;
-
-                            let subscription = oauth
-                                .and_then(|o| o.get("subscriptionType"))
-                                .and_then(|v| v.as_str())
-                                .map(|s| s.to_string());
-
-                            let auth_method = Some("claude.ai oauth".to_string());
-
-                            tracing::info!(
-                                authenticated = authenticated,
-                                subscription = ?subscription,
-                                has_refresh = has_refresh,
-                                "claude auth check (credentials file)"
-                            );
-
-                            let result = CheckCliAuthResult {
-                                authenticated,
-                                email: subscription.clone(), // no email in creds, show subscription
-                                auth_method,
-                                raw_output: format!("subscription: {}", subscription.unwrap_or_default()),
-                            };
-                            return Ok(Some(serde_json::to_value(&result).unwrap()));
-                        }
-                    }
-                    // Credentials file not found or unparseable — not authenticated
-                    let result = CheckCliAuthResult {
-                        authenticated: false,
-                        email: None,
-                        auth_method: None,
-                        raw_output: "no credentials file found".to_string(),
-                    };
-                    return Ok(Some(serde_json::to_value(&result).unwrap()));
-                }
-
-                // Slow path: run CLI auth check command (other providers)
+                // Run CLI auth check command — all providers including Claude.
+                //
+                // A previous "fast path" read ~/.claude/.credentials.json directly and
+                // declared authenticated=true if any token string was present. This caused
+                // false positives: stale, expired, and revoked tokens all passed the check,
+                // and the `email` field was set to the subscription tier ("max", "pro") instead
+                // of the user's email address. See SPEC_AUTH_CHECK_FALSE_POSITIVE_2026_04_15.md.
                 let output = tokio::time::timeout(
                     std::time::Duration::from_secs(25),
                     {
@@ -315,7 +246,9 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 let mut auth_method = None;
 
                 let authenticated = if let Ok(json) = serde_json::from_str::<serde_json::Value>(&stdout) {
-                    email = json.get("email")
+                    // Claude outputs `emailAddress`; other CLIs use `email`. Check both.
+                    email = json.get("emailAddress")
+                        .or_else(|| json.get("email"))
                         .and_then(|v| v.as_str())
                         .map(|s| s.to_string());
                     auth_method = json.get("authMethod")
