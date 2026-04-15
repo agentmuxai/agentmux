@@ -139,6 +139,7 @@ declare global {
         revealInFileExplorer(filePath: string): void;
         captureScreenshot(rect: { x: number; y: number; width: number; height: number }): Promise<string>;
         setKeyboardChordMode: () => void;
+        openAgent: (agentId: string) => Promise<void>;
         openClaudeCodeAuth: () => Promise<void>;
         getClaudeCodeAuth: () => Promise<{ connected: boolean; email?: string; expires_at?: number }>;
         disconnectClaudeCode: () => Promise<void>;
