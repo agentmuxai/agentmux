@@ -241,6 +241,7 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
                         onSelect={acceptCompletion}
                     />
                 </Show>
+                {statusLine()}
                 <textarea
                     ref={textareaRef}
                     class="agent-input"
@@ -249,7 +250,6 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
                     onInput={handleInput}
                     rows={1}
                 />
-                {statusLine()}
                 <div class="agent-input-hint">
                     <span>Enter to send • Shift+Enter for newline • Esc to clear / stop</span>
                 </div>
