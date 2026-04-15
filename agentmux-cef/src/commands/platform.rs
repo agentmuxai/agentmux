@@ -295,7 +295,7 @@ pub async fn run_cli_login(
     let mut cmd = make_cli_cmd(&cli_path);
     cmd.args(&login_args)
         .envs(&auth_env)
-        .stdin(std::process::Stdio::null())
+        .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
 
@@ -309,6 +309,12 @@ pub async fn run_cli_login(
         .map_err(|e| format!("failed to spawn {cli_path}: {e}"))?;
 
     tracing::info!(cli = %cli_path, "run_cli_login: spawned, browser should open");
+
+    // Store the stdin handle so set_provider_auth can deliver the OAuth code.
+    {
+        let mut stored_stdin = state.cli_login_stdin.lock();
+        *stored_stdin = child.stdin.take();
+    }
 
     // Capture the OAuth URL from stdout/stderr. The CLI prints it within the
     // first few hundred ms after spawn. We read until we find "https://..."
@@ -357,6 +363,7 @@ pub async fn run_cli_login(
         *stored = Some(cancel_tx);
     }
 
+    let state_for_cleanup = state.clone();
     tokio::spawn(async move {
         tokio::select! {
             result = child.wait() => {
@@ -376,6 +383,8 @@ pub async fn run_cli_login(
                 let _ = child.kill().await;
             }
         }
+        // Clear the stored stdin handle once the process is done.
+        *state_for_cleanup.cli_login_stdin.lock() = None;
     });
 
     Ok(serde_json::json!({ "auth_url": auth_url }))
