@@ -65,7 +65,7 @@ const THINKING_PHRASES: string[] = [
     // AgentMux additions
     "Agentifying", "Autonomizing", "Calibrating", "Channelling",
     "Conspiring", "Daydreaming", "Defragging", "Dispatching",
-    "Extrapolating", "Hallucinating", "Hyperlooping", "Interpolating",
+    "Extrapolating", "Hyperlooping", "Interpolating",
     "Muxing", "Optimizing", "Parallelizing", "Pathfinding",
     "Quantizing", "Recalibrating", "Sequencing", "Strategizing",
     "Swarmifying", "Tokenizing", "Transcribing", "Vectorizing",
