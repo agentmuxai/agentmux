@@ -31,6 +31,10 @@ pub struct ToolSpec {
     pub tier: u8,
     pub version: String,
     pub check_cmd: String,
+    /// Flag (e.g. `"--version"`) to pass to the binary to get its version string.
+    /// If absent, version probing is skipped and the catalog version is reported.
+    #[serde(default)]
+    pub version_arg: Option<String>,
     pub bundled: bool,
     pub platforms: HashMap<String, PlatformSpec>,
 }
@@ -173,6 +177,33 @@ fn system_path_of(name: &str) -> Option<String> {
     None
 }
 
+/// Run `cmd --version-arg` and extract the first version-looking token.
+/// Returns `Some(version_string)` on success, `None` if the command fails or
+/// the output contains no recognisable version token.
+fn probe_version(cmd: &str, version_arg: &Option<String>) -> Option<String> {
+    let arg = version_arg.as_deref()?;
+    let output = std::process::Command::new(cmd)
+        .arg(arg)
+        .output()
+        .ok()?;
+    // Some tools write version to stderr (e.g. older jq), try both.
+    let text = if !output.stdout.is_empty() {
+        String::from_utf8_lossy(&output.stdout).into_owned()
+    } else {
+        String::from_utf8_lossy(&output.stderr).into_owned()
+    };
+    // Extract first token that looks like a semver number.
+    for word in text.split_whitespace() {
+        let candidate = word.trim_matches(|c: char| !c.is_ascii_digit() && c != '.');
+        if candidate.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false)
+            && candidate.contains('.')
+        {
+            return Some(candidate.to_string());
+        }
+    }
+    None
+}
+
 // ---- Status query ----
 
 /// Get the install status of every tool in the catalog.
@@ -226,13 +257,15 @@ pub fn get_tool_statuses() -> Vec<ToolStatusEntry> {
             // 1. System PATH wins.
             if probe_system_path(&spec.check_cmd) {
                 let path = system_path_of(&spec.check_cmd);
+                // Probe the actual installed version rather than assuming the catalog version.
+                let version = probe_version(&spec.check_cmd, &spec.version_arg);
                 return ToolStatusEntry {
                     id: spec.id.clone(),
                     display: spec.display.clone(),
                     description: spec.description.clone(),
                     tier: spec.tier,
                     status: ToolStatus::InstalledSystem,
-                    version: Some(spec.version.clone()),
+                    version,
                     path,
                 };
             }
