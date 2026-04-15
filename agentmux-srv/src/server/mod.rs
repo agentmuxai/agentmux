@@ -5,6 +5,7 @@ mod forge_handlers;
 mod messagebus;
 mod reactive;
 pub(crate) mod service;
+mod tool_handlers;
 mod websocket;
 
 #[cfg(test)]

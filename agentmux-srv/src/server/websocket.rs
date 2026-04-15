@@ -877,6 +877,9 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
     // CLI handlers (resolvecli, checkcliauth, runclilogin)
     super::cli_handlers::register_cli_handlers(engine, &state);
 
+    // Tool store handlers (gettoolstatus, installtool)
+    super::tool_handlers::register_tool_handlers(engine, &state);
+
     // eventreadhistory → read persisted event history from the WPS broker
     let broker_history = state.broker.clone();
     engine.register_handler(
