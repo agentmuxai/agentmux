@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { writeText as clipboardWriteText } from "@/util/clipboard";
-import { createMemo, onMount, Show, type JSX } from "solid-js";
+import { createMemo, createSignal, onCleanup, onMount, Show, type JSX } from "solid-js";
 import type { AgentViewModel } from "./agent-model";
 import { getProvider } from "./providers";
 import { createAgentAtoms } from "./state";
@@ -23,8 +23,9 @@ import { useAgentCommands } from "./hooks/useAgentCommands";
 import { AgentControlBar } from "./components/AgentControlBar";
 import { AgentDocumentView } from "./components/AgentDocumentView";
 import { AgentFooter, AgentStatusLine } from "./components/AgentFooter";
-import { AgentPicker } from "./components/AgentPicker";
+import { AgentPicker, useForgeAgents } from "./components/AgentPicker";
 import { AgentSearchBar } from "./components/AgentSearchBar";
+import { AgentFocusedPanel } from "./components/AgentFocusedPanel";
 import { SlashCommandPicker } from "./components/SlashCommandPicker";
 import { SlashHelpPanel } from "./components/SlashHelpPanel";
 import { BookmarksPanel } from "./components/BookmarksPanel";
@@ -61,6 +62,21 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
     const providerKey = (): string => block()?.meta?.["agentProvider"] ?? agentId;
     const provider = () => getProvider(providerKey());
     const outputFormat = (): string => block()?.meta?.["agentOutputFormat"] ?? "claude-stream-json";
+
+    // Overlay tab signal — lives in the component so SolidJS can track it.
+    // The model's _setOverlayTab callback is wired on mount and cleaned up on unmount.
+    const [showOverlayTab, setShowOverlayTab] = createSignal<import("./agent-model").OverlayTab | null>(null);
+    onMount(() => {
+        model._setOverlayTab = setShowOverlayTab;
+    });
+    onCleanup(() => {
+        model._setOverlayTab = null;
+    });
+
+    // Reactive forge agent list — used to resolve the current ForgeAgent object
+    // so the overlay can pass it to AgentCardSettingsPanel / rename input.
+    const forgeAgents = useForgeAgents();
+    const currentAgent = createMemo(() => forgeAgents().find((a) => a.id === agentId));
 
     const agentAtoms = createMemo(() => createAgentAtoms(model.blockId));
 
@@ -279,6 +295,17 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                     loading={digest.loading}
                     onDismiss={digest.dismiss}
                     onRegenerate={() => digest.fetch(true)}
+                />
+            </Show>
+
+            {/* Title-bar action overlay: ✏ Rename / ⚙ Forge / 👤 Identity */}
+            <Show when={showOverlayTab() != null && currentAgent() != null}>
+                <AgentFocusedPanel
+                    blockId={model.blockId}
+                    nodeModel={model.nodeModel}
+                    agent={currentAgent()!}
+                    initialTab={showOverlayTab()!}
+                    onClose={() => setShowOverlayTab(null)}
                 />
             </Show>
 
