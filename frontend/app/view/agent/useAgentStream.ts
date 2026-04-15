@@ -13,7 +13,7 @@ import { createEffect, onCleanup, onMount, untrack } from "solid-js";
 import { createTranslator } from "./providers/translator-factory";
 import { ClaudeCodeStreamParser } from "./stream-parser";
 import type { SignalPair } from "./state";
-import type { DocumentNode, StreamingState } from "./types";
+import type { DocumentNode, SessionStats, StreamingState } from "./types";
 
 const OutputFileName = "output";
 
@@ -22,6 +22,8 @@ interface UseAgentStreamOpts {
     outputFormat: string;
     documentAtom: SignalPair<DocumentNode[]>;
     streamingStateAtom: SignalPair<StreamingState>;
+    sessionStatsAtom: SignalPair<SessionStats | null>;
+    currentToolAtom: SignalPair<string | null>;
     enabled: boolean;
     /**
      * Version signal bumped by external document mutations (e.g. history
@@ -40,11 +42,15 @@ export function useAgentStream({
     outputFormat,
     documentAtom,
     streamingStateAtom,
+    sessionStatsAtom,
+    currentToolAtom,
     enabled,
     documentVersion,
 }: UseAgentStreamOpts): void {
     const [, setDocument] = documentAtom;
     const [, setStreaming] = streamingStateAtom;
+    const [, setSessionStats] = sessionStatsAtom;
+    const [, setCurrentTool] = currentToolAtom;
 
     // Mutable state that doesn't trigger re-renders
     let lineBuffer = "";
@@ -176,6 +182,8 @@ export function useAgentStream({
                 pendingUpdates = [];
                 nodeIndexMap = new Map();
                 setDocument([]);
+                setSessionStats(null);
+                setCurrentTool(null);
                 lineBuffer = "";
                 translator.reset();
                 parser.reset();
@@ -244,6 +252,18 @@ export function useAgentStream({
 
                 // Convert StreamEvents → DocumentNodes
                 for (const event of streamEvents) {
+                    // Handle session_end: store stats, clear loading state
+                    if (event.type === "session_end") {
+                        setSessionStats(event.stats ?? null);
+                        setCurrentTool(null);
+                        continue;
+                    }
+                    // Track the currently-running tool for the status line
+                    if (event.type === "tool_call") {
+                        setCurrentTool(event.tool ?? null);
+                    } else if (event.type === "tool_result") {
+                        setCurrentTool(null);
+                    }
                     const node = parser.parseLine(JSON.stringify(event));
                     if (!node) continue;
 

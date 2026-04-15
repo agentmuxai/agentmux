@@ -111,6 +111,8 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         outputFormat: outputFormat(),
         documentAtom: agentAtoms().documentAtom,
         streamingStateAtom: agentAtoms().streamingStateAtom,
+        sessionStatsAtom: agentAtoms().sessionStatsAtom,
+        currentToolAtom: agentAtoms().currentToolAtom,
         enabled: true,
         documentVersion: history.documentVersion,
     });
@@ -139,7 +141,13 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         // included in scrollHeight. See SPEC_AGENT_PANE_FOLLOWUPS item #1.
         onSent: () => scrollToBottomFn?.(),
     });
-    const handleSendMessage = commands.sendMessage;
+
+    // Clear session stats when the user sends a new message.
+    const [, setSessionStats] = agentAtoms().sessionStatsAtom;
+    const handleSendMessage = (message: string): Promise<void> => {
+        setSessionStats(null);
+        return commands.sendMessage(message);
+    };
 
     // ── Jump-to-node + Bookmarks ────────────────────────────────────────────────
 
@@ -304,18 +312,20 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                         />
                     )}
                 </Show>
-                <AgentFooter
-                    agentId={agentId}
-                    onSendMessage={commands.sendMessage}
-                    onTyping={() => scrollToBottomFn?.()}
-                    onStopAgent={commands.stopAgent}
-                    loading={status.isLoading()}
-                    getCompletions={commands.completions}
-                />
                 <AgentControlBar
                     blockId={model.blockId}
                     blockAtom={block}
                     providerId={provider()?.id ?? ""}
+                />
+                <AgentFooter
+                    agentId={agentId}
+                    onSendMessage={handleSendMessage}
+                    onTyping={() => scrollToBottomFn?.()}
+                    onStopAgent={commands.stopAgent}
+                    loading={status.isLoading()}
+                    getCompletions={commands.completions}
+                    currentTool={agentAtoms().currentToolAtom[0]()}
+                    sessionStats={agentAtoms().sessionStatsAtom[0]()}
                 />
             </div>
         </div>
