@@ -62,8 +62,8 @@ task dev           # CEF host + Vite hot reload
 ### Production Build
 
 ```bash
-task cef:package:portable        # Windows portable ZIP
-task cef:package:portable:linux  # Linux portable (planned)
+task package              # Windows portable ZIP
+task package:linux        # Linux portable (planned)
 ```
 
 ## Widgets
@@ -137,10 +137,10 @@ Click the 👤 button on any agent card to assign external accounts (GitHub PAT,
 
 | Command | Description |
 |---------|-------------|
-| `task dev` | Development mode (CEF host + Vite hot reload) |
-| `task cef:build` | Build the CEF host binary |
-| `task cef:bundle` | Bundle CEF runtime DLLs |
-| `task cef:package:portable` | Windows portable ZIP with launcher |
+| `task dev` | Development mode (Vite hot reload) |
+| `task package` | Windows portable ZIP with launcher |
+| `task build:host` | Build the host binary |
+| `task bundle` | Bundle runtime DLLs |
 | `task build:backend` | Build agentmux-srv |
 | `task build:frontend` | Build frontend only |
 | `task test` | Run tests (vitest) |
