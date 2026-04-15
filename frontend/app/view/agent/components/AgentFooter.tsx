@@ -5,10 +5,79 @@
  * AgentFooter - Minimal Claude Code-style input
  */
 
-import { Show, createMemo, createSignal, type JSX } from "solid-js";
+import { Show, createEffect, createMemo, createSignal, onCleanup, type JSX } from "solid-js";
 import type { SlashCommand } from "../commands/types";
 import type { SessionStats } from "../types";
 import { SlashAutocomplete } from "./SlashAutocomplete";
+
+// Thinking phrases sourced from Claude Code's cli.js, with AgentMux additions.
+// Displayed in the status line while the agent is processing (no tool active).
+const THINKING_PHRASES: string[] = [
+    "Accomplishing", "Actioning", "Actualizing", "Architecting",
+    "Baking", "Beaming", "Beboppin'", "Befuddling", "Billowing",
+    "Blanching", "Bloviating", "Boogieing", "Boondoggling", "Booping",
+    "Bootstrapping", "Brewing", "Bunning", "Burrowing",
+    "Calculating", "Canoodling", "Caramelizing", "Cascading", "Catapulting",
+    "Cerebrating", "Channeling", "Choreographing", "Churning", "Clauding",
+    "Coalescing", "Cogitating", "Combobulating", "Composing", "Computing",
+    "Concocting", "Considering", "Contemplating", "Cooking", "Crafting",
+    "Creating", "Crunching", "Crystallizing", "Cultivating",
+    "Deciphering", "Deliberating", "Determining", "Dilly-dallying",
+    "Discombobulating", "Doing", "Doodling", "Drizzling",
+    "Ebbing", "Effecting", "Elucidating", "Embellishing", "Enchanting",
+    "Envisioning", "Evaporating",
+    "Fermenting", "Fiddle-faddling", "Finagling", "Flambéing",
+    "Flibbertigibbeting", "Flowing", "Flummoxing", "Fluttering", "Forging",
+    "Forming", "Frolicking", "Frosting",
+    "Gallivanting", "Galloping", "Garnishing", "Generating", "Gesticulating",
+    "Germinating", "Gitifying", "Grooving", "Gusting",
+    "Harmonizing", "Hashing", "Hatching", "Herding", "Honking",
+    "Hullaballooing", "Hyperspacing",
+    "Ideating", "Imagining", "Improvising", "Incubating", "Inferring",
+    "Infusing", "Ionizing",
+    "Jitterbugging", "Julienning",
+    "Kneading",
+    "Leavening", "Levitating", "Lollygagging",
+    "Manifesting", "Marinating", "Meandering", "Metamorphosing", "Misting",
+    "Moonwalking", "Moseying", "Mulling", "Mustering", "Musing",
+    "Nebulizing", "Nesting", "Newspapering", "Noodling", "Nucleating",
+    "Orbiting", "Orchestrating", "Osmosing",
+    "Perambulating", "Percolating", "Perusing", "Philosophising",
+    "Photosynthesizing", "Pollinating", "Pondering", "Pontificating",
+    "Pouncing", "Precipitating", "Prestidigitating", "Processing",
+    "Proofing", "Propagating", "Puttering", "Puzzling",
+    "Quantumizing",
+    "Razzle-dazzling", "Razzmatazzing", "Recombobulating", "Reticulating",
+    "Roosting", "Ruminating",
+    "Sautéing", "Scampering", "Schlepping", "Scurrying", "Seasoning",
+    "Shenaniganing", "Shimmying", "Simmering", "Skedaddling", "Sketching",
+    "Slithering", "Smooshing", "Sock-hopping", "Spelunking", "Spinning",
+    "Sprouting", "Stewing", "Sublimating", "Swirling", "Swooping",
+    "Symbioting", "Synthesizing",
+    "Tempering", "Thinking", "Thundering", "Tinkering", "Tomfoolering",
+    "Topsy-turvying", "Transfiguring", "Transmuting", "Twisting",
+    "Undulating", "Unfurling", "Unravelling",
+    "Vibing",
+    "Waddling", "Wandering", "Warping", "Whatchamacalliting",
+    "Whirlpooling", "Whirring", "Whisking", "Wibbling", "Working",
+    "Wrangling",
+    "Zesting", "Zigzagging",
+    // AgentMux additions
+    "Agentifying", "Autonomizing", "Calibrating", "Channelling",
+    "Conspiring", "Daydreaming", "Defragging", "Dispatching",
+    "Extrapolating", "Hyperlooping", "Interpolating",
+    "Muxing", "Optimizing", "Parallelizing", "Pathfinding",
+    "Quantizing", "Recalibrating", "Sequencing", "Strategizing",
+    "Swarmifying", "Tokenizing", "Transcribing", "Vectorizing",
+];
+
+function pickThinkingPhrase(exclude?: string): string {
+    let candidate: string;
+    do {
+        candidate = THINKING_PHRASES[Math.floor(Math.random() * THINKING_PHRASES.length)];
+    } while (candidate === exclude && THINKING_PHRASES.length > 1);
+    return candidate;
+}
 
 interface AgentFooterProps {
     agentId: string;
@@ -63,6 +132,20 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
     // per-keystroke cost: <2ms. See
     // specs/SPEC_TOOL_OVERLAY_AND_SCROLL_ON_TYPE_2026_04_13.md §3.4.
     let textareaRef: HTMLTextAreaElement | undefined;
+
+    // ── Thinking phrase cycling ───────────────────────────────────────
+    // Picks a new random phrase every 2.5 s while the agent is loading
+    // and no specific tool name is being reported.
+    const [thinkingPhrase, setThinkingPhrase] = createSignal(pickThinkingPhrase());
+    createEffect(() => {
+        if (!props.loading || props.currentTool) return;
+        // Reset phrase on each new loading session
+        setThinkingPhrase(pickThinkingPhrase());
+        const id = setInterval(() => {
+            setThinkingPhrase((prev) => pickThinkingPhrase(prev));
+        }, 2500);
+        onCleanup(() => clearInterval(id));
+    });
 
     // ── Slash autocomplete state ──────────────────────────────────────
     // Tracks the current `/prefix` (without the leading slash) when the
@@ -201,7 +284,7 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
             return (
                 <span class="agent-status-line agent-status-line--loading">
                     <span class="agent-spinner-dot" />
-                    {props.currentTool ? props.currentTool : "Thinking\u2026"}
+                    {props.currentTool ? props.currentTool : `${thinkingPhrase()}\u2026`}
                 </span>
             );
         }
