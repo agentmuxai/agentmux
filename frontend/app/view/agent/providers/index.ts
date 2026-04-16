@@ -7,8 +7,8 @@ export interface ProviderDefinition {
     cliCommand: string;
     defaultArgs: string[];
     styledArgs: string[];        // CLI flags for JSON streaming mode (documentation; use launchArgs for actual invocation)
-    outputFormat: "claude-stream-json" | "gemini-json" | "codex-json" | "raw";
-    styledOutputFormat: "claude-stream-json" | "gemini-json" | "codex-json";
+    outputFormat: "claude-stream-json" | "gemini-json" | "codex-json" | "acp" | "raw";
+    styledOutputFormat: "claude-stream-json" | "gemini-json" | "codex-json" | "acp";
     authType: "oauth" | "api-key";
     authCheckCommand: string[];  // e.g. ["auth", "status", "--json"]
     authLoginCommand: string[];  // e.g. ["auth", "login"]
@@ -32,8 +32,9 @@ export interface ProviderDefinition {
     // JSON field name containing the session/thread ID in the CLI's init event.
     sessionIdField: string;
     // Controller type: "persistent" keeps a long-running process with stdin streaming,
-    // "subprocess" spawns a fresh process per turn with --resume.
-    controllerType: "persistent" | "subprocess";
+    // "subprocess" spawns a fresh process per turn with --resume,
+    // "acp" uses the Agent Client Protocol (JSON-RPC 2.0 over stdio).
+    controllerType: "persistent" | "subprocess" | "acp";
     // Launch args for persistent mode (--input-format stream-json, no -p).
     // Only used when controllerType is "persistent".
     persistentLaunchArgs?: string[];
@@ -120,6 +121,60 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         sessionIdField: "session_id",
         controllerType: "subprocess",
     },
+    // OpenClaw via gateway daemon (detected if `openclaw` is installed and gateway is running).
+    // Uses acpx as the ACP bridge to the running OpenClaw gateway.
+    // Full OpenClaw features: skills, external messaging channels, memory, multi-agent.
+    openclaw: {
+        id: "openclaw",
+        displayName: "OpenClaw",
+        cliCommand: "acpx",
+        defaultArgs: [],
+        styledArgs: ["--agent", "openclaw"],
+        outputFormat: "acp",
+        styledOutputFormat: "acp",
+        authType: "api-key",
+        authCheckCommand: ["openclaw", "doctor"],
+        authLoginCommand: ["openclaw", "onboard"],
+        npmPackage: "@openclaw/acpx",
+        pinnedVersion: "latest",
+        docsUrl: "https://docs.openclaw.ai",
+        windowsInstallCommand: "npm install -g @openclaw/acpx",
+        unixInstallCommand: "npm install -g @openclaw/acpx",
+        icon: "lobster",
+        authConfigDirEnvVar: "OPENCLAW_HOME",
+        authDirName: "openclaw",
+        launchArgs: ["--agent", "openclaw"],
+        resumeFlag: null,
+        sessionIdField: "sessionId",
+        controllerType: "acp",
+    },
+    // Pi — the lightweight coding agent that powers OpenClaw.
+    // Standalone CLI, no gateway required. Pure coding agent with read/write/bash/edit tools.
+    // Ideal when users want a fast, self-contained coding agent without the full OpenClaw stack.
+    pi: {
+        id: "pi",
+        displayName: "Pi",
+        cliCommand: "pi",
+        defaultArgs: [],
+        styledArgs: ["--json"],
+        outputFormat: "acp",
+        styledOutputFormat: "acp",
+        authType: "api-key",
+        authCheckCommand: ["config", "get", "provider"],
+        authLoginCommand: ["config"],
+        npmPackage: "@mariozechner/pi-coding-agent",
+        pinnedVersion: "latest",
+        docsUrl: "https://github.com/badlogic/pi-mono",
+        windowsInstallCommand: "npm install -g @mariozechner/pi-coding-agent",
+        unixInstallCommand: "npm install -g @mariozechner/pi-coding-agent",
+        icon: "terminal",
+        authConfigDirEnvVar: "PI_HOME",
+        authDirName: "pi",
+        launchArgs: ["--json"],
+        resumeFlag: null,
+        sessionIdField: "sessionId",
+        controllerType: "acp",
+    },
 };
 
 // Aliases for provider IDs from older databases or alternate naming
@@ -128,6 +183,8 @@ const PROVIDER_ALIASES: Record<string, string> = {
     "claude_code": "claude",
     "codex-cli": "codex",
     "gemini-cli": "gemini",
+    "openclaw-cli": "openclaw",
+    "open-claw": "openclaw",
 };
 
 export function resolveProviderAlias(id: string): string {
