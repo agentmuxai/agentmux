@@ -107,6 +107,15 @@ export function buildStartupPayload(opts: StartupPayloadOpts): string | null {
         }
     }
 
+    // ── Action directive ─────────────────────────────────────────────────
+    // Without an explicit instruction at the end, the agent treats the
+    // payload as informational context and responds "Ready to help."
+    if (opts.startupContent?.trim()) {
+        parts.push("\n---\n");
+        parts.push("**ACTION REQUIRED:** Execute the verification round above now. ");
+        parts.push("Run each check, fix any failures, and report the status table before proceeding.\n");
+    }
+
     return parts.join("");
 }
 
