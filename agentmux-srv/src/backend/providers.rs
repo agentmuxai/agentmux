@@ -21,6 +21,9 @@ pub enum ControllerType {
     /// A fresh subprocess is spawned for every turn; prior sessions are
     /// resumed via `resume_flag`.
     Subprocess,
+    /// Agent Client Protocol (ACP): JSON-RPC 2.0 over stdio.
+    /// Sessions are managed by the protocol — no resume flags needed.
+    Acp,
 }
 
 // ─── ProviderConfig ──────────────────────────────────────────────────────────
@@ -82,6 +85,7 @@ impl ProviderConfig {
         match self.controller_type {
             ControllerType::Persistent => "persistent",
             ControllerType::Subprocess => "subprocess",
+            ControllerType::Acp => "acp",
         }
     }
 }
@@ -173,6 +177,27 @@ static GEMINI: ProviderConfig = ProviderConfig {
     docs_url: "https://ai.google.dev/gemini-cli",
 };
 
+static OPENCLAW: ProviderConfig = ProviderConfig {
+    id: "openclaw",
+    display_name: "OpenClaw",
+    cli_command: "acpx",
+    controller_type: ControllerType::Acp,
+    launch_args: &["--agent", "openclaw"],
+    persistent_launch_args: None,
+    // ACP handles sessions natively — no resume flag or session ID parsing needed
+    resume_flag: None,
+    session_id_field: "sessionId",
+    styled_output_format: "acp",
+    auth_config_dir_env_var: "OPENCLAW_HOME",
+    auth_dir_name: "openclaw",
+    auth_extra_env: &[],
+    unset_env: &[],
+    npm_package: "@openclaw/acpx",
+    pinned_version: "latest",
+    icon: "lobster",
+    docs_url: "https://docs.openclaw.ai",
+};
+
 // ─── Static registry ─────────────────────────────────────────────────────────
 
 static REGISTRY: LazyLock<HashMap<&'static str, &'static ProviderConfig>> = LazyLock::new(|| {
@@ -180,6 +205,7 @@ static REGISTRY: LazyLock<HashMap<&'static str, &'static ProviderConfig>> = Lazy
     m.insert(CLAUDE.id, &CLAUDE);
     m.insert(CODEX.id, &CODEX);
     m.insert(GEMINI.id, &GEMINI);
+    m.insert(OPENCLAW.id, &OPENCLAW);
     m
 });
 
@@ -190,6 +216,8 @@ static ALIASES: LazyLock<HashMap<&'static str, &'static str>> = LazyLock::new(||
     m.insert("claude_code", "claude");
     m.insert("codex-cli", "codex");
     m.insert("gemini-cli", "gemini");
+    m.insert("openclaw-cli", "openclaw");
+    m.insert("open-claw", "openclaw");
     m
 });
 
@@ -227,7 +255,7 @@ pub fn get_provider(id: &str) -> Option<&'static ProviderConfig> {
 /// Return an iterator over all registered providers in insertion order.
 pub fn get_provider_list() -> impl Iterator<Item = &'static ProviderConfig> {
     // Stable canonical order matches the TypeScript PROVIDERS object order.
-    static ORDER: &[&str] = &["claude", "codex", "gemini"];
+    static ORDER: &[&str] = &["claude", "codex", "gemini", "openclaw"];
     ORDER.iter().filter_map(|id| REGISTRY.get(*id).copied())
 }
 
@@ -242,6 +270,7 @@ mod tests {
         assert!(get_provider("claude").is_some());
         assert!(get_provider("codex").is_some());
         assert!(get_provider("gemini").is_some());
+        assert!(get_provider("openclaw").is_some());
     }
 
     #[test]
@@ -250,6 +279,7 @@ mod tests {
         assert_eq!(get_provider("claude_code").unwrap().id, "claude");
         assert_eq!(get_provider("codex-cli").unwrap().id, "codex");
         assert_eq!(get_provider("gemini-cli").unwrap().id, "gemini");
+        assert_eq!(get_provider("openclaw-cli").unwrap().id, "openclaw");
     }
 
     #[test]
@@ -258,8 +288,8 @@ mod tests {
     }
 
     #[test]
-    fn provider_list_has_three_entries() {
-        assert_eq!(get_provider_list().count(), 3);
+    fn provider_list_has_four_entries() {
+        assert_eq!(get_provider_list().count(), 4);
     }
 
     #[test]
@@ -283,5 +313,14 @@ mod tests {
             .auth_extra_env
             .iter()
             .any(|(k, v)| *k == "GEMINI_FORCE_FILE_STORAGE" && *v == "true"));
+    }
+
+    #[test]
+    fn openclaw_is_acp_controller() {
+        let p = get_provider("openclaw").unwrap();
+        assert_eq!(p.controller_type, ControllerType::Acp);
+        assert_eq!(p.controller_type_str(), "acp");
+        assert_eq!(p.styled_output_format, "acp");
+        assert!(p.resume_flag.is_none());
     }
 }
