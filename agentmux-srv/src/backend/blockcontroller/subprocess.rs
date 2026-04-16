@@ -303,13 +303,21 @@ impl SubprocessController {
 
         // Write user message to stdin, then close it
         let message = config.message;
+        let block_id_stdin = self.block_id.clone();
         tokio::spawn(async move {
             let mut stdin = stdin;
             if let Err(e) = stdin.write_all(message.as_bytes()).await {
-                tracing::warn!("subprocess stdin write error: {}", e);
+                tracing::warn!(block_id = %block_id_stdin, "subprocess stdin write error: {}", e);
+                return;
             }
             if let Err(e) = stdin.write_all(b"\n").await {
-                tracing::warn!("subprocess stdin newline error: {}", e);
+                tracing::warn!(block_id = %block_id_stdin, "subprocess stdin newline error: {}", e);
+                return;
+            }
+            // Flush explicitly — without this, buffered data may not reach
+            // the child process before the 3s stdin timeout (Claude CLI).
+            if let Err(e) = stdin.flush().await {
+                tracing::warn!(block_id = %block_id_stdin, "subprocess stdin flush error: {}", e);
             }
             // stdin drops here → EOF to the subprocess
         });
