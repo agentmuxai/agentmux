@@ -2,8 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Forge seed engine: preloads agents from an embedded manifest on first launch.
-//! Seeds host agents (AgentX, AgentY) and container agents (Agent1-5) with their
-//! full configuration including content blobs (CLAUDE.md, MCP, env) and skills.
+//! Seeds agents with identity + content. Provider, agent_type, and environment
+//! are NOT baked into the manifest — they default to sensible values and are
+//! user-configurable via the Forge UI after seeding.
 
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -34,9 +35,15 @@ struct SeedAgent {
     name: String,
     #[serde(default = "default_icon")]
     icon: String,
-    agent_type: String,
-    environment: String,
+    /// Defaults to "claude" when absent. User can change in Forge UI.
+    #[serde(default = "default_provider")]
     provider: String,
+    /// Defaults to "host" when absent. User can change in Forge UI.
+    #[serde(default = "default_agent_type")]
+    agent_type: String,
+    /// Defaults to the current OS when absent.
+    #[serde(default = "default_environment")]
+    environment: String,
     #[serde(default)]
     description: String,
     #[serde(default)]
@@ -57,6 +64,18 @@ struct SeedAgent {
 
 fn default_icon() -> String {
     "\u{2726}".to_string()
+}
+
+fn default_provider() -> String {
+    "claude".to_string()
+}
+
+fn default_agent_type() -> String {
+    "host".to_string()
+}
+
+fn default_environment() -> String {
+    std::env::consts::OS.to_string()
 }
 
 /// Content blobs to seed for an agent.
@@ -256,10 +275,9 @@ fn reseed_if_needed(
         match existing_map.get(agent_def.id.as_str()) {
             None => { needs_reseed = true; break; }
             Some(existing_agent) => {
-                if existing_agent.provider != agent_def.provider
-                    || existing_agent.description != agent_def.description
-                    || existing_agent.agent_type != agent_def.agent_type
-                {
+                // Only compare identity fields, NOT provider/agent_type/environment
+                // which the user may have changed via the Forge UI.
+                if existing_agent.description != agent_def.description {
                     needs_reseed = true;
                     break;
                 }
@@ -311,7 +329,22 @@ fn reseed_if_needed(
             accounts: String::new(),
         };
 
-        if existing_map.contains_key(agent_def.id.as_str()) {
+        if let Some(existing_agent) = existing_map.get(agent_def.id.as_str()) {
+            // Preserve user-modified runtime config — only update identity
+            // fields (name, icon, description). Everything the user can
+            // change in the Forge UI stays as-is.
+            agent.provider = existing_agent.provider.clone();
+            agent.agent_type = existing_agent.agent_type.clone();
+            agent.environment = existing_agent.environment.clone();
+            agent.shell = if existing_agent.shell.is_empty() {
+                agent_def.shell.clone()
+            } else {
+                existing_agent.shell.clone()
+            };
+            agent.auto_start = existing_agent.auto_start;
+            agent.restart_on_crash = existing_agent.restart_on_crash;
+            agent.created_at = existing_agent.created_at;
+            agent.accounts = existing_agent.accounts.clone();
             wstore.forge_update(&agent)?;
             updated += 1;
         } else {
