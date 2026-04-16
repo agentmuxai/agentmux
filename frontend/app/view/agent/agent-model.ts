@@ -10,7 +10,7 @@ import { AgentViewWrapper } from "./agent-view";
 import { PROVIDERS, resolveProviderAlias } from "./providers";
 import { Logger } from "@/util/logger";
 
-export type OverlayTab = "rename" | "forge" | "identity";
+export type OverlayTab = "forge" | "identity";
 
 export class AgentViewModel implements ViewModel {
     viewType = "agent";
@@ -20,6 +20,7 @@ export class AgentViewModel implements ViewModel {
 
     viewIcon: () => string;
     viewName: () => string;
+    setViewName: (name: string) => Promise<void>;
     viewText: () => string | HeaderElem[];
     viewComponent: ViewComponent;
     noPadding: () => boolean;
@@ -30,6 +31,8 @@ export class AgentViewModel implements ViewModel {
     // buttons can open the focused overlay without holding a SolidJS signal
     // in the model (signals must live inside the component tree).
     _setOverlayTab: ((tab: OverlayTab | null) => void) | null = null;
+    // Last-used overlay tab — gear re-opens to whichever tab was active last.
+    _lastOverlayTab: OverlayTab = "forge";
 
     constructor(blockId: string, nodeModel: BlockNodeModel) {
         this.blockId = blockId;
@@ -56,40 +59,24 @@ export class AgentViewModel implements ViewModel {
         };
         this.viewText = () => [] as HeaderElem[];
         this.noPadding = () => true;
+        this.setViewName = async (name: string) => {
+            if (!name.trim()) return;
+            const oref = WOS.makeORef("block", this.blockId);
+            await RpcApi.SetMetaCommand(TabRpcClient, { oref, meta: { agentName: name.trim() } });
+        };
 
-        // Pane-frame header buttons: when an agent is loaded show ✏ ⚙ 👤 ← .
+        // Pane-frame header buttons: when an agent is loaded show ⚙ .
         // Hidden when no agent is loaded (picker screen).
-        // Buttons call this._setOverlayTab which is wired by AgentPresentationView
-        // on mount — keeps SolidJS signals inside the component tree.
+        // Gear opens forge/identity panel; defaults to forge, remembers last tab.
         this.endIconButtons = () => {
             const agentId = this.blockAtom()?.meta?.["agentId"];
             if (!agentId) return [];
             return [
                 {
                     elemtype: "iconbutton",
-                    icon: "pencil",
-                    title: "Rename this agent",
-                    click: () => { this._setOverlayTab?.("rename"); },
-                },
-                {
-                    elemtype: "iconbutton",
                     icon: "gear",
-                    title: "Configure in Forge",
-                    click: () => { this._setOverlayTab?.("forge"); },
-                },
-                {
-                    elemtype: "iconbutton",
-                    icon: "user",
-                    title: "Manage identity",
-                    click: () => { this._setOverlayTab?.("identity"); },
-                },
-                {
-                    elemtype: "iconbutton",
-                    icon: "arrow-left",
-                    title: "Back to agent picker",
-                    click: () => {
-                        void this.backToPicker();
-                    },
+                    title: "Agent settings",
+                    click: () => { this._setOverlayTab?.(this._lastOverlayTab); },
                 },
             ];
         };

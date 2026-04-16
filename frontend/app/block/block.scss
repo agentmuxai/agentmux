@@ -114,6 +114,23 @@
                         text-overflow: ellipsis;
                         flex-shrink: 1;
                         min-width: 0;
+
+                        &--editable {
+                            cursor: text;
+                        }
+
+                        &--input {
+                            background: transparent;
+                            border: none;
+                            border-bottom: 1px solid var(--accent-color, #888);
+                            outline: none;
+                            color: inherit;
+                            font: inherit;
+                            padding: 0;
+                            width: 100%;
+                            min-width: 40px;
+                            text-wrap: nowrap;
+                        }
                     }
 
                     .block-frame-blockid {

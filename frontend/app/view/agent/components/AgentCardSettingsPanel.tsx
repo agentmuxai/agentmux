@@ -34,6 +34,7 @@ interface AgentCardSettingsPanelProps {
     agent: ForgeAgent | undefined;
     initialTab: SettingsTab;
     onClose: () => void;
+    onTabChange?: (tab: SettingsTab) => void;
 }
 
 export const AgentCardSettingsPanel = (props: AgentCardSettingsPanelProps): JSX.Element => {
@@ -120,13 +121,13 @@ export const AgentCardSettingsPanel = (props: AgentCardSettingsPanelProps): JSX.
                 <div class="agent-card-settings-tabs">
                     <button
                         class={`agent-card-settings-tab${tab() === "forge" ? " active" : ""}`}
-                        onClick={() => setTab("forge")}
+                        onClick={() => { setTab("forge"); props.onTabChange?.("forge"); }}
                     >
                         {"\u2699"} Forge
                     </button>
                     <button
                         class={`agent-card-settings-tab${tab() === "identity" ? " active" : ""}`}
-                        onClick={() => setTab("identity")}
+                        onClick={() => { setTab("identity"); props.onTabChange?.("identity"); }}
                     >
                         {"\uD83D\uDC64"} Identity
                     </button>
