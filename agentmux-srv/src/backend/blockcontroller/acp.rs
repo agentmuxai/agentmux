@@ -400,6 +400,27 @@ impl AcpController {
                 _ = kill_rx => {
                     let _ = child.kill().await;
                     tracing::info!(block_id = %block_id_wait, "ACP process killed");
+
+                    let mut inner = inner_wait.lock().unwrap();
+                    inner.stdin_tx = None;
+                    inner.current_pid = None;
+                    AcpController::set_status(&mut inner, STATUS_DONE);
+                    drop(inner);
+
+                    health_wait.set_active_turn(false);
+
+                    if let Some(ref broker) = broker_wait {
+                        let status = BlockControllerRuntimeStatus {
+                            blockid: block_id_wait.clone(),
+                            version: 0,
+                            shellprocstatus: STATUS_DONE.to_string(),
+                            shellprocconnname: "local".to_string(),
+                            shellprocexitcode: -1,
+                            spawn_ts_ms: None,
+                            is_agent_pane: true,
+                        };
+                        super::publish_controller_status(broker, &status);
+                    }
                 }
                 status = child.wait() => {
                     let exit_code = status.map(|s| s.code().unwrap_or(-1)).unwrap_or(-1);
@@ -527,28 +548,30 @@ impl Controller for AcpController {
                 return Ok(());
             }
 
-            // For ACP, we need the CLI command info to spawn if not running.
-            // If already running, just send the prompt.
-            if self.is_running() {
-                let session_id = {
-                    let inner = self.inner.lock().unwrap();
-                    inner.session_id.clone().unwrap_or_default()
-                };
-                let req = self.make_request("session/prompt", serde_json::json!({
-                    "sessionId": session_id,
-                    "prompt": {
-                        "type": "text",
-                        "text": message,
-                    }
-                }));
-                self.health_monitor.set_active_turn(true);
-                let inner = self.inner.lock().unwrap();
-                if let Some(ref tx) = inner.stdin_tx {
-                    tx.try_send(req)
-                        .map_err(|e| format!("ACP stdin send failed: {e}"))?;
-                }
+            if !self.is_running() {
+                // Process not running — stash as pending so start() picks it up.
+                let mut inner = self.inner.lock().unwrap();
+                inner.pending_prompt = Some(message);
+                return Err("ACP process not running — message queued for next start()".to_string());
             }
-            // If not running, the process will be spawned on next start()
+
+            let session_id = {
+                let inner = self.inner.lock().unwrap();
+                inner.session_id.clone().unwrap_or_default()
+            };
+            let req = self.make_request("session/prompt", serde_json::json!({
+                "sessionId": session_id,
+                "prompt": {
+                    "type": "text",
+                    "text": message,
+                }
+            }));
+            self.health_monitor.set_active_turn(true);
+            let inner = self.inner.lock().unwrap();
+            if let Some(ref tx) = inner.stdin_tx {
+                tx.try_send(req)
+                    .map_err(|e| format!("ACP stdin send failed: {e}"))?;
+            }
         }
 
         if let Some(sig) = input.sig_name {
