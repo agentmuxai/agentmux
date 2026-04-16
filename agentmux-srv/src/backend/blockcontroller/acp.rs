@@ -238,6 +238,15 @@ impl AcpController {
             cmd.env(k, expanded.to_string_lossy().as_ref());
         }
 
+        // On Windows: suppress console-window allocation. Without CREATE_NO_WINDOW,
+        // node.exe spawned from a windowless sidecar may try to create/attach to a
+        // console, causing stdout to go to that console rather than the pipe.
+        #[cfg(windows)]
+        {
+            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+            cmd.creation_flags(CREATE_NO_WINDOW);
+        }
+
         cmd.stdin(std::process::Stdio::piped());
         cmd.stdout(std::process::Stdio::piped());
         cmd.stderr(std::process::Stdio::piped());
@@ -262,17 +271,28 @@ impl AcpController {
         let stdout = child.stdout.take().unwrap();
         let stderr = child.stderr.take();
 
-        // Drain stderr
+        // Drain stderr with explicit error/EOF logging
         if let Some(stderr_pipe) = stderr {
             let block_id_stderr = self.block_id.clone();
             tokio::spawn(async move {
                 let mut reader = BufReader::new(stderr_pipe).lines();
-                while let Ok(Some(line)) = reader.next_line().await {
-                    tracing::warn!(
-                        block_id = %block_id_stderr,
-                        line = %line,
-                        "ACP agent stderr"
-                    );
+                loop {
+                    match reader.next_line().await {
+                        Err(e) => {
+                            tracing::warn!(block_id = %block_id_stderr, error = %e, "ACP stderr read error");
+                            break;
+                        }
+                        Ok(None) => break,
+                        Ok(Some(line)) => {
+                            if !line.trim().is_empty() {
+                                tracing::warn!(
+                                    block_id = %block_id_stderr,
+                                    line = %line,
+                                    "ACP agent stderr"
+                                );
+                            }
+                        }
+                    }
                 }
             });
         }
@@ -318,7 +338,20 @@ impl AcpController {
         let rpc_id_clone = self.next_rpc_id.clone();
         tokio::spawn(async move {
             let mut reader = BufReader::new(stdout).lines();
-            while let Ok(Some(line)) = reader.next_line().await {
+            tracing::info!(block_id = %block_id_stdout, "ACP stdout_reader started");
+
+            loop {
+                let line = match reader.next_line().await {
+                    Err(e) => {
+                        tracing::warn!(block_id = %block_id_stdout, error = %e, "ACP stdout read error");
+                        break;
+                    }
+                    Ok(None) => {
+                        tracing::info!(block_id = %block_id_stdout, "ACP stdout EOF");
+                        break;
+                    }
+                    Ok(Some(l)) => l,
+                };
                 if line.is_empty() {
                     continue;
                 }
@@ -366,26 +399,16 @@ impl AcpController {
                     }
                 }
 
-                // Persist to .jsonl file
-                if let Some(ref fstore) = filestore_clone {
-                    let _ = fstore.append_line(&block_id_stdout, ACP_OUTPUT_SUBJECT, &line);
-                }
-
-                // Broadcast via WPS so the frontend receives the event
+                // Persist + broadcast via the shared helper (same as subprocess.rs)
                 if let Some(ref broker) = broker_clone {
-                    let event = wps::WaveEvent {
-                        event: wps::EVENT_BLOCKFILE.to_string(),
-                        scopes: vec![format!("block:{}", block_id_stdout)],
-                        sender: String::new(),
-                        persist: 0,
-                        data: Some(serde_json::json!({
-                            "zoneid": "",
-                            "blockid": block_id_stdout,
-                            "name": ACP_OUTPUT_SUBJECT,
-                            "data": line,
-                        })),
-                    };
-                    broker.publish(event);
+                    let line_with_newline = format!("{}\n", line);
+                    super::shell::handle_append_block_file(
+                        broker,
+                        &block_id_stdout,
+                        ACP_OUTPUT_SUBJECT,
+                        line_with_newline.as_bytes(),
+                        filestore_clone.as_ref(),
+                    );
                 }
             }
         });
