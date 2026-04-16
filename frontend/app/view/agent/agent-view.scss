@@ -47,6 +47,33 @@
         content-visibility: auto;
         contain-intrinsic-size: auto 80px;
         contain: layout style;
+        // position: relative anchors the .node-ts timestamp pill.
+        position: relative;
+
+        // Timestamp pill — shown on hover of any node row.
+        // Pure-CSS visibility: no JS signal needed.
+        .node-ts {
+            position: absolute;
+            top: 3px;
+            right: 6px;
+            font-size: 10px;
+            font-family: var(--fixed-font, monospace);
+            color: var(--secondary-text-color);
+            background: var(--panel-bg-color, var(--main-bg-color));
+            border: 1px solid var(--border-color);
+            border-radius: 3px;
+            padding: 0px 4px;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 80ms ease;
+            white-space: nowrap;
+            z-index: 5;
+            line-height: 1.6;
+        }
+
+        &:hover .node-ts {
+            opacity: 1;
+        }
     }
 
     // === Status Log (terminal-style) ===
@@ -1547,23 +1574,32 @@
             padding: 3px 6px;
             border-bottom: 1px solid var(--border-color);
             display: flex;
-            align-items: baseline;
+            // flex-start so the $ and the command text align at their tops
+            // when the command wraps to multiple lines.
+            align-items: flex-start;
             gap: 6px;
 
             .agent-bash-dollar {
                 color: var(--accent-color);
                 flex-shrink: 0;
+                // Keep the $ on the first line, aligned with the first line of
+                // the command even when it wraps.
+                padding-top: 1px;
             }
 
             // HighlightedCode inside the cmd row: inline, no extra padding/bg
             .agent-bash-cmd-code {
                 flex: 1;
+                min-width: 0; // allow flex child to shrink below content width
                 margin: 0;
                 padding: 0;
                 background: transparent;
                 border: none;
                 overflow: visible;
                 white-space: pre-wrap;
+                // Force breaks inside long tokens (long paths, base64, etc.)
+                // so commands never overflow the portal width.
+                word-break: break-all;
 
                 :global(.line) {
                     display: inline;
@@ -3204,7 +3240,8 @@
 .agent-log-hover-overlay {
     position: fixed; // set inline via style; this is for z-index / stacking
     z-index: 300;
-    white-space: nowrap;
+    white-space: pre-wrap;
+    word-break: break-word;
     font-family: var(--fixed-font, monospace);
     font-size: 12px;
     line-height: 1.3;

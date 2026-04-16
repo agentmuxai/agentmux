@@ -17,7 +17,6 @@ interface AgentMessageBlockProps {
 
 export const AgentMessageBlock = ({ node, collapsed, onToggle }: AgentMessageBlockProps): JSX.Element => {
     const isIncoming = node.direction === "incoming";
-    const timestamp = new Date(node.timestamp).toLocaleTimeString();
 
     return (
         <div
@@ -33,7 +32,6 @@ export const AgentMessageBlock = ({ node, collapsed, onToggle }: AgentMessageBlo
             <div class="agent-message-summary">
                 <span class="agent-message-chevron">{collapsed ? "▸" : "▾"}</span>
                 <span class="agent-message-icon">{node.summary}</span>
-                <span class="agent-message-time">{timestamp}</span>
             </div>
             <Show when={!collapsed}>
                 <div class="agent-message-content" onClick={(e) => e.stopPropagation()}>
