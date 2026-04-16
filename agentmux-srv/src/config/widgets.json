@@ -30,6 +30,18 @@
             }
         }
     },
+    "defwidget@editor": {
+        "display:order": 3,
+        "icon": "file-code",
+        "label": "editor",
+        "description": "Code editor with syntax highlighting",
+        "blockdef": {
+            "meta": {
+                "view": "editor",
+                "file": ""
+            }
+        }
+    },
     "defwidget@terminal": {
         "display:order": 5,
         "display:pinned": true,
