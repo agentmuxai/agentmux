@@ -344,6 +344,8 @@ declare global {
         viewType: string;
         viewIcon?: Accessor<string | IconButtonDecl>;
         viewName?: Accessor<string>;
+        /** When provided, the header name becomes an inline editable text field. */
+        setViewName?: (name: string) => Promise<void>;
         viewText?: Accessor<string | HeaderElem[]>;
         preIconButton?: Accessor<IconButtonDecl>;
         endIconButtons?: Accessor<IconButtonDecl[]>;
