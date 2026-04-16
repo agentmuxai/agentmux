@@ -1,113 +1,140 @@
 {
-  "version": 2,
+  "version": 4,
   "agents": [
     {
       "id": "agentx",
       "name": "AgentX",
       "icon": "\ud83d\udd34",
-      "agent_type": "host",
-      "environment": "windows",
-      "provider": "claude",
-      "description": "Claude Code on host \u2014 primary coding agent",
+      "description": "Primary coding agent",
       "working_directory": "~/.agentmux/agents/agentx",
       "shell": "pwsh",
       "agent_bus_id": "agentx",
-      "auto_start": false,
-      "restart_on_crash": false,
       "content": {
-        "env": "AGENT_NAME=agentx\nAGENTMUX_AGENT_ID=AgentX"
+        "env": "AGENT_NAME=agentx\nAGENTMUX_AGENT_ID=AgentX",
+        "startup": "## Verification Round\n\nRun each check below. Fix failures before proceeding. Report results in a table.\n\n### 1. Identity\n```bash\ngh auth status\ngit config user.name && git config user.email\n```\nIf `gh auth status` fails, run `gh auth login`.\n\n### 2. AWS\n```bash\naws sts get-caller-identity 2>/dev/null || echo 'AWS not configured'\n```\n\n### 3. Dev Tools\nInstall if missing, then verify:\n```bash\nnpm list -g @a5af/secrets @a5af/deploy-cli @a5af/database-cli @a5af/api-testing @a5af/file-tools @a5af/e2e-cli @a5af/reagent-cli @a5af/workspace-health 2>/dev/null | grep '@a5af/' || echo 'Installing dev-tools...' && npm install -g @a5af/secrets @a5af/deploy-cli @a5af/database-cli @a5af/api-testing @a5af/file-tools @a5af/e2e-cli @a5af/reagent-cli @a5af/workspace-health\n```\nVerify:\n```bash\nsecrets --version && deploy --version\n```\n\n### 4. MCP Servers\nCheck AgentBus connectivity — list available peer agents.\n\n### Report\n\n| Check | Status | Details |\n|-------|--------|--------|\n| GitHub | OK/FAIL | username |\n| Git Identity | OK/FAIL | name, email |\n| AWS | OK/FAIL/SKIP | profile |\n| Dev Tools | OK/FAIL | count installed |\n| MCP AgentBus | OK/FAIL | peer count |\n\nIf all pass: \"Verification complete — ready to work.\"\nIf any FAIL: attempt fix. If unfixable, report and ask."
       },
-      "skills": []
+      "skills": [
+        {
+          "name": "Startup Verification",
+          "trigger": "startup",
+          "skill_type": "prompt",
+          "description": "Re-run tool verification checks and report status table",
+          "content": "Run the verification round from your startup instructions. Check identity (gh, git, aws), dev-tools (@a5af/* packages — install if missing), and MCP servers. Report a status table with OK/FAIL for each check. Fix any failures automatically if possible."
+        }
+      ]
     },
     {
       "id": "agenty",
       "name": "AgentY",
       "icon": "\ud83d\udfe1",
-      "agent_type": "host",
-      "environment": "windows",
-      "provider": "codex",
-      "description": "Codex CLI on host \u2014 OpenAI coding agent",
+      "description": "Secondary coding agent",
       "working_directory": "~/.agentmux/agents/agenty",
       "shell": "pwsh",
       "agent_bus_id": "agenty",
-      "auto_start": false,
-      "restart_on_crash": false,
       "content": {
-        "env": "AGENT_NAME=agenty\nAGENTMUX_AGENT_ID=AgentY"
+        "env": "AGENT_NAME=agenty\nAGENTMUX_AGENT_ID=AgentY",
+        "startup": "## Verification Round\n\nRun each check below. Fix failures before proceeding. Report results in a table.\n\n### 1. Identity\n```bash\ngh auth status\ngit config user.name && git config user.email\n```\nIf `gh auth status` fails, run `gh auth login`.\n\n### 2. AWS\n```bash\naws sts get-caller-identity 2>/dev/null || echo 'AWS not configured'\n```\n\n### 3. Dev Tools\nInstall if missing, then verify:\n```bash\nnpm list -g @a5af/secrets @a5af/deploy-cli @a5af/database-cli @a5af/api-testing @a5af/file-tools @a5af/e2e-cli @a5af/reagent-cli @a5af/workspace-health 2>/dev/null | grep '@a5af/' || echo 'Installing dev-tools...' && npm install -g @a5af/secrets @a5af/deploy-cli @a5af/database-cli @a5af/api-testing @a5af/file-tools @a5af/e2e-cli @a5af/reagent-cli @a5af/workspace-health\n```\nVerify:\n```bash\nsecrets --version && deploy --version\n```\n\n### 4. MCP Servers\nCheck AgentBus connectivity — list available peer agents.\n\n### Report\n\n| Check | Status | Details |\n|-------|--------|--------|\n| GitHub | OK/FAIL | username |\n| Git Identity | OK/FAIL | name, email |\n| AWS | OK/FAIL/SKIP | profile |\n| Dev Tools | OK/FAIL | count installed |\n| MCP AgentBus | OK/FAIL | peer count |\n\nIf all pass: \"Verification complete — ready to work.\"\nIf any FAIL: attempt fix. If unfixable, report and ask."
       },
-      "skills": []
+      "skills": [
+        {
+          "name": "Startup Verification",
+          "trigger": "startup",
+          "skill_type": "prompt",
+          "description": "Re-run tool verification checks and report status table",
+          "content": "Run the verification round from your startup instructions. Check identity (gh, git, aws), dev-tools (@a5af/* packages — install if missing), and MCP servers. Report a status table with OK/FAIL for each check. Fix any failures automatically if possible."
+        }
+      ]
     },
     {
       "id": "agentz",
       "name": "AgentZ",
       "icon": "\ud83d\udd35",
-      "agent_type": "host",
-      "environment": "windows",
-      "provider": "gemini",
-      "description": "Gemini CLI on host \u2014 Google coding agent",
+      "description": "Tertiary coding agent",
       "working_directory": "~/.agentmux/agents/agentz",
       "shell": "pwsh",
       "agent_bus_id": "agentz",
-      "auto_start": false,
-      "restart_on_crash": false,
       "content": {
-        "env": "AGENT_NAME=agentz\nAGENTMUX_AGENT_ID=AgentZ"
+        "env": "AGENT_NAME=agentz\nAGENTMUX_AGENT_ID=AgentZ",
+        "startup": "## Verification Round\n\nRun each check below. Fix failures before proceeding. Report results in a table.\n\n### 1. Identity\n```bash\ngh auth status\ngit config user.name && git config user.email\n```\nIf `gh auth status` fails, run `gh auth login`.\n\n### 2. AWS\n```bash\naws sts get-caller-identity 2>/dev/null || echo 'AWS not configured'\n```\n\n### 3. Dev Tools\nInstall if missing, then verify:\n```bash\nnpm list -g @a5af/secrets @a5af/deploy-cli @a5af/database-cli @a5af/api-testing @a5af/file-tools @a5af/e2e-cli @a5af/reagent-cli @a5af/workspace-health 2>/dev/null | grep '@a5af/' || echo 'Installing dev-tools...' && npm install -g @a5af/secrets @a5af/deploy-cli @a5af/database-cli @a5af/api-testing @a5af/file-tools @a5af/e2e-cli @a5af/reagent-cli @a5af/workspace-health\n```\nVerify:\n```bash\nsecrets --version && deploy --version\n```\n\n### 4. MCP Servers\nCheck AgentBus connectivity — list available peer agents.\n\n### Report\n\n| Check | Status | Details |\n|-------|--------|--------|\n| GitHub | OK/FAIL | username |\n| Git Identity | OK/FAIL | name, email |\n| AWS | OK/FAIL/SKIP | profile |\n| Dev Tools | OK/FAIL | count installed |\n| MCP AgentBus | OK/FAIL | peer count |\n\nIf all pass: \"Verification complete — ready to work.\"\nIf any FAIL: attempt fix. If unfixable, report and ask."
       },
-      "skills": []
+      "skills": [
+        {
+          "name": "Startup Verification",
+          "trigger": "startup",
+          "skill_type": "prompt",
+          "description": "Re-run tool verification checks and report status table",
+          "content": "Run the verification round from your startup instructions. Check identity (gh, git, aws), dev-tools (@a5af/* packages — install if missing), and MCP servers. Report a status table with OK/FAIL for each check. Fix any failures automatically if possible."
+        }
+      ]
     },
     {
       "id": "agent1",
       "name": "Agent1",
       "icon": "\ud83d\udfe2",
-      "agent_type": "container",
-      "environment": "linux",
-      "provider": "claude",
-      "description": "Claude Code in container \u2014 sandboxed coding",
+      "description": "Sandboxed coding agent",
       "working_directory": "/workspace",
       "shell": "bash",
       "agent_bus_id": "agent1",
-      "auto_start": false,
       "restart_on_crash": true,
       "content": {
-        "env": "AGENT_NAME=agent1\nAGENTMUX_AGENT_ID=Agent1"
+        "env": "AGENT_NAME=agent1\nAGENTMUX_AGENT_ID=Agent1",
+        "startup": "## Verification Round\n\nRun each check below. Fix failures before proceeding. Report results in a table.\n\n### 1. Identity\n```bash\ngh auth status\ngit config user.name && git config user.email\n```\n\n### 2. Dev Tools\nInstall if missing:\n```bash\nnpm list -g @a5af/secrets @a5af/file-tools @a5af/reagent-cli 2>/dev/null | grep '@a5af/' || npm install -g @a5af/secrets @a5af/file-tools @a5af/reagent-cli\n```\n\n### 3. MCP Servers\nCheck AgentBus connectivity — list available peer agents.\n\n### Report\n\n| Check | Status | Details |\n|-------|--------|--------|\n| GitHub | OK/FAIL | username |\n| Git Identity | OK/FAIL | name, email |\n| Dev Tools | OK/FAIL | count installed |\n| MCP AgentBus | OK/FAIL | peer count |\n\nIf all pass: \"Verification complete — ready to work.\"\nIf any FAIL: attempt fix. If unfixable, report and ask."
       },
-      "skills": []
+      "skills": [
+        {
+          "name": "Startup Verification",
+          "trigger": "startup",
+          "skill_type": "prompt",
+          "description": "Re-run tool verification checks and report status table",
+          "content": "Run the verification round from your startup instructions. Check identity (gh, git), dev-tools (@a5af/* packages — install if missing), and MCP servers. Report a status table with OK/FAIL for each check. Fix any failures automatically if possible."
+        }
+      ]
     },
     {
       "id": "agent2",
       "name": "Agent2",
       "icon": "\ud83d\udfe0",
-      "agent_type": "container",
-      "environment": "linux",
-      "provider": "codex",
-      "description": "Codex CLI in container \u2014 sandboxed coding",
+      "description": "Sandboxed coding agent",
       "working_directory": "/workspace",
       "shell": "bash",
       "agent_bus_id": "agent2",
-      "auto_start": false,
       "restart_on_crash": true,
       "content": {
-        "env": "AGENT_NAME=agent2\nAGENTMUX_AGENT_ID=Agent2"
+        "env": "AGENT_NAME=agent2\nAGENTMUX_AGENT_ID=Agent2",
+        "startup": "## Verification Round\n\nRun each check below. Fix failures before proceeding. Report results in a table.\n\n### 1. Identity\n```bash\ngh auth status\ngit config user.name && git config user.email\n```\n\n### 2. Dev Tools\nInstall if missing:\n```bash\nnpm list -g @a5af/secrets @a5af/file-tools @a5af/reagent-cli 2>/dev/null | grep '@a5af/' || npm install -g @a5af/secrets @a5af/file-tools @a5af/reagent-cli\n```\n\n### 3. MCP Servers\nCheck AgentBus connectivity — list available peer agents.\n\n### Report\n\n| Check | Status | Details |\n|-------|--------|--------|\n| GitHub | OK/FAIL | username |\n| Git Identity | OK/FAIL | name, email |\n| Dev Tools | OK/FAIL | count installed |\n| MCP AgentBus | OK/FAIL | peer count |\n\nIf all pass: \"Verification complete — ready to work.\"\nIf any FAIL: attempt fix. If unfixable, report and ask."
       },
-      "skills": []
+      "skills": [
+        {
+          "name": "Startup Verification",
+          "trigger": "startup",
+          "skill_type": "prompt",
+          "description": "Re-run tool verification checks and report status table",
+          "content": "Run the verification round from your startup instructions. Check identity (gh, git), dev-tools (@a5af/* packages — install if missing), and MCP servers. Report a status table with OK/FAIL for each check. Fix any failures automatically if possible."
+        }
+      ]
     },
     {
       "id": "agent3",
       "name": "Agent3",
       "icon": "\ud83d\udfe3",
-      "agent_type": "container",
-      "environment": "linux",
-      "provider": "gemini",
-      "description": "Gemini CLI in container \u2014 sandboxed coding",
+      "description": "Sandboxed coding agent",
       "working_directory": "/workspace",
       "shell": "bash",
       "agent_bus_id": "agent3",
-      "auto_start": false,
       "restart_on_crash": true,
       "content": {
-        "env": "AGENT_NAME=agent3\nAGENTMUX_AGENT_ID=Agent3"
+        "env": "AGENT_NAME=agent3\nAGENTMUX_AGENT_ID=Agent3",
+        "startup": "## Verification Round\n\nRun each check below. Fix failures before proceeding. Report results in a table.\n\n### 1. Identity\n```bash\ngh auth status\ngit config user.name && git config user.email\n```\n\n### 2. Dev Tools\nInstall if missing:\n```bash\nnpm list -g @a5af/secrets @a5af/file-tools @a5af/reagent-cli 2>/dev/null | grep '@a5af/' || npm install -g @a5af/secrets @a5af/file-tools @a5af/reagent-cli\n```\n\n### 3. MCP Servers\nCheck AgentBus connectivity — list available peer agents.\n\n### Report\n\n| Check | Status | Details |\n|-------|--------|--------|\n| GitHub | OK/FAIL | username |\n| Git Identity | OK/FAIL | name, email |\n| Dev Tools | OK/FAIL | count installed |\n| MCP AgentBus | OK/FAIL | peer count |\n\nIf all pass: \"Verification complete — ready to work.\"\nIf any FAIL: attempt fix. If unfixable, report and ask."
       },
-      "skills": []
+      "skills": [
+        {
+          "name": "Startup Verification",
+          "trigger": "startup",
+          "skill_type": "prompt",
+          "description": "Re-run tool verification checks and report status table",
+          "content": "Run the verification round from your startup instructions. Check identity (gh, git), dev-tools (@a5af/* packages — install if missing), and MCP servers. Report a status table with OK/FAIL for each check. Fix any failures automatically if possible."
+        }
+      ]
     }
   ]
 }
