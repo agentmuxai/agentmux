@@ -581,10 +581,16 @@ pub fn open_external(args: &serde_json::Value) -> Result<serde_json::Value, Stri
 
     #[cfg(target_os = "windows")]
     {
-        // Use explorer.exe instead of cmd /C start to avoid command injection
-        // (cmd.exe interprets & and | in URLs as command separators)
-        let _ = std::process::Command::new("explorer")
-            .arg(url)
+        // Use rundll32 url.dll,FileProtocolHandler instead of explorer.exe or
+        // cmd /C start. Explorer is a file manager — when it is already running
+        // (always the case on Windows), passing a URL to a second explorer
+        // instance is unreliable and sometimes opens a file-manager window.
+        // cmd.exe interprets & and | in URLs as command separators (injection).
+        // url.dll,FileProtocolHandler is the Windows built-in URL dispatcher:
+        // it reads HKCR\https\shell\open\command and always opens the default
+        // browser, handling any printable characters in the URL safely.
+        let _ = std::process::Command::new("rundll32.exe")
+            .args(["url.dll,FileProtocolHandler", url])
             .spawn()
             .map_err(|e| format!("Failed to open URL: {}", e))?;
     }

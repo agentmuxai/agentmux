@@ -53,6 +53,7 @@ export interface MarkdownNode {
     type: "markdown";
     id: string;
     content: string; // Raw markdown text
+    timestamp?: number; // Unix ms — when this node was first received
     metadata?: {
         thinking?: boolean; // Whether this is a thinking block
     };
@@ -68,6 +69,7 @@ export interface SectionNode {
     title: string;
     collapsible: boolean;
     collapsed: boolean;
+    timestamp?: number; // Unix ms
 }
 
 /**
@@ -155,6 +157,7 @@ export interface ToolNode {
     result?: ToolResult;
     collapsed: boolean;
     summary: string; // e.g., "📖 Read auth.ts (0.3s) ✓"
+    timestamp?: number; // Unix ms — when this tool call was initiated
 }
 
 /**
@@ -198,6 +201,7 @@ export interface SubagentLinkNode {
     sessionId: string;
     status: "active" | "completed";
     model: string | null;
+    timestamp?: number; // Unix ms
 }
 
 /**

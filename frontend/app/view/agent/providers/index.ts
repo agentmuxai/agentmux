@@ -63,7 +63,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         launchArgs: ["-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--dangerously-skip-permissions"],
         resumeFlag: "--resume",
         sessionIdField: "session_id",
-        controllerType: "persistent",
+        controllerType: "subprocess",
         persistentLaunchArgs: ["--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--dangerously-skip-permissions"],
     },
     codex: {

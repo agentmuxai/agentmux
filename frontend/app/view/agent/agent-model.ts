@@ -10,6 +10,8 @@ import { AgentViewWrapper } from "./agent-view";
 import { PROVIDERS, resolveProviderAlias } from "./providers";
 import { Logger } from "@/util/logger";
 
+export type OverlayTab = "forge" | "identity";
+
 export class AgentViewModel implements ViewModel {
     viewType = "agent";
     blockId: string;
@@ -18,11 +20,19 @@ export class AgentViewModel implements ViewModel {
 
     viewIcon: () => string;
     viewName: () => string;
+    setViewName: (name: string) => Promise<void>;
     viewText: () => string | HeaderElem[];
     viewComponent: ViewComponent;
     noPadding: () => boolean;
     endIconButtons: () => IconButtonDecl[];
     nodejsError: string | null = null;
+
+    // Callback wired by AgentPresentationView on mount so the title-bar
+    // buttons can open the focused overlay without holding a SolidJS signal
+    // in the model (signals must live inside the component tree).
+    _setOverlayTab: ((tab: OverlayTab | null) => void) | null = null;
+    // Last-used overlay tab — gear re-opens to whichever tab was active last.
+    _lastOverlayTab: OverlayTab = "forge";
 
     constructor(blockId: string, nodeModel: BlockNodeModel) {
         this.blockId = blockId;
@@ -49,21 +59,24 @@ export class AgentViewModel implements ViewModel {
         };
         this.viewText = () => [] as HeaderElem[];
         this.noPadding = () => true;
+        this.setViewName = async (name: string) => {
+            if (!name.trim()) return;
+            const oref = WOS.makeORef("block", this.blockId);
+            await RpcApi.SetMetaCommand(TabRpcClient, { oref, meta: { agentName: name.trim() } });
+        };
 
-        // Pane-frame header button: when an agent is launched, show a
-        // back-arrow that returns to the picker. Hidden when the pane
-        // is already on the picker screen (no agentId in meta).
+        // Pane-frame header buttons: when an agent is loaded show ⚙ .
+        // Hidden when no agent is loaded (picker screen).
+        // Gear opens forge/identity panel; defaults to forge, remembers last tab.
         this.endIconButtons = () => {
             const agentId = this.blockAtom()?.meta?.["agentId"];
             if (!agentId) return [];
             return [
                 {
                     elemtype: "iconbutton",
-                    icon: "arrow-left",
-                    title: "Back to agent picker",
-                    click: () => {
-                        void this.backToPicker();
-                    },
+                    icon: "gear",
+                    title: "Agent settings",
+                    click: () => { this._setOverlayTab?.(this._lastOverlayTab); },
                 },
             ];
         };
@@ -144,9 +157,11 @@ export class AgentViewModel implements ViewModel {
             }
         }
 
-        // Provider auth isolation
-        const authDir = await getApi().ensureAuthDir(provider.id);
-        envVars[provider.authConfigDirEnvVar] = authDir;
+        // Provider auth isolation (skip if provider has no isolated auth dir configured)
+        if (provider.authConfigDirEnvVar) {
+            const authDir = await getApi().ensureAuthDir(provider.id);
+            envVars[provider.authConfigDirEnvVar] = authDir;
+        }
         if (provider.authExtraEnv) {
             Object.assign(envVars, provider.authExtraEnv);
         }
@@ -239,7 +254,7 @@ export class AgentViewModel implements ViewModel {
         // Falls back to the legacy name-derived form if slug is empty
         // (defensive — the v4 migration backfills slug for every row).
         const slug = agent.slug || agent.name.toLowerCase().replace(/[^a-z0-9-_]/g, "-");
-        const workDir = agent.working_directory || `~/.agentmux/agents/${slug}`;
+        const workDir = agent.working_directory || `${agentmuxHome()}/agents/${slug}`;
 
         // Build CLI args: use persistent args if available, otherwise standard launch args
         const isPersistent = provider.controllerType === "persistent";
@@ -272,7 +287,7 @@ export class AgentViewModel implements ViewModel {
 
         // Per-agent GitHub config isolation — keyed by the stable
         // slug so renaming doesn't orphan ~/.agentmux/config/gh-<old>.
-        envVars["GH_CONFIG_DIR"] = `~/.agentmux/config/gh-${slug}`;
+        envVars["GH_CONFIG_DIR"] = `${agentmuxHome()}/config/gh-${slug}`;
 
         // AGENTMUX_AGENT_ID stays as the display name for backwards
         // compat: shell integration scripts (bash.sh / zsh.sh / pwsh.ps1)
@@ -290,11 +305,26 @@ export class AgentViewModel implements ViewModel {
         // slug, DISPLAY remains the human-readable label.
         envVars["AGENTMUX_AGENT_DISPLAY"] = agent.name;
 
+        // Git identity — prevents "Please tell me who you are" errors when
+        // the host machine has no global git config. Derived from the agent's
+        // display name + slug-based placeholder email. The Identity panel can
+        // supply a real email in a follow-on, but this fallback is safe and
+        // satisfies git's format requirement unconditionally.
+        envVars["GIT_AUTHOR_NAME"]     = agent.name;
+        envVars["GIT_AUTHOR_EMAIL"]    = `${slug}@agents.local`;
+        envVars["GIT_COMMITTER_NAME"]  = agent.name;
+        envVars["GIT_COMMITTER_EMAIL"] = `${slug}@agents.local`;
+        // GIT_CONFIG_GLOBAL is intentionally not set: we use the 4 identity
+        // env vars above which git always honours, avoiding any path-handling edge cases.
+
         // Provider auth isolation: shared per-version auth dir (not per-agent)
         // Each AgentMux version gets its own auth space via the Tauri app data dir,
         // which already includes the version in its identifier (ai.agentmux.app.vX-Y-Z).
-        const authDir = await getApi().ensureAuthDir(provider.id);
-        envVars[provider.authConfigDirEnvVar] = authDir;
+        // Skip if provider has no isolated auth dir configured (e.g. Claude uses ~/.claude/ globally).
+        if (provider.authConfigDirEnvVar) {
+            const authDir = await getApi().ensureAuthDir(provider.id);
+            envVars[provider.authConfigDirEnvVar] = authDir;
+        }
         if (provider.authExtraEnv) {
             Object.assign(envVars, provider.authExtraEnv);
         }
@@ -376,10 +406,20 @@ async function checkNodejsForProvider(providerId: string): Promise<string | null
 }
 
 /**
+ * Return the ~/.agentmux base directory as an absolute path.
+ * Uses $HOME (Unix/macOS/Git Bash) or $USERPROFILE (Windows cmd/PowerShell)
+ * so no bare `~` ever reaches the OS.
+ */
+function agentmuxHome(): string {
+    const home = getApi().getEnv("HOME") || getApi().getEnv("USERPROFILE") || "~";
+    return `${home}/.agentmux`;
+}
+
+/**
  * Resolve the version-isolated CLI install directory.
  */
 function resolveCliDir(version: string, providerId: string): string {
-    return `~/.agentmux/instances/v${version}/cli/${providerId}`;
+    return `${agentmuxHome()}/instances/v${version}/cli/${providerId}`;
 }
 
 /**

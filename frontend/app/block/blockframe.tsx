@@ -105,6 +105,52 @@ function handleHeaderContextMenu(
     ContextMenuModel.showContextMenu(menu, e);
 }
 
+/** Inline editable name field shown in the pane header when the viewModel provides setViewName. */
+function ViewNameEditor(props: { name: string; onSave: (v: string) => void }): JSX.Element {
+    const [editing, setEditing] = createSignal(false);
+    const [draft, setDraft] = createSignal(props.name);
+
+    const commit = () => {
+        const v = draft().trim();
+        if (v) props.onSave(v);
+        setEditing(false);
+    };
+    const cancel = () => {
+        setDraft(props.name);
+        setEditing(false);
+    };
+
+    return (
+        <Show
+            when={editing()}
+            fallback={
+                <div
+                    class="block-frame-view-type block-frame-view-type--editable"
+                    onClick={() => { setDraft(props.name); setEditing(true); }}
+                    onDblClick={(e) => e.stopPropagation()}
+                    title="Click to rename"
+                >
+                    {props.name}
+                </div>
+            }
+        >
+            <input
+                class="block-frame-view-type block-frame-view-type--input"
+                value={draft()}
+                onInput={(e) => setDraft(e.currentTarget.value)}
+                onBlur={commit}
+                onKeyDown={(e) => {
+                    if (e.key === "Enter") { e.preventDefault(); commit(); }
+                    if (e.key === "Escape") { e.preventDefault(); cancel(); }
+                    e.stopPropagation();
+                }}
+                onDblClick={(e) => e.stopPropagation()}
+                ref={(el) => setTimeout(() => { el.focus(); el.select(); }, 0)}
+            />
+        </Show>
+    );
+}
+
 function getViewIconElem(viewIconUnion: string | IconButtonDecl, blockData: Block): JSX.Element {
     if (viewIconUnion == null || typeof viewIconUnion === "string") {
         const viewIcon = viewIconUnion as string;
@@ -130,7 +176,9 @@ function EndIcons(props: {
     nodeModel: NodeModel;
     onContextMenu: (e: MouseEvent) => void;
 }): JSX.Element {
-    const endIconButtons = util.useAtomValueSafe(props.viewModel?.endIconButtons);
+    // createMemo so blockAtom reads inside endIconButtons() are tracked and
+    // the button array re-evaluates when the agent loads/unloads.
+    const endIconButtons = createMemo(() => util.useAtomValueSafe(props.viewModel?.endIconButtons));
     const magnified = () => props.nodeModel.isMagnified();
     const ephemeral = () => props.nodeModel.isEphemeral();
     const magnifyDisabled = () => false;
@@ -144,8 +192,8 @@ function EndIcons(props: {
 
     return (
         <>
-            <Show when={endIconButtons && endIconButtons.length > 0}>
-                <For each={endIconButtons}>
+            <Show when={(endIconButtons()?.length ?? 0) > 0}>
+                <For each={endIconButtons()}>
                     {(button) => <IconButton decl={button} />}
                 </For>
             </Show>
@@ -294,7 +342,12 @@ function BlockFrame_Header(props: BlockFrameProps & { changeConnModalAtom: util.
             {preIconButtonElem}
             <div class="block-frame-default-header-iconview">
                 {viewIconElem}
-                <div class="block-frame-view-type">{viewName()}</div>
+                <Show
+                    when={props.viewModel?.setViewName}
+                    fallback={<div class="block-frame-view-type">{viewName()}</div>}
+                >
+                    <ViewNameEditor name={viewName()} onSave={(v) => void props.viewModel.setViewName(v)} />
+                </Show>
                 <Show when={showBlockIds}>
                     <div class="block-frame-blockid">[{props.nodeModel.blockId.substring(0, 8)}]</div>
                 </Show>
@@ -307,7 +360,7 @@ function BlockFrame_Header(props: BlockFrameProps & { changeConnModalAtom: util.
                 />
             </Show>
             <div class="block-frame-textelems-wrapper">{headerTextElems}</div>
-            <div class="block-frame-end-icons">
+            <div class="block-frame-end-icons" onDblClick={(e) => e.stopPropagation()}>
                 <EndIcons viewModel={props.viewModel} nodeModel={props.nodeModel} onContextMenu={onContextMenu} />
             </div>
         </div>

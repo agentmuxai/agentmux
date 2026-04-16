@@ -12,6 +12,7 @@ use base64::Engine as _;
 use serde::Deserialize;
 use serde_json::json;
 
+use crate::backend::base::expand_home_dir_safe;
 use crate::backend::blockcontroller;
 use crate::backend::rpc::engine::WshRpcEngine;
 use crate::backend::rpc_types::{
@@ -835,7 +836,8 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                     "WriteAgentConfig"
                 );
 
-                let base_path = std::path::Path::new(&cmd.working_dir);
+                let expanded_working_dir = expand_home_dir_safe(&cmd.working_dir);
+                let base_path = expanded_working_dir.as_path();
                 if !base_path.exists() {
                     std::fs::create_dir_all(base_path)
                         .map_err(|e| format!("failed to create working dir: {e}"))?;

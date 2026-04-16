@@ -220,6 +220,15 @@ impl SubprocessController {
         // via cmd.exe /C with piped stdio. Resolve to node <script> instead.
         let mut cmd = crate::server::cli_handlers::make_cli_cmd(&config.cli_command);
         cmd.args(&args);
+
+        // On Windows: suppress console-window allocation. Without CREATE_NO_WINDOW,
+        // node.exe spawned from a windowless sidecar may try to create/attach to a
+        // console, causing stdout to go to that console rather than the pipe.
+        #[cfg(windows)]
+        {
+            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+            cmd.creation_flags(CREATE_NO_WINDOW);
+        }
         if !config.working_dir.is_empty() {
             // Expand ~ to home directory (cross-platform)
             let expanded_dir = if config.working_dir.starts_with("~/") || config.working_dir == "~" {
@@ -319,105 +328,121 @@ impl SubprocessController {
             let mut lines = reader.lines();
             let mut stats = super::session_stats::SessionStatsAccumulator::new(block_id_read.clone());
 
-            while let Ok(Some(line)) = lines.next_line().await {
-                let trimmed = line.trim();
-                if trimmed.is_empty() {
-                    continue;
-                }
+            tracing::info!(block_id = %block_id_read, "stdout_reader started");
 
-                // Track session metadata (debounced 1 s).
-                // Use `line.len()` (not `trimmed.len()`) to match persistent.rs
-                // so token_estimate stays consistent across controller types.
-                stats.record_line(line.len(), &wstore_read);
-
-                // Classify output for health monitoring
-                if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(trimmed) {
-                    let (meaningful, error) = classify_output_line(&parsed);
-                    health_read.record_output(meaningful);
-                    if let Some((class, msg)) = error {
-                        health_read.record_error(class, msg);
+            loop {
+                match lines.next_line().await {
+                    Err(e) => {
+                        tracing::warn!(block_id = %block_id_read, error = %e, "subprocess stdout read error");
+                        break;
                     }
-                }
+                    Ok(None) => {
+                        tracing::info!(block_id = %block_id_read, "subprocess stdout EOF");
+                        break;
+                    }
+                    Ok(Some(line)) => {
+                        let trimmed = line.trim();
+                        if trimmed.is_empty() {
+                            continue;
+                        }
 
-                // Try to capture session/thread ID from the provider's init event.
-                // Claude: {"type":"system","subtype":"init","session_id":"..."}
-                // Gemini: {"type":"init","session_id":"..."}
-                // Codex:  {"type":"thread.started","thread_id":"..."}
-                if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(trimmed) {
-                    if let Some(sid) = parsed.get(&session_id_field).and_then(|v| v.as_str()) {
-                        let sid_string = sid.to_string();
-                        // Only capture once (first occurrence in the output)
-                        let already_captured = inner_read.lock().unwrap().session_id.is_some();
-                        if !already_captured {
-                            tracing::info!(
-                                block_id = %block_id_read,
-                                field = %session_id_field,
-                                session_id = %sid_string,
-                                "captured session id"
-                            );
-                            {
-                                let mut inner = inner_read.lock().unwrap();
-                                inner.session_id = Some(sid_string.clone());
+                        // Track session metadata (debounced 1 s).
+                        // Use `line.len()` (not `trimmed.len()`) to match persistent.rs
+                        // so token_estimate stays consistent across controller types.
+                        stats.record_line(line.len(), &wstore_read);
+
+                        // Classify output for health monitoring
+                        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(trimmed) {
+                            let (meaningful, error) = classify_output_line(&parsed);
+                            health_read.record_output(meaningful);
+                            if let Some((class, msg)) = error {
+                                health_read.record_error(class, msg);
                             }
+                        }
 
-                            // Persist session_id to block metadata
-                            if let Some(ref store) = wstore_read {
-                                let oref_str = format!("block:{}", block_id_read);
-                                let mut meta_update =
-                                    crate::backend::obj::MetaMapType::new();
-                                meta_update.insert(
-                                    "agent:sessionid".to_string(),
-                                    serde_json::Value::String(sid_string),
-                                );
-                                if let Err(e) = crate::server::service::update_object_meta(
-                                    store, &oref_str, &meta_update,
-                                ) {
-                                    tracing::warn!(
+                        // Try to capture session/thread ID from the provider's init event.
+                        // Claude: {"type":"system","subtype":"init","session_id":"..."}
+                        // Gemini: {"type":"init","session_id":"..."}
+                        // Codex:  {"type":"thread.started","thread_id":"..."}
+                        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(trimmed) {
+                            if let Some(sid) = parsed.get(&session_id_field).and_then(|v| v.as_str()) {
+                                let sid_string = sid.to_string();
+                                // Only capture once (first occurrence in the output)
+                                let already_captured = inner_read.lock().unwrap().session_id.is_some();
+                                if !already_captured {
+                                    tracing::info!(
                                         block_id = %block_id_read,
-                                        error = %e,
-                                        "failed to persist agent:sessionid"
+                                        field = %session_id_field,
+                                        session_id = %sid_string,
+                                        "captured session id"
                                     );
-                                } else if let Some(ref event_bus) = event_bus_read {
-                                    // Broadcast metadata update to frontend
-                                    if let Ok(updated_block) = store.must_get::<crate::backend::obj::Block>(&block_id_read) {
-                                        let update_data = serde_json::to_value(
-                                            &crate::backend::obj::WaveObjUpdate {
-                                                updatetype: "update".into(),
-                                                otype: "block".into(),
-                                                oid: block_id_read.clone(),
-                                                obj: Some(crate::backend::obj::wave_obj_to_value(&updated_block)),
-                                            },
-                                        )
-                                        .ok();
-                                        event_bus.broadcast_event(
-                                            &crate::backend::eventbus::WSEventType {
-                                                eventtype: "waveobj:update".to_string(),
-                                                oref: oref_str,
-                                                data: update_data,
-                                            },
+                                    {
+                                        let mut inner = inner_read.lock().unwrap();
+                                        inner.session_id = Some(sid_string.clone());
+                                    }
+
+                                    // Persist session_id to block metadata
+                                    if let Some(ref store) = wstore_read {
+                                        let oref_str = format!("block:{}", block_id_read);
+                                        let mut meta_update =
+                                            crate::backend::obj::MetaMapType::new();
+                                        meta_update.insert(
+                                            "agent:sessionid".to_string(),
+                                            serde_json::Value::String(sid_string),
                                         );
+                                        if let Err(e) = crate::server::service::update_object_meta(
+                                            store, &oref_str, &meta_update,
+                                        ) {
+                                            tracing::warn!(
+                                                block_id = %block_id_read,
+                                                error = %e,
+                                                "failed to persist agent:sessionid"
+                                            );
+                                        } else if let Some(ref event_bus) = event_bus_read {
+                                            // Broadcast metadata update to frontend
+                                            if let Ok(updated_block) = store.must_get::<crate::backend::obj::Block>(&block_id_read) {
+                                                let update_data = serde_json::to_value(
+                                                    &crate::backend::obj::WaveObjUpdate {
+                                                        updatetype: "update".into(),
+                                                        otype: "block".into(),
+                                                        oid: block_id_read.clone(),
+                                                        obj: Some(crate::backend::obj::wave_obj_to_value(&updated_block)),
+                                                    },
+                                                )
+                                                .ok();
+                                                event_bus.broadcast_event(
+                                                    &crate::backend::eventbus::WSEventType {
+                                                        eventtype: "waveobj:update".to_string(),
+                                                        oref: oref_str,
+                                                        data: update_data,
+                                                    },
+                                                );
+                                            }
+                                        }
                                     }
                                 }
                             }
                         }
+
+                        // Publish the NDJSON line as a WPS blockfile event on the "output" subject
+                        // and write-through to FileStore for persistent history (Phase 1.3).
+                        if let Some(ref broker) = broker_read {
+                            tracing::info!(block_id = %block_id_read, line = %trimmed, "subprocess stdout → blockfile");
+                            // Include the newline so the frontend line splitter works correctly
+                            let line_with_newline = format!("{}\n", trimmed);
+                            super::shell::handle_append_block_file(
+                                broker,
+                                &block_id_read,
+                                SUBPROCESS_OUTPUT_SUBJECT,
+                                line_with_newline.as_bytes(),
+                                filestore_read.as_ref(),
+                            );
+                        }
                     }
                 }
-
-                // Publish the NDJSON line as a WPS blockfile event on the "output" subject
-                // and write-through to FileStore for persistent history (Phase 1.3).
-                if let Some(ref broker) = broker_read {
-                    tracing::info!(block_id = %block_id_read, line = %trimmed, "subprocess stdout → blockfile");
-                    // Include the newline so the frontend line splitter works correctly
-                    let line_with_newline = format!("{}\n", trimmed);
-                    super::shell::handle_append_block_file(
-                        broker,
-                        &block_id_read,
-                        SUBPROCESS_OUTPUT_SUBJECT,
-                        line_with_newline.as_bytes(),
-                        filestore_read.as_ref(),
-                    );
-                }
             }
+
+            tracing::info!(block_id = %block_id_read, "stdout_reader exiting");
         });
 
         // Spawn stderr reader (log warnings, don't publish)
@@ -425,13 +450,22 @@ impl SubprocessController {
         tokio::spawn(async move {
             let reader = BufReader::new(stderr);
             let mut lines = reader.lines();
-            while let Ok(Some(line)) = lines.next_line().await {
-                if !line.trim().is_empty() {
-                    tracing::info!(
-                        block_id = %block_id_err,
-                        stderr = %line,
-                        "subprocess stderr"
-                    );
+            loop {
+                match lines.next_line().await {
+                    Err(e) => {
+                        tracing::warn!(block_id = %block_id_err, error = %e, "subprocess stderr read error");
+                        break;
+                    }
+                    Ok(None) => break,
+                    Ok(Some(line)) => {
+                        if !line.trim().is_empty() {
+                            tracing::info!(
+                                block_id = %block_id_err,
+                                stderr = %line,
+                                "subprocess stderr"
+                            );
+                        }
+                    }
                 }
             }
         });
