@@ -14,6 +14,7 @@ import type { DocumentNode, DocumentState, LogLine, SubagentLinkNode } from "../
 import type { ScrollCommand } from "../hooks/useScrollToNode";
 import { AgentMessageBlock } from "./AgentMessageBlock";
 import { MarkdownBlock } from "./MarkdownBlock";
+import { NodeTimestamp } from "./NodeTimestamp";
 import { SubagentLinkBlock } from "./SubagentLinkBlock";
 import { ToolBlock } from "./ToolBlock";
 import { ContextMenuModel } from "@/app/store/contextmenu";
@@ -59,18 +60,33 @@ export const AgentDocumentView = ({ documentAtom, documentStateAtom, logLines, a
     // Guard against concurrent older-history fetches triggered by scroll
     let loadingOlderInFlight = false;
 
+    // Walk up the DOM to find the nearest ancestor with a non-1 CSS zoom.
+    // The portal renders to document.body (outside the zoom context), so we
+    // divide its coordinate constraints by the zoom factor and re-apply zoom
+    // to the portal container so content scales to match the pane.
+    const getAncestorZoom = (el: HTMLElement): number => {
+        let cur: HTMLElement | null = el;
+        while (cur) {
+            const z = parseFloat(getComputedStyle(cur).zoom ?? "1");
+            if (!isNaN(z) && z !== 1) return z;
+            cur = cur.parentElement;
+        }
+        return 1;
+    };
+
     // Shared hover state for log line full-text overlay.
     // One Portal renders the active line's full text at its viewport position.
     // Using a single shared signal (not per-line) avoids creating N signals in <For>.
-    type LogHover = { text: string; level?: "error" | "warn"; top: number; left: number; width: number };
+    type LogHover = { text: string; level?: "error" | "warn"; top: number; left: number; width: number; zoom: number };
     const [logHover, setLogHover] = createSignal<LogHover | null>(null);
     let logLeavePending = 0;
     const handleLogEnter = (e: MouseEvent, line: LogLine) => {
         if (logLeavePending) { clearTimeout(logLeavePending); logLeavePending = 0; }
         const el = e.currentTarget as HTMLElement;
         const r = el.getBoundingClientRect();
+        const zoom = getAncestorZoom(el);
         const hoverLevel = line.level === "error" || line.level === "warn" ? line.level : undefined;
-        setLogHover({ text: `[${line.tag}] ${line.text}`, level: hoverLevel, top: r.top, left: r.left, width: r.width });
+        setLogHover({ text: `[${line.tag}] ${line.text}`, level: hoverLevel, top: r.top, left: r.left, width: r.width / zoom, zoom });
     };
     const handleLogLeave = () => {
         if (logLeavePending) clearTimeout(logLeavePending);
@@ -274,6 +290,7 @@ export const AgentDocumentView = ({ documentAtom, documentStateAtom, logLines, a
                                         left: `${h().left}px`,
                                         "min-width": `${h().width}px`,
                                         "max-width": `calc(100vw - ${h().left}px - 16px)`,
+                                        zoom: String(h().zoom),
                                     }}
                                     onMouseEnter={() => { if (logLeavePending) { clearTimeout(logLeavePending); logLeavePending = 0; } }}
                                     onMouseLeave={handleLogLeave}
@@ -414,6 +431,7 @@ export const AgentDocumentView = ({ documentAtom, documentStateAtom, logLines, a
                                 onToggleToolPin={() => toggleToolPin(node.id)}
                                 onSubagentClick={onSubagentClick}
                             />
+                            <NodeTimestamp timestamp={(node as any).timestamp} />
                         </div>
                     );
                 }}

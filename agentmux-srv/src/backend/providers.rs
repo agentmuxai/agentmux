@@ -92,7 +92,7 @@ static CLAUDE: ProviderConfig = ProviderConfig {
     id: "claude",
     display_name: "Claude Code",
     cli_command: "claude",
-    controller_type: ControllerType::Persistent,
+    controller_type: ControllerType::Subprocess,
     launch_args: &[
         "-p",
         "--output-format",
@@ -263,10 +263,10 @@ mod tests {
     }
 
     #[test]
-    fn claude_persistent_args_present() {
+    fn claude_subprocess_with_persistent_args_present() {
         let p = get_provider("claude").unwrap();
         assert!(p.persistent_launch_args.is_some());
-        assert_eq!(p.controller_type, ControllerType::Persistent);
+        assert_eq!(p.controller_type, ControllerType::Subprocess);
     }
 
     #[test]

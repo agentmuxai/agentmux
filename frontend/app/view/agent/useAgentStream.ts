@@ -7,8 +7,7 @@
  * the resulting DocumentNodes into SolidJS signals.
  */
 
-import { getFileSubject, waveEventSubscribe } from "@/app/store/wps";
-import * as WOS from "@/app/store/wos";
+import { getFileSubject } from "@/app/store/wps";
 import { base64ToArray } from "@/util/util";
 import { createEffect, onCleanup, onMount, untrack } from "solid-js";
 import { createTranslator } from "./providers/translator-factory";
@@ -272,6 +271,7 @@ export function useAgentStream({
                         id: `stderr-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
                         type: "markdown",
                         content: `**stderr:** ${text}`,
+                        timestamp: Date.now(),
                     });
                     scheduleFlush();
                     continue;
@@ -317,6 +317,13 @@ export function useAgentStream({
                     const node = parser.parseLine(JSON.stringify(event));
                     if (!node) continue;
 
+                    // Stamp a receive time on nodes that don't carry their own
+                    // timestamp (markdown, tool, section, subagent_link).
+                    // user_message and agent_message already have timestamps.
+                    if (!("timestamp" in node) || (node as any).timestamp == null) {
+                        (node as any).timestamp = Date.now();
+                    }
+
                     if (nodeIdSet.has(node.id)) {
                         pendingUpdates.push(node);
                     } else {
@@ -332,41 +339,9 @@ export function useAgentStream({
             }
         });
 
-        // Subscribe to agenthealth WPS events so "Stalled" (30 s) and "Dead"
-        // (120 s) transitions surface as visible log messages rather than
-        // silently leaving the user staring at a spinner forever.
-        const healthScope = WOS.makeORef("block", blockId);
-        const unsubHealth = waveEventSubscribe({
-            eventType: "agenthealth",
-            scope: healthScope,
-            handler: (event: any) => {
-                const health: string = event?.data?.health ?? "";
-                const detail: string = event?.data?.detail ?? "";
-                if (health === "stalled") {
-                    pendingNew.push({
-                        id: `health-stalled-${Date.now()}`,
-                        type: "markdown",
-                        content: `**Agent is taking longer than expected.** ${detail} — it may be waiting for authentication or blocked on a startup prompt.`,
-                        metadata: { level: "warn" },
-                    } as any);
-                    scheduleFlush();
-                } else if (health === "dead") {
-                    pendingNew.push({
-                        id: `health-dead-${Date.now()}`,
-                        type: "markdown",
-                        content: `**Agent is not responding.** ${detail} — try clicking Retry, or check that your authentication is still valid.`,
-                        metadata: { level: "error" },
-                    } as any);
-                    scheduleFlush();
-                    setTurnActive(false);
-                }
-            },
-        });
-
         onCleanup(() => {
             if (flushRafId != null) { cancelAnimationFrame(flushRafId); flushRafId = null; }
             subscription.unsubscribe();
-            unsubHealth();
             setStreaming((prev) => ({ ...prev, active: false }));
             // Clear turn-active on teardown so a crash/exit without session_end
             // doesn't leave the status line showing "Working…" permanently.

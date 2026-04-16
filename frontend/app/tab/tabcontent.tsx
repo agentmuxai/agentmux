@@ -91,6 +91,7 @@ function TabContent(props: { tabId: string }): JSX.Element {
     return (
         <div
             class="flex flex-row flex-grow min-h-0 w-full items-center justify-center overflow-hidden relative"
+            style={{ "padding-top": "1px" }}
             onContextMenu={handleContextMenu}
         >
             <Show

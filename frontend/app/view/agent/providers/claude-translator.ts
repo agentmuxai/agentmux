@@ -44,6 +44,10 @@ export class ClaudeTranslator implements OutputTranslator {
 
         // Case 3: Top-level "assistant" event (complete message)
         if (rawEvent.type === "assistant" && rawEvent.message) {
+            // Skip partial snapshots — the same text arrives incrementally
+            // via stream_event → content_block_delta before each snapshot,
+            // so processing it here would produce duplicate document nodes.
+            if (rawEvent.partial === true) return [];
             return this.handleAssistantMessage(rawEvent.message);
         }
 
@@ -129,29 +133,23 @@ export class ClaudeTranslator implements OutputTranslator {
 
     /**
      * Top-level "assistant" event contains the complete message.
-     * We extract text, tool_use, and thinking blocks.
-     * NOTE: We skip text blocks here since they arrive incrementally via stream_event.
-     * We only extract tool_use blocks that we haven't seen via content_block_start.
+     *
+     * text/thinking blocks are NOT emitted here — they always arrive
+     * incrementally via stream_event → content_block_delta before the
+     * final assistant event lands, so processing them here would produce
+     * duplicate document nodes (one from the streaming, one from this).
+     *
+     * Only tool_use blocks are extracted: they carry the final parsed
+     * params that content_block_start + content_block_stop may not have
+     * fully resolved yet. Node-ID deduplication in useAgentStream handles
+     * the case where the tool node was already added via streaming.
      */
     private handleAssistantMessage(message: any): StreamEvent[] {
         if (!message || !Array.isArray(message.content)) return [];
 
-        // Convert each content block into a StreamEvent.
-        // In persistent mode (--input-format stream-json), assistant messages
-        // may arrive without prior stream_event deltas, so we must render them.
         const events: StreamEvent[] = [];
         for (const block of message.content) {
-            if (block.type === "text" && block.text) {
-                events.push({
-                    type: "text",
-                    content: block.text,
-                });
-            } else if (block.type === "thinking" && block.thinking) {
-                events.push({
-                    type: "thinking",
-                    content: block.thinking,
-                });
-            } else if (block.type === "tool_use") {
+            if (block.type === "tool_use") {
                 this.currentToolCallId = block.id;
                 this.currentToolName = block.name;
                 if (block.id && block.name) {
