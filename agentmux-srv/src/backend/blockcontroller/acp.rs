@@ -54,6 +54,8 @@ struct AcpInner {
     current_pid: Option<u32>,
     stdin_tx: Option<mpsc::Sender<String>>,
     kill_tx: Option<tokio::sync::oneshot::Sender<bool>>,
+    /// First user prompt, deferred until session/create completes.
+    pending_prompt: Option<String>,
 }
 
 /// AcpController manages an ACP-speaking agent process.
@@ -68,7 +70,7 @@ pub struct AcpController {
     filestore: Option<Arc<FileStore>>,
     health_monitor: Arc<HealthMonitor>,
     /// Monotonically increasing JSON-RPC request ID.
-    next_rpc_id: AtomicU64,
+    next_rpc_id: Arc<AtomicU64>,
 }
 
 impl AcpController {
@@ -95,13 +97,14 @@ impl AcpController {
                 current_pid: None,
                 stdin_tx: None,
                 kill_tx: None,
+                pending_prompt: None,
             })),
             broker,
             event_bus,
             wstore,
             filestore,
             health_monitor,
-            next_rpc_id: AtomicU64::new(1),
+            next_rpc_id: Arc::new(AtomicU64::new(1)),
         }
     }
 
@@ -160,18 +163,26 @@ impl AcpController {
     }
 
     /// Send a user message via ACP session/prompt.
-    /// If the process isn't spawned yet, spawns it first.
+    /// If the process isn't spawned yet, spawns it first (the first prompt is
+    /// deferred until the session is established — see `pending_prompt`).
     pub fn send_message(&self, message: String, cli_command: String, cli_args: Vec<String>, working_dir: String, env_vars: HashMap<String, String>) -> Result<(), String> {
         if !self.is_running() {
-            self.spawn_process(cli_command, cli_args, working_dir, env_vars)?;
+            // First turn: spawn and stash the prompt — the stdout reader will
+            // send it once the session/create response arrives.
+            {
+                let mut inner = self.inner.lock().unwrap();
+                inner.pending_prompt = Some(message.clone());
+            }
+            self.health_monitor.set_active_turn(true);
+            return self.spawn_process(cli_command, cli_args, working_dir, env_vars);
         }
 
+        // Subsequent turns: session_id is already populated.
         let session_id = {
             let inner = self.inner.lock().unwrap();
             inner.session_id.clone().unwrap_or_default()
         };
 
-        // Send session/prompt request
         let req = self.make_request("session/prompt", serde_json::json!({
             "sessionId": session_id,
             "prompt": {
@@ -304,6 +315,7 @@ impl AcpController {
         let filestore_clone = self.filestore.clone();
         let inner_clone = self.inner.clone();
         let health_clone = self.health_monitor.clone();
+        let rpc_id_clone = self.next_rpc_id.clone();
         tokio::spawn(async move {
             let mut reader = BufReader::new(stdout).lines();
             while let Ok(Some(line)) = reader.next_line().await {
@@ -323,6 +335,23 @@ impl AcpController {
                                 session_id = %sid,
                                 "ACP session established"
                             );
+
+                            // Flush pending prompt now that session is ready.
+                            if let Some(prompt) = inner.pending_prompt.take() {
+                                let id = rpc_id_clone.fetch_add(1, Ordering::Relaxed);
+                                let req = serde_json::json!({
+                                    "jsonrpc": "2.0",
+                                    "id": id,
+                                    "method": "session/prompt",
+                                    "params": {
+                                        "sessionId": sid,
+                                        "prompt": { "type": "text", "text": prompt },
+                                    }
+                                }).to_string();
+                                if let Some(ref tx) = inner.stdin_tx {
+                                    let _ = tx.try_send(req);
+                                }
+                            }
                         }
                     }
 
@@ -369,10 +398,10 @@ impl AcpController {
         tokio::spawn(async move {
             tokio::select! {
                 _ = kill_rx => {
-                    let _ = child.kill();
+                    let _ = child.kill().await;
                     tracing::info!(block_id = %block_id_wait, "ACP process killed");
                 }
-                status = async { child.wait() } => {
+                status = child.wait() => {
                     let exit_code = status.map(|s| s.code().unwrap_or(-1)).unwrap_or(-1);
                     tracing::info!(
                         block_id = %block_id_wait,
