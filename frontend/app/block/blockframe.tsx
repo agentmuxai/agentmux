@@ -130,7 +130,9 @@ function EndIcons(props: {
     nodeModel: NodeModel;
     onContextMenu: (e: MouseEvent) => void;
 }): JSX.Element {
-    const endIconButtons = util.useAtomValueSafe(props.viewModel?.endIconButtons);
+    // createMemo so blockAtom reads inside endIconButtons() are tracked and
+    // the button array re-evaluates when the agent loads/unloads.
+    const endIconButtons = createMemo(() => util.useAtomValueSafe(props.viewModel?.endIconButtons));
     const magnified = () => props.nodeModel.isMagnified();
     const ephemeral = () => props.nodeModel.isEphemeral();
     const magnifyDisabled = () => false;
@@ -144,8 +146,8 @@ function EndIcons(props: {
 
     return (
         <>
-            <Show when={endIconButtons && endIconButtons.length > 0}>
-                <For each={endIconButtons}>
+            <Show when={(endIconButtons()?.length ?? 0) > 0}>
+                <For each={endIconButtons()}>
                     {(button) => <IconButton decl={button} />}
                 </For>
             </Show>

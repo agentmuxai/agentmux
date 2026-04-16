@@ -170,9 +170,11 @@ export class AgentViewModel implements ViewModel {
             }
         }
 
-        // Provider auth isolation
-        const authDir = await getApi().ensureAuthDir(provider.id);
-        envVars[provider.authConfigDirEnvVar] = authDir;
+        // Provider auth isolation (skip if provider has no isolated auth dir configured)
+        if (provider.authConfigDirEnvVar) {
+            const authDir = await getApi().ensureAuthDir(provider.id);
+            envVars[provider.authConfigDirEnvVar] = authDir;
+        }
         if (provider.authExtraEnv) {
             Object.assign(envVars, provider.authExtraEnv);
         }
@@ -265,7 +267,7 @@ export class AgentViewModel implements ViewModel {
         // Falls back to the legacy name-derived form if slug is empty
         // (defensive — the v4 migration backfills slug for every row).
         const slug = agent.slug || agent.name.toLowerCase().replace(/[^a-z0-9-_]/g, "-");
-        const workDir = agent.working_directory || `~/.agentmux/agents/${slug}`;
+        const workDir = agent.working_directory || `${agentmuxHome()}/agents/${slug}`;
 
         // Build CLI args: use persistent args if available, otherwise standard launch args
         const isPersistent = provider.controllerType === "persistent";
@@ -298,7 +300,7 @@ export class AgentViewModel implements ViewModel {
 
         // Per-agent GitHub config isolation — keyed by the stable
         // slug so renaming doesn't orphan ~/.agentmux/config/gh-<old>.
-        envVars["GH_CONFIG_DIR"] = `~/.agentmux/config/gh-${slug}`;
+        envVars["GH_CONFIG_DIR"] = `${agentmuxHome()}/config/gh-${slug}`;
 
         // AGENTMUX_AGENT_ID stays as the display name for backwards
         // compat: shell integration scripts (bash.sh / zsh.sh / pwsh.ps1)
@@ -325,16 +327,17 @@ export class AgentViewModel implements ViewModel {
         envVars["GIT_AUTHOR_EMAIL"]    = `${slug}@agents.local`;
         envVars["GIT_COMMITTER_NAME"]  = agent.name;
         envVars["GIT_COMMITTER_EMAIL"] = `${slug}@agents.local`;
-        // Note: GIT_CONFIG_GLOBAL is intentionally NOT set here.
-        // Git does not shell-expand ~ in env vars, so "~/.agentmux/..." would
-        // create a literal ~ folder relative to the cwd. The 4 env vars above
-        // are sufficient for the common case.
+        // GIT_CONFIG_GLOBAL is intentionally not set: we use the 4 identity
+        // env vars above which git always honours, avoiding any path-handling edge cases.
 
         // Provider auth isolation: shared per-version auth dir (not per-agent)
         // Each AgentMux version gets its own auth space via the Tauri app data dir,
         // which already includes the version in its identifier (ai.agentmux.app.vX-Y-Z).
-        const authDir = await getApi().ensureAuthDir(provider.id);
-        envVars[provider.authConfigDirEnvVar] = authDir;
+        // Skip if provider has no isolated auth dir configured (e.g. Claude uses ~/.claude/ globally).
+        if (provider.authConfigDirEnvVar) {
+            const authDir = await getApi().ensureAuthDir(provider.id);
+            envVars[provider.authConfigDirEnvVar] = authDir;
+        }
         if (provider.authExtraEnv) {
             Object.assign(envVars, provider.authExtraEnv);
         }
@@ -416,10 +419,20 @@ async function checkNodejsForProvider(providerId: string): Promise<string | null
 }
 
 /**
+ * Return the ~/.agentmux base directory as an absolute path.
+ * Uses $HOME (Unix/macOS/Git Bash) or $USERPROFILE (Windows cmd/PowerShell)
+ * so no bare `~` ever reaches the OS.
+ */
+function agentmuxHome(): string {
+    const home = getApi().getEnv("HOME") || getApi().getEnv("USERPROFILE") || "~";
+    return `${home}/.agentmux`;
+}
+
+/**
  * Resolve the version-isolated CLI install directory.
  */
 function resolveCliDir(version: string, providerId: string): string {
-    return `~/.agentmux/instances/v${version}/cli/${providerId}`;
+    return `${agentmuxHome()}/instances/v${version}/cli/${providerId}`;
 }
 
 /**
