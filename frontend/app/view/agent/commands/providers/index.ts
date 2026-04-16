@@ -9,7 +9,9 @@
 
 import type { SlashCommand } from "../types";
 import { CLAUDE_COMMANDS } from "./claude";
+import { OPENCLAW_COMMANDS } from "./openclaw";
 
 export const SLASH_COMMANDS_BY_PROVIDER: Record<string, SlashCommand[]> = {
     claude: CLAUDE_COMMANDS,
+    openclaw: OPENCLAW_COMMANDS,
 };
