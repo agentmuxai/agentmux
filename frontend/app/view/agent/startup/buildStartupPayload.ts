@@ -112,8 +112,7 @@ export function buildStartupPayload(opts: StartupPayloadOpts): string | null {
     // payload as informational context and responds "Ready to help."
     if (opts.startupContent?.trim()) {
         parts.push("\n---\n");
-        parts.push("**ACTION REQUIRED:** Execute the verification round above now. ");
-        parts.push("Run each check, fix any failures, and report the status table before proceeding.\n");
+        parts.push("**ACTION REQUIRED:** Execute the startup instructions above now before proceeding.\n");
     }
 
     return parts.join("");
