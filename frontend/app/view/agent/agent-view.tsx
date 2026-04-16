@@ -34,7 +34,7 @@ import { RpcApi } from "@/app/store/wshclientapi";
 import { TabRpcClient } from "@/app/store/wshrpcutil";
 import { getApi } from "@/app/store/global";
 import { ContextMenuModel } from "@/app/store/contextmenu";
-import { parseAgentAccounts } from "@/app/view/identity/identity-model";
+import { parseAgentAccounts, loadAccounts } from "@/app/view/identity/identity-model";
 import { buildStartupPayload, resolveAccounts } from "./startup/buildStartupPayload";
 import "./agent-view.scss";
 
@@ -220,13 +220,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
 
             // Resolve assigned accounts from Identity localStorage
             const agentAccounts = parseAgentAccounts(agent);
-            const STORAGE_KEY = "agentmux:identity:accounts";
-            let allAccounts: any[] = [];
-            try {
-                const raw = localStorage.getItem(STORAGE_KEY);
-                if (raw) allAccounts = JSON.parse(raw);
-            } catch { /* no accounts stored */ }
-            const accounts = resolveAccounts(agentAccounts, allAccounts);
+            const accounts = resolveAccounts(agentAccounts, loadAccounts());
 
             const payload = buildStartupPayload({
                 agent,
