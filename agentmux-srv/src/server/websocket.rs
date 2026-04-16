@@ -689,6 +689,7 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                             Some(filestore),
                         );
                         let ctrl = std::sync::Arc::new(ctrl);
+                        ctrl.set_self_ref();
                         blockcontroller::register_controller(&cmd.blockid, ctrl.clone());
                         ctrl as std::sync::Arc<dyn blockcontroller::Controller>
                     }
