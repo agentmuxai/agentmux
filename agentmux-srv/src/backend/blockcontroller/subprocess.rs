@@ -301,18 +301,53 @@ impl SubprocessController {
         let stdout = child.stdout.take().unwrap();
         let stderr = child.stderr.take().unwrap();
 
-        // Write user message to stdin, then close it
+        // Write user message to stdin, then close it.
+        // CRITICAL: This must complete BEFORE the child's stdin timeout
+        // (Claude CLI: 3s). Using std::thread + synchronous write to
+        // bypass the Tokio task scheduler — a tokio::spawn'd task may
+        // not run for seconds on a busy runtime, causing the child to
+        // time out with "no stdin data received in 3s".
         let message = config.message;
-        tokio::spawn(async move {
-            let mut stdin = stdin;
-            if let Err(e) = stdin.write_all(message.as_bytes()).await {
-                tracing::warn!("subprocess stdin write error: {}", e);
-            }
-            if let Err(e) = stdin.write_all(b"\n").await {
-                tracing::warn!("subprocess stdin newline error: {}", e);
-            }
-            // stdin drops here → EOF to the subprocess
-        });
+        let block_id_stdin = self.block_id.clone();
+        {
+            // Convert Tokio's async ChildStdin to a raw OS handle, then
+            // wrap in a std::fs::File for synchronous write. The pipe
+            // buffer (4-64KB on Windows) easily fits our message, so
+            // write_all returns instantly without blocking.
+            #[cfg(unix)]
+            let raw_handle = {
+                use std::os::unix::io::{AsRawFd, FromRawFd};
+                let fd = stdin.as_raw_fd();
+                unsafe { std::fs::File::from_raw_fd(fd) }
+            };
+            #[cfg(windows)]
+            let raw_handle = {
+                use std::os::windows::io::{AsRawHandle, FromRawHandle};
+                let handle = stdin.as_raw_handle();
+                unsafe { std::fs::File::from_raw_handle(handle) }
+            };
+
+            // Spawn a real OS thread (not a Tokio task) for the write.
+            // This ensures it runs immediately regardless of runtime load.
+            // The raw handle is valid as long as `stdin` lives — we move
+            // `stdin` into the thread via a guard to keep it alive.
+            std::thread::spawn(move || {
+                use std::io::Write;
+                let _keep_alive = stdin; // prevent Tokio ChildStdin drop
+                let mut pipe = raw_handle;
+                let payload = format!("{}\n", message);
+                if let Err(e) = pipe.write_all(payload.as_bytes()) {
+                    tracing::warn!(block_id = %block_id_stdin, "subprocess stdin write error: {}", e);
+                    std::mem::forget(pipe); // don't close the handle — _keep_alive owns it
+                    return;
+                }
+                if let Err(e) = pipe.flush() {
+                    tracing::warn!(block_id = %block_id_stdin, "subprocess stdin flush error: {}", e);
+                }
+                std::mem::forget(pipe); // don't double-close — _keep_alive owns the handle
+                // _keep_alive (Tokio ChildStdin) drops here → EOF to the subprocess
+            });
+        }
 
         // Spawn stdout_reader task
         let block_id_read = self.block_id.clone();
