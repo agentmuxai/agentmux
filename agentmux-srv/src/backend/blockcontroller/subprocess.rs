@@ -850,8 +850,14 @@ mod tests {
         };
 
         let result = ctrl.spawn_turn(config);
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("already running"));
+        // spawn_turn now queues instead of rejecting when busy
+        assert!(result.is_ok());
+
+        // Verify the message was queued
+        let inner = ctrl.inner.lock().unwrap();
+        assert_eq!(inner.pending_messages.len(), 1);
+        assert_eq!(inner.pending_messages[0].message, "test");
+        drop(inner);
 
         // Release lock
         ctrl.run_lock.store(false, Ordering::SeqCst);
