@@ -121,12 +121,14 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         sessionIdField: "session_id",
         controllerType: "subprocess",
     },
+    // OpenClaw via gateway daemon (detected if `openclaw` is installed and gateway is running).
+    // Uses acpx as the ACP bridge to the running OpenClaw gateway.
+    // Full OpenClaw features: skills, external messaging channels, memory, multi-agent.
     openclaw: {
         id: "openclaw",
         displayName: "OpenClaw",
         cliCommand: "acpx",
         defaultArgs: [],
-        // ACP agents use JSON-RPC 2.0 over stdio — no custom CLI flags needed
         styledArgs: ["--agent", "openclaw"],
         outputFormat: "acp",
         styledOutputFormat: "acp",
@@ -142,8 +144,35 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         authConfigDirEnvVar: "OPENCLAW_HOME",
         authDirName: "openclaw",
         launchArgs: ["--agent", "openclaw"],
-        resumeFlag: null,           // ACP handles sessions natively
-        sessionIdField: "sessionId", // ACP protocol field
+        resumeFlag: null,
+        sessionIdField: "sessionId",
+        controllerType: "acp",
+    },
+    // Pi — the lightweight coding agent that powers OpenClaw.
+    // Standalone CLI, no gateway required. Pure coding agent with read/write/bash/edit tools.
+    // Ideal when users want a fast, self-contained coding agent without the full OpenClaw stack.
+    pi: {
+        id: "pi",
+        displayName: "Pi",
+        cliCommand: "pi",
+        defaultArgs: [],
+        styledArgs: ["--json"],
+        outputFormat: "acp",
+        styledOutputFormat: "acp",
+        authType: "api-key",
+        authCheckCommand: ["config", "get", "provider"],
+        authLoginCommand: ["config"],
+        npmPackage: "@mariozechner/pi-coding-agent",
+        pinnedVersion: "latest",
+        docsUrl: "https://github.com/badlogic/pi-mono",
+        windowsInstallCommand: "npm install -g @mariozechner/pi-coding-agent",
+        unixInstallCommand: "npm install -g @mariozechner/pi-coding-agent",
+        icon: "terminal",
+        authConfigDirEnvVar: "PI_HOME",
+        authDirName: "pi",
+        launchArgs: ["--json"],
+        resumeFlag: null,
+        sessionIdField: "sessionId",
         controllerType: "acp",
     },
 };
