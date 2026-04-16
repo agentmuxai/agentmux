@@ -32,7 +32,10 @@ import { BookmarksPanel } from "./components/BookmarksPanel";
 import { SessionDigestBanner } from "./components/SessionDigestBanner";
 import { RpcApi } from "@/app/store/wshclientapi";
 import { TabRpcClient } from "@/app/store/wshrpcutil";
+import { getApi } from "@/app/store/global";
 import { ContextMenuModel } from "@/app/store/contextmenu";
+import { parseAgentAccounts } from "@/app/view/identity/identity-model";
+import { buildStartupPayload, resolveAccounts } from "./startup/buildStartupPayload";
 import "./agent-view.scss";
 
 /**
@@ -195,24 +198,52 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
     };
 
     // ── Startup sequence ────────────────────────────────────────────────────────
-    // On first connect (no existing session), fetch forge content type "startup"
-    // for this agent and auto-send it as the opening message. Skipped on
-    // session resume so the sequence isn't replayed every reconnect.
+    // On first connect (no existing session), assemble a structured startup
+    // payload from Forge + Identity data and send it as the opening turn.
+    // See docs/specs/SPEC_AGENT_STARTUP_SEQUENCE_2026_04_16.md
     onReadyFn = async () => {
         // Skip if this is a resumed session
         if (block()?.meta?.["agent:sessionid"]) return;
+
         try {
-            const startupContent = await RpcApi.GetForgeContentCommand(TabRpcClient, {
-                agent_id: agentId,
-                content_type: "startup",
+            const agent = currentAgent();
+            if (!agent) return;
+
+            // Gather inputs in parallel where possible
+            const [startupContentResult, version] = await Promise.all([
+                RpcApi.GetForgeContentCommand(TabRpcClient, {
+                    agent_id: agentId,
+                    content_type: "startup",
+                }).catch(() => null),
+                Promise.resolve(getApi().getAboutModalDetails().version),
+            ]);
+
+            // Resolve assigned accounts from Identity localStorage
+            const agentAccounts = parseAgentAccounts(agent);
+            const STORAGE_KEY = "agentmux:identity:accounts";
+            let allAccounts: any[] = [];
+            try {
+                const raw = localStorage.getItem(STORAGE_KEY);
+                if (raw) allAccounts = JSON.parse(raw);
+            } catch { /* no accounts stored */ }
+            const accounts = resolveAccounts(agentAccounts, allAccounts);
+
+            const payload = buildStartupPayload({
+                agent,
+                providerDisplayName: provider()?.displayName ?? providerKey(),
+                workDir: block()?.meta?.["cmd:cwd"] ?? "",
+                version,
+                accounts,
+                peerAgents: forgeAgents(),
+                startupContent: startupContentResult?.content ?? null,
             });
-            const msg = startupContent?.content?.trim();
-            if (msg) {
+
+            if (payload) {
                 log("agent", "sending startup sequence");
-                await handleSendMessage(msg);
+                await handleSendMessage(payload);
             }
-        } catch {
-            // no startup content configured — that's fine
+        } catch (err) {
+            log("warn", `startup sequence failed: ${err}`, "warn");
         }
     };
 
