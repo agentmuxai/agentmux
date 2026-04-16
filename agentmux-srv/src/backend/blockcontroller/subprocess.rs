@@ -18,7 +18,7 @@
 //! 2. process_waiter: wait for exit, update status, publish lifecycle event
 
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -76,6 +76,9 @@ struct SubprocessControllerInner {
     current_pid: Option<u32>,
     /// Handle to kill the current subprocess.
     kill_tx: Option<tokio::sync::oneshot::Sender<bool>>,
+    /// Messages queued while a turn is in progress.
+    /// Drained sequentially after the current turn exits.
+    pending_messages: VecDeque<SubprocessSpawnConfig>,
 }
 
 /// SubprocessController manages per-turn subprocess lifecycle for agent blocks.
@@ -103,6 +106,9 @@ pub struct SubprocessController {
     filestore: Option<Arc<FileStore>>,
     /// Agent health monitor (output activity + error tracking).
     health_monitor: Arc<HealthMonitor>,
+    /// Weak self-reference for queue drain. Set by `set_self_ref` after
+    /// the controller is wrapped in Arc.
+    self_ref: Mutex<Option<std::sync::Weak<Self>>>,
 }
 
 impl SubprocessController {
@@ -130,13 +136,22 @@ impl SubprocessController {
                 session_id: None,
                 current_pid: None,
                 kill_tx: None,
+                pending_messages: VecDeque::new(),
             })),
             broker,
             event_bus,
             wstore,
             filestore,
             health_monitor,
+            self_ref: Mutex::new(None),
         }
+    }
+
+    /// Store a weak self-reference so the process_waiter can drain queued
+    /// messages by calling spawn_turn after the current turn exits.
+    /// Must be called after wrapping in Arc.
+    pub fn set_self_ref(self: &Arc<Self>) {
+        *self.self_ref.lock().unwrap() = Some(Arc::downgrade(self));
     }
 
     /// Try to acquire the run lock. Returns false if a turn is already in progress.
@@ -193,7 +208,15 @@ impl SubprocessController {
     /// If a session_id exists from a previous turn, `--resume <sid>` is appended to args.
     pub fn spawn_turn(&self, config: SubprocessSpawnConfig) -> Result<(), String> {
         if !self.try_lock_run() {
-            return Err("subprocess is already running a turn".to_string());
+            // Turn in progress — queue the message for after it exits.
+            let mut inner = self.inner.lock().unwrap();
+            tracing::info!(
+                block_id = %self.block_id,
+                queue_depth = inner.pending_messages.len() + 1,
+                "subprocess busy — message queued"
+            );
+            inner.pending_messages.push_back(config);
+            return Ok(());
         }
 
         // Build CLI args, appending resume flag + session_id if we have one and the provider supports it
@@ -524,6 +547,7 @@ impl SubprocessController {
         let broker_wait = self.broker.clone();
         let run_lock = Arc::clone(&self.run_lock);
         let health_wait = Arc::clone(&self.health_monitor);
+        let self_ref_wait = self.self_ref.lock().unwrap().clone().unwrap_or_default();
         tokio::spawn(async move {
             // Wait for either process exit or kill signal
             tokio::select! {
@@ -621,6 +645,29 @@ impl SubprocessController {
 
             // Release run lock
             run_lock.store(false, Ordering::SeqCst);
+
+            // Drain message queue: if messages were queued while this turn
+            // was running, pop the next one and spawn it via the weak
+            // self-reference.
+            let next_config = {
+                let mut inner = inner_wait.lock().unwrap();
+                inner.pending_messages.pop_front()
+            };
+            if let Some(config) = next_config {
+                if let Some(ctrl) = self_ref_wait.upgrade() {
+                    tracing::info!(
+                        block_id = %block_id_wait,
+                        "draining queued message"
+                    );
+                    if let Err(e) = ctrl.spawn_turn(config) {
+                        tracing::warn!(
+                            block_id = %block_id_wait,
+                            error = %e,
+                            "failed to spawn queued turn"
+                        );
+                    }
+                }
+            }
         });
 
         Ok(())
