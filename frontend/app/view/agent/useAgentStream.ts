@@ -300,8 +300,12 @@ export function useAgentStream({
 
                 // Convert StreamEvents → DocumentNodes
                 for (const event of streamEvents) {
-                    // Handle session_end: store stats, clear loading state
+                    // Handle session_end: store stats, clear loading state,
+                    // and flush the parser's text/thinking accumulators so the
+                    // NEXT turn creates fresh nodes instead of appending to the
+                    // previous response (which sits above the user's message).
                     if (event.type === "session_end") {
+                        parser.flushPending();
                         setSessionStats(event.stats ?? null);
                         setCurrentTool(null);
                         setTurnTokens(null);
