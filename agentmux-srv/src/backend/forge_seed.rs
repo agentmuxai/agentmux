@@ -89,6 +89,8 @@ struct SeedContent {
     env: Option<String>,
     #[serde(default)]
     soul: Option<String>,
+    #[serde(default)]
+    startup: Option<String>,
 }
 
 /// A skill definition in the seed manifest.
@@ -168,6 +170,7 @@ pub fn seed_forge_agents(wstore: &Arc<WaveStore>) -> Result<SeedReport, StoreErr
             ("mcp", &agent_def.content.mcp),
             ("env", &agent_def.content.env),
             ("soul", &agent_def.content.soul),
+            ("startup", &agent_def.content.startup),
         ];
         for (content_type, maybe_content) in &content_pairs {
             if let Some(content) = maybe_content {
