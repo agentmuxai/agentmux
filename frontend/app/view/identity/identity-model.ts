@@ -111,7 +111,7 @@ export const KIND_LABELS: Record<AccountKind, string> = {
 
 const STORAGE_KEY = "agentmux:identity:accounts";
 
-function loadAccounts(): Account[] {
+export function loadAccounts(): Account[] {
     try {
         const raw = localStorage.getItem(STORAGE_KEY);
         if (!raw) return [];
