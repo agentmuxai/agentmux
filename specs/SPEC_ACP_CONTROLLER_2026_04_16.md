@@ -317,16 +317,31 @@ Add ACP provider definitions — these are lightweight since the protocol handle
 
 ```typescript
 // ACP agents only need: id, displayName, cliCommand, acp flag + args
+// OpenClaw — full-featured, gateway daemon backed (detected if preinstalled)
 openclaw: {
     id: "openclaw",
     displayName: "OpenClaw",
-    cliCommand: "acpx",                    // or "openclaw-cli"
-    controllerType: "acp",                 // NEW controller type
+    cliCommand: "acpx",
+    controllerType: "acp",
     launchArgs: ["--agent", "openclaw"],
-    styledOutputFormat: "acp",             // universal ACP translator
+    styledOutputFormat: "acp",
     icon: "lobster",
     docsUrl: "https://docs.openclaw.ai",
     npmPackage: "@openclaw/acpx",
+    // ... auth fields
+},
+
+// Pi — lightweight standalone coding agent, no gateway required
+pi: {
+    id: "pi",
+    displayName: "Pi",
+    cliCommand: "pi",
+    controllerType: "acp",
+    launchArgs: ["--json"],
+    styledOutputFormat: "acp",
+    icon: "terminal",
+    docsUrl: "https://github.com/badlogic/pi-mono",
+    npmPackage: "@mariozechner/pi-coding-agent",
     // ... auth fields
 },
 
@@ -364,15 +379,28 @@ pub enum ControllerType {
     Acp,
 }
 
+// OpenClaw — gateway daemon backed (full features: skills, messaging, multi-agent)
 static OPENCLAW: ProviderConfig = ProviderConfig {
     id: "openclaw",
     display_name: "OpenClaw",
     cli_command: "acpx",
     controller_type: ControllerType::Acp,
     launch_args: &["--agent", "openclaw"],
-    // ACP handles sessions natively — no resume_flag or session_id_field needed
     resume_flag: None,
-    session_id_field: "",
+    session_id_field: "sessionId",
+    styled_output_format: "acp",
+    // ...
+};
+
+// Pi — standalone coding agent (no gateway, pure read/write/bash/edit tools)
+static PI: ProviderConfig = ProviderConfig {
+    id: "pi",
+    display_name: "Pi",
+    cli_command: "pi",
+    controller_type: ControllerType::Acp,
+    launch_args: &["--json"],
+    resume_flag: None,
+    session_id_field: "sessionId",
     styled_output_format: "acp",
     // ...
 };
@@ -412,12 +440,19 @@ Both coexist and can connect to the same OpenClaw gateway instance.
 
 ACP doesn't replace existing controllers — it runs alongside them. Existing providers keep working as-is.
 
-### Phase 1: ACP Controller + OpenClaw (This Spec)
+### Phase 1: ACP Controller + OpenClaw + Pi (This Spec)
 
 - Implement `AcpController` in Rust
 - Implement `AcpTranslator` in TypeScript
-- Add OpenClaw as first ACP provider (via `acpx` or native ACP bridge)
-- Add Kiro CLI as second ACP provider
+- Add **two** ACP providers from the OpenClaw ecosystem:
+  - **OpenClaw** — full-featured agent orchestrator backed by the OpenClaw gateway daemon.
+    Detected if `openclaw` is installed and gateway is running at `ws://127.0.0.1:18789`.
+    Uses `acpx` (`@openclaw/acpx`) as ACP bridge. Provides skills, external messaging
+    channels, memory, multi-agent orchestration.
+  - **Pi** — lightweight standalone coding agent (`@mariozechner/pi-coding-agent`).
+    No gateway required. Pure coding agent with read/write/bash/edit tools.
+    Ideal for users who want a fast, self-contained coding agent without the full OpenClaw stack.
+- Add Kiro CLI as third ACP provider
 - Update `forge-seed.json` with AgentClaw entries (from openclaw-agent-runtime.md)
 
 ### Phase 2: Migrate Gemini to ACP
@@ -461,12 +496,12 @@ At that point, all providers use the same controller and translator. Adding a ne
 | File | Change |
 |------|--------|
 | `agentmux-srv/src/backend/blockcontroller/mod.rs` | Add `Acp` variant, route to `AcpController` |
-| `agentmux-srv/src/backend/providers.rs` | Add `ControllerType::Acp`, add OpenClaw + Kiro providers |
-| `agentmux-cef/src/commands/providers.rs` | Add OpenClaw + Kiro npm packages, versions, auth checks |
-| `frontend/app/view/agent/providers/index.ts` | Add OpenClaw + Kiro `ProviderDefinition` entries |
+| `agentmux-srv/src/backend/providers.rs` | Add `ControllerType::Acp`, add OpenClaw + Pi + Kiro providers |
+| `agentmux-cef/src/commands/providers.rs` | Add OpenClaw + Pi + Kiro npm packages, versions, auth checks |
+| `frontend/app/view/agent/providers/index.ts` | Add OpenClaw + Pi + Kiro `ProviderDefinition` entries |
 | `frontend/app/view/agent/providers/translator-factory.ts` | Add `"acp"` case returning `AcpTranslator` |
 | `frontend/app/view/agent/commands/providers/index.ts` | Register OpenClaw slash commands |
-| `frontend/app/view/forge/forge-constants.ts` | Add OpenClaw + Kiro to Forge provider list |
+| `frontend/app/view/forge/forge-constants.ts` | Add OpenClaw + Pi + Kiro to Forge provider list |
 
 ---
 
@@ -484,7 +519,8 @@ At that point, all providers use the same controller and translator. Adding a ne
 
 ### External
 
-- `acpx` (npm: `@openclaw/acpx`) — for OpenClaw ACP bridge
+- `acpx` (npm: `@openclaw/acpx`) — for OpenClaw ACP bridge (gateway-backed)
+- `pi` (npm: `@mariozechner/pi-coding-agent`) — standalone coding agent (no gateway needed)
 - `kiro` (npm: `@anthropic-ai/kiro`) — for Kiro CLI
 - `gemini` already installed — just needs `--acp` flag in Phase 2
 
@@ -521,8 +557,9 @@ At that point, all providers use the same controller and translator. Adding a ne
 - [ ] `AcpController` can spawn, initialize, and prompt an ACP agent
 - [ ] Streaming `session/update` events render in real-time in agent pane
 - [ ] Multi-turn conversations work within a single ACP session
-- [ ] OpenClaw works as first ACP agent in AgentMux
-- [ ] Kiro CLI works as second ACP agent
+- [ ] OpenClaw works as ACP agent in AgentMux (gateway daemon + acpx)
+- [ ] Pi works as standalone ACP coding agent (no gateway needed)
+- [ ] Kiro CLI works as ACP agent
 - [ ] Tool calls display correctly in agent pane
 - [ ] Graceful shutdown on pane close
 - [ ] No regressions on existing Claude/Codex/Gemini providers
@@ -534,7 +571,7 @@ At that point, all providers use the same controller and translator. Adding a ne
 This is a headline feature for agentmux.ai:
 
 > **"Any Agent. One Protocol."**
-> AgentMux now supports the Agent Client Protocol — connect any ACP-compatible coding agent with zero configuration. OpenClaw, Kiro, Gemini, and more work out of the box.
+> AgentMux now supports the Agent Client Protocol — connect any ACP-compatible coding agent with zero configuration. OpenClaw, Pi, Kiro, Gemini, and more work out of the box.
 
 Update the comparison table to show ACP support as a differentiator no competitor has.
 

@@ -198,6 +198,26 @@ static OPENCLAW: ProviderConfig = ProviderConfig {
     docs_url: "https://docs.openclaw.ai",
 };
 
+static PI: ProviderConfig = ProviderConfig {
+    id: "pi",
+    display_name: "Pi",
+    cli_command: "pi",
+    controller_type: ControllerType::Acp,
+    launch_args: &["--json"],
+    persistent_launch_args: None,
+    resume_flag: None,
+    session_id_field: "sessionId",
+    styled_output_format: "acp",
+    auth_config_dir_env_var: "PI_HOME",
+    auth_dir_name: "pi",
+    auth_extra_env: &[],
+    unset_env: &[],
+    npm_package: "@mariozechner/pi-coding-agent",
+    pinned_version: "latest",
+    icon: "terminal",
+    docs_url: "https://github.com/badlogic/pi-mono",
+};
+
 // ─── Static registry ─────────────────────────────────────────────────────────
 
 static REGISTRY: LazyLock<HashMap<&'static str, &'static ProviderConfig>> = LazyLock::new(|| {
@@ -206,6 +226,7 @@ static REGISTRY: LazyLock<HashMap<&'static str, &'static ProviderConfig>> = Lazy
     m.insert(CODEX.id, &CODEX);
     m.insert(GEMINI.id, &GEMINI);
     m.insert(OPENCLAW.id, &OPENCLAW);
+    m.insert(PI.id, &PI);
     m
 });
 
@@ -255,7 +276,7 @@ pub fn get_provider(id: &str) -> Option<&'static ProviderConfig> {
 /// Return an iterator over all registered providers in insertion order.
 pub fn get_provider_list() -> impl Iterator<Item = &'static ProviderConfig> {
     // Stable canonical order matches the TypeScript PROVIDERS object order.
-    static ORDER: &[&str] = &["claude", "codex", "gemini", "openclaw"];
+    static ORDER: &[&str] = &["claude", "codex", "gemini", "openclaw", "pi"];
     ORDER.iter().filter_map(|id| REGISTRY.get(*id).copied())
 }
 
@@ -288,8 +309,8 @@ mod tests {
     }
 
     #[test]
-    fn provider_list_has_four_entries() {
-        assert_eq!(get_provider_list().count(), 4);
+    fn provider_list_has_five_entries() {
+        assert_eq!(get_provider_list().count(), 5);
     }
 
     #[test]
@@ -322,5 +343,15 @@ mod tests {
         assert_eq!(p.controller_type_str(), "acp");
         assert_eq!(p.styled_output_format, "acp");
         assert!(p.resume_flag.is_none());
+    }
+
+    #[test]
+    fn pi_is_acp_controller() {
+        let p = get_provider("pi").unwrap();
+        assert_eq!(p.controller_type, ControllerType::Acp);
+        assert_eq!(p.controller_type_str(), "acp");
+        assert_eq!(p.styled_output_format, "acp");
+        assert_eq!(p.cli_command, "pi");
+        assert_eq!(p.npm_package, "@mariozechner/pi-coding-agent");
     }
 }
