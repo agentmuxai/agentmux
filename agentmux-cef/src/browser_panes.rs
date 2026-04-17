@@ -151,10 +151,10 @@ wrap_task! {
             let url_cef = CefString::from(self.url.as_str());
             let settings = BrowserSettings::default();
 
-            let client = main_browser.host().and_then(|h| h.client());
-
+            // Use None for client — CEF creates a default client that handles
+            // rendering. Sharing the main browser's client caused issues.
             let new_bv = match browser_view_create(
-                client.as_ref().map(|c| c as &Client).cloned().as_mut(),
+                None,
                 Some(&url_cef),
                 Some(&settings),
                 None, None, None,
@@ -163,7 +163,14 @@ wrap_task! {
                 None => { tracing::error!("browser_view_create failed"); return; }
             };
 
-            // Register browser for navigation
+            let has_browser = new_bv.browser().is_some();
+            tracing::info!(
+                block_id = %self.block_id,
+                has_browser,
+                "browser_view created, adding overlay"
+            );
+
+            // Register browser for navigation (may be None until on_after_created)
             if let Some(browser) = new_bv.browser() {
                 self.state.browsers.lock().insert(label.clone(), browser);
             }
@@ -179,6 +186,13 @@ wrap_task! {
             match controller {
                 Some(ctrl) => {
                     ctrl.set_bounds(Some(&self.rect));
+
+                    // CEF issue #3790: overlays with CUSTOM docking may start
+                    // hidden. The OverlayController wraps a View — make it visible.
+                    if let Some(contents) = ctrl.contents_view() {
+                        contents.set_visible(1);
+                    }
+
                     tracing::info!(
                         block_id = %self.block_id,
                         url = %self.url,
