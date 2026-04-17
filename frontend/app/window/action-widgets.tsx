@@ -321,6 +321,25 @@ const ActionWidgets = (): JSX.Element => {
         setDropIndex(null);
     };
 
+    // ── Context menu active state (keeps hover highlight while menu is open) ──
+    const [contextMenuActiveKey, setContextMenuActiveKey] = createSignal<string | null>(null);
+    let contextMenuCleanup: (() => void) | null = null;
+
+    function armContextMenuDismiss(key: string) {
+        contextMenuCleanup?.();
+        setContextMenuActiveKey(key);
+        const clear = () => {
+            setContextMenuActiveKey(null);
+            document.removeEventListener("mousedown", clear);
+            document.removeEventListener("keydown", onKey);
+            contextMenuCleanup = null;
+        };
+        const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") clear(); };
+        document.addEventListener("mousedown", clear, { once: true });
+        document.addEventListener("keydown", onKey);
+        contextMenuCleanup = clear;
+    }
+
     // ── Context menus ─────────────────────────────────────────────────────────
 
     const handleBarContextMenu = (e: MouseEvent) => {
@@ -347,6 +366,7 @@ const ActionWidgets = (): JSX.Element => {
     const handlePinnedContextMenu = (e: MouseEvent, key: string) => {
         e.preventDefault();
         e.stopPropagation();
+        armContextMenuDismiss(key);
         const shortName = key.replace("defwidget@", "");
         ContextMenuModel.showContextMenu(
             [
@@ -379,7 +399,7 @@ const ActionWidgets = (): JSX.Element => {
                                 <div class="action-widget-drop-indicator" />
                             </Show>
                             <div
-                                class={`action-widget-slot${draggingKey() === key ? " dragging" : ""}`}
+                                class={`action-widget-slot${draggingKey() === key ? " dragging" : ""}${contextMenuActiveKey() === key ? " context-active" : ""}`}
                                 data-widget-slot={idx()}
                                 onPointerDown={(e) => handlePointerDown(key, e)}
                                 onPointerMove={handlePointerMove}
