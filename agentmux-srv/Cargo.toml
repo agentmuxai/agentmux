@@ -1,6 +1,6 @@
 [package]
 name = "agentmux-srv"
-version = "0.33.219"
+version = "0.33.220"
 edition = "2021"
 description = "AgentMux Rust backend server"
 
