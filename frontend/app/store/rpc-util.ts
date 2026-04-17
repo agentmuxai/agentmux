@@ -12,7 +12,7 @@ import { getApi } from "./global";
 let TabRpcClient: TabClient;
 
 function initWshrpc(tabId: string): WSControl {
-    const router = new RpcRouter(new UpstreamWshRpcProxy());
+    const router = new RpcRouter(new UpstreamRpcProxy());
     setDefaultRouter(router);
     const handleFn = (event: WSEventType) => {
         if (event.data == null) return;
@@ -36,7 +36,7 @@ function initWshrpc(tabId: string): WSControl {
     return globalWS;
 }
 
-class UpstreamWshRpcProxy implements AbstractRpcClient {
+class UpstreamRpcProxy implements AbstractRpcClient {
     recvRpcMessage(msg: RpcMessage): void {
         const wsMsg: WSRpcCommand = { wscommand: "rpc", message: msg };
         globalWS?.pushMessage(wsMsg);
