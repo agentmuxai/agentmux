@@ -1,0 +1,91 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+.editor-view {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    width: 100%;
+    overflow: hidden;
+    background: var(--block-bg-color, #1e1e1e);
+}
+
+.editor-open-prompt {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    gap: 12px;
+    color: var(--secondary-text-color, #888);
+}
+
+.editor-open-label {
+    font-size: 14px;
+}
+
+.editor-open-row {
+    display: flex;
+    gap: 8px;
+}
+
+.editor-open-input {
+    width: 350px;
+    padding: 6px 10px;
+    border: 1px solid var(--border-color, #444);
+    border-radius: 4px;
+    background: var(--input-bg-color, #2a2a2a);
+    color: var(--main-text-color, #ddd);
+    font-family: var(--termfontfamily, "JetBrains Mono", monospace);
+    font-size: 13px;
+
+    &:focus {
+        outline: none;
+        border-color: var(--accent-color, #58a6ff);
+    }
+}
+
+.editor-open-btn {
+    padding: 6px 16px;
+    border: 1px solid var(--border-color, #444);
+    border-radius: 4px;
+    background: var(--accent-color, #58a6ff);
+    color: #fff;
+    cursor: pointer;
+    font-size: 13px;
+
+    &:hover {
+        opacity: 0.9;
+    }
+}
+
+.editor-loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    color: var(--secondary-text-color, #888);
+    font-size: 13px;
+}
+
+.editor-error {
+    padding: 8px 12px;
+    background: rgba(255, 80, 80, 0.15);
+    color: #ff6b6b;
+    font-size: 12px;
+    border-bottom: 1px solid rgba(255, 80, 80, 0.3);
+}
+
+.editor-codemirror {
+    flex: 1;
+    overflow: hidden;
+
+    .cm-editor {
+        height: 100%;
+    }
+
+    .cm-scroller {
+        font-family: var(--termfontfamily, "JetBrains Mono", monospace);
+        font-size: 13px;
+    }
+}
