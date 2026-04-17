@@ -344,7 +344,7 @@ const ActionWidgets = (): JSX.Element => {
         );
     };
 
-    const handlePinnedContextMenu = (e: MouseEvent, key: string, widget: WidgetConfigType) => {
+    const handlePinnedContextMenu = (e: MouseEvent, key: string, _widget: WidgetConfigType) => {
         e.preventDefault();
         e.stopPropagation();
         const shortName = key.replace("defwidget@", "");
