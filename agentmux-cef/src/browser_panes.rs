@@ -113,6 +113,22 @@ impl BrowserPaneManager {
         if let Some(mut b) = self.browser_for(state, block_id) { b.reload(); }
     }
 
+    /// Tell every registered pane browser it has lost focus, at the Chromium
+    /// level. Called by the `main_window_focus` IPC to keep renderer-side
+    /// focus in sync with OS-level focus when the user clicks a main-DOM
+    /// input (e.g. a URL bar).
+    pub fn defocus_all(&self, state: &Arc<AppState>) {
+        let labels: Vec<String> = self.panes.lock().values().cloned().collect();
+        let browsers = state.browsers.lock();
+        for label in &labels {
+            if let Some(browser) = browsers.get(label).cloned() {
+                if let Some(host) = browser.host() {
+                    host.set_focus(0);
+                }
+            }
+        }
+    }
+
     /// Give keyboard focus to the pane's child HWND so keystrokes reach the
     /// embedded page. Called by the frontend's ViewModel.giveFocus() when the
     /// pane becomes the active layout node — without this, focus falls back to
