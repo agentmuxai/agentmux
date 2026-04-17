@@ -292,6 +292,13 @@ impl AgentMuxHandler {
         }
 
         let frame = frame.expect("Frame is None");
+
+        // Don't show error pages for sub-frames (iframes) — only for
+        // the main frame. Without this, an iframe blocked by
+        // X-Frame-Options replaces the entire app with an error page.
+        if frame.is_main() != 1 {
+            return;
+        }
         let error_text = error_text.map(CefString::to_string).unwrap_or_default();
         let failed_url = failed_url.map(CefString::to_string).unwrap_or_default();
         let error_code_i32 = error_code_raw as i32;
