@@ -192,6 +192,9 @@ pub struct AppState {
     /// Active cross-window drag session (at most one at a time).
     pub active_drag: Mutex<Option<DragSession>>,
 
+    /// Embedded browser panes (native CefBrowserView per pane).
+    pub browser_panes: crate::browser_panes::BrowserPaneManager,
+
     /// Windows Job Object handle -- keeps backend alive until frontend exits
     #[cfg(target_os = "windows")]
     pub job_handle: Mutex<Option<JobHandle>>,
@@ -221,6 +224,7 @@ impl Default for AppState {
             version_data_dir: Mutex::new(None),
             version_config_dir: Mutex::new(None),
             active_drag: Mutex::new(None),
+            browser_panes: crate::browser_panes::BrowserPaneManager::new(),
             #[cfg(target_os = "windows")]
             job_handle: Mutex::new(None),
         }

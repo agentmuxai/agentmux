@@ -21,7 +21,9 @@ export class BrowserViewModel implements ViewModel {
     viewText: Accessor<string | HeaderElem[]> = () => [];
     noPadding: Accessor<boolean> = () => true;
 
-    viewComponent: ViewComponent = null; // set by barrel
+    get viewComponent(): ViewComponent {
+        return null; // overridden by barrel via Object.defineProperty
+    }
 
     private _url = createSignal<string>("");
     urlAtom: Accessor<string> = this._url[0];
