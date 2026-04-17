@@ -30,6 +30,18 @@
             }
         }
     },
+    "defwidget@browser": {
+        "display:order": 2,
+        "icon": "globe",
+        "label": "browser",
+        "description": "Embedded web browser",
+        "blockdef": {
+            "meta": {
+                "view": "browser",
+                "url": ""
+            }
+        }
+    },
     "defwidget@editor": {
         "display:order": 3,
         "icon": "file-code",
