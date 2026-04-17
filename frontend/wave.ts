@@ -42,15 +42,15 @@ import { ContextMenuModel } from "@/app/store/contextmenu";
 
 // Deferred — assigned inside initBare() after window.api is ready.
 // Do NOT call getApi() at module level: this file is statically imported by
-// tauri-bootstrap.ts before setupTauriApi()/setupCefApi() runs, so window.api
+// bootstrap.ts before setupCefApi() runs, so window.api
 // does not exist yet.
 let platform: NodeJS.Platform;
 let appVersion: string;
 let savedInitOpts: AgentMuxInitOpts = null;
 
 /**
- * Detect whether we're running in a host app (Tauri or CEF).
- * Both host apps own the backend sidecar and need to query it for
+ * Detect whether we're running in a host app.
+ * The host app owns the backend sidecar and needs to query it for
  * client/window/tab state. Non-host mode waits for an `agentmux-init` event.
  */
 function isHostApp(): boolean {
@@ -58,51 +58,13 @@ function isHostApp(): boolean {
         || typeof window.__AGENTMUX_IPC_PORT__ !== "undefined";
 }
 
-/** Whether running specifically in Tauri (not CEF). */
+/** @deprecated Tauri host was removed. Always returns false. */
 export function isTauriHost(): boolean {
-    return typeof window.__TAURI_INTERNALS__ !== "undefined";
+    return false;
 }
 
-// Update window title with instance ID if running in multi-instance mode
-async function updateWindowTitleWithInstanceID() {
-    try {
-        // Only in Tauri (uses tauri-plugin-fs for file access)
-        if (!isTauriHost()) {
-            return;
-        }
-
-        const { invoke } = await import("@tauri-apps/api/core");
-        const { readTextFile, exists } = await import("@tauri-apps/plugin-fs");
-
-        const dataDir = await invoke<string>("get_data_dir");
-        // Use platform-agnostic path joining
-        const instanceIDPath = dataDir.endsWith("/") || dataDir.endsWith("\\")
-            ? `${dataDir}instance-id.txt`
-            : `${dataDir}/instance-id.txt`;
-
-        const fileExists = await exists(instanceIDPath);
-        if (fileExists) {
-            const instanceID = await readTextFile(instanceIDPath);
-            if (instanceID && instanceID.trim()) {
-                const newTitle = `AgentMux ${appVersion} [${instanceID.trim()}]`;
-                document.title = newTitle;
-
-                // Also update Tauri window title
-                const { getCurrentWindow } = await import("@tauri-apps/api/window");
-                const currentWindow = getCurrentWindow();
-                await currentWindow.setTitle(newTitle);
-
-                console.log(`[multi-instance] Running as: ${instanceID.trim()}`);
-            }
-        }
-    } catch (e) {
-        // Ignore errors - instance file may not exist for default instance
-        console.log("[multi-instance] No instance ID file found (default instance)");
-    }
-}
-
-// Call after a short delay to allow backend to write the file
-setTimeout(updateWindowTitleWithInstanceID, 1000);
+// Multi-instance title update was Tauri-only (removed). The CEF host
+// sets the window title from document.title via on_title_change.
 
 
 window.WOS = WOS;
