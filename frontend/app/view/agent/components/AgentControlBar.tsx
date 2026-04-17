@@ -10,8 +10,8 @@
  */
 
 import { createSignal, Show, type JSX } from "solid-js";
-import { RpcApi } from "@/app/store/wshclientapi";
-import { TabRpcClient } from "@/app/store/wshrpcutil";
+import { RpcApi } from "@/app/store/rpc-api";
+import { TabRpcClient } from "@/app/store/rpc-util";
 import * as WOS from "@/app/store/wos";
 import type { AgentRuntimeConfig, PermissionMode, ModelChoice, EffortLevel } from "../types";
 import { DEFAULT_RUNTIME_CONFIG } from "../types";

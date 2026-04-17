@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { atoms, recordTEvent, refocusNode } from "@/app/store/global";
-import { RpcApi } from "@/app/store/wshclientapi";
-import { TabRpcClient } from "@/app/store/wshrpcutil";
+import { RpcApi } from "@/app/store/rpc-api";
+import { TabRpcClient } from "@/app/store/rpc-util";
 import { Button } from "@/element/button";
 import { fireAndForget } from "@/util/util";
 import clsx from "clsx";

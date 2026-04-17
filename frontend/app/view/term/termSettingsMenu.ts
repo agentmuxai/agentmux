@@ -1,8 +1,8 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { RpcApi } from "@/app/store/wshclientapi";
-import { TabRpcClient } from "@/app/store/wshrpcutil";
+import { RpcApi } from "@/app/store/rpc-api";
+import { TabRpcClient } from "@/app/store/rpc-util";
 import { atoms, getBlockMetaKeyAtom, getSettingsKeyAtom, WOS } from "@/store/global";
 import type { TermViewModel } from "./termViewModel";
 

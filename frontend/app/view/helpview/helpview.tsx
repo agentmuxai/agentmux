@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { QuickTips } from "@/app/element/quicktips";
-import { RpcApi } from "@/app/store/wshclientapi";
-import { TabRpcClient } from "@/app/store/wshrpcutil";
+import { RpcApi } from "@/app/store/rpc-api";
+import { TabRpcClient } from "@/app/store/rpc-util";
 import { showZoomIndicator } from "@/app/store/zoom.platform";
 import { WOS } from "@/store/global";
 import { fireAndForget } from "@/util/util";

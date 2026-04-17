@@ -6,8 +6,8 @@
 // or via agent tool calls. This covers quick edits, file viewing, and diffing.
 
 import { BlockNodeModel } from "@/app/block/blocktypes";
-import { RpcApi } from "@/app/store/wshclientapi";
-import { TabRpcClient } from "@/app/store/wshrpcutil";
+import { RpcApi } from "@/app/store/rpc-api";
+import { TabRpcClient } from "@/app/store/rpc-util";
 import { getWaveObjectAtom, makeORef } from "@/app/store/wos";
 import { createMemo, createSignal, type Accessor } from "solid-js";
 

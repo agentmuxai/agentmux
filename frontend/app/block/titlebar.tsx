@@ -3,8 +3,8 @@
 
 import { IconButton } from "@/app/element/iconbutton";
 import { atoms, WOS } from "@/store/global";
-import { RpcApi } from "@/store/wshclientapi";
-import { TabRpcClient } from "@/store/wshrpcutil";
+import { RpcApi } from "@/store/rpc-api";
+import { TabRpcClient } from "@/store/rpc-util";
 import { fireAndForget, isBlank, makeIconClass } from "@/util/util";
 import clsx from "clsx";
 import type { JSX } from "solid-js";
