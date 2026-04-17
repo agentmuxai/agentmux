@@ -154,9 +154,11 @@ wrap_task! {
             let mut settings = settings;
             settings.background_color = 0xFFFFFFFF; // white — visible debug
 
-            // Create a fresh client for this browser pane. Sharing the
-            // main browser's client doesn't work — CEF needs a dedicated
-            // client per browser for the renderer process to launch.
+            // Queue the label so on_after_created registers the browser
+            // under this name (otherwise it gets a random UUID label).
+            self.state.pending_window_labels.lock().push_back(label.clone());
+
+            // Create a fresh client for this browser pane.
             let handler = crate::client::AgentMuxHandler::new(self.state.clone(), 0);
             let mut client = Some(crate::client::AgentMuxClient::new(handler));
 
@@ -170,17 +172,11 @@ wrap_task! {
                 None => { tracing::error!("browser_view_create failed"); return; }
             };
 
-            let has_browser = new_bv.browser().is_some();
             tracing::info!(
                 block_id = %self.block_id,
-                has_browser,
-                "browser_view created, adding overlay"
+                label = %label,
+                "browser_view created, adding overlay (browser registered via on_after_created)"
             );
-
-            // Register browser for navigation (may be None until on_after_created)
-            if let Some(browser) = new_bv.browser() {
-                self.state.browsers.lock().insert(label.clone(), browser);
-            }
 
             // Add as overlay with custom positioning
             let mut view = View::from(&new_bv);
