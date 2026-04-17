@@ -217,11 +217,6 @@ Ensure `frontend/wave.ts` uses `getApi().getAboutModalDetails().version`
 `dist/schema/` is wiped by `task clean` but automatically recreated by the
 `copy:schema` dependency in `dev`, `start`, `quickdev`, and `package` tasks.
 
-### Terminal rendering issues on Linux
-**DO NOT enable WebGL as the default renderer on Linux** until verified.
-WebKitGTK's WebGL2 had systemic rendering issues under the old host.
-The current Chromium-based host may have resolved this, but the Linux
-check should stay until verified.
 
 ### AppImage shows cog/gear icon instead of app icon
 `appimagetool` creates `.DirIcon` inside the AppImage as an **absolute symlink** to the
