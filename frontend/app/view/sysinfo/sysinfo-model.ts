@@ -8,8 +8,8 @@ import type { SignalAtom } from "@/util/util";
 import { createSignalAtom } from "@/util/util";
 
 import { getConnStatusAtom } from "@/store/global";
-import { RpcApi } from "@/app/store/wshclientapi";
-import { TabRpcClient } from "@/app/store/wshrpcutil";
+import { RpcApi } from "@/app/store/rpc-api";
+import { TabRpcClient } from "@/app/store/rpc-util";
 
 import { DataItem, DefaultNumPoints, DefaultPlotMeta, PlotTypes } from "./sysinfo-types";
 import { convertWaveEventToDataItem, getGapThresholdMs } from "./sysinfo-util";

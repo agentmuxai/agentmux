@@ -5,10 +5,10 @@ import { Block } from "@/app/block/block";
 import { BlockNodeModel } from "@/app/block/blocktypes";
 import { appHandleKeyDown } from "@/app/store/keymodel";
 import { waveEventSubscribe } from "@/app/store/wps";
-import { RpcApi } from "@/app/store/wshclientapi";
-import { makeFeBlockRouteId } from "@/app/store/wshrouter";
-import { DefaultRouter, TabRpcClient } from "@/app/store/wshrpcutil";
-import { TermWshClient } from "@/app/view/term/term-wsh";
+import { RpcApi } from "@/app/store/rpc-api";
+import { makeFeBlockRouteId } from "@/app/store/rpc-router";
+import { DefaultRouter, TabRpcClient } from "@/app/store/rpc-util";
+import { TermRpcClient } from "@/app/view/term/term-rpc";
 import { readText as clipboardReadText, writeText as clipboardWriteText } from "@/util/clipboard";
 import {
     atoms,
@@ -56,7 +56,7 @@ class TermViewModel implements ViewModel {
     blockBg: () => MetaType;
     manageConnection: () => boolean;
     connStatus: () => ConnStatus;
-    termWshClient: TermWshClient;
+    termRpcClient: TermRpcClient;
     fontSizeAtom: () => number;
     termZoomAtom: () => number;
     termThemeNameAtom: () => string;
@@ -74,8 +74,8 @@ class TermViewModel implements ViewModel {
     constructor(blockId: string, nodeModel: BlockNodeModel) {
         this.viewType = "term";
         this.blockId = blockId;
-        this.termWshClient = new TermWshClient(blockId, this);
-        DefaultRouter.registerRoute(makeFeBlockRouteId(blockId), this.termWshClient);
+        this.termRpcClient = new TermRpcClient(blockId, this);
+        DefaultRouter.registerRoute(makeFeBlockRouteId(blockId), this.termRpcClient);
         this.nodeModel = nodeModel;
         this.blockAtom = WOS.getWaveObjectAtom<Block>(`block:${blockId}`);
 

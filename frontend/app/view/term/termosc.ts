@@ -4,8 +4,8 @@
 // Terminal OSC escape sequence handlers.
 // Extracted from termwrap.ts — pure functions, no TermWrap dependency.
 
-import { RpcApi } from "@/app/store/wshclientapi";
-import { TabRpcClient } from "@/app/store/wshrpcutil";
+import { RpcApi } from "@/app/store/rpc-api";
+import { TabRpcClient } from "@/app/store/rpc-util";
 import { WOS, atoms } from "@/app/store/global";
 import * as services from "@/app/store/services";
 import { getWebServerEndpoint } from "@/util/endpoints";

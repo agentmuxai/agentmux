@@ -206,7 +206,7 @@ git push origin main
 git tag v0.X.Y && git push origin v0.X.Y
 
 # 3. Trigger the builder (builds all platforms, creates GitHub Release)
-gh workflow run tauri-build.yml -R agentmuxai/agentmux-builder -f ref=v0.X.Y
+gh workflow run build.yml -R agentmuxai/agentmux-builder -f ref=v0.X.Y
 
 # 4. Wait for build to complete (~15-20 min)
 gh run list -R agentmuxai/agentmux-builder --limit 1

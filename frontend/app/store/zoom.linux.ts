@@ -9,8 +9,8 @@
 // Chrome zoom — scales title bar + status bar together via --zoomfactor CSS var.
 
 import { getBlockComponentModel, getFocusedBlockId, WOS } from "@/app/store/global";
-import { RpcApi } from "@/app/store/wshclientapi";
-import { TabRpcClient } from "@/app/store/wshrpcutil";
+import { RpcApi } from "@/app/store/rpc-api";
+import { TabRpcClient } from "@/app/store/rpc-util";
 import { fireAndForget } from "@/util/util";
 import { createSignal } from "solid-js";
 

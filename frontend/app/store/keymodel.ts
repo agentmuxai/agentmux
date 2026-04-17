@@ -21,8 +21,8 @@ import {
     WOS,
 } from "@/app/store/global";
 import { WorkspaceService } from "@/app/store/services";
-import { RpcApi } from "@/app/store/wshclientapi";
-import { TabRpcClient } from "@/app/store/wshrpcutil";
+import { RpcApi } from "@/app/store/rpc-api";
+import { TabRpcClient } from "@/app/store/rpc-util";
 import { zoomIn, zoomOut, zoomReset } from "@/app/store/zoom.platform";
 import { TabBarModel } from "@/app/tab/tabbar-model";
 import { deleteLayoutModelForTab, getLayoutModelForStaticTab, NavigateDirection } from "@/layout/index";
