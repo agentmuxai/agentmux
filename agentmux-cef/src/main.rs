@@ -22,6 +22,7 @@
 )]
 
 mod app;
+mod browser_panes;
 mod client;
 mod commands;
 mod events;

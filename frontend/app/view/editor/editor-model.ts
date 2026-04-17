@@ -21,7 +21,9 @@ export class EditorViewModel implements ViewModel {
     viewText: Accessor<string | HeaderElem[]> = () => [];
     noPadding: Accessor<boolean> = () => true;
 
-    viewComponent: ViewComponent = null; // set by barrel
+    get viewComponent(): ViewComponent {
+        return null; // overridden by barrel via Object.defineProperty
+    }
 
     // Editor state
     private _filePath = createSignal<string>("");
