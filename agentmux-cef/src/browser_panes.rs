@@ -91,6 +91,11 @@ impl BrowserPaneManager {
                             0x0010, // SWP_NOACTIVATE
                         );
                     }
+                    // Tell Chromium the pane has been moved/resized so its cached
+                    // screen bounds are updated — without this, hit-tests on
+                    // scrollbars and drag operations use stale coordinates and
+                    // drags are rejected / misrouted.
+                    host.notify_move_or_resize_started();
                 }
             }
         }
