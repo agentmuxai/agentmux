@@ -364,8 +364,8 @@ async function initHostNewWindow(): Promise<void> {
 }
 
 export async function initBare() {
-    // window.api is guaranteed to exist here — tauri-bootstrap.ts calls
-    // setupTauriApi() or setupCefApi() before calling initBare().
+    // window.api is guaranteed to exist here — bootstrap.ts calls
+    // setupCefApi() before calling initBare().
     // Defensive wait: if a race condition leaves window.api unset, poll briefly.
     if (!window.api) {
         console.error("[initBare] window.api not ready — polling (max 5s)");
@@ -477,7 +477,7 @@ export async function initBare() {
     }, 30_000);
 }
 
-// tauri-bootstrap.ts calls initBare() directly (static import).
+// bootstrap.ts calls initBare() directly (static import).
 // This self-start path is kept only for dev environments where the
 // bootstrap entry point is not used. Skip if running in Tauri or CEF
 // since the bootstrap handles setup (window.api) before calling initBare().
