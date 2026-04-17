@@ -149,10 +149,22 @@ export class BrowserViewModel implements ViewModel {
     }
 
     giveFocus(): boolean {
-        // Tell the host to move Windows-level keyboard focus to this pane's
-        // HWND. Without this, FocusManager falls back to focusing a hidden
-        // "dummy-focus" input in the main window and keystrokes never reach
-        // the embedded page.
+        // If a main-window input inside this block (e.g. the URL bar) is
+        // already focused, keep it — the user is interacting with the block's
+        // chrome, not the embedded page. Also tell the host to move OS-level
+        // keyboard focus back to the main window, in case a pane was holding
+        // it (otherwise keystrokes still get routed to the pane's HWND).
+        const active = document.activeElement as HTMLElement | null;
+        const isMainInput =
+            active != null &&
+            (active.tagName === "INPUT" || active.tagName === "TEXTAREA") &&
+            !active.classList.contains("dummy-focus");
+        if (isMainInput) {
+            invokeCommand("main_window_focus", {}).catch(() => {});
+            return true;
+        }
+        // Otherwise the user wants to interact with the embedded page — tell
+        // the host to move Windows-level keyboard focus to the pane's HWND.
         invokeCommand("browser_pane_focus", { block_id: this.blockId }).catch(() => {});
         return true;
     }

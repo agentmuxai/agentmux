@@ -328,6 +328,20 @@ async fn route_command(
             state.browser_panes.focus(block_id, state);
             Ok(serde_json::json!(true))
         }
+        "main_window_focus" => {
+            // Move OS-level keyboard focus back to the main window's top-level
+            // HWND. Used by the frontend when the user clicks a main-DOM input
+            // (e.g. a browser block's URL bar) to reclaim focus from a pane
+            // that previously held it.
+            #[cfg(target_os = "windows")]
+            unsafe {
+                let top = crate::commands::window::find_own_top_level_window();
+                if !top.is_null() {
+                    windows_sys::Win32::UI::Input::KeyboardAndMouse::SetFocus(top as _);
+                }
+            }
+            Ok(serde_json::json!(true))
+        }
 
         // ---- Unknown command ----
         _ => Err(format!("Unknown command: {}", cmd)),
