@@ -154,9 +154,11 @@ wrap_task! {
             let mut settings = settings;
             settings.background_color = 0xFFFFFFFF; // white — visible debug
 
-            // Get the main browser's client — a None client doesn't launch
-            // a renderer process, leaving the overlay as a black rect.
-            let mut client = main_browser.host().and_then(|h| h.client());
+            // Create a fresh client for this browser pane. Sharing the
+            // main browser's client doesn't work — CEF needs a dedicated
+            // client per browser for the renderer process to launch.
+            let handler = crate::client::AgentMuxHandler::new(self.state.clone(), 0);
+            let mut client = Some(crate::client::AgentMuxClient::new(handler));
 
             let new_bv = match browser_view_create(
                 client.as_mut(),
