@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { createEffect, createSignal, onCleanup, onMount, Show, type JSX } from "solid-js";
+import { createEffect, createSignal, onCleanup, onMount, Show, untrack, type JSX } from "solid-js";
 import { EditorView, basicSetup } from "codemirror";
 import { EditorState, type Extension } from "@codemirror/state";
 import { keymap } from "@codemirror/view";
@@ -118,18 +118,20 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
     });
 
     // Rebuild only when a NEW file is opened (path changes), not on every
-    // keystroke. Tracking contentAtom here would destroy + recreate the
-    // CodeMirror instance on every keypress, losing cursor position.
+    // keystroke. contentAtom is updated by onContentChange on every keypress —
+    // reading it inside a tracked effect would destroy+recreate CodeMirror
+    // on every keystroke. untrack() prevents SolidJS from subscribing to
+    // those inner reads.
     createEffect(() => {
         const _path = model.filePathAtom(); // reactive dependency
-        const loading = model.loadingAtom();
+        const loading = model.loadingAtom(); // reactive dependency
         if (!loading && _path && containerRef) {
-            // Read content/language/readOnly non-reactively — we only
-            // want this effect to fire on path changes, not content.
-            const content = model.contentAtom();
-            const lang = model.languageAtom();
-            const readOnly = model.readOnlyAtom();
-            void setupEditor(content, lang, readOnly);
+            untrack(() => {
+                const content = model.contentAtom();
+                const lang = model.languageAtom();
+                const readOnly = model.readOnlyAtom();
+                void setupEditor(content, lang, readOnly);
+            });
         }
     });
 
