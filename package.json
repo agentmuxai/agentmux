@@ -6,7 +6,7 @@
   "productName": "AgentMux",
   "description": "Open-Source AI-Native Terminal Built for Seamless Workflows",
   "license": "Apache-2.0",
-  "version": "0.33.212",
+  "version": "0.33.213",
   "homepage": "https://github.com/agentmuxai/agentmux",
   "build": {
     "appId": "ai.agentmux.app"
@@ -30,7 +30,6 @@
     "@eslint/js": "^8.57.0",
     "@rollup/plugin-node-resolve": "^16.0.3",
     "@tailwindcss/vite": "^4.1.18",
-    "@tauri-apps/cli": "2.10.0",
     "@types/color": "^4.2.0",
     "@types/css-tree": "^2",
     "@types/debug": "^4",

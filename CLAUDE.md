@@ -4,7 +4,7 @@
 
 - **Name:** AgentMux
 - **GitHub:** https://github.com/agentmuxai/agentmux
-- **Type:** CEF desktop application
+- **Type:** Desktop application (Chromium-based)
 - **Build System:** Task (Taskfile.yml)
 
 ---
@@ -15,9 +15,8 @@
 
 | Command | Use When | Auto-Updates? |
 |---------|----------|---------------|
-| `task dev` | **Development** (CEF host + Vite hot reload) | Yes - hot reload |
-| `task cef:package:portable` | **Portable release builds** | No |
-**Note:** The Tauri host has been removed. All development uses the CEF host.
+| `task dev` | **Development** (Vite hot reload) | Yes - hot reload |
+| `task package` | **Portable release builds** | No |
 
 ### Build System
 
@@ -27,10 +26,10 @@
 - Run `task --list` to see all available commands
 
 **Common Tasks:**
-- `task dev` - Development mode (CEF + Vite)
-- `task cef:build` - Build CEF host binary
-- `task cef:bundle` - Bundle CEF runtime DLLs
-- `task cef:package:portable` - Portable ZIP
+- `task dev` - Development mode (Vite + host)
+- `task package` - Portable ZIP (Windows)
+- `task build:host` - Build host binary
+- `task bundle` - Bundle runtime DLLs
 - `task build:backend` - Rust sidecar binary (agentmux-srv)
 - `task build:frontend` - Frontend only
 - `task test` - Run tests
@@ -54,24 +53,24 @@ On this dev machine, Ninja is at `/c/Systems/bin/ninja.exe` (copied from VS 2022
 
 - **TypeScript/SolidJS** - Auto-reloads in `task dev`
 - **Rust backend** - `task build:backend` then restart `task dev`
-- **Test package** - `task cef:package:portable` then extract ZIP
+- **Test package** - `task package` then extract ZIP
 
 ### Architecture
 
-AgentMux uses a **CEF (Chromium Embedded Framework)** host with a **100% Rust backend**:
+AgentMux is a **100% Rust** desktop app with a **Chromium-based UI**:
 
-- **agentmux-cef** = CEF host app (Rust, IPC bridge, window management, bundled Chromium)
-- **agentmux-launcher** = 325 KB launcher exe (sets DLL path, spawns CEF host from `runtime/`)
+- **agentmux-cef** = Host app (Rust, IPC bridge, window management, bundled Chromium)
+- **agentmux-launcher** = 325 KB launcher exe (sets DLL path, spawns host from `runtime/`)
 - **agentmux-srv** = Rust backend sidecar (auto-spawned, don't run manually)
 - **agentmux-common** = Shared utilities used by all the above
 
-**Important:** CEF is the only active host. The Tauri host has been removed. All Go and Electron code has been removed.
+**Note:** There is only one host. Tauri, Go, and Electron code has been removed.
 
 ### Multiple Instances Run in Parallel
 
 AgentMux is designed to run multiple instances simultaneously — different versions, dev + portable, or multiple portable copies. Each instance is fully isolated:
 
-- **Separate CEF data dirs:** Each instance uses its own CEF user data directory based on version, so browser state, cookies, and caches never collide.
+- **Separate data dirs:** Each instance uses its own user data directory based on version, so browser state, cookies, and caches never collide.
 - **Separate backend sidecars:** Each instance spawns its own `agentmux-srv` on a dynamic port. No port conflicts.
 - **Separate binaries:** Portable instances run from their own extracted folder. `task dev` copies to `dist/cef-dev/`. Nothing is shared.
 - **Dev mode isolation:** `AGENTMUX_DEV=1` → data dir `~/.agentmux-dev` (separate from `~/.agentmux`).
@@ -200,11 +199,11 @@ npm run build:dev    # Development build
 npm run build:prod   # Production build
 ```
 
-### Package Release (CEF)
+### Package Release
 ```bash
-task cef:build              # Build CEF host binary
-task cef:bundle             # Bundle CEF runtime DLLs
-task cef:package:portable   # Portable ZIP (Windows)
+task build:host     # Build host binary
+task bundle         # Bundle runtime DLLs
+task package        # Portable ZIP (Windows)
 ```
 
 ---
@@ -218,11 +217,6 @@ Ensure `frontend/wave.ts` uses `getApi().getAboutModalDetails().version`
 `dist/schema/` is wiped by `task clean` but automatically recreated by the
 `copy:schema` dependency in `dev`, `start`, `quickdev`, and `package` tasks.
 
-### Terminal rendering issues on Linux (Tauri-era, may not apply to CEF)
-**DO NOT enable WebGL as the default renderer on Linux.**
-WebKitGTK's WebGL2 had systemic rendering issues under the old Tauri host.
-CEF bundles its own Chromium so this may be resolved, but the Linux check should
-stay until verified on CEF Linux builds.
 
 ### AppImage shows cog/gear icon instead of app icon
 `appimagetool` creates `.DirIcon` inside the AppImage as an **absolute symlink** to the

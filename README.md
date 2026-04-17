@@ -23,7 +23,7 @@ Knowledge workers running AI agents across long-horizon tasks are blind while it
 
 AgentMux is an open-source desktop application that surfaces what agents are doing in real time: tool calls, reasoning steps, source citations, output streams, and conflicts between agents. The human role is observer and supervisor, not driver.
 
-Cross-platform (Windows, macOS, Linux). 100% Rust backend (Tokio + Axum). CEF host (bundled Chromium). Apache 2.0.
+Cross-platform (Windows, macOS, Linux). 100% Rust backend (Tokio + Axum). Chromium-based desktop UI. Apache 2.0.
 
 - **Live agent monitoring** — Watch every tool call and decision step as it happens. Catch an agent undoing correct work mid-task and redirect it before the damage compounds.
 - **Multi-agent orchestration** — Run parallel agents and see all of them at once. Spot conflicts before synthesis. Redirect any agent without killing the others.
@@ -42,7 +42,7 @@ Cross-platform (Windows, macOS, Linux). 100% Rust backend (Tokio + Axum). CEF ho
 | Tool | Version | Purpose |
 |------|---------|---------|
 | **Node.js** | 22 LTS | Frontend build |
-| **Rust** | 1.77+ | Backend + CEF host |
+| **Rust** | 1.77+ | Backend + Host |
 | **[Task](https://taskfile.dev/)** | Latest | Build orchestration |
 | **CMake** | 3.20+ | CEF native build (cef-dll-sys) |
 | **Ninja** | 1.10+ | CEF native build (cef-dll-sys) |
@@ -56,14 +56,14 @@ Platform-specific:
 
 ```bash
 npm install        # install frontend dependencies
-task dev           # CEF host + Vite hot reload
+task dev           # Vite hot reload
 ```
 
 ### Production Build
 
 ```bash
-task cef:package:portable        # Windows portable ZIP
-task cef:package:portable:linux  # Linux portable (planned)
+task package              # Windows portable ZIP
+task package:linux        # Linux portable (planned)
 ```
 
 ## Widgets
@@ -131,16 +131,16 @@ Click the 👤 button on any agent card to assign external accounts (GitHub PAT,
 - **Backend:** Rust (Tokio + Axum + SQLite + portable-pty)
 - **Terminal:** xterm.js
 
-> **Note:** The Tauri host (`src-tauri/`) is deprecated and no longer maintained. All development uses the CEF host. Tauri code remains in the repo for reference but should not be used.
+> **Note:** The Tauri host was removed. All code is Chromium-based.
 
 ## Build Commands
 
 | Command | Description |
 |---------|-------------|
-| `task dev` | Development mode (CEF host + Vite hot reload) |
-| `task cef:build` | Build the CEF host binary |
-| `task cef:bundle` | Bundle CEF runtime DLLs |
-| `task cef:package:portable` | Windows portable ZIP with launcher |
+| `task dev` | Development mode (Vite hot reload) |
+| `task package` | Windows portable ZIP with launcher |
+| `task build:host` | Build the host binary |
+| `task bundle` | Bundle runtime DLLs |
 | `task build:backend` | Build agentmux-srv |
 | `task build:frontend` | Build frontend only |
 | `task test` | Run tests (vitest) |
@@ -172,7 +172,7 @@ Releases are built by [`agentmuxai/agentmux-builder`](https://github.com/agentmu
 
 1. The builder's workflow checks out this repo at the given ref
 2. Builds run in parallel on `ubuntu-latest`, `macos-latest`, and `windows-latest`
-3. Each job builds the Rust backend binary (agentmux-srv), then builds the CEF host
+3. Each job builds the Rust backend binary (agentmux-srv), then builds the host
 4. macOS builds are code-signed and notarized via Apple Developer credentials
 5. Windows builds include both an NSIS installer and a portable ZIP
 6. A final `create-release` job collects all artifacts and creates a GitHub Release on this repo

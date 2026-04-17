@@ -23,11 +23,16 @@ vars:
 
 tasks:
     dev:
-        desc: Run AgentMux in development mode (CEF host + Vite hot reload).
+        desc: Run AgentMux in development mode (Vite hot reload).
         cmds:
-            - task: cef:dev
+            - task: dev:serve
+        deps:
+            - npm:install
+            - build:backend
+            - copy:schema
         env:
             AGENTMUX_ENVFILE: "{{.ROOT_DIR}}/.env"
+            AGENTMUX_DEV: "1"
 
     storybook:
         desc: Start the Storybook server.
@@ -52,36 +57,32 @@ tasks:
               platforms: [linux, darwin]
 
     package:
-        desc: Package the application for the current platform (CEF).
-        cmds:
-            - task: cef:package:portable
-
-
-    package:portable:
-        desc: Package the application as a portable ZIP bundle (Windows only).
+        desc: Build everything and package as a portable directory + ZIP (Windows). Outputs to ~/Desktop by default.
         platforms: [windows]
         cmds:
-            - task: package
-            - powershell -ExecutionPolicy Bypass -Command "& ./scripts/package-portable.ps1"
+            - task: build:frontend
+            - task: build:backend
+            - task: build:host
+            - task: bundle
+            - bash scripts/package-portable.sh
 
     package:msix:
-        desc: "[TODO] Package for Windows Store (MSIX). Needs rewrite for CEF."
+        desc: "[TODO] Package for Windows Store (MSIX)."
         platforms: [windows]
         cmds:
-            - echo "MSIX packaging not yet implemented for CEF host. Old Tauri script was removed."
+            - echo "MSIX packaging not yet implemented."
 
     package:macos:
-        desc: "[TODO] Package the application for macOS (CEF). Not yet implemented."
+        desc: "[TODO] Package the application for macOS."
         platforms: [darwin]
         cmds:
-            - echo "macOS CEF packaging not yet implemented. Use cef:package:portable on Windows."
+            - echo "macOS packaging not yet implemented."
 
-
-    package:portable:linux:
-        desc: "[TODO] Package the application as a portable AppImage (Linux, CEF). Not yet implemented."
+    package:linux:
+        desc: "[TODO] Package the application as a portable AppImage (Linux)."
         platforms: [linux]
         cmds:
-            - echo "Linux CEF AppImage packaging not yet implemented."
+            - echo "Linux AppImage packaging not yet implemented."
 
     build:frontend:
         desc: Build the frontend (production mode).
@@ -354,46 +355,46 @@ tasks:
 
 
     # ========================================
-    # CEF Host Build Tasks
+    # Host Build Tasks
     # ========================================
 
-    cef:build:
-        desc: Build the CEF host binary for the current platform.
+    build:host:
+        desc: Build the host binary for the current platform.
         cmds:
-            - task: cef:build:{{OS}}
+            - task: build:host:{{OS}}
 
-    cef:build:windows:
+    build:host:windows:
         internal: true
         platforms: [windows]
         cmds:
             - cargo build --release -p agentmux-cef -p agentmux-launcher
             - cmd: powershell -Command "New-Item -ItemType Directory -Force -Path dist/cef | Out-Null; Copy-Item target/release/agentmux-cef.exe dist/cef/agentmux-cef.exe -Force"
-            - echo "✓ Built agentmux-cef + agentmux-launcher for Windows"
+            - echo "✓ Built host + launcher for Windows"
 
-    cef:build:darwin:
+    build:host:darwin:
         internal: true
         platforms: [darwin]
         cmds:
             - bash -c 'source "$HOME/.cargo/env" 2>/dev/null; PATH="$HOME/.cargo/bin:$PATH" cargo build --release -p agentmux-cef'
             - mkdir -p dist/cef
             - cp target/release/agentmux-cef dist/cef/agentmux-cef
-            - echo "✓ Built agentmux-cef for macOS"
+            - echo "✓ Built host for macOS"
 
-    cef:build:linux:
+    build:host:linux:
         internal: true
         platforms: [linux]
         cmds:
             - bash -c 'source "$HOME/.cargo/env" 2>/dev/null; PATH="$HOME/.cargo/bin:$PATH" cargo build --release -p agentmux-cef'
             - mkdir -p dist/cef
             - cp target/release/agentmux-cef dist/cef/agentmux-cef
-            - echo "✓ Built agentmux-cef for Linux"
+            - echo "✓ Built host for Linux"
 
-    cef:bundle:
-        desc: Bundle CEF binaries alongside the agentmux-cef executable.
+    bundle:
+        desc: Bundle runtime binaries alongside the host executable.
         cmds:
-            - task: cef:bundle:{{OS}}
+            - task: bundle:{{OS}}
 
-    cef:bundle:windows:
+    bundle:windows:
         internal: true
         platforms: [windows]
         cmds:
@@ -401,20 +402,20 @@ tasks:
                 cefDir=$(find target/release -name 'libcef.dll' 2>/dev/null | head -1)
                 [ -z "$cefDir" ] && cefDir=$(find target -name 'libcef.dll' 2>/dev/null | head -1)
                 if [ -z "$cefDir" ]; then
-                  echo "❌ libcef.dll not found in target/ — build agentmux-cef first"
+                  echo "❌ libcef.dll not found in target/ — run build:host first"
                   exit 1
                 fi
                 cefDir=$(dirname "$cefDir")
-                echo "Found CEF binaries in: $cefDir"
+                echo "Found runtime binaries in: $cefDir"
                 mkdir -p dist/cef/locales
-                # Core CEF DLLs (required)
+                # Core DLLs (required)
                 cp -f "$cefDir/libcef.dll" dist/cef/
                 cp -f "$cefDir/chrome_elf.dll" dist/cef/ 2>/dev/null || true
                 # GPU support (required — ANGLE + D3D compiler)
                 cp -f "$cefDir/libEGL.dll" dist/cef/ 2>/dev/null || true
                 cp -f "$cefDir/libGLESv2.dll" dist/cef/ 2>/dev/null || true
                 cp -f "$cefDir/d3dcompiler_47.dll" dist/cef/ 2>/dev/null || true
-                # CEF data files (required)
+                # Data files (required)
                 cp -f "$cefDir/icudtl.dat" dist/cef/ 2>/dev/null || true
                 cp -f "$cefDir/v8_context_snapshot.bin" dist/cef/ 2>/dev/null || true
                 cp -f "$cefDir"/*.pak dist/cef/ 2>/dev/null || true
@@ -425,25 +426,25 @@ tasks:
                 #   dxil.dll, dxcompiler.dll (WebGPU — not used)
                 #   snapshot_blob.bin (removed in CEF 133+)
                 #   49 non-English locale .pak files
-                echo "✓ Bundled CEF binaries to dist/cef/ (optimized: GPU kept, SwiftShader/WebGPU/extra locales stripped)"
+                echo "✓ Bundled runtime to dist/cef/ (optimized: GPU kept, SwiftShader/WebGPU/extra locales stripped)"
 
-    cef:bundle:darwin:
+    bundle:darwin:
         internal: true
         platforms: [darwin]
         cmds:
-            - echo "macOS CEF bundling not yet implemented"
+            - echo "macOS bundling not yet implemented"
 
-    cef:bundle:linux:
+    bundle:linux:
         internal: true
         platforms: [linux]
         cmds:
             - |
                 CEF_DIR=$(find target -name "libcef.so" -path "*/cef-dll-sys*/out/*" -printf '%h' -quit 2>/dev/null)
                 if [ -z "$CEF_DIR" ]; then
-                  echo "❌ libcef.so not found in target/ — build agentmux-cef first"
+                  echo "❌ libcef.so not found in target/ — run build:host first"
                   exit 1
                 fi
-                echo "Found CEF binaries in: $CEF_DIR"
+                echo "Found runtime binaries in: $CEF_DIR"
                 mkdir -p dist/cef/locales
                 cp -f "$CEF_DIR/libcef.so" dist/cef/
                 cp -f "$CEF_DIR/libEGL.so" dist/cef/ 2>/dev/null || true
@@ -453,26 +454,14 @@ tasks:
                 cp -f "$CEF_DIR/v8_context_snapshot.bin" dist/cef/ 2>/dev/null || true
                 cp -f "$CEF_DIR"/*.pak dist/cef/
                 cp -f "$CEF_DIR/locales/en-US.pak" dist/cef/locales/ 2>/dev/null || true
-                echo "✓ Bundled CEF runtime for Linux"
+                echo "✓ Bundled runtime for Linux"
 
-    cef:dev:
-        desc: Build and run the CEF host in development mode (starts Vite + CEF host).
-        cmds:
-            - task: cef:build
-            - task: cef:bundle
-            - task: cef:dev:serve
-        deps:
-            - npm:install
-            - build:backend
-            - copy:schema
-        env:
-            AGENTMUX_ENVFILE: "{{.ROOT_DIR}}/.env"
-            AGENTMUX_DEV: "1"
-
-    cef:dev:serve:
+    dev:serve:
         internal: true
-        desc: Start Vite dev server and CEF host concurrently.
+        desc: Start Vite dev server and host concurrently.
         cmds:
+            - task: build:host
+            - task: bundle
             - cmd: |
                 # Gate on successful bundle — don't launch stale binaries
                 if [ ! -f dist/cef/agentmux-cef{{exeExt}} ]; then
@@ -507,36 +496,28 @@ tasks:
                 echo "Vite ready."
                 cd "$DEV_DIR" && LD_LIBRARY_PATH=. ./agentmux-cef{{exeExt}} --url=http://localhost:5173
 
-    cef:run:
-        desc: Run the CEF host (must be built and bundled first).
+    run:
+        desc: Run the host (must be built and bundled first).
         cmds:
-            - task: cef:run:{{OS}}
+            - task: run:{{OS}}
 
-    cef:run:windows:
+    run:windows:
         internal: true
         platforms: [windows]
         cmd: cmd /c "cd dist\\cef && agentmux-cef.exe --url=http://localhost:5173"
 
-    cef:run:darwin:
+    run:darwin:
         internal: true
         platforms: [darwin]
         cmd: cd dist/cef && ./agentmux-cef --url=http://localhost:5173
-    cef:run:linux:
+
+    run:linux:
         internal: true
         platforms: [linux]
         cmd: cd dist/cef && LD_LIBRARY_PATH=. ./agentmux-cef --url=http://localhost:5173
-    cef:package:portable:
-        desc: Build everything and package as a portable directory + ZIP (Windows). Outputs to ~/Desktop by default.
-        platforms: [windows]
-        cmds:
-            - task: build:frontend
-            - task: build:backend
-            - task: cef:build
-            - task: cef:bundle
-            - bash scripts/package-portable.sh
 
-    cef:clean:
-        desc: Clean CEF build artifacts.
+    clean:host:
+        desc: Clean host build artifacts.
         cmds:
             - cmd: '{{.RMRF}} "dist/cef"'
               ignore_error: true
@@ -544,6 +525,6 @@ tasks:
               ignore_error: true
 
     # ========================================
-    # End CEF Tasks
+    # End Host Tasks
     # ========================================
 
