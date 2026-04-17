@@ -300,12 +300,12 @@ async fn route_command(
             let y = args.get("y").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
             let w = args.get("width").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
             let h = args.get("height").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
-            state.browser_panes.resize(block_id, cef::Rect { x, y, width: w, height: h });
+            state.browser_panes.resize(block_id, cef::Rect { x, y, width: w, height: h }, state);
             Ok(serde_json::json!(true))
         }
         "browser_pane_close" => {
             let block_id = args.get("block_id").and_then(|v| v.as_str()).unwrap_or("");
-            state.browser_panes.close(block_id);
+            state.browser_panes.close(block_id, state);
             Ok(serde_json::json!(true))
         }
         "browser_pane_go_back" => {

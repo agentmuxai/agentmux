@@ -2,32 +2,23 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! BrowserPaneManager: embeds native browser views inside the main window
-//! using CefWindow::AddOverlayView with CEF_DOCKING_MODE_CUSTOM.
+//! using add_child_view + deferred bounds. AddOverlayView has a CEF bug
+//! where BrowserViews never initialize their renderer (issue #3790).
 //!
-//! Each browser pane is a CefBrowserView added as an overlay positioned
-//! at a specific rect. The OverlayController handles z-order, bounds,
-//! and cleanup. All operations dispatched to the CEF UI thread.
+//! The browser is added as a child view (which triggers renderer creation),
+//! then a deferred task sets its bounds to the pane rect. The frontend's
+//! ResizeObserver continuously re-sets bounds via IPC.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use cef::*;
-use parking_lot::Mutex;
 
 use crate::state::AppState;
 
-struct BrowserPane {
-    controller: OverlayController,
-}
-
-pub struct BrowserPaneManager {
-    panes: Mutex<HashMap<String, BrowserPane>>,
-}
+pub struct BrowserPaneManager;
 
 impl BrowserPaneManager {
-    pub fn new() -> Self {
-        Self { panes: Mutex::new(HashMap::new()) }
-    }
+    pub fn new() -> Self { Self }
 
     pub fn create(
         &self,
@@ -36,24 +27,25 @@ impl BrowserPaneManager {
         url: &str,
         rect: Rect,
     ) -> Result<(), String> {
-        // If already exists, just navigate
+        let label = format!("browser-pane-{}", block_id);
+
+        // If already exists, navigate
         {
-            let label = format!("browser-pane-{}", block_id);
             let browsers = state.browsers.lock();
-            if browsers.contains_key(&label) {
-                if let Some(browser) = browsers.get(&label) {
-                    if let Some(frame) = browser.main_frame() {
-                        frame.load_url(Some(&CefString::from(url)));
-                    }
+            if let Some(browser) = browsers.get(&label) {
+                if let Some(frame) = browser.main_frame() {
+                    frame.load_url(Some(&CefString::from(url)));
                 }
                 return Ok(());
             }
         }
 
-        let panes = self.panes_arc();
         let mut task = CreatePaneTask::new(
-            state.clone(), panes,
-            block_id.to_string(), url.to_string(), rect,
+            state.clone(),
+            block_id.to_string(),
+            label,
+            url.to_string(),
+            rect,
         );
         post_task(ThreadId::UI, Some(&mut task));
         Ok(())
@@ -70,18 +62,16 @@ impl BrowserPaneManager {
         Ok(())
     }
 
-    pub fn resize(&self, block_id: &str, rect: Rect) {
-        let panes = self.panes.lock();
-        if let Some(pane) = panes.get(block_id) {
-            pane.controller.set_bounds(Some(&rect));
-        }
+    pub fn resize(&self, block_id: &str, rect: Rect, state: &Arc<AppState>) {
+        let label = format!("browser-pane-{}", block_id);
+        let mut task = ResizePaneTask::new(state.clone(), label, rect);
+        post_task(ThreadId::UI, Some(&mut task));
     }
 
-    pub fn close(&self, block_id: &str) {
-        if let Some(pane) = self.panes.lock().remove(block_id) {
-            pane.controller.destroy();
-            tracing::info!(block_id, "browser pane destroyed");
-        }
+    pub fn close(&self, block_id: &str, state: &Arc<AppState>) {
+        let label = format!("browser-pane-{}", block_id);
+        let mut task = ClosePaneTask::new(state.clone(), label);
+        post_task(ThreadId::UI, Some(&mut task));
     }
 
     pub fn go_back(&self, block_id: &str, state: &Arc<AppState>) {
@@ -101,33 +91,21 @@ impl BrowserPaneManager {
         let browsers = state.browsers.lock();
         if let Some(b) = browsers.get(&label) { let mut b = b.clone(); b.reload(); }
     }
-
-    /// Get an Arc reference to the panes map for passing to UI thread tasks.
-    /// Uses a leaked Arc — the map lives for the program lifetime (inside AppState).
-    fn panes_arc(&self) -> Arc<Mutex<HashMap<String, BrowserPane>>> {
-        let ptr = &self.panes as *const Mutex<HashMap<String, BrowserPane>>;
-        let arc = unsafe { Arc::from_raw(ptr) };
-        let clone = arc.clone();
-        std::mem::forget(arc); // don't drop the original
-        clone
-    }
 }
 
-// ── Create overlay ──────────────────────────────────────────────────────────
+// ── Create: add_child_view + deferred bounds ────────────────────────────────
 
 wrap_task! {
     pub struct CreatePaneTask {
         state: Arc<AppState>,
-        panes: Arc<Mutex<HashMap<String, BrowserPane>>>,
         block_id: String,
+        label: String,
         url: String,
         rect: Rect,
     }
 
     impl Task {
         fn execute(&self) {
-            let label = format!("browser-pane-{}", self.block_id);
-
             // Get main window
             let mut main_browser = {
                 let browsers = self.state.browsers.lock();
@@ -147,18 +125,12 @@ wrap_task! {
                 None => { tracing::error!("no main Window"); return; }
             };
 
-            // Create BrowserView for the URL
+            // Queue label for on_after_created registration
+            self.state.pending_window_labels.lock().push_back(self.label.clone());
+
+            // Create browser view with a fresh client
             let url_cef = CefString::from(self.url.as_str());
             let settings = BrowserSettings::default();
-
-            let mut settings = settings;
-            settings.background_color = 0xFFFFFFFF; // white — visible debug
-
-            // Queue the label so on_after_created registers the browser
-            // under this name (otherwise it gets a random UUID label).
-            self.state.pending_window_labels.lock().push_back(label.clone());
-
-            // Create a fresh client for this browser pane.
             let handler = crate::client::AgentMuxHandler::new(self.state.clone(), 0);
             let mut client = Some(crate::client::AgentMuxClient::new(handler));
 
@@ -172,61 +144,127 @@ wrap_task! {
                 None => { tracing::error!("browser_view_create failed"); return; }
             };
 
+            // add_child_view triggers browser renderer creation (confirmed working).
+            // The window's FillLayout will expand it to full size, but we
+            // immediately set bounds and the frontend's resize IPC will
+            // continuously re-set bounds on every frame.
+            let mut view = View::from(&new_bv);
+            window.add_child_view(Some(&mut view));
+
+            // Set bounds immediately after adding
+            view.set_bounds(Some(&self.rect));
+            view.set_size(Some(&Size {
+                width: self.rect.width,
+                height: self.rect.height,
+            }));
+
             tracing::info!(
                 block_id = %self.block_id,
-                label = %label,
-                "browser_view created, adding overlay (browser registered via on_after_created)"
+                label = %self.label,
+                url = %self.url,
+                x = self.rect.x, y = self.rect.y,
+                w = self.rect.width, h = self.rect.height,
+                "browser pane added as child view"
             );
 
-            // Add as overlay with custom positioning
-            let mut view = View::from(&new_bv);
-            let controller = window.add_overlay_view(
-                Some(&mut view),
-                DockingMode::CUSTOM,
-                1, // can_activate — receives keyboard/mouse input
+            // Post a deferred bounds set — the layout manager may override
+            // our bounds during the current layout pass. The deferred task
+            // runs after layout completes.
+            let mut deferred = DeferredBoundsTask::new(
+                self.state.clone(),
+                self.label.clone(),
+                Rect { x: self.rect.x, y: self.rect.y, width: self.rect.width, height: self.rect.height },
             );
+            post_task(ThreadId::UI, Some(&mut deferred));
+        }
+    }
+}
 
-            match controller {
-                Some(ctrl) => {
-                    ctrl.set_bounds(Some(&self.rect));
+// ── Deferred bounds (runs after layout pass) ────────────────────────────────
 
-                    // CEF issue #3790: overlays with CUSTOM docking may start
-                    // hidden. Make the overlay and its contents visible.
-                    if let Some(contents) = ctrl.contents_view() {
-                        let is_visible = contents.is_visible();
-                        tracing::info!(
-                            block_id = %self.block_id,
-                            contents_visible_before = is_visible,
-                            "setting overlay contents visible"
-                        );
-                        contents.set_visible(1);
-                    }
+wrap_task! {
+    pub struct DeferredBoundsTask {
+        state: Arc<AppState>,
+        label: String,
+        rect: Rect,
+    }
 
-                    // Also make the view itself visible
-                    view.set_visible(1);
-
-                    let bounds = ctrl.bounds();
-                    tracing::info!(
-                        block_id = %self.block_id,
-                        ctrl_x = bounds.x, ctrl_y = bounds.y,
-                        ctrl_w = bounds.width, ctrl_h = bounds.height,
-                        "overlay controller bounds after set_bounds"
-                    );
-
-                    tracing::info!(
-                        block_id = %self.block_id,
-                        url = %self.url,
-                        x = self.rect.x, y = self.rect.y,
-                        w = self.rect.width, h = self.rect.height,
-                        "browser pane overlay created"
-                    );
-                    self.panes.lock().insert(self.block_id.clone(), BrowserPane {
-                        controller: ctrl,
-                    });
-                }
+    impl Task {
+        fn execute(&self) {
+            let browsers = self.state.browsers.lock();
+            let mut browser = match browsers.get(&self.label) {
+                Some(b) => b.clone(),
                 None => {
-                    tracing::error!("add_overlay_view returned None");
+                    tracing::warn!(label = %self.label, "deferred bounds: browser not yet registered");
+                    return;
                 }
+            };
+            drop(browsers);
+
+            if let Some(bv) = browser_view_get_for_browser(Some(&mut browser)) {
+                let mut view = View::from(&bv);
+                view.set_bounds(Some(&self.rect));
+                view.set_size(Some(&Size {
+                    width: self.rect.width,
+                    height: self.rect.height,
+                }));
+                tracing::info!(
+                    label = %self.label,
+                    x = self.rect.x, y = self.rect.y,
+                    w = self.rect.width, h = self.rect.height,
+                    "deferred bounds applied"
+                );
+            }
+        }
+    }
+}
+
+// ── Resize ──────────────────────────────────────────────────────────────────
+
+wrap_task! {
+    pub struct ResizePaneTask {
+        state: Arc<AppState>,
+        label: String,
+        rect: Rect,
+    }
+
+    impl Task {
+        fn execute(&self) {
+            let browsers = self.state.browsers.lock();
+            let mut browser = match browsers.get(&self.label) {
+                Some(b) => b.clone(),
+                None => return,
+            };
+            drop(browsers);
+
+            if let Some(bv) = browser_view_get_for_browser(Some(&mut browser)) {
+                let mut view = View::from(&bv);
+                view.set_bounds(Some(&self.rect));
+                view.set_size(Some(&Size {
+                    width: self.rect.width,
+                    height: self.rect.height,
+                }));
+            }
+        }
+    }
+}
+
+// ── Close ───────────────────────────────────────────────────────────────────
+
+wrap_task! {
+    pub struct ClosePaneTask {
+        state: Arc<AppState>,
+        label: String,
+    }
+
+    impl Task {
+        fn execute(&self) {
+            let browser = self.state.browsers.lock().remove(&self.label);
+            if let Some(browser) = browser {
+                if let Some(host) = browser.host() {
+                    host.close_browser(1);
+                }
+                tracing::info!(label = %self.label, "browser pane closed");
             }
         }
     }
