@@ -165,7 +165,15 @@ const MoreDropdown = ({
         e.stopPropagation();
         const shortName = key.replace("defwidget@", "");
         ContextMenuModel.showContextMenu(
-            [{ label: "Pin to bar", click: () => pinWidget(shortName, settings(), wmap()) }],
+            [
+                { label: "New Window", click: () => {
+                    fireAndForget(async () => {
+                        await getApi().openNewWindow();
+                    });
+                }},
+                { type: "separator" },
+                { label: "Pin to bar", click: () => pinWidget(shortName, settings(), wmap()) },
+            ],
             e
         );
         onClose();
@@ -341,7 +349,15 @@ const ActionWidgets = (): JSX.Element => {
         e.stopPropagation();
         const shortName = key.replace("defwidget@", "");
         ContextMenuModel.showContextMenu(
-            [{ label: "Unpin from bar", click: () => unpinWidget(shortName, settings(), wmap()) }],
+            [
+                { label: "New Window", click: () => {
+                    fireAndForget(async () => {
+                        await getApi().openNewWindow();
+                    });
+                }},
+                { type: "separator" },
+                { label: "Unpin from bar", click: () => unpinWidget(shortName, settings(), wmap()) },
+            ],
             e
         );
     };
