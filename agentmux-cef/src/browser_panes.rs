@@ -151,14 +151,15 @@ wrap_task! {
             let url_cef = CefString::from(self.url.as_str());
             let settings = BrowserSettings::default();
 
-            // Use a white background so we can distinguish "loaded but blank"
-            // from "not rendering". The main app uses black (0xFF000000).
             let mut settings = settings;
-            settings.background_color = 0xFFFFFFFF; // white
+            settings.background_color = 0xFFFFFFFF; // white — visible debug
 
-            // Create with None client — CEF provides default rendering.
+            // Get the main browser's client — a None client doesn't launch
+            // a renderer process, leaving the overlay as a black rect.
+            let mut client = main_browser.host().and_then(|h| h.client());
+
             let new_bv = match browser_view_create(
-                None,
+                client.as_mut(),
                 Some(&url_cef),
                 Some(&settings),
                 None, None, None,
