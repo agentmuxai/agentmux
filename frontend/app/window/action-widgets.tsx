@@ -166,7 +166,7 @@ const MoreDropdown = ({
         const shortName = key.replace("defwidget@", "");
         ContextMenuModel.showContextMenu(
             [
-                { label: "Open in New Window", click: () => {
+                { label: "New Window", click: () => {
                     fireAndForget(async () => {
                         await getApi().openNewWindow();
                     });
@@ -344,13 +344,13 @@ const ActionWidgets = (): JSX.Element => {
         );
     };
 
-    const handlePinnedContextMenu = (e: MouseEvent, key: string, _widget: WidgetConfigType) => {
+    const handlePinnedContextMenu = (e: MouseEvent, key: string) => {
         e.preventDefault();
         e.stopPropagation();
         const shortName = key.replace("defwidget@", "");
         ContextMenuModel.showContextMenu(
             [
-                { label: "Open in New Window", click: () => {
+                { label: "New Window", click: () => {
                     fireAndForget(async () => {
                         await getApi().openNewWindow();
                     });
@@ -389,7 +389,7 @@ const ActionWidgets = (): JSX.Element => {
                                 <ActionWidget
                                     widget={widget}
                                     iconOnly={iconOnly()}
-                                    onContextMenu={(e) => handlePinnedContextMenu(e, key, widget)}
+                                    onContextMenu={(e) => handlePinnedContextMenu(e, key)}
                                 />
                             </div>
                         </>
