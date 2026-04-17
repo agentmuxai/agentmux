@@ -211,7 +211,7 @@ task package        # Portable ZIP (Windows)
 ## Common Issues
 
 ### Title bar shows wrong version
-Ensure `frontend/wave.ts` uses `getApi().getAboutModalDetails().version`
+Ensure `frontend/app-init.ts` uses `getApi().getAboutModalDetails().version`
 
 ### Build Fails After Clean
 `dist/schema/` is wiped by `task clean` but automatically recreated by the
