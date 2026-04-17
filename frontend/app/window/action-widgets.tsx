@@ -165,7 +165,15 @@ const MoreDropdown = ({
         e.stopPropagation();
         const shortName = key.replace("defwidget@", "");
         ContextMenuModel.showContextMenu(
-            [{ label: "Pin to bar", click: () => pinWidget(shortName, settings(), wmap()) }],
+            [
+                { label: "Open in New Window", click: () => {
+                    fireAndForget(async () => {
+                        await getApi().openNewWindow();
+                    });
+                }},
+                { type: "separator" },
+                { label: "Pin to bar", click: () => pinWidget(shortName, settings(), wmap()) },
+            ],
             e
         );
         onClose();
@@ -336,12 +344,20 @@ const ActionWidgets = (): JSX.Element => {
         );
     };
 
-    const handlePinnedContextMenu = (e: MouseEvent, key: string) => {
+    const handlePinnedContextMenu = (e: MouseEvent, key: string, widget: WidgetConfigType) => {
         e.preventDefault();
         e.stopPropagation();
         const shortName = key.replace("defwidget@", "");
         ContextMenuModel.showContextMenu(
-            [{ label: "Unpin from bar", click: () => unpinWidget(shortName, settings(), wmap()) }],
+            [
+                { label: "Open in New Window", click: () => {
+                    fireAndForget(async () => {
+                        await getApi().openNewWindow();
+                    });
+                }},
+                { type: "separator" },
+                { label: "Unpin from bar", click: () => unpinWidget(shortName, settings(), wmap()) },
+            ],
             e
         );
     };
@@ -373,7 +389,7 @@ const ActionWidgets = (): JSX.Element => {
                                 <ActionWidget
                                     widget={widget}
                                     iconOnly={iconOnly()}
-                                    onContextMenu={(e) => handlePinnedContextMenu(e, key)}
+                                    onContextMenu={(e) => handlePinnedContextMenu(e, key, widget)}
                                 />
                             </div>
                         </>
