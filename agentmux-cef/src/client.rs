@@ -140,16 +140,24 @@ impl AgentMuxHandler {
             }
         }
 
-        // Browser panes get a subclassed WndProc that redirects WM_SETFOCUS
-        // to the parent (top-level) so they cannot steal keyboard focus.
+        // Browser panes must sit ABOVE the main browser's widget in Z-order
+        // or mouse-wheel events over the visible pane area hit main instead
+        // of the pane. Bring the pane's HWND to the top of its parent's
+        // Z-order without changing its activation state.
         #[cfg(target_os = "windows")]
         if self.is_pane {
             if let Some(host) = browser.host() {
                 let wh = host.window_handle();
                 if !wh.0.is_null() {
                     unsafe {
-                        install_pane_focus_redirect(wh.0 as *mut std::ffi::c_void);
+                        windows_sys::Win32::UI::WindowsAndMessaging::SetWindowPos(
+                            wh.0 as _,
+                            std::ptr::null_mut(), // HWND_TOP
+                            0, 0, 0, 0,
+                            0x0001 | 0x0002 | 0x0010, // SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE
+                        );
                     }
+                    tracing::info!("[pane-zorder] raised pane to top of Z-order");
                 }
             }
         }
@@ -274,18 +282,7 @@ impl AgentMuxHandler {
         // focus goes through `browser_pane_focus` IPC, and clicking a main
         // input goes through `main_window_focus`.
         if self.is_pane {
-            #[cfg(target_os = "windows")]
-            if let Some(b) = browser.as_ref() {
-                if let Some(host) = b.host() {
-                    let wh = host.window_handle();
-                    if !wh.0.is_null() {
-                        unsafe {
-                            install_pane_focus_redirect(wh.0 as *mut std::ffi::c_void);
-                        }
-                    }
-                }
-            }
-            tracing::info!("[pane-load-end] re-subclassed children after navigation");
+            tracing::info!("[pane-load-end] pane page loaded");
             return;
         }
 
