@@ -54,8 +54,7 @@ let savedInitOpts: AgentMuxInitOpts = null;
  * client/window/tab state. Non-host mode waits for an `agentmux-init` event.
  */
 function isHostApp(): boolean {
-    return typeof window.__TAURI_INTERNALS__ !== "undefined"
-        || typeof window.__AGENTMUX_IPC_PORT__ !== "undefined";
+    return typeof window.__AGENTMUX_IPC_PORT__ !== "undefined";
 }
 
 /** @deprecated Tauri host was removed. Always returns false. */
