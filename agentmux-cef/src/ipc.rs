@@ -325,6 +325,7 @@ async fn route_command(
         }
         "browser_pane_focus" => {
             let block_id = args.get("block_id").and_then(|v| v.as_str()).unwrap_or("");
+            tracing::info!("[ipc] browser_pane_focus block_id={}", block_id);
             state.browser_panes.focus(block_id, state);
             Ok(serde_json::json!(true))
         }
@@ -333,12 +334,17 @@ async fn route_command(
             // HWND. Used by the frontend when the user clicks a main-DOM input
             // (e.g. a browser block's URL bar) to reclaim focus from a pane
             // that previously held it.
+            tracing::info!("[ipc] main_window_focus");
             #[cfg(target_os = "windows")]
             unsafe {
                 let top = crate::commands::window::find_own_top_level_window();
                 if !top.is_null() {
                     windows_sys::Win32::UI::Input::KeyboardAndMouse::SetFocus(top as _);
+                    tracing::info!("[ipc] main_window_focus: SetFocus on top={:p}", top);
                 }
+                // Also explicitly defocus ALL panes' browsers at the Chromium
+                // level so the renderer stops routing keystrokes to them.
+                state.browser_panes.defocus_all(state);
             }
             Ok(serde_json::json!(true))
         }
