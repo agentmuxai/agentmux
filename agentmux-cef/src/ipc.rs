@@ -291,13 +291,7 @@ async fn route_command(
         "browser_pane_navigate" => {
             let block_id = args.get("block_id").and_then(|v| v.as_str()).unwrap_or("");
             let url = args.get("url").and_then(|v| v.as_str()).unwrap_or("");
-            // Close existing pane and recreate with new URL
-            state.browser_panes.close(block_id, state);
-            let x = args.get("x").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
-            let y = args.get("y").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
-            let w = args.get("width").and_then(|v| v.as_i64()).unwrap_or(800) as i32;
-            let h = args.get("height").and_then(|v| v.as_i64()).unwrap_or(600) as i32;
-            state.browser_panes.create(state, block_id, url, cef::Rect { x, y, width: w, height: h })?;
+            state.browser_panes.navigate(block_id, url, state)?;
             Ok(serde_json::json!(true))
         }
         "browser_pane_resize" => {
@@ -306,12 +300,12 @@ async fn route_command(
             let y = args.get("y").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
             let w = args.get("width").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
             let h = args.get("height").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
-            state.browser_panes.resize(block_id, cef::Rect { x, y, width: w, height: h }, state);
+            state.browser_panes.resize(block_id, cef::Rect { x, y, width: w, height: h });
             Ok(serde_json::json!(true))
         }
         "browser_pane_close" => {
             let block_id = args.get("block_id").and_then(|v| v.as_str()).unwrap_or("");
-            state.browser_panes.close(block_id, state);
+            state.browser_panes.close(block_id);
             Ok(serde_json::json!(true))
         }
         "browser_pane_go_back" => {
