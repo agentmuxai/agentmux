@@ -103,12 +103,12 @@ async function bootstrap() {
         try {
             await initApp();
             log("INFO", "✅ Main application loaded successfully");
-        } catch (waveError) {
-            log("ERROR", "Failed in initApp:", waveError);
-            log("ERROR", "Wave error name:", (waveError as Error)?.name);
-            log("ERROR", "Wave error message:", (waveError as Error)?.message);
-            log("ERROR", "Wave error stack:", (waveError as Error)?.stack);
-            throw waveError;
+        } catch (initError) {
+            log("ERROR", "Failed in initApp:", initError);
+            log("ERROR", "Init error name:", (initError as Error)?.name);
+            log("ERROR", "Init error message:", (initError as Error)?.message);
+            log("ERROR", "Init error stack:", (initError as Error)?.stack);
+            throw initError;
         }
 
     } catch (error) {
