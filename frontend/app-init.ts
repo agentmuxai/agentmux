@@ -39,28 +39,16 @@ import { setKeyUtilPlatform } from "@/util/keyutil";
 import { render } from "solid-js/web";
 import { benchMark, benchDump } from "@/util/startup-bench";
 import { ContextMenuModel } from "@/app/store/contextmenu";
+import { isHostApp } from "@/app/init/host-detect";
+import { showStartupError } from "@/app/init/error-display";
+import { withTimeout } from "@/app/init/timeout";
 
 // Deferred — assigned inside initApp() after window.api is ready.
 // Do NOT call getApi() at module level: this file is statically imported by
-// bootstrap.ts before setupCefApi() runs, so window.api
-// does not exist yet.
+// bootstrap.ts before setupCefApi() runs, so window.api does not exist yet.
 let platform: NodeJS.Platform;
 let appVersion: string;
 let savedInitOpts: AgentMuxInitOpts = null;
-
-/**
- * Detect whether we're running in a host app.
- * The host app owns the backend sidecar and needs to query it for
- * client/window/tab state. Non-host mode waits for an `agentmux-init` event.
- */
-function isHostApp(): boolean {
-    return typeof window.__AGENTMUX_IPC_PORT__ !== "undefined";
-}
-
-
-// Multi-instance title update was Tauri-only (removed). The CEF host
-// sets the window title from document.title via on_title_change.
-
 
 window.WOS = WOS;
 window.globalAtoms = atoms;
@@ -73,47 +61,6 @@ window.pushFlashError = pushFlashError;
 window.pushNotification = pushNotification;
 window.removeNotificationById = removeNotificationById;
 window.modalsModel = modalsModel;
-
-
-/** Wrap a promise with a timeout. Rejects with a descriptive error if it takes too long. */
-function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
-    return Promise.race([
-        promise,
-        new Promise<T>((_, reject) =>
-            setTimeout(() => reject(new Error(`Timeout: ${label} did not respond within ${ms / 1000}s`)), ms)
-        ),
-    ]);
-}
-
-/** Make body visible and show an error message so the user never sees an infinite grey screen. */
-function showStartupError(message: string) {
-    document.body.style.visibility = "visible";
-    document.body.style.opacity = "1";
-    document.body.classList.remove("is-transparent");
-    // Remove the "Starting AgentMux..." loader
-    const loader = document.getElementById("startup-loading");
-    if (loader) loader.remove();
-    // Show error in the main div
-    const main = document.getElementById("main");
-    if (main) {
-        main.innerHTML = "";
-        const errorDiv = document.createElement("div");
-        errorDiv.style.cssText = "padding: 40px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; color: #f7f7f7;";
-        const title = document.createElement("h2");
-        title.textContent = "AgentMux failed to start";
-        title.style.cssText = "color: #ff6b6b; margin-bottom: 16px;";
-        errorDiv.appendChild(title);
-        const msg = document.createElement("pre");
-        msg.textContent = message;
-        msg.style.cssText = "background: #1a1a1a; padding: 16px; border-radius: 8px; overflow-x: auto; white-space: pre-wrap; font-size: 13px;";
-        errorDiv.appendChild(msg);
-        const hint = document.createElement("p");
-        hint.textContent = "Press F12 for console details. Try closing and reopening the app.";
-        hint.style.cssText = "margin-top: 16px; color: rgba(255,255,255,0.5); font-size: 13px;";
-        errorDiv.appendChild(hint);
-        main.appendChild(errorDiv);
-    }
-}
 
 const RPC_TIMEOUT = 5_000; // 5 seconds for individual RPC calls
 
