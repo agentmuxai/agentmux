@@ -1,25 +1,41 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! BrowserPaneManager: embeds native browser views inside the main window
-//! using add_child_view + deferred bounds. AddOverlayView has a CEF bug
-//! where BrowserViews never initialize their renderer (issue #3790).
-//!
-//! The browser is added as a child view (which triggers renderer creation),
-//! then a deferred task sets its bounds to the pane rect. The frontend's
-//! ResizeObserver continuously re-sets bounds via IPC.
+//! BrowserPaneManager: embeds native browser views using CefBrowserHost::CreateBrowser
+//! with a parent HWND. This is the production-proven pattern used by CefSharp, QCefView,
+//! and Spotify. No CEF Views framework — native OS child window management.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use cef::*;
+use parking_lot::Mutex;
 
 use crate::state::AppState;
 
-pub struct BrowserPaneManager;
+#[cfg(target_os = "windows")]
+const WS_CHILD: u32 = 0x4000_0000;
+#[cfg(target_os = "windows")]
+const WS_VISIBLE: u32 = 0x1000_0000;
+#[cfg(target_os = "windows")]
+const WS_CLIPCHILDREN: u32 = 0x0200_0000;
+#[cfg(target_os = "windows")]
+const WS_CLIPSIBLINGS: u32 = 0x0400_0000;
+
+struct BrowserPane {
+    browser: Browser,
+}
+
+pub struct BrowserPaneManager {
+    panes: Mutex<HashMap<String, BrowserPane>>,
+}
 
 impl BrowserPaneManager {
-    pub fn new() -> Self { Self }
+    pub fn new() -> Self {
+        Self { panes: Mutex::new(HashMap::new()) }
+    }
 
+    /// Create a browser pane as a native child window of the main window.
     pub fn create(
         &self,
         state: &Arc<AppState>,
@@ -27,245 +43,171 @@ impl BrowserPaneManager {
         url: &str,
         rect: Rect,
     ) -> Result<(), String> {
-        let label = format!("browser-pane-{}", block_id);
-
         // If already exists, navigate
-        {
-            let browsers = state.browsers.lock();
-            if let Some(browser) = browsers.get(&label) {
-                if let Some(frame) = browser.main_frame() {
-                    frame.load_url(Some(&CefString::from(url)));
-                }
-                return Ok(());
+        if let Some(pane) = self.panes.lock().get(block_id) {
+            if let Some(frame) = pane.browser.main_frame() {
+                frame.load_url(Some(&CefString::from(url)));
             }
+            return Ok(());
         }
 
-        let mut task = CreatePaneTask::new(
-            state.clone(),
-            block_id.to_string(),
-            label,
-            url.to_string(),
-            rect,
+        // Get main window's native handle
+        let parent_hwnd = {
+            let browsers = state.browsers.lock();
+            let main_browser = browsers.get("main")
+                .ok_or("no main browser registered")?;
+            let host = main_browser.host()
+                .ok_or("main browser has no host")?;
+            host.window_handle()
+        };
+
+        if parent_hwnd.0.is_null() {
+            return Err("main window HWND is null".to_string());
+        }
+
+        // Queue label for on_after_created registration
+        let label = format!("browser-pane-{}", block_id);
+        state.pending_window_labels.lock().push_back(label.clone());
+
+        // Create client for this browser pane
+        let handler = crate::client::AgentMuxHandler::new(state.clone(), 0);
+        let mut client = Some(crate::client::AgentMuxClient::new(handler));
+
+        let url_cef = CefString::from(url);
+        let settings = BrowserSettings::default();
+
+        // Configure as a child window of the main window
+        #[cfg(target_os = "windows")]
+        let window_info = WindowInfo {
+            size: std::mem::size_of::<WindowInfo>(),
+            ex_style: 0,
+            window_name: CefString::from(""),
+            style: WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN | WS_CLIPSIBLINGS,
+            bounds: Rect { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+            parent_window: parent_hwnd,
+            menu: std::ptr::null_mut(),
+            windowless_rendering_enabled: 0,
+            shared_texture_enabled: 0,
+            external_begin_frame_enabled: 0,
+            window: parent_hwnd,
+            runtime_style: RuntimeStyle::DEFAULT,
+        };
+
+        #[cfg(not(target_os = "windows"))]
+        let window_info = {
+            // TODO: macOS/Linux — set parent_window to the main NSView/X11 window
+            return Err("browser panes not yet implemented on this platform".to_string());
+        };
+
+        let result = browser_host_create_browser(
+            Some(&window_info),
+            client.as_mut(),
+            Some(&url_cef),
+            Some(&settings),
+            None, // extra_info
+            None, // request_context
         );
-        post_task(ThreadId::UI, Some(&mut task));
+
+        if result == 0 {
+            return Err("browser_host_create_browser returned 0 (failed)".to_string());
+        }
+
+        tracing::info!(
+            block_id,
+            url,
+            x = rect.x, y = rect.y,
+            w = rect.width, h = rect.height,
+            parent_hwnd = ?parent_hwnd,
+            "browser pane creating as native child window"
+        );
+
+        // The browser will be registered in on_after_created via pending_window_labels.
+        // We'll store it in self.panes when on_after_created fires.
+        // For now, spawn a task that waits for registration and stores the ref.
+        let panes = self.panes_arc();
+        let block_id = block_id.to_string();
+        let state_clone = state.clone();
+        std::thread::spawn(move || {
+            // Poll for the browser to be registered (on_after_created is async)
+            for _ in 0..50 {
+                std::thread::sleep(std::time::Duration::from_millis(100));
+                let browsers = state_clone.browsers.lock();
+                if let Some(browser) = browsers.get(&label) {
+                    panes.lock().insert(block_id.clone(), BrowserPane {
+                        browser: browser.clone(),
+                    });
+                    tracing::info!(block_id = %block_id, "browser pane registered");
+                    return;
+                }
+            }
+            tracing::warn!(block_id = %block_id, "browser pane registration timed out (5s)");
+        });
+
         Ok(())
     }
 
-    pub fn navigate(&self, block_id: &str, url: &str, state: &Arc<AppState>) -> Result<(), String> {
-        let label = format!("browser-pane-{}", block_id);
-        let browsers = state.browsers.lock();
-        if let Some(browser) = browsers.get(&label) {
-            if let Some(frame) = browser.main_frame() {
+    pub fn navigate(&self, block_id: &str, url: &str, _state: &Arc<AppState>) -> Result<(), String> {
+        let panes = self.panes.lock();
+        if let Some(pane) = panes.get(block_id) {
+            if let Some(frame) = pane.browser.main_frame() {
                 frame.load_url(Some(&CefString::from(url)));
             }
         }
         Ok(())
     }
 
-    pub fn resize(&self, block_id: &str, rect: Rect, state: &Arc<AppState>) {
-        let label = format!("browser-pane-{}", block_id);
-        let mut task = ResizePaneTask::new(state.clone(), label, rect);
-        post_task(ThreadId::UI, Some(&mut task));
-    }
-
-    pub fn close(&self, block_id: &str, state: &Arc<AppState>) {
-        let label = format!("browser-pane-{}", block_id);
-        let mut task = ClosePaneTask::new(state.clone(), label);
-        post_task(ThreadId::UI, Some(&mut task));
-    }
-
-    pub fn go_back(&self, block_id: &str, state: &Arc<AppState>) {
-        let label = format!("browser-pane-{}", block_id);
-        let browsers = state.browsers.lock();
-        if let Some(b) = browsers.get(&label) { let mut b = b.clone(); b.go_back(); }
-    }
-
-    pub fn go_forward(&self, block_id: &str, state: &Arc<AppState>) {
-        let label = format!("browser-pane-{}", block_id);
-        let browsers = state.browsers.lock();
-        if let Some(b) = browsers.get(&label) { let mut b = b.clone(); b.go_forward(); }
-    }
-
-    pub fn reload(&self, block_id: &str, state: &Arc<AppState>) {
-        let label = format!("browser-pane-{}", block_id);
-        let browsers = state.browsers.lock();
-        if let Some(b) = browsers.get(&label) { let mut b = b.clone(); b.reload(); }
-    }
-}
-
-// ── Create: add_child_view + deferred bounds ────────────────────────────────
-
-wrap_task! {
-    pub struct CreatePaneTask {
-        state: Arc<AppState>,
-        block_id: String,
-        label: String,
-        url: String,
-        rect: Rect,
-    }
-
-    impl Task {
-        fn execute(&self) {
-            // Get main window
-            let mut main_browser = {
-                let browsers = self.state.browsers.lock();
-                match browsers.get("main") {
-                    Some(b) => b.clone(),
-                    None => { tracing::error!("no main browser"); return; }
+    pub fn resize(&self, block_id: &str, rect: Rect, _state: &Arc<AppState>) {
+        let panes = self.panes.lock();
+        if let Some(pane) = panes.get(block_id) {
+            if let Some(host) = pane.browser.host() {
+                let hwnd = host.window_handle();
+                if !hwnd.0.is_null() {
+                    #[cfg(target_os = "windows")]
+                    unsafe {
+                        windows_sys::Win32::UI::WindowsAndMessaging::SetWindowPos(
+                            hwnd.0 as _,
+                            std::ptr::null_mut(), // HWND_TOP
+                            rect.x,
+                            rect.y,
+                            rect.width,
+                            rect.height,
+                            0x0004, // SWP_NOZORDER
+                        );
+                    }
                 }
-            };
-
-            let main_bv = match browser_view_get_for_browser(Some(&mut main_browser)) {
-                Some(bv) => bv,
-                None => { tracing::error!("no main BrowserView"); return; }
-            };
-
-            let window = match main_bv.window() {
-                Some(w) => w,
-                None => { tracing::error!("no main Window"); return; }
-            };
-
-            // Queue label for on_after_created registration
-            self.state.pending_window_labels.lock().push_back(self.label.clone());
-
-            // Create browser view with a fresh client
-            let url_cef = CefString::from(self.url.as_str());
-            let settings = BrowserSettings::default();
-            let handler = crate::client::AgentMuxHandler::new(self.state.clone(), 0);
-            let mut client = Some(crate::client::AgentMuxClient::new(handler));
-
-            let new_bv = match browser_view_create(
-                client.as_mut(),
-                Some(&url_cef),
-                Some(&settings),
-                None, None, None,
-            ) {
-                Some(bv) => bv,
-                None => { tracing::error!("browser_view_create failed"); return; }
-            };
-
-            // add_child_view triggers browser renderer creation (confirmed working).
-            // The window's FillLayout will expand it to full size, but we
-            // immediately set bounds and the frontend's resize IPC will
-            // continuously re-set bounds on every frame.
-            let mut view = View::from(&new_bv);
-            window.add_child_view(Some(&mut view));
-
-            // Set bounds immediately after adding
-            view.set_bounds(Some(&self.rect));
-            view.set_size(Some(&Size {
-                width: self.rect.width,
-                height: self.rect.height,
-            }));
-
-            tracing::info!(
-                block_id = %self.block_id,
-                label = %self.label,
-                url = %self.url,
-                x = self.rect.x, y = self.rect.y,
-                w = self.rect.width, h = self.rect.height,
-                "browser pane added as child view"
-            );
-
-            // Post a deferred bounds set — the layout manager may override
-            // our bounds during the current layout pass. The deferred task
-            // runs after layout completes.
-            let mut deferred = DeferredBoundsTask::new(
-                self.state.clone(),
-                self.label.clone(),
-                Rect { x: self.rect.x, y: self.rect.y, width: self.rect.width, height: self.rect.height },
-            );
-            post_task(ThreadId::UI, Some(&mut deferred));
-        }
-    }
-}
-
-// ── Deferred bounds (runs after layout pass) ────────────────────────────────
-
-wrap_task! {
-    pub struct DeferredBoundsTask {
-        state: Arc<AppState>,
-        label: String,
-        rect: Rect,
-    }
-
-    impl Task {
-        fn execute(&self) {
-            let browsers = self.state.browsers.lock();
-            let mut browser = match browsers.get(&self.label) {
-                Some(b) => b.clone(),
-                None => {
-                    tracing::warn!(label = %self.label, "deferred bounds: browser not yet registered");
-                    return;
-                }
-            };
-            drop(browsers);
-
-            if let Some(bv) = browser_view_get_for_browser(Some(&mut browser)) {
-                let mut view = View::from(&bv);
-                view.set_bounds(Some(&self.rect));
-                view.set_size(Some(&Size {
-                    width: self.rect.width,
-                    height: self.rect.height,
-                }));
-                tracing::info!(
-                    label = %self.label,
-                    x = self.rect.x, y = self.rect.y,
-                    w = self.rect.width, h = self.rect.height,
-                    "deferred bounds applied"
-                );
             }
         }
     }
-}
 
-// ── Resize ──────────────────────────────────────────────────────────────────
-
-wrap_task! {
-    pub struct ResizePaneTask {
-        state: Arc<AppState>,
-        label: String,
-        rect: Rect,
-    }
-
-    impl Task {
-        fn execute(&self) {
-            let browsers = self.state.browsers.lock();
-            let mut browser = match browsers.get(&self.label) {
-                Some(b) => b.clone(),
-                None => return,
-            };
-            drop(browsers);
-
-            if let Some(bv) = browser_view_get_for_browser(Some(&mut browser)) {
-                let mut view = View::from(&bv);
-                view.set_bounds(Some(&self.rect));
-                view.set_size(Some(&Size {
-                    width: self.rect.width,
-                    height: self.rect.height,
-                }));
+    pub fn close(&self, block_id: &str, _state: &Arc<AppState>) {
+        if let Some(pane) = self.panes.lock().remove(block_id) {
+            if let Some(host) = pane.browser.host() {
+                host.close_browser(1);
             }
+            tracing::info!(block_id, "browser pane closed");
         }
     }
-}
 
-// ── Close ───────────────────────────────────────────────────────────────────
-
-wrap_task! {
-    pub struct ClosePaneTask {
-        state: Arc<AppState>,
-        label: String,
+    pub fn go_back(&self, block_id: &str, _state: &Arc<AppState>) {
+        let panes = self.panes.lock();
+        if let Some(pane) = panes.get(block_id) { let mut b = pane.browser.clone(); b.go_back(); }
     }
 
-    impl Task {
-        fn execute(&self) {
-            let browser = self.state.browsers.lock().remove(&self.label);
-            if let Some(browser) = browser {
-                if let Some(host) = browser.host() {
-                    host.close_browser(1);
-                }
-                tracing::info!(label = %self.label, "browser pane closed");
-            }
-        }
+    pub fn go_forward(&self, block_id: &str, _state: &Arc<AppState>) {
+        let panes = self.panes.lock();
+        if let Some(pane) = panes.get(block_id) { let mut b = pane.browser.clone(); b.go_forward(); }
+    }
+
+    pub fn reload(&self, block_id: &str, _state: &Arc<AppState>) {
+        let panes = self.panes.lock();
+        if let Some(pane) = panes.get(block_id) { let mut b = pane.browser.clone(); b.reload(); }
+    }
+
+    fn panes_arc(&self) -> Arc<Mutex<HashMap<String, BrowserPane>>> {
+        let ptr = &self.panes as *const Mutex<HashMap<String, BrowserPane>>;
+        let arc = unsafe { Arc::from_raw(ptr) };
+        let clone = arc.clone();
+        std::mem::forget(arc);
+        clone
     }
 }
