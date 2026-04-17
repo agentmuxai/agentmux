@@ -51,19 +51,22 @@ impl BrowserPaneManager {
             return Ok(());
         }
 
-        // Get main window's native handle
-        let parent_hwnd = {
-            let browsers = state.browsers.lock();
-            let main_browser = browsers.get("main")
-                .ok_or("no main browser registered")?;
-            let host = main_browser.host()
-                .ok_or("main browser has no host")?;
-            host.window_handle()
+        // Get main window's native handle.
+        // CEF Views mode returns NULL from host.window_handle(), so
+        // we enumerate Win32 windows by process ID (same as window.rs).
+        #[cfg(target_os = "windows")]
+        let parent_hwnd_raw = unsafe {
+            crate::commands::window::find_own_top_level_window()
         };
+        #[cfg(not(target_os = "windows"))]
+        let parent_hwnd_raw: *mut std::ffi::c_void = std::ptr::null_mut();
 
-        if parent_hwnd.0.is_null() {
-            return Err("main window HWND is null".to_string());
+        if parent_hwnd_raw.is_null() {
+            return Err("could not find main window HWND".to_string());
         }
+
+        // Wrap raw pointer in CEF's HWND type
+        let parent_hwnd = cef::sys::HWND(parent_hwnd_raw as *mut _);
 
         // Queue label for on_after_created registration
         let label = format!("browser-pane-{}", block_id);
