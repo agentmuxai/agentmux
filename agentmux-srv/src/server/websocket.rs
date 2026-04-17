@@ -926,23 +926,26 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                 let expanded = expand_home_dir_safe(&cmd.path);
                 let path = expanded.as_path();
 
-                // Path safety: must be an existing file (no creating new files
-                // in arbitrary locations) or inside user's home directory
+                // Path safety: restrict writes to under the user's home directory.
+                // Allowlist approach — safer than an incomplete denylist.
+                let home = dirs::home_dir()
+                    .ok_or("writeeditorfile: cannot determine home directory")?;
+                let canonical_home = home.canonicalize()
+                    .map_err(|e| format!("writeeditorfile: home dir: {e}"))?;
+
+                // Resolve the target path (canonicalize existing, or parent + filename for new files)
                 let canonical = path.canonicalize().or_else(|_| {
-                    // File doesn't exist yet — check parent exists
                     path.parent()
                         .and_then(|p| p.canonicalize().ok())
                         .map(|p| p.join(path.file_name().unwrap_or_default()))
                         .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "invalid path"))
                 }).map_err(|e| format!("writeeditorfile: {e}"))?;
 
-                // Block writes to sensitive directories
-                let canonical_str = canonical.to_string_lossy().to_lowercase();
-                let blocked = [".ssh", "authorized_keys", ".gnupg", ".aws/credentials"];
-                for pattern in &blocked {
-                    if canonical_str.contains(pattern) {
-                        return Err(format!("writeeditorfile: write to {} blocked", pattern));
-                    }
+                if !canonical.starts_with(&canonical_home) {
+                    return Err(format!(
+                        "writeeditorfile: path {} is outside home directory",
+                        canonical.display()
+                    ));
                 }
 
                 std::fs::write(&canonical, &cmd.content)
