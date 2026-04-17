@@ -260,22 +260,20 @@ impl AgentMuxHandler {
             return;
         }
 
-        // For browser panes: after the page loads, restore focus to the main
-        // browser. Chromium's renderer marks the last-navigated browser as the
-        // focused one for keystroke routing — without this, typing in the main
-        // window's terminals and URL bar stops working after a pane page loads.
-        // Skip IPC injection for panes (google.com etc. is not our frontend).
+        // For browser panes: skip IPC-port injection (the embedded page is
+        // not our frontend). Re-install the HWND subclass — Chromium creates
+        // the render HWND (Chrome_RenderWidgetHostHWND) during navigation, so
+        // it doesn't exist yet in on_after_created. We re-subclass on every
+        // navigation so newly-created child HWNDs are always covered.
+        //
+        // DO NOT force focus back to main here: WM_MOUSEWHEEL is routed to
+        // the focused HWND (on Windows without "scroll inactive windows"),
+        // so stealing focus away from the pane breaks scrolling. The
+        // FocusHandler cancel + WndProc redirect already keep focus off the
+        // pane during the *initial* navigation focus steal; user-driven
+        // focus goes through `browser_pane_focus` IPC, and clicking a main
+        // input goes through `main_window_focus`.
         if self.is_pane {
-            if let Some(main_browser) = self.state.browsers.lock().get("main").cloned() {
-                if let Some(host) = main_browser.host() {
-                    host.set_focus(1);
-                }
-            }
-
-            // Re-subclass children. Chromium creates the render HWND during
-            // navigation; it often doesn't exist yet in on_after_created, so
-            // we install hooks again here once the page has loaded and the
-            // full HWND tree exists.
             #[cfg(target_os = "windows")]
             if let Some(b) = browser.as_ref() {
                 if let Some(host) = b.host() {
@@ -287,8 +285,7 @@ impl AgentMuxHandler {
                     }
                 }
             }
-
-            tracing::info!("[pane-load-end] restored renderer focus to main browser");
+            tracing::info!("[pane-load-end] re-subclassed children after navigation");
             return;
         }
 
@@ -968,6 +965,23 @@ unsafe fn install_pane_focus_redirect(hwnd: *mut std::ffi::c_void) {
         wparam: usize,
         lparam: isize,
     ) -> isize {
+        // Diagnostic: surface mouse-wheel and key events so we can tell
+        // whether they reach the pane HWND at all when the user reports
+        // scrolling/typing breakage.
+        const WM_MOUSEWHEEL: u32 = 0x020A;
+        const WM_MOUSEHWHEEL: u32 = 0x020E;
+        const WM_KEYDOWN: u32 = 0x0100;
+        const WM_CHAR: u32 = 0x0102;
+        match msg {
+            WM_MOUSEWHEEL | WM_MOUSEHWHEEL => {
+                tracing::info!("[pane-wndproc] mouse-wheel hwnd={:p} msg=0x{:x}", hwnd, msg);
+            }
+            WM_KEYDOWN | WM_CHAR => {
+                tracing::info!("[pane-wndproc] key msg=0x{:x} wparam={}", msg, wparam);
+            }
+            _ => {}
+        }
+
         if msg == WM_SETFOCUS {
             // Intentional focus from the frontend's giveFocus() IPC: honor it
             // once, then revert to redirect-mode for subsequent events.
