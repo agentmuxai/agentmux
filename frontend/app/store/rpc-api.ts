@@ -200,7 +200,7 @@ class RpcApiType {
 
     // command "fileliststream" [responsestream]
 	FileListStreamCommand(client: RpcClient, data: FileListData, opts?: RpcOpts): AsyncGenerator<CommandRemoteListEntriesRtnData, void, boolean> {
-        return client.wshRpcStream("fileliststream", data, opts);
+        return client.rpcStream("fileliststream", data, opts);
     }
 
     // command "filemkdir" [call]
@@ -220,7 +220,7 @@ class RpcApiType {
 
     // command "filereadstream" [responsestream]
 	FileReadStreamCommand(client: RpcClient, data: FileData, opts?: RpcOpts): AsyncGenerator<FileData, void, boolean> {
-        return client.wshRpcStream("filereadstream", data, opts);
+        return client.rpcStream("filereadstream", data, opts);
     }
 
     // command "filesharecapability" [call]
@@ -230,7 +230,7 @@ class RpcApiType {
 
     // command "filestreamtar" [responsestream]
 	FileStreamTarCommand(client: RpcClient, data: CommandRemoteStreamTarData, opts?: RpcOpts): AsyncGenerator<Packet, void, boolean> {
-        return client.wshRpcStream("filestreamtar", data, opts);
+        return client.rpcStream("filestreamtar", data, opts);
     }
 
     // command "filewrite" [call]
@@ -335,7 +335,7 @@ class RpcApiType {
 
     // command "remotelistentries" [responsestream]
 	RemoteListEntriesCommand(client: RpcClient, data: CommandRemoteListEntriesData, opts?: RpcOpts): AsyncGenerator<CommandRemoteListEntriesRtnData, void, boolean> {
-        return client.wshRpcStream("remotelistentries", data, opts);
+        return client.rpcStream("remotelistentries", data, opts);
     }
 
     // command "remotemkdir" [call]
@@ -345,17 +345,17 @@ class RpcApiType {
 
     // command "remotestreamcpudata" [responsestream]
 	RemoteStreamCpuDataCommand(client: RpcClient, opts?: RpcOpts): AsyncGenerator<TimeSeriesData, void, boolean> {
-        return client.wshRpcStream("remotestreamcpudata", null, opts);
+        return client.rpcStream("remotestreamcpudata", null, opts);
     }
 
     // command "remotestreamfile" [responsestream]
 	RemoteStreamFileCommand(client: RpcClient, data: CommandRemoteStreamFileData, opts?: RpcOpts): AsyncGenerator<FileData, void, boolean> {
-        return client.wshRpcStream("remotestreamfile", data, opts);
+        return client.rpcStream("remotestreamfile", data, opts);
     }
 
     // command "remotetarstream" [responsestream]
 	RemoteTarStreamCommand(client: RpcClient, data: CommandRemoteStreamTarData, opts?: RpcOpts): AsyncGenerator<Packet, void, boolean> {
-        return client.wshRpcStream("remotetarstream", data, opts);
+        return client.rpcStream("remotetarstream", data, opts);
     }
 
     // command "remotewritefile" [call]
@@ -415,12 +415,12 @@ class RpcApiType {
 
     // command "streamcpudata" [responsestream]
 	StreamCpuDataCommand(client: RpcClient, data: CpuDataRequest, opts?: RpcOpts): AsyncGenerator<TimeSeriesData, void, boolean> {
-        return client.wshRpcStream("streamcpudata", data, opts);
+        return client.rpcStream("streamcpudata", data, opts);
     }
 
     // command "streamtest" [responsestream]
 	StreamTestCommand(client: RpcClient, opts?: RpcOpts): AsyncGenerator<number, void, boolean> {
-        return client.wshRpcStream("streamtest", null, opts);
+        return client.rpcStream("streamtest", null, opts);
     }
 
     // command "termgetscrollbacklines" [call]

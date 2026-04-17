@@ -72,7 +72,7 @@ class RpcClient {
         });
     }
 
-    wshRpcStream(command: string, data: any, opts: RpcOpts): AsyncGenerator<any, void, boolean> {
+    rpcStream(command: string, data: any, opts: RpcOpts): AsyncGenerator<any, void, boolean> {
         if (opts?.noresponse) {
             throw new Error("noresponse not supported for responsestream calls");
         }

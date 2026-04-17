@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { wpsReconnectHandler } from "@/app/store/wps";
-import { RpcClient } from "@/app/store/rpc-client";
+
 import { RpcRouter } from "@/app/store/rpc-router";
 import { getWSServerEndpoint } from "@/util/endpoints";
 import { addWSReconnectHandler, globalWS, initGlobalWS } from "./ws";
@@ -115,7 +115,7 @@ function shutdownWshrpc() {
     globalWS?.shutdown();
 }
 
-class UpstreamWshRpcProxy implements AbstractRpcClient {
+class UpstreamRpcProxy implements AbstractRpcClient {
     recvRpcMessage(msg: RpcMessage): void {
         const wsMsg: WSRpcCommand = { wscommand: "rpc", message: msg };
         globalWS?.pushMessage(wsMsg);
