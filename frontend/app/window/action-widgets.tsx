@@ -160,13 +160,14 @@ const MoreDropdown = ({
         onClose();
     };
 
-    const handleItemContextMenu = (e: MouseEvent, key: string) => {
+    const handleItemContextMenu = (e: MouseEvent, key: string, widget: WidgetConfigType) => {
         e.preventDefault();
         e.stopPropagation();
         const shortName = key.replace("defwidget@", "");
+        const label = widget.label ? widget.label.charAt(0).toUpperCase() + widget.label.slice(1) : "Widget";
         ContextMenuModel.showContextMenu(
             [
-                { label: "New Window", click: () => {
+                { label: `Open ${label} in New Window`, click: () => {
                     fireAndForget(async () => {
                         await getApi().openNewWindow();
                     });
@@ -190,7 +191,7 @@ const MoreDropdown = ({
                     <div
                         class="action-widget-more-item"
                         onClick={() => handleItemClick(widget)}
-                        onContextMenu={(e) => handleItemContextMenu(e, key)}
+                        onContextMenu={(e) => handleItemContextMenu(e, key, widget)}
                     >
                         <span class="action-widget-more-item-icon" style={{ color: widget.color }}>
                             <i class={makeIconClass(widget.icon, true, { defaultIcon: "browser" })}></i>
@@ -321,6 +322,18 @@ const ActionWidgets = (): JSX.Element => {
         setDropIndex(null);
     };
 
+    // ── Context menu active state (keeps hover highlight while menu is open) ──
+    const [contextMenuActiveKey, setContextMenuActiveKey] = createSignal<string | null>(null);
+
+    createEffect(() => {
+        if (contextMenuActiveKey() == null) return;
+        const handler = () => setContextMenuActiveKey(null);
+        requestAnimationFrame(() => {
+            document.addEventListener("mousedown", handler, { once: true });
+        });
+        onCleanup(() => document.removeEventListener("mousedown", handler));
+    });
+
     // ── Context menus ─────────────────────────────────────────────────────────
 
     const handleBarContextMenu = (e: MouseEvent) => {
@@ -344,13 +357,15 @@ const ActionWidgets = (): JSX.Element => {
         );
     };
 
-    const handlePinnedContextMenu = (e: MouseEvent, key: string) => {
+    const handlePinnedContextMenu = (e: MouseEvent, key: string, widget: WidgetConfigType) => {
         e.preventDefault();
         e.stopPropagation();
+        setContextMenuActiveKey(key);
         const shortName = key.replace("defwidget@", "");
+        const label = widget.label ? widget.label.charAt(0).toUpperCase() + widget.label.slice(1) : "Widget";
         ContextMenuModel.showContextMenu(
             [
-                { label: "New Window", click: () => {
+                { label: `Open ${label} in New Window`, click: () => {
                     fireAndForget(async () => {
                         await getApi().openNewWindow();
                     });
@@ -379,7 +394,7 @@ const ActionWidgets = (): JSX.Element => {
                                 <div class="action-widget-drop-indicator" />
                             </Show>
                             <div
-                                class={`action-widget-slot${draggingKey() === key ? " dragging" : ""}`}
+                                class={`action-widget-slot${draggingKey() === key ? " dragging" : ""}${contextMenuActiveKey() === key ? " context-active" : ""}`}
                                 data-widget-slot={idx()}
                                 onPointerDown={(e) => handlePointerDown(key, e)}
                                 onPointerMove={handlePointerMove}
@@ -389,7 +404,7 @@ const ActionWidgets = (): JSX.Element => {
                                 <ActionWidget
                                     widget={widget}
                                     iconOnly={iconOnly()}
-                                    onContextMenu={(e) => handlePinnedContextMenu(e, key)}
+                                    onContextMenu={(e) => handlePinnedContextMenu(e, key, widget)}
                                 />
                             </div>
                         </>
