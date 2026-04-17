@@ -117,13 +117,18 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
         }
     });
 
-    // Rebuild when content is loaded from a new file
+    // Rebuild only when a NEW file is opened (path changes), not on every
+    // keystroke. Tracking contentAtom here would destroy + recreate the
+    // CodeMirror instance on every keypress, losing cursor position.
     createEffect(() => {
-        const content = model.contentAtom();
-        const lang = model.languageAtom();
-        const readOnly = model.readOnlyAtom();
+        const _path = model.filePathAtom(); // reactive dependency
         const loading = model.loadingAtom();
-        if (!loading && containerRef) {
+        if (!loading && _path && containerRef) {
+            // Read content/language/readOnly non-reactively — we only
+            // want this effect to fire on path changes, not content.
+            const content = model.contentAtom();
+            const lang = model.languageAtom();
+            const readOnly = model.readOnlyAtom();
             void setupEditor(content, lang, readOnly);
         }
     });

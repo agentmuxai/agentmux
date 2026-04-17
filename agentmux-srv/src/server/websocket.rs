@@ -917,12 +917,37 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                 struct Cmd { path: String, content: String }
                 let cmd: Cmd = serde_json::from_value(data)
                     .map_err(|e| format!("writeeditorfile: {e}"))?;
+
+                // Size guard: match readeditorfile's 10MB limit
+                if cmd.content.len() > 10_000_000 {
+                    return Err("Content too large (>10MB)".to_string());
+                }
+
                 let expanded = expand_home_dir_safe(&cmd.path);
                 let path = expanded.as_path();
 
-                std::fs::write(path, &cmd.content)
+                // Path safety: must be an existing file (no creating new files
+                // in arbitrary locations) or inside user's home directory
+                let canonical = path.canonicalize().or_else(|_| {
+                    // File doesn't exist yet — check parent exists
+                    path.parent()
+                        .and_then(|p| p.canonicalize().ok())
+                        .map(|p| p.join(path.file_name().unwrap_or_default()))
+                        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "invalid path"))
+                }).map_err(|e| format!("writeeditorfile: {e}"))?;
+
+                // Block writes to sensitive directories
+                let canonical_str = canonical.to_string_lossy().to_lowercase();
+                let blocked = [".ssh", "authorized_keys", ".gnupg", ".aws/credentials"];
+                for pattern in &blocked {
+                    if canonical_str.contains(pattern) {
+                        return Err(format!("writeeditorfile: write to {} blocked", pattern));
+                    }
+                }
+
+                std::fs::write(&canonical, &cmd.content)
                     .map_err(|e| format!("writeeditorfile: {e}"))?;
-                tracing::info!(path = %path.display(), bytes = cmd.content.len(), "editor file saved");
+                tracing::info!(path = %canonical.display(), bytes = cmd.content.len(), "editor file saved");
 
                 Ok(None)
             })
