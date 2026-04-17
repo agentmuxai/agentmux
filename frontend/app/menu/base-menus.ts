@@ -62,8 +62,8 @@ export function createWidgetsMenu(fullConfig: any): MenuBuilder {
                 type: "checkbox" as const,
                 checked: isPinned,
                 click: async () => {
-                    const { RpcApi } = await import("@/app/store/wshclientapi");
-                    const { TabRpcClient } = await import("@/app/store/wshrpcutil");
+                    const { RpcApi } = await import("@/app/store/rpc-api");
+                    const { TabRpcClient } = await import("@/app/store/rpc-util");
                     const currentPinned = getPinnedKeys(settings, widgets);
                     const next = isPinned
                         ? currentPinned.filter((k) => k !== shortName)
@@ -81,8 +81,8 @@ export function createWidgetsMenu(fullConfig: any): MenuBuilder {
         type: "checkbox" as const,
         checked: iconOnly,
         click: async () => {
-            const { RpcApi } = await import("@/app/store/wshclientapi");
-            const { TabRpcClient } = await import("@/app/store/wshrpcutil");
+            const { RpcApi } = await import("@/app/store/rpc-api");
+            const { TabRpcClient } = await import("@/app/store/rpc-util");
             await RpcApi.SetConfigCommand(TabRpcClient, { "widget:icononly": !iconOnly } as any);
         },
     });
@@ -108,8 +108,8 @@ function createOpacityMenu(settings: Record<string, any>): MenuBuilder {
             type: "radio",
             checked: Math.abs(value - currentStep) < 0.001,
             click: async () => {
-                const { RpcApi } = await import("@/app/store/wshclientapi");
-                const { TabRpcClient } = await import("@/app/store/wshrpcutil");
+                const { RpcApi } = await import("@/app/store/rpc-api");
+                const { TabRpcClient } = await import("@/app/store/rpc-util");
                 if (value < 1.0) {
                     await RpcApi.SetConfigCommand(TabRpcClient, {
                         "window:opacity": value,

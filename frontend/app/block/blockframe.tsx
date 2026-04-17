@@ -15,8 +15,8 @@ import {
     useBlockAtom,
     WOS,
 } from "@/app/store/global";
-import { RpcApi } from "@/app/store/wshclientapi";
-import { TabRpcClient } from "@/app/store/wshrpcutil";
+import { RpcApi } from "@/app/store/rpc-api";
+import { TabRpcClient } from "@/app/store/rpc-util";
 import { ErrorBoundary } from "@/element/errorboundary";
 import { IconButton, ToggleIconButton } from "@/element/iconbutton";
 import { BlockStatsBadge } from "@/element/blockstats";

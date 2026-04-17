@@ -7,8 +7,8 @@
 // this as a block view — agent configuration lives inside the agent pane.
 
 import { BlockNodeModel } from "@/app/block/blocktypes";
-import { RpcApi } from "@/app/store/wshclientapi";
-import { TabRpcClient } from "@/app/store/wshrpcutil";
+import { RpcApi } from "@/app/store/rpc-api";
+import { TabRpcClient } from "@/app/store/rpc-util";
 import { waveEventSubscribe } from "@/app/store/wps";
 import { createSignal, type Accessor, type Setter } from "solid-js";
 

@@ -3,8 +3,8 @@
 
 import { atoms, getSettingsKeyAtom } from "@/app/store/global";
 import { focusManager } from "@/app/store/focusManager";
-import { RpcApi } from "@/app/store/wshclientapi";
-import { TabRpcClient } from "@/app/store/wshrpcutil";
+import { RpcApi } from "@/app/store/rpc-api";
+import { TabRpcClient } from "@/app/store/rpc-util";
 import { atomWithThrottle, boundNumber, createSignalAtom, SignalAtom } from "@/util/util";
 import type { Properties as CSSProperties } from "csstype";
 import { createMemo, createRoot, getOwner, runWithOwner, Owner } from "solid-js";

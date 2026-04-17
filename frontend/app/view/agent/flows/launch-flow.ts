@@ -30,8 +30,8 @@
  *   - "fatal"       — CLI missing, docker missing, provider unknown (retry won't help)
  */
 
-import { RpcApi } from "@/app/store/wshclientapi";
-import { TabRpcClient } from "@/app/store/wshrpcutil";
+import { RpcApi } from "@/app/store/rpc-api";
+import { TabRpcClient } from "@/app/store/rpc-util";
 import { waveEventSubscribe } from "@/app/store/wps";
 import * as WOS from "@/app/store/wos";
 import { BlockService } from "@/app/store/services";

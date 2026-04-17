@@ -13,8 +13,8 @@
 
 import { createEffect, createSignal, onCleanup, onMount, Show, type JSX } from "solid-js";
 import type { BlockNodeModel } from "@/app/block/blocktypes";
-import { RpcApi } from "@/app/store/wshclientapi";
-import { TabRpcClient } from "@/app/store/wshrpcutil";
+import { RpcApi } from "@/app/store/rpc-api";
+import { TabRpcClient } from "@/app/store/rpc-util";
 import { ForgeViewModel } from "@/app/view/forge/forge-model";
 import { ForgeDetail } from "@/app/view/forge/components/ForgeDetail";
 import { ForgeForm } from "@/app/view/forge/components/ForgeForm";

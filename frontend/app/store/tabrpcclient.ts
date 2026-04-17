@@ -3,9 +3,9 @@
 
 import { getApi } from "@/app/store/global";
 import { getLayoutModelForStaticTab } from "@/layout/index";
-import { RpcResponseHelper, WshClient } from "./wshclient";
+import { RpcResponseHelper, RpcClient } from "./rpc-client";
 
-export class TabClient extends WshClient {
+export class TabClient extends RpcClient {
     constructor(routeId: string) {
         super(routeId);
     }
