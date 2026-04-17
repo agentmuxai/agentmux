@@ -4,7 +4,7 @@
 
 - **Name:** AgentMux
 - **GitHub:** https://github.com/agentmuxai/agentmux
-- **Type:** CEF desktop application
+- **Type:** Desktop application (Chromium-based)
 - **Build System:** Task (Taskfile.yml)
 
 ---
@@ -57,20 +57,20 @@ On this dev machine, Ninja is at `/c/Systems/bin/ninja.exe` (copied from VS 2022
 
 ### Architecture
 
-AgentMux uses a **CEF (Chromium Embedded Framework)** host with a **100% Rust backend**:
+AgentMux is a **100% Rust** desktop app with a **Chromium-based UI**:
 
-- **agentmux-cef** = CEF host app (Rust, IPC bridge, window management, bundled Chromium)
-- **agentmux-launcher** = 325 KB launcher exe (sets DLL path, spawns CEF host from `runtime/`)
+- **agentmux-cef** = Host app (Rust, IPC bridge, window management, bundled Chromium)
+- **agentmux-launcher** = 325 KB launcher exe (sets DLL path, spawns host from `runtime/`)
 - **agentmux-srv** = Rust backend sidecar (auto-spawned, don't run manually)
 - **agentmux-common** = Shared utilities used by all the above
 
-**Important:** CEF is the only active host. The Tauri host has been removed. All Go and Electron code has been removed.
+**Note:** There is only one host. Tauri, Go, and Electron code has been removed.
 
 ### Multiple Instances Run in Parallel
 
 AgentMux is designed to run multiple instances simultaneously — different versions, dev + portable, or multiple portable copies. Each instance is fully isolated:
 
-- **Separate CEF data dirs:** Each instance uses its own CEF user data directory based on version, so browser state, cookies, and caches never collide.
+- **Separate data dirs:** Each instance uses its own user data directory based on version, so browser state, cookies, and caches never collide.
 - **Separate backend sidecars:** Each instance spawns its own `agentmux-srv` on a dynamic port. No port conflicts.
 - **Separate binaries:** Portable instances run from their own extracted folder. `task dev` copies to `dist/cef-dev/`. Nothing is shared.
 - **Dev mode isolation:** `AGENTMUX_DEV=1` → data dir `~/.agentmux-dev` (separate from `~/.agentmux`).
@@ -217,11 +217,11 @@ Ensure `frontend/wave.ts` uses `getApi().getAboutModalDetails().version`
 `dist/schema/` is wiped by `task clean` but automatically recreated by the
 `copy:schema` dependency in `dev`, `start`, `quickdev`, and `package` tasks.
 
-### Terminal rendering issues on Linux (Tauri-era, may not apply to CEF)
-**DO NOT enable WebGL as the default renderer on Linux.**
-WebKitGTK's WebGL2 had systemic rendering issues under the old Tauri host.
-CEF bundles its own Chromium so this may be resolved, but the Linux check should
-stay until verified on CEF Linux builds.
+### Terminal rendering issues on Linux
+**DO NOT enable WebGL as the default renderer on Linux** until verified.
+WebKitGTK's WebGL2 had systemic rendering issues under the old host.
+The current Chromium-based host may have resolved this, but the Linux
+check should stay until verified.
 
 ### AppImage shows cog/gear icon instead of app icon
 `appimagetool` creates `.DirIcon` inside the AppImage as an **absolute symlink** to the
