@@ -877,6 +877,86 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
         }),
     );
 
+    // readeditorfile → read file from disk for the editor pane
+    engine.register_handler(
+        "readeditorfile",
+        Box::new(|data, _ctx| {
+            Box::pin(async move {
+                #[derive(serde::Deserialize)]
+                struct Cmd { path: String }
+                let cmd: Cmd = serde_json::from_value(data)
+                    .map_err(|e| format!("readeditorfile: {e}"))?;
+                let expanded = expand_home_dir_safe(&cmd.path);
+                let path = expanded.as_path();
+
+                // Size guard: reject files > 10MB
+                let metadata = std::fs::metadata(path)
+                    .map_err(|e| format!("readeditorfile: {e}"))?;
+                if metadata.len() > 10_000_000 {
+                    return Err("File too large (>10MB)".to_string());
+                }
+
+                let content = std::fs::read_to_string(path)
+                    .map_err(|e| format!("readeditorfile: {e}"))?;
+                let read_only = metadata.permissions().readonly();
+
+                Ok(Some(serde_json::json!({
+                    "content": content,
+                    "read_only": read_only,
+                })))
+            })
+        }),
+    );
+
+    // writeeditorfile → write file to disk from the editor pane
+    engine.register_handler(
+        "writeeditorfile",
+        Box::new(|data, _ctx| {
+            Box::pin(async move {
+                #[derive(serde::Deserialize)]
+                struct Cmd { path: String, content: String }
+                let cmd: Cmd = serde_json::from_value(data)
+                    .map_err(|e| format!("writeeditorfile: {e}"))?;
+
+                // Size guard: match readeditorfile's 10MB limit
+                if cmd.content.len() > 10_000_000 {
+                    return Err("Content too large (>10MB)".to_string());
+                }
+
+                let expanded = expand_home_dir_safe(&cmd.path);
+                let path = expanded.as_path();
+
+                // Path safety: restrict writes to under the user's home directory.
+                // Allowlist approach — safer than an incomplete denylist.
+                let home = dirs::home_dir()
+                    .ok_or("writeeditorfile: cannot determine home directory")?;
+                let canonical_home = home.canonicalize()
+                    .map_err(|e| format!("writeeditorfile: home dir: {e}"))?;
+
+                // Resolve the target path (canonicalize existing, or parent + filename for new files)
+                let canonical = path.canonicalize().or_else(|_| {
+                    path.parent()
+                        .and_then(|p| p.canonicalize().ok())
+                        .map(|p| p.join(path.file_name().unwrap_or_default()))
+                        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "invalid path"))
+                }).map_err(|e| format!("writeeditorfile: {e}"))?;
+
+                if !canonical.starts_with(&canonical_home) {
+                    return Err(format!(
+                        "writeeditorfile: path {} is outside home directory",
+                        canonical.display()
+                    ));
+                }
+
+                std::fs::write(&canonical, &cmd.content)
+                    .map_err(|e| format!("writeeditorfile: {e}"))?;
+                tracing::info!(path = %canonical.display(), bytes = cmd.content.len(), "editor file saved");
+
+                Ok(None)
+            })
+        }),
+    );
+
     // CLI handlers (resolvecli, checkcliauth, runclilogin)
     super::cli_handlers::register_cli_handlers(engine, &state);
 

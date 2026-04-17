@@ -1603,6 +1603,23 @@ declare global {
         files: AgentConfigFile[];
     };
 
+    // wshrpc.CommandReadEditorFileData
+    type CommandReadEditorFileData = {
+        path: string;
+    };
+
+    // wshrpc.CommandReadEditorFileResult
+    type CommandReadEditorFileResult = {
+        content: string;
+        read_only: boolean;
+    };
+
+    // wshrpc.CommandWriteEditorFileData
+    type CommandWriteEditorFileData = {
+        path: string;
+        content: string;
+    };
+
     // wshrpc.CommandResolveCliData
     type CommandResolveCliData = {
         provider_id: string;

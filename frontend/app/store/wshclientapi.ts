@@ -574,6 +574,16 @@ class RpcApiType {
         return client.wshRpcCall("writeagentconfig", data, opts);
     }
 
+    // command "readeditorfile" [call]
+    ReadEditorFileCommand(client: WshClient, data: CommandReadEditorFileData, opts?: RpcOpts): Promise<CommandReadEditorFileResult> {
+        return client.wshRpcCall("readeditorfile", data, opts);
+    }
+
+    // command "writeeditorfile" [call]
+    WriteEditorFileCommand(client: WshClient, data: CommandWriteEditorFileData, opts?: RpcOpts): Promise<void> {
+        return client.wshRpcCall("writeeditorfile", data, opts);
+    }
+
     // command "resolvecli" [call]
     ResolveCliCommand(client: WshClient, data: CommandResolveCliData, opts?: RpcOpts): Promise<ResolveCliResult> {
         return client.wshRpcCall("resolvecli", data, opts);

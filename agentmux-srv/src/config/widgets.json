@@ -30,6 +30,30 @@
             }
         }
     },
+    "defwidget@browser": {
+        "display:order": 2,
+        "icon": "globe",
+        "label": "browser",
+        "description": "Embedded web browser",
+        "blockdef": {
+            "meta": {
+                "view": "browser",
+                "url": ""
+            }
+        }
+    },
+    "defwidget@editor": {
+        "display:order": 3,
+        "icon": "file-code",
+        "label": "editor",
+        "description": "Code editor with syntax highlighting",
+        "blockdef": {
+            "meta": {
+                "view": "editor",
+                "file": ""
+            }
+        }
+    },
     "defwidget@terminal": {
         "display:order": 5,
         "display:pinned": true,
