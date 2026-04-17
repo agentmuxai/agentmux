@@ -112,6 +112,34 @@ impl BrowserPaneManager {
     pub fn reload(&self, block_id: &str, state: &Arc<AppState>) {
         if let Some(mut b) = self.browser_for(state, block_id) { b.reload(); }
     }
+
+    /// Give keyboard focus to the pane's child HWND so keystrokes reach the
+    /// embedded page. Called by the frontend's ViewModel.giveFocus() when the
+    /// pane becomes the active layout node — without this, focus falls back to
+    /// the main window's invisible "dummy-focus" input and keystrokes vanish.
+    pub fn focus(&self, block_id: &str, state: &Arc<AppState>) {
+        if let Some(browser) = self.browser_for(state, block_id) {
+            if let Some(host) = browser.host() {
+                host.set_focus(1);
+                #[cfg(target_os = "windows")]
+                {
+                    let hwnd = host.window_handle();
+                    if !hwnd.0.is_null() {
+                        // Tell the subclass this focus request is intentional
+                        // (not Chromium's on-load focus steal) so it won't be
+                        // redirected back to the parent.
+                        crate::client::ALLOW_PANE_FOCUS_ONCE.store(
+                            true,
+                            std::sync::atomic::Ordering::Relaxed,
+                        );
+                        unsafe {
+                            windows_sys::Win32::UI::Input::KeyboardAndMouse::SetFocus(hwnd.0 as _);
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 // ── UI thread task: create browser ──────────────────────────────────────────
@@ -145,8 +173,8 @@ wrap_task! {
             // Queue label for on_after_created registration (stored in state.browsers)
             self.state.pending_window_labels.lock().push_back(self.label.clone());
 
-            let handler = crate::client::AgentMuxHandler::new(self.state.clone(), 0);
-            let mut client = Some(crate::client::AgentMuxClient::new(handler));
+            let handler = crate::client::AgentMuxHandler::new_with_pane(self.state.clone(), 0, true);
+            let mut client = Some(crate::client::AgentMuxClient::new(handler, true));
 
             let url_cef = CefString::from(self.url.as_str());
             let settings = BrowserSettings::default();
