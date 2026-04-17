@@ -138,7 +138,19 @@ export function BrowserViewComponent(props: ViewComponentProps<BrowserViewModel>
                 <div class="browser-error">{model.errorAtom()}</div>
             </Show>
 
-            <div class="browser-placeholder" ref={placeholderRef}>
+            <div
+                class="browser-placeholder"
+                ref={placeholderRef}
+                onMouseEnter={() => {
+                    // Windows routes WM_MOUSEWHEEL to the focused HWND, so hand
+                    // OS-level keyboard focus to the pane when the cursor is over
+                    // it. Without this, wheel events go to main's widget and the
+                    // embedded page can't scroll.
+                    if (paneCreated) {
+                        invokeCommand("browser_pane_focus", { block_id: model.blockId }).catch(() => {});
+                    }
+                }}
+            >
                 <Show when={!model.urlAtom() && !paneCreated}>
                     <div class="browser-empty">
                         <div class="browser-empty-icon">{"\uD83C\uDF10"}</div>

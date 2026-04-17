@@ -78,11 +78,17 @@ impl BrowserPaneManager {
                 if !hwnd.0.is_null() {
                     #[cfg(target_os = "windows")]
                     unsafe {
+                        // HWND_TOP = 0 brings the window to the top of the Z-order
+                        // within its parent. SWP_NOACTIVATE keeps keyboard focus where
+                        // it is. We MUST keep the pane on top of the main browser's
+                        // Chrome_RenderWidgetHostHWND — otherwise mouse-wheel events
+                        // over the visible pane area hit main's widget (higher in
+                        // Z-order) instead of the pane, and scrolling is broken.
                         windows_sys::Win32::UI::WindowsAndMessaging::SetWindowPos(
                             hwnd.0 as _,
-                            std::ptr::null_mut(),
+                            std::ptr::null_mut(), // HWND_TOP
                             rect.x, rect.y, rect.width, rect.height,
-                            0x0004, // SWP_NOZORDER
+                            0x0010, // SWP_NOACTIVATE
                         );
                     }
                 }
