@@ -160,14 +160,13 @@ const MoreDropdown = ({
         onClose();
     };
 
-    const handleItemContextMenu = (e: MouseEvent, key: string, widget: WidgetConfigType) => {
+    const handleItemContextMenu = (e: MouseEvent, key: string) => {
         e.preventDefault();
         e.stopPropagation();
         const shortName = key.replace("defwidget@", "");
-        const label = widget.label ? widget.label.charAt(0).toUpperCase() + widget.label.slice(1) : "Widget";
         ContextMenuModel.showContextMenu(
             [
-                { label: `Open ${label} in New Window`, click: () => {
+                { label: "New Window", click: () => {
                     fireAndForget(async () => {
                         await getApi().openNewWindow();
                     });
@@ -191,7 +190,7 @@ const MoreDropdown = ({
                     <div
                         class="action-widget-more-item"
                         onClick={() => handleItemClick(widget)}
-                        onContextMenu={(e) => handleItemContextMenu(e, key, widget)}
+                        onContextMenu={(e) => handleItemContextMenu(e, key)}
                     >
                         <span class="action-widget-more-item-icon" style={{ color: widget.color }}>
                             <i class={makeIconClass(widget.icon, true, { defaultIcon: "browser" })}></i>
@@ -324,15 +323,19 @@ const ActionWidgets = (): JSX.Element => {
 
     // ── Context menu active state (keeps hover highlight while menu is open) ──
     const [contextMenuActiveKey, setContextMenuActiveKey] = createSignal<string | null>(null);
+    let contextMenuCleanup: (() => void) | null = null;
 
-    createEffect(() => {
-        if (contextMenuActiveKey() == null) return;
-        const handler = () => setContextMenuActiveKey(null);
-        requestAnimationFrame(() => {
-            document.addEventListener("mousedown", handler, { once: true });
-        });
-        onCleanup(() => document.removeEventListener("mousedown", handler));
-    });
+    function armContextMenuDismiss(key: string) {
+        // Clean up any previous listener
+        contextMenuCleanup?.();
+        setContextMenuActiveKey(key);
+        const handler = () => {
+            setContextMenuActiveKey(null);
+            contextMenuCleanup = null;
+        };
+        document.addEventListener("mousedown", handler, { once: true });
+        contextMenuCleanup = () => document.removeEventListener("mousedown", handler);
+    }
 
     // ── Context menus ─────────────────────────────────────────────────────────
 
@@ -360,12 +363,11 @@ const ActionWidgets = (): JSX.Element => {
     const handlePinnedContextMenu = (e: MouseEvent, key: string, widget: WidgetConfigType) => {
         e.preventDefault();
         e.stopPropagation();
-        setContextMenuActiveKey(key);
+        armContextMenuDismiss(key);
         const shortName = key.replace("defwidget@", "");
-        const label = widget.label ? widget.label.charAt(0).toUpperCase() + widget.label.slice(1) : "Widget";
         ContextMenuModel.showContextMenu(
             [
-                { label: `Open ${label} in New Window`, click: () => {
+                { label: "New Window", click: () => {
                     fireAndForget(async () => {
                         await getApi().openNewWindow();
                     });
