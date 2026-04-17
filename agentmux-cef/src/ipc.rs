@@ -323,6 +323,11 @@ async fn route_command(
             state.browser_panes.reload(block_id, state);
             Ok(serde_json::json!(true))
         }
+        "browser_pane_focus" => {
+            let block_id = args.get("block_id").and_then(|v| v.as_str()).unwrap_or("");
+            state.browser_panes.focus(block_id, state);
+            Ok(serde_json::json!(true))
+        }
 
         // ---- Unknown command ----
         _ => Err(format!("Unknown command: {}", cmd)),

@@ -6,6 +6,7 @@
 // native CefBrowserView for sites that block iframes.
 
 import { BlockNodeModel } from "@/app/block/blocktypes";
+import { invokeCommand } from "@/app/platform/ipc";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { getWaveObjectAtom, makeORef } from "@/app/store/wos";
@@ -148,7 +149,12 @@ export class BrowserViewModel implements ViewModel {
     }
 
     giveFocus(): boolean {
-        return false;
+        // Tell the host to move Windows-level keyboard focus to this pane's
+        // HWND. Without this, FocusManager falls back to focusing a hidden
+        // "dummy-focus" input in the main window and keystrokes never reach
+        // the embedded page.
+        invokeCommand("browser_pane_focus", { block_id: this.blockId }).catch(() => {});
+        return true;
     }
 
     dispose(): void {}
