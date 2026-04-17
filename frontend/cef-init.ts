@@ -13,7 +13,7 @@ import { buildCefApi, initCefApi, isCef } from "@/util/cef-api";
  * Initialize the CEF API shim if running inside a CEF host.
  * Sets window.api to a CEF-backed implementation of AppApi.
  *
- * This MUST be awaited before importing wave.ts or any module
+ * This MUST be awaited before importing app-init.ts or any module
  * that calls getApi() at the top level.
  */
 export async function setupCefApi(): Promise<void> {
