@@ -326,15 +326,18 @@ const ActionWidgets = (): JSX.Element => {
     let contextMenuCleanup: (() => void) | null = null;
 
     function armContextMenuDismiss(key: string) {
-        // Clean up any previous listener
         contextMenuCleanup?.();
         setContextMenuActiveKey(key);
-        const handler = () => {
+        const clear = () => {
             setContextMenuActiveKey(null);
+            document.removeEventListener("mousedown", clear);
+            document.removeEventListener("keydown", onKey);
             contextMenuCleanup = null;
         };
-        document.addEventListener("mousedown", handler, { once: true });
-        contextMenuCleanup = () => document.removeEventListener("mousedown", handler);
+        const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") clear(); };
+        document.addEventListener("mousedown", clear, { once: true });
+        document.addEventListener("keydown", onKey);
+        contextMenuCleanup = clear;
     }
 
     // ── Context menus ─────────────────────────────────────────────────────────
@@ -360,7 +363,7 @@ const ActionWidgets = (): JSX.Element => {
         );
     };
 
-    const handlePinnedContextMenu = (e: MouseEvent, key: string, widget: WidgetConfigType) => {
+    const handlePinnedContextMenu = (e: MouseEvent, key: string) => {
         e.preventDefault();
         e.stopPropagation();
         armContextMenuDismiss(key);
@@ -406,7 +409,7 @@ const ActionWidgets = (): JSX.Element => {
                                 <ActionWidget
                                     widget={widget}
                                     iconOnly={iconOnly()}
-                                    onContextMenu={(e) => handlePinnedContextMenu(e, key, widget)}
+                                    onContextMenu={(e) => handlePinnedContextMenu(e, key)}
                                 />
                             </div>
                         </>
