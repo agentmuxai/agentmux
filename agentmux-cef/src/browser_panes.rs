@@ -151,8 +151,12 @@ wrap_task! {
             let url_cef = CefString::from(self.url.as_str());
             let settings = BrowserSettings::default();
 
-            // Use None for client — CEF creates a default client that handles
-            // rendering. Sharing the main browser's client caused issues.
+            // Use a white background so we can distinguish "loaded but blank"
+            // from "not rendering". The main app uses black (0xFF000000).
+            let mut settings = settings;
+            settings.background_color = 0xFFFFFFFF; // white
+
+            // Create with None client — CEF provides default rendering.
             let new_bv = match browser_view_create(
                 None,
                 Some(&url_cef),
@@ -188,10 +192,27 @@ wrap_task! {
                     ctrl.set_bounds(Some(&self.rect));
 
                     // CEF issue #3790: overlays with CUSTOM docking may start
-                    // hidden. The OverlayController wraps a View — make it visible.
+                    // hidden. Make the overlay and its contents visible.
                     if let Some(contents) = ctrl.contents_view() {
+                        let is_visible = contents.is_visible();
+                        tracing::info!(
+                            block_id = %self.block_id,
+                            contents_visible_before = is_visible,
+                            "setting overlay contents visible"
+                        );
                         contents.set_visible(1);
                     }
+
+                    // Also make the view itself visible
+                    view.set_visible(1);
+
+                    let bounds = ctrl.bounds();
+                    tracing::info!(
+                        block_id = %self.block_id,
+                        ctrl_x = bounds.x, ctrl_y = bounds.y,
+                        ctrl_w = bounds.width, ctrl_h = bounds.height,
+                        "overlay controller bounds after set_bounds"
+                    );
 
                     tracing::info!(
                         block_id = %self.block_id,
