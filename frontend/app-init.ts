@@ -40,7 +40,7 @@ import { render } from "solid-js/web";
 import { benchMark, benchDump } from "@/util/startup-bench";
 import { ContextMenuModel } from "@/app/store/contextmenu";
 
-// Deferred — assigned inside initBare() after window.api is ready.
+// Deferred — assigned inside initApp() after window.api is ready.
 // Do NOT call getApi() at module level: this file is statically imported by
 // bootstrap.ts before setupCefApi() runs, so window.api
 // does not exist yet.
@@ -132,7 +132,7 @@ async function initInstanceTracking(): Promise<void> {
         setWindowCountAtom(windowCount);
 
         // Keep count in sync whenever any window opens or closes.
-        // Uses the platform-agnostic listen from AppApi (works in both Tauri and CEF).
+        // Uses the platform-agnostic listen from AppApi.
         await getApi().listen("window-instances-changed", (event: any) => {
             const payload = event?.payload ?? event;
             setWindowCountAtom(typeof payload === "number" ? payload : 0);
@@ -143,7 +143,7 @@ async function initInstanceTracking(): Promise<void> {
 }
 
 /**
- * Initialize AgentMux in host app mode (Tauri or CEF) by fetching
+ * Initialize AgentMux in host app mode by fetching
  * client/window/workspace/tab data from backend, verifying objects exist,
  * and creating missing ones if needed.
  */
@@ -315,12 +315,12 @@ async function initHostNewWindow(): Promise<void> {
     }
 }
 
-export async function initBare() {
+export async function initApp() {
     // window.api is guaranteed to exist here — bootstrap.ts calls
-    // setupCefApi() before calling initBare().
+    // setupCefApi() before calling initApp().
     // Defensive wait: if a race condition leaves window.api unset, poll briefly.
     if (!window.api) {
-        console.error("[initBare] window.api not ready — polling (max 5s)");
+        console.error("[initApp] window.api not ready — polling (max 5s)");
         await new Promise<void>((resolve, reject) => {
             const check = setInterval(() => {
                 if (window.api) { clearInterval(check); resolve(); }
@@ -330,7 +330,7 @@ export async function initBare() {
                 if (window.api) {
                     resolve();
                 } else {
-                    reject(new Error("[initBare] window.api still undefined after 5s — host API bridge failed to initialize"));
+                    reject(new Error("[initApp] window.api still undefined after 5s — host API bridge failed to initialize"));
                 }
             }, 5000);
         });
@@ -377,10 +377,10 @@ export async function initBare() {
     try {
         await Promise.race([fontsPromise, timeoutPromise]);
     } catch (fontErr) {
-        getApi().sendLog(`initBare: font wait error (non-fatal): ${fontErr}`);
+        getApi().sendLog(`initApp: font wait error (non-fatal): ${fontErr}`);
     }
     benchMark("fonts-ready");
-    const fontsMsg = `[startup-perf] initBare (fonts ready): ${(performance.now() - bareStart).toFixed(1)}ms`;
+    const fontsMsg = `[startup-perf] initApp (fonts ready): ${(performance.now() - bareStart).toFixed(1)}ms`;
     try { getApi().sendLog(fontsMsg); } catch {}
     getApi().sendLog("Init Bare Done");
     getApi().setWindowInitStatus("ready");
@@ -405,7 +405,7 @@ export async function initBare() {
                 await initHostNewWindow();
             }
         } catch (error) {
-            console.error("[initBare] Host initialization failed:", error);
+            console.error("[initApp] Host initialization failed:", error);
             getApi().sendLog(`Host init error: ${error}`);
             showStartupError(String(error));
         }
@@ -414,8 +414,8 @@ export async function initBare() {
     // Safety net: if body is still hidden after 30s, force it visible
     setTimeout(() => {
         if (document.body.style.visibility === "hidden") {
-            console.warn("[initBare] Safety timeout: forcing body visible after 30s");
-            getApi().sendLog("[initBare] Safety timeout: forcing body visible after 30s");
+            console.warn("[initApp] Safety timeout: forcing body visible after 30s");
+            getApi().sendLog("[initApp] Safety timeout: forcing body visible after 30s");
             document.body.style.visibility = "visible";
             document.body.style.opacity = "1";
             document.body.classList.remove("is-transparent");
@@ -423,15 +423,15 @@ export async function initBare() {
     }, 30_000);
 }
 
-// bootstrap.ts calls initBare() directly (static import).
+// bootstrap.ts calls initApp() directly (static import).
 // This self-start path is kept only for dev environments where the
 // bootstrap entry point is not used. Skip if running in Tauri or CEF
-// since the bootstrap handles setup (window.api) before calling initBare().
+// since the bootstrap handles setup (window.api) before calling initApp().
 if (!isHostApp()) {
     if (document.readyState === "loading") {
-        document.addEventListener("DOMContentLoaded", initBare);
+        document.addEventListener("DOMContentLoaded", initApp);
     } else {
-        initBare();
+        initApp();
     }
 }
 

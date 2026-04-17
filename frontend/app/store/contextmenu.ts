@@ -8,7 +8,7 @@ class ContextMenuModelType {
 
     constructor() {}
 
-    // Must be called from wave.ts:initBare() after setupTauriApi() has installed window.api.
+    // Must be called from app-init.ts:initApp() after setupCefApi() has installed window.api.
     // Calling getApi() here (module level) would crash before window.api exists.
     init() {
         getApi().onContextMenuClick(this.handleContextMenuClick.bind(this));

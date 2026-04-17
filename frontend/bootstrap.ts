@@ -3,11 +3,11 @@
 //
 // Application bootstrap — entry point loaded by index.html.
 // Initializes logging, detects the host runtime, sets up the API bridge,
-// then launches the main application (wave.ts).
+// then launches the main application (app-init.ts).
 
 import { initLogPipe } from "./log/log-pipe";
 import { setupCefApi } from "./cef-init";
-import { initBare } from "./wave";
+import { initApp } from "./app-init";
 import { benchMark } from "@/util/startup-bench";
 
 // Pipe all console.log/warn/error to the Rust host log file.
@@ -98,17 +98,17 @@ async function bootstrap() {
         log("INFO", "API initialized, window.api available:", !!window.api);
 
         // Launch the main application
-        log("INFO", "Starting main application (wave.ts initBare)...");
-        benchMark("initBare-start");
+        log("INFO", "Starting main application (app-init)...");
+        benchMark("initApp-start");
         try {
-            await initBare();
+            await initApp();
             log("INFO", "✅ Main application loaded successfully");
-        } catch (waveError) {
-            log("ERROR", "Failed in initBare:", waveError);
-            log("ERROR", "Wave error name:", (waveError as Error)?.name);
-            log("ERROR", "Wave error message:", (waveError as Error)?.message);
-            log("ERROR", "Wave error stack:", (waveError as Error)?.stack);
-            throw waveError;
+        } catch (initError) {
+            log("ERROR", "Failed in initApp:", initError);
+            log("ERROR", "Init error name:", (initError as Error)?.name);
+            log("ERROR", "Init error message:", (initError as Error)?.message);
+            log("ERROR", "Init error stack:", (initError as Error)?.stack);
+            throw initError;
         }
 
     } catch (error) {
