@@ -1,17 +1,17 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { sendRpcCommand, sendRpcResponse } from "@/app/store/wshrpcutil-base";
+import { sendRpcCommand, sendRpcResponse } from "@/app/store/rpc-util-base";
 import * as util from "@/util/util";
 
 const notFoundLogMap = new Map<string, boolean>();
 
 class RpcResponseHelper {
-    client: WshClient;
+    client: RpcClient;
     cmdMsg: RpcMessage;
     done: boolean;
 
-    constructor(client: WshClient, cmdMsg: RpcMessage) {
+    constructor(client: RpcClient, cmdMsg: RpcMessage) {
         this.client = client;
         this.cmdMsg = cmdMsg;
         // if reqid is null, no response required
@@ -39,7 +39,7 @@ class RpcResponseHelper {
     }
 }
 
-class WshClient {
+class RpcClient {
     routeId: string;
     openRpcs: Map<string, ClientRpcEntry> = new Map();
 
@@ -47,7 +47,7 @@ class WshClient {
         this.routeId = routeId;
     }
 
-    wshRpcCall(command: string, data: any, opts: RpcOpts): Promise<any> {
+    rpcCall(command: string, data: any, opts: RpcOpts): Promise<any> {
         const msg: RpcMessage = {
             command: command,
             data: data,
@@ -156,4 +156,4 @@ class WshClient {
     }
 }
 
-export { RpcResponseHelper, WshClient };
+export { RpcResponseHelper, RpcClient };

@@ -23,12 +23,12 @@ function makeTabRouteId(tabId: string): string {
     return `tab:${tabId}`;
 }
 
-class WshRouter {
-    routeMap: Map<string, AbstractWshClient>; // routeid -> client
-    upstreamClient: AbstractWshClient;
+class RpcRouter {
+    routeMap: Map<string, AbstractRpcClient>; // routeid -> client
+    upstreamClient: AbstractRpcClient;
     rpcMap: Map<string, RouteInfo>; // rpcid -> routeinfo
 
-    constructor(upstreamClient: AbstractWshClient) {
+    constructor(upstreamClient: AbstractRpcClient) {
         this.routeMap = new Map();
         this.rpcMap = new Map();
         if (upstreamClient == null) {
@@ -121,7 +121,7 @@ class WshRouter {
         dlog("bad rpc message recevied by router, no command, reqid, or resid (discarding)", msg);
     }
 
-    registerRoute(routeId: string, client: AbstractWshClient) {
+    registerRoute(routeId: string, client: AbstractRpcClient) {
         if (routeId == SysRouteName) {
             throw new Error(`Cannot register route with reserved name (${routeId})`);
         }
@@ -149,4 +149,4 @@ class WshRouter {
     }
 }
 
-export { makeFeBlockRouteId, makeTabRouteId, WshRouter };
+export { makeFeBlockRouteId, makeTabRouteId, RpcRouter };

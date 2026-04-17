@@ -441,7 +441,7 @@ declare global {
         type?: "error" | "update" | "info" | "warning";
     };
 
-    interface AbstractWshClient {
+    interface AbstractRpcClient {
         recvRpcMessage(msg: RpcMessage): void;
     }
 

@@ -10,8 +10,8 @@ import {
 } from "@/app/store/keymodel";
 import { modalsModel } from "@/app/store/modalmodel";
 import { ClientService, WindowService, WorkspaceService } from "@/app/store/services";
-import { RpcApi } from "@/app/store/wshclientapi";
-import { initWshrpc, TabRpcClient } from "@/app/store/wshrpcutil";
+import { RpcApi } from "@/app/store/rpc-api";
+import { initWshrpc, TabRpcClient } from "@/app/store/rpc-util";
 import { getLayoutModelForStaticTab } from "@/layout/index";
 import {
     atoms,
@@ -57,10 +57,6 @@ function isHostApp(): boolean {
     return typeof window.__AGENTMUX_IPC_PORT__ !== "undefined";
 }
 
-/** @deprecated Tauri host was removed. Always returns false. */
-export function isTauriHost(): boolean {
-    return false;
-}
 
 // Multi-instance title update was Tauri-only (removed). The CEF host
 // sets the window title from document.title via on_title_change.
@@ -231,35 +227,12 @@ async function initHostWave(): Promise<void> {
         // Initialize instance tracking (must come after initWaveWrap so global state is ready)
         await initInstanceTracking();
 
-        // Show the window now that it's fully initialized (Tauri starts hidden).
-        // In CEF, the window is already visible — these calls are no-ops.
-        if (isTauriHost()) {
-            try {
-                const { getCurrentWindow } = await import("@tauri-apps/api/window");
-                const currentWindow = getCurrentWindow();
-                benchMark("window-show");
-                await currentWindow.show();
-                if (platform === "linux") {
-                    await currentWindow.center();
-                }
-                await currentWindow.setFocus();
-            } catch (showError) {
-                console.warn("[initHostWave] Failed to show window:", showError);
-            }
-        }
         benchDump(); // emit full startup timeline to log
 
     } catch (error) {
         console.error("[initHostWave] Initialization failed:", error);
         getApi().sendLog(`[initHostWave] ERROR: ${error}`);
         showStartupError(String(error));
-        // Show Tauri window even on error so user can see the error message
-        if (isTauriHost()) {
-            try {
-                const { getCurrentWindow } = await import("@tauri-apps/api/window");
-                await getCurrentWindow().show();
-            } catch {}
-        }
     }
 }
 
@@ -335,30 +308,10 @@ async function initHostNewWindow(): Promise<void> {
         // Initialize instance tracking (must come after initWaveWrap so global state is ready)
         await initInstanceTracking();
 
-        // Show the window now that it's initialized
-        if (isTauriHost()) {
-            try {
-                const { getCurrentWindow } = await import("@tauri-apps/api/window");
-                const currentWindow = getCurrentWindow();
-                await currentWindow.show();
-                await currentWindow.setFocus();
-                getApi().sendLog("[initHostNewWindow] Window shown and focused");
-            } catch (showError) {
-                console.warn("[initHostNewWindow] Failed to show window:", showError);
-            }
-        }
-
     } catch (error) {
         console.error("[initHostNewWindow] Initialization failed:", error);
         try { getApi().sendLog(`[initHostNewWindow] Error: ${error}`); } catch {}
         showStartupError("New window: " + String(error));
-        // Show Tauri window so user sees the error
-        if (isTauriHost()) {
-            try {
-                const { getCurrentWindow } = await import("@tauri-apps/api/window");
-                await getCurrentWindow().show();
-            } catch {}
-        }
     }
 }
 
@@ -409,14 +362,8 @@ export async function initBare() {
     }
     setKeyUtilPlatform(platform);
     loadFonts();
-    // Reset window zoom to 1.0 (per-pane zoom is handled via block metadata,
-    // chrome zoom via CSS custom properties).
-    // CEF: post_task dispatch for set_zoom_level is not yet working reliably.
-    // Skip in CEF to avoid deadlock. TODO: debug post_task integration.
-    const api = getApi();
-    if (isTauriHost() && api && typeof api.setZoomFactor === "function") {
-        api.setZoomFactor(1.0);
-    }
+    // Per-pane zoom is handled via block metadata. Chrome zoom via CSS custom
+    // properties. Window-level zoom reset is not needed.
 
     // Initialize chrome zoom CSS variables
     import("@/app/store/zoom.platform").then(({ initChromeZoom }) => {

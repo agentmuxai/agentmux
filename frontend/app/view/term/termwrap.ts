@@ -3,8 +3,8 @@
 
 import { getFileSubject } from "@/app/store/wps";
 import { sendWSCommand } from "@/app/store/ws";
-import { RpcApi } from "@/app/store/wshclientapi";
-import { TabRpcClient } from "@/app/store/wshrpcutil";
+import { RpcApi } from "@/app/store/rpc-api";
+import { TabRpcClient } from "@/app/store/rpc-util";
 import { WOS, atoms, fetchWaveFile, getSettingsKeyAtom, openLink } from "@/app/store/global";
 import * as services from "@/app/store/services";
 import { PLATFORM, PlatformLinux, PlatformMacOS, PlatformWindows } from "@/util/platformutil";

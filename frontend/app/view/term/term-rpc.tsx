@@ -1,11 +1,11 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { RpcResponseHelper, WshClient } from "@/app/store/wshclient";
-import { makeFeBlockRouteId } from "@/app/store/wshrouter";
+import { RpcResponseHelper, RpcClient } from "@/app/store/rpc-client";
+import { makeFeBlockRouteId } from "@/app/store/rpc-router";
 import { TermViewModel } from "@/app/view/term/term";
 
-export class TermWshClient extends WshClient {
+export class TermRpcClient extends RpcClient {
     blockId: string;
     model: TermViewModel;
 
