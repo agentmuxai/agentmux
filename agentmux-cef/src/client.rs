@@ -1219,8 +1219,6 @@ unsafe fn install_frameless_resize_hook(hwnd: *mut std::ffi::c_void) {
     tracing::info!("Installed frameless resize hook (WM_NCCALCSIZE + WM_NCHITTEST)");
 }
 
-/// Load the app icon from the exe's embedded resource and set it on the window.
-/// This makes the icon appear in the taskbar and Alt+Tab switcher instead of
 /// Hide the given top-level HWND from the Windows taskbar via
 /// `ITaskbarList::DeleteTab`. The window remains fully usable — Alt-Tab still
 /// finds it, it takes focus, repaints, etc. — but the shell paints no taskbar
@@ -1300,6 +1298,8 @@ unsafe fn skip_taskbar(hwnd: *mut std::ffi::c_void) {
     (vtbl.release)(tbl);
 }
 
+/// Load the app icon from the exe's embedded resource and set it on the window.
+/// This makes the icon appear in the taskbar and Alt+Tab switcher instead of
 /// the default CEF/Chromium icon.
 #[cfg(target_os = "windows")]
 unsafe fn set_window_icon(hwnd: *mut std::ffi::c_void) {
