@@ -23,30 +23,56 @@ pub struct BackendSpawnResult {
 pub async fn spawn_backend(state: &Arc<AppState>) -> Result<BackendSpawnResult, String> {
     tracing::info!("spawn_backend() called");
 
-    // 1. Resolve directories — per-version top-level dir (matches Tauri pattern)
-    //    Tauri uses: ai.agentmux.app.v0-31-100/
-    //    CEF uses:   ai.agentmux.cef.v0-32-111/
-    //    Dev uses:   ai.agentmux.cef.dev/
+    // 1. Resolve directories.
+    //
+    // Portable mode: CEF host binary lives in <portable-root>/runtime/.
+    //   data_dir   = <portable-root>/data/
+    //   config_dir = <portable-root>/data/config/
+    //
+    // Installed mode: version-isolated dirs in platform AppData (unchanged).
+    //   data_dir   = %LOCALAPPDATA%/ai.agentmux.cef.vX/
+    //   config_dir = %APPDATA%/ai.agentmux.cef.vX/
     let current_version = env!("CARGO_PKG_VERSION");
     let version_instance_id = format!("v{}", current_version);
 
-    let is_dev = cfg!(debug_assertions);
-    let dir_name = if is_dev {
-        "ai.agentmux.cef.dev".to_string()
+    // Detect portable root: if the CEF host is inside a directory named "runtime",
+    // its parent is the portable root and data lives in <root>/data/.
+    let host_exe_dir = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.to_path_buf()))
+        .unwrap_or_default();
+    let portable_root: Option<std::path::PathBuf> = if host_exe_dir
+        .file_name()
+        .and_then(|n| n.to_str())
+        == Some("runtime")
+    {
+        host_exe_dir.parent().map(|p| p.to_path_buf())
     } else {
-        let version_slug = current_version.replace('.', "-");
-        format!("ai.agentmux.cef.v{}", version_slug)
+        None
     };
 
-    let data_dir = dirs::data_dir()
-        .ok_or_else(|| "Failed to get data dir".to_string())?
-        .join(&dir_name);
-    let config_dir = dirs::config_dir()
-        .ok_or_else(|| "Failed to get config dir".to_string())?
-        .join(&dir_name);
+    let (data_dir, config_dir) = if let Some(ref root) = portable_root {
+        let base = root.join("data");
+        (base.clone(), base.join("config"))
+    } else {
+        let is_dev = cfg!(debug_assertions);
+        let dir_name = if is_dev {
+            "ai.agentmux.cef.dev".to_string()
+        } else {
+            let version_slug = current_version.replace('.', "-");
+            format!("ai.agentmux.cef.v{}", version_slug)
+        };
+        let d = dirs::data_dir()
+            .ok_or_else(|| "Failed to get data dir".to_string())?
+            .join(&dir_name);
+        let c = dirs::config_dir()
+            .ok_or_else(|| "Failed to get config dir".to_string())?
+            .join(&dir_name);
+        (d, c)
+    };
 
+    tracing::info!(portable = portable_root.is_some(), "Using data_dir: {}", data_dir.display());
     tracing::info!("Using config_dir: {}", config_dir.display());
-    tracing::info!("Using data_dir: {}", data_dir.display());
 
     // 2. Ensure directory tree (flat — no instances/ subdirectory)
     std::fs::create_dir_all(data_dir.join("db"))

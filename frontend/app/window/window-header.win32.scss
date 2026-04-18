@@ -7,7 +7,10 @@
 // This MUST remain pure CSS — setting the width from JS breaks Windows.
 
 .window-header {
-    --default-indent: 10px;
+    // Left drag-spacer width. Kept small so the + New Tab button sits close
+    // to the window's left edge (Win11 Edge / Chrome-style). Any smaller and
+    // the user loses a grabbable drag area next to the tabs.
+    --default-indent: 2px;
 }
 
 .config-error-message {

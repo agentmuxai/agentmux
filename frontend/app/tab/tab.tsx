@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { atoms, recordTEvent, refocusNode } from "@/app/store/global";
-import { RpcApi } from "@/app/store/wshclientapi";
-import { TabRpcClient } from "@/app/store/wshrpcutil";
+import { RpcApi } from "@/app/store/rpc-api";
+import { TabRpcClient } from "@/app/store/rpc-util";
 import { Button } from "@/element/button";
 import { fireAndForget } from "@/util/util";
 import clsx from "clsx";
@@ -12,7 +12,6 @@ import { Portal } from "solid-js/web";
 import type { JSX } from "solid-js";
 import { ObjectService } from "../store/services";
 import { makeORef, useWaveObjectValue } from "../store/wos";
-import { TabBarModel } from "./tabbar-model";
 import "./tab.scss";
 
 // 10 equally-spaced hues (0°, 36°, 72°, … 324°) — full spectrum, no near-duplicates
@@ -32,10 +31,8 @@ export const TAB_COLORS: { name: string; hex: string }[] = [
 interface TabContextPanelProps {
     anchor: DOMRect;
     currentColor: string | null | undefined;
-    isPinned: boolean;
     onColorSelect: (hex: string | null) => void;
     onRename: () => void;
-    onPinChange: () => void;
     onClose: (e?: MouseEvent) => void;
     onCloseTab: () => void;
 }
@@ -93,9 +90,6 @@ const TabContextPanel = (props: TabContextPanelProps): JSX.Element => {
                     </button>
                 </div>
                 <div class="tab-context-actions">
-                    <button class="tab-context-btn" onClick={() => { props.onPinChange(); props.onClose(); }}>
-                        {props.isPinned ? "📌 Unpin" : "📌 Pin"}
-                    </button>
                     <button class="tab-context-btn" onClick={() => { props.onRename(); props.onClose(); }}>
                         ✏️ Rename
                     </button>
@@ -116,23 +110,18 @@ interface TabProps {
     isDragging: boolean;
     tabWidth: number;
     isNew: boolean;
-    isPinned: boolean;
     onSelect: () => void;
     onClose: (event: MouseEvent | null) => void;
     onDragStart: (event: DragEvent) => void;
     onLoaded: () => void;
-    onPinChange: () => void;
 }
 
 function Tab(props: TabProps): JSX.Element {
     const [tabData] = useWaveObjectValue<Tab>(makeORef("tab", props.id));
     const [originalName, setOriginalName] = createSignal("");
     const [isEditable, setIsEditable] = createSignal(false);
-    const [isJiggling, setIsJiggling] = createSignal(false);
     const [showColorPicker, setShowColorPicker] = createSignal(false);
     const [colorPickerAnchor, setColorPickerAnchor] = createSignal<DOMRect | null>(null);
-
-    const jiggleTrigger = TabBarModel.getInstance().jigglePinAtom;
 
     let editableRef!: HTMLDivElement;
     let tabRef!: HTMLDivElement;
@@ -221,17 +210,6 @@ function Tab(props: TabProps): JSX.Element {
         }
     });
 
-    createEffect(() => {
-        const trigger = jiggleTrigger();
-        if (props.active && props.isPinned && trigger > 0) {
-            setIsJiggling(true);
-            const timeout = setTimeout(() => {
-                setIsJiggling(false);
-            }, 500);
-            onCleanup(() => clearTimeout(timeout));
-        }
-    });
-
     const handleMouseDownOnClose = (event: MouseEvent) => {
         event.stopPropagation();
     };
@@ -270,7 +248,7 @@ function Tab(props: TabProps): JSX.Element {
                 onClick={props.onSelect}
                 onContextMenu={handleContextMenu}
                 data-tab-id={props.id}
-                data-tauri-drag-region="false"
+                data-drag-region="false"
             >
                 <div class="tab-inner">
                     <div
@@ -283,40 +261,22 @@ function Tab(props: TabProps): JSX.Element {
                     >
                         {tabData()?.name}
                     </div>
-                    <Show
-                        when={props.isPinned}
-                        fallback={
-                            <Button
-                                className="ghost grey close"
-                                onClick={props.onClose}
-                                onMouseDown={handleMouseDownOnClose}
-                                title="Close Tab"
-                            >
-                                <i class="fa fa-solid fa-xmark" />
-                            </Button>
-                        }
+                    <Button
+                        className="ghost grey close"
+                        onClick={props.onClose}
+                        onMouseDown={handleMouseDownOnClose}
+                        title="Close Tab"
                     >
-                        <Button
-                            className={clsx("ghost grey pin", { jiggling: isJiggling() })}
-                            onClick={(e: MouseEvent) => {
-                                e.stopPropagation();
-                                props.onPinChange();
-                            }}
-                            title="Unpin Tab"
-                        >
-                            <i class="fa fa-solid fa-thumbtack" />
-                        </Button>
-                    </Show>
+                        <i class="fa fa-solid fa-xmark" />
+                    </Button>
                 </div>
             </div>
             <Show when={showColorPicker() && colorPickerAnchor()}>
                 <TabContextPanel
                     anchor={colorPickerAnchor()}
                     currentColor={tabColor()}
-                    isPinned={props.isPinned}
                     onColorSelect={handleColorSelect}
                     onRename={() => handleRenameTab()}
-                    onPinChange={() => props.onPinChange()}
                     onClose={() => setShowColorPicker(false)}
                     onCloseTab={() => props.onClose(null)}
                 />

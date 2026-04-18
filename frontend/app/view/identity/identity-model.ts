@@ -1,6 +1,12 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+// NOTE: Identity is NOT a standalone pane. It is embedded inside the agent
+// pane as a tab in the floating settings panel (AgentCardSettingsPanel →
+// AgentIdentityPanel). The standalone identity widget was removed in
+// v0.33.197. Do not re-register this as a block view — account management
+// lives inside the agent pane's settings overlay.
+
 import { BlockNodeModel } from "@/app/block/blocktypes";
 import { createSignal, type Accessor, type Setter } from "solid-js";
 
@@ -111,7 +117,7 @@ export const KIND_LABELS: Record<AccountKind, string> = {
 
 const STORAGE_KEY = "agentmux:identity:accounts";
 
-function loadAccounts(): Account[] {
+export function loadAccounts(): Account[] {
     try {
         const raw = localStorage.getItem(STORAGE_KEY);
         if (!raw) return [];

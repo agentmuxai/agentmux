@@ -30,15 +30,16 @@
  *   - "fatal"       — CLI missing, docker missing, provider unknown (retry won't help)
  */
 
-import { RpcApi } from "@/app/store/wshclientapi";
-import { TabRpcClient } from "@/app/store/wshrpcutil";
+import { RpcApi } from "@/app/store/rpc-api";
+import { TabRpcClient } from "@/app/store/rpc-util";
 import { waveEventSubscribe } from "@/app/store/wps";
 import * as WOS from "@/app/store/wos";
 import { BlockService } from "@/app/store/services";
 import { getApi, staticTabId } from "@/app/store/global";
 import type { ProviderDefinition } from "../providers";
 
-export type LogFn = (tag: string, text: string, level?: "info" | "error" | "warn") => void;
+import type { LogFn } from "../types";
+export type { LogFn };
 
 export interface LaunchFlowOptions {
     blockId: string;
@@ -131,10 +132,18 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
         log("cli", `found: ${cliResult.cli_path} (${cliResult.version})`);
     }
 
-    // Update block meta with resolved absolute path
+    // Update block meta with resolved CLI path and auth env vars.
+    // cmd:env is read by AgentInputCommand when spawning the subprocess —
+    // it must include CLAUDE_CONFIG_DIR (or equivalent) so the subprocess
+    // uses the same isolated auth dir that was validated in Phase 2.
+    // Without this, the subprocess runs without the env var and falls back
+    // to the global ~/.claude/ dir, failing auth silently after login.
     await RpcApi.SetMetaCommand(TabRpcClient, {
         oref,
-        meta: { cmd: cliResult.cli_path },
+        meta: {
+            cmd: cliResult.cli_path,
+            ...(authEnv && Object.keys(authEnv).length > 0 ? { "cmd:env": authEnv } : {}),
+        },
     });
 
     // Phase 2: Auth Check → auto-login if not authenticated
@@ -178,10 +187,17 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
             );
             if (loginUrl) {
                 setAuthUrl(loginUrl);
-                log("auth", "OAuth URL captured — browser should open automatically");
-                log("auth", "if it didn't, copy the URL from the box above");
+                log("auth", "opening browser...");
+                try {
+                    getApi().openExternal(loginUrl);
+                    log("auth", "browser opened — complete login there");
+                } catch (err: any) {
+                    log("auth", `browser did not open: ${err?.message ?? String(err)}`, "warn");
+                    log("auth", "copy the URL from the box above and open it manually", "warn");
+                }
             } else {
-                log("auth", "a browser window should have opened — complete login there");
+                log("auth", "attempting to open browser for login...");
+                log("auth", "if no browser opened, run the login command manually", "warn");
             }
 
             // Poll until authenticated, cancelled, or timed out (5 minutes)

@@ -23,6 +23,10 @@
         cursor: grabbing;
     }
 
+    &.context-active {
+        background: var(--hoverbg-color, rgba(255, 255, 255, 0.08));
+    }
+
     &.dragging {
         opacity: 0.3;
     }

@@ -339,6 +339,10 @@ export function buildTauriApi(): AppApi {
             return "";
         },
 
+        openAgent: async (_agentId: string) => {
+            // Tauri host is legacy — no-op stub to satisfy AppApi interface.
+        },
+
         // --- Claude Code Auth ---
         openClaudeCodeAuth: async () => {
             console.trace("[LEGACY] openClaudeCodeAuth called — who called this?");

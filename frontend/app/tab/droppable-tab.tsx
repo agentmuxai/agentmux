@@ -28,15 +28,11 @@ export interface DroppableTabProps {
     isActive: boolean;
     isFirst: boolean;
     isBeforeActive: boolean;
-    isPinned: boolean;
     allTabCount: number;
-    tabIndex: number;      // combined index (pinned + regular) — used for activeIndex math only
-    sectionIndex: number;  // index within its section — what the backend expects for ReorderTab
-    pinnedTabIds: string[];
-    regularTabIds: string[];
+    tabIndex: number;      // index into tabIds — used for activeIndex math and ReorderTab
+    tabIds: string[];
     onSelect: () => void;
     onClose: () => void;
-    onPinChange: () => void;
 }
 
 export function DroppableTab(props: DroppableTabProps): JSX.Element {
@@ -68,22 +64,19 @@ export function DroppableTab(props: DroppableTabProps): JSX.Element {
             getInitialData: () => ({
                 tabId: props.tabId,
                 workspaceId: props.workspaceId,
-                isPinned: props.isPinned,
                 tabIndex: props.tabIndex,
-                sectionIndex: props.sectionIndex,
                 type: tabItemType,
             }),
             onDragStart: () => {
                 setGlobalDragTabId(props.tabId);
                 setInsertionPoint(null);
                 setIsDragging(true);
-                setCurrentDragPayload({ kind: "tab", tabId: props.tabId, workspaceId: props.workspaceId, isPinned: props.isPinned });
+                setCurrentDragPayload({ kind: "tab", tabId: props.tabId, workspaceId: props.workspaceId });
                 getApi().setJsDragActive(true).catch(() => {});
                 Logger.info("dnd", "tab-drag started", {
                     tabId: props.tabId,
                     workspaceId: props.workspaceId,
-                    isPinned: props.isPinned,
-                    sectionIndex: props.sectionIndex,
+                    tabIndex: props.tabIndex,
                 });
             },
             onDrop: () => {
@@ -106,7 +99,7 @@ export function DroppableTab(props: DroppableTabProps): JSX.Element {
     return (
         <div
             ref={tabWrapRef!}
-            data-tauri-drag-region="false"
+            data-drag-region="false"
             class={clsx("tab-drop-wrapper", {
                 "tab-dragging": isDragging(),
                 "tab-bouncing": isBouncing(),
@@ -124,12 +117,10 @@ export function DroppableTab(props: DroppableTabProps): JSX.Element {
                 isDragging={isDragging()}
                 tabWidth={0}
                 isNew={false}
-                isPinned={props.isPinned}
                 onSelect={props.onSelect}
                 onClose={props.onClose}
                 onDragStart={() => {}}
                 onLoaded={() => {}}
-                onPinChange={props.onPinChange}
             />
         </div>
     );

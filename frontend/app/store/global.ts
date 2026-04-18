@@ -3,8 +3,8 @@
 //
 // Global app state — migrated from Jotai atoms to SolidJS signals.
 
-import { RpcApi } from "@/app/store/wshclientapi";
-import { TabRpcClient } from "@/app/store/wshrpcutil";
+import { RpcApi } from "@/app/store/rpc-api";
+import { TabRpcClient } from "@/app/store/rpc-util";
 import {
     getLayoutModelForStaticTab,
     LayoutTreeActionType,

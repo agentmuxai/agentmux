@@ -14,6 +14,8 @@ import { SysinfoViewModel } from "@/app/view/sysinfo/sysinfo";
 import { AgentViewModel } from "@/app/view/agent";
 import { SubagentViewModel } from "@/app/view/subagent/subagent";
 import { SwarmViewModel } from "@/app/view/swarm/swarm";
+import { EditorViewModel } from "@/app/view/editor/editor";
+import { BrowserViewModel } from "@/app/view/browser/browser";
 import { ErrorBoundary } from "@/element/errorboundary";
 import { CenteredDiv } from "@/element/quickelems";
 import { NodeModel, useDebouncedNodeInnerRect } from "@/layout/index";
@@ -44,14 +46,15 @@ BlockRegistry.set("launcher", LauncherViewModel as any);
 BlockRegistry.set("agent", AgentViewModel as any);
 BlockRegistry.set("subagent", SubagentViewModel as any);
 BlockRegistry.set("swarm", SwarmViewModel as any);
+BlockRegistry.set("editor", EditorViewModel as any);
+BlockRegistry.set("browser", BrowserViewModel as any);
 
 function makeViewModel(blockId: string, blockView: string, nodeModel: NodeModel): ViewModel {
-    // Consolidation migration: the forge and identity widgets have been
-    // merged into the agent picker's per-card settings panel. Any saved
-    // pane with view: "forge" or view: "identity" now renders as an
-    // agent pane — the user sees the picker with the ⚙ / 👤 buttons and
-    // can find the same functionality there.
-    // See specs/SPEC_CONSOLIDATE_FORGE_IDENTITY_INTO_AGENT_2026_04_13.md (PR 4).
+    // Migration shim (v0.33.197): forge and identity are no longer standalone
+    // panes — they live inside the agent pane's floating settings panel.
+    // Old databases may still have blocks with view: "forge" or "identity";
+    // redirect them to "agent" so the user gets the picker with ⚙/👤 buttons.
+    // TODO: remove this shim after v0.34.x when all databases have been migrated.
     const effectiveView = (blockView === "forge" || blockView === "identity") ? "agent" : blockView;
     const ctor = BlockRegistry.get(effectiveView);
     if (ctor != null) {

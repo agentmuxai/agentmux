@@ -21,10 +21,9 @@ import {
     WOS,
 } from "@/app/store/global";
 import { WorkspaceService } from "@/app/store/services";
-import { RpcApi } from "@/app/store/wshclientapi";
-import { TabRpcClient } from "@/app/store/wshrpcutil";
+import { RpcApi } from "@/app/store/rpc-api";
+import { TabRpcClient } from "@/app/store/rpc-util";
 import { zoomIn, zoomOut, zoomReset } from "@/app/store/zoom.platform";
-import { TabBarModel } from "@/app/tab/tabbar-model";
 import { deleteLayoutModelForTab, getLayoutModelForStaticTab, NavigateDirection } from "@/layout/index";
 import * as keyutil from "@/util/keyutil";
 import { CHORD_TIMEOUT } from "@/util/sharedconst";
@@ -152,12 +151,6 @@ function getStaticTabBlockCount(): number {
     return tabData?.blockids?.length ?? 0;
 }
 
-function isStaticTabPinned(): boolean {
-    const ws = atoms.workspace();
-    const tabId = atoms.activeTabId();
-    return ws?.pinnedtabids?.includes(tabId) ?? false;
-}
-
 function simpleCloseStaticTab() {
     debugLog("simpleCloseStaticTab called");
     const ws = atoms.workspace();
@@ -169,11 +162,6 @@ function simpleCloseStaticTab() {
 }
 
 function uxCloseBlock(blockId: string) {
-    if (isStaticTabPinned() && getStaticTabBlockCount() === 1) {
-        TabBarModel.getInstance().jiggleActivePinnedTab();
-        return;
-    }
-
     const layoutModel = getLayoutModelForStaticTab();
     const node = layoutModel.getNodeByBlockId(blockId);
     if (node) {
@@ -183,10 +171,6 @@ function uxCloseBlock(blockId: string) {
 
 function genericClose() {
     debugLog("genericClose called");
-    if (isStaticTabPinned() && getStaticTabBlockCount() === 1) {
-        TabBarModel.getInstance().jiggleActivePinnedTab();
-        return;
-    }
     const blockCount = getStaticTabBlockCount();
     debugLog("genericClose blockCount", blockCount);
     if (blockCount === 0) {
@@ -498,10 +482,6 @@ function registerGlobalKeys() {
         return true;
     });
     globalKeyMap.set("Cmd:Shift:w", () => {
-        if (isStaticTabPinned()) {
-            TabBarModel.getInstance().jiggleActivePinnedTab();
-            return true;
-        }
         simpleCloseStaticTab();
         return true;
     });

@@ -11,6 +11,7 @@
 //! - ShellController handles "shell" and "cmd" block types
 //! - Controllers dispatch I/O between the user and the process/service
 
+pub mod acp;
 pub mod health;
 pub mod persistent;
 pub mod pidregistry;
@@ -46,6 +47,7 @@ pub const BLOCK_CONTROLLER_CMD: &str = "cmd";
 pub const BLOCK_CONTROLLER_TSUNAMI: &str = "tsunami";
 pub const BLOCK_CONTROLLER_SUBPROCESS: &str = "subprocess";
 pub const BLOCK_CONTROLLER_PERSISTENT: &str = "persistent";
+pub const BLOCK_CONTROLLER_ACP: &str = "acp";
 
 // ---- Block metadata key constants (match Go) ----
 
@@ -360,11 +362,25 @@ pub fn resync_controller(
                 filestore,
             );
             let ctrl = Arc::new(ctrl);
+            ctrl.set_self_ref();
             register_controller(block_id, ctrl.clone());
             ctrl.start(block_meta.clone(), rt_opts, force)
         }
         BLOCK_CONTROLLER_PERSISTENT => {
             let ctrl = persistent::PersistentSubprocessController::new(
+                tab_id.to_string(),
+                block_id.to_string(),
+                broker,
+                event_bus,
+                wstore,
+                filestore,
+            );
+            let ctrl = Arc::new(ctrl);
+            register_controller(block_id, ctrl.clone());
+            ctrl.start(block_meta.clone(), rt_opts, force)
+        }
+        BLOCK_CONTROLLER_ACP => {
+            let ctrl = acp::AcpController::new(
                 tab_id.to_string(),
                 block_id.to_string(),
                 broker,

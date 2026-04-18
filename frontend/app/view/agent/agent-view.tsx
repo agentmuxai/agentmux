@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { writeText as clipboardWriteText } from "@/util/clipboard";
-import { createMemo, onMount, Show, type JSX } from "solid-js";
+import { createMemo, createSignal, onCleanup, onMount, Show, type JSX } from "solid-js";
 import type { AgentViewModel } from "./agent-model";
 import { getProvider } from "./providers";
 import { createAgentAtoms } from "./state";
@@ -22,14 +22,20 @@ import { useControllerStatusEvents } from "./hooks/useControllerStatusEvents";
 import { useAgentCommands } from "./hooks/useAgentCommands";
 import { AgentControlBar } from "./components/AgentControlBar";
 import { AgentDocumentView } from "./components/AgentDocumentView";
-import { AgentFooter } from "./components/AgentFooter";
-import { AgentPicker } from "./components/AgentPicker";
+import { AgentFooter, AgentStatusLine } from "./components/AgentFooter";
+import { AgentPicker, useForgeAgents } from "./components/AgentPicker";
 import { AgentSearchBar } from "./components/AgentSearchBar";
+import { AgentFocusedPanel } from "./components/AgentFocusedPanel";
 import { SlashCommandPicker } from "./components/SlashCommandPicker";
 import { SlashHelpPanel } from "./components/SlashHelpPanel";
 import { BookmarksPanel } from "./components/BookmarksPanel";
 import { SessionDigestBanner } from "./components/SessionDigestBanner";
+import { RpcApi } from "@/app/store/rpc-api";
+import { TabRpcClient } from "@/app/store/rpc-util";
+import { getApi } from "@/app/store/global";
 import { ContextMenuModel } from "@/app/store/contextmenu";
+import { parseAgentAccounts, loadAccounts } from "@/app/view/identity/identity-model";
+import { buildStartupPayload, resolveAccounts } from "./startup/buildStartupPayload";
 import "./agent-view.scss";
 
 /**
@@ -62,10 +68,31 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
     const provider = () => getProvider(providerKey());
     const outputFormat = (): string => block()?.meta?.["agentOutputFormat"] ?? "claude-stream-json";
 
+    // Overlay tab signal — lives in the component so SolidJS can track it.
+    // The model's _setOverlayTab callback is wired on mount and cleaned up on unmount.
+    const [showOverlayTab, setShowOverlayTab] = createSignal<import("./agent-model").OverlayTab | null>(null);
+    onMount(() => {
+        model._setOverlayTab = setShowOverlayTab;
+    });
+    onCleanup(() => {
+        model._setOverlayTab = null;
+    });
+
+    // Reactive forge agent list — used to resolve the current ForgeAgent object
+    // so the overlay can pass it to AgentCardSettingsPanel / rename input.
+    const forgeAgents = useForgeAgents();
+    const currentAgent = createMemo(() => forgeAgents().find((a) => a.id === agentId));
+
     const agentAtoms = createMemo(() => createAgentAtoms(model.blockId));
 
     // Log buffer — the LogFn is passed down to every hook that needs it.
     const { lines: logLines, append: log } = useLaunchLogs();
+
+    // Startup sequence callback ref — assigned after commands + handleSendMessage
+    // are defined (below), so the onReady callback can reference them.
+    // onReady fires synchronously after startLaunchFlow succeeds, which is
+    // always after this component body has fully run (SolidJS onMount timing).
+    let onReadyFn: (() => void) | null = null;
 
     // History pagination: owns the document slice, loadingOlder state,
     // loadOlder handler, and documentVersion (bumped on every external
@@ -98,6 +125,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 } as import("./types").MarkdownNode,
             ]);
         },
+        onReady: () => onReadyFn?.(),
     });
 
     onMount(() => {
@@ -129,6 +157,8 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         streamingStateAtom: agentAtoms().streamingStateAtom,
         sessionStatsAtom: agentAtoms().sessionStatsAtom,
         currentToolAtom: agentAtoms().currentToolAtom,
+        turnTokensAtom: agentAtoms().turnTokensAtom,
+        turnActiveAtom: agentAtoms().turnActiveAtom,
         enabled: true,
         documentVersion: history.documentVersion,
     });
@@ -158,11 +188,57 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         onSent: () => scrollToBottomFn?.(),
     });
 
-    // Clear session stats when the user sends a new message.
+    // Clear session stats and mark turn as active when the user sends a message.
     const [, setSessionStats] = agentAtoms().sessionStatsAtom;
+    const [, setTurnActive] = agentAtoms().turnActiveAtom;
     const handleSendMessage = (message: string): Promise<void> => {
         setSessionStats(null);
+        setTurnActive(true);
         return commands.sendMessage(message);
+    };
+
+    // ── Startup sequence ────────────────────────────────────────────────────────
+    // On first connect (no existing session), assemble a structured startup
+    // payload from Forge + Identity data and send it as the opening turn.
+    // See docs/specs/SPEC_AGENT_STARTUP_SEQUENCE_2026_04_16.md
+    onReadyFn = async () => {
+        // Skip if this is a resumed session
+        if (block()?.meta?.["agent:sessionid"]) return;
+
+        try {
+            const agent = currentAgent();
+            if (!agent) return;
+
+            // Gather inputs in parallel where possible
+            const [startupContentResult, version] = await Promise.all([
+                RpcApi.GetForgeContentCommand(TabRpcClient, {
+                    agent_id: agentId,
+                    content_type: "startup",
+                }).catch(() => null),
+                Promise.resolve(getApi().getAboutModalDetails().version),
+            ]);
+
+            // Resolve assigned accounts from Identity localStorage
+            const agentAccounts = parseAgentAccounts(agent);
+            const accounts = resolveAccounts(agentAccounts, loadAccounts());
+
+            const payload = buildStartupPayload({
+                agent,
+                providerDisplayName: provider()?.displayName ?? providerKey(),
+                workDir: block()?.meta?.["cmd:cwd"] ?? "",
+                version,
+                accounts,
+                peerAgents: forgeAgents(),
+                startupContent: startupContentResult?.content ?? null,
+            });
+
+            if (payload) {
+                log("agent", "sending startup sequence");
+                await handleSendMessage(payload);
+            }
+        } catch (err) {
+            log("warn", `startup sequence failed: ${err}`, "warn");
+        }
     };
 
     // ── Jump-to-node + Bookmarks ────────────────────────────────────────────────
@@ -278,6 +354,18 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 />
             </Show>
 
+            {/* Title-bar action overlay: ⚙ Forge / 👤 Identity */}
+            <Show when={showOverlayTab() != null && currentAgent() != null}>
+                <AgentFocusedPanel
+                    blockId={model.blockId}
+                    nodeModel={model.nodeModel}
+                    agent={currentAgent()!}
+                    initialTab={showOverlayTab()!}
+                    onClose={() => setShowOverlayTab(null)}
+                    onTabChange={(tab) => { model._lastOverlayTab = tab; }}
+                />
+            </Show>
+
             <AgentDocumentView
                 documentAtom={agentAtoms().documentAtom}
                 documentStateAtom={agentAtoms().documentStateAtom}
@@ -294,13 +382,6 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 highlightNodeId={search.highlightId}
             />
 
-            <Show when={status.loginWaiting()}>
-                <div class="agent-retry-bar">
-                    <button class="agent-retry-btn agent-retry-btn--cancel" onClick={status.cancelLogin}>
-                        Cancel Login
-                    </button>
-                </div>
-            </Show>
             <Show when={status.canRetry()}>
                 <div class="agent-retry-bar">
                     <button class="agent-retry-btn" onClick={status.startLaunchFlow}>
@@ -329,6 +410,12 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                         />
                     )}
                 </Show>
+                <AgentStatusLine
+                    loading={status.isLoading() || agentAtoms().turnActiveAtom[0]()}
+                    currentTool={agentAtoms().currentToolAtom[0]()}
+                    sessionStats={agentAtoms().sessionStatsAtom[0]()}
+                    turnTokens={agentAtoms().turnTokensAtom[0]()}
+                />
                 <AgentControlBar
                     blockId={model.blockId}
                     blockAtom={block}
@@ -339,10 +426,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                     onSendMessage={handleSendMessage}
                     onTyping={() => scrollToBottomFn?.()}
                     onStopAgent={commands.stopAgent}
-                    loading={status.isLoading()}
                     getCompletions={commands.completions}
-                    currentTool={agentAtoms().currentToolAtom[0]()}
-                    sessionStats={agentAtoms().sessionStatsAtom[0]()}
                 />
             </div>
         </div>

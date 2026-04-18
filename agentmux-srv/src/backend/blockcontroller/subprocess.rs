@@ -18,7 +18,7 @@
 //! 2. process_waiter: wait for exit, update status, publish lifecycle event
 
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -76,6 +76,9 @@ struct SubprocessControllerInner {
     current_pid: Option<u32>,
     /// Handle to kill the current subprocess.
     kill_tx: Option<tokio::sync::oneshot::Sender<bool>>,
+    /// Messages queued while a turn is in progress.
+    /// Drained sequentially after the current turn exits.
+    pending_messages: VecDeque<SubprocessSpawnConfig>,
 }
 
 /// SubprocessController manages per-turn subprocess lifecycle for agent blocks.
@@ -103,6 +106,9 @@ pub struct SubprocessController {
     filestore: Option<Arc<FileStore>>,
     /// Agent health monitor (output activity + error tracking).
     health_monitor: Arc<HealthMonitor>,
+    /// Weak self-reference for queue drain. Set by `set_self_ref` after
+    /// the controller is wrapped in Arc.
+    self_ref: Mutex<Option<std::sync::Weak<Self>>>,
 }
 
 impl SubprocessController {
@@ -130,13 +136,22 @@ impl SubprocessController {
                 session_id: None,
                 current_pid: None,
                 kill_tx: None,
+                pending_messages: VecDeque::new(),
             })),
             broker,
             event_bus,
             wstore,
             filestore,
             health_monitor,
+            self_ref: Mutex::new(None),
         }
+    }
+
+    /// Store a weak self-reference so the process_waiter can drain queued
+    /// messages by calling spawn_turn after the current turn exits.
+    /// Must be called after wrapping in Arc.
+    pub fn set_self_ref(self: &Arc<Self>) {
+        *self.self_ref.lock().unwrap() = Some(Arc::downgrade(self));
     }
 
     /// Try to acquire the run lock. Returns false if a turn is already in progress.
@@ -193,7 +208,15 @@ impl SubprocessController {
     /// If a session_id exists from a previous turn, `--resume <sid>` is appended to args.
     pub fn spawn_turn(&self, config: SubprocessSpawnConfig) -> Result<(), String> {
         if !self.try_lock_run() {
-            return Err("subprocess is already running a turn".to_string());
+            // Turn in progress — queue the message for after it exits.
+            let mut inner = self.inner.lock().unwrap();
+            tracing::info!(
+                block_id = %self.block_id,
+                queue_depth = inner.pending_messages.len() + 1,
+                "subprocess busy — message queued"
+            );
+            inner.pending_messages.push_back(config);
+            return Ok(());
         }
 
         // Build CLI args, appending resume flag + session_id if we have one and the provider supports it
@@ -220,6 +243,15 @@ impl SubprocessController {
         // via cmd.exe /C with piped stdio. Resolve to node <script> instead.
         let mut cmd = crate::server::cli_handlers::make_cli_cmd(&config.cli_command);
         cmd.args(&args);
+
+        // On Windows: suppress console-window allocation. Without CREATE_NO_WINDOW,
+        // node.exe spawned from a windowless sidecar may try to create/attach to a
+        // console, causing stdout to go to that console rather than the pipe.
+        #[cfg(windows)]
+        {
+            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+            cmd.creation_flags(CREATE_NO_WINDOW);
+        }
         if !config.working_dir.is_empty() {
             // Expand ~ to home directory (cross-platform)
             let expanded_dir = if config.working_dir.starts_with("~/") || config.working_dir == "~" {
@@ -292,18 +324,53 @@ impl SubprocessController {
         let stdout = child.stdout.take().unwrap();
         let stderr = child.stderr.take().unwrap();
 
-        // Write user message to stdin, then close it
+        // Write user message to stdin, then close it.
+        // CRITICAL: This must complete BEFORE the child's stdin timeout
+        // (Claude CLI: 3s). Using std::thread + synchronous write to
+        // bypass the Tokio task scheduler — a tokio::spawn'd task may
+        // not run for seconds on a busy runtime, causing the child to
+        // time out with "no stdin data received in 3s".
         let message = config.message;
-        tokio::spawn(async move {
-            let mut stdin = stdin;
-            if let Err(e) = stdin.write_all(message.as_bytes()).await {
-                tracing::warn!("subprocess stdin write error: {}", e);
-            }
-            if let Err(e) = stdin.write_all(b"\n").await {
-                tracing::warn!("subprocess stdin newline error: {}", e);
-            }
-            // stdin drops here → EOF to the subprocess
-        });
+        let block_id_stdin = self.block_id.clone();
+        {
+            // Convert Tokio's async ChildStdin to a raw OS handle, then
+            // wrap in a std::fs::File for synchronous write. The pipe
+            // buffer (4-64KB on Windows) easily fits our message, so
+            // write_all returns instantly without blocking.
+            #[cfg(unix)]
+            let raw_handle = {
+                use std::os::unix::io::{AsRawFd, FromRawFd};
+                let fd = stdin.as_raw_fd();
+                unsafe { std::fs::File::from_raw_fd(fd) }
+            };
+            #[cfg(windows)]
+            let raw_handle = {
+                use std::os::windows::io::{AsRawHandle, FromRawHandle};
+                let handle = stdin.as_raw_handle();
+                unsafe { std::fs::File::from_raw_handle(handle) }
+            };
+
+            // Spawn a real OS thread (not a Tokio task) for the write.
+            // This ensures it runs immediately regardless of runtime load.
+            // The raw handle is valid as long as `stdin` lives — we move
+            // `stdin` into the thread via a guard to keep it alive.
+            std::thread::spawn(move || {
+                use std::io::Write;
+                let _keep_alive = stdin; // prevent Tokio ChildStdin drop
+                let mut pipe = raw_handle;
+                let payload = format!("{}\n", message);
+                if let Err(e) = pipe.write_all(payload.as_bytes()) {
+                    tracing::warn!(block_id = %block_id_stdin, "subprocess stdin write error: {}", e);
+                    std::mem::forget(pipe); // don't close the handle — _keep_alive owns it
+                    return;
+                }
+                if let Err(e) = pipe.flush() {
+                    tracing::warn!(block_id = %block_id_stdin, "subprocess stdin flush error: {}", e);
+                }
+                std::mem::forget(pipe); // don't double-close — _keep_alive owns the handle
+                // _keep_alive (Tokio ChildStdin) drops here → EOF to the subprocess
+            });
+        }
 
         // Spawn stdout_reader task
         let block_id_read = self.block_id.clone();
@@ -319,105 +386,121 @@ impl SubprocessController {
             let mut lines = reader.lines();
             let mut stats = super::session_stats::SessionStatsAccumulator::new(block_id_read.clone());
 
-            while let Ok(Some(line)) = lines.next_line().await {
-                let trimmed = line.trim();
-                if trimmed.is_empty() {
-                    continue;
-                }
+            tracing::info!(block_id = %block_id_read, "stdout_reader started");
 
-                // Track session metadata (debounced 1 s).
-                // Use `line.len()` (not `trimmed.len()`) to match persistent.rs
-                // so token_estimate stays consistent across controller types.
-                stats.record_line(line.len(), &wstore_read);
-
-                // Classify output for health monitoring
-                if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(trimmed) {
-                    let (meaningful, error) = classify_output_line(&parsed);
-                    health_read.record_output(meaningful);
-                    if let Some((class, msg)) = error {
-                        health_read.record_error(class, msg);
+            loop {
+                match lines.next_line().await {
+                    Err(e) => {
+                        tracing::warn!(block_id = %block_id_read, error = %e, "subprocess stdout read error");
+                        break;
                     }
-                }
+                    Ok(None) => {
+                        tracing::info!(block_id = %block_id_read, "subprocess stdout EOF");
+                        break;
+                    }
+                    Ok(Some(line)) => {
+                        let trimmed = line.trim();
+                        if trimmed.is_empty() {
+                            continue;
+                        }
 
-                // Try to capture session/thread ID from the provider's init event.
-                // Claude: {"type":"system","subtype":"init","session_id":"..."}
-                // Gemini: {"type":"init","session_id":"..."}
-                // Codex:  {"type":"thread.started","thread_id":"..."}
-                if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(trimmed) {
-                    if let Some(sid) = parsed.get(&session_id_field).and_then(|v| v.as_str()) {
-                        let sid_string = sid.to_string();
-                        // Only capture once (first occurrence in the output)
-                        let already_captured = inner_read.lock().unwrap().session_id.is_some();
-                        if !already_captured {
-                            tracing::info!(
-                                block_id = %block_id_read,
-                                field = %session_id_field,
-                                session_id = %sid_string,
-                                "captured session id"
-                            );
-                            {
-                                let mut inner = inner_read.lock().unwrap();
-                                inner.session_id = Some(sid_string.clone());
+                        // Track session metadata (debounced 1 s).
+                        // Use `line.len()` (not `trimmed.len()`) to match persistent.rs
+                        // so token_estimate stays consistent across controller types.
+                        stats.record_line(line.len(), &wstore_read);
+
+                        // Classify output for health monitoring
+                        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(trimmed) {
+                            let (meaningful, error) = classify_output_line(&parsed);
+                            health_read.record_output(meaningful);
+                            if let Some((class, msg)) = error {
+                                health_read.record_error(class, msg);
                             }
+                        }
 
-                            // Persist session_id to block metadata
-                            if let Some(ref store) = wstore_read {
-                                let oref_str = format!("block:{}", block_id_read);
-                                let mut meta_update =
-                                    crate::backend::obj::MetaMapType::new();
-                                meta_update.insert(
-                                    "agent:sessionid".to_string(),
-                                    serde_json::Value::String(sid_string),
-                                );
-                                if let Err(e) = crate::server::service::update_object_meta(
-                                    store, &oref_str, &meta_update,
-                                ) {
-                                    tracing::warn!(
+                        // Try to capture session/thread ID from the provider's init event.
+                        // Claude: {"type":"system","subtype":"init","session_id":"..."}
+                        // Gemini: {"type":"init","session_id":"..."}
+                        // Codex:  {"type":"thread.started","thread_id":"..."}
+                        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(trimmed) {
+                            if let Some(sid) = parsed.get(&session_id_field).and_then(|v| v.as_str()) {
+                                let sid_string = sid.to_string();
+                                // Only capture once (first occurrence in the output)
+                                let already_captured = inner_read.lock().unwrap().session_id.is_some();
+                                if !already_captured {
+                                    tracing::info!(
                                         block_id = %block_id_read,
-                                        error = %e,
-                                        "failed to persist agent:sessionid"
+                                        field = %session_id_field,
+                                        session_id = %sid_string,
+                                        "captured session id"
                                     );
-                                } else if let Some(ref event_bus) = event_bus_read {
-                                    // Broadcast metadata update to frontend
-                                    if let Ok(updated_block) = store.must_get::<crate::backend::obj::Block>(&block_id_read) {
-                                        let update_data = serde_json::to_value(
-                                            &crate::backend::obj::WaveObjUpdate {
-                                                updatetype: "update".into(),
-                                                otype: "block".into(),
-                                                oid: block_id_read.clone(),
-                                                obj: Some(crate::backend::obj::wave_obj_to_value(&updated_block)),
-                                            },
-                                        )
-                                        .ok();
-                                        event_bus.broadcast_event(
-                                            &crate::backend::eventbus::WSEventType {
-                                                eventtype: "waveobj:update".to_string(),
-                                                oref: oref_str,
-                                                data: update_data,
-                                            },
+                                    {
+                                        let mut inner = inner_read.lock().unwrap();
+                                        inner.session_id = Some(sid_string.clone());
+                                    }
+
+                                    // Persist session_id to block metadata
+                                    if let Some(ref store) = wstore_read {
+                                        let oref_str = format!("block:{}", block_id_read);
+                                        let mut meta_update =
+                                            crate::backend::obj::MetaMapType::new();
+                                        meta_update.insert(
+                                            "agent:sessionid".to_string(),
+                                            serde_json::Value::String(sid_string),
                                         );
+                                        if let Err(e) = crate::server::service::update_object_meta(
+                                            store, &oref_str, &meta_update,
+                                        ) {
+                                            tracing::warn!(
+                                                block_id = %block_id_read,
+                                                error = %e,
+                                                "failed to persist agent:sessionid"
+                                            );
+                                        } else if let Some(ref event_bus) = event_bus_read {
+                                            // Broadcast metadata update to frontend
+                                            if let Ok(updated_block) = store.must_get::<crate::backend::obj::Block>(&block_id_read) {
+                                                let update_data = serde_json::to_value(
+                                                    &crate::backend::obj::WaveObjUpdate {
+                                                        updatetype: "update".into(),
+                                                        otype: "block".into(),
+                                                        oid: block_id_read.clone(),
+                                                        obj: Some(crate::backend::obj::wave_obj_to_value(&updated_block)),
+                                                    },
+                                                )
+                                                .ok();
+                                                event_bus.broadcast_event(
+                                                    &crate::backend::eventbus::WSEventType {
+                                                        eventtype: "waveobj:update".to_string(),
+                                                        oref: oref_str,
+                                                        data: update_data,
+                                                    },
+                                                );
+                                            }
+                                        }
                                     }
                                 }
                             }
                         }
+
+                        // Publish the NDJSON line as a WPS blockfile event on the "output" subject
+                        // and write-through to FileStore for persistent history (Phase 1.3).
+                        if let Some(ref broker) = broker_read {
+                            tracing::info!(block_id = %block_id_read, line = %trimmed, "subprocess stdout → blockfile");
+                            // Include the newline so the frontend line splitter works correctly
+                            let line_with_newline = format!("{}\n", trimmed);
+                            super::shell::handle_append_block_file(
+                                broker,
+                                &block_id_read,
+                                SUBPROCESS_OUTPUT_SUBJECT,
+                                line_with_newline.as_bytes(),
+                                filestore_read.as_ref(),
+                            );
+                        }
                     }
                 }
-
-                // Publish the NDJSON line as a WPS blockfile event on the "output" subject
-                // and write-through to FileStore for persistent history (Phase 1.3).
-                if let Some(ref broker) = broker_read {
-                    tracing::info!(block_id = %block_id_read, line = %trimmed, "subprocess stdout → blockfile");
-                    // Include the newline so the frontend line splitter works correctly
-                    let line_with_newline = format!("{}\n", trimmed);
-                    super::shell::handle_append_block_file(
-                        broker,
-                        &block_id_read,
-                        SUBPROCESS_OUTPUT_SUBJECT,
-                        line_with_newline.as_bytes(),
-                        filestore_read.as_ref(),
-                    );
-                }
             }
+
+            tracing::info!(block_id = %block_id_read, "stdout_reader exiting");
         });
 
         // Spawn stderr reader (log warnings, don't publish)
@@ -425,13 +508,22 @@ impl SubprocessController {
         tokio::spawn(async move {
             let reader = BufReader::new(stderr);
             let mut lines = reader.lines();
-            while let Ok(Some(line)) = lines.next_line().await {
-                if !line.trim().is_empty() {
-                    tracing::info!(
-                        block_id = %block_id_err,
-                        stderr = %line,
-                        "subprocess stderr"
-                    );
+            loop {
+                match lines.next_line().await {
+                    Err(e) => {
+                        tracing::warn!(block_id = %block_id_err, error = %e, "subprocess stderr read error");
+                        break;
+                    }
+                    Ok(None) => break,
+                    Ok(Some(line)) => {
+                        if !line.trim().is_empty() {
+                            tracing::info!(
+                                block_id = %block_id_err,
+                                stderr = %line,
+                                "subprocess stderr"
+                            );
+                        }
+                    }
                 }
             }
         });
@@ -455,6 +547,7 @@ impl SubprocessController {
         let broker_wait = self.broker.clone();
         let run_lock = Arc::clone(&self.run_lock);
         let health_wait = Arc::clone(&self.health_monitor);
+        let self_ref_wait = self.self_ref.lock().unwrap().clone().unwrap_or_default();
         tokio::spawn(async move {
             // Wait for either process exit or kill signal
             tokio::select! {
@@ -552,6 +645,29 @@ impl SubprocessController {
 
             // Release run lock
             run_lock.store(false, Ordering::SeqCst);
+
+            // Drain message queue: if messages were queued while this turn
+            // was running, pop the next one and spawn it via the weak
+            // self-reference.
+            let next_config = {
+                let mut inner = inner_wait.lock().unwrap();
+                inner.pending_messages.pop_front()
+            };
+            if let Some(config) = next_config {
+                if let Some(ctrl) = self_ref_wait.upgrade() {
+                    tracing::info!(
+                        block_id = %block_id_wait,
+                        "draining queued message"
+                    );
+                    if let Err(e) = ctrl.spawn_turn(config) {
+                        tracing::warn!(
+                            block_id = %block_id_wait,
+                            error = %e,
+                            "failed to spawn queued turn"
+                        );
+                    }
+                }
+            }
         });
 
         Ok(())
@@ -734,8 +850,14 @@ mod tests {
         };
 
         let result = ctrl.spawn_turn(config);
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("already running"));
+        // spawn_turn now queues instead of rejecting when busy
+        assert!(result.is_ok());
+
+        // Verify the message was queued
+        let inner = ctrl.inner.lock().unwrap();
+        assert_eq!(inner.pending_messages.len(), 1);
+        assert_eq!(inner.pending_messages[0].message, "test");
+        drop(inner);
 
         // Release lock
         ctrl.run_lock.store(false, Ordering::SeqCst);

@@ -218,25 +218,80 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     .map_err(|e| format!("checkcliauth: {e}"))?;
                 tracing::info!(cli = %cmd.cli_path, "CheckCliAuth");
 
-                // Run CLI auth check command — all providers including Claude.
+                // Two-phase auth check for Claude; single-phase for other providers.
                 //
-                // A previous "fast path" read ~/.claude/.credentials.json directly and
-                // declared authenticated=true if any token string was present. This caused
-                // false positives: stale, expired, and revoked tokens all passed the check,
-                // and the `email` field was set to the subscription tier ("max", "pro") instead
-                // of the user's email address. See SPEC_AUTH_CHECK_FALSE_POSITIVE_2026_04_15.md.
+                // Phase 1 (fast, <1 ms): read the credentials file to determine whether
+                // tokens exist at all. If no file / no tokens → return unauthenticated
+                // immediately without spawning the CLI. This avoids a 10+ second cold-start
+                // stall when the user is definitely not logged in.
+                //
+                // Phase 2 (CLI, 10 s timeout): only when tokens ARE present, run
+                // `claude auth status --json` to validate them and obtain the real email.
+                // This catches expired/revoked tokens — the false-positive that the old
+                // file-only fast path missed.
+                //
+                // Other providers skip Phase 1 and go straight to the CLI (they don't have
+                // a predictable credentials file layout).
+                //
+                // See SPEC_AUTH_CHECK_FALSE_POSITIVE_2026_04_15.md.
+                if cmd.cli_path.to_lowercase().contains("claude") {
+                    let home = std::env::var("HOME")
+                        .or_else(|_| std::env::var("USERPROFILE"))
+                        .unwrap_or_default();
+
+                    // Build candidate paths: isolated dir first, then global ~/.claude/
+                    let mut creds_candidates: Vec<String> = Vec::new();
+                    if let Some(config_dir) = cmd.auth_env.get("CLAUDE_CONFIG_DIR") {
+                        creds_candidates.push(format!("{}/.credentials.json", config_dir));
+                    }
+                    creds_candidates.push(format!("{}/.claude/.credentials.json", home));
+
+                    let tokens_exist = creds_candidates.iter().any(|p| {
+                        if let Ok(content) = std::fs::read_to_string(p) {
+                            if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
+                                let oauth = json.get("claudeAiOauth");
+                                let has_token = oauth.and_then(|o| o.get("accessToken"))
+                                    .and_then(|v| v.as_str()).map(|s| !s.is_empty()).unwrap_or(false);
+                                let has_refresh = oauth.and_then(|o| o.get("refreshToken"))
+                                    .and_then(|v| v.as_str()).map(|s| !s.is_empty()).unwrap_or(false);
+                                return has_token || has_refresh;
+                            }
+                        }
+                        false
+                    });
+
+                    if !tokens_exist {
+                        // No credentials file or empty tokens — definitely not authenticated.
+                        tracing::info!("claude auth check: no credentials file, skipping CLI");
+                        let result = CheckCliAuthResult {
+                            authenticated: false,
+                            email: None,
+                            auth_method: None,
+                            raw_output: "no credentials found".to_string(),
+                        };
+                        return Ok(Some(serde_json::to_value(&result).unwrap()));
+                    }
+
+                    // Tokens exist on disk — validate with the CLI (10 s timeout).
+                    tracing::info!("claude auth check: credentials found, validating via CLI");
+                }
+
                 let output = tokio::time::timeout(
-                    std::time::Duration::from_secs(25),
+                    std::time::Duration::from_secs(10),
                     {
                         let mut check_cmd = make_cli_cmd(&cmd.cli_path);
                         check_cmd.args(&cmd.auth_check_args);
                         for (k, v) in &cmd.auth_env {
                             check_cmd.env(k, v);
                         }
+                        // Null stdin: prevents the CLI from blocking on interactive
+                        // first-run prompts (onboarding, theme selection, etc.) that
+                        // only appear when stdin is a TTY or non-null pipe.
+                        check_cmd.stdin(std::process::Stdio::null());
                         check_cmd.output()
                     },
                 ).await
-                    .map_err(|_| "auth check timed out (25s)".to_string())?
+                    .map_err(|_| "auth check timed out (10s)".to_string())?
                     .map_err(|e| format!("failed to run auth check: {e}"))?;
 
                 let stdout = String::from_utf8_lossy(&output.stdout).to_string();
@@ -314,7 +369,11 @@ pub(crate) fn make_cli_cmd(cli_path: &str) -> tokio::process::Command {
 async fn get_cli_version(cli_path: &str) -> String {
     let result = tokio::time::timeout(
         std::time::Duration::from_secs(5),
-        make_cli_cmd(cli_path).arg("--version").output(),
+        {
+            let mut c = make_cli_cmd(cli_path);
+            c.arg("--version").stdin(std::process::Stdio::null());
+            c.output()
+        },
     ).await;
     match result {
         Ok(Ok(output)) if output.status.success() => {
