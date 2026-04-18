@@ -94,11 +94,10 @@
     margin-top: 4px;
 }
 
-.browser-iframe {
+.browser-placeholder {
     flex: 1;
     width: 100%;
-    border: none;
-    background: #fff;
+    position: relative;
 }
 
 .browser-empty {
