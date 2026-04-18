@@ -10,7 +10,7 @@ use cef::*;
 use std::sync::Arc;
 use parking_lot::Mutex;
 
-use crate::state::AppState;
+use crate::state::{AppState, WindowKind};
 
 /// Write a debug line to `%TEMP%\agentmux-close-debug.txt`.
 ///
@@ -102,7 +102,7 @@ impl AgentMuxHandler {
 
         // Register browser in the multi-window map.
         // First browser is "main"; additional browsers get labels from their URL params.
-        {
+        let label = {
             let mut browsers = self.state.browsers.lock();
             let label = if browsers.is_empty() {
                 "main".to_string()
@@ -117,26 +117,69 @@ impl AgentMuxHandler {
             };
             tracing::info!("Registered browser: label={} (total: {})", label, browsers.len() + 1);
             dlog(&format!("on_after_created: registered label={} total={}", label, browsers.len() + 1));
-            browsers.insert(label, browser.clone());
+            browsers.insert(label.clone(), browser.clone());
+            label
+        };
+
+        // Ensure WindowMeta exists for this browser so downstream code (taskbar
+        // treatment here, cascade-close below) can classify it. If the creator
+        // didn't pre-register a meta (legacy callers, or the very first "main"
+        // window), default to FullInstance. Browser panes use `browser-pane-*`
+        // labels which are intentionally absent from window_meta — they're
+        // child HWNDs, not top-level windows, and skipping the taskbar logic
+        // below for them is correct.
+        let is_top_level_window = !label.starts_with("browser-pane-");
+        if is_top_level_window {
+            let mut metas = self.state.window_meta.lock();
+            metas.entry(label.clone()).or_insert_with(|| {
+                crate::state::WindowMeta {
+                    label: label.clone(),
+                    kind: WindowKind::FullInstance,
+                    parent_instance_id: None,
+                }
+            });
         }
 
         // No DwmExtendFrameIntoClientArea — it causes the white flash.
         // CEF Views handles frameless + resize via its delegate.
 
-        // Set the taskbar/title bar icon from the embedded exe resource.
+        // Set the taskbar/title bar icon from the embedded exe resource, and
+        // for `Subwindow` top-levels, hide them from the taskbar via
+        // ITaskbarList::DeleteTab.
         #[cfg(target_os = "windows")]
         {
-            // For native windows, use the browser's HWND; for CEF Views, enumerate.
-            let hwnd = browser.host()
-                .and_then(|h| {
-                    let wh = h.window_handle();
-                    if wh.0.is_null() { None } else { Some(wh.0 as *mut std::ffi::c_void) }
-                })
-                .unwrap_or_else(|| unsafe {
-                    crate::commands::window::find_own_top_level_window()
-                });
+            // Prefer CEF Views' `Window::window_handle()` — it targets the
+            // specific top-level window for THIS browser, avoiding the
+            // `find_own_top_level_window` fallback's "first visible HWND"
+            // ambiguity when multiple windows exist.
+            let mut browser_mut = browser.clone();
+            let views_top_hwnd = browser_view_get_for_browser(Some(&mut browser_mut))
+                .and_then(|bv| bv.window())
+                .map(|w| w.window_handle().0 as *mut std::ffi::c_void)
+                .filter(|p| !p.is_null());
+
+            let hwnd = views_top_hwnd.unwrap_or_else(|| {
+                browser.host()
+                    .and_then(|h| {
+                        let wh = h.window_handle();
+                        if wh.0.is_null() { None } else { Some(wh.0 as *mut std::ffi::c_void) }
+                    })
+                    .unwrap_or_else(|| unsafe {
+                        crate::commands::window::find_own_top_level_window()
+                    })
+            });
+
             if !hwnd.is_null() {
                 unsafe { set_window_icon(hwnd); }
+
+                // Subwindow? Hide from taskbar. Full instances and browser-pane
+                // child HWNDs skip this branch.
+                if is_top_level_window {
+                    let kind = self.state.window_meta.lock().get(&label).map(|m| m.kind);
+                    if kind == Some(WindowKind::Subwindow) {
+                        unsafe { skip_taskbar(hwnd); }
+                    }
+                }
             }
         }
 
@@ -205,6 +248,36 @@ impl AgentMuxHandler {
             dlog(&format!("window_id_map.remove({:?}) => {:?}", lbl, wid));
             wid
         });
+
+        // Pull and remove the closing window's meta; if it's a FullInstance,
+        // cascade-close every Subwindow whose parent_instance_id points to it.
+        // See `docs/specs/SPEC_MULTIWINDOW_TASKBAR_GROUPING.md` §2.3.
+        let closing_meta = label
+            .as_deref()
+            .and_then(|lbl| self.state.window_meta.lock().remove(lbl));
+        if let Some(meta) = &closing_meta {
+            if meta.kind == WindowKind::FullInstance {
+                let child_labels: Vec<String> = self
+                    .state
+                    .window_meta
+                    .lock()
+                    .values()
+                    .filter(|m| {
+                        m.kind == WindowKind::Subwindow
+                            && m.parent_instance_id.as_deref() == Some(&meta.label)
+                    })
+                    .map(|m| m.label.clone())
+                    .collect();
+                for child_label in child_labels {
+                    if let Some(mut child) = self.state.browsers.lock().get(&child_label).cloned() {
+                        if let Some(host) = child.host() {
+                            tracing::info!(parent = %meta.label, child = %child_label, "[subwindow-cascade] closing sub-window");
+                            host.close_browser(1);
+                        }
+                    }
+                }
+            }
+        }
 
         dlog(&format!("backend_window_id: {:?}", backend_window_id));
 
@@ -1144,6 +1217,85 @@ unsafe fn install_frameless_resize_hook(hwnd: *mut std::ffi::c_void) {
     }
     SetWindowLongPtrW(hwnd, GWLP_WNDPROC, wndproc_hook as isize);
     tracing::info!("Installed frameless resize hook (WM_NCCALCSIZE + WM_NCHITTEST)");
+}
+
+/// Hide the given top-level HWND from the Windows taskbar via
+/// `ITaskbarList::DeleteTab`. The window remains fully usable — Alt-Tab still
+/// finds it, it takes focus, repaints, etc. — but the shell paints no taskbar
+/// button for it regardless of the user's "Combine taskbar buttons" setting.
+///
+/// Used only for `WindowKind::Subwindow` top-level windows. Must be called
+/// once the HWND exists (post-`on_after_created`) and re-applied on the
+/// `TaskbarCreated` broadcast after Explorer restarts.
+///
+/// Same primitive Electron uses in `NativeWindowViews::SetSkipTaskbar`
+/// (`shell/browser/native_window_views.cc`).
+#[cfg(target_os = "windows")]
+unsafe fn skip_taskbar(hwnd: *mut std::ffi::c_void) {
+    use windows_sys::Win32::System::Com::{CoCreateInstance, CLSCTX_INPROC_SERVER};
+    use windows_sys::core::GUID;
+
+    // CLSID_TaskbarList
+    const CLSID_TASKBAR_LIST: GUID = GUID {
+        data1: 0x56FDF344,
+        data2: 0xFD6D,
+        data3: 0x11D0,
+        data4: [0x95, 0x8A, 0x00, 0x60, 0x97, 0xC9, 0xA0, 0x90],
+    };
+    // IID_ITaskbarList
+    const IID_TASKBAR_LIST: GUID = GUID {
+        data1: 0x56FDF342,
+        data2: 0xFD6D,
+        data3: 0x11D0,
+        data4: [0x95, 0x8A, 0x00, 0x60, 0x97, 0xC9, 0xA0, 0x90],
+    };
+
+    // Hand-rolled vtable — `windows-sys` doesn't expose `ITaskbarList` types
+    // at this feature level, and pulling in the full `windows` crate for one
+    // COM interface is overkill.
+    #[repr(C)]
+    struct ITaskbarList {
+        lp_vtbl: *const ITaskbarListVtbl,
+    }
+    #[repr(C)]
+    struct ITaskbarListVtbl {
+        query_interface: unsafe extern "system" fn(*mut ITaskbarList, *const GUID, *mut *mut core::ffi::c_void) -> i32,
+        add_ref: unsafe extern "system" fn(*mut ITaskbarList) -> u32,
+        release: unsafe extern "system" fn(*mut ITaskbarList) -> u32,
+        hr_init: unsafe extern "system" fn(*mut ITaskbarList) -> i32,
+        add_tab: unsafe extern "system" fn(*mut ITaskbarList, *mut core::ffi::c_void) -> i32,
+        delete_tab: unsafe extern "system" fn(*mut ITaskbarList, *mut core::ffi::c_void) -> i32,
+        activate_tab: unsafe extern "system" fn(*mut ITaskbarList, *mut core::ffi::c_void) -> i32,
+        set_active_alt: unsafe extern "system" fn(*mut ITaskbarList, *mut core::ffi::c_void) -> i32,
+    }
+
+    let mut tbl: *mut ITaskbarList = std::ptr::null_mut();
+    let hr = CoCreateInstance(
+        &CLSID_TASKBAR_LIST as *const GUID,
+        std::ptr::null_mut(),
+        CLSCTX_INPROC_SERVER,
+        &IID_TASKBAR_LIST as *const GUID,
+        &mut tbl as *mut _ as *mut _,
+    );
+    if hr < 0 || tbl.is_null() {
+        tracing::warn!("[skip_taskbar] CoCreateInstance(TaskbarList) failed: hr=0x{:x}", hr);
+        return;
+    }
+
+    let vtbl = &*(*tbl).lp_vtbl;
+    let hr = (vtbl.hr_init)(tbl);
+    if hr < 0 {
+        tracing::warn!("[skip_taskbar] HrInit failed: hr=0x{:x}", hr);
+        (vtbl.release)(tbl);
+        return;
+    }
+    let hr = (vtbl.delete_tab)(tbl, hwnd);
+    if hr < 0 {
+        tracing::warn!("[skip_taskbar] DeleteTab failed: hr=0x{:x}", hr);
+    } else {
+        tracing::info!("[skip_taskbar] hid HWND {:p} from taskbar", hwnd);
+    }
+    (vtbl.release)(tbl);
 }
 
 /// Load the app icon from the exe's embedded resource and set it on the window.
