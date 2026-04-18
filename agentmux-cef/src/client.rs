@@ -12,6 +12,7 @@ use parking_lot::Mutex;
 
 use crate::state::{AppState, WindowKind};
 
+
 /// Write a debug line to `%TEMP%\agentmux-close-debug.txt`.
 ///
 /// Only active when `AGENTMUX_DEBUG_CLOSE=1` is set in the environment.
@@ -814,9 +815,63 @@ const EVENTFLAG_CONTROL_DOWN: u32 = 1 << 2;
 const VK_P: i32 = 0x50; // Ctrl+P — command palette (not print)
 const VK_G: i32 = 0x47; // Ctrl+G — (reserve for app use)
 
+/// Shared body for on_pre_key_event across all platforms.
+/// The os_event parameter type differs per platform so it is not passed here.
+fn handle_pre_key_event(
+    event: Option<&KeyEvent>,
+    is_keyboard_shortcut: Option<&mut ::std::os::raw::c_int>,
+) -> ::std::os::raw::c_int {
+    if let Some(ev) = event {
+        let ctrl = (ev.modifiers & EVENTFLAG_CONTROL_DOWN) != 0;
+        if ctrl && matches!(ev.windows_key_code, VK_P | VK_G) {
+            // Tell CEF this is a keyboard shortcut so it dispatches
+            // the keydown event to JavaScript instead of handling it
+            // as a built-in browser action (print dialog, etc.).
+            if let Some(flag) = is_keyboard_shortcut {
+                *flag = 1;
+            }
+        }
+    }
+    0 // not consumed
+}
+
+// The os_event type differs per platform so we must use separate macro
+// invocations — #[cfg] attributes are not valid inside macro argument lists.
+#[cfg(target_os = "macos")]
 wrap_keyboard_handler! {
     struct AgentMuxKeyboardHandler;
+    impl KeyboardHandler {
+        fn on_pre_key_event(
+            &self,
+            _browser: Option<&mut Browser>,
+            event: Option<&KeyEvent>,
+            _os_event: *mut u8,
+            is_keyboard_shortcut: Option<&mut ::std::os::raw::c_int>,
+        ) -> ::std::os::raw::c_int {
+            handle_pre_key_event(event, is_keyboard_shortcut)
+        }
+    }
+}
 
+#[cfg(target_os = "linux")]
+wrap_keyboard_handler! {
+    struct AgentMuxKeyboardHandler;
+    impl KeyboardHandler {
+        fn on_pre_key_event(
+            &self,
+            _browser: Option<&mut Browser>,
+            event: Option<&KeyEvent>,
+            _os_event: Option<&mut XEvent>,
+            is_keyboard_shortcut: Option<&mut ::std::os::raw::c_int>,
+        ) -> ::std::os::raw::c_int {
+            handle_pre_key_event(event, is_keyboard_shortcut)
+        }
+    }
+}
+
+#[cfg(windows)]
+wrap_keyboard_handler! {
+    struct AgentMuxKeyboardHandler;
     impl KeyboardHandler {
         fn on_pre_key_event(
             &self,
@@ -825,21 +880,7 @@ wrap_keyboard_handler! {
             _os_event: Option<&mut cef::sys::MSG>,
             is_keyboard_shortcut: Option<&mut ::std::os::raw::c_int>,
         ) -> ::std::os::raw::c_int {
-            if let Some(ev) = event {
-                let ctrl = (ev.modifiers & EVENTFLAG_CONTROL_DOWN) != 0;
-                if ctrl && matches!(ev.windows_key_code, VK_P | VK_G) {
-                    // Tell CEF this is a keyboard shortcut so it dispatches
-                    // the keydown event to JavaScript instead of handling it
-                    // as a built-in browser action (print dialog, etc.).
-                    if let Some(flag) = is_keyboard_shortcut {
-                        *flag = 1;
-                    }
-                    // Return 0 = not consumed at pre-key stage; CEF will
-                    // still call on_key_event where we return 0 again,
-                    // letting JS handle it via the normal keydown path.
-                }
-            }
-            0 // not consumed
+            handle_pre_key_event(event, is_keyboard_shortcut)
         }
     }
 }

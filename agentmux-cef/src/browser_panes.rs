@@ -203,8 +203,8 @@ impl BrowserPaneManager {
         if let Some(browser) = self.live_browser(state, block_id) {
             if let Some(host) = browser.host() {
                 let hwnd = host.window_handle();
+                #[cfg(target_os = "windows")]
                 if !hwnd.0.is_null() {
-                    #[cfg(target_os = "windows")]
                     unsafe {
                         // HWND_TOP = 0 brings the window to the top of the Z-order
                         // within its parent. SWP_NOACTIVATE keeps keyboard focus where
@@ -223,6 +223,10 @@ impl BrowserPaneManager {
                     // screen bounds are updated — without this, hit-tests on
                     // scrollbars and drag operations use stale coordinates and
                     // drags are rejected / misrouted.
+                    host.notify_move_or_resize_started();
+                }
+                #[cfg(not(target_os = "windows"))]
+                if !hwnd.is_null() {
                     host.notify_move_or_resize_started();
                 }
             }

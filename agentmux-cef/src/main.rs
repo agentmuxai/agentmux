@@ -268,6 +268,15 @@ fn main() {
     let resources_dir = CefString::from(base_dir.to_str().unwrap_or(""));
     let locales_dir = CefString::from(base_dir.join("locales").to_str().unwrap_or(""));
 
+    // On macOS, tell CEF exactly where the framework lives so it can load ICU
+    // and register the bundle correctly — required when running outside a .app.
+    // Without this, FrameworkBundlePath() fails and icudtl.dat lookup returns empty.
+    #[cfg(target_os = "macos")]
+    let framework_dir = {
+        let p = host_exe_dir.join("../Frameworks/Chromium Embedded Framework.framework");
+        p.canonicalize().unwrap_or(p)
+    };
+
     // Reuse data_dir from single-instance check as CEF cache path.
     // Remove stale lockfile from a previous killed run.
     let lockfile = data_dir.join("lockfile");
@@ -290,6 +299,8 @@ fn main() {
         browser_subprocess_path: CefString::from(
             std::env::current_exe().unwrap().to_str().unwrap_or("")
         ),
+        #[cfg(target_os = "macos")]
+        framework_dir_path: CefString::from(framework_dir.to_str().unwrap_or("")),
         ..Default::default()
     };
 

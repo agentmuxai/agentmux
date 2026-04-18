@@ -432,7 +432,31 @@ tasks:
         internal: true
         platforms: [darwin]
         cmds:
-            - echo "macOS bundling not yet implemented"
+            - |
+                # Locate CEF framework built by cef-dll-sys in the cargo target dir.
+                CEF_FW=$(find target -type d -name "Chromium Embedded Framework.framework" \
+                  -path "*/cef-dll-sys*/out/*" 2>/dev/null | \
+                  xargs -I{} stat -f "%m {}" {} 2>/dev/null | sort -rn | head -1 | cut -d' ' -f2-)
+                if [ -z "$CEF_FW" ]; then
+                  echo "❌ Chromium Embedded Framework.framework not found — run build:host first"
+                  exit 1
+                fi
+                echo "Found CEF framework: $CEF_FW"
+                # Copy to dist/Frameworks/ (one level above dist/cef/ where the binary lives,
+                # so CEF's library_loader resolves ../Frameworks/ correctly at runtime).
+                mkdir -p dist/Frameworks
+                rsync -a --delete "$CEF_FW" dist/Frameworks/
+                # Strip non-English lproj dirs to save ~50 MB.
+                find "dist/Frameworks/Chromium Embedded Framework.framework/Resources" \
+                  -maxdepth 1 -name "*.lproj" ! -name "en.lproj" -exec rm -rf {} + 2>/dev/null || true
+                echo "✓ CEF framework → dist/Frameworks/"
+                # GPU subprocess looks for libGLESv2.dylib and libEGL.dylib in the exe
+                # directory (same dir as agentmux-cef). Copy them from the framework.
+                FW_LIBS="dist/Frameworks/Chromium Embedded Framework.framework/Libraries"
+                mkdir -p dist/cef
+                cp -f "$FW_LIBS/libGLESv2.dylib" dist/cef/libGLESv2.dylib 2>/dev/null || true
+                cp -f "$FW_LIBS/libEGL.dylib" dist/cef/libEGL.dylib 2>/dev/null || true
+                echo "✓ GPU libraries copied to dist/cef/"
 
     bundle:linux:
         internal: true
