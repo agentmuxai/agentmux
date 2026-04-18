@@ -106,21 +106,25 @@ impl BrowserPaneManager {
             Some(l) => l,
             None => return,
         };
-        // Pull the browser out of state.browsers AND release the map lock
-        // before calling close_browser — leaving it in the map would cause
-        // create() to later find a stale destroyed browser and try to
-        // navigate it instead of creating a fresh pane. on_before_close
-        // handles the actual entry removal when CEF fires that callback,
-        // but we remove here eagerly to avoid the race.
+        // Clone the browser out of state.browsers WITHOUT removing it —
+        // removing here made on_before_close's label lookup fail (it uses
+        // is_same against entries in state.browsers to find the closing
+        // browser), which skipped the per-browser cleanup path and left
+        // the main browser's on_before_close as the only one that found a
+        // match. Let CEF fire on_before_close and remove the entry
+        // naturally there.
         let browser = {
-            let mut browsers = state.browsers.lock();
-            browsers.remove(&label)
+            let browsers = state.browsers.lock();
+            browsers.get(&label).cloned()
         };
         if let Some(browser) = browser {
             if let Some(host) = browser.host() {
-                host.close_browser(1);
+                // force_close=0 (graceful) — force_close=1 was cascading into
+                // the main browser's on_before_close and quitting the whole
+                // app. A graceful close closes only this browser.
+                host.close_browser(0);
             }
-            tracing::info!(block_id, "browser pane closed");
+            tracing::info!(block_id, "browser pane close requested");
         }
     }
 
