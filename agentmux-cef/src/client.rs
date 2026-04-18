@@ -218,10 +218,13 @@ impl AgentMuxHandler {
 
         dlog(&format!("browser_list after remove: {}", self.browser_list.len()));
 
-        if self.browser_list.is_empty() {
+        if self.browser_list.is_empty() && !self.is_pane {
             dlog("last window — calling quit_message_loop");
             // Last window — quit the message loop.
             // The Job Object kills agentmux-srv which kills all shell processes.
+            // Only the MAIN client's handler should trigger app exit — pane
+            // clients own only their own pane browser and their list emptying
+            // just means the user closed the pane, not the whole app.
             quit_message_loop();
         } else {
             // Notify remaining windows of the new count.
