@@ -195,11 +195,16 @@ impl BrowserPaneManager {
         let browser = state.browsers.lock().get(&label).cloned();
         if let Some(browser) = browser {
             if let Some(host) = browser.host() {
-                // force_close=0 (graceful) — force_close=1 used to cascade into
-                // the main browser's on_before_close and quit the app, which the
-                // `!is_pane` guard at client.rs on_before_close now prevents.
-                // Graceful close is still preferred so Chromium runs its full
-                // teardown (beforeunload, GPU surface release) in order.
+                // Increment the cascade-guard counter BEFORE calling close_browser:
+                // during the teardown, CEF fires do_close on main too (Alloy child-
+                // HWND cascade), and main's do_close reads this counter and cancels.
+                // Decrement in drain_closed_label once the pane's on_before_close
+                // has drained this entry.
+                crate::client::PANE_CLOSE_IN_PROGRESS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+
+                // force_close=0 (graceful) — force_close=1 used to cascade even
+                // more aggressively. Graceful still cascades on Alloy (see
+                // do_close guard above), but it's the less disruptive path.
                 host.close_browser(0);
             }
             tracing::info!(block_id, label, "browser pane close requested");
@@ -212,7 +217,8 @@ impl BrowserPaneManager {
 
     /// Called from CEF's `on_before_close` once the pane's Browser has been
     /// removed from `state.browsers`. Drops the `panes` entry so the block_id
-    /// can be reused if a new pane is created with the same id.
+    /// can be reused if a new pane is created with the same id. Also
+    /// decrements the cascade-guard counter paired with `close()`.
     pub fn drain_closed_label(&self, label: &str) {
         let mut panes = self.panes.lock();
         let victim = panes
@@ -222,6 +228,14 @@ impl BrowserPaneManager {
         if let Some(block_id) = victim {
             panes.remove(&block_id);
             tracing::info!(block_id, label, "browser pane drained from lifecycle map");
+        }
+        // Always decrement — even if we didn't find the entry (e.g. create()
+        // failed before registering), the pane close IPC had incremented
+        // somewhere and leaving it positive would block main's close forever.
+        // Saturating to avoid underflow if drain is ever called spuriously.
+        let prev = crate::client::PANE_CLOSE_IN_PROGRESS.load(std::sync::atomic::Ordering::SeqCst);
+        if prev > 0 {
+            crate::client::PANE_CLOSE_IN_PROGRESS.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
         }
     }
 
