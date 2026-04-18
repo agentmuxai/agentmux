@@ -306,7 +306,7 @@ impl BrowserPaneManager {
                         // Tell the subclass this focus request is intentional
                         // (not Chromium's on-load focus steal) so it won't be
                         // redirected back to the parent.
-                        crate::client::ALLOW_PANE_FOCUS_ONCE.store(
+                        crate::pane::ALLOW_PANE_FOCUS_ONCE.store(
                             true,
                             std::sync::atomic::Ordering::Relaxed,
                         );
