@@ -10,7 +10,7 @@ use cef::*;
 use std::sync::Arc;
 use parking_lot::Mutex;
 
-use crate::state::AppState;
+use crate::state::{AppState, WindowKind};
 
 /// Write a debug line to `%TEMP%\agentmux-close-debug.txt`.
 ///
@@ -42,15 +42,21 @@ pub struct AgentMuxHandler {
     is_closing: bool,
     state: Arc<AppState>,
     ipc_port: u16,
+    is_pane: bool,
 }
 
 impl AgentMuxHandler {
     pub fn new(state: Arc<AppState>, ipc_port: u16) -> Arc<Mutex<Self>> {
+        Self::new_with_pane(state, ipc_port, false)
+    }
+
+    pub fn new_with_pane(state: Arc<AppState>, ipc_port: u16, is_pane: bool) -> Arc<Mutex<Self>> {
         Arc::new(Mutex::new(Self {
             browser_list: Vec::new(),
             is_closing: false,
             state,
             ipc_port,
+            is_pane,
         }))
     }
 
@@ -96,7 +102,7 @@ impl AgentMuxHandler {
 
         // Register browser in the multi-window map.
         // First browser is "main"; additional browsers get labels from their URL params.
-        {
+        let label = {
             let mut browsers = self.state.browsers.lock();
             let label = if browsers.is_empty() {
                 "main".to_string()
@@ -111,26 +117,91 @@ impl AgentMuxHandler {
             };
             tracing::info!("Registered browser: label={} (total: {})", label, browsers.len() + 1);
             dlog(&format!("on_after_created: registered label={} total={}", label, browsers.len() + 1));
-            browsers.insert(label, browser.clone());
+            browsers.insert(label.clone(), browser.clone());
+            label
+        };
+
+        // Ensure WindowMeta exists for this browser so downstream code (taskbar
+        // treatment here, cascade-close below) can classify it. If the creator
+        // didn't pre-register a meta (legacy callers, or the very first "main"
+        // window), default to FullInstance. Browser panes use `browser-pane-*`
+        // labels which are intentionally absent from window_meta — they're
+        // child HWNDs, not top-level windows, and skipping the taskbar logic
+        // below for them is correct.
+        let is_top_level_window = !label.starts_with("browser-pane-");
+        if is_top_level_window {
+            let mut metas = self.state.window_meta.lock();
+            metas.entry(label.clone()).or_insert_with(|| {
+                crate::state::WindowMeta {
+                    label: label.clone(),
+                    kind: WindowKind::FullInstance,
+                    parent_instance_id: None,
+                }
+            });
         }
 
         // No DwmExtendFrameIntoClientArea — it causes the white flash.
         // CEF Views handles frameless + resize via its delegate.
 
-        // Set the taskbar/title bar icon from the embedded exe resource.
+        // Set the taskbar/title bar icon from the embedded exe resource, and
+        // for `Subwindow` top-levels, hide them from the taskbar via
+        // ITaskbarList::DeleteTab.
         #[cfg(target_os = "windows")]
         {
-            // For native windows, use the browser's HWND; for CEF Views, enumerate.
-            let hwnd = browser.host()
-                .and_then(|h| {
-                    let wh = h.window_handle();
-                    if wh.0.is_null() { None } else { Some(wh.0 as *mut std::ffi::c_void) }
-                })
-                .unwrap_or_else(|| unsafe {
-                    crate::commands::window::find_own_top_level_window()
-                });
+            // Prefer CEF Views' `Window::window_handle()` — it targets the
+            // specific top-level window for THIS browser, avoiding the
+            // `find_own_top_level_window` fallback's "first visible HWND"
+            // ambiguity when multiple windows exist.
+            let mut browser_mut = browser.clone();
+            let views_top_hwnd = browser_view_get_for_browser(Some(&mut browser_mut))
+                .and_then(|bv| bv.window())
+                .map(|w| w.window_handle().0 as *mut std::ffi::c_void)
+                .filter(|p| !p.is_null());
+
+            let hwnd = views_top_hwnd.unwrap_or_else(|| {
+                browser.host()
+                    .and_then(|h| {
+                        let wh = h.window_handle();
+                        if wh.0.is_null() { None } else { Some(wh.0 as *mut std::ffi::c_void) }
+                    })
+                    .unwrap_or_else(|| unsafe {
+                        crate::commands::window::find_own_top_level_window()
+                    })
+            });
+
             if !hwnd.is_null() {
                 unsafe { set_window_icon(hwnd); }
+
+                // Subwindow? Hide from taskbar. Full instances and browser-pane
+                // child HWNDs skip this branch.
+                if is_top_level_window {
+                    let kind = self.state.window_meta.lock().get(&label).map(|m| m.kind);
+                    if kind == Some(WindowKind::Subwindow) {
+                        unsafe { skip_taskbar(hwnd); }
+                    }
+                }
+            }
+        }
+
+        // Browser panes must sit ABOVE the main browser's widget in Z-order
+        // or mouse-wheel events over the visible pane area hit main instead
+        // of the pane. Bring the pane's HWND to the top of its parent's
+        // Z-order without changing its activation state.
+        #[cfg(target_os = "windows")]
+        if self.is_pane {
+            if let Some(host) = browser.host() {
+                let wh = host.window_handle();
+                if !wh.0.is_null() {
+                    unsafe {
+                        windows_sys::Win32::UI::WindowsAndMessaging::SetWindowPos(
+                            wh.0 as _,
+                            std::ptr::null_mut(), // HWND_TOP
+                            0, 0, 0, 0,
+                            0x0001 | 0x0002 | 0x0010, // SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE
+                        );
+                    }
+                    tracing::info!("[pane-zorder] raised pane to top of Z-order");
+                }
             }
         }
 
@@ -178,6 +249,36 @@ impl AgentMuxHandler {
             wid
         });
 
+        // Pull and remove the closing window's meta; if it's a FullInstance,
+        // cascade-close every Subwindow whose parent_instance_id points to it.
+        // See `docs/specs/SPEC_MULTIWINDOW_TASKBAR_GROUPING.md` §2.3.
+        let closing_meta = label
+            .as_deref()
+            .and_then(|lbl| self.state.window_meta.lock().remove(lbl));
+        if let Some(meta) = &closing_meta {
+            if meta.kind == WindowKind::FullInstance {
+                let child_labels: Vec<String> = self
+                    .state
+                    .window_meta
+                    .lock()
+                    .values()
+                    .filter(|m| {
+                        m.kind == WindowKind::Subwindow
+                            && m.parent_instance_id.as_deref() == Some(&meta.label)
+                    })
+                    .map(|m| m.label.clone())
+                    .collect();
+                for child_label in child_labels {
+                    if let Some(mut child) = self.state.browsers.lock().get(&child_label).cloned() {
+                        if let Some(host) = child.host() {
+                            tracing::info!(parent = %meta.label, child = %child_label, "[subwindow-cascade] closing sub-window");
+                            host.close_browser(1);
+                        }
+                    }
+                }
+            }
+        }
+
         dlog(&format!("backend_window_id: {:?}", backend_window_id));
 
         if let Some(index) = self
@@ -190,10 +291,13 @@ impl AgentMuxHandler {
 
         dlog(&format!("browser_list after remove: {}", self.browser_list.len()));
 
-        if self.browser_list.is_empty() {
+        if self.browser_list.is_empty() && !self.is_pane {
             dlog("last window — calling quit_message_loop");
             // Last window — quit the message loop.
             // The Job Object kills agentmux-srv which kills all shell processes.
+            // Only the MAIN client's handler should trigger app exit — pane
+            // clients own only their own pane browser and their list emptying
+            // just means the user closed the pane, not the whole app.
             quit_message_loop();
         } else {
             // Notify remaining windows of the new count.
@@ -237,6 +341,24 @@ impl AgentMuxHandler {
         let Some(frame) = frame else { return };
 
         if frame.is_main() != 1 {
+            return;
+        }
+
+        // For browser panes: skip IPC-port injection (the embedded page is
+        // not our frontend). Re-install the HWND subclass — Chromium creates
+        // the render HWND (Chrome_RenderWidgetHostHWND) during navigation, so
+        // it doesn't exist yet in on_after_created. We re-subclass on every
+        // navigation so newly-created child HWNDs are always covered.
+        //
+        // DO NOT force focus back to main here: WM_MOUSEWHEEL is routed to
+        // the focused HWND (on Windows without "scroll inactive windows"),
+        // so stealing focus away from the pane breaks scrolling. The
+        // FocusHandler cancel + WndProc redirect already keep focus off the
+        // pane during the *initial* navigation focus steal; user-driven
+        // focus goes through `browser_pane_focus` IPC, and clicking a main
+        // input goes through `main_window_focus`.
+        if self.is_pane {
+            tracing::info!("[pane-load-end] pane page loaded");
             return;
         }
 
@@ -292,6 +414,13 @@ impl AgentMuxHandler {
         }
 
         let frame = frame.expect("Frame is None");
+
+        // Don't show error pages for sub-frames (iframes) — only for
+        // the main frame. Without this, an iframe blocked by
+        // X-Frame-Options replaces the entire app with an error page.
+        if frame.is_main() != 1 {
+            return;
+        }
         let error_text = error_text.map(CefString::to_string).unwrap_or_default();
         let failed_url = failed_url.map(CefString::to_string).unwrap_or_default();
         let error_code_i32 = error_code_raw as i32;
@@ -626,6 +755,7 @@ fn html_escape(s: &str) -> String {
 wrap_client! {
     pub struct AgentMuxClient {
         inner: Arc<Mutex<AgentMuxHandler>>,
+        is_pane: bool,
     }
 
     impl Client {
@@ -647,6 +777,39 @@ wrap_client! {
 
         fn request_handler(&self) -> Option<RequestHandler> {
             Some(AgentMuxRequestHandler::new(self.inner.clone()))
+        }
+
+        fn focus_handler(&self) -> Option<FocusHandler> {
+            // For browser panes only: cancel CEF's auto-focus on navigation so the
+            // child HWND doesn't steal keyboard focus from the main window when the
+            // page finishes loading. The user can still click into the pane to focus it.
+            if self.is_pane {
+                Some(AgentMuxPaneFocusHandler::new())
+            } else {
+                None
+            }
+        }
+    }
+}
+
+// FocusHandler used only by browser-pane clients — cancels NAVIGATION focus
+// (triggered by page load) but allows SYSTEM focus (user click, keyboard).
+// Combined with the Win32 WndProc subclass below, this means:
+//   • Page load / JS window.focus() → cancelled at both Chromium and Win32
+//   • User click inside the pane → allowed at both layers, pane gets focus,
+//     user can type into page inputs (e.g. google.com search box)
+wrap_focus_handler! {
+    struct AgentMuxPaneFocusHandler;
+
+    impl FocusHandler {
+        fn on_set_focus(
+            &self,
+            _browser: Option<&mut Browser>,
+            source: FocusSource,
+        ) -> ::std::os::raw::c_int {
+            let cancel = source == FocusSource::NAVIGATION;
+            tracing::info!("[pane-focus] on_set_focus source={:?} cancel={}", source, cancel);
+            if cancel { 1 } else { 0 }
         }
     }
 }
@@ -835,6 +998,145 @@ static ORIGINAL_WNDPROCS: std::sync::LazyLock<
     std::sync::Mutex<std::collections::HashMap<usize, isize>>,
 > = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
 
+/// Map of pane HWND -> original WndProc for the focus-redirect subclass below.
+#[cfg(target_os = "windows")]
+static PANE_WNDPROCS: std::sync::LazyLock<
+    std::sync::Mutex<std::collections::HashMap<usize, isize>>,
+> = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+
+/// Subclass a browser pane's HWND so that WM_SETFOCUS is immediately redirected
+/// back to the parent (top-level) window. Without this, Chromium's internal
+/// SetFocus on the pane HWND (on page load, on JS window.focus() calls, etc.)
+/// steals the Windows-level keyboard focus — any subsequent keystrokes go to
+/// the pane's renderer instead of the main window, so terminals, URL bars, and
+/// other inputs in the main UI stop responding.
+///
+/// The pane becomes view-only (user cannot type into google.com's search box),
+/// but the main window keeps working. A later gesture (e.g. Alt+click) can
+/// restore focus to the pane explicitly when the user wants to interact with
+/// the embedded page.
+/// When true, the next WM_SETFOCUS delivered to a subclassed pane HWND is
+/// allowed through instead of being redirected. The `browser_pane_focus` IPC
+/// handler sets this flag before calling SetFocus on the pane, so user-
+/// initiated focus (routed by the frontend's ViewModel.giveFocus()) works
+/// even though the Chromium-internal focus steal on navigation is blocked.
+#[cfg(target_os = "windows")]
+pub static ALLOW_PANE_FOCUS_ONCE: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+#[cfg(target_os = "windows")]
+unsafe fn install_pane_focus_redirect(hwnd: *mut std::ffi::c_void) {
+    use std::sync::atomic::Ordering;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        CallWindowProcW, GetParent, SetWindowLongPtrW, GWLP_WNDPROC, WM_SETFOCUS,
+    };
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::SetFocus;
+
+    unsafe extern "system" fn wndproc_hook(
+        hwnd: *mut std::ffi::c_void,
+        msg: u32,
+        wparam: usize,
+        lparam: isize,
+    ) -> isize {
+        // Diagnostic: surface mouse-wheel and key events so we can tell
+        // whether they reach the pane HWND at all when the user reports
+        // scrolling/typing breakage.
+        const WM_MOUSEWHEEL: u32 = 0x020A;
+        const WM_MOUSEHWHEEL: u32 = 0x020E;
+        const WM_KEYDOWN: u32 = 0x0100;
+        const WM_CHAR: u32 = 0x0102;
+        match msg {
+            WM_MOUSEWHEEL | WM_MOUSEHWHEEL => {
+                tracing::info!("[pane-wndproc] mouse-wheel hwnd={:p} msg=0x{:x}", hwnd, msg);
+            }
+            WM_KEYDOWN | WM_CHAR => {
+                tracing::info!("[pane-wndproc] key msg=0x{:x} wparam={}", msg, wparam);
+            }
+            _ => {}
+        }
+
+        if msg == WM_SETFOCUS {
+            // Intentional focus from the frontend's giveFocus() IPC: honor it
+            // once, then revert to redirect-mode for subsequent events.
+            if ALLOW_PANE_FOCUS_ONCE.swap(false, Ordering::Relaxed) {
+                tracing::info!("[pane-wndproc] WM_SETFOCUS allowed (intentional)");
+                // Fall through to the original WndProc.
+            } else {
+                // Programmatic focus (page load, JS window.focus()): redirect.
+                let parent = GetParent(hwnd);
+                if !parent.is_null() {
+                    SetFocus(parent);
+                }
+                return 0;
+            }
+        }
+
+        let original = PANE_WNDPROCS
+            .lock()
+            .ok()
+            .and_then(|m| m.get(&(hwnd as usize)).copied())
+            .unwrap_or(0);
+        if original != 0 {
+            let proc_fn: unsafe extern "system" fn(
+                *mut std::ffi::c_void, u32, usize, isize,
+            ) -> isize = std::mem::transmute(original);
+            CallWindowProcW(Some(proc_fn), hwnd, msg, wparam, lparam)
+        } else {
+            0
+        }
+    }
+
+    // Subclass the outer HWND — but only once. Re-calling SetWindowLongPtrW
+    // would replace our hook with itself and poison PANE_WNDPROCS.
+    let already_hooked = PANE_WNDPROCS
+        .lock()
+        .ok()
+        .map(|m| m.contains_key(&(hwnd as usize)))
+        .unwrap_or(false);
+    if !already_hooked {
+        let original = SetWindowLongPtrW(hwnd, GWLP_WNDPROC, wndproc_hook as *const () as isize);
+        if original != 0 {
+            if let Ok(mut map) = PANE_WNDPROCS.lock() {
+                map.insert(hwnd as usize, original);
+            }
+            tracing::info!("[pane-subclass] installed focus-redirect WndProc on pane HWND {:p}", hwnd);
+        }
+    }
+
+    // Chromium creates inner HWNDs (widget + render) below the outer HWND.
+    // Mouse input reaches the deepest descendant, so we must walk the whole
+    // tree and subclass every one.
+    unsafe extern "system" fn enum_children(
+        child: *mut std::ffi::c_void,
+        _lparam: isize,
+    ) -> i32 {
+        let already = PANE_WNDPROCS
+            .lock()
+            .ok()
+            .map(|m| m.contains_key(&(child as usize)))
+            .unwrap_or(false);
+        if already {
+            return 1;
+        }
+        let orig = SetWindowLongPtrW(child, GWLP_WNDPROC, wndproc_hook as *const () as isize);
+        if orig != 0 {
+            if let Ok(mut map) = PANE_WNDPROCS.lock() {
+                map.insert(child as usize, orig);
+            }
+            let mut class_buf = [0u16; 64];
+            let n = windows_sys::Win32::UI::WindowsAndMessaging::GetClassNameW(
+                child, class_buf.as_mut_ptr(), class_buf.len() as i32,
+            );
+            let class_name = String::from_utf16_lossy(&class_buf[..n as usize]);
+            tracing::info!("[pane-subclass] subclassed child HWND {:p} class={}", child, class_name);
+        }
+        1 // continue
+    }
+    windows_sys::Win32::UI::WindowsAndMessaging::EnumChildWindows(
+        hwnd, Some(enum_children), 0,
+    );
+}
+
 /// Install a WndProc hook on a SECONDARY window that handles:
 /// - WM_NCCALCSIZE: returns 0 to eliminate the non-client area (removes the
 ///   wide title bar / top border that WS_THICKFRAME + DWM extension creates)
@@ -915,6 +1217,85 @@ unsafe fn install_frameless_resize_hook(hwnd: *mut std::ffi::c_void) {
     }
     SetWindowLongPtrW(hwnd, GWLP_WNDPROC, wndproc_hook as isize);
     tracing::info!("Installed frameless resize hook (WM_NCCALCSIZE + WM_NCHITTEST)");
+}
+
+/// Hide the given top-level HWND from the Windows taskbar via
+/// `ITaskbarList::DeleteTab`. The window remains fully usable — Alt-Tab still
+/// finds it, it takes focus, repaints, etc. — but the shell paints no taskbar
+/// button for it regardless of the user's "Combine taskbar buttons" setting.
+///
+/// Used only for `WindowKind::Subwindow` top-level windows. Must be called
+/// once the HWND exists (post-`on_after_created`) and re-applied on the
+/// `TaskbarCreated` broadcast after Explorer restarts.
+///
+/// Same primitive Electron uses in `NativeWindowViews::SetSkipTaskbar`
+/// (`shell/browser/native_window_views.cc`).
+#[cfg(target_os = "windows")]
+unsafe fn skip_taskbar(hwnd: *mut std::ffi::c_void) {
+    use windows_sys::Win32::System::Com::{CoCreateInstance, CLSCTX_INPROC_SERVER};
+    use windows_sys::core::GUID;
+
+    // CLSID_TaskbarList
+    const CLSID_TASKBAR_LIST: GUID = GUID {
+        data1: 0x56FDF344,
+        data2: 0xFD6D,
+        data3: 0x11D0,
+        data4: [0x95, 0x8A, 0x00, 0x60, 0x97, 0xC9, 0xA0, 0x90],
+    };
+    // IID_ITaskbarList
+    const IID_TASKBAR_LIST: GUID = GUID {
+        data1: 0x56FDF342,
+        data2: 0xFD6D,
+        data3: 0x11D0,
+        data4: [0x95, 0x8A, 0x00, 0x60, 0x97, 0xC9, 0xA0, 0x90],
+    };
+
+    // Hand-rolled vtable — `windows-sys` doesn't expose `ITaskbarList` types
+    // at this feature level, and pulling in the full `windows` crate for one
+    // COM interface is overkill.
+    #[repr(C)]
+    struct ITaskbarList {
+        lp_vtbl: *const ITaskbarListVtbl,
+    }
+    #[repr(C)]
+    struct ITaskbarListVtbl {
+        query_interface: unsafe extern "system" fn(*mut ITaskbarList, *const GUID, *mut *mut core::ffi::c_void) -> i32,
+        add_ref: unsafe extern "system" fn(*mut ITaskbarList) -> u32,
+        release: unsafe extern "system" fn(*mut ITaskbarList) -> u32,
+        hr_init: unsafe extern "system" fn(*mut ITaskbarList) -> i32,
+        add_tab: unsafe extern "system" fn(*mut ITaskbarList, *mut core::ffi::c_void) -> i32,
+        delete_tab: unsafe extern "system" fn(*mut ITaskbarList, *mut core::ffi::c_void) -> i32,
+        activate_tab: unsafe extern "system" fn(*mut ITaskbarList, *mut core::ffi::c_void) -> i32,
+        set_active_alt: unsafe extern "system" fn(*mut ITaskbarList, *mut core::ffi::c_void) -> i32,
+    }
+
+    let mut tbl: *mut ITaskbarList = std::ptr::null_mut();
+    let hr = CoCreateInstance(
+        &CLSID_TASKBAR_LIST as *const GUID,
+        std::ptr::null_mut(),
+        CLSCTX_INPROC_SERVER,
+        &IID_TASKBAR_LIST as *const GUID,
+        &mut tbl as *mut _ as *mut _,
+    );
+    if hr < 0 || tbl.is_null() {
+        tracing::warn!("[skip_taskbar] CoCreateInstance(TaskbarList) failed: hr=0x{:x}", hr);
+        return;
+    }
+
+    let vtbl = &*(*tbl).lp_vtbl;
+    let hr = (vtbl.hr_init)(tbl);
+    if hr < 0 {
+        tracing::warn!("[skip_taskbar] HrInit failed: hr=0x{:x}", hr);
+        (vtbl.release)(tbl);
+        return;
+    }
+    let hr = (vtbl.delete_tab)(tbl, hwnd);
+    if hr < 0 {
+        tracing::warn!("[skip_taskbar] DeleteTab failed: hr=0x{:x}", hr);
+    } else {
+        tracing::info!("[skip_taskbar] hid HWND {:p} from taskbar", hwnd);
+    }
+    (vtbl.release)(tbl);
 }
 
 /// Load the app icon from the exe's embedded resource and set it on the window.

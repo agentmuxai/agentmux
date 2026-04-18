@@ -1,7 +1,7 @@
 [package]
 name = "agentmux-cef"
-version = "0.33.220"
-description = "AgentMux CEF Host — Pinned Chromium renderer replacing system WebView2"
+version = "0.33.242"
+description = "AgentMux Host — Desktop app with bundled Chromium"
 authors = ["AgentMux Corp"]
 edition = "2021"
 rust-version = "1.77"
@@ -55,6 +55,8 @@ windows-sys = { version = "0.59", features = [
     "Win32_System_Ole",
     "Win32_System_SystemInformation",
     "Win32_System_ProcessStatus",
+    "Win32_UI_Shell",
+    "Win32_System_Com",
 ] }
 
 [target.'cfg(target_os = "windows")'.build-dependencies]
