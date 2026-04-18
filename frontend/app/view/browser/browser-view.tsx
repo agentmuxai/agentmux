@@ -32,7 +32,7 @@ export function BrowserViewComponent(props: ViewComponentProps<BrowserViewModel>
     };
 
     const syncPosition = () => {
-        if (!placeholderRef || !paneCreated()) return;
+        if (!placeholderRef || !paneCreated() || model.closed) return;
         invokeCommand("browser_pane_resize", {
             block_id: model.blockId,
             ...paneRect(),
@@ -98,10 +98,17 @@ export function BrowserViewComponent(props: ViewComponentProps<BrowserViewModel>
     });
 
     onCleanup(() => {
-        resizeObserver?.disconnect();
-        if (positionInterval) clearInterval(positionInterval);
+        // Fire close IPC BEFORE disconnecting observers — the IPC flips the
+        // backend pane to Closing, so any in-flight resize/focus/nav calls
+        // that haven't reached the backend yet get no-op'd there instead of
+        // racing a mid-destruction HWND. See SPEC_BROWSER_PANE_LIFECYCLE.md §5.
         if (paneCreated()) {
             invokeCommand("browser_pane_close", { block_id: model.blockId }).catch(() => {});
+        }
+        resizeObserver?.disconnect();
+        if (positionInterval) {
+            clearInterval(positionInterval);
+            positionInterval = null;
         }
     });
 
@@ -161,7 +168,12 @@ export function BrowserViewComponent(props: ViewComponentProps<BrowserViewModel>
                     // OS-level keyboard focus to the pane when the cursor is over
                     // it. Without this, wheel events go to main's widget and the
                     // embedded page can't scroll.
-                    if (paneCreated()) {
+                    //
+                    // Gate on `model.closed`: hover can fire between the close IPC
+                    // being issued and the DOM node being removed — without this
+                    // check, SetFocus hits a HWND CEF is tearing down, which is
+                    // the crash-on-close described in the lifecycle spec.
+                    if (paneCreated() && !model.closed) {
                         invokeCommand("browser_pane_focus", { block_id: model.blockId }).catch(() => {});
                     }
                 }}
