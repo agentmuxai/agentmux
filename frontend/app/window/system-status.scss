@@ -20,33 +20,41 @@
     // Windows 11 standard caption buttons. Dimensions, hit area, and hover
     // treatment match the Win11 Fluent / Mica design tokens used by Explorer,
     // Edge, Terminal, and VS Code's custom-titlebar mode:
-    //   - 46×height hit area, tiled edge to edge (no gap)
+    //   - 46×(full title-bar height) hit area, tiled edge to edge
     //   - 10×10 glyph centered
     //   - Minimize/Maximize hover/press: theme-relative neutral overlay
     //     (via --win-caption-hover-bg / --win-caption-press-bg below)
     //   - Close hover:         solid #c42b1c red with white glyph
     //   - Close press:         #b7201b slightly darker
     //
-    // The caption-button overlay opacities come from the Fluent
-    // surface-background-hover (0.0605) / surface-background-pressed
-    // (0.0419) tokens. We default to the dark-theme values (white overlay)
-    // and override for light via prefers-color-scheme so the hover stays
-    // visible on both themes — the previous `opacity: 0.7` attempt only
-    // dimmed the glyph, which vanished against a light bar.
+    // Overlay alphas are bumped slightly from the raw Fluent tokens
+    // (0.0605 / 0.0419 dark, 0.0373 / 0.0241 light) to 0.08 / 0.054 dark
+    // and 0.06 / 0.04 light because the AgentMux title bar uses a darker
+    // surface than the Win11 Mica default — the raw Fluent values are
+    // nearly invisible on our background. Close button's red hover stays
+    // the exact OS value (#c42b1c / #b7201b) since it's brand-colour, not
+    // surface-relative.
     .window-action-buttons {
         display: flex;
         flex-direction: row;
+        // Fill the full title-bar height so the 46-px-wide button tiles render
+        // as full-height rectangles (like real Win11 caption buttons). Without
+        // `align-self: stretch`, the parent `.system-status`'s `align-items:
+        // center` collapses this container to icon size and the hover backgrounds
+        // only paint a tiny box.
+        align-self: stretch;
         align-items: stretch;
+
         // Butt up against the edge — Win11 caption buttons have no
         // right-margin padding.
         margin-right: -6px;
 
-        --win-caption-hover-bg: rgba(255, 255, 255, 0.0605);
-        --win-caption-press-bg: rgba(255, 255, 255, 0.0419);
+        --win-caption-hover-bg: rgba(255, 255, 255, 0.0804);
+        --win-caption-press-bg: rgba(255, 255, 255, 0.0536);
 
         @media (prefers-color-scheme: light) {
-            --win-caption-hover-bg: rgba(0, 0, 0, 0.0373);
-            --win-caption-press-bg: rgba(0, 0, 0, 0.0241);
+            --win-caption-hover-bg: rgba(0, 0, 0, 0.0604);
+            --win-caption-press-bg: rgba(0, 0, 0, 0.0402);
         }
 
         .window-action-btn {
