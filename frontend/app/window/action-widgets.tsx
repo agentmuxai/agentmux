@@ -390,7 +390,7 @@ const ActionWidgets = (): JSX.Element => {
                 ref={containerRef}
                 class="action-widgets"
                 data-testid="action-widgets"
-                data-tauri-drag-region="false"
+                data-drag-region="false"
                 onContextMenu={handleBarContextMenu}
             >
                 <For each={pinnedWidgets()}>
