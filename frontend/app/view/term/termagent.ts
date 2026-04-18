@@ -12,7 +12,7 @@ export const registeredAgentsByBlock = new Map<string, string>();
 
 export async function registerAgent(agentId: string, blockId: string, tabId?: string): Promise<void> {
     try {
-        const url = getWebServerEndpoint() + "/wave/reactive/register";
+        const url = getWebServerEndpoint() + "/agentmux/reactive/register";
         const response = await fetch(url, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -41,7 +41,7 @@ export async function registerAgent(agentId: string, blockId: string, tabId?: st
 
 export async function unregisterAgent(agentId: string): Promise<void> {
     try {
-        const url = getWebServerEndpoint() + "/wave/reactive/unregister";
+        const url = getWebServerEndpoint() + "/agentmux/reactive/unregister";
         const response = await fetch(url, {
             method: "POST",
             headers: { "Content-Type": "application/json" },

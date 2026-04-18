@@ -115,7 +115,7 @@ function callBackendService(service: string, method: string, args: any[], noUICo
         if (authKey) usp.set("authkey", authKey);
     }
 
-    const url = getWebServerEndpoint() + "/wave/service?" + usp.toString();
+    const url = getWebServerEndpoint() + "/agentmux/service?" + usp.toString();
     const fetchPromise = fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },

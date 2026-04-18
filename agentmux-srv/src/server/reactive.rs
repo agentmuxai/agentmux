@@ -41,7 +41,7 @@ pub(super) async fn handle_reactive_inject(
         if let Some(entry) = agent_registry::lookup(&data_dir, &req.target_agent) {
             // Guard against self-forwarding loops.
             if entry.local_url != state.local_web_url {
-                let forward_url = format!("{}/wave/reactive/inject", entry.local_url);
+                let forward_url = format!("{}/agentmux/reactive/inject", entry.local_url);
                 tracing::debug!(
                     target = %req.target_agent,
                     url = %forward_url,
