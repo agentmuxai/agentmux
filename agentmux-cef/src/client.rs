@@ -1221,7 +1221,7 @@ fn backend_close_window(web_endpoint: &str, auth_key: &str, window_id: &str) {
         "uicontext": null,
     }).to_string();
     let request = format!(
-        "POST /wave/service?service=window&method=CloseWindow&authkey={} HTTP/1.1\r\n\
+        "POST /agentmux/service?service=window&method=CloseWindow&authkey={} HTTP/1.1\r\n\
          Host: 127.0.0.1\r\n\
          Content-Type: application/json\r\n\
          Content-Length: {}\r\n\

@@ -65,7 +65,7 @@ fn auth_rejects_missing_key() {
 
     let client = reqwest::blocking::Client::new();
     let resp = client
-        .get(format!("http://{}/wave/service", web_addr))
+        .get(format!("http://{}/agentmux/service", web_addr))
         .send()
         .expect("request failed");
     assert_eq!(resp.status(), 401);
@@ -80,7 +80,7 @@ fn auth_accepts_valid_header() {
 
     let client = reqwest::blocking::Client::new();
     let resp = client
-        .post(format!("http://{}/wave/service", web_addr))
+        .post(format!("http://{}/agentmux/service", web_addr))
         .header("X-AuthKey", &auth_key)
         .header("Content-Type", "application/json")
         .body(r#"{"service":"client","method":"GetClientData"}"#)

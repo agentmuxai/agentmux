@@ -84,7 +84,7 @@ window.addEventListener("beforeunload", () => {
 **Design:**
 
 1. Frontend calls `registerBackendWindow(label, windowId)` IPC after `initWave()` completes, storing `window_label → backend_window_id` in `AppState.window_id_map`
-2. CEF Rust `on_before_close` hook: looks up the closing browser's label → looks up backend window ID → spawns thread → raw TCP call to `agentmux-srv /wave/service?method=CloseWindow`
+2. CEF Rust `on_before_close` hook: looks up the closing browser's label → looks up backend window ID → spawns thread → raw TCP call to `agentmux-srv /agentmux/service?method=CloseWindow`
 3. Also emits `"window-instances-changed"` to remaining windows (fixes the `windowCountAtom` stale count bug from Attempt 2)
 
 **Result:**
@@ -96,7 +96,7 @@ window.addEventListener("beforeunload", () => {
 
 ## Root Cause Analysis: v0.33.46 Window Close Failure
 
-The `on_before_close` Rust hook spawns a thread that calls `backend_close_window()`. This function makes a raw TCP connection to `agentmux-srv` and sends an HTTP POST to `/wave/service`.
+The `on_before_close` Rust hook spawns a thread that calls `backend_close_window()`. This function makes a raw TCP connection to `agentmux-srv` and sends an HTTP POST to `/agentmux/service`.
 
 Three possible failure points have been identified.
 

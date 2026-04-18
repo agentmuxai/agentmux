@@ -100,7 +100,7 @@ function TermSticker(props: { sticker: StickerType; config: StickerTermConfig })
     if (sticker.stickertype == "image") {
         if (sticker.imgsrc == null) return null;
         const streamingUrl =
-            getWebServerEndpoint() + "/wave/stream-local-file?path=" + encodeURIComponent(sticker.imgsrc);
+            getWebServerEndpoint() + "/agentmux/stream-local-file?path=" + encodeURIComponent(sticker.imgsrc);
         return (
             <div class="term-sticker term-sticker-image" style={style as any} onClick={clickHandler}>
                 <img src={streamingUrl} />
