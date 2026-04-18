@@ -217,6 +217,16 @@ async fn route_command(
         "is_main_window" => Ok(commands::window::is_main_window(args)),
         "get_window_label" => Ok(commands::window::get_window_label(args)),
         "open_new_window" => commands::window::open_new_window(state),
+        "open_subwindow" => {
+            // Agent / backend-only API — creates a sub-window tied to a full
+            // instance. Hidden from the taskbar. Not exposed in user UI.
+            let parent = args
+                .get("parent_instance_id")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| "open_subwindow: parent_instance_id required".to_string())?
+                .to_string();
+            commands::window::open_subwindow(state, parent)
+        }
         "get_instance_number" => Ok(commands::window::get_instance_number(state, args)),
         "get_window_count" => Ok(commands::window::get_window_count(state)),
         "register_backend_window" => Ok(commands::window::register_backend_window(state, args)),
