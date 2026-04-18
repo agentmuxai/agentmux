@@ -7,10 +7,8 @@ import { useWindowDrag } from "@/app/hook/useWindowDrag.platform";
 import { monitorForElements } from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
 import { For, onCleanup, onMount } from "solid-js";
 import type { JSX } from "solid-js";
-import { ObjectService, WorkspaceService } from "../store/services";
-import { makeORef, getObjectValue } from "../store/wos";
+import { WorkspaceService } from "../store/services";
 import { deleteLayoutModelForTab } from "@/layout/index";
-import { TAB_COLORS } from "./tab";
 import { DroppableTab } from "./droppable-tab";
 import {
     tabItemType,
@@ -35,16 +33,21 @@ interface TabBarProps {
 function TabBar(props: TabBarProps): JSX.Element {
     const activeTabId = atoms.activeTabId;
 
-    const pinnedTabIds = () => props.workspace?.pinnedtabids ?? [];
-    const regularTabIds = () => props.workspace?.tabids ?? [];
-    const allTabIds = () => [...pinnedTabIds(), ...regularTabIds()];
+    // Pin feature removed — merge any legacy pinnedtabids into the regular list
+    // so existing workspaces don't lose tabs. A one-time UpdateTabIds (below)
+    // drains pinnedtabids server-side so this concat becomes a no-op.
+    const tabIds = () => {
+        const ws = props.workspace;
+        if (!ws) return [];
+        return [...(ws.pinnedtabids ?? []), ...(ws.tabids ?? [])];
+    };
 
     const handleSelect = (tabId: string) => {
         if (tabId !== activeTabId()) setActiveTab(tabId);
     };
 
     const handleClose = (tabId: string) => {
-        const allTabs = allTabIds();
+        const allTabs = tabIds();
         if (allTabs.length <= 1) return;
         fireAndForget(async () => {
             if (tabId === activeTabId()) {
@@ -57,36 +60,23 @@ function TabBar(props: TabBarProps): JSX.Element {
         });
     };
 
-    const handlePinChange = (tabId: string) => {
-        const pinned = pinnedTabIds();
-        const regular = regularTabIds();
-        const isPinned = pinned.includes(tabId);
-        const newPinnedIds = isPinned ? pinned.filter((id) => id !== tabId) : [...pinned, tabId];
-        const newRegularIds = isPinned ? [...regular, tabId] : regular.filter((id) => id !== tabId);
-
-        // Auto-assign a color when the first tab is pinned and the tab has no color yet
-        const isFirstPin = !isPinned && pinned.length === 0;
-        const tab = isFirstPin ? getObjectValue<Tab>(makeORef("tab", tabId)) : null;
-        const needsColor = isFirstPin && !tab?.meta?.["tab:color"];
-
-        fireAndForget(async () => {
-            await WorkspaceService.UpdateTabIds(props.workspace.oid, newRegularIds, newPinnedIds);
-            if (needsColor) {
-                const allIds = [...(props.workspace.tabids ?? []), ...(props.workspace.pinnedtabids ?? [])];
-                const usedColors = allIds.map((id) => {
-                    const t = getObjectValue<Tab>(makeORef("tab", id));
-                    return t?.meta?.["tab:color"] as string | null | undefined;
-                });
-                const palette = TAB_COLORS.map((c) => c.hex);
-                const available = palette.filter((hex) => !usedColors.includes(hex));
-                const pool = available.length > 0 ? available : palette;
-                const color = pool[Math.floor(Math.random() * pool.length)];
-                await ObjectService.UpdateObjectMeta(makeORef("tab", tabId), { "tab:color": color } as MetaType);
-            }
-        });
-    };
-
     const { dragProps } = useWindowDrag();
+
+    // One-time migration: if this workspace still has pinned tabs from an older
+    // build, fold them into tabids and clear pinnedtabids server-side.
+    onMount(() => {
+        const ws = props.workspace;
+        if (ws && (ws.pinnedtabids?.length ?? 0) > 0) {
+            const merged = [...(ws.pinnedtabids ?? []), ...(ws.tabids ?? [])];
+            fireAndForget(async () => {
+                try {
+                    await WorkspaceService.UpdateTabIds(ws.oid, merged, []);
+                } catch (e) {
+                    console.error("[tabbar] pin migration failed:", e);
+                }
+            });
+        }
+    });
 
     onMount(() => {
         const cleanup = monitorForElements({
@@ -110,11 +100,10 @@ function TabBar(props: TabBarProps): JSX.Element {
                 const draggedTabId = source.data.tabId as string;
 
                 if (ip && draggedTabId) {
-                    const pinned = pinnedTabIds();
-                    const regular = regularTabIds();
+                    const tabs = tabIds();
                     const wsId = props.workspace?.oid;
 
-                    executeReorder(ip, draggedTabId, pinned, regular, wsId);
+                    executeReorder(ip, draggedTabId, tabs, wsId);
 
                     // Trigger bounce on the dragged tab at its new position
                     setBouncingTabId(draggedTabId);
@@ -136,7 +125,7 @@ function TabBar(props: TabBarProps): JSX.Element {
 
     if (!props.workspace) return null;
 
-    const activeIndex = () => allTabIds().indexOf(activeTabId());
+    const activeIndex = () => tabIds().indexOf(activeTabId());
 
     return (
         <div class="tab-bar" {...dragProps}>
@@ -144,7 +133,7 @@ function TabBar(props: TabBarProps): JSX.Element {
                 <i class="fa fa-plus" />
             </button>
             <div class="tab-bar-scroll" data-tauri-drag-region="false">
-                <For each={pinnedTabIds()}>
+                <For each={tabIds()}>
                     {(tabId, i) => (
                         <DroppableTab
                             tabId={tabId}
@@ -153,41 +142,14 @@ function TabBar(props: TabBarProps): JSX.Element {
                             isActive={tabId === activeTabId()}
                             isFirst={i() === 0}
                             isBeforeActive={i() === activeIndex() - 1}
-                            isPinned={true}
-                            allTabCount={allTabIds().length}
+                            allTabCount={tabIds().length}
                             tabIndex={i()}
-                            sectionIndex={i()}
-                            pinnedTabIds={pinnedTabIds()}
-                            regularTabIds={regularTabIds()}
+                            tabIds={tabIds()}
                             onSelect={() => handleSelect(tabId)}
                             onClose={() => handleClose(tabId)}
-                            onPinChange={() => handlePinChange(tabId)}
                         />
                     )}
                 </For>
-                {pinnedTabIds().length > 0 && <div class="pinned-tab-spacer" />}
-                <For each={regularTabIds()}>
-                    {(tabId, i) => (
-                        <DroppableTab
-                            tabId={tabId}
-                            workspaceId={props.workspace.oid}
-                            activeTabId={activeTabId()}
-                            isActive={tabId === activeTabId()}
-                            isFirst={pinnedTabIds().length === 0 && i() === 0}
-                            isBeforeActive={pinnedTabIds().length + i() === activeIndex() - 1}
-                            isPinned={false}
-                            allTabCount={allTabIds().length}
-                            tabIndex={pinnedTabIds().length + i()}
-                            sectionIndex={i()}
-                            pinnedTabIds={pinnedTabIds()}
-                            regularTabIds={regularTabIds()}
-                            onSelect={() => handleSelect(tabId)}
-                            onClose={() => handleClose(tabId)}
-                            onPinChange={() => handlePinChange(tabId)}
-                        />
-                    )}
-                </For>
-
             </div>
             {/* Empty right-side space — draggable so the user can grab the window from here */}
             <div class="tab-bar-fill" data-tauri-drag-region="true" />
@@ -196,81 +158,35 @@ function TabBar(props: TabBarProps): JSX.Element {
 }
 
 /**
- * Execute the reorder or cross-section move described by the insertion point.
+ * Execute the reorder described by the insertion point.
  * All drop logic lives here — droppable-tab.tsx is visual-only.
  */
 function executeReorder(
     ip: InsertionPoint,
     draggedTabId: string,
-    pinned: string[],
-    regular: string[],
+    tabs: string[],
     wsId: string
 ): void {
-    const sourceInPinned = pinned.includes(draggedTabId);
-
-    // Classify which section the gap belongs to
-    const beforeInPinned = ip.beforeTabId ? pinned.includes(ip.beforeTabId) : null;
-    const afterInPinned  = ip.afterTabId  ? pinned.includes(ip.afterTabId)  : null;
-
-    let targetSection: "pinned" | "regular";
     let insertIdx: number;
-
     if (ip.beforeTabId === null) {
-        // Gap before the very first tab
-        targetSection = afterInPinned ? "pinned" : "regular";
         insertIdx = 0;
     } else if (ip.afterTabId === null) {
-        // Gap after the very last tab
-        targetSection = beforeInPinned ? "pinned" : "regular";
-        const section = targetSection === "pinned" ? pinned : regular;
-        insertIdx = section.length;
-    } else if (beforeInPinned === afterInPinned) {
-        // Gap within same section — insert before afterTabId
-        targetSection = beforeInPinned ? "pinned" : "regular";
-        const section = targetSection === "pinned" ? pinned : regular;
-        insertIdx = section.indexOf(ip.afterTabId!);
+        insertIdx = tabs.length;
     } else {
-        // Cross-section boundary gap: beforeTabId is pinned, afterTabId is regular (or vice versa)
-        // Snap to the section of whichever tab is closest to the gap's logical side
-        if (sourceInPinned) {
-            // Pinned tab dropped at boundary → moves to start of regular
-            targetSection = "regular";
-            insertIdx = 0;
-        } else {
-            // Regular tab dropped at boundary → moves to end of pinned
-            targetSection = "pinned";
-            insertIdx = pinned.length;
-        }
+        insertIdx = tabs.indexOf(ip.afterTabId);
     }
 
-    if (sourceInPinned === (targetSection === "pinned")) {
-        // Same-section reorder — use ReorderTab (remove-then-insert)
-        const section = targetSection === "pinned" ? pinned : regular;
-        const sourceIdx = section.indexOf(draggedTabId);
-        if (sourceIdx < 0 || insertIdx < 0) return;
-        // Adjust for element removal shifting indices
-        const finalIdx = sourceIdx < insertIdx ? insertIdx - 1 : insertIdx;
-        fireAndForget(async () => {
-            try {
-                await WorkspaceService.ReorderTab(wsId, draggedTabId, finalIdx);
-            } catch (e) {
-                Logger.error("dnd", "tab-reorder failed", { tabId: draggedTabId, finalIdx, error: String(e) });
-            }
-        });
-    } else {
-        // Cross-section move — use UpdateTabIds
-        const newPinned = [...pinned];
-        const newRegular = [...regular];
-        if (sourceInPinned) {
-            newPinned.splice(newPinned.indexOf(draggedTabId), 1);
-            newRegular.splice(Math.min(insertIdx, newRegular.length), 0, draggedTabId);
-        } else {
-            newRegular.splice(newRegular.indexOf(draggedTabId), 1);
-            newPinned.splice(Math.min(insertIdx, newPinned.length), 0, draggedTabId);
+    const sourceIdx = tabs.indexOf(draggedTabId);
+    if (sourceIdx < 0 || insertIdx < 0) return;
+    // Adjust for element removal shifting indices
+    const finalIdx = sourceIdx < insertIdx ? insertIdx - 1 : insertIdx;
+    fireAndForget(async () => {
+        try {
+            await WorkspaceService.ReorderTab(wsId, draggedTabId, finalIdx);
+        } catch (e) {
+            Logger.error("dnd", "tab-reorder failed", { tabId: draggedTabId, finalIdx, error: String(e) });
         }
-        Logger.info("dnd", "tab-cross-section drop", { draggedTabId, targetSection, insertIdx });
-        fireAndForget(() => WorkspaceService.UpdateTabIds(wsId, newRegular, newPinned));
-    }
+    });
 }
 
 export { TabBar };

@@ -18,7 +18,7 @@ import type { LayoutNode } from "@/layout/lib/types";
 
 export type DragItemPayload =
     | { kind: "tile"; node: LayoutNode }
-    | { kind: "tab"; tabId: string; workspaceId: string; isPinned: boolean };
+    | { kind: "tab"; tabId: string; workspaceId: string };
 
 let _currentDragPayload: DragItemPayload | null = null;
 
