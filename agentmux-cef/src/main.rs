@@ -28,6 +28,7 @@ mod commands;
 mod events;
 mod ipc;
 mod memory_heartbeat;
+mod pane;
 mod sidecar;
 mod state;
 mod ui_tasks;
