@@ -157,10 +157,10 @@ function TabBar(props: TabBarProps): JSX.Element {
 
     return (
         <div class="tab-bar" {...dragProps}>
-            <button class="add-tab-btn" onClick={createTab} title="New Tab" data-tauri-drag-region="false">
+            <button class="add-tab-btn" onClick={createTab} title="New Tab" data-drag-region="false">
                 <i class="fa fa-plus" />
             </button>
-            <div class="tab-bar-scroll" data-tauri-drag-region="false">
+            <div class="tab-bar-scroll" data-drag-region="false">
                 <For each={tabIds()}>
                     {(tabId, i) => (
                         <DroppableTab
@@ -180,7 +180,7 @@ function TabBar(props: TabBarProps): JSX.Element {
                 </For>
             </div>
             {/* Empty right-side space — draggable so the user can grab the window from here */}
-            <div class="tab-bar-fill" data-tauri-drag-region="true" />
+            <div class="tab-bar-fill" data-drag-region="true" />
         </div>
     );
 }

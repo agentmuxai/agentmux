@@ -99,7 +99,7 @@ export function DroppableTab(props: DroppableTabProps): JSX.Element {
     return (
         <div
             ref={tabWrapRef!}
-            data-tauri-drag-region="false"
+            data-drag-region="false"
             class={clsx("tab-drop-wrapper", {
                 "tab-dragging": isDragging(),
                 "tab-bouncing": isBouncing(),
