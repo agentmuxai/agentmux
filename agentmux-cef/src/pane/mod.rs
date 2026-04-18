@@ -11,5 +11,10 @@
 //! Re-exports the public surface that `browser_panes.rs` and tests consume.
 
 pub mod lifecycle;
+#[cfg(target_os = "windows")]
+pub mod hwnd;
 
 pub use lifecycle::{PaneLifecycle, PaneStateMachine, RegisterResult};
+
+#[cfg(target_os = "windows")]
+pub use hwnd::{ALLOW_PANE_FOCUS_ONCE, install_pane_focus_redirect};
