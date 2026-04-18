@@ -6,27 +6,6 @@ import { invokeCommand } from "@/app/platform/ipc";
 import type { BrowserViewModel } from "./browser-model";
 import "./browser-view.scss";
 
-/**
- * Global timestamp of the last "main window reclaimed focus" event.
- * Shared across every BrowserViewComponent instance in the window so that
- * clicking an address bar in one pane suppresses the hover-focus re-grab
- * in every pane (including itself) for a short cooldown window. Without
- * this, moving the cursor back over the pane right after clicking a main-
- * DOM input re-fires `onMouseEnter` → `browser_pane_focus` and re-locks
- * Windows-level keyboard focus onto the pane — the exact
- * "type in browser then can't type anywhere else" bug report.
- */
-let lastMainFocusAtMs = 0;
-const MAIN_FOCUS_COOLDOWN_MS = 750;
-
-export function markMainFocusReclaimed() {
-    lastMainFocusAtMs = Date.now();
-}
-
-function mainFocusCooldownActive(): boolean {
-    return Date.now() - lastMainFocusAtMs < MAIN_FOCUS_COOLDOWN_MS;
-}
-
 export function BrowserViewComponent(props: ViewComponentProps<BrowserViewModel>): JSX.Element {
     const model = props.model;
     const [addressBar, setAddressBar] = createSignal(model.urlAtom() || "");
@@ -168,12 +147,11 @@ export function BrowserViewComponent(props: ViewComponentProps<BrowserViewModel>
                     onFocus={(e) => {
                         e.currentTarget.select();
                         // Take OS-level keyboard focus away from the pane so
-                        // keystrokes reach this address-bar input. The pane may
-                        // have held HWND focus from an earlier hover. Also
-                        // arm the cooldown so the hover-focus grab below doesn't
-                        // immediately re-claim focus when the cursor is still
-                        // over the pane area.
-                        markMainFocusReclaimed();
+                        // keystrokes reach this address-bar input. The pane
+                        // grabs focus explicitly on click (onMouseDown on
+                        // .browser-placeholder), not on hover, so releasing
+                        // here is sufficient — nothing will re-steal until
+                        // the user clicks inside the pane again.
                         invokeCommand("main_window_focus", {}).catch(() => {});
                     }}
                     placeholder="Enter URL or search..."
@@ -188,23 +166,20 @@ export function BrowserViewComponent(props: ViewComponentProps<BrowserViewModel>
             <div
                 class="browser-placeholder"
                 ref={placeholderRef}
-                onMouseEnter={() => {
-                    // Windows routes WM_MOUSEWHEEL to the focused HWND, so hand
-                    // OS-level keyboard focus to the pane when the cursor is over
-                    // it. Without this, wheel events go to main's widget and the
-                    // embedded page can't scroll.
+                onMouseDown={() => {
+                    // User clicked into the pane — explicitly hand Windows-level
+                    // keyboard focus to the pane HWND so subsequent keystrokes
+                    // and mouse-wheel events route there.
                     //
-                    // Gated on three things:
-                    //   1. paneCreated — HWND exists.
-                    //   2. !model.closed — hover can fire between the close IPC
-                    //      being issued and the DOM node being removed; SetFocus
-                    //      on a dying HWND is the crash the lifecycle spec covers.
-                    //   3. !mainFocusCooldownActive — if the user just clicked a
-                    //      main-DOM input (address bar, etc), suppress the hover
-                    //      re-focus for MAIN_FOCUS_COOLDOWN_MS so the user can
-                    //      actually type. Without this, the hover handler grabs
-                    //      focus back before the first keystroke arrives.
-                    if (paneCreated() && !model.closed && !mainFocusCooldownActive()) {
+                    // We used to grab focus on onMouseEnter (hover), but that
+                    // created a loop: clicking the address bar released focus,
+                    // then the cursor drifting back over the pane (inevitable —
+                    // the address bar is right above it) re-grabbed focus
+                    // before the user could type. Hover-focus is nicer for
+                    // scroll-without-click, but it breaks keyboard routing so
+                    // aggressively that the trade-off doesn't pay. Explicit
+                    // click is the clear user intent.
+                    if (paneCreated() && !model.closed) {
                         invokeCommand("browser_pane_focus", { block_id: model.blockId }).catch(() => {});
                     }
                 }}
