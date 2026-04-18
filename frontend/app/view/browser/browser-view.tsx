@@ -16,9 +16,10 @@ export function BrowserViewComponent(props: ViewComponentProps<BrowserViewModel>
     // when the pane is created and hides the empty-state placeholder.
     const [paneCreated, setPaneCreated] = createSignal(false);
 
-    // getBoundingClientRect() returns CSS pixels; CEF / SetWindowPos expect
-    // device-independent pixels. On high-DPI displays (devicePixelRatio > 1)
-    // the pane would be mispositioned/missized without this correction.
+    // getBoundingClientRect() returns CSS pixels (device-INdependent); CEF
+    // and Win32 SetWindowPos expect physical / device pixels. Multiply by
+    // devicePixelRatio to convert. On HiDPI displays (dpr > 1) the pane
+    // would be mispositioned/missized without this.
     const paneRect = () => {
         const r = placeholderRef!.getBoundingClientRect();
         const dpr = window.devicePixelRatio || 1;
