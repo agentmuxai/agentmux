@@ -5,13 +5,19 @@ import { describe, test, expect } from "vitest";
 import { PROVIDERS, getProvider, getProviderList } from "./index";
 import type { ProviderDefinition } from "./index";
 
+// Providers split into two classes by how they talk to the backend:
+//   - OAuth CLIs (raw stream): claude, codex, gemini — authType "oauth",
+//     outputFormat "raw", no defaultArgs.
+//   - ACP providers:           openclaw, pi — authType "api-key",
+//     outputFormat "acp".
+const OAUTH_CLI_IDS = ["claude", "codex", "gemini"] as const;
+const ACP_IDS = ["openclaw", "pi"] as const;
+
 describe("PROVIDERS", () => {
-    test("defines exactly 3 providers", () => {
+    test("includes the OAuth CLI trio and the ACP providers", () => {
         const ids = Object.keys(PROVIDERS);
-        expect(ids).toHaveLength(3);
-        expect(ids).toContain("claude");
-        expect(ids).toContain("codex");
-        expect(ids).toContain("gemini");
+        for (const id of OAUTH_CLI_IDS) expect(ids).toContain(id);
+        for (const id of ACP_IDS) expect(ids).toContain(id);
     });
 
     test("all providers have required fields", () => {
@@ -31,16 +37,25 @@ describe("PROVIDERS", () => {
         }
     });
 
-    test("all providers are in raw output mode", () => {
-        for (const provider of Object.values(PROVIDERS)) {
+    test("OAuth CLI providers are in raw output mode with no default args", () => {
+        for (const id of OAUTH_CLI_IDS) {
+            const provider = PROVIDERS[id];
             expect(provider.outputFormat).toBe("raw");
             expect(provider.defaultArgs).toEqual([]);
         }
     });
 
-    test("all providers use OAuth auth type", () => {
-        for (const provider of Object.values(PROVIDERS)) {
-            expect(provider.authType).toBe("oauth");
+    test("OAuth CLI providers use OAuth auth type", () => {
+        for (const id of OAUTH_CLI_IDS) {
+            expect(PROVIDERS[id].authType).toBe("oauth");
+        }
+    });
+
+    test("ACP providers use the ACP output format and api-key auth", () => {
+        for (const id of ACP_IDS) {
+            const provider = PROVIDERS[id];
+            expect(provider.outputFormat).toBe("acp");
+            expect(provider.authType).toBe("api-key");
         }
     });
 });
@@ -112,7 +127,9 @@ describe("getProvider", () => {
 describe("getProviderList", () => {
     test("returns all providers as array", () => {
         const list = getProviderList();
-        expect(list).toHaveLength(3);
-        expect(list.map((p) => p.id)).toEqual(expect.arrayContaining(["claude", "codex", "gemini"]));
+        expect(list).toHaveLength(Object.keys(PROVIDERS).length);
+        expect(list.map((p) => p.id)).toEqual(
+            expect.arrayContaining([...OAUTH_CLI_IDS, ...ACP_IDS]),
+        );
     });
 });
