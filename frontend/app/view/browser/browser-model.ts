@@ -56,6 +56,12 @@ export class BrowserViewModel implements ViewModel {
 
     blockAtom: Accessor<Block | undefined>;
 
+    // Flipped in dispose() so late callers see the pane is gone and no-op
+    // instead of firing IPC against a Browser that CEF is mid-destruction.
+    // See docs/specs/SPEC_BROWSER_PANE_LIFECYCLE.md §9 step 4.
+    private _closed = false;
+    get closed(): boolean { return this._closed; }
+
     constructor(blockId: string, nodeModel: BlockNodeModel) {
         this.blockId = blockId;
         this.nodeModel = nodeModel;
@@ -75,6 +81,7 @@ export class BrowserViewModel implements ViewModel {
     }
 
     navigate(url: string): void {
+        if (this._closed) return;
         // Normalize URL
         let normalized = url.trim();
         if (!normalized) return;
@@ -108,6 +115,7 @@ export class BrowserViewModel implements ViewModel {
     }
 
     goBack(): void {
+        if (this._closed) return;
         if (this.historyIndex > 0) {
             this.historyIndex--;
             this.setUrl(this.history[this.historyIndex]);
@@ -118,6 +126,7 @@ export class BrowserViewModel implements ViewModel {
     }
 
     goForward(): void {
+        if (this._closed) return;
         if (this.historyIndex < this.history.length - 1) {
             this.historyIndex++;
             this.setUrl(this.history[this.historyIndex]);
@@ -128,6 +137,7 @@ export class BrowserViewModel implements ViewModel {
     }
 
     reload(): void {
+        if (this._closed) return;
         const url = this.urlAtom();
         if (url) {
             this.setUrl("");
@@ -149,6 +159,7 @@ export class BrowserViewModel implements ViewModel {
     }
 
     giveFocus(): boolean {
+        if (this._closed) return false;
         // If a main-window input inside this block (e.g. the URL bar) is
         // already focused, keep it — the user is interacting with the block's
         // chrome, not the embedded page. Also tell the host to move OS-level
@@ -169,5 +180,7 @@ export class BrowserViewModel implements ViewModel {
         return true;
     }
 
-    dispose(): void {}
+    dispose(): void {
+        this._closed = true;
+    }
 }
