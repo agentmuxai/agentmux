@@ -12,33 +12,41 @@ export function BrowserViewComponent(props: ViewComponentProps<BrowserViewModel>
     let placeholderRef: HTMLDivElement | undefined;
     let resizeObserver: ResizeObserver | null = null;
     let positionInterval: ReturnType<typeof setInterval> | null = null;
-    let paneCreated = false;
+    // SolidJS signal — must be reactive so <Show when={!paneCreated()}> re-runs
+    // when the pane is created and hides the empty-state placeholder.
+    const [paneCreated, setPaneCreated] = createSignal(false);
+
+    // getBoundingClientRect() returns CSS pixels; CEF / SetWindowPos expect
+    // device-independent pixels. On high-DPI displays (devicePixelRatio > 1)
+    // the pane would be mispositioned/missized without this correction.
+    const paneRect = () => {
+        const r = placeholderRef!.getBoundingClientRect();
+        const dpr = window.devicePixelRatio || 1;
+        return {
+            x: Math.round(r.x * dpr),
+            y: Math.round(r.y * dpr),
+            width: Math.round(r.width * dpr),
+            height: Math.round(r.height * dpr),
+        };
+    };
 
     const syncPosition = () => {
-        if (!placeholderRef || !paneCreated) return;
-        const rect = placeholderRef.getBoundingClientRect();
+        if (!placeholderRef || !paneCreated()) return;
         invokeCommand("browser_pane_resize", {
             block_id: model.blockId,
-            x: Math.round(rect.x),
-            y: Math.round(rect.y),
-            width: Math.round(rect.width),
-            height: Math.round(rect.height),
+            ...paneRect(),
         }).catch(() => {});
     };
 
     const createPane = async (url: string) => {
         if (!placeholderRef) return;
-        const rect = placeholderRef.getBoundingClientRect();
         try {
             await invokeCommand("browser_pane_create", {
                 block_id: model.blockId,
                 url: url || "about:blank",
-                x: Math.round(rect.x),
-                y: Math.round(rect.y),
-                width: Math.round(rect.width),
-                height: Math.round(rect.height),
+                ...paneRect(),
             });
-            paneCreated = true;
+            setPaneCreated(true);
             model.onLoad();
         } catch (e) {
             model.onError(`Failed to create browser pane: ${e}`);
@@ -61,7 +69,7 @@ export function BrowserViewComponent(props: ViewComponentProps<BrowserViewModel>
         model.navigate(normalized);
         setAddressBar(normalized);
 
-        if (paneCreated) {
+        if (paneCreated()) {
             invokeCommand("browser_pane_navigate", {
                 block_id: model.blockId,
                 url: normalized,
@@ -91,7 +99,7 @@ export function BrowserViewComponent(props: ViewComponentProps<BrowserViewModel>
     onCleanup(() => {
         resizeObserver?.disconnect();
         if (positionInterval) clearInterval(positionInterval);
-        if (paneCreated) {
+        if (paneCreated()) {
             invokeCommand("browser_pane_close", { block_id: model.blockId }).catch(() => {});
         }
     });
@@ -146,12 +154,12 @@ export function BrowserViewComponent(props: ViewComponentProps<BrowserViewModel>
                     // OS-level keyboard focus to the pane when the cursor is over
                     // it. Without this, wheel events go to main's widget and the
                     // embedded page can't scroll.
-                    if (paneCreated) {
+                    if (paneCreated()) {
                         invokeCommand("browser_pane_focus", { block_id: model.blockId }).catch(() => {});
                     }
                 }}
             >
-                <Show when={!model.urlAtom() && !paneCreated}>
+                <Show when={!model.urlAtom() && !paneCreated()}>
                     <div class="browser-empty">
                         <div class="browser-empty-icon">{"\uD83C\uDF10"}</div>
                         <div class="browser-empty-text">Enter a URL above to browse</div>

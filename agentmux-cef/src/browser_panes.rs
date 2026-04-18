@@ -106,7 +106,17 @@ impl BrowserPaneManager {
             Some(l) => l,
             None => return,
         };
-        if let Some(browser) = state.browsers.lock().get(&label).cloned() {
+        // Pull the browser out of state.browsers AND release the map lock
+        // before calling close_browser — leaving it in the map would cause
+        // create() to later find a stale destroyed browser and try to
+        // navigate it instead of creating a fresh pane. on_before_close
+        // handles the actual entry removal when CEF fires that callback,
+        // but we remove here eagerly to avoid the race.
+        let browser = {
+            let mut browsers = state.browsers.lock();
+            browsers.remove(&label)
+        };
+        if let Some(browser) = browser {
             if let Some(host) = browser.host() {
                 host.close_browser(1);
             }
