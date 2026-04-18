@@ -23,21 +23,26 @@
 # correctly". Screenshot dumps are retained for visual cross-check.
 #
 # Usage:
-#   pwsh tools/tests/pane-focus-stress.ps1 -LogPath <path-to-host-log>
+#   pwsh tools/tests/pane-focus-stress.ps1
 #
-# If -LogPath is omitted, the script tails the file at
-# `%APPDATA%\ai.agentmux.cef.v<latest>\db\…` via the dev task's
-# version string.
+# The harness auto-discovers the running dev instance via authkey.dev
+# (see SPEC_TEST_API_ACCESS.md and tools/tests/authfile.ps1). Override
+# with -LogPath if you want to point at a non-default log file, or
+# -SkipAuthFile to fall back to image-name-based discovery.
 
 [CmdletBinding()]
 param(
     [string]$LogPath,
+    [switch]$SkipAuthFile,
     [int]$TypeDelayMs = 300,
     [int]$AfterTypeMs = 400
 )
 
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes, System.Windows.Forms
+
+# Pull in Get-AgentMuxAuthFile / Get-AgentMuxHostLogPath helpers.
+. (Join-Path $PSScriptRoot 'authfile.ps1')
 
 # ── Win32 interop ───────────────────────────────────────────────────────
 $win32 = @'
@@ -56,6 +61,17 @@ Add-Type -TypeDefinition $win32 -ErrorAction SilentlyContinue | Out-Null
 # ── Helpers ─────────────────────────────────────────────────────────────
 
 function Find-AgentMuxMain {
+    param([int]$PreferredPid = 0)
+    # If we know the dev instance's PID via authfile, pick that exact
+    # process — multiple agentmux-cef instances run side-by-side
+    # (portable + dev + multiple windows) and grabbing the first match
+    # routinely targets the wrong one.
+    if ($PreferredPid -gt 0) {
+        try {
+            $p = Get-Process -Id $PreferredPid -ErrorAction Stop
+            if ($p.MainWindowHandle -ne [IntPtr]::Zero) { return $p }
+        } catch {}
+    }
     Get-Process agentmux-cef -ErrorAction SilentlyContinue |
         Where-Object { $_.MainWindowHandle -ne [IntPtr]::Zero } |
         Select-Object -First 1
@@ -96,6 +112,10 @@ function Read-LogSince([string]$path, [datetime]$since) {
 }
 
 function Find-LatestHostLog {
+    # Legacy fallback used only when -SkipAuthFile is set. The
+    # version-suffix glob never matches dev mode (whose data dir is
+    # `ai.agentmux.cef.dev`) — Get-AgentMuxHostLogPath is the
+    # authoritative path resolver.
     $base = Join-Path $env:APPDATA 'ai.agentmux.cef.v*'
     $dirs = Get-ChildItem -Path $base -Directory -ErrorAction SilentlyContinue |
         Sort-Object { [version]($_.Name -replace 'ai\.agentmux\.cef\.v', '' -replace '-', '.') } -Descending
@@ -112,7 +132,24 @@ function Find-LatestHostLog {
 
 # ── Setup ───────────────────────────────────────────────────────────────
 
-$main = Find-AgentMuxMain
+$auth = $null
+$preferredPid = 0
+if (-not $SkipAuthFile) {
+    try {
+        $auth = Get-AgentMuxAuthFile
+        $preferredPid = $auth.host_pid
+        Write-Host "[setup] authkey.dev: instance=$($auth.instance) pid=$($auth.host_pid) endpoint=$($auth.web_endpoint)"
+        if (-not $LogPath) {
+            $candidate = Get-AgentMuxHostLogPath -Auth $auth
+            if ($candidate) { $LogPath = $candidate }
+        }
+    } catch {
+        Write-Warning "Auth file lookup failed: $_"
+        Write-Warning "Falling back to image-name discovery; layout / log targeting may pick the wrong instance if multiple agentmux-cef processes are running."
+    }
+}
+
+$main = Find-AgentMuxMain -PreferredPid $preferredPid
 if (-not $main) {
     Write-Error "No running agentmux-cef process with a main window. Start 'task dev' first."
 }
@@ -127,7 +164,7 @@ Start-Sleep -Milliseconds 500
 
 if (-not $LogPath) { $LogPath = Find-LatestHostLog }
 if (-not $LogPath -or -not (Test-Path $LogPath)) {
-    Write-Warning "Host log not found — log-side assertions will be skipped. Use -LogPath to point at it."
+    Write-Warning "Host log not found — log-side assertions will be skipped. Use -LogPath to point at it explicitly, or ensure a debug build wrote authkey.dev (-SkipAuthFile bypassed)."
 } else {
     Write-Host "[setup] Log path: $LogPath"
 }
