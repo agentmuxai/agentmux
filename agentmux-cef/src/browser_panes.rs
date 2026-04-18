@@ -73,7 +73,35 @@ impl<'a> PaneCloseOps for AppStateCloseOps<'a> {
     fn destroy_hwnd(&self, hwnd: usize) {
         #[cfg(target_os = "windows")]
         unsafe {
-            windows_sys::Win32::UI::WindowsAndMessaging::DestroyWindow(hwnd as _);
+            use windows_sys::Win32::UI::WindowsAndMessaging::{
+                DestroyWindow, GetParent, ShowWindow, SW_HIDE,
+            };
+            use windows_sys::Win32::Graphics::Gdi::{InvalidateRect, UpdateWindow};
+            let h = hwnd as *mut std::ffi::c_void;
+
+            // Capture the parent BEFORE we destroy the HWND — GetParent(h)
+            // on a destroyed HWND returns null.
+            let parent = GetParent(h);
+
+            // Hide first so DWM stops compositing the pane's GPU surface.
+            // Without this, even after DestroyWindow the Chromium compositor's
+            // last-rendered frame can stay "stuck" on-screen because the GPU
+            // process is still alive and DWM was caching that layer. Observed
+            // in v0.33.259 with a loaded google.com pane — close fires,
+            // lifecycle entry clears, HWND is gone — but the page pixels
+            // persist over the main frame until a resize/redraw.
+            ShowWindow(h, SW_HIDE);
+
+            DestroyWindow(h);
+
+            // Ask the parent (main's top-level) to repaint the area where the
+            // pane used to sit. Without InvalidateRect + UpdateWindow, DWM
+            // may keep showing the cached pane surface until unrelated UI
+            // activity happens to repaint over it.
+            if !parent.is_null() {
+                InvalidateRect(parent, std::ptr::null(), 1 /* TRUE erase */);
+                UpdateWindow(parent);
+            }
         }
         #[cfg(not(target_os = "windows"))]
         {
