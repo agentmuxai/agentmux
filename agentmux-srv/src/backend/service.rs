@@ -321,16 +321,6 @@ pub fn get_method_meta(service: &str, method: &str) -> Option<MethodMeta> {
             arg_names: vec![],
             return_desc: Some("icons".into()),
         }),
-        ("workspace", "ChangeTabPinning") => Some(MethodMeta {
-            desc: Some("change tab pinning state".into()),
-            arg_names: vec![
-                "ctx".into(),
-                "workspaceId".into(),
-                "tabId".into(),
-                "pinned".into(),
-            ],
-            return_desc: None,
-        }),
         ("workspace", "UpdateTabIds") => Some(MethodMeta {
             desc: Some("update tab ordering".into()),
             arg_names: vec![

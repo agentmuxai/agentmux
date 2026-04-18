@@ -803,34 +803,6 @@ fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType {
                 Err(e) => WebReturnType::error(e.to_string()),
             }
         }
-        ("workspace", "ChangeTabPinning") => {
-            let ws_id: String = match service::get_arg(args, 0) {
-                Ok(v) => v,
-                Err(e) => return WebReturnType::error(e),
-            };
-            let tab_id: String = match service::get_arg(args, 1) {
-                Ok(v) => v,
-                Err(e) => return WebReturnType::error(e),
-            };
-            let pinned: bool = match service::get_arg(args, 2) {
-                Ok(v) => v,
-                Err(e) => return WebReturnType::error(e),
-            };
-            match store.must_get::<Workspace>(&ws_id) {
-                Ok(mut ws) => {
-                    ws.pinnedtabids.retain(|id| id != &tab_id);
-                    if pinned {
-                        ws.pinnedtabids.push(tab_id);
-                    }
-                    match store.update(&mut ws) {
-                        Ok(_) => WebReturnType::success_empty(),
-                        Err(e) => WebReturnType::error(e.to_string()),
-                    }
-                }
-                Err(e) => WebReturnType::error(e.to_string()),
-            }
-        }
-
         // ---- UserInputService ----
         ("userinput", "SendUserInputResponse") => {
             // Accept but drop — user input routing not yet wired
