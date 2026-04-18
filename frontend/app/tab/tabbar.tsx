@@ -7,7 +7,8 @@ import { useWindowDrag } from "@/app/hook/useWindowDrag.platform";
 import { monitorForElements } from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
 import { For, onCleanup, onMount } from "solid-js";
 import type { JSX } from "solid-js";
-import { WorkspaceService } from "../store/services";
+import { ObjectService, WorkspaceService } from "../store/services";
+import { makeORef, getObjectValue } from "../store/wos";
 import { deleteLayoutModelForTab } from "@/layout/index";
 import { DroppableTab } from "./droppable-tab";
 import {
@@ -76,6 +77,33 @@ function TabBar(props: TabBarProps): JSX.Element {
                 }
             });
         }
+    });
+
+    // Startup-tab color: if the workspace has exactly one tab and it has no
+    // tab:color set, apply the theme Blue from TAB_COLORS. The backend-created
+    // startup tab doesn't get a color meta, so without this the first tab
+    // stays neutral while every user-created tab is vibrant.
+    onMount(() => {
+        const ws = props.workspace;
+        if (!ws) return;
+        const ids = [...(ws.pinnedtabids ?? []), ...(ws.tabids ?? [])];
+        if (ids.length !== 1) return;
+        const firstId = ids[0];
+        const tab = getObjectValue<Tab>(makeORef("tab", firstId));
+        if (!tab) return;
+        if (tab.meta?.["tab:color"]) return;
+        // #3b82f6 is the "Blue" entry in TAB_COLORS — same as the color
+        // picker's blue swatch, so stays consistent with user-chosen blue.
+        fireAndForget(async () => {
+            try {
+                await ObjectService.UpdateObjectMeta(
+                    makeORef("tab", firstId),
+                    { "tab:color": "#3b82f6" } as MetaType,
+                );
+            } catch (e) {
+                console.error("[tabbar] startup-tab color apply failed:", e);
+            }
+        });
     });
 
     onMount(() => {
