@@ -10,6 +10,7 @@
 //!
 //! Re-exports the public surface that `browser_panes.rs` and tests consume.
 
+pub mod callbacks;
 pub mod creation;
 pub mod lifecycle;
 #[cfg(target_os = "windows")]
@@ -26,9 +27,5 @@ pub use lifecycle::PaneLifecycle;
 #[cfg(target_os = "windows")]
 pub use hwnd::ALLOW_PANE_FOCUS_ONCE;
 
-// install_pane_focus_redirect is defined but not yet wired to any caller;
-// Phase 4 will invoke it from pane `on_after_created` / `on_load_end`.
-// Re-export is ready; flagging suppressed until that lands.
 #[cfg(target_os = "windows")]
-#[allow(unused_imports)]
 pub use hwnd::install_pane_focus_redirect;
