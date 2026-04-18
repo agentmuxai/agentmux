@@ -1,0 +1,8 @@
+{
+  "_comment": "Copy to pane-focus-stress.targets.json and fill with actual pixel coordinates. Measure via a screenshot + pixel ruler while the AgentMux window is at (50, 50, 1300, 900). All coords are relative to the screen, not the window.",
+  "P1_search":  [200, 320],
+  "P1_address": [160, 130],
+  "P2_search":  [900, 320],
+  "P2_address": [860, 130],
+  "Terminal":   [550, 450]
+}

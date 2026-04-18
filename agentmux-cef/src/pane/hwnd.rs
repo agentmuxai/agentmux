@@ -51,7 +51,7 @@ pub unsafe fn install_pane_focus_redirect(hwnd: *mut std::ffi::c_void) {
     use std::sync::atomic::Ordering;
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         CallWindowProcW, GetAncestor, SetWindowLongPtrW, GA_ROOT, GWLP_WNDPROC,
-        WM_SETFOCUS, WM_KILLFOCUS,
+        WM_SETFOCUS, WM_KILLFOCUS, WM_LBUTTONDOWN,
     };
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::SetFocus;
 
@@ -79,6 +79,20 @@ pub unsafe fn install_pane_focus_redirect(hwnd: *mut std::ffi::c_void) {
                 tracing::info!("[pane-wndproc] WM_KILLFOCUS hwnd={:p}", hwnd);
             }
             _ => {}
+        }
+
+        // A click inside the pane HWND is the explicit "user wants to
+        // interact with the embedded page" signal. Chromium's own handler
+        // will call SetFocus(pane) next — arm ALLOW_PANE_FOCUS_ONCE so
+        // the WM_SETFOCUS branch below doesn't redirect it. Without this,
+        // clicks on the pane never transfer keyboard focus to Chromium
+        // (cursor works, typing goes nowhere — reported by user after
+        // the onMouseEnter→onMouseDown switch broke hover-focus-grab but
+        // the DOM-level mousedown never fires because the pane HWND
+        // intercepts the click at Win32 level, not DOM level).
+        if msg == WM_LBUTTONDOWN {
+            ALLOW_PANE_FOCUS_ONCE.store(true, Ordering::Relaxed);
+            tracing::info!("[pane-wndproc] WM_LBUTTONDOWN — arming focus allow");
         }
 
         if msg == WM_SETFOCUS {

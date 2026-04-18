@@ -268,3 +268,143 @@ pub fn post_show_dev_tools(state: &Arc<AppState>, label: &str) {
     let mut task = ShowDevToolsTask::new(state.clone(), label.to_string());
     post_task(ThreadId::UI, Some(&mut task));
 }
+
+// ── Main-focus reclaim ────────────────────────────────────────────────────
+//
+// Reclaim keyboard focus for the main browser when the user clicks a
+// main-DOM input (address bar, etc). Runs on the CEF UI thread because:
+//   - host.set_focus / browser_view_get_for_browser require the UI thread
+//   - walking the HWND tree via EnumChildWindows is safer post-setup when
+//     Chromium has published all of its render widgets
+//
+// On Windows, after the Chromium-level focus flip we also walk the Views
+// window for the Chrome_RenderWidgetHostHWND and Win32-SetFocus it — without
+// that explicit Win32 SetFocus, keyboard events keep routing to whichever
+// pane HWND currently holds Win32 focus even though Chromium "thinks" main
+// is focused. Observed on v0.33.264: host.set_focus(1) on main left pane
+// keystrokes arriving at the pane HWND for >2 seconds.
+
+wrap_task! {
+    pub struct MainFocusReclaimTask {
+        state: Arc<AppState>,
+        label: String,
+    }
+
+    impl Task {
+        fn execute(&self) {
+            let mut browser = match self.state.browsers.lock().get(&self.label).cloned() {
+                Some(b) => b,
+                None => {
+                    tracing::warn!("[main-focus-reclaim] no browser for label={}", self.label);
+                    return;
+                }
+            };
+
+            if let Some(host) = browser.host() {
+                host.set_focus(1);
+                tracing::info!("[main-focus-reclaim] host.set_focus(1) on label={}", self.label);
+            }
+
+            #[cfg(target_os = "windows")]
+            {
+                let views_top_hwnd = browser_view_get_for_browser(Some(&mut browser))
+                    .and_then(|bv| bv.window())
+                    .map(|w| w.window_handle().0 as *mut std::ffi::c_void)
+                    .filter(|p| !p.is_null());
+
+                // Collect every pane's outer HWND so we can skip render widgets
+                // that descend from them. Panes are siblings of main under the
+                // Views top-level, so a naive EnumChildWindows would pick up
+                // their Chrome_RenderWidgetHostHWND and SetFocus on the wrong
+                // target.
+                let pane_outer_hwnds: Vec<*mut std::ffi::c_void> = {
+                    let browsers = self.state.browsers.lock();
+                    browsers
+                        .iter()
+                        .filter(|(k, _)| k.starts_with("browser-pane-"))
+                        .filter_map(|(_, b)| {
+                            let mut b = b.clone();
+                            b.host().and_then(|h| {
+                                let wh = h.window_handle();
+                                if wh.0.is_null() { None } else { Some(wh.0 as *mut std::ffi::c_void) }
+                            })
+                        })
+                        .collect()
+                };
+
+                match views_top_hwnd {
+                    Some(top_hwnd) => unsafe {
+                        let render = find_main_render_widget(top_hwnd, &pane_outer_hwnds);
+                        let target = render.unwrap_or(top_hwnd);
+                        windows_sys::Win32::UI::Input::KeyboardAndMouse::SetFocus(target as _);
+                        tracing::info!(
+                            "[main-focus-reclaim] Win32 SetFocus target={:p} render_found={} panes_excluded={}",
+                            target,
+                            render.is_some(),
+                            pane_outer_hwnds.len(),
+                        );
+                    },
+                    None => {
+                        tracing::warn!(
+                            "[main-focus-reclaim] could not resolve Views top-level HWND for label={}",
+                            self.label,
+                        );
+                    }
+                }
+            }
+
+            // Defocus all live panes at the Chromium level too.
+            self.state.browser_panes.defocus_all(&self.state);
+        }
+    }
+}
+
+/// Walk descendants of `root` and return the first Chrome_RenderWidgetHostHWND
+/// whose ancestor chain does NOT pass through any of `pane_outer_hwnds`.
+/// Panes are siblings of main under the Views top-level, so without this
+/// filter the walk would happily pick a pane's render widget.
+#[cfg(target_os = "windows")]
+unsafe fn find_main_render_widget(
+    root: *mut std::ffi::c_void,
+    pane_outer_hwnds: &[*mut std::ffi::c_void],
+) -> Option<*mut std::ffi::c_void> {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        EnumChildWindows, GetClassNameW, GetParent,
+    };
+
+    struct Finder<'a> {
+        found: *mut std::ffi::c_void,
+        panes: &'a [*mut std::ffi::c_void],
+    }
+    let mut finder = Finder { found: std::ptr::null_mut(), panes: pane_outer_hwnds };
+
+    unsafe extern "system" fn cb(hwnd: *mut std::ffi::c_void, lparam: isize) -> i32 {
+        let finder = &mut *(lparam as *mut Finder);
+        let mut buf = [0u16; 64];
+        let n = GetClassNameW(hwnd, buf.as_mut_ptr(), buf.len() as i32);
+        if n > 0 {
+            let class = String::from_utf16_lossy(&buf[..n as usize]);
+            if class == "Chrome_RenderWidgetHostHWND" {
+                // Walk ancestors; if we pass through any pane outer HWND,
+                // this widget belongs to a pane, not main.
+                let mut descends_from_pane = false;
+                let mut cursor = GetParent(hwnd);
+                while !cursor.is_null() {
+                    if finder.panes.iter().any(|p| *p == cursor) {
+                        descends_from_pane = true;
+                        break;
+                    }
+                    cursor = GetParent(cursor);
+                }
+                if !descends_from_pane {
+                    finder.found = hwnd;
+                    return 0; // stop
+                }
+            }
+        }
+        1
+    }
+
+    EnumChildWindows(root, Some(cb), &mut finder as *mut _ as isize);
+    if finder.found.is_null() { None } else { Some(finder.found) }
+}
