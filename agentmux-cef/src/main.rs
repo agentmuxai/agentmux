@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// AgentMux CEF Host — Entry point.
+// AgentMux Host — Entry point.
 //
 // This binary serves as both the browser process and CEF subprocess
 // (renderer, GPU, utility). Subprocess mode is detected via the --type
@@ -22,6 +22,7 @@
 )]
 
 mod app;
+mod browser_panes;
 mod client;
 mod commands;
 mod events;
@@ -102,6 +103,18 @@ fn main() {
     // -----------------------------------------------------------------------
     // Browser process initialization
     // -----------------------------------------------------------------------
+
+    // Set the Application User Model ID before any UI is created. This lets
+    // Windows group our windows under one pinned identity and is required for
+    // the `DeleteTab` + per-HWND AppID treatment used by the full-instance /
+    // sub-window model (see docs/specs/SPEC_MULTIWINDOW_TASKBAR_GROUPING.md).
+    // Use a VERSION-STABLE ID — never embed the patch number or pinning forks.
+    #[cfg(target_os = "windows")]
+    unsafe {
+        use windows_sys::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID;
+        let aumid: Vec<u16> = "AgentMuxCorp.AgentMux\0".encode_utf16().collect();
+        let _ = SetCurrentProcessExplicitAppUserModelID(aumid.as_ptr());
+    }
 
     let version = env!("CARGO_PKG_VERSION");
     let is_dev = std::env::var("AGENTMUX_DEV").is_ok();
@@ -325,7 +338,7 @@ fn main() {
     // Clean up port file so stale data doesn't confuse future launches.
     let _ = std::fs::remove_file(&port_file);
 
-    tracing::info!("AgentMux CEF host shutdown complete");
+    tracing::info!("AgentMux host shutdown complete");
 }
 
 /// Initialize tracing with dual output: rolling daily log file + human-readable stderr.
@@ -378,7 +391,7 @@ fn init_logging(log_dir: &std::path::Path) -> tracing_appender::non_blocking::Wo
         os = std::env::consts::OS,
         arch = std::env::consts::ARCH,
         log_dir = %log_dir.display(),
-        "AgentMux CEF host starting"
+        "AgentMux host starting"
     );
 
     guard

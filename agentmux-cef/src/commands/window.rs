@@ -419,9 +419,48 @@ pub(crate) fn resolve_frontend_base_url(ipc_port: u16) -> String {
     }
 }
 
-/// Open a new window (Ctrl+Shift+N or StatusBar click).
-/// Creates a new CEF Views window with the same frameless style as the main window.
+/// Open a new full AgentMux instance (status-bar version click, Ctrl+Shift+N,
+/// second `agentmux.exe` launch). Independent top-level window, own taskbar
+/// entry, independent lifecycle. See
+/// `docs/specs/SPEC_MULTIWINDOW_TASKBAR_GROUPING.md`.
 pub fn open_new_window(state: &Arc<AppState>) -> Result<serde_json::Value, String> {
+    open_window_with_kind(state, crate::state::WindowKind::FullInstance, None)
+}
+
+/// Open a sub-window tied to `parent_instance_id`. **Not exposed to users** —
+/// reserved for agent / backend callers that need a transient auxiliary
+/// top-level window (tool-spawned panels, diff views, etc.). Sub-windows are
+/// hidden from the taskbar via `ITaskbarList::DeleteTab` and close when their
+/// parent full instance closes.
+pub fn open_subwindow(
+    state: &Arc<AppState>,
+    parent_instance_id: String,
+) -> Result<serde_json::Value, String> {
+    // Reject if the parent isn't a known FullInstance — prevents orphan
+    // sub-windows and enforces the lifecycle rule in the spec.
+    let parent_ok = state
+        .window_meta
+        .lock()
+        .get(&parent_instance_id)
+        .map(|m| m.kind == crate::state::WindowKind::FullInstance)
+        .unwrap_or(false);
+    if !parent_ok {
+        return Err(format!(
+            "open_subwindow: unknown or non-full-instance parent label={parent_instance_id}"
+        ));
+    }
+    open_window_with_kind(
+        state,
+        crate::state::WindowKind::Subwindow,
+        Some(parent_instance_id),
+    )
+}
+
+fn open_window_with_kind(
+    state: &Arc<AppState>,
+    kind: crate::state::WindowKind,
+    parent_instance_id: Option<String>,
+) -> Result<serde_json::Value, String> {
     let window_id = uuid::Uuid::new_v4();
     let label = format!("window-{}", window_id.simple());
 
@@ -435,7 +474,18 @@ pub fn open_new_window(state: &Arc<AppState>) -> Result<serde_json::Value, Strin
         base_url, separator, ipc_port, ipc_token, label
     );
 
-    tracing::info!(label = %label, "[window] open_new_window");
+    tracing::info!(label = %label, kind = ?kind, parent = ?parent_instance_id, "[window] open window");
+
+    // Record WindowMeta BEFORE the browser is created so on_after_created can
+    // read it and apply the right taskbar treatment.
+    state.window_meta.lock().insert(
+        label.clone(),
+        crate::state::WindowMeta {
+            label: label.clone(),
+            kind,
+            parent_instance_id,
+        },
+    );
 
     // Register instance number BEFORE creating the browser, so the new window's
     // frontend can query its instance number immediately on load.

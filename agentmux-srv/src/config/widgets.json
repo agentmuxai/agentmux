@@ -32,6 +32,7 @@
     },
     "defwidget@browser": {
         "display:order": 2,
+        "display:pinned": true,
         "icon": "globe",
         "label": "browser",
         "description": "Embedded web browser",

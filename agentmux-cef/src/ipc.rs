@@ -217,6 +217,16 @@ async fn route_command(
         "is_main_window" => Ok(commands::window::is_main_window(args)),
         "get_window_label" => Ok(commands::window::get_window_label(args)),
         "open_new_window" => commands::window::open_new_window(state),
+        "open_subwindow" => {
+            // Agent / backend-only API — creates a sub-window tied to a full
+            // instance. Hidden from the taskbar. Not exposed in user UI.
+            let parent = args
+                .get("parent_instance_id")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| "open_subwindow: parent_instance_id required".to_string())?
+                .to_string();
+            commands::window::open_subwindow(state, parent)
+        }
         "get_instance_number" => Ok(commands::window::get_instance_number(state, args)),
         "get_window_count" => Ok(commands::window::get_window_count(state)),
         "register_backend_window" => Ok(commands::window::register_backend_window(state, args)),
@@ -275,6 +285,79 @@ async fn route_command(
 
         // ---- App API (frontend-driven) ----
         "open_agent" => commands::palette::open_agent(state, args),
+
+        // ---- Browser panes (native CefBrowserView) ----
+        "browser_pane_create" => {
+            let block_id = args.get("block_id").and_then(|v| v.as_str()).unwrap_or("");
+            let url = args.get("url").and_then(|v| v.as_str()).unwrap_or("about:blank");
+            let x = args.get("x").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+            let y = args.get("y").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+            let w = args.get("width").and_then(|v| v.as_i64()).unwrap_or(800) as i32;
+            let h = args.get("height").and_then(|v| v.as_i64()).unwrap_or(600) as i32;
+            let rect = cef::Rect { x, y, width: w, height: h };
+            state.browser_panes.create(state, block_id, url, rect)?;
+            Ok(serde_json::json!(true))
+        }
+        "browser_pane_navigate" => {
+            let block_id = args.get("block_id").and_then(|v| v.as_str()).unwrap_or("");
+            let url = args.get("url").and_then(|v| v.as_str()).unwrap_or("");
+            state.browser_panes.navigate(block_id, url, state)?;
+            Ok(serde_json::json!(true))
+        }
+        "browser_pane_resize" => {
+            let block_id = args.get("block_id").and_then(|v| v.as_str()).unwrap_or("");
+            let x = args.get("x").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+            let y = args.get("y").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+            let w = args.get("width").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+            let h = args.get("height").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+            state.browser_panes.resize(block_id, cef::Rect { x, y, width: w, height: h }, state);
+            Ok(serde_json::json!(true))
+        }
+        "browser_pane_close" => {
+            let block_id = args.get("block_id").and_then(|v| v.as_str()).unwrap_or("");
+            state.browser_panes.close(block_id, state);
+            Ok(serde_json::json!(true))
+        }
+        "browser_pane_go_back" => {
+            let block_id = args.get("block_id").and_then(|v| v.as_str()).unwrap_or("");
+            state.browser_panes.go_back(block_id, state);
+            Ok(serde_json::json!(true))
+        }
+        "browser_pane_go_forward" => {
+            let block_id = args.get("block_id").and_then(|v| v.as_str()).unwrap_or("");
+            state.browser_panes.go_forward(block_id, state);
+            Ok(serde_json::json!(true))
+        }
+        "browser_pane_reload" => {
+            let block_id = args.get("block_id").and_then(|v| v.as_str()).unwrap_or("");
+            state.browser_panes.reload(block_id, state);
+            Ok(serde_json::json!(true))
+        }
+        "browser_pane_focus" => {
+            let block_id = args.get("block_id").and_then(|v| v.as_str()).unwrap_or("");
+            tracing::info!("[ipc] browser_pane_focus block_id={}", block_id);
+            state.browser_panes.focus(block_id, state);
+            Ok(serde_json::json!(true))
+        }
+        "main_window_focus" => {
+            // Move OS-level keyboard focus back to the main window's top-level
+            // HWND. Used by the frontend when the user clicks a main-DOM input
+            // (e.g. a browser block's URL bar) to reclaim focus from a pane
+            // that previously held it.
+            tracing::info!("[ipc] main_window_focus");
+            #[cfg(target_os = "windows")]
+            unsafe {
+                let top = crate::commands::window::find_own_top_level_window();
+                if !top.is_null() {
+                    windows_sys::Win32::UI::Input::KeyboardAndMouse::SetFocus(top as _);
+                    tracing::info!("[ipc] main_window_focus: SetFocus on top={:p}", top);
+                }
+                // Also explicitly defocus ALL panes' browsers at the Chromium
+                // level so the renderer stops routing keystrokes to them.
+                state.browser_panes.defocus_all(state);
+            }
+            Ok(serde_json::json!(true))
+        }
 
         // ---- Unknown command ----
         _ => Err(format!("Unknown command: {}", cmd)),
