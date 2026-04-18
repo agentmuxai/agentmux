@@ -30,6 +30,66 @@ use crate::state::AppState;
 /// would otherwise find and wipe the NEW entry.
 static PANE_LABEL_SEQ: AtomicU64 = AtomicU64::new(1);
 
+/// Abstraction over the CEF-side operations `close()` performs on the host
+/// process. Production implements this over `&Arc<AppState>` and Win32;
+/// tests implement it with a recording mock so the close-path state machine
+/// can be exercised without real CEF/HWNDs.
+///
+/// Kept minimal (just two methods) to avoid a dependency graph that has to
+/// be updated every time `close()` grows. Other ops (`focus`, `resize`, …)
+/// can gain their own traits when they need testing, or graduate to a
+/// unified `PaneCefBridge` once the shape is stable.
+pub trait PaneCloseOps {
+    /// Remove the Browser for this label from the registry. Return its
+    /// outer HWND as a pointer-sized value, or `None` if there is no
+    /// Browser or no HWND. Dropping the Browser Arc is the implementation's
+    /// responsibility — production drops before returning so Chromium's
+    /// refcount isn't held by our scope.
+    fn take_browser_hwnd(&self, label: &str) -> Option<usize>;
+
+    /// Destroy the given HWND. Production calls Win32 `DestroyWindow`.
+    /// Called only with values returned from `take_browser_hwnd`.
+    fn destroy_hwnd(&self, hwnd: usize);
+}
+
+/// Production implementation of `PaneCloseOps` backed by `AppState.browsers`
+/// and Win32 `DestroyWindow`.
+struct AppStateCloseOps<'a>(&'a Arc<AppState>);
+
+impl<'a> PaneCloseOps for AppStateCloseOps<'a> {
+    fn take_browser_hwnd(&self, label: &str) -> Option<usize> {
+        let browser = self.0.browsers.lock().remove(label)?;
+
+        #[cfg(target_os = "windows")]
+        let hwnd = browser.host().and_then(|h| {
+            let wh = h.window_handle();
+            if wh.0.is_null() {
+                None
+            } else {
+                Some(wh.0 as usize)
+            }
+        });
+        #[cfg(not(target_os = "windows"))]
+        let hwnd: Option<usize> = None;
+
+        // Drop our Arc before returning so Chromium's refcount doesn't wait
+        // for the caller's scope to unwind.
+        drop(browser);
+        hwnd
+    }
+
+    fn destroy_hwnd(&self, hwnd: usize) {
+        #[cfg(target_os = "windows")]
+        unsafe {
+            windows_sys::Win32::UI::WindowsAndMessaging::DestroyWindow(hwnd as _);
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = hwnd;
+        }
+    }
+}
+
 /// Per-pane lifecycle phase. Simplified from the full state machine in
 /// `SPEC_BROWSER_PANE_LIFECYCLE.md` §6 — the pre-create states are handled
 /// by the panes-map-absent sentinel so we only need to distinguish live
@@ -231,6 +291,12 @@ impl BrowserPaneManager {
     /// user expects to persist across close). If beforeunload becomes
     /// important, revisit.
     pub fn close(&self, block_id: &str, state: &Arc<AppState>) {
+        let ops = AppStateCloseOps(state);
+        self.close_with(block_id, &ops);
+    }
+
+    /// The testable body of `close()`. See `PaneCloseOps` for the seam.
+    fn close_with(&self, block_id: &str, ops: &dyn PaneCloseOps) {
         let label = {
             let mut panes = self.panes.lock();
             let entry = match panes.get_mut(block_id) {
@@ -244,32 +310,14 @@ impl BrowserPaneManager {
             entry.label.clone()
         };
 
-        // Remove from state.browsers up front so focus/resize/defocus_all
-        // lookups miss immediately, in addition to the Closing gate.
-        let browser = state.browsers.lock().remove(&label);
+        // Remove from state.browsers and get the HWND in one go. `take_browser_hwnd`
+        // also drops the Browser Arc, so focus/resize/defocus_all lookups miss
+        // immediately in addition to the Closing gate.
+        let hwnd = ops.take_browser_hwnd(&label);
 
-        if let Some(browser) = browser {
-            #[cfg(target_os = "windows")]
-            let hwnd = browser.host().and_then(|h| {
-                let wh = h.window_handle();
-                if wh.0.is_null() {
-                    None
-                } else {
-                    Some(wh.0 as *mut std::ffi::c_void)
-                }
-            });
-
-            // Drop our Arc before DestroyWindow so Chromium's refcount doesn't
-            // have to wait for this scope to exit.
-            drop(browser);
-
-            #[cfg(target_os = "windows")]
-            if let Some(hwnd) = hwnd {
-                unsafe {
-                    windows_sys::Win32::UI::WindowsAndMessaging::DestroyWindow(hwnd as _);
-                }
-                tracing::info!(block_id, label, "pane HWND destroyed");
-            }
+        if let Some(hwnd) = hwnd {
+            ops.destroy_hwnd(hwnd);
+            tracing::info!(block_id, label, "pane HWND destroyed");
         }
 
         // Drop the lifecycle entry now so the block_id can be reused. If CEF
@@ -447,14 +495,61 @@ wrap_task! {
 // ── Tests ───────────────────────────────────────────────────────────────────
 //
 // Covers the non-CEF pieces of `BrowserPaneManager`: the panes map, label
-// sequencing, and lifecycle-state transitions. CEF-touching paths (`create`'s
-// browser_host_create_browser, `close`'s DestroyWindow, Browser clone/drop)
-// need a `PaneCefBridge` trait extraction — deferred to the follow-up PR
-// described in SPEC_BROWSER_PANE_LIFECYCLE_TESTS.md §9.
+// sequencing, lifecycle-state transitions, AND `close()` itself via a
+// mock `PaneCloseOps` (the trait introduced in this PR). Other CEF-touching
+// paths (`create`'s browser_host_create_browser, `focus`'s SetFocus) will
+// get the same treatment as their own traits are extracted — see
+// SPEC_BROWSER_PANE_MODULARIZATION.md §6 for the phased plan.
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Recording mock for `PaneCloseOps`. Tests inspect `taken` and
+    /// `destroyed` to assert what close() did with the browsers it
+    /// was supposed to tear down.
+    struct MockCloseOps {
+        /// label -> fake HWND. Populated before the test to simulate the
+        /// AppState.browsers map.
+        registered: parking_lot::Mutex<HashMap<String, usize>>,
+        /// Labels `close()` asked us to take (in call order).
+        taken: parking_lot::Mutex<Vec<String>>,
+        /// HWNDs `close()` asked us to destroy (in call order).
+        destroyed: parking_lot::Mutex<Vec<usize>>,
+    }
+
+    impl MockCloseOps {
+        fn new() -> Self {
+            Self {
+                registered: parking_lot::Mutex::new(HashMap::new()),
+                taken: parking_lot::Mutex::new(Vec::new()),
+                destroyed: parking_lot::Mutex::new(Vec::new()),
+            }
+        }
+
+        fn register(&self, label: &str, hwnd: usize) {
+            self.registered.lock().insert(label.to_string(), hwnd);
+        }
+
+        fn taken_labels(&self) -> Vec<String> {
+            self.taken.lock().clone()
+        }
+
+        fn destroyed_hwnds(&self) -> Vec<usize> {
+            self.destroyed.lock().clone()
+        }
+    }
+
+    impl PaneCloseOps for MockCloseOps {
+        fn take_browser_hwnd(&self, label: &str) -> Option<usize> {
+            self.taken.lock().push(label.to_string());
+            self.registered.lock().remove(label)
+        }
+
+        fn destroy_hwnd(&self, hwnd: usize) {
+            self.destroyed.lock().push(hwnd);
+        }
+    }
 
     #[test]
     fn new_manager_is_empty() {
@@ -551,5 +646,127 @@ mod tests {
         let m = BrowserPaneManager::new();
         m.test_insert_live("b1", "custom-label-42");
         assert_eq!(m.test_entry_label("b1").as_deref(), Some("custom-label-42"));
+    }
+
+    // ── close_with tests — drive close() through the PaneCloseOps seam ──
+
+    #[test]
+    fn close_with_live_entry_destroys_hwnd_and_drops_entry() {
+        let m = BrowserPaneManager::new();
+        m.test_insert_live("b1", "browser-pane-b1-1");
+
+        let ops = MockCloseOps::new();
+        ops.register("browser-pane-b1-1", 0xABCD);
+
+        m.close_with("b1", &ops);
+
+        assert_eq!(ops.taken_labels(), vec!["browser-pane-b1-1"]);
+        assert_eq!(ops.destroyed_hwnds(), vec![0xABCD]);
+        assert!(!m.test_has_entry("b1"),
+            "entry must be drained after close_with");
+    }
+
+    #[test]
+    fn close_with_missing_entry_is_noop() {
+        let m = BrowserPaneManager::new();
+
+        let ops = MockCloseOps::new();
+        m.close_with("never-existed", &ops);
+
+        assert!(ops.taken_labels().is_empty(),
+            "take_browser_hwnd must not be called when entry is absent");
+        assert!(ops.destroyed_hwnds().is_empty());
+    }
+
+    #[test]
+    fn close_with_already_closing_is_noop() {
+        // Second close call must not re-enter the CEF ops — that would
+        // double-destroy the HWND and panic.
+        let m = BrowserPaneManager::new();
+        m.test_insert_live("b1", "browser-pane-b1-1");
+        m.test_mark_closing("b1");
+
+        let ops = MockCloseOps::new();
+        ops.register("browser-pane-b1-1", 0xABCD);
+
+        m.close_with("b1", &ops);
+
+        assert!(ops.taken_labels().is_empty(),
+            "already-Closing pane must not call take_browser_hwnd again");
+        assert!(ops.destroyed_hwnds().is_empty(),
+            "already-Closing pane must not call destroy_hwnd again");
+    }
+
+    #[test]
+    fn close_with_unregistered_browser_still_drains_entry() {
+        // If the Browser was already gone from state.browsers (creation
+        // failed, or on_before_close got there first), close_with must
+        // still drop the lifecycle entry so future creates can reuse
+        // the block_id.
+        let m = BrowserPaneManager::new();
+        m.test_insert_live("b1", "browser-pane-b1-1");
+
+        let ops = MockCloseOps::new(); // no register() — lookup will miss
+
+        m.close_with("b1", &ops);
+
+        assert_eq!(ops.taken_labels(), vec!["browser-pane-b1-1"],
+            "take_browser_hwnd is still called; returns None");
+        assert!(ops.destroyed_hwnds().is_empty(),
+            "destroy_hwnd skipped when no HWND to destroy");
+        assert!(!m.test_has_entry("b1"),
+            "entry is always drained, Browser-present or not");
+    }
+
+    #[test]
+    fn close_with_two_panes_independently() {
+        let m = BrowserPaneManager::new();
+        m.test_insert_live("b1", "browser-pane-b1-1");
+        m.test_insert_live("b2", "browser-pane-b2-2");
+
+        let ops = MockCloseOps::new();
+        ops.register("browser-pane-b1-1", 0x1111);
+        ops.register("browser-pane-b2-2", 0x2222);
+
+        m.close_with("b1", &ops);
+
+        assert!(!m.test_has_entry("b1"));
+        assert!(m.test_has_entry("b2"),
+            "closing b1 must not affect b2's entry");
+        assert_eq!(ops.destroyed_hwnds(), vec![0x1111],
+            "only b1's HWND destroyed, b2 untouched");
+
+        m.close_with("b2", &ops);
+
+        assert!(!m.test_has_entry("b2"));
+        assert_eq!(ops.destroyed_hwnds(), vec![0x1111, 0x2222]);
+    }
+
+    #[test]
+    fn close_with_flips_to_closing_before_calling_ops() {
+        // Verifies the state transition happens BEFORE any CEF-side op.
+        // An ops impl could theoretically observe lifecycle state via
+        // a shared reference — this test proves it'd see Closing by then.
+        struct StateSpyingOps<'a> {
+            m: &'a BrowserPaneManager,
+            state_on_take: parking_lot::Mutex<Option<PaneLifecycle>>,
+        }
+        impl<'a> PaneCloseOps for StateSpyingOps<'a> {
+            fn take_browser_hwnd(&self, _label: &str) -> Option<usize> {
+                *self.state_on_take.lock() = self.m.test_entry_state("b1");
+                None
+            }
+            fn destroy_hwnd(&self, _hwnd: usize) {}
+        }
+
+        let m = BrowserPaneManager::new();
+        m.test_insert_live("b1", "browser-pane-b1-1");
+        assert_eq!(m.test_entry_state("b1"), Some(PaneLifecycle::Live));
+
+        let ops = StateSpyingOps { m: &m, state_on_take: parking_lot::Mutex::new(None) };
+        m.close_with("b1", &ops);
+
+        assert_eq!(*ops.state_on_take.lock(), Some(PaneLifecycle::Closing),
+            "state must be Closing by the time take_browser_hwnd runs");
     }
 }
