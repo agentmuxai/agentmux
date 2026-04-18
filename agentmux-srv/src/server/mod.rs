@@ -79,25 +79,25 @@ pub fn build_router(state: AppState) -> Router {
 
     // No-auth routes (matching Go SkipAuth: true — localhost-only reactive endpoints)
     let reactive_routes = Router::new()
-        .route("/wave/reactive/inject", post(reactive::handle_reactive_inject))
-        .route("/wave/reactive/agents", get(reactive::handle_reactive_agents))
-        .route("/wave/reactive/agent", get(reactive::handle_reactive_agent))
-        .route("/wave/reactive/audit", get(reactive::handle_reactive_audit))
-        .route("/wave/reactive/register", post(reactive::handle_reactive_register))
+        .route("/agentmux/reactive/inject", post(reactive::handle_reactive_inject))
+        .route("/agentmux/reactive/agents", get(reactive::handle_reactive_agents))
+        .route("/agentmux/reactive/agent", get(reactive::handle_reactive_agent))
+        .route("/agentmux/reactive/audit", get(reactive::handle_reactive_audit))
+        .route("/agentmux/reactive/register", post(reactive::handle_reactive_register))
         .route(
-            "/wave/reactive/unregister",
+            "/agentmux/reactive/unregister",
             post(reactive::handle_reactive_unregister),
         )
         .route(
-            "/wave/reactive/poller/stats",
+            "/agentmux/reactive/poller/stats",
             get(reactive::handle_reactive_poller_stats),
         )
         .route(
-            "/wave/reactive/poller/config",
+            "/agentmux/reactive/poller/config",
             post(reactive::handle_reactive_poller_config),
         )
         .route(
-            "/wave/reactive/poller/status",
+            "/agentmux/reactive/poller/status",
             get(reactive::handle_reactive_poller_status),
         );
 
@@ -113,11 +113,11 @@ pub fn build_router(state: AppState) -> Router {
 
     let authed_routes = Router::new()
         .route("/ws", get(websocket::handle_ws))
-        .route("/wave/service", post(service::handle_service))
-        .route("/wave/file", get(files::handle_wave_file))
-        .route("/wave/stream-file", get(stub_501))
-        .route("/wave/stream-file/*path", get(stub_501))
-        .route("/wave/stream-local-file", get(stub_501))
+        .route("/agentmux/service", post(service::handle_service))
+        .route("/agentmux/file", get(files::handle_wave_file))
+        .route("/agentmux/stream-file", get(stub_501))
+        .route("/agentmux/stream-file/*path", get(stub_501))
+        .route("/agentmux/stream-local-file", get(stub_501))
         .route("/api/post-chat-message", get(stub_501).post(stub_501))
         .route("/docsite/*path", get(files::handle_docsite))
         .route("/schema/*path", get(files::handle_schema))

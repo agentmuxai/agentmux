@@ -289,7 +289,7 @@ export function handleOsc16162Command(data: string, blockId: string, loaded: boo
         case "X":
             fireAndForget(async () => {
                 try {
-                    const url = getWebServerEndpoint() + "/wave/reactive/poller/config";
+                    const url = getWebServerEndpoint() + "/agentmux/reactive/poller/config";
                     const response = await fetch(url, {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },

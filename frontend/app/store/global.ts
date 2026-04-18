@@ -625,7 +625,7 @@ export async function fetchWaveFile(
         const authKey = getApi()?.getAuthKey?.();
         if (authKey) usp.set("authkey", authKey);
     }
-    const resp = await fetch(getWebServerEndpoint() + "/wave/file?" + usp.toString());
+    const resp = await fetch(getWebServerEndpoint() + "/agentmux/file?" + usp.toString());
     if (!resp.ok) {
         if (resp.status === 404) return { data: null, fileInfo: null };
         throw new Error("error getting wave file: " + resp.statusText);

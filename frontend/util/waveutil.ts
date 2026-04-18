@@ -8,7 +8,7 @@ import { generate as generateCSS, parse as parseCSS, walk as walkCSS } from "css
 function encodeFileURL(file: string) {
     const webEndpoint = getWebServerEndpoint();
     const fileUri = formatRemoteUri(file, "local");
-    const rtn = webEndpoint + `/wave/stream-file?path=${encodeURIComponent(fileUri)}&no404=1`;
+    const rtn = webEndpoint + `/agentmux/stream-file?path=${encodeURIComponent(fileUri)}&no404=1`;
     return rtn;
 }
 

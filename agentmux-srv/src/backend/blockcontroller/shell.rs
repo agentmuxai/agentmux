@@ -621,7 +621,7 @@ impl Controller for ShellController {
 
         // Auto-register with jekt if AGENTMUX_AGENT_ID was set in the block env.
         // This maps agent_id → block_id in the ReactiveHandler so jekt can deliver
-        // messages directly to this PTY without a separate /wave/reactive/register call.
+        // messages directly to this PTY without a separate /agentmux/reactive/register call.
         if let Some(ref agent_id) = agent_id_for_jekt {
             match crate::backend::reactive::get_global_handler()
                 .register_agent(agent_id, &self.block_id, Some(&self.tab_id))

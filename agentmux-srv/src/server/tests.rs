@@ -73,7 +73,7 @@ async fn health_returns_200() {
 async fn auth_rejects_bad_key() {
     let app = test_router();
     let req = Request::builder()
-        .uri("/wave/service")
+        .uri("/agentmux/service")
         .method("POST")
         .header("X-AuthKey", "wrong-key")
         .header("Content-Type", "application/json")
@@ -87,7 +87,7 @@ async fn auth_rejects_bad_key() {
 async fn auth_rejects_missing_key() {
     let app = test_router();
     let req = Request::builder()
-        .uri("/wave/service")
+        .uri("/agentmux/service")
         .method("POST")
         .header("Content-Type", "application/json")
         .body(Body::from(r#"{"service":"client","method":"GetClientData"}"#))
@@ -100,7 +100,7 @@ async fn auth_rejects_missing_key() {
 async fn auth_accepts_valid_header() {
     let app = test_router();
     let req = Request::builder()
-        .uri("/wave/service")
+        .uri("/agentmux/service")
         .method("POST")
         .header("X-AuthKey", "test-secret-key")
         .header("Content-Type", "application/json")
@@ -122,7 +122,7 @@ async fn auth_accepts_valid_header() {
 async fn auth_accepts_query_param() {
     let app = test_router();
     let req = Request::builder()
-        .uri("/wave/service?authkey=test-secret-key")
+        .uri("/agentmux/service?authkey=test-secret-key")
         .method("POST")
         .header("Content-Type", "application/json")
         .body(Body::from(
@@ -137,7 +137,7 @@ async fn auth_accepts_query_param() {
 async fn reactive_routes_skip_auth() {
     let app = test_router();
     let req = Request::builder()
-        .uri("/wave/reactive/agents")
+        .uri("/agentmux/reactive/agents")
         .body(Body::empty())
         .unwrap();
     let resp = app.oneshot(req).await.unwrap();
@@ -165,7 +165,7 @@ async fn cors_headers_present() {
 async fn service_get_client_data() {
     let app = test_router();
     let req = Request::builder()
-        .uri("/wave/service")
+        .uri("/agentmux/service")
         .method("POST")
         .header("X-AuthKey", "test-secret-key")
         .header("Content-Type", "application/json")
@@ -189,7 +189,7 @@ async fn service_get_client_data() {
 async fn service_list_workspaces() {
     let app = test_router();
     let req = Request::builder()
-        .uri("/wave/service")
+        .uri("/agentmux/service")
         .method("POST")
         .header("X-AuthKey", "test-secret-key")
         .header("Content-Type", "application/json")
@@ -212,7 +212,7 @@ async fn service_list_workspaces() {
 async fn service_unknown_method_returns_error() {
     let app = test_router();
     let req = Request::builder()
-        .uri("/wave/service")
+        .uri("/agentmux/service")
         .method("POST")
         .header("X-AuthKey", "test-secret-key")
         .header("Content-Type", "application/json")
@@ -236,7 +236,7 @@ async fn service_unknown_method_returns_error() {
 async fn reactive_agents_returns_empty_list() {
     let app = test_router();
     let req = Request::builder()
-        .uri("/wave/reactive/agents")
+        .uri("/agentmux/reactive/agents")
         .body(Body::empty())
         .unwrap();
     let resp = app.oneshot(req).await.unwrap();
@@ -253,7 +253,7 @@ async fn reactive_agents_returns_empty_list() {
 async fn reactive_poller_status() {
     let app = test_router();
     let req = Request::builder()
-        .uri("/wave/reactive/poller/status")
+        .uri("/agentmux/reactive/poller/status")
         .body(Body::empty())
         .unwrap();
     let resp = app.oneshot(req).await.unwrap();
@@ -271,7 +271,7 @@ async fn workspace_colors_and_icons() {
     let state = test_state();
     let app = build_router(state);
     let req = Request::builder()
-        .uri("/wave/service")
+        .uri("/agentmux/service")
         .method("POST")
         .header("X-AuthKey", "test-secret-key")
         .header("Content-Type", "application/json")

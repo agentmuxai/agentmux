@@ -165,7 +165,7 @@ export const resolveRemoteFile = async (filepath: string, resolveOpts: MarkdownR
         // console.log("markdown resolve", resolveOpts, filepath, "=>", baseDirUri, remoteUri);
         const usp = new URLSearchParams();
         usp.set("path", remoteUri);
-        return getWebServerEndpoint() + "/wave/stream-file?" + usp.toString();
+        return getWebServerEndpoint() + "/agentmux/stream-file?" + usp.toString();
     } catch (err) {
         console.warn("Failed to resolve remote file:", filepath, err);
         return null;
