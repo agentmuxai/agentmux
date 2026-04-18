@@ -32,6 +32,10 @@ static PANE_WNDPROCS: std::sync::LazyLock<
 pub static ALLOW_PANE_FOCUS_ONCE: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
 
+// Phase 4 of the modularization split will wire this into pane
+// `on_after_created` / `on_load_end`. Until then the function is present but
+// unused — keeping it visible avoids importing it back into `client.rs`.
+#[allow(dead_code)]
 /// Subclass a browser pane's outer HWND (and every descendant HWND Chromium
 /// has already created) so `WM_SETFOCUS` is redirected back to the parent
 /// top-level window unless the focus change is user-initiated (see
