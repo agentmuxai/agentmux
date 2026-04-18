@@ -6,6 +6,7 @@
 // native CefBrowserView for sites that block iframes.
 
 import { BlockNodeModel } from "@/app/block/blocktypes";
+import { invokeCommand } from "@/app/platform/ipc";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { getWaveObjectAtom, makeORef } from "@/app/store/wos";
@@ -21,7 +22,9 @@ export class BrowserViewModel implements ViewModel {
     viewText: Accessor<string | HeaderElem[]> = () => [];
     noPadding: Accessor<boolean> = () => true;
 
-    viewComponent: ViewComponent = null; // set by barrel
+    get viewComponent(): ViewComponent {
+        return null; // overridden by barrel via Object.defineProperty
+    }
 
     private _url = createSignal<string>("");
     urlAtom: Accessor<string> = this._url[0];
@@ -146,7 +149,24 @@ export class BrowserViewModel implements ViewModel {
     }
 
     giveFocus(): boolean {
-        return false;
+        // If a main-window input inside this block (e.g. the URL bar) is
+        // already focused, keep it — the user is interacting with the block's
+        // chrome, not the embedded page. Also tell the host to move OS-level
+        // keyboard focus back to the main window, in case a pane was holding
+        // it (otherwise keystrokes still get routed to the pane's HWND).
+        const active = document.activeElement as HTMLElement | null;
+        const isMainInput =
+            active != null &&
+            (active.tagName === "INPUT" || active.tagName === "TEXTAREA") &&
+            !active.classList.contains("dummy-focus");
+        if (isMainInput) {
+            invokeCommand("main_window_focus", {}).catch(() => {});
+            return true;
+        }
+        // Otherwise the user wants to interact with the embedded page — tell
+        // the host to move Windows-level keyboard focus to the pane's HWND.
+        invokeCommand("browser_pane_focus", { block_id: this.blockId }).catch(() => {});
+        return true;
     }
 
     dispose(): void {}

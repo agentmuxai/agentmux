@@ -12,10 +12,10 @@ fn main() {
     {
         let version = std::env::var("CARGO_PKG_VERSION").unwrap();
         let mut res = winres::WindowsResource::new();
-        res.set("FileDescription", &format!("AgentMux CEF v{}", version));
+        res.set("FileDescription", &format!("AgentMux v{}", version));
         res.set("ProductName", "AgentMux");
         res.set("CompanyName", "AgentMux");
-        res.set("InternalName", "agentmux-cef");
+        res.set("InternalName", "agentmux");
         let icon_path = std::path::Path::new("resources/win/agentmux.ico");
         if icon_path.exists() {
             res.set_icon(icon_path.to_str().unwrap());

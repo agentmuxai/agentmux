@@ -42,15 +42,21 @@ pub struct AgentMuxHandler {
     is_closing: bool,
     state: Arc<AppState>,
     ipc_port: u16,
+    is_pane: bool,
 }
 
 impl AgentMuxHandler {
     pub fn new(state: Arc<AppState>, ipc_port: u16) -> Arc<Mutex<Self>> {
+        Self::new_with_pane(state, ipc_port, false)
+    }
+
+    pub fn new_with_pane(state: Arc<AppState>, ipc_port: u16, is_pane: bool) -> Arc<Mutex<Self>> {
         Arc::new(Mutex::new(Self {
             browser_list: Vec::new(),
             is_closing: false,
             state,
             ipc_port,
+            is_pane,
         }))
     }
 
@@ -131,6 +137,28 @@ impl AgentMuxHandler {
                 });
             if !hwnd.is_null() {
                 unsafe { set_window_icon(hwnd); }
+            }
+        }
+
+        // Browser panes must sit ABOVE the main browser's widget in Z-order
+        // or mouse-wheel events over the visible pane area hit main instead
+        // of the pane. Bring the pane's HWND to the top of its parent's
+        // Z-order without changing its activation state.
+        #[cfg(target_os = "windows")]
+        if self.is_pane {
+            if let Some(host) = browser.host() {
+                let wh = host.window_handle();
+                if !wh.0.is_null() {
+                    unsafe {
+                        windows_sys::Win32::UI::WindowsAndMessaging::SetWindowPos(
+                            wh.0 as _,
+                            std::ptr::null_mut(), // HWND_TOP
+                            0, 0, 0, 0,
+                            0x0001 | 0x0002 | 0x0010, // SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE
+                        );
+                    }
+                    tracing::info!("[pane-zorder] raised pane to top of Z-order");
+                }
             }
         }
 
@@ -240,6 +268,24 @@ impl AgentMuxHandler {
             return;
         }
 
+        // For browser panes: skip IPC-port injection (the embedded page is
+        // not our frontend). Re-install the HWND subclass — Chromium creates
+        // the render HWND (Chrome_RenderWidgetHostHWND) during navigation, so
+        // it doesn't exist yet in on_after_created. We re-subclass on every
+        // navigation so newly-created child HWNDs are always covered.
+        //
+        // DO NOT force focus back to main here: WM_MOUSEWHEEL is routed to
+        // the focused HWND (on Windows without "scroll inactive windows"),
+        // so stealing focus away from the pane breaks scrolling. The
+        // FocusHandler cancel + WndProc redirect already keep focus off the
+        // pane during the *initial* navigation focus steal; user-driven
+        // focus goes through `browser_pane_focus` IPC, and clicking a main
+        // input goes through `main_window_focus`.
+        if self.is_pane {
+            tracing::info!("[pane-load-end] pane page loaded");
+            return;
+        }
+
         let ipc_token = &self.state.ipc_token;
         let js = format!(
             "window.__AGENTMUX_IPC_PORT__ = {}; window.__AGENTMUX_IPC_TOKEN__ = '{}';",
@@ -292,6 +338,13 @@ impl AgentMuxHandler {
         }
 
         let frame = frame.expect("Frame is None");
+
+        // Don't show error pages for sub-frames (iframes) — only for
+        // the main frame. Without this, an iframe blocked by
+        // X-Frame-Options replaces the entire app with an error page.
+        if frame.is_main() != 1 {
+            return;
+        }
         let error_text = error_text.map(CefString::to_string).unwrap_or_default();
         let failed_url = failed_url.map(CefString::to_string).unwrap_or_default();
         let error_code_i32 = error_code_raw as i32;
@@ -626,6 +679,7 @@ fn html_escape(s: &str) -> String {
 wrap_client! {
     pub struct AgentMuxClient {
         inner: Arc<Mutex<AgentMuxHandler>>,
+        is_pane: bool,
     }
 
     impl Client {
@@ -647,6 +701,39 @@ wrap_client! {
 
         fn request_handler(&self) -> Option<RequestHandler> {
             Some(AgentMuxRequestHandler::new(self.inner.clone()))
+        }
+
+        fn focus_handler(&self) -> Option<FocusHandler> {
+            // For browser panes only: cancel CEF's auto-focus on navigation so the
+            // child HWND doesn't steal keyboard focus from the main window when the
+            // page finishes loading. The user can still click into the pane to focus it.
+            if self.is_pane {
+                Some(AgentMuxPaneFocusHandler::new())
+            } else {
+                None
+            }
+        }
+    }
+}
+
+// FocusHandler used only by browser-pane clients — cancels NAVIGATION focus
+// (triggered by page load) but allows SYSTEM focus (user click, keyboard).
+// Combined with the Win32 WndProc subclass below, this means:
+//   • Page load / JS window.focus() → cancelled at both Chromium and Win32
+//   • User click inside the pane → allowed at both layers, pane gets focus,
+//     user can type into page inputs (e.g. google.com search box)
+wrap_focus_handler! {
+    struct AgentMuxPaneFocusHandler;
+
+    impl FocusHandler {
+        fn on_set_focus(
+            &self,
+            _browser: Option<&mut Browser>,
+            source: FocusSource,
+        ) -> ::std::os::raw::c_int {
+            let cancel = source == FocusSource::NAVIGATION;
+            tracing::info!("[pane-focus] on_set_focus source={:?} cancel={}", source, cancel);
+            if cancel { 1 } else { 0 }
         }
     }
 }
@@ -834,6 +921,145 @@ unsafe fn setup_native_frameless(hwnd: *mut std::ffi::c_void) {
 static ORIGINAL_WNDPROCS: std::sync::LazyLock<
     std::sync::Mutex<std::collections::HashMap<usize, isize>>,
 > = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+
+/// Map of pane HWND -> original WndProc for the focus-redirect subclass below.
+#[cfg(target_os = "windows")]
+static PANE_WNDPROCS: std::sync::LazyLock<
+    std::sync::Mutex<std::collections::HashMap<usize, isize>>,
+> = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+
+/// Subclass a browser pane's HWND so that WM_SETFOCUS is immediately redirected
+/// back to the parent (top-level) window. Without this, Chromium's internal
+/// SetFocus on the pane HWND (on page load, on JS window.focus() calls, etc.)
+/// steals the Windows-level keyboard focus — any subsequent keystrokes go to
+/// the pane's renderer instead of the main window, so terminals, URL bars, and
+/// other inputs in the main UI stop responding.
+///
+/// The pane becomes view-only (user cannot type into google.com's search box),
+/// but the main window keeps working. A later gesture (e.g. Alt+click) can
+/// restore focus to the pane explicitly when the user wants to interact with
+/// the embedded page.
+/// When true, the next WM_SETFOCUS delivered to a subclassed pane HWND is
+/// allowed through instead of being redirected. The `browser_pane_focus` IPC
+/// handler sets this flag before calling SetFocus on the pane, so user-
+/// initiated focus (routed by the frontend's ViewModel.giveFocus()) works
+/// even though the Chromium-internal focus steal on navigation is blocked.
+#[cfg(target_os = "windows")]
+pub static ALLOW_PANE_FOCUS_ONCE: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+#[cfg(target_os = "windows")]
+unsafe fn install_pane_focus_redirect(hwnd: *mut std::ffi::c_void) {
+    use std::sync::atomic::Ordering;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        CallWindowProcW, GetParent, SetWindowLongPtrW, GWLP_WNDPROC, WM_SETFOCUS,
+    };
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::SetFocus;
+
+    unsafe extern "system" fn wndproc_hook(
+        hwnd: *mut std::ffi::c_void,
+        msg: u32,
+        wparam: usize,
+        lparam: isize,
+    ) -> isize {
+        // Diagnostic: surface mouse-wheel and key events so we can tell
+        // whether they reach the pane HWND at all when the user reports
+        // scrolling/typing breakage.
+        const WM_MOUSEWHEEL: u32 = 0x020A;
+        const WM_MOUSEHWHEEL: u32 = 0x020E;
+        const WM_KEYDOWN: u32 = 0x0100;
+        const WM_CHAR: u32 = 0x0102;
+        match msg {
+            WM_MOUSEWHEEL | WM_MOUSEHWHEEL => {
+                tracing::info!("[pane-wndproc] mouse-wheel hwnd={:p} msg=0x{:x}", hwnd, msg);
+            }
+            WM_KEYDOWN | WM_CHAR => {
+                tracing::info!("[pane-wndproc] key msg=0x{:x} wparam={}", msg, wparam);
+            }
+            _ => {}
+        }
+
+        if msg == WM_SETFOCUS {
+            // Intentional focus from the frontend's giveFocus() IPC: honor it
+            // once, then revert to redirect-mode for subsequent events.
+            if ALLOW_PANE_FOCUS_ONCE.swap(false, Ordering::Relaxed) {
+                tracing::info!("[pane-wndproc] WM_SETFOCUS allowed (intentional)");
+                // Fall through to the original WndProc.
+            } else {
+                // Programmatic focus (page load, JS window.focus()): redirect.
+                let parent = GetParent(hwnd);
+                if !parent.is_null() {
+                    SetFocus(parent);
+                }
+                return 0;
+            }
+        }
+
+        let original = PANE_WNDPROCS
+            .lock()
+            .ok()
+            .and_then(|m| m.get(&(hwnd as usize)).copied())
+            .unwrap_or(0);
+        if original != 0 {
+            let proc_fn: unsafe extern "system" fn(
+                *mut std::ffi::c_void, u32, usize, isize,
+            ) -> isize = std::mem::transmute(original);
+            CallWindowProcW(Some(proc_fn), hwnd, msg, wparam, lparam)
+        } else {
+            0
+        }
+    }
+
+    // Subclass the outer HWND — but only once. Re-calling SetWindowLongPtrW
+    // would replace our hook with itself and poison PANE_WNDPROCS.
+    let already_hooked = PANE_WNDPROCS
+        .lock()
+        .ok()
+        .map(|m| m.contains_key(&(hwnd as usize)))
+        .unwrap_or(false);
+    if !already_hooked {
+        let original = SetWindowLongPtrW(hwnd, GWLP_WNDPROC, wndproc_hook as *const () as isize);
+        if original != 0 {
+            if let Ok(mut map) = PANE_WNDPROCS.lock() {
+                map.insert(hwnd as usize, original);
+            }
+            tracing::info!("[pane-subclass] installed focus-redirect WndProc on pane HWND {:p}", hwnd);
+        }
+    }
+
+    // Chromium creates inner HWNDs (widget + render) below the outer HWND.
+    // Mouse input reaches the deepest descendant, so we must walk the whole
+    // tree and subclass every one.
+    unsafe extern "system" fn enum_children(
+        child: *mut std::ffi::c_void,
+        _lparam: isize,
+    ) -> i32 {
+        let already = PANE_WNDPROCS
+            .lock()
+            .ok()
+            .map(|m| m.contains_key(&(child as usize)))
+            .unwrap_or(false);
+        if already {
+            return 1;
+        }
+        let orig = SetWindowLongPtrW(child, GWLP_WNDPROC, wndproc_hook as *const () as isize);
+        if orig != 0 {
+            if let Ok(mut map) = PANE_WNDPROCS.lock() {
+                map.insert(child as usize, orig);
+            }
+            let mut class_buf = [0u16; 64];
+            let n = windows_sys::Win32::UI::WindowsAndMessaging::GetClassNameW(
+                child, class_buf.as_mut_ptr(), class_buf.len() as i32,
+            );
+            let class_name = String::from_utf16_lossy(&class_buf[..n as usize]);
+            tracing::info!("[pane-subclass] subclassed child HWND {:p} class={}", child, class_name);
+        }
+        1 // continue
+    }
+    windows_sys::Win32::UI::WindowsAndMessaging::EnumChildWindows(
+        hwnd, Some(enum_children), 0,
+    );
+}
 
 /// Install a WndProc hook on a SECONDARY window that handles:
 /// - WM_NCCALCSIZE: returns 0 to eliminate the non-client area (removes the
