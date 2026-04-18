@@ -183,26 +183,11 @@ impl AgentMuxHandler {
             }
         }
 
-        // Browser panes must sit ABOVE the main browser's widget in Z-order
-        // or mouse-wheel events over the visible pane area hit main instead
-        // of the pane. Bring the pane's HWND to the top of its parent's
-        // Z-order without changing its activation state.
-        #[cfg(target_os = "windows")]
+        // Pane-specific on_after_created work (Z-order raise + Win32 focus
+        // subclass install) lives in `crate::pane::callbacks` after Phase 4
+        // of the modularization split.
         if self.is_pane {
-            if let Some(host) = browser.host() {
-                let wh = host.window_handle();
-                if !wh.0.is_null() {
-                    unsafe {
-                        windows_sys::Win32::UI::WindowsAndMessaging::SetWindowPos(
-                            wh.0 as _,
-                            std::ptr::null_mut(), // HWND_TOP
-                            0, 0, 0, 0,
-                            0x0001 | 0x0002 | 0x0010, // SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE
-                        );
-                    }
-                    tracing::info!("[pane-zorder] raised pane to top of Z-order");
-                }
-            }
+            crate::pane::callbacks::on_after_created_pane(&self.state, &browser);
         }
 
         self.browser_list.push(browser);
@@ -241,13 +226,11 @@ impl AgentMuxHandler {
             label
         };
 
-        // Drain the pane's lifecycle entry so a re-create with the same block_id
-        // gets a fresh Live state. Label prefix tells us this was a pane browser;
-        // it's cheap enough to always call — the manager's drain is a no-op for
-        // labels it doesn't own.
+        // Pane-specific on_before_close work (drain lifecycle entry) lives
+        // in `crate::pane::callbacks` after Phase 4.
         if let Some(ref lbl) = label {
             if lbl.starts_with("browser-pane-") {
-                self.state.browser_panes.drain_closed_label(lbl);
+                crate::pane::callbacks::on_before_close_pane(&self.state, lbl);
             }
         }
 
@@ -354,21 +337,14 @@ impl AgentMuxHandler {
             return;
         }
 
-        // For browser panes: skip IPC-port injection (the embedded page is
-        // not our frontend). Re-install the HWND subclass — Chromium creates
-        // the render HWND (Chrome_RenderWidgetHostHWND) during navigation, so
-        // it doesn't exist yet in on_after_created. We re-subclass on every
-        // navigation so newly-created child HWNDs are always covered.
-        //
-        // DO NOT force focus back to main here: WM_MOUSEWHEEL is routed to
-        // the focused HWND (on Windows without "scroll inactive windows"),
-        // so stealing focus away from the pane breaks scrolling. The
-        // FocusHandler cancel + WndProc redirect already keep focus off the
-        // pane during the *initial* navigation focus steal; user-driven
-        // focus goes through `browser_pane_focus` IPC, and clicking a main
-        // input goes through `main_window_focus`.
+        // Pane-specific on_load_end work (focus subclass re-install after
+        // Chromium rebuilds Chrome_RenderWidgetHostHWND on navigation)
+        // lives in `crate::pane::callbacks` after Phase 4. Returning early
+        // skips main-only IPC-port injection below.
         if self.is_pane {
-            tracing::info!("[pane-load-end] pane page loaded");
+            if let Some(b) = browser.as_deref() {
+                crate::pane::callbacks::on_load_end_pane(&self.state, b);
+            }
             return;
         }
 
