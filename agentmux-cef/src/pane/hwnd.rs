@@ -43,14 +43,10 @@ pub static ALLOW_PANE_FOCUS_ONCE: std::sync::atomic::AtomicBool =
 /// window, so terminals, URL bars, and other inputs in the main UI stop
 /// responding.
 ///
-/// ## Known gap
-///
-/// Currently has no callers. `SPEC_BROWSER_PANE_LIFECYCLE.md` §5 race #5
-/// flagged that we should be wiring this into the pane `on_after_created`
-/// and `on_load_end` paths (Chromium creates a new `Chrome_RenderWidgetHostHWND`
-/// on every navigation, so the subclass needs to be reinstalled). That
-/// wiring lands in Phase 4 of the modularization split when the pane
-/// callbacks move out of `client.rs`.
+/// Wired in by `pane::callbacks::on_after_created_pane` at create time and
+/// by `pane::callbacks::on_load_end_pane` after every navigation — Chromium
+/// recreates the `Chrome_RenderWidgetHostHWND` on every page load, so the
+/// subclass has to follow along or it ends up stranded on a destroyed HWND.
 pub unsafe fn install_pane_focus_redirect(hwnd: *mut std::ffi::c_void) {
     use std::sync::atomic::Ordering;
     use windows_sys::Win32::UI::WindowsAndMessaging::{
