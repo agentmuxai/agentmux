@@ -101,6 +101,27 @@ wrap_window_delegate! {
         fn window_runtime_style(&self) -> RuntimeStyle {
             self.runtime_style
         }
+
+        // When the OS window is activated (user clicks back into AgentMux from
+        // another app), tell the Chromium browser host to claim keyboard focus.
+        // Without this, the CEF window receives mouse events but keyboard input
+        // stays routed to whatever app was active before — typing doesn't work
+        // until the user explicitly clicks a browser element that calls focus().
+        fn on_window_activation_changed(
+            &self,
+            _window: Option<&mut Window>,
+            active: ::std::os::raw::c_int,
+        ) {
+            if active == 0 { return; }
+            let bv_ref = self.browser_view.borrow();
+            if let Some(bv) = bv_ref.as_ref() {
+                if let Some(browser) = bv.browser() {
+                    if let Some(host) = browser.host() {
+                        host.set_focus(1);
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -262,6 +283,16 @@ wrap_app! {
                 let rpl_key = CefString::from("renderer-process-limit");
                 let rpl_val = CefString::from("1");
                 cmd.append_switch_with_value(Some(&rpl_key), Some(&rpl_val));
+
+                // Bypass macOS Keychain for Chromium's OSCrypt/SafeStorage.
+                // Without this, Chromium prompts the user to allow keychain
+                // access on every launch. AgentMux doesn't store browser
+                // passwords so mock keychain is safe and avoids the dialog.
+                #[cfg(target_os = "macos")]
+                {
+                    let mk_key = CefString::from("use-mock-keychain");
+                    cmd.append_switch(Some(&mk_key));
+                }
             }
         }
 
