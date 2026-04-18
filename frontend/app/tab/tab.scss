@@ -16,13 +16,20 @@
     align-items: center;
     justify-content: center;
 
+    // Vertical bar between adjacent tabs (replaces the old .pinned-tab-spacer
+    // that used to sit only between pinned and regular). Weight matches that
+    // spacer — 1 px × 18 px bottom-aligned — so every tab boundary reads the
+    // same. First tab hides its own via :first-child; active + next-sibling
+    // also hide theirs so the active tab reads as a connected block.
     &::after {
         content: "";
         position: absolute;
         left: 0;
+        bottom: 4px;
         width: 1px;
-        height: 14px;
-        border-right: 1px solid rgb(from var(--main-text-color) r g b / 0.2);
+        height: 18px;
+        background: var(--border-color);
+        pointer-events: none;
     }
 
     .tab-inner {
@@ -33,7 +40,7 @@
         padding: 0 6px;
         height: 100%;
         white-space: nowrap;
-        border-radius: 6px;
+        border-radius: 0;
     }
 
     &.animate {
