@@ -11,6 +11,7 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { getWaveObjectAtom, makeORef } from "@/app/store/wos";
 import { createMemo, createSignal, type Accessor } from "solid-js";
+import { markMainFocusReclaimed } from "./browser-view";
 
 export class BrowserViewModel implements ViewModel {
     viewType = "browser";
@@ -171,6 +172,10 @@ export class BrowserViewModel implements ViewModel {
             (active.tagName === "INPUT" || active.tagName === "TEXTAREA") &&
             !active.classList.contains("dummy-focus");
         if (isMainInput) {
+            // Arm the hover-focus cooldown so a cursor that's still over
+            // the pane area doesn't re-steal keyboard focus from the
+            // main input the user just landed on.
+            markMainFocusReclaimed();
             invokeCommand("main_window_focus", {}).catch(() => {});
             return true;
         }

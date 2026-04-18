@@ -6,6 +6,27 @@ import { invokeCommand } from "@/app/platform/ipc";
 import type { BrowserViewModel } from "./browser-model";
 import "./browser-view.scss";
 
+/**
+ * Global timestamp of the last "main window reclaimed focus" event.
+ * Shared across every BrowserViewComponent instance in the window so that
+ * clicking an address bar in one pane suppresses the hover-focus re-grab
+ * in every pane (including itself) for a short cooldown window. Without
+ * this, moving the cursor back over the pane right after clicking a main-
+ * DOM input re-fires `onMouseEnter` → `browser_pane_focus` and re-locks
+ * Windows-level keyboard focus onto the pane — the exact
+ * "type in browser then can't type anywhere else" bug report.
+ */
+let lastMainFocusAtMs = 0;
+const MAIN_FOCUS_COOLDOWN_MS = 750;
+
+export function markMainFocusReclaimed() {
+    lastMainFocusAtMs = Date.now();
+}
+
+function mainFocusCooldownActive(): boolean {
+    return Date.now() - lastMainFocusAtMs < MAIN_FOCUS_COOLDOWN_MS;
+}
+
 export function BrowserViewComponent(props: ViewComponentProps<BrowserViewModel>): JSX.Element {
     const model = props.model;
     const [addressBar, setAddressBar] = createSignal(model.urlAtom() || "");
@@ -148,7 +169,11 @@ export function BrowserViewComponent(props: ViewComponentProps<BrowserViewModel>
                         e.currentTarget.select();
                         // Take OS-level keyboard focus away from the pane so
                         // keystrokes reach this address-bar input. The pane may
-                        // have held HWND focus from an earlier hover.
+                        // have held HWND focus from an earlier hover. Also
+                        // arm the cooldown so the hover-focus grab below doesn't
+                        // immediately re-claim focus when the cursor is still
+                        // over the pane area.
+                        markMainFocusReclaimed();
                         invokeCommand("main_window_focus", {}).catch(() => {});
                     }}
                     placeholder="Enter URL or search..."
@@ -169,11 +194,17 @@ export function BrowserViewComponent(props: ViewComponentProps<BrowserViewModel>
                     // it. Without this, wheel events go to main's widget and the
                     // embedded page can't scroll.
                     //
-                    // Gate on `model.closed`: hover can fire between the close IPC
-                    // being issued and the DOM node being removed — without this
-                    // check, SetFocus hits a HWND CEF is tearing down, which is
-                    // the crash-on-close described in the lifecycle spec.
-                    if (paneCreated() && !model.closed) {
+                    // Gated on three things:
+                    //   1. paneCreated — HWND exists.
+                    //   2. !model.closed — hover can fire between the close IPC
+                    //      being issued and the DOM node being removed; SetFocus
+                    //      on a dying HWND is the crash the lifecycle spec covers.
+                    //   3. !mainFocusCooldownActive — if the user just clicked a
+                    //      main-DOM input (address bar, etc), suppress the hover
+                    //      re-focus for MAIN_FOCUS_COOLDOWN_MS so the user can
+                    //      actually type. Without this, the hover handler grabs
+                    //      focus back before the first keystroke arrives.
+                    if (paneCreated() && !model.closed && !mainFocusCooldownActive()) {
                         invokeCommand("browser_pane_focus", { block_id: model.blockId }).catch(() => {});
                     }
                 }}
