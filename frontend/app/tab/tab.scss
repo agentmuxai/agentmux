@@ -6,7 +6,7 @@
     width: auto;
     max-width: 200px;
     min-width: 60px;
-    height: calc(100% - 1px);
+    height: 100%;
     padding: 0 0 0 0;
     box-sizing: border-box;
     font-weight: bold;
@@ -56,12 +56,12 @@
             &::after {
                 content: "";
                 position: absolute;
-                bottom: 0;
+                top: 0;
                 left: 4px;
                 right: 4px;
                 height: 2px;
                 background: var(--accent-color);
-                border-radius: 2px 2px 0 0;
+                border-radius: 0 0 2px 2px;
             }
         }
 
