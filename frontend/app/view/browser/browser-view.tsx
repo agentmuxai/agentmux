@@ -137,7 +137,13 @@ export function BrowserViewComponent(props: ViewComponentProps<BrowserViewModel>
                     value={addressBar()}
                     onInput={(e) => setAddressBar(e.currentTarget.value)}
                     onKeyDown={handleAddressKeyDown}
-                    onFocus={(e) => e.currentTarget.select()}
+                    onFocus={(e) => {
+                        e.currentTarget.select();
+                        // Take OS-level keyboard focus away from the pane so
+                        // keystrokes reach this address-bar input. The pane may
+                        // have held HWND focus from an earlier hover.
+                        invokeCommand("main_window_focus", {}).catch(() => {});
+                    }}
                     placeholder="Enter URL or search..."
                 />
                 <button class="browser-nav-btn browser-go-btn" onClick={handleNavigate}>Go</button>
