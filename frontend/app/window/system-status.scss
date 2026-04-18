@@ -20,13 +20,19 @@
     // Windows 11 standard caption buttons. Dimensions, hit area, and hover
     // treatment match the Win11 Fluent / Mica design tokens used by Explorer,
     // Edge, Terminal, and VS Code's custom-titlebar mode:
-    //   - 46×32 hit area (no gap between buttons so they tile edge to edge)
+    //   - 46×height hit area, tiled edge to edge (no gap)
     //   - 10×10 glyph centered
-    //   - Minimize/Maximize hover: subtle neutral overlay
-    //     (dark theme: rgba(255,255,255,0.0605); light: rgba(0,0,0,0.0373))
-    //   - Close hover: solid #c42b1c red with white glyph
+    //   - Minimize/Maximize hover/press: theme-relative neutral overlay
+    //     (via --win-caption-hover-bg / --win-caption-press-bg below)
+    //   - Close hover:         solid #c42b1c red with white glyph
     //   - Close press:         #b7201b slightly darker
-    //   - Press state on non-close buttons: rgba(...,0.1) overlay
+    //
+    // The caption-button overlay opacities come from the Fluent
+    // surface-background-hover (0.0605) / surface-background-pressed
+    // (0.0419) tokens. We default to the dark-theme values (white overlay)
+    // and override for light via prefers-color-scheme so the hover stays
+    // visible on both themes — the previous `opacity: 0.7` attempt only
+    // dimmed the glyph, which vanished against a light bar.
     .window-action-buttons {
         display: flex;
         flex-direction: row;
@@ -34,6 +40,14 @@
         // Butt up against the edge — Win11 caption buttons have no
         // right-margin padding.
         margin-right: -6px;
+
+        --win-caption-hover-bg: rgba(255, 255, 255, 0.0605);
+        --win-caption-press-bg: rgba(255, 255, 255, 0.0419);
+
+        @media (prefers-color-scheme: light) {
+            --win-caption-hover-bg: rgba(0, 0, 0, 0.0373);
+            --win-caption-press-bg: rgba(0, 0, 0, 0.0241);
+        }
 
         .window-action-btn {
             cursor: pointer;
@@ -57,11 +71,11 @@
             }
 
             &:hover {
-                background-color: rgba(255, 255, 255, 0.0605);
+                background-color: var(--win-caption-hover-bg);
             }
 
             &:active {
-                background-color: rgba(255, 255, 255, 0.0419);
+                background-color: var(--win-caption-press-bg);
             }
 
             &.close-btn {
