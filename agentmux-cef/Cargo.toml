@@ -55,6 +55,8 @@ windows-sys = { version = "0.59", features = [
     "Win32_System_Ole",
     "Win32_System_SystemInformation",
     "Win32_System_ProcessStatus",
+    "Win32_UI_Shell",
+    "Win32_System_Com",
 ] }
 
 [target.'cfg(target_os = "windows")'.build-dependencies]
