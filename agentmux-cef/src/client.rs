@@ -241,6 +241,16 @@ impl AgentMuxHandler {
             label
         };
 
+        // Drain the pane's lifecycle entry so a re-create with the same block_id
+        // gets a fresh Live state. Label prefix tells us this was a pane browser;
+        // it's cheap enough to always call — the manager's drain is a no-op for
+        // labels it doesn't own.
+        if let Some(ref lbl) = label {
+            if lbl.starts_with("browser-pane-") {
+                self.state.browser_panes.drain_closed_label(lbl);
+            }
+        }
+
         // Unregister from instance registry; retrieve backend window ID for cleanup.
         let backend_window_id = label.as_deref().and_then(|lbl| {
             self.state.window_instance_registry.lock().unregister(lbl);
