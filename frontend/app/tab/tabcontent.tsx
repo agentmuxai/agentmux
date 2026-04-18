@@ -90,18 +90,21 @@ function TabContent(props: { tabId: string }): JSX.Element {
 
     const isEmpty = createMemo(() => (tabData()?.blockids?.length ?? 0) === 0);
 
-    // When the active tab has no panes, draw the accent-colored border that
-    // panes normally provide on their frame — signals "this is the active
-    // area" even in the empty state. Matches the block-frame focused border.
-    const emptyStyle = (): JSX.CSSProperties =>
-        isEmpty()
+    // 1px gap below the tab bar is always present with >1 panes (TileLayout
+    // emits its own gap) but vanishes in the single-pane path. Restore it
+    // uniformly with padding-top. Box-shadow for empty-tab accent border
+    // sits on top of the padding so it still reads as a framed area.
+    const rootStyle = (): JSX.CSSProperties => ({
+        "padding-top": "1px",
+        ...(isEmpty()
             ? { "box-shadow": "inset 0 0 0 1px var(--accent-color)" }
-            : {};
+            : {}),
+    });
 
     return (
         <div
             class="flex flex-row flex-grow min-h-0 w-full items-center justify-center overflow-hidden relative"
-            style={emptyStyle()}
+            style={rootStyle()}
             onContextMenu={handleContextMenu}
         >
             <Show
