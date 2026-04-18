@@ -2,7 +2,7 @@
 
 These instructions cover setting up dependencies and building AgentMux from source on Windows, macOS, and Linux.
 
-**Architecture:** AgentMux is built on **Tauri v2** with a **100% Rust backend** (Go removed in v0.31.0).
+**Architecture:** AgentMux is a **Chromium-based desktop app** with a **100% Rust backend**.
 
 ---
 
@@ -13,7 +13,7 @@ These instructions cover setting up dependencies and building AgentMux from sour
 | Tool | Version | Purpose |
 |------|---------|---------|
 | **Node.js** | v22 LTS | Frontend build (React/Vite) |
-| **Rust** | 1.77+ | Backend (agentmux-srv) + CEF host (agentmux-cef) |
+| **Rust** | 1.77+ | Backend (agentmux-srv) + Host (agentmux-cef) |
 | **Task** | Latest | Build orchestration |
 
 > **Note:** Go and Zig are no longer required. The backend is 100% Rust since v0.31.0.
@@ -112,10 +112,10 @@ task dev
 
 Features:
 - Frontend hot reload (React HMR via Vite)
-- Tauri auto-rebuild on Rust changes
+- Auto-rebuild on Rust changes
 - DevTools available (Ctrl+Shift+I)
 
-**Important:** Always use `task dev` for development. Never launch from `src-tauri/target/` directly.
+**Important:** Always use `task dev` for development.
 
 ---
 
@@ -138,24 +138,13 @@ This rebuilds:
 
 ### Production Build
 
-Create a production Tauri build with installer:
+Create a portable build (Windows):
 
 ```bash
 task package
 ```
 
-Output locations:
-- **Windows:** `src-tauri/target/release/bundle/nsis/AgentMux_{version}_x64-setup.exe`
-- **macOS:** `src-tauri/target/release/bundle/dmg/AgentMux_{version}_x64.dmg`
-- **Linux:** `src-tauri/target/release/bundle/deb/agentmux_{version}_amd64.deb`
-
-For a portable ZIP (Windows):
-
-```bash
-task package:portable
-```
-
-Output: `dist/agentmux-{version}-x64-portable.zip`
+Output: `~/Desktop/agentmux-{version}-x64-portable/` and `.zip`
 
 ---
 
@@ -164,7 +153,7 @@ Output: `dist/agentmux-{version}-x64-portable.zip`
 **Before releasing, ensure version consistency across all files:**
 
 ```bash
-# Bump version (updates package.json, Cargo.toml, tauri.conf.json, etc.)
+# Bump version (updates package.json, Cargo.toml, etc.)
 ./bump-version.sh patch --message "Your change description"
 
 # Verify consistency
@@ -196,7 +185,7 @@ task dev
 # 4. Make changes to code
 # - Frontend (frontend/): Auto-reloads
 # - Rust backend (agentmux-srv/src/): Run `task build:backend`, restart dev
-# - CEF host (agentmux-cef/src/): Run `task cef:build`, restart dev
+# - Host (agentmux-cef/src/): Run `task build:host`, restart dev
 
 # 5. Test changes in running app
 
@@ -225,14 +214,14 @@ dist/bin/
 └── agentmux-srv-{version}-windows.x64.exe       # Rust backend (sidecar)
 
 target/release/
-├── agentmux-cef.exe                              # CEF host
+├── agentmux-cef.exe                              # Host
 └── agentmux-launcher.exe                         # Portable launcher
 
 ~/Desktop/
 └── agentmux-{version}-x64-portable/             # Portable build
     ├── agentmux.exe                             # Launcher
     └── runtime/
-        ├── agentmux-{version}.exe               # CEF host
+        ├── agentmux-{version}.exe               # Host
         ├── agentmux-srv-{version}-windows.x64.exe  # Backend
         ├── libcef.dll                           # CEF runtime
         └── frontend/                            # Web UI
@@ -243,7 +232,7 @@ target/release/
 | Component | Size | Purpose |
 |-----------|------|---------|
 | `agentmux.exe` (launcher) | ~325 KB | Portable launcher |
-| `agentmux-cef.exe` | ~8 MB | CEF host (Rust + cef-rs) |
+| `agentmux-cef.exe` | ~8 MB | Host (Rust + Chromium) |
 | `agentmux-srv.exe` | ~4 MB | Rust async backend server |
 | CEF runtime (libcef + paks) | ~160 MB | Bundled Chromium |
 | **Portable ZIP** | ~156 MB | Compressed with CEF bundle |
@@ -276,9 +265,9 @@ tail -f ~/.agentmux-dev/agentmux.log
 tail -f ~/.agentmux/agentmux.log
 ```
 
-### Tauri Logs
+### Host Logs
 
-Rust/Tauri logs appear in the terminal where you ran `task dev`.
+Rust host logs appear in the terminal where you ran `task dev`.
 
 ---
 
@@ -297,7 +286,7 @@ task build:backend
 ls -lh dist/bin/agentmux-srv-*
 ```
 
-### Issue: Tauri build fails with linker errors
+### Issue: Build fails with linker errors
 
 **Cause:** Missing Rust toolchain or system libraries.
 
@@ -363,11 +352,11 @@ Artifacts are uploaded to GitHub Releases on tagged commits.
 # 2. Rebuild Rust binaries
 task build:backend
 
-# 3. Build Tauri package
+# 3. Build portable package
 task package
 
-# 4. Test installer
-# Install from src-tauri/target/release/bundle/
+# 4. Test portable build
+# Extract and run from ~/Desktop/agentmux-{version}-x64-portable/
 
 # 5. Tag and push
 git push origin main --tags
@@ -418,17 +407,10 @@ npm run build:dev
 npm run build:prod
 ```
 
-### Build Tauri Only (skip backend rebuild)
-
-```bash
-npx tauri build
-```
-
 ---
 
 ## Resources
 
-- **Tauri Documentation:** https://tauri.app/v2/
 - **Task Configuration:** [Taskfile.yml](Taskfile.yml)
 - **Architecture Docs:** [docs/architecture/](docs/architecture/)
 - **Contributing:** [CONTRIBUTING.md](CONTRIBUTING.md)
@@ -442,8 +424,9 @@ npx tauri build
 |------|---------|
 | **Development** | `task dev` |
 | **Rebuild Rust backend** | `task build:backend` |
-| **Production build** | `task package` |
-| **Portable ZIP** | `task package:portable` |
+| **Build host** | `task build:host` |
+| **Bundle runtime** | `task bundle` |
+| **Portable ZIP** | `task package` |
 | **Bump version** | `./bump-version.sh patch` |
 | **Run tests** | `npm test` |
 | **Verify versions** | `bump verify` |

@@ -8,11 +8,13 @@
  */
 
 import { createEffect, createSignal, For, Show, type Accessor, type JSX, onCleanup } from "solid-js";
+import { Portal } from "solid-js/web";
 import type { SignalPair } from "../state";
 import type { DocumentNode, DocumentState, LogLine, SubagentLinkNode } from "../types";
 import type { ScrollCommand } from "../hooks/useScrollToNode";
 import { AgentMessageBlock } from "./AgentMessageBlock";
 import { MarkdownBlock } from "./MarkdownBlock";
+import { NodeTimestamp } from "./NodeTimestamp";
 import { SubagentLinkBlock } from "./SubagentLinkBlock";
 import { ToolBlock } from "./ToolBlock";
 import { ContextMenuModel } from "@/app/store/contextmenu";
@@ -57,6 +59,40 @@ export const AgentDocumentView = ({ documentAtom, documentStateAtom, logLines, a
     let autoScroll = true;
     // Guard against concurrent older-history fetches triggered by scroll
     let loadingOlderInFlight = false;
+
+    // Walk up the DOM to find the nearest ancestor with a non-1 CSS zoom.
+    // The portal renders to document.body (outside the zoom context), so we
+    // divide its coordinate constraints by the zoom factor and re-apply zoom
+    // to the portal container so content scales to match the pane.
+    const getAncestorZoom = (el: HTMLElement): number => {
+        let cur: HTMLElement | null = el;
+        while (cur) {
+            const z = parseFloat(getComputedStyle(cur).zoom ?? "1");
+            if (!isNaN(z) && z !== 1) return z;
+            cur = cur.parentElement;
+        }
+        return 1;
+    };
+
+    // Shared hover state for log line full-text overlay.
+    // One Portal renders the active line's full text at its viewport position.
+    // Using a single shared signal (not per-line) avoids creating N signals in <For>.
+    type LogHover = { text: string; level?: "error" | "warn"; top: number; left: number; width: number; zoom: number };
+    const [logHover, setLogHover] = createSignal<LogHover | null>(null);
+    let logLeavePending = 0;
+    const handleLogEnter = (e: MouseEvent, line: LogLine) => {
+        if (logLeavePending) { clearTimeout(logLeavePending); logLeavePending = 0; }
+        const el = e.currentTarget as HTMLElement;
+        const r = el.getBoundingClientRect();
+        const zoom = getAncestorZoom(el);
+        const hoverLevel = line.level === "error" || line.level === "warn" ? line.level : undefined;
+        setLogHover({ text: `[${line.tag}] ${line.text}`, level: hoverLevel, top: r.top, left: r.left, width: r.width / zoom, zoom });
+    };
+    const handleLogLeave = () => {
+        if (logLeavePending) clearTimeout(logLeavePending);
+        logLeavePending = window.setTimeout(() => { logLeavePending = 0; setLogHover(null); }, 80);
+    };
+    onCleanup(() => { if (logLeavePending) clearTimeout(logLeavePending); });
 
     // Scroll to a node by its data-node-id attribute.
     // Exposed to the parent via scrollToNodeRef so BookmarksPanel can call it.
@@ -179,7 +215,7 @@ export const AgentDocumentView = ({ documentAtom, documentStateAtom, logLines, a
     const handleScroll = () => {
         if (!scrollRef) return;
         const { scrollTop, scrollHeight, clientHeight } = scrollRef;
-        autoScroll = scrollHeight - scrollTop - clientHeight < 50;
+        autoScroll = scrollHeight - scrollTop - clientHeight < 200;
 
         // Trigger older-history load when near the top
         if (
@@ -230,11 +266,40 @@ export const AgentDocumentView = ({ documentAtom, documentStateAtom, logLines, a
                                     "agent-status-line--error": line.level === "error",
                                     "agent-status-line--warn": line.level === "warn",
                                 }}
+                                onMouseEnter={(e) => handleLogEnter(e, line)}
+                                onMouseLeave={handleLogLeave}
                             >
                                 <span class="agent-status-tag">[{line.tag}]</span> {line.text}
                             </div>
                         )}
                     </For>
+                    {/* Full-text hover overlay — Portal escapes the scroll container's
+                        overflow:auto clipping so the complete line text is visible. */}
+                    <Show when={logHover()}>
+                        {(h) => (
+                            <Portal>
+                                <div
+                                    class="agent-log-hover-overlay"
+                                    classList={{
+                                        "agent-log-hover-overlay--error": h().level === "error",
+                                        "agent-log-hover-overlay--warn": h().level === "warn",
+                                    }}
+                                    style={{
+                                        position: "fixed",
+                                        top: `${h().top}px`,
+                                        left: `${h().left}px`,
+                                        "min-width": `${h().width}px`,
+                                        "max-width": `calc(100vw - ${h().left}px - 16px)`,
+                                        zoom: String(h().zoom),
+                                    }}
+                                    onMouseEnter={() => { if (logLeavePending) { clearTimeout(logLeavePending); logLeavePending = 0; } }}
+                                    onMouseLeave={handleLogLeave}
+                                >
+                                    {h().text}
+                                </div>
+                            </Portal>
+                        )}
+                    </Show>
                     <Show when={authUrl?.()}>
                         {(url) => {
                             const [pasteCode, setPasteCode] = createSignal("");
@@ -280,6 +345,19 @@ export const AgentDocumentView = ({ documentAtom, documentStateAtom, logLines, a
                                             onInput={(e) => setPasteCode((e.target as HTMLInputElement).value)}
                                             onKeyDown={(e) => { if (e.key === "Enter") void handleSubmitCode(); }}
                                         />
+                                        <button
+                                            class="agent-auth-url-copy"
+                                            title="Paste from clipboard"
+                                            onClick={() => {
+                                                import("@/util/clipboard").then(c => c.readText()).then(text => {
+                                                    if (text) setPasteCode(text.trim());
+                                                }).catch(() => {
+                                                    setPasteResult("Could not read clipboard — paste manually");
+                                                });
+                                            }}
+                                        >
+                                            Paste
+                                        </button>
                                         <button
                                             class="agent-auth-url-copy"
                                             onClick={handleSubmitCode}
@@ -353,6 +431,7 @@ export const AgentDocumentView = ({ documentAtom, documentStateAtom, logLines, a
                                 onToggleToolPin={() => toggleToolPin(node.id)}
                                 onSubagentClick={onSubagentClick}
                             />
+                            <NodeTimestamp timestamp={(node as any).timestamp} />
                         </div>
                     );
                 }}

@@ -14,8 +14,8 @@
 
 import { Tooltip } from "@/app/element/tooltip";
 import { ContextMenuModel } from "@/app/store/contextmenu";
-import { RpcApi } from "@/app/store/wshclientapi";
-import { TabRpcClient } from "@/app/store/wshrpcutil";
+import { RpcApi } from "@/app/store/rpc-api";
+import { TabRpcClient } from "@/app/store/rpc-util";
 import { atoms, createBlock, getApi } from "@/store/global";
 import { fireAndForget, isBlank, makeIconClass } from "@/util/util";
 import { invokeCommand } from "@/app/platform/ipc";
@@ -165,7 +165,15 @@ const MoreDropdown = ({
         e.stopPropagation();
         const shortName = key.replace("defwidget@", "");
         ContextMenuModel.showContextMenu(
-            [{ label: "Pin to bar", click: () => pinWidget(shortName, settings(), wmap()) }],
+            [
+                { label: "New Window", click: () => {
+                    fireAndForget(async () => {
+                        await getApi().openNewWindow();
+                    });
+                }},
+                { type: "separator" },
+                { label: "Pin to bar", click: () => pinWidget(shortName, settings(), wmap()) },
+            ],
             e
         );
         onClose();
@@ -313,6 +321,25 @@ const ActionWidgets = (): JSX.Element => {
         setDropIndex(null);
     };
 
+    // ── Context menu active state (keeps hover highlight while menu is open) ──
+    const [contextMenuActiveKey, setContextMenuActiveKey] = createSignal<string | null>(null);
+    let contextMenuCleanup: (() => void) | null = null;
+
+    function armContextMenuDismiss(key: string) {
+        contextMenuCleanup?.();
+        setContextMenuActiveKey(key);
+        const clear = () => {
+            setContextMenuActiveKey(null);
+            document.removeEventListener("mousedown", clear);
+            document.removeEventListener("keydown", onKey);
+            contextMenuCleanup = null;
+        };
+        const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") clear(); };
+        document.addEventListener("mousedown", clear, { once: true });
+        document.addEventListener("keydown", onKey);
+        contextMenuCleanup = clear;
+    }
+
     // ── Context menus ─────────────────────────────────────────────────────────
 
     const handleBarContextMenu = (e: MouseEvent) => {
@@ -339,9 +366,18 @@ const ActionWidgets = (): JSX.Element => {
     const handlePinnedContextMenu = (e: MouseEvent, key: string) => {
         e.preventDefault();
         e.stopPropagation();
+        armContextMenuDismiss(key);
         const shortName = key.replace("defwidget@", "");
         ContextMenuModel.showContextMenu(
-            [{ label: "Unpin from bar", click: () => unpinWidget(shortName, settings(), wmap()) }],
+            [
+                { label: "New Window", click: () => {
+                    fireAndForget(async () => {
+                        await getApi().openNewWindow();
+                    });
+                }},
+                { type: "separator" },
+                { label: "Unpin from bar", click: () => unpinWidget(shortName, settings(), wmap()) },
+            ],
             e
         );
     };
@@ -354,6 +390,7 @@ const ActionWidgets = (): JSX.Element => {
                 ref={containerRef}
                 class="action-widgets"
                 data-testid="action-widgets"
+                data-drag-region="false"
                 onContextMenu={handleBarContextMenu}
             >
                 <For each={pinnedWidgets()}>
@@ -363,7 +400,7 @@ const ActionWidgets = (): JSX.Element => {
                                 <div class="action-widget-drop-indicator" />
                             </Show>
                             <div
-                                class={`action-widget-slot${draggingKey() === key ? " dragging" : ""}`}
+                                class={`action-widget-slot${draggingKey() === key ? " dragging" : ""}${contextMenuActiveKey() === key ? " context-active" : ""}`}
                                 data-widget-slot={idx()}
                                 onPointerDown={(e) => handlePointerDown(key, e)}
                                 onPointerMove={handlePointerMove}

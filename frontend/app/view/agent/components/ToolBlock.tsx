@@ -61,6 +61,20 @@ const STATUS_ICON: Record<ToolNode["status"], string> = {
     failed: "✗",
 };
 
+// Walk upward from `el` to find the first ancestor with a non-1 CSS zoom.
+// The portal renders to document.body (outside the zoom context), so we must
+// apply the same zoom to the portal container and shrink the width constraints
+// by the zoom factor so the visual size matches the underlying block.
+function getAncestorZoom(el: HTMLElement): number {
+    let cur: HTMLElement | null = el;
+    while (cur) {
+        const z = parseFloat(getComputedStyle(cur).zoom ?? "1");
+        if (!isNaN(z) && z !== 1) return z;
+        cur = cur.parentElement;
+    }
+    return 1;
+}
+
 // Walk upward from `el` until we find a scrollable ancestor. Used to decide
 // whether the overlay has room to pop down or must flip up.
 function findScrollParent(el: HTMLElement): HTMLElement | null {
@@ -163,14 +177,16 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
         if (leavePending) clearTimeout(leavePending);
     });
 
-    // Reposition the portal overlay on scroll so a pinned overlay stays
-    // anchored to its block. Only attached while overlayMode() is active
-    // to avoid one listener per tool block in the document.
+    // Reposition the portal overlay on scroll so a PINNED overlay stays
+    // anchored to its block. Only attached while pinned — hover-only overlays
+    // don't need scroll tracking because mouseleave fires before any
+    // significant drift, and removing the listener eliminates the one-frame
+    // reposition lag that causes the hover overlay to visually twitch.
     let scrollParentRef: HTMLElement | null = null;
     const handleScroll = () => measure();
 
     createEffect(() => {
-        const active = overlayMode();
+        const active = props.pinned; // scroll tracking only while pinned
         if (active && blockRef) {
             scrollParentRef = findScrollParent(blockRef);
             scrollParentRef?.addEventListener("scroll", handleScroll, { passive: true });
@@ -277,22 +293,38 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
 
     // Overlay style — only meaningful when overlayMode() is true. Computed
     // from overlayRect() which is set during handleMouseEnter / handleScroll.
+    //
+    // Zoom correction: the portal renders to document.body, outside the
+    // .agent-view zoom context. getBoundingClientRect() returns viewport
+    // coordinates (already zoomed), so top/left stay as-is. But the portal
+    // container's width/height are in un-zoomed CSS px, so min/max-width must
+    // be divided by zoom to produce the correct visual size. We also apply
+    // `zoom` to the portal container itself so font-sizes and spacing scale
+    // to match the surrounding document.
     const overlayStyle = (): Record<string, string> => {
         const r = overlayRect();
         if (!r) return { display: "none" };
+        const zoom = blockRef ? getAncestorZoom(blockRef) : 1;
+        // Clamp right edge to viewport so the overlay never bleeds off-screen.
+        const maxRight = (window.innerWidth - r.left - 16) / zoom;
+        const minWidth = r.width / zoom;
         if (overlayUp()) {
             return {
                 position: "fixed",
                 left: `${r.left}px`,
-                width: `${r.width}px`,
+                minWidth: `${minWidth}px`,
+                maxWidth: `${maxRight}px`,
                 bottom: `${r.bottom}px`,
+                zoom: String(zoom),
             };
         }
         return {
             position: "fixed",
             left: `${r.left}px`,
-            width: `${r.width}px`,
+            minWidth: `${minWidth}px`,
+            maxWidth: `${maxRight}px`,
             top: `${r.top}px`,
+            zoom: String(zoom),
         };
     };
 

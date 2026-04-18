@@ -13,8 +13,8 @@ import {
     WOS,
 } from "@/app/store/global";
 import { globalRefocusWithTimeout } from "@/app/store/keymodel";
-import { RpcApi } from "@/app/store/wshclientapi";
-import { TabRpcClient } from "@/app/store/wshrpcutil";
+import { RpcApi } from "@/app/store/rpc-api";
+import { TabRpcClient } from "@/app/store/rpc-util";
 import { NodeModel } from "@/layout/index";
 import * as keyutil from "@/util/keyutil";
 import * as util from "@/util/util";

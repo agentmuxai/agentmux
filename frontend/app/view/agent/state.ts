@@ -10,14 +10,11 @@
 
 import { createSignal, type Accessor, type Setter } from "solid-js";
 import {
-    AgentProcessState,
-    AuthState,
     DocumentNode,
     DocumentState,
-    MessageRouterState,
     SessionStats,
     StreamingState,
-    UserInfo,
+    TurnTokens,
 } from "./types";
 
 /**
@@ -32,15 +29,11 @@ export interface AgentAtoms {
     documentAtom: SignalPair<DocumentNode[]>;
     documentStateAtom: SignalPair<DocumentState>;
     streamingStateAtom: SignalPair<StreamingState>;
-    processAtom: SignalPair<AgentProcessState>;
-    messageRouterAtom: SignalPair<MessageRouterState>;
-    authAtom: SignalPair<AuthState>;
-    userInfoAtom: SignalPair<UserInfo | null>;
-    providerConfigAtom: SignalPair<ProviderConfig | null>;
-    sessionIdAtom: SignalPair<string>;
-    rawOutputAtom: SignalPair<string>;
     sessionStatsAtom: SignalPair<SessionStats | null>;
     currentToolAtom: SignalPair<string | null>;
+    turnTokensAtom: SignalPair<TurnTokens | null>;
+    /** True from the moment the user sends a message until session_end arrives. */
+    turnActiveAtom: SignalPair<boolean>;
 }
 
 /**
@@ -68,26 +61,9 @@ export function createAgentAtoms(agentId: string): AgentAtoms {
             bufferSize: 0,
             lastEventTime: 0,
         }),
-        processAtom: createSignal<AgentProcessState>({
-            pid: undefined,
-            agentId: agentId,
-            status: "idle",
-            canRestart: true,
-            canKill: false,
-        }),
-        messageRouterAtom: createSignal<MessageRouterState>({
-            backend: "local",
-            connected: false,
-            endpoint: "",
-        }),
-        authAtom: createSignal<AuthState>({
-            status: "disconnected",
-        }),
-        userInfoAtom: createSignal<UserInfo | null>(null),
-        providerConfigAtom: createSignal<ProviderConfig | null>(null),
-        sessionIdAtom: createSignal<string>(""),
-        rawOutputAtom: createSignal<string>(""),
         sessionStatsAtom: createSignal<SessionStats | null>(null),
         currentToolAtom: createSignal<string | null>(null),
+        turnTokensAtom: createSignal<TurnTokens | null>(null),
+        turnActiveAtom: createSignal<boolean>(false),
     };
 }

@@ -125,11 +125,6 @@ export const WindowService = new WindowServiceType();
 
 // workspaceservice.WorkspaceService (workspace)
 class WorkspaceServiceType {
-    // @returns object updates
-    ChangeTabPinning(workspaceId: string, tabId: string, pinned: boolean): Promise<void> {
-        return WOS.callBackendService("workspace", "ChangeTabPinning", Array.from(arguments))
-    }
-
     // @returns CloseTabRtn (and object updates)
     CloseTab(workspaceId: string, tabId: string): Promise<CloseTabRtnType> {
         return WOS.callBackendService("workspace", "CloseTab", Array.from(arguments))

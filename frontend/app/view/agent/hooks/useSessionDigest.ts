@@ -24,10 +24,11 @@
  */
 
 import { createSignal, onMount, type Accessor } from "solid-js";
-import { RpcApi } from "@/app/store/wshclientapi";
-import { TabRpcClient } from "@/app/store/wshrpcutil";
+import { RpcApi } from "@/app/store/rpc-api";
+import { TabRpcClient } from "@/app/store/rpc-util";
 
-export type LogFn = (tag: string, text: string, level?: "info" | "error" | "warn") => void;
+import type { LogFn } from "../types";
+export type { LogFn };
 
 const IDLE_THRESHOLD_MS = 3_600_000;     // 1 hour
 const STALE_LINE_THRESHOLD = 20;          // lines of new activity since last digest

@@ -11,8 +11,8 @@
  *   /tools install jq rg fd   → install specific tools by id
  */
 
-import { RpcApi } from "@/app/store/wshclientapi";
-import { TabRpcClient } from "@/app/store/wshrpcutil";
+import { RpcApi } from "@/app/store/rpc-api";
+import { TabRpcClient } from "@/app/store/rpc-util";
 import type { SlashCommand, SlashCommandContext, SlashResult } from "../types";
 
 // ── helpers ───────────────────────────────────────────────────────────────────

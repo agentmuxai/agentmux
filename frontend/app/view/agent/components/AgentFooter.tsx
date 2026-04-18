@@ -5,10 +5,121 @@
  * AgentFooter - Minimal Claude Code-style input
  */
 
-import { Show, createMemo, createSignal, type JSX } from "solid-js";
+import { Show, createEffect, createMemo, createSignal, onCleanup, type JSX } from "solid-js";
 import type { SlashCommand } from "../commands/types";
-import type { SessionStats } from "../types";
+import type { SessionStats, TurnTokens } from "../types";
 import { SlashAutocomplete } from "./SlashAutocomplete";
+
+// ── AgentStatusLine ───────────────────────────────────────────────────────────
+// Displayed above the control bar. Shows a cycling thinking phrase while the
+// agent is processing, then the last phrase converted to past tense + session
+// stats when the turn completes.
+
+function pickThinkingPhrase(_exclude?: string): string {
+    return "Working";
+}
+
+function ingToEd(_phrase: string): string {
+    return "Worked";
+}
+
+function fmtElapsed(ms: number): string {
+    const s = Math.floor(ms / 1000);
+    return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
+}
+
+function fmtTokens(t: TurnTokens): string {
+    const fmt = (n: number) => n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
+    return `\u2191${fmt(t.input)} \u2193${fmt(t.output)}`;
+}
+
+interface AgentStatusLineProps {
+    loading?: boolean;
+    currentTool?: string | null;
+    sessionStats?: SessionStats | null;
+    turnTokens?: TurnTokens | null;
+}
+
+export const AgentStatusLine = (props: AgentStatusLineProps): JSX.Element => {
+    const [phrase, setPhrase] = createSignal(pickThinkingPhrase());
+    const [lastPhrase, setLastPhrase] = createSignal(pickThinkingPhrase());
+    const [elapsedMs, setElapsedMs] = createSignal(0);
+
+    // Phrase cycling: 30s interval while loading without a tool name.
+    createEffect(() => {
+        if (!props.loading || props.currentTool) return;
+        setPhrase(pickThinkingPhrase());
+        const id = setInterval(() => {
+            setPhrase((prev) => {
+                const next = pickThinkingPhrase(prev);
+                setLastPhrase(next);
+                return next;
+            });
+        }, 30000);
+        onCleanup(() => clearInterval(id));
+    });
+
+    // Elapsed timer: reset to 0 and tick every second while loading.
+    createEffect(() => {
+        if (!props.loading) return;
+        const start = Date.now();
+        setElapsedMs(0);
+        const id = setInterval(() => setElapsedMs(Date.now() - start), 1000);
+        onCleanup(() => clearInterval(id));
+    });
+
+    // Seed lastPhrase when loading begins.
+    createEffect(() => {
+        if (props.loading && !props.currentTool) setLastPhrase(phrase());
+    });
+
+    // Reactive derived values used in both branches.
+    const statsText = createMemo((): string | null => {
+        const stats = props.sessionStats;
+        if (!stats) return null;
+        const parts: string[] = [];
+        parts.push(ingToEd(lastPhrase()));
+        if (stats.cost_usd != null) parts.push(`$${stats.cost_usd.toFixed(3)}`);
+        if (stats.duration_ms != null) {
+            const s = Math.round(stats.duration_ms / 1000);
+            parts.push(s < 60 ? `${Math.max(1, s)}s` : `${Math.floor(s / 60)}m ${s % 60}s`);
+        }
+        if (stats.num_turns) {
+            parts.push(`${stats.num_turns} ${stats.num_turns === 1 ? "turn" : "turns"}`);
+        }
+        return parts.join("  \u00b7  ");
+    });
+
+    const rightText = createMemo((): string => {
+        const right: string[] = [];
+        if (props.turnTokens) right.push(fmtTokens(props.turnTokens));
+        right.push(fmtElapsed(elapsedMs()));
+        return right.join("  \u00b7  ");
+    });
+
+    return (
+        <Show
+            when={props.loading}
+            fallback={
+                <Show when={statsText()} fallback={<span class="agent-status-line" />}>
+                    <span class="agent-status-line agent-status-line--stats">
+                        {statsText()}
+                    </span>
+                </Show>
+            }
+        >
+            <span class="agent-status-line agent-status-line--loading">
+                <span class="agent-spinner-dot" />
+                <span class="agent-status-left">
+                    {props.currentTool ? props.currentTool : `${phrase()}\u2026`}
+                </span>
+                <span class="agent-status-right">{rightText()}</span>
+            </span>
+        </Show>
+    );
+};
+
+AgentStatusLine.displayName = "AgentStatusLine";
 
 interface AgentFooterProps {
     agentId: string;
@@ -27,7 +138,6 @@ interface AgentFooterProps {
      * See SPEC_AGENT_PANE_FOLLOWUPS item #9.
      */
     onStopAgent?: () => void;
-    loading?: boolean;
     /**
      * Slash command completions. When the textarea value matches
      * `^/\w*$` (no space), AgentFooter calls this with the prefix
@@ -35,10 +145,6 @@ interface AgentFooterProps {
      * If absent, autocomplete is disabled.
      */
     getCompletions?: (prefix: string) => SlashCommand[];
-    /** Name of the currently-running tool (from the last tool_call event). */
-    currentTool?: string | null;
-    /** Stats from the last completed session. Displayed until the next send. */
-    sessionStats?: SessionStats | null;
 }
 
 export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
@@ -196,40 +302,6 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
         }
     };
 
-    const statusLine = (): JSX.Element => {
-        if (props.loading) {
-            return (
-                <span class="agent-status-line agent-status-line--loading">
-                    <span class="agent-spinner-dot" />
-                    {props.currentTool ? props.currentTool : "Thinking\u2026"}
-                </span>
-            );
-        }
-        const stats = props.sessionStats;
-        if (!stats) return <span class="agent-status-line" />;
-
-        const parts: string[] = [];
-        if (stats.cost_usd != null) parts.push(`$${stats.cost_usd.toFixed(3)}`);
-        if (stats.duration_ms != null) {
-            const s = Math.round(stats.duration_ms / 1000);
-            if (s < 60) {
-                parts.push(`${Math.max(1, s)}s`);
-            } else {
-                parts.push(`${Math.floor(s / 60)}m ${s % 60}s`);
-            }
-        }
-        if (stats.num_turns) {
-            parts.push(`${stats.num_turns} ${stats.num_turns === 1 ? "turn" : "turns"}`);
-        }
-        if (parts.length === 0) return <span class="agent-status-line" />;
-
-        return (
-            <span class="agent-status-line agent-status-line--stats">
-                {parts.join("  \u00b7  ")}
-            </span>
-        );
-    };
-
     return (
         <div class="agent-footer">
             <div class="agent-input-container">
@@ -249,7 +321,6 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
                     onInput={handleInput}
                     rows={1}
                 />
-                {statusLine()}
                 <div class="agent-input-hint">
                     <span>Enter to send • Shift+Enter for newline • Esc to clear / stop</span>
                 </div>

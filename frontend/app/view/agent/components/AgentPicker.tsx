@@ -11,8 +11,8 @@
  */
 
 import { createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
-import { RpcApi } from "@/app/store/wshclientapi";
-import { TabRpcClient } from "@/app/store/wshrpcutil";
+import { RpcApi } from "@/app/store/rpc-api";
+import { TabRpcClient } from "@/app/store/rpc-util";
 import { atoms, WOS } from "@/app/store/global";
 import { waveEventSubscribe } from "@/app/store/wps";
 import type { AgentViewModel } from "../agent-model";

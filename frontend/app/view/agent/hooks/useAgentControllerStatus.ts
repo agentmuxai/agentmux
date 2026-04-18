@@ -38,13 +38,16 @@ import { getApi } from "@/app/store/global";
 import { runLaunchFlow } from "../flows/launch-flow";
 import type { ProviderDefinition } from "../providers";
 
-export type LogFn = (tag: string, text: string, level?: "info" | "error" | "warn") => void;
+import type { LogFn } from "../types";
+export type { LogFn };
 
 export interface UseAgentControllerStatusOptions {
     blockId: string;
     provider: Accessor<ProviderDefinition | undefined>;
     log: LogFn;
     onLoginSuccess?: (email: string | null) => void;
+    /** Called once when the launch flow completes successfully and the agent is ready to receive messages. */
+    onReady?: () => void;
 }
 
 export interface UseAgentControllerStatus {
@@ -115,6 +118,7 @@ export function useAgentControllerStatus(
             });
             if (result === "success") {
                 setAgentReady(true);
+                opts.onReady?.();
             } else if (result === "auth_failed" && !loginCancelled) {
                 setCanRetry(true);
                 setAgentReady(true); // clear spinner so retry button is usable

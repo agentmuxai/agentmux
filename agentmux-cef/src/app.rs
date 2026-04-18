@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// CefApp and BrowserProcessHandler implementations for AgentMux CEF host.
+// CefApp and BrowserProcessHandler implementations for AgentMux host.
 // Creates a browser window loading the frontend URL on context initialization.
 //
 // Phase 2: Stores AppState and injects IPC port into the page after load.
@@ -304,6 +304,7 @@ wrap_browser_process_handler! {
                 let mut client = self.client.borrow_mut();
                 *client = Some(AgentMuxClient::new(
                     AgentMuxHandler::new(self.state.clone(), self.ipc_port),
+                    false, // is_pane = false — main browser takes focus normally
                 ));
             }
 

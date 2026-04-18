@@ -115,6 +115,34 @@ pub struct BackendEndpoints {
     pub web_endpoint: String,
 }
 
+/// Window role in the AgentMux multi-window model.
+///
+/// Two distinct types with different taskbar treatment:
+/// - `FullInstance`: independent AgentMux window (like Chrome/VS Code new window).
+///   Appears in the Windows taskbar. All user-facing "new window" paths (status-bar
+///   version click, second `agentmux.exe` launch, `Ctrl+Shift+N`) create one.
+/// - `Subwindow`: hidden from the taskbar via `ITaskbarList::DeleteTab`. Only
+///   reachable through the backend `open_subwindow` API — reserved for agent /
+///   internal use cases (transient auxiliary views, tool-spawned panels). Closes
+///   when its parent full instance closes.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WindowKind {
+    FullInstance,
+    Subwindow,
+}
+
+/// Per-window metadata held alongside the CEF `Browser`. See `WindowKind` for
+/// the semantics of `kind` and `parent_instance_id`.
+#[derive(Clone, Debug)]
+pub struct WindowMeta {
+    pub label: String,
+    pub kind: WindowKind,
+    /// For `Subwindow` only: label of the `FullInstance` that owns this window.
+    /// `None` for `FullInstance`.
+    pub parent_instance_id: Option<String>,
+}
+
 /// Shared application state for the CEF host.
 ///
 /// Unlike the Tauri version, this uses `Arc<AppState>` directly instead of
@@ -162,6 +190,10 @@ pub struct AppState {
     /// Cancellation channel for an in-progress CLI login process
     pub cli_login_cancel: Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
 
+    /// Stdin handle for the running CLI login child process.
+    /// Written to by `set_provider_auth` to deliver the OAuth device code.
+    pub cli_login_stdin: Mutex<Option<tokio::process::ChildStdin>>,
+
     /// IPC HTTP server port
     pub ipc_port: Mutex<u16>,
 
@@ -172,6 +204,12 @@ pub struct AppState {
     /// CEF Browser handles keyed by window label (multi-window support).
     /// "main" is the primary window; tear-off windows get "window-{UUID}" labels.
     pub browsers: Mutex<HashMap<String, Browser>>,
+
+    /// Per-window metadata (kind, parent linkage). Maintained in parallel with
+    /// `browsers` — any `browsers.insert()` for a real window must also record
+    /// a `WindowMeta` here so on_after_created knows whether to hide the HWND
+    /// from the taskbar and so on_before_close can cascade sub-window closure.
+    pub window_meta: Mutex<HashMap<String, WindowMeta>>,
 
     /// FIFO queue of labels for windows that are about to be created.
     /// Pushed in `open_new_window` / `open_window_at_position` before
@@ -187,6 +225,9 @@ pub struct AppState {
 
     /// Active cross-window drag session (at most one at a time).
     pub active_drag: Mutex<Option<DragSession>>,
+
+    /// Embedded browser panes (native CefBrowserView per pane).
+    pub browser_panes: crate::browser_panes::BrowserPaneManager,
 
     /// Windows Job Object handle -- keeps backend alive until frontend exits
     #[cfg(target_os = "windows")]
@@ -209,13 +250,16 @@ impl Default for AppState {
             window_init_status: Mutex::new(String::new()),
             window_instance_registry: Mutex::new(WindowInstanceRegistry::new()),
             cli_login_cancel: Mutex::new(None),
+            cli_login_stdin: Mutex::new(None),
             ipc_port: Mutex::new(0),
             ipc_token: uuid::Uuid::new_v4().to_string(),
             browsers: Mutex::new(HashMap::new()),
+            window_meta: Mutex::new(HashMap::new()),
             pending_window_labels: Mutex::new(VecDeque::new()),
             version_data_dir: Mutex::new(None),
             version_config_dir: Mutex::new(None),
             active_drag: Mutex::new(None),
+            browser_panes: crate::browser_panes::BrowserPaneManager::new(),
             #[cfg(target_os = "windows")]
             job_handle: Mutex::new(None),
         }

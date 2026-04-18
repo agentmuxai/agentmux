@@ -13,7 +13,7 @@ import { createEffect, onCleanup, onMount, untrack } from "solid-js";
 import { createTranslator } from "./providers/translator-factory";
 import { ClaudeCodeStreamParser } from "./stream-parser";
 import type { SignalPair } from "./state";
-import type { DocumentNode, SessionStats, StreamingState } from "./types";
+import type { DocumentNode, SessionStats, StreamingState, TurnTokens } from "./types";
 
 const OutputFileName = "output";
 
@@ -24,6 +24,8 @@ interface UseAgentStreamOpts {
     streamingStateAtom: SignalPair<StreamingState>;
     sessionStatsAtom: SignalPair<SessionStats | null>;
     currentToolAtom: SignalPair<string | null>;
+    turnTokensAtom: SignalPair<TurnTokens | null>;
+    turnActiveAtom: SignalPair<boolean>;
     enabled: boolean;
     /**
      * Version signal bumped by external document mutations (e.g. history
@@ -44,13 +46,17 @@ export function useAgentStream({
     streamingStateAtom,
     sessionStatsAtom,
     currentToolAtom,
+    turnTokensAtom,
+    turnActiveAtom,
     enabled,
     documentVersion,
 }: UseAgentStreamOpts): void {
     const [, setDocument] = documentAtom;
     const [, setStreaming] = streamingStateAtom;
     const [, setSessionStats] = sessionStatsAtom;
+    const [, setTurnActive] = turnActiveAtom;
     const [, setCurrentTool] = currentToolAtom;
+    const [, setTurnTokens] = turnTokensAtom;
 
     // Mutable state that doesn't trigger re-renders
     let lineBuffer = "";
@@ -94,12 +100,24 @@ export function useAgentStream({
                 }
             }
 
-            // Append new nodes
+            // Append new nodes — but guard against the race where a
+            // documentVersion rebuild placed the node into the doc externally
+            // (e.g. history load completed between the node entering pendingNew
+            // and this RAF firing). If nodeIndexMap already has a valid entry
+            // for the node, update in-place instead of appending to prevent
+            // duplicates.
             if (batchNew.length > 0) {
-                const baseIdx = result.length;
                 for (let i = 0; i < batchNew.length; i++) {
-                    nodeIndexMap.set(batchNew[i].id, baseIdx + i);
-                    result.push(batchNew[i]);
+                    const n = batchNew[i];
+                    const existingIdx = nodeIndexMap.get(n.id);
+                    if (existingIdx != null && existingIdx < result.length) {
+                        // Already in doc (placed by an external mutation while
+                        // this node was queued). Update in-place.
+                        result[existingIdx] = n;
+                    } else {
+                        nodeIndexMap.set(n.id, result.length);
+                        result.push(n);
+                    }
                 }
                 mutated = true;
             }
@@ -165,7 +183,16 @@ export function useAgentStream({
         if (documentVersion != null) {
             createEffect(() => {
                 documentVersion();
+                // Re-add IDs from pending buffers AFTER rebuilding from the
+                // document so subsequent stream events for in-flight nodes are
+                // still routed as updates (not new nodes). Without this, a
+                // rebuild clears their dedup protection and the next delta
+                // creates a second entry for the same node.
+                const beforePendingNew = pendingNew.slice();
+                const beforePendingUpdates = pendingUpdates.slice();
                 rebuildIndicesFromDocument();
+                for (const n of beforePendingNew) nodeIdSet.add(n.id);
+                for (const n of beforePendingUpdates) nodeIdSet.add(n.id);
             });
         }
 
@@ -184,6 +211,8 @@ export function useAgentStream({
                 setDocument([]);
                 setSessionStats(null);
                 setCurrentTool(null);
+                setTurnTokens(null);
+                setTurnActive(false);
                 lineBuffer = "";
                 translator.reset();
                 parser.reset();
@@ -242,9 +271,28 @@ export function useAgentStream({
                         id: `stderr-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
                         type: "markdown",
                         content: `**stderr:** ${text}`,
+                        timestamp: Date.now(),
                     });
                     scheduleFlush();
                     continue;
+                }
+
+                // Extract live token counts from Anthropic stream events before
+                // the translator discards them. message_start carries input_tokens
+                // for this turn; message_delta carries the running output_tokens.
+                {
+                    const inner = rawEvent.type === "stream_event" ? rawEvent.event : rawEvent;
+                    if (inner?.type === "message_start") {
+                        const inputTok = inner.message?.usage?.input_tokens as number | undefined;
+                        if (inputTok != null) {
+                            setTurnTokens((prev) => ({ input: inputTok, output: prev?.output ?? 0 }));
+                        }
+                    } else if (inner?.type === "message_delta") {
+                        const outputTok = inner.usage?.output_tokens as number | undefined;
+                        if (outputTok != null) {
+                            setTurnTokens((prev) => ({ input: prev?.input ?? 0, output: outputTok }));
+                        }
+                    }
                 }
 
                 // Translate provider-specific format → StreamEvent[]
@@ -252,10 +300,16 @@ export function useAgentStream({
 
                 // Convert StreamEvents → DocumentNodes
                 for (const event of streamEvents) {
-                    // Handle session_end: store stats, clear loading state
+                    // Handle session_end: store stats, clear loading state,
+                    // and flush the parser's text/thinking accumulators so the
+                    // NEXT turn creates fresh nodes instead of appending to the
+                    // previous response (which sits above the user's message).
                     if (event.type === "session_end") {
+                        parser.flushPending();
                         setSessionStats(event.stats ?? null);
                         setCurrentTool(null);
+                        setTurnTokens(null);
+                        setTurnActive(false);
                         continue;
                     }
                     // Track the currently-running tool for the status line
@@ -266,6 +320,13 @@ export function useAgentStream({
                     }
                     const node = parser.parseLine(JSON.stringify(event));
                     if (!node) continue;
+
+                    // Stamp a receive time on nodes that don't carry their own
+                    // timestamp (markdown, tool, section, subagent_link).
+                    // user_message and agent_message already have timestamps.
+                    if (!("timestamp" in node) || (node as any).timestamp == null) {
+                        (node as any).timestamp = Date.now();
+                    }
 
                     if (nodeIdSet.has(node.id)) {
                         pendingUpdates.push(node);
@@ -286,6 +347,9 @@ export function useAgentStream({
             if (flushRafId != null) { cancelAnimationFrame(flushRafId); flushRafId = null; }
             subscription.unsubscribe();
             setStreaming((prev) => ({ ...prev, active: false }));
+            // Clear turn-active on teardown so a crash/exit without session_end
+            // doesn't leave the status line showing "Working…" permanently.
+            setTurnActive(false);
         });
     });
 }

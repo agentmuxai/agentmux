@@ -28,12 +28,13 @@
  */
 
 import { createMemo, createSignal, type Accessor, type Setter } from "solid-js";
-import { RpcApi } from "@/app/store/wshclientapi";
-import { TabRpcClient } from "@/app/store/wshrpcutil";
+import { RpcApi } from "@/app/store/rpc-api";
+import { TabRpcClient } from "@/app/store/rpc-util";
 import * as WOS from "@/app/store/wos";
 import type { Bookmark, DocumentNode } from "../types";
 
-export type LogFn = (tag: string, text: string, level?: "info" | "error" | "warn") => void;
+import type { LogFn } from "../types";
+export type { LogFn };
 
 export interface UseBookmarksOptions {
     blockId: string;

@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// AgentMux CEF Host — Entry point.
+// AgentMux Host — Entry point.
 //
 // This binary serves as both the browser process and CEF subprocess
 // (renderer, GPU, utility). Subprocess mode is detected via the --type
@@ -22,11 +22,13 @@
 )]
 
 mod app;
+mod browser_panes;
 mod client;
 mod commands;
 mod events;
 mod ipc;
 mod memory_heartbeat;
+mod pane;
 mod sidecar;
 mod state;
 mod ui_tasks;
@@ -103,36 +105,87 @@ fn main() {
     // Browser process initialization
     // -----------------------------------------------------------------------
 
-    // Initialize dual-output tracing: rolling log file + stderr.
-    // The log file guard must live for the entire process to ensure flushing.
-    let _log_guard = init_logging();
+    // Set the Application User Model ID before any UI is created. This lets
+    // Windows group our windows under one pinned identity and is required for
+    // the `DeleteTab` + per-HWND AppID treatment used by the full-instance /
+    // sub-window model (see docs/specs/SPEC_MULTIWINDOW_TASKBAR_GROUPING.md).
+    // Use a VERSION-STABLE ID — never embed the patch number or pinning forks.
+    #[cfg(target_os = "windows")]
+    unsafe {
+        use windows_sys::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID;
+        let aumid: Vec<u16> = "AgentMuxCorp.AgentMux\0".encode_utf16().collect();
+        let _ = SetCurrentProcessExplicitAppUserModelID(aumid.as_ptr());
+    }
 
-    tracing::info!("Initializing CEF browser process");
-
-    // macOS 26 Tahoe compat: CEF 146 calls a private NSApplication selector during
-    // NSDraggingSession setup that was removed in macOS 26. Swizzle
-    // doesNotRecognizeSelector: on NSApplication to log the selector name and
-    // return without throwing NSInvalidArgumentException, allowing drag to proceed.
-    // See: docs/investigations/tab-drag-tearoff-crash-macos.md
-    #[cfg(target_os = "macos")]
-    unsafe { patch_nsapp_unrecognized_selector() };
-
-    // Single-instance check: if another instance of the same version is
-    // running, send it a "new window" request via its IPC server and exit.
-    // Uses a named mutex for detection and a port file for communication.
     let version = env!("CARGO_PKG_VERSION");
     let is_dev = std::env::var("AGENTMUX_DEV").is_ok();
     let version_slug = version.replace('.', "-");
-    let data_dir_name = if is_dev {
-        "ai.agentmux.cef.dev".to_string()
+
+    // Detect portable mode: in portable builds the CEF host binary lives inside
+    // <portable-root>/runtime/. If current_exe()'s parent directory is named
+    // "runtime", we are in portable mode and the portable root is its parent.
+    let host_exe_dir = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.to_path_buf()))
+        .unwrap_or_default();
+    let portable_root: Option<std::path::PathBuf> = if host_exe_dir
+        .file_name()
+        .and_then(|n| n.to_str())
+        == Some("runtime")
+    {
+        host_exe_dir.parent().map(|p| p.to_path_buf())
     } else {
-        format!("ai.agentmux.cef.v{}", version_slug)
+        None
     };
-    let data_dir = dirs::data_dir()
-        .unwrap_or_else(|| std::path::PathBuf::from("."))
-        .join(&data_dir_name);
+
+    // Resolve the CEF cache directory and log directory.
+    //
+    // Portable:  all state lives under <portable-root>/data/
+    //            → cef cache:  data/cef/
+    //            → logs:       data/logs/
+    //
+    // Installed: state lives in platform AppData (version-isolated)
+    //            → cef cache:  %LOCALAPPDATA%/ai.agentmux.cef.vX/
+    //            → logs:       ~/.agentmux/logs/  (shared, easy to find)
+    let (data_dir, log_dir) = if let Some(ref root) = portable_root {
+        let base = root.join("data");
+        (base.join("cef"), base.join("logs"))
+    } else {
+        let cef_name = if is_dev {
+            "ai.agentmux.cef.dev".to_string()
+        } else {
+            format!("ai.agentmux.cef.v{}", version_slug)
+        };
+        let cef_dir = dirs::data_dir()
+            .unwrap_or_else(|| std::path::PathBuf::from("."))
+            .join(&cef_name);
+        let log_dir = dirs::home_dir()
+            .unwrap_or_default()
+            .join(".agentmux")
+            .join("logs");
+        (cef_dir, log_dir)
+    };
     std::fs::create_dir_all(&data_dir).ok();
     let port_file = data_dir.join("ipc-port");
+
+    // Initialize dual-output tracing: rolling log file + stderr.
+    // The log file guard must live for the entire process to ensure flushing.
+    let _log_guard = init_logging(&log_dir);
+
+    tracing::info!(
+        version,
+        portable = portable_root.is_some(),
+        data_dir = %data_dir.display(),
+        log_dir = %log_dir.display(),
+        "Initializing CEF browser process"
+    );
+
+    // macOS 26 Tahoe compat: patch NSApplication before CEF initializes.
+    // Injects resolveInstanceMethod: to add typed stubs for private selectors
+    // removed in macOS 26 (isHandlingSendEvent, setEffectiveAppearance:, etc.)
+    // that CEF 146 calls during NSDraggingSession and event routing setup.
+    #[cfg(target_os = "macos")]
+    unsafe { patch_nsapp_unrecognized_selector() };
 
     // If port file exists and we can connect, another instance is running.
     // Send it a "new window" request and exit.
@@ -209,17 +262,15 @@ fn main() {
     // Create the App handler with state.
     let mut cef_app = app::AgentMuxApp::new(app_state.clone(), ipc_port);
 
-    // Resolve runtime directory for portable layout (resources in runtime/ subdir)
-    let exe_dir = std::env::current_exe()
-        .ok()
-        .and_then(|p| p.parent().map(|d| d.to_path_buf()))
-        .unwrap_or_default();
-    let runtime_dir = exe_dir.join("runtime");
-    let _base_dir = if runtime_dir.exists() {
+    // Resolve resource directories for portable layout.
+    // In portable mode the CEF host is IN runtime/, so resources are flat
+    // alongside it. In dev mode they are also flat in dist/cef-dev/.
+    // host_exe_dir is already computed above.
+    let runtime_dir = host_exe_dir.join("runtime");
+    let base_dir = if runtime_dir.exists() {
         runtime_dir
     } else {
-        // Dev mode: resources are flat alongside the exe in dist/cef/
-        exe_dir.clone()
+        host_exe_dir.clone()
     };
     // On macOS, pak files and locale paks live inside the CEF framework's
     // Resources/ directory — not alongside the executable. The framework is
@@ -228,17 +279,16 @@ fn main() {
     // chrome_*.pak, resources.pak, icudtl.dat, and the *.lproj/locale.pak files.
     #[cfg(target_os = "macos")]
     let (resources_dir, locales_dir) = {
-        let fw_resources = exe_dir
+        let fw_resources = host_exe_dir
             .join("../Frameworks/Chromium Embedded Framework.framework/Resources");
-        // canonicalize() resolves ".." so CEF receives a clean absolute path.
         let fw_resources = fw_resources.canonicalize().unwrap_or(fw_resources);
         let s = fw_resources.to_str().unwrap_or("").to_owned();
         (CefString::from(s.as_str()), CefString::from(s.as_str()))
     };
     #[cfg(not(target_os = "macos"))]
     let (resources_dir, locales_dir) = (
-        CefString::from(_base_dir.to_str().unwrap_or("")),
-        CefString::from(_base_dir.join("locales").to_str().unwrap_or("")),
+        CefString::from(base_dir.to_str().unwrap_or("")),
+        CefString::from(base_dir.join("locales").to_str().unwrap_or("")),
     );
 
     // Reuse data_dir from single-instance check as CEF cache path.
@@ -256,7 +306,7 @@ fn main() {
     // and register the bundle correctly — required when running outside a .app.
     #[cfg(target_os = "macos")]
     let framework_dir = {
-        let p = exe_dir.join("../Frameworks/Chromium Embedded Framework.framework");
+        let p = host_exe_dir.join("../Frameworks/Chromium Embedded Framework.framework");
         p.canonicalize().unwrap_or(p)
     };
 
@@ -322,7 +372,7 @@ fn main() {
     // Clean up port file so stale data doesn't confuse future launches.
     let _ = std::fs::remove_file(&port_file);
 
-    tracing::info!("AgentMux CEF host shutdown complete");
+    tracing::info!("AgentMux host shutdown complete");
 }
 
 /// macOS 26 Tahoe compat: CEF 146 calls private NSApplication selectors (e.g.
@@ -434,19 +484,14 @@ unsafe fn patch_nsapp_unrecognized_selector() {
 }
 
 /// Initialize tracing with dual output: rolling daily log file + human-readable stderr.
+/// `log_dir` is resolved by the caller: `<portable-root>/data/logs/` in portable mode,
+/// `~/.agentmux/logs/` in installed mode.
 /// Returns a guard that must be held for the lifetime of the process to ensure log flushing.
-fn init_logging() -> tracing_appender::non_blocking::WorkerGuard {
+fn init_logging(log_dir: &std::path::Path) -> tracing_appender::non_blocking::WorkerGuard {
     use tracing_subscriber::{fmt, layer::SubscriberExt, EnvFilter};
 
-    // Always log to ~/.agentmux/logs/ so all logs (host + sidecar) land in one
-    // discoverable directory. Ignores AGENTMUX_DATA_HOME which may point to a
-    // versioned AppData dir (or be inherited from a parent AgentMux instance).
     let version = env!("CARGO_PKG_VERSION");
-    let log_dir = dirs::home_dir()
-        .unwrap_or_default()
-        .join(".agentmux")
-        .join("logs");
-    let _ = std::fs::create_dir_all(&log_dir);
+    let _ = std::fs::create_dir_all(log_dir);
 
     // Delete log files older than 7 days to prevent unbounded growth.
     cleanup_old_logs(&log_dir, 7);
@@ -488,7 +533,7 @@ fn init_logging() -> tracing_appender::non_blocking::WorkerGuard {
         os = std::env::consts::OS,
         arch = std::env::consts::ARCH,
         log_dir = %log_dir.display(),
-        "AgentMux CEF host starting"
+        "AgentMux host starting"
     );
 
     guard

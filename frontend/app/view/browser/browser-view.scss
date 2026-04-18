@@ -1,0 +1,120 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+.browser-view {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    width: 100%;
+    overflow: hidden;
+    background: var(--block-bg-color, #1e1e1e);
+}
+
+.browser-nav-bar {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 8px;
+    background: var(--header-bg-color, #252525);
+    border-bottom: 1px solid var(--border-color, #333);
+    flex-shrink: 0;
+}
+
+.browser-nav-btn {
+    width: 28px;
+    height: 28px;
+    border: none;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--main-text-color, #ccc);
+    font-size: 14px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    &:hover:not(:disabled) {
+        background: var(--highlight-bg-color, #333);
+    }
+
+    &:disabled {
+        opacity: 0.3;
+        cursor: default;
+    }
+}
+
+.browser-go-btn {
+    width: auto;
+    padding: 0 10px;
+    font-size: 12px;
+}
+
+.browser-address-bar {
+    flex: 1;
+    height: 28px;
+    padding: 0 10px;
+    border: 1px solid var(--border-color, #444);
+    border-radius: 14px;
+    background: var(--input-bg-color, #1a1a1a);
+    color: var(--main-text-color, #ddd);
+    font-family: var(--termfontfamily, "JetBrains Mono", monospace);
+    font-size: 12px;
+
+    &:focus {
+        outline: none;
+        border-color: var(--accent-color, #58a6ff);
+    }
+}
+
+.browser-loading-bar {
+    height: 2px;
+    background: var(--accent-color, #58a6ff);
+    animation: browser-loading 1.5s ease-in-out infinite;
+    flex-shrink: 0;
+}
+
+@keyframes browser-loading {
+    0% { width: 0; margin-left: 0; }
+    50% { width: 60%; margin-left: 20%; }
+    100% { width: 0; margin-left: 100%; }
+}
+
+.browser-error {
+    padding: 12px 16px;
+    background: rgba(255, 80, 80, 0.1);
+    color: #ff6b6b;
+    font-size: 13px;
+    border-bottom: 1px solid rgba(255, 80, 80, 0.2);
+    flex-shrink: 0;
+}
+
+.browser-error-hint {
+    font-size: 11px;
+    color: var(--secondary-text-color, #888);
+    margin-top: 4px;
+}
+
+.browser-placeholder {
+    flex: 1;
+    width: 100%;
+    position: relative;
+}
+
+.browser-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    gap: 12px;
+    color: var(--secondary-text-color, #666);
+}
+
+.browser-empty-icon {
+    font-size: 48px;
+    opacity: 0.5;
+}
+
+.browser-empty-text {
+    font-size: 14px;
+}

@@ -1,9 +1,14 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+// NOTE: Forge is NOT a standalone pane. It is embedded inside the agent pane
+// as a floating panel (AgentCardSettingsPanel → ForgeDetail / ForgeForm).
+// The standalone forge widget was removed in v0.33.197. Do not re-register
+// this as a block view — agent configuration lives inside the agent pane.
+
 import { BlockNodeModel } from "@/app/block/blocktypes";
-import { RpcApi } from "@/app/store/wshclientapi";
-import { TabRpcClient } from "@/app/store/wshrpcutil";
+import { RpcApi } from "@/app/store/rpc-api";
+import { TabRpcClient } from "@/app/store/rpc-util";
 import { waveEventSubscribe } from "@/app/store/wps";
 import { createSignal, type Accessor, type Setter } from "solid-js";
 

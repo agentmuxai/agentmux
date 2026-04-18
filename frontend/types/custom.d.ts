@@ -139,6 +139,7 @@ declare global {
         revealInFileExplorer(filePath: string): void;
         captureScreenshot(rect: { x: number; y: number; width: number; height: number }): Promise<string>;
         setKeyboardChordMode: () => void;
+        openAgent: (agentId: string) => Promise<void>;
         openClaudeCodeAuth: () => Promise<void>;
         getClaudeCodeAuth: () => Promise<{ connected: boolean; email?: string; expires_at?: number }>;
         disconnectClaudeCode: () => Promise<void>;
@@ -343,6 +344,8 @@ declare global {
         viewType: string;
         viewIcon?: Accessor<string | IconButtonDecl>;
         viewName?: Accessor<string>;
+        /** When provided, the header name becomes an inline editable text field. */
+        setViewName?: (name: string) => Promise<void>;
         viewText?: Accessor<string | HeaderElem[]>;
         preIconButton?: Accessor<IconButtonDecl>;
         endIconButtons?: Accessor<IconButtonDecl[]>;
@@ -438,7 +441,7 @@ declare global {
         type?: "error" | "update" | "info" | "warning";
     };
 
-    interface AbstractWshClient {
+    interface AbstractRpcClient {
         recvRpcMessage(msg: RpcMessage): void;
     }
 
