@@ -39,15 +39,6 @@
         }
     }
 
-    .pinned-tab-spacer {
-        flex-shrink: 0;
-        width: 1px;
-        height: 18px;
-        margin: 0 3px 4px;
-        background: var(--border-color);
-        align-self: flex-end;
-    }
-
     .add-tab-btn {
         flex-shrink: 0;
         display: flex;
@@ -87,7 +78,7 @@
             .tab {
                 outline: 2px solid var(--accent-color, #22c55e);
                 outline-offset: -2px;
-                border-radius: 4px 4px 0 0;
+                border-radius: 0;
                 animation: tab-drop-pulse 0.8s ease-in-out infinite alternate;
             }
         }

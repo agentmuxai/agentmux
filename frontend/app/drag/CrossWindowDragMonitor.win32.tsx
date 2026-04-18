@@ -32,7 +32,7 @@ import type { LayoutNode } from "@/layout/lib/types";
 // Shared drag state set by TileLayout / TabBar drag handlers
 export type DragItemPayload =
     | { kind: "tile"; node: LayoutNode }
-    | { kind: "tab"; tabId: string; workspaceId: string; isPinned: boolean };
+    | { kind: "tab"; tabId: string; workspaceId: string };
 
 // Module-level drag state so TileLayout/TabBar can set it before dragend fires
 let _currentDragPayload: DragItemPayload | null = null;
