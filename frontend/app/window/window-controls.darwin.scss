@@ -1,0 +1,72 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+//
+// macOS traffic-light window controls.
+// Circles sit on the LEFT of the title bar, vertically centred in the full
+// header height (overrides the parent flex container's align-items: end).
+// Glyphs are hidden at rest and fade in when the mouse enters the group,
+// matching the standard macOS Sequoia / Sonoma behaviour.
+
+.traffic-lights {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+
+    // Left inset from the window edge matches the macOS HIG (8 px).
+    padding-left: 8px;
+    // Right gap between the last button and the first tab.
+    padding-right: 8px;
+
+    flex-shrink: 0;
+    // Centre the circles vertically in the full title-bar height.
+    // The parent uses align-items: end so tabs sit at the bottom;
+    // override that just for the traffic-light group.
+    align-self: center;
+
+    // The entire group must NOT be a drag region so clicks reach the buttons.
+    -webkit-app-region: no-drag;
+
+    .traffic-btn {
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        border: none;
+        padding: 0;
+        cursor: default;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+        -webkit-app-region: no-drag;
+        user-select: none;
+        transition: filter 80ms linear;
+
+        .traffic-glyph {
+            // Glyphs are hidden at rest; they fade in when the group is hovered.
+            opacity: 0;
+            transition: opacity 80ms linear;
+            // Semi-transparent dark overlay — readable on any circle colour.
+            color: rgba(0, 0, 0, 0.55);
+        }
+
+        &.close-btn    { background-color: #FF5F57; }
+        &.minimize-btn { background-color: #FFBD2E; }
+        &.zoom-btn     { background-color: #28CA41; }
+
+        &:active {
+            filter: brightness(0.8);
+        }
+    }
+
+    // Reveal glyphs when hovering anywhere over the traffic-light cluster.
+    &:hover .traffic-glyph {
+        opacity: 1;
+    }
+
+    // Unfocused state: all three buttons turn neutral grey.
+    // Applied by JS when the OS window loses focus.
+    &.window-unfocused .traffic-btn {
+        background-color: #9E9E9E;
+    }
+}

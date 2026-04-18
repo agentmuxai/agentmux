@@ -9,6 +9,7 @@ import { atoms } from "@/store/global";
 import { type JSX } from "solid-js";
 import { createTabBarMenu } from "@/app/menu/base-menus";
 import { SystemStatus } from "@/app/window/system-status";
+import { WindowControlsLeft } from "@/app/window/window-controls.platform";
 import "./window-header.platform.scss";
 
 
@@ -38,6 +39,8 @@ const WindowHeader = (props: WindowHeaderProps): JSX.Element => {
             {...dragProps}
             onContextMenu={handleContextMenu}
         >
+            <WindowControlsLeft />
+
             <WindowDrag ref={draggerLeftRef} class="left" />
 
             <TabBar workspace={props.workspace} />
