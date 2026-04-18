@@ -340,22 +340,43 @@ async fn route_command(
             Ok(serde_json::json!(true))
         }
         "main_window_focus" => {
-            // Move OS-level keyboard focus back to the main window's top-level
-            // HWND. Used by the frontend when the user clicks a main-DOM input
-            // (e.g. a browser block's URL bar) to reclaim focus from a pane
-            // that previously held it.
+            // Move keyboard focus back to the main browser when the user
+            // clicks a main-DOM input (address bar, etc). Previously this
+            // called SetFocus(top_level) where top_level was the outer CEF
+            // Views window — which does NOT route keyboard to the embedded
+            // render widget. Keys kept arriving at the pane's HWND.
+            //
+            // Correct path: tell Chromium that main's Browser has focus.
+            // CEF internally calls SetFocus on the right Chrome_RenderWidgetHostHWND.
+            // Also defocus every pane browser so Chromium stops routing input
+            // to them.
             tracing::info!("[ipc] main_window_focus");
-            #[cfg(target_os = "windows")]
-            unsafe {
-                let top = crate::commands::window::find_own_top_level_window();
-                if !top.is_null() {
-                    windows_sys::Win32::UI::Input::KeyboardAndMouse::SetFocus(top as _);
-                    tracing::info!("[ipc] main_window_focus: SetFocus on top={:p}", top);
-                }
-                // Also explicitly defocus ALL panes' browsers at the Chromium
-                // level so the renderer stops routing keystrokes to them.
-                state.browser_panes.defocus_all(state);
+
+            // Main browser is the one NOT prefixed with browser-pane-. Find
+            // it by excluding pane labels. There's always exactly one "main".
+            let main_browser = {
+                let browsers = state.browsers.lock();
+                browsers
+                    .iter()
+                    .find(|(k, _)| !k.starts_with("browser-pane-"))
+                    .map(|(k, b)| (k.clone(), b.clone()))
+            };
+
+            if let Some((label, _browser)) = main_browser {
+                // Full focus reclaim has to run on the CEF UI thread:
+                // `browser_view_get_for_browser`, `host.set_focus`, and
+                // walking the HWND tree all require it. The task also
+                // handles `defocus_all` on panes.
+                let mut task = crate::ui_tasks::MainFocusReclaimTask::new(
+                    state.clone(),
+                    label.clone(),
+                );
+                cef::post_task(cef::ThreadId::UI, Some(&mut task));
+                tracing::info!("[ipc] main_window_focus: posted MainFocusReclaimTask for label={}", label);
+            } else {
+                tracing::warn!("[ipc] main_window_focus: no non-pane browser found in state.browsers");
             }
+
             Ok(serde_json::json!(true))
         }
 
@@ -363,3 +384,4 @@ async fn route_command(
         _ => Err(format!("Unknown command: {}", cmd)),
     }
 }
+
