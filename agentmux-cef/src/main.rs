@@ -104,6 +104,18 @@ fn main() {
     // Browser process initialization
     // -----------------------------------------------------------------------
 
+    // Set the Application User Model ID before any UI is created. This lets
+    // Windows group our windows under one pinned identity and is required for
+    // the `DeleteTab` + per-HWND AppID treatment used by the full-instance /
+    // sub-window model (see docs/specs/SPEC_MULTIWINDOW_TASKBAR_GROUPING.md).
+    // Use a VERSION-STABLE ID — never embed the patch number or pinning forks.
+    #[cfg(target_os = "windows")]
+    unsafe {
+        use windows_sys::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID;
+        let aumid: Vec<u16> = "AgentMuxCorp.AgentMux\0".encode_utf16().collect();
+        let _ = SetCurrentProcessExplicitAppUserModelID(aumid.as_ptr());
+    }
+
     let version = env!("CARGO_PKG_VERSION");
     let is_dev = std::env::var("AGENTMUX_DEV").is_ok();
     let version_slug = version.replace('.', "-");
