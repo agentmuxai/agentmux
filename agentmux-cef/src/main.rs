@@ -25,6 +25,8 @@ mod app;
 mod browser_panes;
 mod client;
 mod commands;
+#[cfg(debug_assertions)]
+mod dev_authfile;
 mod events;
 mod ipc;
 mod memory_heartbeat;
@@ -250,6 +252,39 @@ fn main() {
     if !backend_ready {
         tracing::error!("Backend failed to start — exiting");
         std::process::exit(1);
+    }
+
+    // Dev-only: write authkey.dev so external test harnesses can call the
+    // service API without polling logs or driving the UI. Release builds
+    // skip this entirely (debug_assertions is false). See
+    // docs/specs/SPEC_TEST_API_ACCESS.md §5.
+    #[cfg(debug_assertions)]
+    {
+        let endpoints = app_state.backend_endpoints.lock().clone();
+        let auth_key = app_state.auth_key.lock().clone();
+        let ipc_token = app_state.ipc_token.clone();
+        let data_dir_str = app_state
+            .version_data_dir
+            .lock()
+            .clone()
+            .unwrap_or_default();
+        let data_dir_path = std::path::PathBuf::from(&data_dir_str);
+        let ipc_endpoint = format!("127.0.0.1:{}", ipc_port);
+        let instance = format!("v{}", env!("CARGO_PKG_VERSION"));
+        let host_pid = std::process::id();
+        match dev_authfile::write_dev_auth_file(
+            &data_dir_path,
+            &auth_key,
+            &endpoints.web_endpoint,
+            &endpoints.ws_endpoint,
+            &ipc_endpoint,
+            &ipc_token,
+            &instance,
+            host_pid,
+        ) {
+            Ok(p) => tracing::info!("Wrote dev authkey file: {}", p.display()),
+            Err(e) => tracing::warn!("Failed to write dev authkey file: {}", e),
+        }
     }
 
     // Create the App handler with state.
