@@ -102,7 +102,7 @@ const WindowActionButtons = (): JSX.Element => {
                 title="Minimize"
                 aria-label="Minimize"
                 data-testid="window-minimize-btn"
-                data-tauri-drag-region="false"
+                data-drag-region="false"
             >
                 <MinimizeGlyph />
             </button>
@@ -112,7 +112,7 @@ const WindowActionButtons = (): JSX.Element => {
                 title="Maximize"
                 aria-label="Maximize"
                 data-testid="window-maximize-btn"
-                data-tauri-drag-region="false"
+                data-drag-region="false"
             >
                 <MaximizeGlyph />
             </button>
@@ -122,7 +122,7 @@ const WindowActionButtons = (): JSX.Element => {
                 title="Close"
                 aria-label="Close"
                 data-testid="window-close-btn"
-                data-tauri-drag-region="false"
+                data-drag-region="false"
             >
                 <CloseGlyph />
             </button>

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // Windows-specific window drag hook.
-// Tauri: data-tauri-drag-region is handled at the WebView/OS level.
+// Tauri: data-drag-region is handled at the WebView/OS level.
 // CEF: JS-driven window move — track mouse delta, set window position via IPC.
 // WM_NCLBUTTONDOWN doesn't work because the async IPC roundtrip loses mouse state.
 
@@ -13,7 +13,7 @@ let cefDragListenerInstalled = false;
 function isInDragRegion(target: HTMLElement | null): boolean {
     let el = target;
     while (el) {
-        const attr = el.getAttribute("data-tauri-drag-region");
+        const attr = el.getAttribute("data-drag-region");
         if (attr === "false") return false;
         if (attr === "true" || attr === "") return true;
         el = el.parentElement;
@@ -69,5 +69,5 @@ function installCefDragListener() {
 
 export function useWindowDrag(): { dragProps: Record<string, unknown> } {
     installCefDragListener();
-    return { dragProps: { "data-tauri-drag-region": true } };
+    return { dragProps: { "data-drag-region": true } };
 }
