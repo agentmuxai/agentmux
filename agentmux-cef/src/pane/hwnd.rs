@@ -50,7 +50,8 @@ pub static ALLOW_PANE_FOCUS_ONCE: std::sync::atomic::AtomicBool =
 pub unsafe fn install_pane_focus_redirect(hwnd: *mut std::ffi::c_void) {
     use std::sync::atomic::Ordering;
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        CallWindowProcW, GetParent, SetWindowLongPtrW, GWLP_WNDPROC, WM_SETFOCUS,
+        CallWindowProcW, GetAncestor, SetWindowLongPtrW, GA_ROOT, GWLP_WNDPROC,
+        WM_SETFOCUS, WM_KILLFOCUS,
     };
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::SetFocus;
 
@@ -74,6 +75,9 @@ pub unsafe fn install_pane_focus_redirect(hwnd: *mut std::ffi::c_void) {
             WM_KEYDOWN | WM_CHAR => {
                 tracing::info!("[pane-wndproc] key msg=0x{:x} wparam={}", msg, wparam);
             }
+            WM_KILLFOCUS => {
+                tracing::info!("[pane-wndproc] WM_KILLFOCUS hwnd={:p}", hwnd);
+            }
             _ => {}
         }
 
@@ -84,10 +88,17 @@ pub unsafe fn install_pane_focus_redirect(hwnd: *mut std::ffi::c_void) {
                 tracing::info!("[pane-wndproc] WM_SETFOCUS allowed (intentional)");
                 // Fall through to the original WndProc.
             } else {
-                // Programmatic focus (page load, JS window.focus()): redirect.
-                let parent = GetParent(hwnd);
-                if !parent.is_null() {
-                    SetFocus(parent);
+                // Programmatic focus (page load, JS window.focus()): redirect
+                // to the TOP-LEVEL ancestor, not the immediate parent.
+                // `GetParent` on a descendant HWND (Chrome_WidgetWin_1,
+                // Chrome_RenderWidgetHostHWND, …) returns the pane's outer
+                // HWND, which is still inside the pane tree — redirecting
+                // there leaves focus stuck in the pane. `GetAncestor(GA_ROOT)`
+                // walks all the way up to the top-level window that hosts
+                // both main and pane, which is the correct place to land.
+                let root = GetAncestor(hwnd, GA_ROOT);
+                if !root.is_null() && root != hwnd {
+                    SetFocus(root);
                 }
                 return 0;
             }
