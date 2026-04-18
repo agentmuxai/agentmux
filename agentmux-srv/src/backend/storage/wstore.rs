@@ -1276,6 +1276,7 @@ mod tests {
             environment: String::new(),
             agent_bus_id: String::new(),
             is_seeded: 0,
+            accounts: String::new(),
         };
         store.forge_insert(&mut a1).unwrap();
         // "Agent X" → "agent-x"
@@ -1334,6 +1335,7 @@ mod tests {
             environment: String::new(),
             agent_bus_id: String::new(),
             is_seeded: 0,
+            accounts: String::new(),
         };
         store.forge_insert(&mut a1).unwrap();
         assert_eq!(a1.slug, "explicit");
