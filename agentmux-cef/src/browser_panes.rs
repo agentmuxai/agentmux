@@ -61,6 +61,39 @@ impl BrowserPaneManager {
         Self { panes: Mutex::new(HashMap::new()) }
     }
 
+    // ---- test-only helpers ----
+    // Exposed for the unit tests below. Kept out of the production surface
+    // so real callers can't stumble into manipulating lifecycle state.
+    #[cfg(test)]
+    fn test_has_entry(&self, block_id: &str) -> bool {
+        self.panes.lock().contains_key(block_id)
+    }
+
+    #[cfg(test)]
+    fn test_entry_state(&self, block_id: &str) -> Option<PaneLifecycle> {
+        self.panes.lock().get(block_id).map(|e| e.state)
+    }
+
+    #[cfg(test)]
+    fn test_entry_label(&self, block_id: &str) -> Option<String> {
+        self.panes.lock().get(block_id).map(|e| e.label.clone())
+    }
+
+    #[cfg(test)]
+    fn test_insert_live(&self, block_id: &str, label: &str) {
+        self.panes.lock().insert(
+            block_id.to_string(),
+            PaneEntry { label: label.to_string(), state: PaneLifecycle::Live },
+        );
+    }
+
+    #[cfg(test)]
+    fn test_mark_closing(&self, block_id: &str) {
+        if let Some(entry) = self.panes.lock().get_mut(block_id) {
+            entry.state = PaneLifecycle::Closing;
+        }
+    }
+
     /// Look up the Browser iff the pane is Live. Returns None when closing
     /// so all ops short-circuit uniformly.
     fn live_browser(&self, state: &Arc<AppState>, block_id: &str) -> Option<Browser> {
@@ -172,13 +205,32 @@ impl BrowserPaneManager {
         }
     }
 
+    /// Close a pane by destroying its child HWND directly and dropping the
+    /// Browser Arc.
+    ///
+    /// We deliberately do **not** call `host.close_browser(force)`. Empirically
+    /// (host-log trace v0.33.251 and v0.33.252 in `SPEC_BROWSER_PANE_LIFECYCLE.md`
+    /// §4), CEF Alloy treats the pane Browser and the main Browser as a single
+    /// close unit when the pane's outer HWND is a child of main's top-level:
+    /// `close_browser(pane)` fires `do_close` on main too. Previous attempts
+    /// (force=0, force=1, a cascade-guard cancelling main's do_close) either
+    /// quit the whole app or orphaned the pane's pixels while blocking the
+    /// pane's own teardown.
+    ///
+    /// Instead:
+    /// 1. Remove the Browser from `state.browsers` so subsequent lookups miss.
+    /// 2. Win32 `DestroyWindow` on the pane's outer HWND. The pane HWND is a
+    ///    `WS_CHILD`; `WM_DESTROY` cascades to descendants only, never to the
+    ///    parent. Main stays up.
+    /// 3. Drop our `Browser` Arc. CEF still holds refs (browser_list etc.);
+    ///    `on_before_close` *may* eventually fire on the now-destroyed Browser,
+    ///    which is why `drain_closed_label` is idempotent.
+    ///
+    /// Trade-off: because we bypass `close_browser`, Chromium's `beforeunload`
+    /// handler doesn't run. Acceptable for a browser pane (no form data the
+    /// user expects to persist across close). If beforeunload becomes
+    /// important, revisit.
     pub fn close(&self, block_id: &str, state: &Arc<AppState>) {
-        // Flip to Closing first so any concurrent focus/resize/navigate sees
-        // the flag and bails before touching the Browser. The entry stays in
-        // `panes` until CEF's on_before_close fires drain_closed_label — the
-        // Browser stays in state.browsers during that window so on_before_close
-        // can still find it by is_same() and run its unified cleanup path
-        // (backend_close_window, window_instance_registry, etc).
         let label = {
             let mut panes = self.panes.lock();
             let entry = match panes.get_mut(block_id) {
@@ -192,33 +244,46 @@ impl BrowserPaneManager {
             entry.label.clone()
         };
 
-        let browser = state.browsers.lock().get(&label).cloned();
-        if let Some(browser) = browser {
-            if let Some(host) = browser.host() {
-                // Increment the cascade-guard counter BEFORE calling close_browser:
-                // during the teardown, CEF fires do_close on main too (Alloy child-
-                // HWND cascade), and main's do_close reads this counter and cancels.
-                // Decrement in drain_closed_label once the pane's on_before_close
-                // has drained this entry.
-                crate::client::PANE_CLOSE_IN_PROGRESS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        // Remove from state.browsers up front so focus/resize/defocus_all
+        // lookups miss immediately, in addition to the Closing gate.
+        let browser = state.browsers.lock().remove(&label);
 
-                // force_close=0 (graceful) — force_close=1 used to cascade even
-                // more aggressively. Graceful still cascades on Alloy (see
-                // do_close guard above), but it's the less disruptive path.
-                host.close_browser(0);
+        if let Some(browser) = browser {
+            #[cfg(target_os = "windows")]
+            let hwnd = browser.host().and_then(|h| {
+                let wh = h.window_handle();
+                if wh.0.is_null() {
+                    None
+                } else {
+                    Some(wh.0 as *mut std::ffi::c_void)
+                }
+            });
+
+            // Drop our Arc before DestroyWindow so Chromium's refcount doesn't
+            // have to wait for this scope to exit.
+            drop(browser);
+
+            #[cfg(target_os = "windows")]
+            if let Some(hwnd) = hwnd {
+                unsafe {
+                    windows_sys::Win32::UI::WindowsAndMessaging::DestroyWindow(hwnd as _);
+                }
+                tracing::info!(block_id, label, "pane HWND destroyed");
             }
-            tracing::info!(block_id, label, "browser pane close requested");
-        } else {
-            // Browser never made it into state.browsers (creation failed or
-            // still on UI thread). Drop the panes entry; nothing to close.
-            self.panes.lock().remove(block_id);
         }
+
+        // Drop the lifecycle entry now so the block_id can be reused. If CEF
+        // does eventually fire on_before_close, `drain_closed_label` will find
+        // no matching label and no-op.
+        self.panes.lock().remove(block_id);
+        tracing::info!(block_id, label, "browser pane lifecycle entry cleared");
     }
 
-    /// Called from CEF's `on_before_close` once the pane's Browser has been
-    /// removed from `state.browsers`. Drops the `panes` entry so the block_id
-    /// can be reused if a new pane is created with the same id. Also
-    /// decrements the cascade-guard counter paired with `close()`.
+    /// Called from CEF's `on_before_close` if/when it fires for a pane
+    /// browser. The new DestroyWindow-based `close()` usually clears the
+    /// lifecycle entry first, so this is a no-op in that case — but
+    /// `on_before_close` may still fire async as Chromium's refcount hits
+    /// zero, and we need to stay idempotent so the callback doesn't panic.
     pub fn drain_closed_label(&self, label: &str) {
         let mut panes = self.panes.lock();
         let victim = panes
@@ -228,14 +293,6 @@ impl BrowserPaneManager {
         if let Some(block_id) = victim {
             panes.remove(&block_id);
             tracing::info!(block_id, label, "browser pane drained from lifecycle map");
-        }
-        // Always decrement — even if we didn't find the entry (e.g. create()
-        // failed before registering), the pane close IPC had incremented
-        // somewhere and leaving it positive would block main's close forever.
-        // Saturating to avoid underflow if drain is ever called spuriously.
-        let prev = crate::client::PANE_CLOSE_IN_PROGRESS.load(std::sync::atomic::Ordering::SeqCst);
-        if prev > 0 {
-            crate::client::PANE_CLOSE_IN_PROGRESS.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
         }
     }
 
@@ -384,5 +441,115 @@ wrap_task! {
                 );
             }
         }
+    }
+}
+
+// ── Tests ───────────────────────────────────────────────────────────────────
+//
+// Covers the non-CEF pieces of `BrowserPaneManager`: the panes map, label
+// sequencing, and lifecycle-state transitions. CEF-touching paths (`create`'s
+// browser_host_create_browser, `close`'s DestroyWindow, Browser clone/drop)
+// need a `PaneCefBridge` trait extraction — deferred to the follow-up PR
+// described in SPEC_BROWSER_PANE_LIFECYCLE_TESTS.md §9.
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn new_manager_is_empty() {
+        let m = BrowserPaneManager::new();
+        assert!(!m.test_has_entry("any-block"));
+    }
+
+    #[test]
+    fn drain_closed_label_noop_on_missing() {
+        let m = BrowserPaneManager::new();
+        // Must not panic, must not corrupt state.
+        m.drain_closed_label("nonexistent-label");
+        assert!(!m.test_has_entry("nonexistent-block"));
+    }
+
+    #[test]
+    fn drain_closed_label_removes_matching_entry() {
+        let m = BrowserPaneManager::new();
+        m.test_insert_live("b1", "browser-pane-b1-1");
+
+        m.drain_closed_label("browser-pane-b1-1");
+
+        assert!(!m.test_has_entry("b1"));
+    }
+
+    #[test]
+    fn drain_closed_label_ignores_unrelated_labels() {
+        let m = BrowserPaneManager::new();
+        m.test_insert_live("b1", "browser-pane-b1-1");
+        m.test_insert_live("b2", "browser-pane-b2-2");
+
+        m.drain_closed_label("browser-pane-other-99");
+
+        assert!(m.test_has_entry("b1"));
+        assert!(m.test_has_entry("b2"));
+    }
+
+    #[test]
+    fn drain_closed_label_idempotent() {
+        // DestroyWindow-based close() removes the entry up front, but CEF may
+        // still fire on_before_close afterward. Calling drain twice must not
+        // panic.
+        let m = BrowserPaneManager::new();
+        m.test_insert_live("b1", "browser-pane-b1-1");
+
+        m.drain_closed_label("browser-pane-b1-1");
+        m.drain_closed_label("browser-pane-b1-1");
+
+        assert!(!m.test_has_entry("b1"));
+    }
+
+    #[test]
+    fn label_sequence_is_monotonic() {
+        // Three inserts via test_insert_live don't exercise PANE_LABEL_SEQ
+        // directly — we inspect the counter by reading PANE_LABEL_SEQ before
+        // and after create-like operations. Since PANE_LABEL_SEQ is static
+        // and advances monotonically for every create() call in the process,
+        // we simply verify the counter keeps growing.
+        use std::sync::atomic::Ordering;
+        let before = PANE_LABEL_SEQ.load(Ordering::Relaxed);
+        let a = PANE_LABEL_SEQ.fetch_add(1, Ordering::Relaxed);
+        let b = PANE_LABEL_SEQ.fetch_add(1, Ordering::Relaxed);
+        let c = PANE_LABEL_SEQ.fetch_add(1, Ordering::Relaxed);
+        assert!(a >= before);
+        assert_eq!(b, a + 1);
+        assert_eq!(c, b + 1);
+    }
+
+    #[test]
+    fn state_transitions_live_to_closing() {
+        let m = BrowserPaneManager::new();
+        m.test_insert_live("b1", "browser-pane-b1-1");
+        assert_eq!(m.test_entry_state("b1"), Some(PaneLifecycle::Live));
+
+        m.test_mark_closing("b1");
+        assert_eq!(m.test_entry_state("b1"), Some(PaneLifecycle::Closing));
+    }
+
+    #[test]
+    fn drain_after_transition_still_removes() {
+        // close() flips to Closing, then DestroyWindow, then drain. The
+        // drain must remove the entry regardless of the Closing flag.
+        let m = BrowserPaneManager::new();
+        m.test_insert_live("b1", "browser-pane-b1-1");
+        m.test_mark_closing("b1");
+
+        m.drain_closed_label("browser-pane-b1-1");
+
+        assert!(!m.test_has_entry("b1"));
+    }
+
+    #[test]
+    fn entry_label_is_what_we_inserted() {
+        let m = BrowserPaneManager::new();
+        m.test_insert_live("b1", "custom-label-42");
+        assert_eq!(m.test_entry_label("b1").as_deref(), Some("custom-label-42"));
     }
 }

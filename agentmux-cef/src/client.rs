@@ -36,17 +36,6 @@ pub fn dlog(msg: &str) {
     }
 }
 
-/// Count of pane-close operations currently in flight between
-/// `BrowserPaneManager::close()` and the pane's `on_before_close`. When > 0,
-/// main's `do_close` cancels — empirically, tearing down a pane Alloy browser
-/// (child HWND of main's top-level) cascades a WM_CLOSE-equivalent into main,
-/// emptying main's browser_list and firing `quit_message_loop`, which exits
-/// the whole app. See docs/specs/SPEC_BROWSER_PANE_LIFECYCLE.md §4 and the
-/// host-log trace at v0.33.251 08:56:19.777 ("Unregistered browser:
-/// label=main") for evidence.
-pub static PANE_CLOSE_IN_PROGRESS: std::sync::atomic::AtomicUsize =
-    std::sync::atomic::AtomicUsize::new(0);
-
 /// Core handler state shared across all CEF callback interfaces.
 pub struct AgentMuxHandler {
     browser_list: Vec<Browser>,
@@ -221,23 +210,6 @@ impl AgentMuxHandler {
 
     fn do_close(&mut self, _browser: Option<&mut Browser>) -> bool {
         debug_assert_ne!(currently_on(ThreadId::UI), 0);
-
-        // Cancel the cascade: when a browser pane is mid-close, CEF on Alloy
-        // fires do_close on main too (likely because the pane's outer HWND
-        // is a child of main's top-level and Chromium's Alloy teardown
-        // propagates). Returning true here tells CEF to keep main's browser
-        // alive; the pane close still proceeds normally in its own handler.
-        // See SPEC_BROWSER_PANE_LIFECYCLE.md §4 trace and the v0.33.251
-        // host log where main was torn down 6ms after the pane's
-        // on_before_close fired.
-        use std::sync::atomic::Ordering;
-        if !self.is_pane && PANE_CLOSE_IN_PROGRESS.load(Ordering::SeqCst) > 0 {
-            tracing::warn!(
-                "[do_close] cancelling main do_close during pane close cascade (count={})",
-                PANE_CLOSE_IN_PROGRESS.load(Ordering::SeqCst)
-            );
-            return true; // cancel
-        }
 
         if self.browser_list.len() == 1 {
             self.is_closing = true;
