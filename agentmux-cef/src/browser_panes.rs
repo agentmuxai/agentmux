@@ -17,11 +17,18 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use cef::*;
 use parking_lot::Mutex;
 
 use crate::state::AppState;
+
+/// Monotonic counter appended to every pane label so a close-then-recreate of
+/// the same block_id doesn't collide: if the old browser's `on_before_close`
+/// fires after the new pane's `create()` has already run, `drain_closed_label`
+/// would otherwise find and wipe the NEW entry.
+static PANE_LABEL_SEQ: AtomicU64 = AtomicU64::new(1);
 
 /// Per-pane lifecycle phase. Simplified from the full state machine in
 /// `SPEC_BROWSER_PANE_LIFECYCLE.md` §6 — the pre-create states are handled
@@ -54,10 +61,6 @@ impl BrowserPaneManager {
         Self { panes: Mutex::new(HashMap::new()) }
     }
 
-    fn label_for(&self, block_id: &str) -> Option<String> {
-        self.panes.lock().get(block_id).map(|e| e.label.clone())
-    }
-
     /// Look up the Browser iff the pane is Live. Returns None when closing
     /// so all ops short-circuit uniformly.
     fn live_browser(&self, state: &Arc<AppState>, block_id: &str) -> Option<Browser> {
@@ -79,14 +82,41 @@ impl BrowserPaneManager {
         url: &str,
         rect: Rect,
     ) -> Result<(), String> {
-        if let Some(browser) = self.live_browser(state, block_id) {
-            if let Some(frame) = browser.main_frame() {
-                frame.load_url(Some(&CefString::from(url)));
+        // Existing entry: navigate if Live; reject if Closing. Reject (rather
+        // than overwrite) because the old CEF Browser is mid-teardown and its
+        // on_before_close will call drain_closed_label — if we let create()
+        // overwrite the map entry, the drain would evict the NEW entry. The
+        // frontend is expected to retry after a short delay; in practice
+        // block_ids are unique-per-create so this race is already rare.
+        {
+            let panes = self.panes.lock();
+            if let Some(entry) = panes.get(block_id) {
+                match entry.state {
+                    PaneLifecycle::Live => {
+                        // drop lock before touching CEF
+                        let label = entry.label.clone();
+                        drop(panes);
+                        if let Some(browser) = state.browsers.lock().get(&label).cloned() {
+                            if let Some(frame) = browser.main_frame() {
+                                frame.load_url(Some(&CefString::from(url)));
+                            }
+                        }
+                        return Ok(());
+                    }
+                    PaneLifecycle::Closing => {
+                        return Err(format!(
+                            "browser pane for block_id={} is still closing; retry after on_before_close",
+                            block_id
+                        ));
+                    }
+                }
             }
-            return Ok(());
         }
 
-        let label = format!("browser-pane-{}", block_id);
+        // Monotonic seq so close-then-recreate of the same block_id gets a
+        // unique label — drain_closed_label on the old pane won't match us.
+        let seq = PANE_LABEL_SEQ.fetch_add(1, Ordering::Relaxed);
+        let label = format!("browser-pane-{}-{}", block_id, seq);
         self.panes.lock().insert(
             block_id.to_string(),
             PaneEntry { label: label.clone(), state: PaneLifecycle::Live },
