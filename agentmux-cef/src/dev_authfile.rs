@@ -81,10 +81,25 @@ pub fn write_dev_auth_file(
     std::fs::write(&path, json.as_bytes())
         .map_err(|e| format!("write {}: {}", path.display(), e))?;
 
+    // Lock down read access to the file owner. Default umask leaves
+    // world-readable bits on most distros; on Windows, files inherit
+    // the parent dir's ACL which can include other principals. Both
+    // paths apply explicit owner-only access — the auth_key and
+    // ipc_token in this file would let any peer on the machine drive
+    // the service API.
+    #[cfg(unix)]
+    apply_owner_only_mode(&path)?;
     #[cfg(target_os = "windows")]
     apply_owner_only_dacl(&path)?;
 
     Ok(path)
+}
+
+#[cfg(unix)]
+fn apply_owner_only_mode(path: &Path) -> Result<(), String> {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+        .map_err(|e| format!("chmod 0600 {}: {}", path.display(), e))
 }
 
 #[cfg(target_os = "windows")]
