@@ -27,13 +27,8 @@
     //   - Close hover:         solid #c42b1c red with white glyph
     //   - Close press:         #b7201b slightly darker
     //
-    // Overlay alphas are bumped slightly from the raw Fluent tokens
-    // (0.0605 / 0.0419 dark, 0.0373 / 0.0241 light) to 0.08 / 0.054 dark
-    // and 0.06 / 0.04 light because the AgentMux title bar uses a darker
-    // surface than the Win11 Mica default — the raw Fluent values are
-    // nearly invisible on our background. Close button's red hover stays
-    // the exact OS value (#c42b1c / #b7201b) since it's brand-colour, not
-    // surface-relative.
+    // Close button's red hover stays the exact OS value
+    // (#c42b1c / #b7201b) since it's brand-colour, not surface-relative.
     .window-action-buttons {
         display: flex;
         flex-direction: row;
@@ -45,16 +40,29 @@
         align-self: stretch;
         align-items: stretch;
 
+        // `.window-header` has `padding-top: 6px` for the tab bar; the caption
+        // buttons need to override that and reach the absolute top of the
+        // title bar, or the hover background leaves a 6-px strip at the top
+        // uncovered. Pull the container up with a negative margin and grow
+        // its height by the same amount so flex still respects it.
+        margin-top: -6px;
+        height: calc(100% + 6px);
+
         // Butt up against the edge — Win11 caption buttons have no
         // right-margin padding.
         margin-right: -6px;
 
-        --win-caption-hover-bg: rgba(255, 255, 255, 0.0804);
-        --win-caption-press-bg: rgba(255, 255, 255, 0.0536);
+        // Overlay alphas tuned for the AgentMux title-bar surface, which is
+        // noticeably darker than Win11's default Mica. Raw Fluent tokens
+        // (6.05%/4.19%) and even the previous 8%/5.4% bump were too subtle to
+        // perceive on our background; 13%/9% (dark) + 9%/6.5% (light) renders
+        // a distinct hover/press without shifting colour hue.
+        --win-caption-hover-bg: rgba(255, 255, 255, 0.13);
+        --win-caption-press-bg: rgba(255, 255, 255, 0.09);
 
         @media (prefers-color-scheme: light) {
-            --win-caption-hover-bg: rgba(0, 0, 0, 0.0604);
-            --win-caption-press-bg: rgba(0, 0, 0, 0.0402);
+            --win-caption-hover-bg: rgba(0, 0, 0, 0.09);
+            --win-caption-press-bg: rgba(0, 0, 0, 0.065);
         }
 
         .window-action-btn {
