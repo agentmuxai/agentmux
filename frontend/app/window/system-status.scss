@@ -17,33 +17,76 @@
         flex: 0 0 fit-content;
     }
 
+    // Windows 11 standard caption buttons. Dimensions, hit area, and hover
+    // treatment match the Win11 Fluent / Mica design tokens used by Explorer,
+    // Edge, Terminal, and VS Code's custom-titlebar mode:
+    //   - 46×height hit area, tiled edge to edge (no gap)
+    //   - 10×10 glyph centered
+    //   - Minimize/Maximize hover/press: theme-relative neutral overlay
+    //     (via --win-caption-hover-bg / --win-caption-press-bg below)
+    //   - Close hover:         solid #c42b1c red with white glyph
+    //   - Close press:         #b7201b slightly darker
+    //
+    // The caption-button overlay opacities come from the Fluent
+    // surface-background-hover (0.0605) / surface-background-pressed
+    // (0.0419) tokens. We default to the dark-theme values (white overlay)
+    // and override for light via prefers-color-scheme so the hover stays
+    // visible on both themes — the previous `opacity: 0.7` attempt only
+    // dimmed the glyph, which vanished against a light bar.
     .window-action-buttons {
         display: flex;
         flex-direction: row;
-        gap: 4px;
-        align-items: center;
+        align-items: stretch;
+        // Butt up against the edge — Win11 caption buttons have no
+        // right-margin padding.
+        margin-right: -6px;
+
+        --win-caption-hover-bg: rgba(255, 255, 255, 0.0605);
+        --win-caption-press-bg: rgba(255, 255, 255, 0.0419);
+
+        @media (prefers-color-scheme: light) {
+            --win-caption-hover-bg: rgba(0, 0, 0, 0.0373);
+            --win-caption-press-bg: rgba(0, 0, 0, 0.0241);
+        }
 
         .window-action-btn {
             cursor: pointer;
-            padding: 4px 8px;
-            font-size: 14px;
-            background: none;
+            width: 46px;
+            height: 100%;
+            padding: 0;
+            background: transparent;
             border: none;
-            color: var(--secondary-text-color);
-            transition: opacity 0.15s ease, color 0.15s ease;
+            color: var(--main-text-color);
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
             user-select: none;
             -webkit-app-region: no-drag;
+            transition: background-color 80ms linear, color 80ms linear;
+
+            // Glyph colour follows button color; the SVGs use currentColor.
+            svg {
+                display: block;
+                shape-rendering: geometricPrecision;
+            }
 
             &:hover {
-                opacity: 0.7;
-                color: var(--main-text-color);
+                background-color: var(--win-caption-hover-bg);
+            }
+
+            &:active {
+                background-color: var(--win-caption-press-bg);
             }
 
             &.close-btn {
-                color: #ff4444;
-
                 &:hover {
-                    color: #ff6666;
+                    background-color: #c42b1c;
+                    color: #ffffff;
+                }
+
+                &:active {
+                    background-color: #b7201b;
+                    color: #ffffff;
                 }
             }
         }
