@@ -12,7 +12,7 @@
 
 The `agentbus-client` MCP server has two delivery paths:
 
-1. **Local** — `POST {AGENTMUX_LOCAL_URL}/wave/reactive/inject` → AgentMux writes directly to the PTY. Sub-millisecond, no cloud involved.
+1. **Local** — `POST {AGENTMUX_LOCAL_URL}/agentmux/reactive/inject` → AgentMux writes directly to the PTY. Sub-millisecond, no cloud involved.
 2. **Cloud polling** — polls `agentbus.asaf.cc/reactive/pending/{agentId}` every 5s, delivers via `console.error()` on the MCP server's stderr. Stderr from an MCP child process is not fed back as user input in Claude Code, so injections are silently lost.
 
 Path 1 is the correct path. Path 2 doesn't work for in-pane injection.

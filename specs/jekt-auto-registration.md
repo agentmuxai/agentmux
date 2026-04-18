@@ -12,7 +12,7 @@
 Jekt (terminal injection) currently requires a **manual registration call** before it works:
 
 ```bash
-POST /wave/reactive/register
+POST /agentmux/reactive/register
 { "agent_id": "AgentX", "block_id": "<block-id>" }
 ```
 
@@ -31,7 +31,7 @@ with `AGENTMUX_AGENT_ID` set, jekt should work immediately — no extra step.
 ```
 1. User/Forge sets cmd:env["AGENTMUX_AGENT_ID"] = "Agent1" on block
 2. Block spawns — AGENTMUX_AGENT_ID + AGENTMUX_BLOCKID are set in PTY env
-3. ← Manual step required: POST /wave/reactive/register {agent_id, block_id}
+3. ← Manual step required: POST /agentmux/reactive/register {agent_id, block_id}
 4. Jekt via POST /api/bus/inject → ReactiveHandler → blockcontroller::send_input → PTY ✓
 ```
 
@@ -131,7 +131,7 @@ Already exists on `ReactiveHandler`.
 - `shell.rs`: ~15 lines changed/added
 
 ### What does NOT change
-- `/wave/reactive/register` endpoint — still works for manual registration (backward compat,
+- `/agentmux/reactive/register` endpoint — still works for manual registration (backward compat,
   useful for non-shell blocks or external processes)
 - MessageBus registration — unchanged; agents can still call `bus:register` separately
 - Any frontend code
@@ -162,7 +162,7 @@ panes, etc. are unaffected.
 
 ```bash
 # 1. Open AgentMux, create a terminal pane with cmd:env["AGENTMUX_AGENT_ID"] = "test-agent"
-# 2. Immediately jekt it — no /wave/reactive/register call needed:
+# 2. Immediately jekt it — no /agentmux/reactive/register call needed:
 curl -X POST http://localhost:<port>/api/bus/inject \
   -H 'Content-Type: application/json' \
   -d '{"from": "agentx", "target": "test-agent", "message": "echo hello"}'
@@ -172,7 +172,7 @@ curl -X POST http://localhost:<port>/api/bus/inject \
 # Expected: {"status":"injected","via":"messagebus",...} (falls back, agent deregistered)
 
 # 4. Verify agents list:
-curl http://localhost:<port>/wave/reactive/agents
+curl http://localhost:<port>/agentmux/reactive/agents
 # Expected: [] after close, ["test-agent"] while running
 ```
 

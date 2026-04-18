@@ -25,12 +25,12 @@ Agent (e.g., Claude Code)
   ├─ MCP tool: inject_terminal
   │   └─ @a5af/agentbus-client (Node.js stdio MCP server)
   │       │
-  │       ├─ Try 1: LOCAL — POST http://127.0.0.1:PORT/wave/reactive/inject
+  │       ├─ Try 1: LOCAL — POST http://127.0.0.1:PORT/agentmux/reactive/inject
   │       │   └─ ReactiveHandler → blockcontroller::send_input() → PTY write
   │       │   └─ Sub-millisecond, synchronous
   │       │
   │       ├─ Try 2: CROSS-INSTANCE — File registry lookup → HTTP forward
-  │       │   └─ {data_dir}/agents/{agent_id}.json → POST remote:PORT/wave/reactive/inject
+  │       │   └─ {data_dir}/agents/{agent_id}.json → POST remote:PORT/agentmux/reactive/inject
   │       │
   │       └─ Try 3: CLOUD — POST https://agentbus.asaf.cc/reactive/inject
   │           └─ Lambda + DynamoDB, 15s polling timeout
@@ -165,7 +165,7 @@ With LAN discovery, jekt delivery becomes a **4-tier cascade** with clear separa
 Jekt delivery priority:
   1. LOCAL PTY     — agent on this instance → direct PTY write (sub-ms)
   2. LOCAL MSGBUS  — agent has WS connection → push via MessageBus (ms)
-  3. LAN FORWARD   — agent on LAN peer → HTTP POST to peer's /wave/reactive/inject (low ms)
+  3. LAN FORWARD   — agent on LAN peer → HTTP POST to peer's /agentmux/reactive/inject (low ms)
   4. CLOUD RELAY   — agent unreachable locally/LAN → AgentBus cloud (agentbus.asaf.cc)
 ```
 
@@ -309,7 +309,7 @@ pub struct LanInstance {
 
 ### Phase 3: LAN-based Jekt Forwarding
 - When `inject_terminal` target not found locally, query LAN peers
-- Forward via HTTP to peer's `/wave/reactive/inject`
+- Forward via HTTP to peer's `/agentmux/reactive/inject`
 - Update `list_agents` to include agents from LAN peers
 - Update `broadcast` to fan out to LAN peers
 

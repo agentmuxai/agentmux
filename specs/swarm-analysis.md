@@ -161,7 +161,7 @@ AgentMux already has the building blocks for subagent watching:
 |-----------|--------|-----------|
 | **File watcher** (`notify` crate) | Production | Watch `subagents/` directories for new JSONL files |
 | **Block/pane creation** (`wcore::create_block`) | Production | Create new panes for subagent activity |
-| **Agent registration** (`/wave/reactive/register`) | Production | Register subagents in the reactive system |
+| **Agent registration** (`/agentmux/reactive/register`) | Production | Register subagents in the reactive system |
 | **EventBus** | Production | Push subagent events to frontend in real-time |
 | **OSC 16162 protocol** | Production | Metadata extraction from terminal output |
 | **Forge widget** | Production | Agent creation/management (separate concern from Swarm) |
