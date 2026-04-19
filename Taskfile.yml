@@ -494,7 +494,12 @@ tasks:
                   exit 1
                 fi
                 echo "Vite ready."
-                cd "$DEV_DIR" && LD_LIBRARY_PATH=. ./agentmux-cef{{exeExt}} --url=http://localhost:5173
+                # Inline AGENTMUX_DEV=1 on the launch: go-task's top-level
+                # env: block (on the `dev` task) doesn't propagate into
+                # cmd: shell subprocesses invoked via `task:` on Windows,
+                # so agentmux-cef would start without the flag and skip
+                # the authkey.dev write (docs/specs/SPEC_TEST_API_ACCESS.md §6).
+                cd "$DEV_DIR" && LD_LIBRARY_PATH=. AGENTMUX_DEV=1 ./agentmux-cef{{exeExt}} --url=http://localhost:5173
 
     run:
         desc: Run the host (must be built and bundled first).

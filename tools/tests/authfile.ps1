@@ -50,14 +50,17 @@ function Get-AgentMuxAuthFile {
         if (Test-Path -LiteralPath $p) { $candidates += Get-Item -LiteralPath $p }
     } else {
         $base = Join-Path $env:APPDATA 'ai.agentmux.cef.*'
-        $candidates = Get-ChildItem -Path $base -Directory -ErrorAction SilentlyContinue |
+        # Wrap with @(...) so a single match doesn't collapse into a
+        # bare object — `.Count` and `foreach` both need an array under
+        # Set-StrictMode -Version Latest, which this module enables.
+        $candidates = @(Get-ChildItem -Path $base -Directory -ErrorAction SilentlyContinue |
             ForEach-Object { Join-Path $_.FullName 'authkey.dev' } |
             Where-Object { Test-Path -LiteralPath $_ } |
             Get-Item |
-            Sort-Object LastWriteTime -Descending
+            Sort-Object LastWriteTime -Descending)
     }
 
-    if (-not $candidates -or $candidates.Count -eq 0) {
+    if ($candidates.Count -eq 0) {
         throw @"
 No authkey.dev found under %APPDATA%\ai.agentmux.cef.*\.
 Start a dev instance first: ``task dev``. The file is written only by
@@ -166,10 +169,16 @@ function Invoke-AgentMuxService {
         -Body $body `
         -TimeoutSec $TimeoutSec
 
-    if ($null -ne $resp.error -and $resp.error -ne '') {
-        throw "service $Service.$Method returned error: $($resp.error)"
+    # Under Set-StrictMode -Version Latest, $resp.error throws when
+    # the JSON has no `error` field — the server omits it entirely
+    # on success. PSObject.Properties lookup is strict-safe.
+    $errProp = $resp.PSObject.Properties['error']
+    if ($errProp -and $errProp.Value) {
+        throw "service $Service.$Method returned error: $($errProp.Value)"
     }
-    return $resp.data
+    $dataProp = $resp.PSObject.Properties['data']
+    if ($dataProp) { return $dataProp.Value }
+    return $null
 }
 
 function Get-AgentMuxHostLogPath {

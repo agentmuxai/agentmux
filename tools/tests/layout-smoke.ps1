@@ -58,10 +58,17 @@ try {
     # pending actions). If pendingbackendactions is still non-empty
     # the frontend hasn't processed yet — either SettleMs is too
     # short for this machine, or the frontend isn't running.
+    # Property access is PSObject.Properties-based because strict
+    # mode throws on missing properties and the serialized LayoutState
+    # omits rootnode/pending when unset.
     $ls = Invoke-AgentMuxService -Auth $auth -Service object -Method GetObject `
         -Args @("layout:$($tab.layoutstate)")
-    if (-not $ls.rootnode) {
-        Write-Warning "LayoutState has no rootnode yet — frontend may not have drained pendingbackendactions. Pending count: $($ls.pendingbackendactions.Count)"
+    $rootnode = $ls.PSObject.Properties['rootnode']
+    $pending  = $ls.PSObject.Properties['pendingbackendactions']
+    if (-not $rootnode -or -not $rootnode.Value) {
+        $pendingCount = 0
+        if ($pending -and $pending.Value) { $pendingCount = @($pending.Value).Count }
+        Write-Warning "LayoutState has no rootnode yet - frontend may not have drained pendingbackendactions. Pending count: $pendingCount"
     } else {
         Write-Host "[layout-smoke] LayoutState rootnode present"
     }
