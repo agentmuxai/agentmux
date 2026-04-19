@@ -64,3 +64,60 @@ pub struct Rect {
     pub width: f64,
     pub height: f64,
 }
+
+// ── browser.focus_info ──────────────────────────────────────────────────
+
+#[derive(Debug, Deserialize)]
+pub struct FocusInfoReq {
+    pub block_id: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct FocusInfoData {
+    /// null when `document.activeElement` is null or the `<body>`
+    /// (the default resting state with no focused control).
+    pub focused: Option<Element>,
+}
+
+// ── browser.eval ────────────────────────────────────────────────────────
+
+#[derive(Debug, Deserialize)]
+pub struct EvalReq {
+    pub block_id: String,
+    pub script: String,
+    /// If true and the script returns a Promise, wait for it to
+    /// resolve before returning. Maps to CDP `Runtime.evaluate`
+    /// `awaitPromise`.
+    #[serde(default)]
+    pub await_promise: bool,
+}
+
+#[derive(Debug, Serialize)]
+pub struct EvalData {
+    /// The serialized JS return value, whatever shape the script
+    /// produced. `null` if the script returned `undefined` or threw.
+    pub result: serde_json::Value,
+    /// CDP's type tag: "object" | "string" | "number" | "boolean" |
+    /// "undefined" | "function" | "symbol" | "bigint". Kept so
+    /// callers can distinguish `null`-the-value from `null`-the-failure.
+    #[serde(rename = "type")]
+    pub type_: String,
+    /// Populated when the script threw. The message + stack, when
+    /// available. `result` is null in this case.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exception: Option<String>,
+}
+
+// ── browser.screenshot ──────────────────────────────────────────────────
+
+#[derive(Debug, Deserialize)]
+pub struct ScreenshotReq {
+    pub block_id: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ScreenshotData {
+    /// Base64-encoded PNG bytes — same format CDP's
+    /// `Page.captureScreenshot` returns.
+    pub png_base64: String,
+}
