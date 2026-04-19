@@ -222,9 +222,24 @@ function New-AgentMuxThreePaneLayout {
     # Push the full LayoutState back via UpdateObject (not
     # UpdateObjectMeta — layout fields aren't in meta). The backend
     # preserves otype/oid/version and overwrites the rest.
-    $layoutState.pendingbackendactions = $actions
+    #
+    # Rebuild as a hashtable rather than mutating $layoutState: under
+    # Set-StrictMode -Version Latest, assigning to a property that
+    # isn't already present on the PSCustomObject throws. `pendingbackendactions`
+    # is omitted from the serialized JSON when None, so a fresh
+    # LayoutState never has that property in the parsed response.
+    $updatePayload = @{
+        otype                 = "layout"
+        oid                   = $layoutStateOid
+        version               = $layoutState.version
+        pendingbackendactions = $actions
+    }
+    foreach ($propName in @("rootnode", "magnifiednodeid", "focusednodeid", "leaforder", "meta")) {
+        $prop = $layoutState.PSObject.Properties[$propName]
+        if ($prop) { $updatePayload[$propName] = $prop.Value }
+    }
     Invoke-AgentMuxService -Auth $Auth -Service object -Method UpdateObject `
-        -Args @($layoutState, $false) | Out-Null
+        -Args @($updatePayload, $false) | Out-Null
 
     Write-Verbose "Pushed 3 layout actions; waiting ${SettleMs}ms for frontend to drain…"
     Start-Sleep -Milliseconds $SettleMs
