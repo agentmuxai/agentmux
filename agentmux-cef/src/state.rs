@@ -229,6 +229,17 @@ pub struct AppState {
     /// Embedded browser panes (native CefBrowserView per pane).
     pub browser_panes: crate::browser_panes::BrowserPaneManager,
 
+    /// Browser DOM API state — CDP target cache + future connection
+    /// pool. See `crate::browser_api`.
+    pub browser_api: crate::browser_api::BrowserApiState,
+
+    /// CEF remote debugging port (9223 dev / 9222 release). Populated
+    /// by `main.rs` from the same `is_dev` branch that sets
+    /// `Settings.remote_debugging_port`. Used by the browser DOM API
+    /// (`/agentmux/browser/*`) to open CDP WebSocket connections to
+    /// pane targets. See `docs/specs/SPEC_BROWSER_DOM_API.md` §6.
+    pub debug_port: Mutex<u16>,
+
     /// Windows Job Object handle -- keeps backend alive until frontend exits
     #[cfg(target_os = "windows")]
     pub job_handle: Mutex<Option<JobHandle>>,
@@ -260,6 +271,8 @@ impl Default for AppState {
             version_config_dir: Mutex::new(None),
             active_drag: Mutex::new(None),
             browser_panes: crate::browser_panes::BrowserPaneManager::new(),
+            browser_api: crate::browser_api::BrowserApiState::new(),
+            debug_port: Mutex::new(0),
             #[cfg(target_os = "windows")]
             job_handle: Mutex::new(None),
         }
