@@ -1,6 +1,6 @@
 # SPEC: Pane Header Height + Tab Active Indicator Edge-to-Edge
 
-**Status:** Spec — not implemented  
+**Status:** Implemented  
 **Date:** 2026-04-19  
 **Owner:** AgentY
 
@@ -8,11 +8,13 @@
 
 ## 1. Goal
 
-Two visual polish changes to align the UI:
+Three visual polish changes to align the UI:
 
-1. **Pane headers match tab bar height.** Browser pane title bars and block frame headers are shorter than the tab bar, creating a visible height mismatch. Both should be 33 px — the same height as the window header / tab bar row.
+1. **Pane headers match tab height.** Browser pane title bars and block frame headers are shorter than the tabs, creating a visible height mismatch. Both should be 33 px.
 
-2. **Active tab indicator spans edge-to-edge.** The accent bar that marks the selected tab is currently inset 4 px from each side of the tab. It should run the full width of the tab with no inset.
+2. **Active tab indicator spans edge-to-edge.** The accent bar that marks the selected tab is currently inset 4 px from each side. It should run the full width of the tab with no inset.
+
+3. **Tab close button tighter.** The close button hit area is reduced from 20×20 to 16×16 with no padding, for a tighter fit within the tab.
 
 ---
 
@@ -24,11 +26,10 @@ Two visual polish changes to align the UI:
 |---------|------|------|-------|
 | `.window-header` total height | `frontend/app/window/window-header.win32.scss` | 35 | `height: 33px` |
 | `.window-header` top padding | `frontend/app/window/window-header.win32.scss` | 28 | `padding-top: 6px` |
-| **Effective tab height** | — | — | **27px** (33 − 6, tabs are `height: 100%` bottom-aligned inside the padded header) |
 | `.pane-title-bar` (browser pane header) | `frontend/app/block/titlebar.scss` | 9 | `height: 24px` |
 | `--header-height` (block frame header) | `frontend/app/theme.scss` | 42 | `--header-height: 30px` |
 
-The window header is 33 px tall but carries a 6 px `padding-top` (drag/title area above the tabs). Tabs use `height: 100%` inside a flex container with `align-items: end`, so the rendered tab height is **27 px**. The pane title bar (24 px) is 3 px short; the block frame header (30 px) is 3 px too tall. Both should be 27 px.
+**On effective tab height:** The window-header is 33 px with `box-sizing: border-box` and `padding-top: 6px`, giving a CSS content height of 27 px. In theory, `height: 100%` on flex children should resolve to 27 px. In practice, Chromium resolves `height: 100%` on flex items against the border-box height (33 px) when `align-items` is not `stretch` — confirmed visually. The effective rendered tab height is **33 px**, not 27 px. Pane headers should therefore be 33 px to match.
 
 ### 2b. Active tab indicator
 
@@ -51,7 +52,17 @@ File: `frontend/app/tab/tab.scss`, lines 56–65
 }
 ```
 
-The `left: 4px` / `right: 4px` insets leave a visible gap between the indicator and the tab edges. The same inset is inherited by the colored-tab variant at lines 191–193.
+The `left: 4px` / `right: 4px` insets leave a visible gap between the indicator and the tab edges.
+
+### 2c. Tab close button
+
+```scss
+.wave-button {
+    width: 20px;
+    height: 20px;
+    padding: 1px 2px;
+}
+```
 
 ---
 
@@ -63,21 +74,13 @@ The `left: 4px` / `right: 4px` insets leave a visible gap between the indicator 
 
 ```scss
 // Before
-.pane-title-bar {
-    height: 24px;
-    padding: 2px 8px;
-    ...
-}
+height: 24px;
+padding: 2px 8px;
 
 // After
-.pane-title-bar {
-    height: 27px;
-    padding: 0 8px;   // remove vertical padding — flex centering handles it
-    ...
-}
+height: 33px;
+padding: 0 8px;   // remove vertical padding — flex centering handles it
 ```
-
-`align-items: center` is already set on `.pane-title-bar`, so dropping the vertical padding keeps content vertically centered at the new height.
 
 ### Change 2 — `--header-height` CSS variable
 
@@ -88,28 +91,42 @@ The `left: 4px` / `right: 4px` insets leave a visible gap between the indicator 
 --header-height: 30px;
 
 // After
---header-height: 27px;
+--header-height: 33px;
 ```
 
-This variable drives `min-height` / `max-height` on `.block-frame-default-header` (block.scss lines 83–84) and is referenced for layout math at lines 315, 452, 454. All consumers use it via `var(--header-height)` so this is the only edit needed.
+Drives `min-height` / `max-height` on `.block-frame-default-header` (block.scss lines 83–84) and layout math at lines 315, 452, 454.
 
 ### Change 3 — Active tab indicator edge-to-edge
 
 **File:** `frontend/app/tab/tab.scss`
 
 ```scss
-// Before (lines 60–61)
+// Before
 left: 4px;
 right: 4px;
+border-radius: 0 0 2px 2px;
 
 // After
 left: 0;
 right: 0;
+// border-radius removed — flush bar doesn't need rounded corners
 ```
 
-Remove `border-radius: 0 0 2px 2px` as well — at full tab width the rounded corners are imperceptible and inconsistent with a flush edge-to-edge bar.
+### Change 4 — Tab close button tighter
 
-The colored-tab variant (lines 191–193) only sets `background`, so no additional change needed there; it inherits the corrected geometry from the rule above.
+**File:** `frontend/app/tab/tab.scss`
+
+```scss
+// Before
+width: 20px;
+height: 20px;
+padding: 1px 2px;
+
+// After
+width: 16px;
+height: 16px;
+padding: 0;
+```
 
 ---
 
@@ -117,9 +134,9 @@ The colored-tab variant (lines 191–193) only sets `background`, so no addition
 
 | File | Change |
 |------|--------|
-| `frontend/app/block/titlebar.scss` | `height: 24px → 27px`, `padding: 2px 8px → 0 8px` |
-| `frontend/app/theme.scss` | `--header-height: 30px → 27px` |
-| `frontend/app/tab/tab.scss` | `left: 4px → 0`, `right: 4px → 0`, remove `border-radius` on `::after` |
+| `frontend/app/block/titlebar.scss` | `height: 24px → 33px`, `padding: 2px 8px → 0 8px` |
+| `frontend/app/theme.scss` | `--header-height: 30px → 33px` |
+| `frontend/app/tab/tab.scss` | indicator edge-to-edge, close button 20×20 → 16×16 |
 
 No Rust, no backend, no data model changes.
 
@@ -127,7 +144,8 @@ No Rust, no backend, no data model changes.
 
 ## 5. Verification
 
-- Tab bar height visually matches pane title bars and block frame headers.
-- Active tab accent bar spans the full tab width with no visible gap at either edge.
-- Hover and colored-tab states unaffected (no regressions in `tab.scss` hover rules).
-- Layout math using `--header-height` (content offset, overflow positioning) still correct at 33 px.
+- Pane title bars and block frame headers visually match tab height.
+- Active tab accent bar spans the full tab width with no gap at edges.
+- Tab close button sits tighter within the tab.
+- Hover and colored-tab states unaffected.
+- Layout math using `--header-height` correct at 33 px.
