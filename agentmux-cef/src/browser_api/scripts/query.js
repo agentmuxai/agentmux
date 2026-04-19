@@ -36,6 +36,25 @@
     return segs.join(' > ');
   };
 
+  // Snapshot whatever has focus right now as our Element shape.
+  // Returns null when nothing meaningful is focused (document.body
+  // is the default resting state; there's no input focus to report).
+  window.__amq_focus_info = () => {
+    const el = document.activeElement;
+    if (!el || el === document.body) return null;
+    const r = el.getBoundingClientRect();
+    const attrs = {};
+    for (const a of el.attributes) attrs[a.name] = a.value;
+    return {
+      selector: window.__amq_path(el),
+      tag: el.tagName.toLowerCase(),
+      text: (el.textContent || '').slice(0, 500),
+      attrs,
+      rect: { x: r.x, y: r.y, width: r.width, height: r.height },
+      focused: true,
+    };
+  };
+
   window.__amq_query = (selector, limit) => {
     let nodes;
     try {

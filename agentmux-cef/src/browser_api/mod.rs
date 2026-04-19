@@ -35,7 +35,11 @@ pub mod types;
 /// Called from `ipc::start_ipc_server` alongside the existing
 /// `/ipc` + `/health` routes.
 pub fn register_routes(router: Router<Arc<AppState>>) -> Router<Arc<AppState>> {
-    router.route("/agentmux/browser/query", post(routes::query))
+    router
+        .route("/agentmux/browser/query", post(routes::query))
+        .route("/agentmux/browser/focus_info", post(routes::focus_info))
+        .route("/agentmux/browser/eval", post(routes::eval))
+        .route("/agentmux/browser/screenshot", post(routes::screenshot))
 }
 
 /// Shared state for the browser API — primarily the CDP target

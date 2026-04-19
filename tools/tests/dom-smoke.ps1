@@ -104,6 +104,74 @@ try {
     $p2Search = $p2Resp.matches[0]
     Write-Host "[dom-smoke]   P2 search: tag=$($p2Search.tag) rect=($($p2Search.rect.x),$($p2Search.rect.y),$($p2Search.rect.width)x$($p2Search.rect.height))"
 
+    # ── Phase 2 assertions ────────────────────────────────────────────
+
+    Write-Host "[dom-smoke] browser.eval 1+1 in P1"
+    $evalResp = Invoke-AgentMuxBrowserApi -Auth $auth -Method eval `
+        -Body @{ block_id = $p1; script = "1 + 1" }
+    $excProp = $evalResp.PSObject.Properties['exception']
+    if ($excProp -and $excProp.Value) {
+        Write-Error "eval 1+1 unexpectedly threw: $($excProp.Value)"
+    }
+    if ($evalResp.result -ne 2) {
+        Write-Error "eval 1+1 returned $($evalResp.result), expected 2"
+    }
+    Write-Host "[dom-smoke]   eval 1+1 = $($evalResp.result) (type=$($evalResp.type))"
+
+    Write-Host "[dom-smoke] browser.eval with a throwing script (negative test)"
+    $throwResp = Invoke-AgentMuxBrowserApi -Auth $auth -Method eval `
+        -Body @{ block_id = $p1; script = "throw new Error('expected')" }
+    $throwExc = $throwResp.PSObject.Properties['exception']
+    if (-not $throwExc -or -not $throwExc.Value) {
+        Write-Error "throwing eval didn't surface an exception"
+    }
+    if ($throwExc.Value -notmatch 'expected') {
+        Write-Error "exception text didn't include 'expected': '$($throwExc.Value)'"
+    }
+    Write-Host "[dom-smoke]   exception captured: $($throwExc.Value.Substring(0, [Math]::Min($throwExc.Value.Length, 80)))"
+
+    Write-Host "[dom-smoke] browser.focus_info on P1 (expect null or body — nothing user-focused)"
+    $focusResp = Invoke-AgentMuxBrowserApi -Auth $auth -Method focus_info `
+        -Body @{ block_id = $p1 }
+    $focusedProp = $focusResp.PSObject.Properties['focused']
+    if ($focusedProp -and $null -ne $focusedProp.Value) {
+        Write-Host "[dom-smoke]   P1 focused: $($focusedProp.Value.tag) (acceptable — page may have auto-focused something)"
+    } else {
+        Write-Host "[dom-smoke]   P1 focused: null (default resting state)"
+    }
+
+    Write-Host "[dom-smoke] browser.focus_info on P2 after programmatic focus"
+    # Focus the search field via eval, then assert focus_info sees it.
+    Invoke-AgentMuxBrowserApi -Auth $auth -Method eval `
+        -Body @{ block_id = $p2; script = "document.querySelector('textarea[name=\""q\""], input[name=\""q\""]').focus()" } | Out-Null
+    Start-Sleep -Milliseconds 200
+    $focusResp2 = Invoke-AgentMuxBrowserApi -Auth $auth -Method focus_info `
+        -Body @{ block_id = $p2 }
+    $focused2 = $focusResp2.PSObject.Properties['focused']
+    if (-not $focused2 -or $null -eq $focused2.Value) {
+        Write-Error "focus_info didn't report any focused element after programmatic focus"
+    }
+    $focusedTag = $focused2.Value.tag
+    if ($focusedTag -notin @('textarea','input')) {
+        Write-Error "focused element tag was '$focusedTag', expected textarea or input"
+    }
+    Write-Host "[dom-smoke]   P2 focused after focus(): $focusedTag (attrs.name=$($focused2.Value.attrs.name))"
+
+    Write-Host "[dom-smoke] browser.screenshot P1"
+    $shotResp = Invoke-AgentMuxBrowserApi -Auth $auth -Method screenshot `
+        -Body @{ block_id = $p1 }
+    if (-not $shotResp.png_base64) {
+        Write-Error "screenshot returned empty png_base64"
+    }
+    $pngBytes = [Convert]::FromBase64String($shotResp.png_base64)
+    # PNG magic: 89 50 4E 47 0D 0A 1A 0A
+    if ($pngBytes.Length -lt 8 -or
+        $pngBytes[0] -ne 0x89 -or $pngBytes[1] -ne 0x50 -or
+        $pngBytes[2] -ne 0x4E -or $pngBytes[3] -ne 0x47) {
+        Write-Error "screenshot bytes don't start with PNG magic (got $($pngBytes[0..3] | ForEach-Object { '0x{0:X2}' -f $_ } | Join-String -Separator ' '))"
+    }
+    Write-Host "[dom-smoke]   screenshot OK, $($pngBytes.Length) bytes of PNG"
+
     Write-Host "[dom-smoke] PASS" -ForegroundColor Green
     if ($KeepTab) {
         Write-Host "[dom-smoke] -KeepTab set; tab left open: $($tabInfo.tabid)"
