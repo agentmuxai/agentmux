@@ -27,6 +27,30 @@ pub(super) async fn handle_service(
         call.method,
         elapsed.as_secs_f64() * 1000.0,
     );
+
+    // Broadcast every WaveObjUpdate the handler returned so other
+    // clients (additional windows, test harnesses, etc.) learn about
+    // changes they didn't initiate. The calling HTTP client also gets
+    // `updates` in the response body — this broadcast is for
+    // everybody else on the event bus. Before this, only a handful
+    // of handlers (agent.open, blockcontroller events) broadcast
+    // manually, so an external harness's CreateTab / UpdateObject
+    // were invisible to the frontend.
+    if let Some(updates) = &result.updates {
+        for update in updates {
+            if let Ok(data) = serde_json::to_value(update) {
+                let oref = format!("{}:{}", update.otype, update.oid);
+                state.event_bus.broadcast_event(
+                    &crate::backend::eventbus::WSEventType {
+                        eventtype: "waveobj:update".to_string(),
+                        oref,
+                        data: Some(data),
+                    },
+                );
+            }
+        }
+    }
+
     Json(result)
 }
 
