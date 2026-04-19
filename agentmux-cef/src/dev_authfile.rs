@@ -8,19 +8,20 @@
 //! harness in any language can call `POST /agentmux/service` against a
 //! running `task dev` instance.
 //!
-//! Gated on `cfg(debug_assertions)` at both the module declaration site
-//! (in `main.rs`) and via `#![cfg(debug_assertions)]` here. Release
-//! builds contain no symbols from this module — verifiable in CI by
-//! `grep -R authkey.dev target/release/`.
+//! Gated at the call site by a runtime `AGENTMUX_DEV=1` env-var check
+//! (see `main.rs`). The first revision of this module used
+//! `cfg(debug_assertions)`, but `task dev` builds with `--release`
+//! (Taskfile.yml `build:host:windows`), which made the gate a no-op
+//! exactly where we needed the file. The runtime env-var gate matches
+//! the same signal `sidecar.rs` uses to pick the dev data dir.
 //!
 //! On Windows the file is created with an owner-only DACL via
 //! `SetNamedSecurityInfoW`, with `PROTECTED_DACL_SECURITY_INFORMATION`
 //! to break parent-dir inheritance — defense against a hostile parent
-//! ACL change after file creation.
+//! ACL change after file creation. On Unix the file is chmod'd 0600
+//! after creation to override the default umask.
 //!
 //! Spec: `docs/specs/SPEC_TEST_API_ACCESS.md` §5–§6.
-
-#![cfg(debug_assertions)]
 
 use serde::Serialize;
 use std::path::Path;
