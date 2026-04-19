@@ -34,6 +34,10 @@
 param(
     [string]$LogPath,
     [switch]$SkipAuthFile,
+    # Create the 3-pane layout via the service API and clean up after.
+    # Omit this flag to use whatever layout is currently on screen
+    # (requires manual setup per README "Setup before running" §A).
+    [switch]$CreateLayout,
     [int]$TypeDelayMs = 300,
     [int]$AfterTypeMs = 400
 )
@@ -41,8 +45,12 @@ param(
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes, System.Windows.Forms
 
-# Pull in Get-AgentMuxAuthFile / Get-AgentMuxHostLogPath helpers.
+# Pull in Get-AgentMuxAuthFile / Get-AgentMuxHostLogPath helpers and
+# (when -CreateLayout is set) the layout-builder helpers.
 . (Join-Path $PSScriptRoot 'authfile.ps1')
+if ($CreateLayout) {
+    . (Join-Path $PSScriptRoot 'three-pane-layout.ps1')
+}
 
 # ── Win32 interop ───────────────────────────────────────────────────────
 $win32 = @'
@@ -169,13 +177,31 @@ if (-not $LogPath -or -not (Test-Path $LogPath)) {
     Write-Host "[setup] Log path: $LogPath"
 }
 
+# ── Optional: programmatic layout setup ─────────────────────────────────
+
+$createdTabInfo = $null
+if ($CreateLayout) {
+    if (-not $auth) {
+        Write-Error "-CreateLayout requires the auth file (cannot be combined with -SkipAuthFile)."
+    }
+    Write-Host "[setup] Creating 3-pane layout via service API…"
+    $createdTabInfo = New-AgentMuxTestTab -Auth $auth
+    $layoutInfo = New-AgentMuxThreePaneLayout -Auth $auth -TabInfo $createdTabInfo
+    Write-Host "[setup]   tab=$($createdTabInfo.tabid) p1=$($layoutInfo.p1) t=$($layoutInfo.t) p2=$($layoutInfo.p2)"
+    # Give the browsers a moment to reach google.com so the search
+    # box is present when the first click lands. Without this the
+    # harness can click at a pane position that's still rendering the
+    # navigation-in-progress state.
+    Start-Sleep -Milliseconds 2500
+}
+
 # ── Layout assumptions ──────────────────────────────────────────────────
 #
-# The harness assumes the user has manually set up P1 browser / T
-# terminal / P2 browser side-by-side and navigated both browsers to
-# google.com. The "create the layout programmatically" path through
-# UIA context menus is brittle enough that it belongs in a follow-up
-# commit; leaving it manual keeps the FIRST run of this spec deliverable.
+# Without -CreateLayout, the harness assumes the user has manually set
+# up P1 browser / T terminal / P2 browser side-by-side and navigated
+# both browsers to google.com. With -CreateLayout, the harness creates
+# that layout programmatically in a fresh tab and tears it down in
+# finally.
 #
 # Click coordinates are read from an accompanying JSON file
 # `pane-focus-stress.targets.json` in the same dir:
@@ -191,14 +217,39 @@ if (-not $LogPath -or -not (Test-Path $LogPath)) {
 # then re-run this harness as many times as needed.
 
 $targetsPath = Join-Path $PSScriptRoot 'pane-focus-stress.targets.json'
-if (-not (Test-Path $targetsPath)) {
+if (Test-Path $targetsPath) {
+    $targets = Get-Content -LiteralPath $targetsPath -Raw | ConvertFrom-Json
+    Write-Host "[setup] Using custom click targets from $targetsPath"
+} elseif ($CreateLayout) {
+    # With -CreateLayout the window is a known (50, 50) at 1300×900
+    # with 3 equal-width panes (P1 | T | P2). These defaults come
+    # from that geometry: tab bar + browser nav bar ≈ 130px of
+    # chrome, so pane content starts around y=130 with room up to
+    # y=900. Browser address bar is near the top of each pane
+    # (~y=155), Google search box lives in the middle of the pane
+    # content area, terminal prompt sits low within the middle pane.
+    # Tweak by hand via a pane-focus-stress.targets.json override.
+    $paneWidth = 1300 / 3
+    $p1Cx = [int](50 + $paneWidth * 0.5)
+    $tCx  = [int](50 + $paneWidth * 1.5)
+    $p2Cx = [int](50 + $paneWidth * 2.5)
+    $targets = [pscustomobject]@{
+        P1_address = @($p1Cx, 155)
+        P1_search  = @($p1Cx, 430)
+        P2_address = @($p2Cx, 155)
+        P2_search  = @($p2Cx, 430)
+        Terminal   = @($tCx,  700)
+    }
+    Write-Host "[setup] Using auto-computed click targets from window geometry"
+} else {
     Write-Error @"
 Missing $targetsPath.
 Create it with 5 (x, y) coordinates for P1_search, P1_address, P2_search, P2_address, Terminal.
 Capture them via the windows-mcp Snapshot tool or by eyeballing a screenshot.
+Alternatively, pass -CreateLayout to have the harness build a standard
+3-pane layout and auto-compute coordinates from its geometry.
 "@
 }
-$targets = Get-Content -LiteralPath $targetsPath -Raw | ConvertFrom-Json
 
 # ── Round definitions ───────────────────────────────────────────────────
 
@@ -254,7 +305,9 @@ $rounds = @(
 $failures = @()
 $stepCount = 0
 $startTime = Get-Date
+$exitCode = 1
 
+try {
 foreach ($round in $rounds) {
     Write-Host ""
     Write-Host "=== Round: $($round.name) ===" -ForegroundColor Cyan
@@ -325,19 +378,32 @@ foreach ($round in $rounds) {
 Write-Host ""
 if ($failures.Count -eq 0) {
     Write-Host "PASS ($stepCount/$stepCount steps)" -ForegroundColor Green
-    exit 0
+    $exitCode = 0
+} else {
+    $ts = Get-Date -Format 'yyyyMMdd-HHmmss'
+    $reportPath = Join-Path $env:TEMP "pane-focus-stress-$ts.log"
+    $failures | ForEach-Object {
+        "=== FAIL step $($_.step) ($($_.round)) target=$($_.target) ==="
+        "reasons: $($_.reasons -join '; ')"
+        "--- log ---"
+        $_.logs
+        ""
+    } | Out-File -LiteralPath $reportPath -Encoding UTF8
+
+    Write-Host "FAIL: $($failures.Count)/$stepCount steps failed" -ForegroundColor Red
+    Write-Host "Report: $reportPath" -ForegroundColor Red
+    $exitCode = 1
+}
+}  # end try
+finally {
+    # Cleanup: close the test tab if -CreateLayout created one.
+    # Runs on both happy-path exit and exceptions (e.g. missing
+    # coords, UIA errors mid-round) so we don't leak test tabs
+    # across runs.
+    if ($createdTabInfo -and $auth) {
+        Write-Host "[teardown] Closing test tab $($createdTabInfo.tabid)"
+        Remove-AgentMuxTestTab -Auth $auth -TabInfo $createdTabInfo
+    }
 }
 
-$ts = Get-Date -Format 'yyyyMMdd-HHmmss'
-$reportPath = Join-Path $env:TEMP "pane-focus-stress-$ts.log"
-$failures | ForEach-Object {
-    "=== FAIL step $($_.step) ($($_.round)) target=$($_.target) ==="
-    "reasons: $($_.reasons -join '; ')"
-    "--- log ---"
-    $_.logs
-    ""
-} | Out-File -LiteralPath $reportPath -Encoding UTF8
-
-Write-Host "FAIL: $($failures.Count)/$stepCount steps failed" -ForegroundColor Red
-Write-Host "Report: $reportPath" -ForegroundColor Red
-exit 1
+exit $exitCode
