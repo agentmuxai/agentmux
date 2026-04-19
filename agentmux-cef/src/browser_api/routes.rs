@@ -508,7 +508,7 @@ pub async fn dispatch_key(
     if let Some(sel) = &req.selector {
         let sel_js = serde_json::to_string(sel).unwrap_or_else(|_| "\"\"".into());
         let script = format!(
-            "(() => {{ const e = document.querySelector({sel}); \
+            "(() => {{ const e = document.querySelector({sel_js}); \
                 if (!e) return false; e.focus(); return true; }})()"
         );
         let reply = cdp
