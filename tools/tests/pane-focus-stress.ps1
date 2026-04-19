@@ -106,16 +106,30 @@ function Send-Text([string]$text) {
 
 function Read-LogSince([string]$path, [datetime]$since) {
     if (-not (Test-Path $path)) { return @() }
-    $sinceStr = $since.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss")
+    # The host log on disk is JSON-per-line, not the ANSI-colored text
+    # that the task-dev stdout shows. Try JSON first; fall back to the
+    # ANSI format so this function works against either source. Parsed
+    # timestamps come back Kind=Local (DateTime.Parse converts the Z
+    # suffix to local time), which compares correctly against Get-Date.
     Get-Content -LiteralPath $path -Encoding UTF8 |
-        Where-Object { $_ -match '^\e\[2m(?<ts>\S+)\e\[0m' } |
         ForEach-Object {
-            if ($_ -match '^\x1b\[2m(?<ts>[^\x1b]+)\x1b\[0m') {
+            $line = $_
+            # JSON path (disk log): {"timestamp":"2026-...Z",...}
+            if ($line.StartsWith('{')) {
+                if ($line -match '"timestamp"\s*:\s*"(?<ts>[^"]+)"') {
+                    try {
+                        $ts = [datetime]::Parse($matches['ts'])
+                        if ($ts -ge $since) { $line }
+                    } catch {}
+                }
+            }
+            # ANSI path (tty / stdout): \e[2m<timestamp>\e[0m ...
+            elseif ($line -match '^\x1b\[2m(?<ts>[^\x1b]+)\x1b\[0m') {
                 try {
                     $ts = [datetime]::Parse($matches['ts'])
-                    if ($ts -ge $since) { $_ }
+                    if ($ts -ge $since) { $line }
                 } catch {}
-            } else { $_ }
+            }
         }
 }
 
@@ -180,6 +194,7 @@ if (-not $LogPath -or -not (Test-Path $LogPath)) {
 # ── Optional: programmatic layout setup ─────────────────────────────────
 
 $createdTabInfo = $null
+$layoutInfo = $null
 if ($CreateLayout) {
     if (-not $auth) {
         Write-Error "-CreateLayout requires the auth file (cannot be combined with -SkipAuthFile)."
@@ -320,8 +335,36 @@ foreach ($round in $rounds) {
         if (-not $coords) { Write-Error "Missing coords for target '$targetName'" }
 
         $preTime = Get-Date
+
+        # Search-box targets (P1_search, P2_search) use the DOM API to
+        # focus the Google search input before the SendKeys delivery.
+        # Pixel-click alone routinely missed the input on HiDPI or with
+        # a slightly drifted layout (11/24 failures before this change).
+        # Pixel click still runs first — it's what transfers Win32 focus
+        # to the pane HWND so the pane-wndproc log assertion stays valid.
+        # focus_element then fixes the RENDERER-side DOM focus so the
+        # SendKeys keystrokes actually land in the search field, not on
+        # an empty pane area the pixel click happened to hit.
+        $isDomTarget = ($targetName -eq 'P1_search' -or $targetName -eq 'P2_search')
+        $domBlockId = $null
+        $domSelector = "textarea[name='q'], input[name='q']"
+        if ($isDomTarget -and $layoutInfo) {
+            $domBlockId = if ($targetName -eq 'P1_search') { $layoutInfo.p1 } else { $layoutInfo.p2 }
+        }
+
         Click-Pixel $coords[0] $coords[1]
         Start-Sleep -Milliseconds $TypeDelayMs
+
+        if ($domBlockId) {
+            try {
+                Invoke-AgentMuxBrowserApi -Auth $auth -Method focus_element `
+                    -Body @{ block_id = $domBlockId; selector = $domSelector } | Out-Null
+                Start-Sleep -Milliseconds 100
+            } catch {
+                Write-Warning "focus_element for $targetName failed: $_"
+            }
+        }
+
         Send-Text $text
         Start-Sleep -Milliseconds $AfterTypeMs
 
@@ -345,6 +388,26 @@ foreach ($round in $rounds) {
         if ((-not $expectedPaneKeys) -and $paneKeyMatches.Count -gt 0) {
             $status = 'FAIL'
             $reasons += "keystrokes leaked to pane HWND ($($paneKeyMatches.Count) events)"
+        }
+        # DOM-side verification: if this was a search-box step and we
+        # have the block id, eval the field's `.value` and require it
+        # to CONTAIN the text we typed. Catches the case where Win32
+        # keys landed somewhere else entirely (e.g. focus got stolen
+        # mid-typing). Only appended — does not replace the log checks.
+        if ($domBlockId -and $status -eq 'PASS') {
+            try {
+                $valResp = Invoke-AgentMuxBrowserApi -Auth $auth -Method eval `
+                    -Body @{ block_id = $domBlockId; script = "document.querySelector(`"$domSelector`")?.value ?? ''" }
+                $valProp = $valResp.PSObject.Properties['result']
+                $actual = if ($valProp) { [string]$valProp.Value } else { '' }
+                if ($actual -notlike "*${text}*") {
+                    $status = 'FAIL'
+                    $reasons += "DOM value for search box did not contain '$text' (got '$actual')"
+                }
+            } catch {
+                $status = 'FAIL'
+                $reasons += "DOM value verification threw: $_"
+            }
         }
         if ($renderFoundFalse.Count -gt 0) {
             $status = 'FAIL'
