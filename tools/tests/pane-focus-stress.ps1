@@ -322,25 +322,23 @@ if (Test-Path $targetsPath) {
     #   - pane header + browser nav bar: ~40 px each in P1/P2
     #   - content below that fills the rest
     # Panes: 3 equal horizontal columns. Centers at 1/6, 3/6, 5/6 of window width.
-    # Read back ACTUAL pane HWND positions. The "chrome above pane"
-    # offset depends on theme/DPI/window-decoration settings, so we
-    # can't just pick a magic y. Strategy:
-    #   - address bar is in main window's DOM, ABOVE the pane HWND
-    #   - pick a y that's halfway between the window top and the
-    #     first pane HWND top — that reliably lands in the nav bar.
+    # Y-coords measured from the actual UIAutomation tree on this
+    # codebase's layout at window (50, 50, 800x900):
+    #   - browser address-bar input centre: ≈ y=137 (window-y + 87)
+    #   - Google search field centre:        ≈ y=463 (window-y + 413)
+    #   - terminal input centre:             ≈ y=257 (window-y + 207)
+    # These are Chromium-layout offsets — tab bar + pane header heights
+    # — so they're stable across window sizes on this host. If the
+    # pane/nav-bar CSS ever changes, remeasure with
+    # `mcp__windows-mcp__Snapshot` and update these constants.
     $paneTop = Get-AgentMuxPaneTop -MainHwnd $main.MainWindowHandle -WindowY $winY
     $paneWidth = $winW / 3
     $p1Cx = [int]($winX + $paneWidth * 0.5)
     $tCx  = [int]($winX + $paneWidth * 1.5)
     $p2Cx = [int]($winX + $paneWidth * 2.5)
-    # Nav bar lives roughly in the bottom 2/3 of the chrome above the
-    # pane HWND; pick 2/3 down from window top to pane top.
-    $addressY = [int]($winY + (($paneTop - $winY) * 0.66))
-    # Search box is roughly mid-height of the browser content area.
-    # Pane runs from $paneTop to near window bottom.
-    $paneBottom = $winY + $winH - 20  # account for status bar
-    $searchY  = [int]($paneTop + ($paneBottom - $paneTop) * 0.35)
-    $termY    = [int]($paneTop + ($paneBottom - $paneTop) * 0.55)
+    $addressY = $winY + 87
+    $searchY  = $winY + 413
+    $termY    = $winY + 207
     $targets = [pscustomobject]@{
         P1_address = @($p1Cx, $addressY)
         P1_search  = @($p1Cx, $searchY)
@@ -349,7 +347,7 @@ if (Test-Path $targetsPath) {
         Terminal   = @($tCx,  $termY)
     }
     Write-Host "[setup] Auto-computed targets:"
-    Write-Host "         paneTop=$paneTop paneBottom=$paneBottom"
+    Write-Host "         paneTop=$paneTop"
     Write-Host "         x: P1=$p1Cx T=$tCx P2=$p2Cx"
     Write-Host "         y: addressY=$addressY searchY=$searchY termY=$termY"
 } else {
