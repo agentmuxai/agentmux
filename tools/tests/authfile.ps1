@@ -124,8 +124,18 @@ function Invoke-AgentMuxService {
     .PARAMETER TimeoutSec
     HTTP timeout. Default 15s.
 
+    .PARAMETER Uicontext
+    UIContext to send with the call. Required by methods that depend
+    on the active tab (e.g. object.CreateBlock reads `activetabid`
+    from uicontext — not args — and returns an error without it).
+    Pass @{ activetabid = $tabId }.
+
     .EXAMPLE
     $client = Invoke-AgentMuxService -Auth $auth -Service client -Method GetClientData -Args @()
+
+    .EXAMPLE
+    $blockId = Invoke-AgentMuxService -Auth $auth -Service object -Method CreateBlock `
+        -Args @($blockDef, $rtOpts) -Uicontext @{ activetabid = $tabId }
     #>
     [CmdletBinding()]
     param(
@@ -133,6 +143,7 @@ function Invoke-AgentMuxService {
         [Parameter(Mandatory)] [string]$Service,
         [Parameter(Mandatory)] [string]$Method,
         [object[]]$Args = @(),
+        [hashtable]$Uicontext,
         [int]$TimeoutSec = 15
     )
 
@@ -147,7 +158,7 @@ function Invoke-AgentMuxService {
         service   = $Service
         method    = $Method
         args      = $Args
-        uicontext = $null
+        uicontext = $Uicontext
     } | ConvertTo-Json -Depth 20 -Compress
 
     $resp = Invoke-RestMethod -Method Post -Uri $url `
