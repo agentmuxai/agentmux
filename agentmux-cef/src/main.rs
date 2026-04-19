@@ -25,7 +25,6 @@ mod app;
 mod browser_panes;
 mod client;
 mod commands;
-#[cfg(debug_assertions)]
 mod dev_authfile;
 mod events;
 mod ipc;
@@ -254,12 +253,18 @@ fn main() {
         std::process::exit(1);
     }
 
-    // Dev-only: write authkey.dev so external test harnesses can call the
-    // service API without polling logs or driving the UI. Release builds
-    // skip this entirely (debug_assertions is false). See
-    // docs/specs/SPEC_TEST_API_ACCESS.md §5.
-    #[cfg(debug_assertions)]
-    {
+    // Dev-only: write authkey.dev so external test harnesses can call
+    // the service API without polling logs or driving the UI. Gate is
+    // runtime, not cfg(debug_assertions), because `task dev` builds
+    // --release (Taskfile.yml `build:host:windows`) — a compile-time
+    // gate would silently no-op the file write in dev mode, defeating
+    // the purpose. Taskfile sets AGENTMUX_DEV=1 on the dev task; the
+    // user's installed/portable builds do not, so the file is only
+    // written when the operator has opted into dev mode for THIS run.
+    // See docs/specs/SPEC_TEST_API_ACCESS.md §3 (threat model) — the
+    // attacker class affected is "same-user local process", which we
+    // do not defend against.
+    if std::env::var("AGENTMUX_DEV").as_deref() == Ok("1") {
         let endpoints = app_state.backend_endpoints.lock().clone();
         let auth_key = app_state.auth_key.lock().clone();
         let ipc_token = app_state.ipc_token.clone();
