@@ -40,6 +40,10 @@ pub fn register_routes(router: Router<Arc<AppState>>) -> Router<Arc<AppState>> {
         .route("/agentmux/browser/focus_info", post(routes::focus_info))
         .route("/agentmux/browser/eval", post(routes::eval))
         .route("/agentmux/browser/screenshot", post(routes::screenshot))
+        .route("/agentmux/browser/click_element", post(routes::click_element))
+        .route("/agentmux/browser/focus_element", post(routes::focus_element))
+        .route("/agentmux/browser/dispatch_key", post(routes::dispatch_key))
+        .route("/agentmux/browser/navigate", post(routes::navigate))
 }
 
 /// Shared state for the browser API — primarily the CDP target

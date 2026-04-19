@@ -121,3 +121,61 @@ pub struct ScreenshotData {
     /// `Page.captureScreenshot` returns.
     pub png_base64: String,
 }
+
+// ── browser.click_element ───────────────────────────────────────────────
+
+#[derive(Debug, Deserialize)]
+pub struct ClickElementReq {
+    pub block_id: String,
+    pub selector: String,
+}
+
+// ── browser.focus_element ───────────────────────────────────────────────
+
+#[derive(Debug, Deserialize)]
+pub struct FocusElementReq {
+    pub block_id: String,
+    pub selector: String,
+}
+
+// ── browser.dispatch_key ────────────────────────────────────────────────
+
+#[derive(Debug, Deserialize)]
+pub struct DispatchKeyReq {
+    pub block_id: String,
+    /// Optional CSS selector: focus this element before dispatching
+    /// the key event(s). If absent, the key lands on whatever has
+    /// focus currently.
+    #[serde(default)]
+    pub selector: Option<String>,
+    /// Send this text as `Input.insertText` (atomic, preserves IME
+    /// and autocomplete behaviour). Mutually exclusive with `key`.
+    #[serde(default)]
+    pub text: Option<String>,
+    /// Send this named key as a `keyDown`+`keyUp` pair. Supported:
+    /// `Enter`, `Tab`, `Escape`, `Backspace`, `ArrowUp`, `ArrowDown`,
+    /// `ArrowLeft`, `ArrowRight`, `Space`. Unknown keys → error.
+    #[serde(default)]
+    pub key: Option<String>,
+}
+
+// ── browser.navigate ────────────────────────────────────────────────────
+
+#[derive(Debug, Deserialize)]
+pub struct NavigateReq {
+    pub block_id: String,
+    pub url: String,
+}
+
+// ── Generic "ok:true" success body for write endpoints ──────────────────
+
+#[derive(Debug, Serialize)]
+pub struct AckData {
+    pub ok: bool,
+}
+
+impl AckData {
+    pub fn new() -> Self {
+        Self { ok: true }
+    }
+}
