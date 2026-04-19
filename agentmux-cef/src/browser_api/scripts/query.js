@@ -55,6 +55,22 @@
     };
   };
 
+  // Return viewport-space centroid of the first selector match, or
+  // null if no element matches. Used by /agentmux/browser/click_element
+  // to convert a CSS selector into Input.dispatchMouseEvent coords.
+  window.__amq_centroid_of = (selector) => {
+    let el;
+    try { el = document.querySelector(selector); } catch (e) { return null; }
+    if (!el) return null;
+    // Scroll into view so the centroid is actually clickable. Chromium
+    // silently drops dispatchMouseEvent events that land outside the
+    // visible viewport; without the scroll, an off-screen selector
+    // would look like a successful call that does nothing.
+    el.scrollIntoView({ block: 'center', inline: 'center' });
+    const r = el.getBoundingClientRect();
+    return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+  };
+
   window.__amq_query = (selector, limit) => {
     let nodes;
     try {
