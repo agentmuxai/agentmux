@@ -16,6 +16,7 @@ import { SubagentViewModel } from "@/app/view/subagent/subagent";
 import { SwarmViewModel } from "@/app/view/swarm/swarm";
 import { EditorViewModel } from "@/app/view/editor/editor";
 import { BrowserViewModel } from "@/app/view/browser/browser";
+import { invokeCommand } from "@/app/platform/ipc";
 import { ErrorBoundary } from "@/element/errorboundary";
 import { CenteredDiv } from "@/element/quickelems";
 import { NodeModel, useDebouncedNodeInnerRect } from "@/layout/index";
@@ -173,6 +174,17 @@ function BlockFull({ nodeModel, viewModel }: FullBlockProps): JSX.Element {
             console.log("focusedChild focus", nodeModel.blockId);
             nodeModel.focusNode();
         }
+        // Any DOM element gaining focus lives in the main window's
+        // render widget (pane HWNDs are OS-level and never fire DOM
+        // focus events). Tell the host to move Win32 keyboard focus
+        // back to the main HWND — without this, a previously-clicked
+        // browser pane keeps Win32 focus and subsequent keystrokes
+        // keep routing there instead of the now-focused element.
+        // Browser panes' address-bar onFocus handler fires the same
+        // IPC; this widens the trigger to every non-pane block
+        // (terminal, agent, forge, editor, ...). Idempotent when
+        // focus is already on main.
+        invokeCommand("main_window_focus", {}).catch(() => {});
     };
 
     const setFocusTarget = () => {
