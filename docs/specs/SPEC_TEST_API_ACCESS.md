@@ -131,10 +131,17 @@ the key.
 - **Cleanup**: overwritten on every fresh startup (superseded). Not
   deleted on shutdown (next startup owns the overwrite — deletes on
   shutdown can race with harnesses reading).
-- **Gate**: `#[cfg(debug_assertions)]` surrounding both the write and
-  the ACL code, and the struct that defines the file format.
-- **Release behaviour**: file is never written. Harnesses that look
-  for it fail fast.
+- **Gate**: runtime check `std::env::var("AGENTMUX_DEV") == "1"`
+  surrounding the write call site. The first revision used
+  `#[cfg(debug_assertions)]`, but `task dev` builds with `--release`
+  (Taskfile.yml `build:host:windows`), which silently no-op'd the
+  write exactly where it was needed. The env-var gate reuses the
+  same signal `sidecar.rs` already uses to pick the dev data dir.
+- **Release behaviour**: file is not written unless the operator
+  explicitly sets `AGENTMUX_DEV=1` for that launch. Installed and
+  portable builds do not set the variable. The "same-user local
+  process" attacker class can set the variable on a launch they
+  control, but that attacker class is already out of scope (§3).
 
 **Pros**
 - Works for any language; no SDK required.
@@ -285,14 +292,12 @@ parse logs:
 
 ## 6. Code changes
 
-### 6.1 `agentmux-cef/src/sidecar.rs`
+### 6.1 `agentmux-cef/src/main.rs`
 
-After `Backend successfully started` log line, when
-`cfg(debug_assertions)`:
+After `backend_ready` is confirmed, when `AGENTMUX_DEV=1`:
 
 ```rust
-#[cfg(debug_assertions)]
-{
+if std::env::var("AGENTMUX_DEV").as_deref() == Ok("1") {
     write_dev_auth_file(
         &data_dir,
         &auth_key,
@@ -304,8 +309,11 @@ After `Backend successfully started` log line, when
 }
 ```
 
-New helper `fn write_dev_auth_file(...)` in the same file (or a new
-`src/dev_authfile.rs`), gated by `#[cfg(debug_assertions)]`.
+New helper `fn write_dev_auth_file(...)` in `src/dev_authfile.rs`,
+no `cfg` gate on the module — the runtime env-var gate at the call
+site is the only opt-in. Symbols ship in release binaries; the file
+is only created when the operator sets `AGENTMUX_DEV=1` for the
+launch (which `task dev` does via Taskfile.yml).
 
 ### 6.2 ACL logic
 
@@ -321,12 +329,15 @@ Unix (not currently a target, but for future parity):
 Both paths verified by a unit test that reads the DACL back and asserts
 only the current user's SID is present.
 
-### 6.3 Release build is compile-time unreachable
+### 6.3 Release build behaviour
 
-Both the helper function and its call site are under `#[cfg(debug_assertions)]`.
-A release build's binary won't contain the helper at all. A
-`grep -R authkey.dev agentmux-cef/target/release/` on the built binary
-must return zero hits — verified in CI.
+The helper symbols are present in release binaries (`grep authkey.dev`
+on a release build returns ~2 hits — the `FILE_NAME` const and the
+log message format string). The file is only created when the
+operator sets `AGENTMUX_DEV=1` for the launch. The threat model in
+§3 already accepts that the same-user local-process attacker can do
+this, so the runtime gate is defense-in-depth rather than a hard
+boundary.
 
 ### 6.4 Harness README update
 
