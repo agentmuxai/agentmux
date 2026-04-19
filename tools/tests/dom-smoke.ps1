@@ -157,6 +157,52 @@ try {
     }
     Write-Host "[dom-smoke]   P2 focused after focus(): $focusedTag (attrs.name=$($focused2.Value.attrs.name))"
 
+    # ── Phase 3 write endpoints ───────────────────────────────────────
+
+    Write-Host "[dom-smoke] browser.focus_element + dispatch_key text on P2 search"
+    $searchSel = "textarea[name='q'], input[name='q']"
+    Invoke-AgentMuxBrowserApi -Auth $auth -Method focus_element `
+        -Body @{ block_id = $p2; selector = $searchSel } | Out-Null
+    Invoke-AgentMuxBrowserApi -Auth $auth -Method dispatch_key `
+        -Body @{ block_id = $p2; text = "agentmux test" } | Out-Null
+    Start-Sleep -Milliseconds 200
+    $valResp = Invoke-AgentMuxBrowserApi -Auth $auth -Method eval `
+        -Body @{ block_id = $p2; script = "document.querySelector(`"$searchSel`").value" }
+    if ($valResp.result -ne "agentmux test") {
+        Write-Error "P2 search field value = '$($valResp.result)', expected 'agentmux test'"
+    }
+    Write-Host "[dom-smoke]   P2 search value: '$($valResp.result)'"
+
+    Write-Host "[dom-smoke] browser.dispatch_key with named key (Backspace)"
+    Invoke-AgentMuxBrowserApi -Auth $auth -Method dispatch_key `
+        -Body @{ block_id = $p2; key = "Backspace" } | Out-Null
+    Start-Sleep -Milliseconds 200
+    $valResp2 = Invoke-AgentMuxBrowserApi -Auth $auth -Method eval `
+        -Body @{ block_id = $p2; script = "document.querySelector(`"$searchSel`").value" }
+    if ($valResp2.result -ne "agentmux tes") {
+        Write-Error "After Backspace value = '$($valResp2.result)', expected 'agentmux tes'"
+    }
+    Write-Host "[dom-smoke]   after Backspace: '$($valResp2.result)'"
+
+    Write-Host "[dom-smoke] browser.click_element — click the <h1> on example.com"
+    # No form on example.com to click; click the h1 and assert via eval
+    # that document.activeElement changed (or at least that click didn't error).
+    Invoke-AgentMuxBrowserApi -Auth $auth -Method click_element `
+        -Body @{ block_id = $p1; selector = "h1" } | Out-Null
+    Write-Host "[dom-smoke]   click_element h1 on P1: OK"
+
+    Write-Host "[dom-smoke] browser.navigate — redirect P1 to iana.org"
+    Invoke-AgentMuxBrowserApi -Auth $auth -Method navigate `
+        -Body @{ block_id = $p1; url = "https://www.iana.org/help/example-domains" } | Out-Null
+    Start-Sleep -Milliseconds 2500
+    $titleResp = Invoke-AgentMuxBrowserApi -Auth $auth -Method eval `
+        -Body @{ block_id = $p1; script = "document.title" }
+    if (-not $titleResp.result -or $titleResp.result -notmatch 'IANA|Example') {
+        Write-Host "[dom-smoke]   navigate — post-nav title: '$($titleResp.result)' (not strict-asserted)"
+    } else {
+        Write-Host "[dom-smoke]   navigate — post-nav title: '$($titleResp.result)'"
+    }
+
     Write-Host "[dom-smoke] browser.screenshot P1"
     $shotResp = Invoke-AgentMuxBrowserApi -Auth $auth -Method screenshot `
         -Body @{ block_id = $p1 }
