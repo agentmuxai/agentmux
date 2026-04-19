@@ -82,7 +82,11 @@ pub async fn start_ipc_server(state: Arc<AppState>) -> u16 {
 
     let mut app = Router::new()
         .route("/ipc", post(handle_ipc))
-        .route("/health", get(health))
+        .route("/health", get(health));
+    // Browser DOM API routes (`/agentmux/browser/*`). Token auth is
+    // enforced inside each handler — same bearer scheme as /ipc.
+    app = crate::browser_api::register_routes(app);
+    let mut app = app
         .layer(CorsLayer::permissive())
         .with_state(state);
 

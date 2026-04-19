@@ -22,6 +22,7 @@
 )]
 
 mod app;
+mod browser_api;
 mod browser_panes;
 mod client;
 mod commands;
@@ -319,10 +320,12 @@ fn main() {
     let cache_dir = CefString::from(data_dir.to_str().unwrap_or(""));
 
     // Configure CEF settings.
+    let debug_port: u16 = if is_dev { 9223 } else { 9222 };
+    *app_state.debug_port.lock() = debug_port;
     let settings = Settings {
         no_sandbox: 1,
         background_color: 0xFF000000,
-        remote_debugging_port: if is_dev { 9223 } else { 9222 },
+        remote_debugging_port: debug_port as i32,
         root_cache_path: cache_dir,
         resources_dir_path: resources_dir,
         locales_dir_path: locales_dir,
