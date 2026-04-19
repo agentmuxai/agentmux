@@ -66,3 +66,53 @@ None of these needed 24/24 on the stress test to be valuable. They're the real w
 ## Bottom line
 
 Shipped the DOM API (four PRs, all merged). Exposed a real Win32 focus-routing bug that's been hidden for ≥2 weeks by a blind log parser. Did *not* hit the 24/24 target, but the target was based on a false reading anyway. Next pickup is (3) + (4) in the action table above.
+
+---
+
+## Post-reboot addendum (same day)
+
+After reboot, toolchain compiled clean in 2m09s — transient state, as expected. Dug into the focus-reclaim failure and found **two separate issues** layered on top of each other:
+
+### Issue 1 — harness hardcoded a 1300×900 window on a 900×1600 portrait monitor
+
+`MoveWindow` silently clamps to the primary screen. Requesting 1300 wide got 800–920 actual depending on chrome. The "auto-computed coords" divided by 3 assuming 1300, so `$tCx = 700` landed *inside P2's actual HWND* (x=666–968) instead of the terminal gap (x=355–666). Every "terminal" click was a pane click; every "P2 search" click was off-screen.
+
+**Fix**: read `GetWindowRect` back after `MoveWindow`, derive all coords from the actual rect. Plus enumerate child HWNDs at runtime to find the real pane top (chrome height varies by theme/DPI). Committed in the same branch as this retro addendum.
+
+### Issue 2 — terminal clicks never call `main_window_focus`
+
+Grep for `main_window_focus` across the frontend returns **exactly two callers**: `browser-model.ts:174` (`giveFocus()` when main DOM already has focus) and `browser-view.tsx:155` (address bar `onFocus`). **Nothing else ever requests focus reclaim.**
+
+The stress-test premise — "clicking the terminal after a pane should route subsequent keys to main" — is based on a misunderstanding of how focus transfer works. A mouse click in Windows doesn't automatically transfer Win32 focus to the clicked HWND's top-level; focus transfer requires an explicit `SetFocus` call, which in this codebase only fires from `MainFocusReclaimTask`, which only fires from the `main_window_focus` IPC, which only the address bar invokes.
+
+Clicking the terminal:
+- Updates DOM focus to the xterm canvas (main-window DOM state)
+- Does NOT invoke `main_window_focus` IPC
+- Does NOT transfer Win32 focus to the main window's render widget
+- So SendKeys keeps routing to whichever pane last had the focus handed to it
+
+This wasn't a regression. The test's "expected no pane keys on terminal step" invariant has never been true. It was a phantom pass hidden by the broken log filter (Issue #2 in the main retro above).
+
+**Options forward**:
+- A. Add `main_window_focus` IPC to the terminal view's focus handler (treats terminal like address bar — gives it "main chrome owns keyboard" semantics). Probably what a user expects.
+- B. Change the test to only assert "no leak" after actual main-chrome focus transitions (i.e. the address bar steps).
+- C. Broader fix: on any non-pane DOM element gaining focus, fire `main_window_focus`. Centralizes the focus-reclaim policy.
+
+(A) is minimal and fixes the immediate user-visible case (type in browser → type in terminal → expect terminal to receive keys). (C) is structurally cleaner but widens the blast radius.
+
+### Action items update
+
+| # | Item | Status |
+|---|---|---|
+| 1 | Toolchain crash → reboot | ✅ Fixed by reboot (as predicted ~70%) |
+| 2 | Harness self-check (false-assert detection) | still open |
+| 3 | Pane HWND covers nav bar? | ❌ Not the cause. Actual cause: window clamping + auto-coord math |
+| 4 | Rerun stress test after (3) | done — still 24/24 fail, but *now* we understand why (Issue 2 above) |
+| 5 | Phase 4b: don't use focus_element in stress test | partially applied; still relevant |
+| 6 | Add no-LTO dev guide to CLAUDE.md | not needed — LTO wasn't the issue |
+| **7** | **Add `main_window_focus` IPC to terminal view's focus handler** — treats terminal like address bar | new, open |
+| **8** | **Rework stress-test invariants** — "no pane keys on terminal step" requires terminal to *explicitly* transfer Win32 focus; either make that happen (#7) or remove the invariant | new, open |
+
+### What to try next
+
+Start with (#7) — 3-line change in the terminal view's focus handler, fires the same IPC the address bar does. If that makes terminal steps pass, the harness is validated and we can work down from 24/24-fail to whatever the real number is.

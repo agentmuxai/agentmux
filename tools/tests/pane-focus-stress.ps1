@@ -56,12 +56,19 @@ if ($CreateLayout) {
 $win32 = @'
 using System;
 using System.Runtime.InteropServices;
+public struct RECT { public int left, top, right, bottom; }
 public static class Win32 {
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
     [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
     [DllImport("user32.dll")] public static extern bool MoveWindow(IntPtr hWnd, int x, int y, int cx, int cy, bool bRepaint);
     [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")] public static extern IntPtr GetFocus();
+}
+// A second class so callers that already do [Win32Rect]::GetWindowRect work;
+// keeping it separate avoids Add-Type compile conflicts when the script is
+// re-sourced in the same PS session.
+public static class Win32Rect {
+    [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT r);
 }
 '@
 Add-Type -TypeDefinition $win32 -ErrorAction SilentlyContinue | Out-Null
@@ -133,6 +140,53 @@ function Read-LogSince([string]$path, [datetime]$since) {
         }
 }
 
+function Get-AgentMuxPaneTop {
+    <#
+    .SYNOPSIS
+    Enumerate main window's child HWNDs and return the TOP of the
+    first pane HWND — the pane content area's screen-Y. Used by the
+    stress test to compute "above the pane" y-coords for address-bar
+    clicks (which must land on main window DOM, not the pane).
+
+    Returns $WindowY + 107 as a fallback if enumeration finds nothing.
+    #>
+    param(
+        [Parameter(Mandatory)] [IntPtr]$MainHwnd,
+        [Parameter(Mandatory)] [int]$WindowY
+    )
+    try {
+        Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class PaneEnum {
+    [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out PaneRect r);
+    [DllImport("user32.dll")] public static extern bool EnumChildWindows(IntPtr h, EnumProc cb, IntPtr p);
+    public delegate bool EnumProc(IntPtr h, IntPtr p);
+}
+public struct PaneRect { public int left, top, right, bottom; }
+'@ -ErrorAction SilentlyContinue | Out-Null
+    } catch {}
+
+    $tops = New-Object System.Collections.ArrayList
+    $cb = [PaneEnum+EnumProc] {
+        param([IntPtr]$h, [IntPtr]$p)
+        $r = New-Object PaneRect
+        [PaneEnum]::GetWindowRect($h, [ref]$r) | Out-Null
+        # Pane HWNDs are narrower than the full main window (3 panes
+        # side by side) and tall. Filter by "width < window_width/2
+        # and height > 100" to skip the main-chrome HWND.
+        if (($r.right - $r.left) -gt 50 -and ($r.right - $r.left) -lt 500 -and ($r.bottom - $r.top) -gt 300) {
+            $null = $tops.Add($r.top)
+        }
+        return $true
+    }
+    [PaneEnum]::EnumChildWindows($MainHwnd, $cb, [IntPtr]::Zero) | Out-Null
+    if ($tops.Count -gt 0) {
+        return ($tops | Sort-Object | Select-Object -First 1)
+    }
+    return ($WindowY + 107)  # fallback to the pre-measurement constant
+}
+
 function Find-LatestHostLog {
     # Legacy fallback used only when -SkipAuthFile is set. The
     # version-suffix glob never matches dev mode (whose data dir is
@@ -179,10 +233,30 @@ Write-Host "[setup] AgentMux main PID=$($main.Id) handle=$($main.MainWindowHandl
 
 [Win32]::ShowWindow($main.MainWindowHandle, 5) | Out-Null
 Start-Sleep -Milliseconds 200
-[Win32]::MoveWindow($main.MainWindowHandle, 50, 50, 1300, 900, $true) | Out-Null
+# Size the window to fit the primary display. Earlier versions hard-coded
+# 1300×900 which got silently clamped on narrower monitors (e.g. 900×1600
+# portrait), pushing pane coords out of alignment and making clicks land
+# on the wrong HWNDs. Size the window to primary screen minus 2× the
+# window origin; then read back the ACTUAL rect for coord math below.
+$screen = [System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea
+$origin = 50
+$reqW = [Math]::Min(1300, $screen.Width - 2 * $origin)
+$reqH = [Math]::Min(900,  $screen.Height - 2 * $origin)
+[Win32]::MoveWindow($main.MainWindowHandle, $origin, $origin, $reqW, $reqH, $true) | Out-Null
 Start-Sleep -Milliseconds 200
 [Win32]::SetForegroundWindow($main.MainWindowHandle) | Out-Null
 Start-Sleep -Milliseconds 500
+
+# Read back the actual window rect — Windows may clamp our request
+# below the primary screen's dimensions. All coord math below is based
+# on this, NOT the requested size.
+$winRect = New-Object RECT
+[Win32Rect]::GetWindowRect($main.MainWindowHandle, [ref]$winRect) | Out-Null
+$winX = $winRect.left
+$winY = $winRect.top
+$winW = $winRect.right - $winRect.left
+$winH = $winRect.bottom - $winRect.top
+Write-Host "[setup] Window actual rect=($winX, $winY, ${winW}x${winH}) (requested ${reqW}x${reqH})"
 
 if (-not $LogPath) { $LogPath = Find-LatestHostLog }
 if (-not $LogPath -or -not (Test-Path $LogPath)) {
@@ -236,26 +310,48 @@ if (Test-Path $targetsPath) {
     $targets = Get-Content -LiteralPath $targetsPath -Raw | ConvertFrom-Json
     Write-Host "[setup] Using custom click targets from $targetsPath"
 } elseif ($CreateLayout) {
-    # With -CreateLayout the window is a known (50, 50) at 1300×900
-    # with 3 equal-width panes (P1 | T | P2). These defaults come
-    # from that geometry: tab bar + browser nav bar ≈ 130px of
-    # chrome, so pane content starts around y=130 with room up to
-    # y=900. Browser address bar is near the top of each pane
-    # (~y=155), Google search box lives in the middle of the pane
-    # content area, terminal prompt sits low within the middle pane.
-    # Tweak by hand via a pane-focus-stress.targets.json override.
-    $paneWidth = 1300 / 3
-    $p1Cx = [int](50 + $paneWidth * 0.5)
-    $tCx  = [int](50 + $paneWidth * 1.5)
-    $p2Cx = [int](50 + $paneWidth * 2.5)
+    # With -CreateLayout, compute click targets from the ACTUAL window
+    # rect we measured above — NOT a hardcoded 1300×900. That assumption
+    # breaks on any display narrower than ~1500 px (Windows clamps the
+    # window and the 3-pane math sends clicks into the wrong HWNDs —
+    # confirmed on a 900×1600 portrait display where `$tCx` landed
+    # inside P2's actual HWND instead of the terminal).
+    #
+    # Layout model for the window content:
+    #   - top chrome (title + tab bar): ~60 px
+    #   - pane header + browser nav bar: ~40 px each in P1/P2
+    #   - content below that fills the rest
+    # Panes: 3 equal horizontal columns. Centers at 1/6, 3/6, 5/6 of window width.
+    # Read back ACTUAL pane HWND positions. The "chrome above pane"
+    # offset depends on theme/DPI/window-decoration settings, so we
+    # can't just pick a magic y. Strategy:
+    #   - address bar is in main window's DOM, ABOVE the pane HWND
+    #   - pick a y that's halfway between the window top and the
+    #     first pane HWND top — that reliably lands in the nav bar.
+    $paneTop = Get-AgentMuxPaneTop -MainHwnd $main.MainWindowHandle -WindowY $winY
+    $paneWidth = $winW / 3
+    $p1Cx = [int]($winX + $paneWidth * 0.5)
+    $tCx  = [int]($winX + $paneWidth * 1.5)
+    $p2Cx = [int]($winX + $paneWidth * 2.5)
+    # Nav bar lives roughly in the bottom 2/3 of the chrome above the
+    # pane HWND; pick 2/3 down from window top to pane top.
+    $addressY = [int]($winY + (($paneTop - $winY) * 0.66))
+    # Search box is roughly mid-height of the browser content area.
+    # Pane runs from $paneTop to near window bottom.
+    $paneBottom = $winY + $winH - 20  # account for status bar
+    $searchY  = [int]($paneTop + ($paneBottom - $paneTop) * 0.35)
+    $termY    = [int]($paneTop + ($paneBottom - $paneTop) * 0.55)
     $targets = [pscustomobject]@{
-        P1_address = @($p1Cx, 155)
-        P1_search  = @($p1Cx, 430)
-        P2_address = @($p2Cx, 155)
-        P2_search  = @($p2Cx, 430)
-        Terminal   = @($tCx,  700)
+        P1_address = @($p1Cx, $addressY)
+        P1_search  = @($p1Cx, $searchY)
+        P2_address = @($p2Cx, $addressY)
+        P2_search  = @($p2Cx, $searchY)
+        Terminal   = @($tCx,  $termY)
     }
-    Write-Host "[setup] Using auto-computed click targets from window geometry"
+    Write-Host "[setup] Auto-computed targets:"
+    Write-Host "         paneTop=$paneTop paneBottom=$paneBottom"
+    Write-Host "         x: P1=$p1Cx T=$tCx P2=$p2Cx"
+    Write-Host "         y: addressY=$addressY searchY=$searchY termY=$termY"
 } else {
     Write-Error @"
 Missing $targetsPath.
