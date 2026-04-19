@@ -204,3 +204,57 @@ function Get-AgentMuxHostLogPath {
     if ($f) { return $f.FullName }
     return $null
 }
+
+function Invoke-AgentMuxBrowserApi {
+    <#
+    .SYNOPSIS
+    Calls a method on the browser DOM API (`/agentmux/browser/*`).
+
+    .DESCRIPTION
+    Wraps `POST http://<ipc_endpoint>/agentmux/browser/<method>` with
+    the `Authorization: Bearer <ipc_token>` header. The endpoint is
+    served by the agentmux-cef IPC server — NOT agentmux-srv — because
+    browser panes are managed by the host process. See
+    `docs/specs/SPEC_BROWSER_DOM_API.md`.
+
+    .PARAMETER Auth
+    Parsed authkey.dev. Supplies ipc_endpoint + ipc_token.
+
+    .PARAMETER Method
+    Method name (e.g. "query", "focus_info"). Appended to the URL path.
+
+    .PARAMETER Body
+    Request payload as a hashtable. Serialized as JSON.
+
+    .PARAMETER TimeoutSec
+    HTTP timeout. Default 15s.
+
+    .EXAMPLE
+    $resp = Invoke-AgentMuxBrowserApi -Auth $auth -Method query `
+        -Body @{ block_id = $p1; selector = "input[name='q']" }
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] $Auth,
+        [Parameter(Mandatory)] [string]$Method,
+        [Parameter(Mandatory)] [hashtable]$Body,
+        [int]$TimeoutSec = 15
+    )
+    $url = "http://{0}/agentmux/browser/{1}" -f $Auth.ipc_endpoint, $Method
+    $jsonBody = $Body | ConvertTo-Json -Depth 10 -Compress
+    $resp = Invoke-RestMethod -Method Post -Uri $url `
+        -Headers @{ Authorization = "Bearer $($Auth.ipc_token)" } `
+        -ContentType 'application/json' `
+        -Body $jsonBody `
+        -TimeoutSec $TimeoutSec
+
+    $okProp = $resp.PSObject.Properties['ok']
+    if (-not $okProp -or -not $okProp.Value) {
+        $errProp = $resp.PSObject.Properties['error']
+        $msg = if ($errProp) { $errProp.Value } else { "unknown" }
+        throw "browser.$Method failed: $msg"
+    }
+    $dataProp = $resp.PSObject.Properties['data']
+    if ($dataProp) { return $dataProp.Value }
+    return $null
+}

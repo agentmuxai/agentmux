@@ -149,6 +149,17 @@ impl BrowserPaneManager {
         state.browsers.lock().get(&label).cloned()
     }
 
+    /// Return the current URL of the pane's main frame, if the pane
+    /// is Live. Used by the browser DOM API resolver
+    /// (`crate::browser_api::resolver`) to match CEF `/json` targets
+    /// against block ids without a first-class `browserId` field on
+    /// the CEF side.
+    pub fn pane_url(&self, state: &Arc<AppState>, block_id: &str) -> Option<String> {
+        let browser = self.live_browser(state, block_id)?;
+        let frame = browser.main_frame()?;
+        Some(CefString::from(&frame.url()).to_string())
+    }
+
     pub fn create(
         &self,
         state: &Arc<AppState>,
