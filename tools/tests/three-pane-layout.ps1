@@ -62,6 +62,15 @@ function New-AgentMuxTestTab {
         -Args @($workspaceId, $Name, $true, $false)
     if (-not $tabId) { throw "workspace.CreateTab returned empty tabid" }
 
+    # Explicit SetActiveTab after CreateTab. CreateTab(activate=true)
+    # flips workspace.activetabid on the backend, but in practice the
+    # frontend's tab switch doesn't always fire on that path alone —
+    # the stress harness saw clicks landing on the prior tab's layout.
+    # SetActiveTab runs heal_layout + broadcasts a workspace update
+    # that the frontend's activeTabId() atom reliably reacts to.
+    Invoke-AgentMuxService -Auth $Auth -Service workspace -Method SetActiveTab `
+        -Args @($workspaceId, $tabId) | Out-Null
+
     return [pscustomobject]@{
         workspaceid = $workspaceId
         tabid       = $tabId
@@ -133,7 +142,7 @@ function New-AgentMuxThreePaneLayout {
         [Parameter(Mandatory)] $Auth,
         [Parameter(Mandatory)] $TabInfo,
         [string]$BrowserUrl = "https://www.google.com",
-        [int]$SettleMs = 1500
+        [int]$SettleMs = 3500
     )
 
     $uicontext = @{ activetabid = $TabInfo.tabid }
@@ -186,9 +195,18 @@ function New-AgentMuxThreePaneLayout {
     $layoutState = Invoke-AgentMuxService -Auth $Auth -Service object -Method GetObject `
         -Args @("layout:$layoutStateOid")
 
-    # Each action needs a unique actionid; the frontend de-dupes on it
-    # (see layoutPersistence.ts `processedActionIds.has(action.actionid)`).
-    $actions = @(
+    # Push layout actions ONE AT A TIME, letting the frontend drain
+    # between each. Pushing all three in one batch doesn't work: the
+    # frontend's processPendingBackendActions loops the actions but
+    # calls getNodeByBlockId against `model.leafs` (a memoized signal)
+    # — that signal is only refreshed by updateTree() at the END of
+    # the loop, so action 2's splithorizontal can't find the target
+    # block that action 1 just inserted. The loop silently no-ops on
+    # the misses. Per-action push forces updateTree + persistToBackend
+    # to run between each, so the next push sees the freshly-materialized
+    # target. See frontend/layout/lib/layoutPersistence.ts and
+    # layoutNodeModels.ts `getNodeByBlockId`.
+    $plan = @(
         @{
             actiontype = "insert"
             actionid   = [guid]::NewGuid().ToString()
@@ -219,30 +237,37 @@ function New-AgentMuxThreePaneLayout {
         }
     )
 
-    # Push the full LayoutState back via UpdateObject (not
-    # UpdateObjectMeta — layout fields aren't in meta). The backend
-    # preserves otype/oid/version and overwrites the rest.
-    #
-    # Rebuild as a hashtable rather than mutating $layoutState: under
-    # Set-StrictMode -Version Latest, assigning to a property that
-    # isn't already present on the PSCustomObject throws. `pendingbackendactions`
-    # is omitted from the serialized JSON when None, so a fresh
-    # LayoutState never has that property in the parsed response.
-    $updatePayload = @{
-        otype                 = "layout"
-        oid                   = $layoutStateOid
-        version               = $layoutState.version
-        pendingbackendactions = $actions
-    }
-    foreach ($propName in @("rootnode", "magnifiednodeid", "focusednodeid", "leaforder", "meta")) {
-        $prop = $layoutState.PSObject.Properties[$propName]
-        if ($prop) { $updatePayload[$propName] = $prop.Value }
-    }
-    Invoke-AgentMuxService -Auth $Auth -Service object -Method UpdateObject `
-        -Args @($updatePayload, $false) | Out-Null
+    # Budget the settle time across 3 pushes. Default 3500ms → ~1200ms
+    # per push, which is generous for a locally-running dev instance.
+    $perStepSettle = [int]($SettleMs / $plan.Count)
 
-    Write-Verbose "Pushed 3 layout actions; waiting ${SettleMs}ms for frontend to drain…"
-    Start-Sleep -Milliseconds $SettleMs
+    for ($i = 0; $i -lt $plan.Count; $i++) {
+        Write-Verbose "Layout action $($i + 1)/$($plan.Count): $($plan[$i].actiontype) $($plan[$i].blockid)"
+
+        # Re-fetch the LayoutState each iteration — the frontend wrote
+        # back rootnode/version from the previous action via
+        # persistToBackend, and UpdateObject takes the whole object.
+        $currentLs = Invoke-AgentMuxService -Auth $Auth -Service object -Method GetObject `
+            -Args @("layout:$layoutStateOid")
+
+        # Rebuild as a hashtable: under Set-StrictMode assigning to a
+        # property the PSCustomObject doesn't have throws.
+        $payload = @{
+            otype                 = "layout"
+            oid                   = $layoutStateOid
+            version               = $currentLs.version
+            pendingbackendactions = @($plan[$i])
+        }
+        foreach ($propName in @("rootnode", "magnifiednodeid", "focusednodeid", "leaforder", "meta")) {
+            $prop = $currentLs.PSObject.Properties[$propName]
+            if ($prop) { $payload[$propName] = $prop.Value }
+        }
+
+        Invoke-AgentMuxService -Auth $Auth -Service object -Method UpdateObject `
+            -Args @($payload, $false) | Out-Null
+
+        Start-Sleep -Milliseconds $perStepSettle
+    }
 
     return [pscustomobject]@{
         tabid = $TabInfo.tabid
