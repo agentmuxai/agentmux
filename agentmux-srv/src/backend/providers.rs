@@ -177,6 +177,33 @@ static GEMINI: ProviderConfig = ProviderConfig {
     docs_url: "https://ai.google.dev/gemini-cli",
 };
 
+static KIMI: ProviderConfig = ProviderConfig {
+    id: "kimi",
+    display_name: "Kimi Code CLI",
+    cli_command: "kimi",
+    controller_type: ControllerType::Subprocess,
+    launch_args: &[
+        "--print",
+        "--output-format",
+        "stream-json",
+        "--yolo",
+        "-p",
+        "",
+    ],
+    persistent_launch_args: None,
+    resume_flag: None,
+    session_id_field: "session_id",
+    styled_output_format: "kimi-stream-json",
+    auth_config_dir_env_var: "KIMI_SHARE_DIR",
+    auth_dir_name: "kimi",
+    auth_extra_env: &[],
+    unset_env: &[],
+    npm_package: "",
+    pinned_version: "",
+    icon: "moon",
+    docs_url: "https://moonshotai.github.io/kimi-cli/",
+};
+
 static OPENCLAW: ProviderConfig = ProviderConfig {
     id: "openclaw",
     display_name: "OpenClaw",
@@ -225,6 +252,7 @@ static REGISTRY: LazyLock<HashMap<&'static str, &'static ProviderConfig>> = Lazy
     m.insert(CLAUDE.id, &CLAUDE);
     m.insert(CODEX.id, &CODEX);
     m.insert(GEMINI.id, &GEMINI);
+    m.insert(KIMI.id, &KIMI);
     m.insert(OPENCLAW.id, &OPENCLAW);
     m.insert(PI.id, &PI);
     m
@@ -237,6 +265,8 @@ static ALIASES: LazyLock<HashMap<&'static str, &'static str>> = LazyLock::new(||
     m.insert("claude_code", "claude");
     m.insert("codex-cli", "codex");
     m.insert("gemini-cli", "gemini");
+    m.insert("kimi-cli", "kimi");
+    m.insert("kimi_code", "kimi");
     m.insert("openclaw-cli", "openclaw");
     m.insert("open-claw", "openclaw");
     m
@@ -276,7 +306,7 @@ pub fn get_provider(id: &str) -> Option<&'static ProviderConfig> {
 /// Return an iterator over all registered providers in insertion order.
 pub fn get_provider_list() -> impl Iterator<Item = &'static ProviderConfig> {
     // Stable canonical order matches the TypeScript PROVIDERS object order.
-    static ORDER: &[&str] = &["claude", "codex", "gemini", "openclaw", "pi"];
+    static ORDER: &[&str] = &["claude", "codex", "gemini", "kimi", "openclaw", "pi"];
     ORDER.iter().filter_map(|id| REGISTRY.get(*id).copied())
 }
 
@@ -291,6 +321,7 @@ mod tests {
         assert!(get_provider("claude").is_some());
         assert!(get_provider("codex").is_some());
         assert!(get_provider("gemini").is_some());
+        assert!(get_provider("kimi").is_some());
         assert!(get_provider("openclaw").is_some());
     }
 
@@ -300,6 +331,7 @@ mod tests {
         assert_eq!(get_provider("claude_code").unwrap().id, "claude");
         assert_eq!(get_provider("codex-cli").unwrap().id, "codex");
         assert_eq!(get_provider("gemini-cli").unwrap().id, "gemini");
+        assert_eq!(get_provider("kimi-cli").unwrap().id, "kimi");
         assert_eq!(get_provider("openclaw-cli").unwrap().id, "openclaw");
     }
 
@@ -309,8 +341,8 @@ mod tests {
     }
 
     #[test]
-    fn provider_list_has_five_entries() {
-        assert_eq!(get_provider_list().count(), 5);
+    fn provider_list_has_six_entries() {
+        assert_eq!(get_provider_list().count(), 6);
     }
 
     #[test]
@@ -334,6 +366,16 @@ mod tests {
             .auth_extra_env
             .iter()
             .any(|(k, v)| *k == "GEMINI_FORCE_FILE_STORAGE" && *v == "true"));
+    }
+
+    #[test]
+    fn kimi_is_subprocess_controller() {
+        let p = get_provider("kimi").unwrap();
+        assert_eq!(p.controller_type, ControllerType::Subprocess);
+        assert_eq!(p.controller_type_str(), "subprocess");
+        assert_eq!(p.styled_output_format, "kimi-stream-json");
+        assert_eq!(p.cli_command, "kimi");
+        assert!(p.npm_package.is_empty());
     }
 
     #[test]

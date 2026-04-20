@@ -6,6 +6,7 @@ import { ClaudeTranslator } from "./claude-translator";
 import { GeminiTranslator } from "./gemini-translator";
 import { CodexTranslator } from "./codex-translator";
 import { AcpTranslator } from "./acp-translator";
+import { KimiTranslator } from "./kimi-translator";
 
 /**
  * Create an OutputTranslator for the given output format.
@@ -18,6 +19,8 @@ export function createTranslator(outputFormat: string): OutputTranslator {
             return new GeminiTranslator();
         case "codex-json":
             return new CodexTranslator();
+        case "kimi-stream-json":
+            return new KimiTranslator();
         case "acp":
             return new AcpTranslator();
         default:
