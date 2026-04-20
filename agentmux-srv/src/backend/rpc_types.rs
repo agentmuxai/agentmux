@@ -296,6 +296,9 @@ pub const COMMAND_AGENT_LIST: &str = "agent.list";
 pub const COMMAND_AGENT_OUTPUT: &str = "agent.output";
 pub const COMMAND_AGENT_STREAM: &str = "agent.stream";
 
+// App API Tier 2 — pane lifecycle commands
+pub const COMMAND_PANE_OPEN: &str = "pane.open";
+
 // App API Tier 1 — blockfile pagination commands
 pub const COMMAND_BLOCKFILE_LINE_COUNT: &str = "blockfile:line_count";
 pub const COMMAND_BLOCKFILE_READ_RANGE: &str = "blockfile:read_range";
@@ -619,6 +622,37 @@ pub struct AgentOpenResult {
     pub provider: String,
     pub controller_type: String,
     pub status: String,
+    pub created: bool,
+}
+
+/// Request for pane.open — create a new pane showing the given view.
+///
+/// Supported views: `editor`, `term`, `browser`, `sysinfo`, `help`.
+/// `file` is required for `editor`; `url` is required for `browser`.
+/// Placement: if `split_direction` ("right" / "left" / "down" / "up")
+/// and `split_reference_block_id` are provided, the new pane splits
+/// relative to that block. Otherwise it is inserted at the tab root.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct CommandPaneOpenData {
+    pub view: String,
+    pub file: Option<String>,
+    pub url: Option<String>,
+    pub cwd: Option<String>,
+    pub title: Option<String>,
+    pub tab_id: Option<String>,
+    pub split_direction: Option<String>,
+    pub split_reference_block_id: Option<String>,
+    pub focus: Option<bool>,
+}
+
+/// Response from pane.open.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct PaneOpenResult {
+    pub block_id: String,
+    pub tab_id: String,
+    pub view: String,
     pub created: bool,
 }
 

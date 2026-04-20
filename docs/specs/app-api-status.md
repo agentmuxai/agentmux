@@ -20,6 +20,7 @@ All Tier 1 commands register on the WSH RPC engine and respond correctly:
 | `agent.status` | Working | Returns agent state, session ID, exit code |
 | `agent.list` | Working | Lists all agent panes across tabs |
 | `agent.output` | Implemented | Reads broker event history (needs persist > 0 for blockfile events) |
+| `pane.open` | Implemented | Creates a block for view `editor`/`term`/`browser`/`sysinfo`/`help`, optionally split-placed against a reference block. MVP: no idempotency, no new-tab placement, no path sandboxing — see `app-api-pane-open.md`. |
 
 ### WebSocket Protocol
 
