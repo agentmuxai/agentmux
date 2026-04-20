@@ -27,6 +27,7 @@ const PERMISSION_FLAGS: Record<PermissionMode, string[]> = {
 const PERMISSION_STRIP = new Set([
     "--dangerously-skip-permissions",
     "--permission-mode",
+    "--yolo",
 ]);
 
 /**
@@ -39,6 +40,7 @@ const PERMISSION_STRIP = new Set([
 export function buildRuntimeArgs(
     baseLaunchArgs: string[],
     runtime: AgentRuntimeConfig | null | undefined,
+    providerId?: string,
 ): string[] {
     const config = runtime ?? DEFAULT_RUNTIME_CONFIG;
     const args: string[] = [];
@@ -68,12 +70,25 @@ export function buildRuntimeArgs(
         i++;
     }
 
-    // Apply permission mode (fall back to bypass if metadata contains an invalid value)
-    const permFlags = PERMISSION_FLAGS[config.permissionMode] ?? PERMISSION_FLAGS.bypass;
-    args.push(...permFlags);
+    // Apply permission mode
+    if (providerId === "kimi" || providerId === "gemini") {
+        // Kimi and Gemini only support --yolo (bypass) vs no flag (default)
+        if (config.permissionMode !== "default") {
+            args.push("--yolo");
+        }
+    } else {
+        const permFlags = PERMISSION_FLAGS[config.permissionMode] ?? PERMISSION_FLAGS.bypass;
+        args.push(...permFlags);
+    }
 
-    args.push("--model", config.model);
-    args.push("--effort", config.effort);
+    // --model: supported by claude, codex, gemini. --effort: claude only.
+    const supportsModel = !providerId || providerId === "claude" || providerId === "codex" || providerId === "gemini";
+    if (supportsModel) {
+        args.push("--model", config.model);
+    }
+    if (!providerId || providerId === "claude") {
+        args.push("--effort", config.effort);
+    }
 
     return args;
 }

@@ -7,8 +7,8 @@ export interface ProviderDefinition {
     cliCommand: string;
     defaultArgs: string[];
     styledArgs: string[];        // CLI flags for JSON streaming mode (documentation; use launchArgs for actual invocation)
-    outputFormat: "claude-stream-json" | "gemini-json" | "codex-json" | "acp" | "raw";
-    styledOutputFormat: "claude-stream-json" | "gemini-json" | "codex-json" | "acp";
+    outputFormat: "claude-stream-json" | "gemini-json" | "codex-json" | "kimi-stream-json" | "acp" | "raw";
+    styledOutputFormat: "claude-stream-json" | "gemini-json" | "codex-json" | "kimi-stream-json" | "acp";
     authType: "oauth" | "api-key";
     authCheckCommand: string[];  // e.g. ["auth", "status", "--json"]
     authLoginCommand: string[];  // e.g. ["auth", "login"]
@@ -148,6 +148,33 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         sessionIdField: "sessionId",
         controllerType: "acp",
     },
+    // Kimi Code CLI — Moonshot AI's coding agent.
+    // Python-based CLI (not npm). Supports stream-json output and OpenAI-style tool calls.
+    kimi: {
+        id: "kimi",
+        displayName: "Kimi Code CLI",
+        cliCommand: "kimi",
+        defaultArgs: [],
+        styledArgs: ["--print", "--output-format", "stream-json", "--yolo", "-p", ""],
+        outputFormat: "raw",
+        styledOutputFormat: "kimi-stream-json",
+        authType: "api-key",
+        authCheckCommand: ["info"],
+        authLoginCommand: ["login"],
+        npmPackage: "",
+        pinnedVersion: "",
+        docsUrl: "https://moonshotai.github.io/kimi-cli/",
+        windowsInstallCommand: "pip install kimi-cli",
+        unixInstallCommand: "pip install kimi-cli",
+        icon: "moon",
+        unsetEnv: [],
+        authConfigDirEnvVar: "KIMI_SHARE_DIR",
+        authDirName: "kimi",
+        launchArgs: ["--print", "--output-format", "stream-json", "--yolo", "-p", ""],
+        resumeFlag: null,
+        sessionIdField: "session_id",
+        controllerType: "subprocess",
+    },
     // Pi — the lightweight coding agent that powers OpenClaw.
     // Standalone CLI, no gateway required. Pure coding agent with read/write/bash/edit tools.
     // Ideal when users want a fast, self-contained coding agent without the full OpenClaw stack.
@@ -183,6 +210,8 @@ const PROVIDER_ALIASES: Record<string, string> = {
     "claude_code": "claude",
     "codex-cli": "codex",
     "gemini-cli": "gemini",
+    "kimi-cli": "kimi",
+    "kimi_code": "kimi",
     "openclaw-cli": "openclaw",
     "open-claw": "openclaw",
 };
