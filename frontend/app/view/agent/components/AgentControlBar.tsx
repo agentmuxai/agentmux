@@ -87,10 +87,11 @@ export const AgentControlBar = ({ blockId, blockAtom, providerId }: AgentControl
 
     const compactSummary = (): string => {
         const r = runtime();
-        const parts: string[] = [PERMISSION_LABELS[r.permissionMode]];
-        if (r.model) parts.push(MODEL_LABELS[r.model] || r.model);
-        if (r.effort) parts.push(`Effort: ${EFFORT_LABELS[r.effort] || r.effort}`);
-        return parts.join(" · ");
+        return [
+            PERMISSION_LABELS[r.permissionMode],
+            MODEL_LABELS[r.model] || r.model,
+            `Effort: ${EFFORT_LABELS[r.effort] || r.effort}`,
+        ].join(" · ");
     };
 
     // ── Session management helpers ──────────────────────────────────────────────
@@ -284,10 +285,9 @@ export const AgentControlBar = ({ blockId, blockAtom, providerId }: AgentControl
                         <label class="agent-control-label">Model</label>
                         <select
                             class="agent-control-select"
-                            value={runtime().model ?? ""}
-                            onChange={(e) => updateRuntime({ model: (e.target.value || null) as ModelChoice })}
+                            value={runtime().model}
+                            onChange={(e) => updateRuntime({ model: e.target.value as ModelChoice })}
                         >
-                            <option value="">Default</option>
                             <option value="opus">Opus</option>
                             <option value="sonnet">Sonnet</option>
                             <option value="haiku">Haiku</option>
@@ -297,10 +297,9 @@ export const AgentControlBar = ({ blockId, blockAtom, providerId }: AgentControl
                         <label class="agent-control-label">Effort</label>
                         <select
                             class="agent-control-select"
-                            value={runtime().effort ?? ""}
-                            onChange={(e) => updateRuntime({ effort: (e.target.value || null) as EffortLevel })}
+                            value={runtime().effort}
+                            onChange={(e) => updateRuntime({ effort: e.target.value as EffortLevel })}
                         >
-                            <option value="">Default</option>
                             <option value="low">Low</option>
                             <option value="medium">Medium</option>
                             <option value="high">High</option>
