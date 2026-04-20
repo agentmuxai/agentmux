@@ -28,8 +28,9 @@ Cross-platform (Windows, macOS, Linux). 100% Rust backend (Tokio + Axum). CEF ho
 - **Live agent monitoring** — Watch every tool call and decision step as it happens. Catch an agent undoing correct work mid-task and redirect it before the damage compounds.
 - **Multi-agent orchestration** — Run parallel agents and see all of them at once. Spot conflicts before synthesis. Redirect any agent without killing the others.
 - **Guardrail observability** — See which constraints are active and firing. Tune your agent system from live signal, not post-mortem guesswork.
-- **Built-in Claude integration** — Agent sessions are first-class citizens alongside terminals, editor, and system metrics.
+- **Multi-provider agent support** — Claude Code, Codex CLI, and Gemini CLI as first-class providers, alongside terminals, editor, browser, and system metrics.
 - **Forge widget** — Agent picker wired to live Forge data for orchestration workflows.
+- **App API** — Local WebSocket RPC so external tools and agents can open panes, send messages, and read output. See [`docs/api/getting-started.md`](./docs/api/getting-started.md).
 - **Drag and drop** — Rearrange panes by dragging headers, reorder tabs, drag panes and tabs across windows.
 - **Per-pane zoom** — Independent zoom level per pane, plus global chrome zoom.
 - **Real PTY support** — Authentic terminal emulation via xterm.js and portable-pty.
@@ -62,8 +63,10 @@ task dev           # CEF host + Vite hot reload
 ### Production Build
 
 ```bash
-task cef:package:portable        # Windows portable ZIP
-task cef:package:portable:linux  # Linux portable (planned)
+task package           # Portable ZIP for the host platform
+task package:macos     # macOS DMG
+task package:linux     # Linux AppImage / deb
+task package:msix      # Windows MSIX installer
 ```
 
 ## Widgets
@@ -124,7 +127,7 @@ ws.send(JSON.stringify({
 ```
                     ┌─────────────────────────────────┐
                     │           Frontend               │
-                    │   SolidJS + xterm.js + Jotai     │
+                    │   SolidJS + xterm.js             │
                     └──────────────────┬───────────────┘
                                        │
                     ┌──────────────────▼───────────────┐
@@ -142,7 +145,7 @@ ws.send(JSON.stringify({
 ```
 
 **Stack:**
-- **Frontend:** SolidJS + TypeScript + Vite + Jotai
+- **Frontend:** SolidJS + TypeScript + Vite (state via SolidJS signals)
 - **Desktop:** CEF 146 via cef-rs — bundles its own Chromium (~148 MB ZIP, ~150 ms startup)
 - **Backend:** Rust (Tokio + Axum + SQLite + portable-pty)
 - **Terminal:** xterm.js
@@ -154,9 +157,9 @@ ws.send(JSON.stringify({
 | Command | Description |
 |---------|-------------|
 | `task dev` | Development mode (CEF host + Vite hot reload) |
-| `task cef:build` | Build the CEF host binary |
-| `task cef:bundle` | Bundle CEF runtime DLLs |
-| `task cef:package:portable` | Windows portable ZIP with launcher |
+| `task build:host` | Build the CEF host binary |
+| `task bundle` | Bundle CEF runtime DLLs |
+| `task package` | Package a portable build for the host platform |
 | `task build:backend` | Build agentmux-srv |
 | `task build:frontend` | Build frontend only |
 | `task test` | Run tests (vitest) |
@@ -196,8 +199,10 @@ Releases are built by [`agentmuxai/agentmux-builder`](https://github.com/agentmu
 ### Triggering a release
 
 ```bash
-# Manual workflow dispatch (pass a tag, branch, or SHA)
-gh workflow run build.yml -R agentmuxai/agentmux-builder -f ref=v0.33.0
+# Manual workflow dispatch (pass a tag, branch, or SHA).
+# The workflow file is still named tauri-build.yml for historical reasons,
+# even though the CEF host replaced Tauri.
+gh workflow run tauri-build.yml -R agentmuxai/agentmux-builder -f ref=v0.33.0
 ```
 
 ### Release artifacts
