@@ -304,11 +304,12 @@ export interface Bookmark {
 export interface DocumentState {
     collapsedNodes: Set<string>; // Node IDs that are collapsed (agent messages)
     /**
-     * Tool nodes the user has clicked to PIN open. A tool node renders
-     * expanded when pinned OR hovered OR status is running/failed.
-     * Default is collapsed — see docs/specs/tool-collapse.md.
+     * Nodes the user has clicked to PIN expanded. For tool nodes this opens
+     * the portal overlay with tool-specific content; for other kinds this is
+     * used by future expansion surfaces. Default is collapsed — see
+     * docs/specs/tool-collapse.md.
      */
-    pinnedToolNodes: Set<string>;
+    pinnedNodes: Set<string>;
     scrollPosition: number;
     selectedNode: string | null; // For keyboard navigation
     filter: FilterState;
