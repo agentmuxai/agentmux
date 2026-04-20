@@ -84,6 +84,26 @@ pub async fn spawn_backend(state: &Arc<AppState>) -> Result<BackendSpawnResult, 
     *state.version_data_dir.lock() = Some(data_dir.to_string_lossy().to_string());
     *state.version_config_dir.lock() = Some(config_dir.to_string_lossy().to_string());
 
+    // Resolve the user data home used by the frontend for per-agent paths
+    // (`<home>/agents/<slug>/`, `GH_CONFIG_DIR`, etc.). Portable keeps this
+    // inside the portable folder; installed uses `~/.agentmux`. An explicit
+    // `AGENTMUX_DATA_HOME` env override wins over both.
+    let user_home_dir = std::env::var("AGENTMUX_DATA_HOME")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| {
+            if portable_root.is_some() {
+                data_dir.to_string_lossy().to_string()
+            } else {
+                dirs::home_dir()
+                    .unwrap_or_default()
+                    .join(".agentmux")
+                    .to_string_lossy()
+                    .to_string()
+            }
+        });
+    *state.user_home_dir.lock() = Some(user_home_dir);
+
     // 3. Resolve the backend binary path
     let backend_name = "agentmux-srv";
     let exe_suffix = if cfg!(windows) { ".exe" } else { "" };

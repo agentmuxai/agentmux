@@ -25,6 +25,7 @@ let cachedValues: {
     hostName: string;
     dataDir: string;
     configDir: string;
+    userHomeDir: string;
     docsiteUrl: string;
     zoomFactor: number;
     updaterStatus: UpdaterStatus;
@@ -74,6 +75,7 @@ export async function initTauriApi(): Promise<void> {
         hostName,
         dataDir,
         configDir,
+        userHomeDir,
         docsiteUrl,
         zoomFactor,
         aboutDetails,
@@ -85,6 +87,7 @@ export async function initTauriApi(): Promise<void> {
         invoke<string>("get_host_name"),
         invoke<string>("get_data_dir"),
         invoke<string>("get_config_dir"),
+        invoke<string>("get_user_home_dir"),
         invoke<string>("get_docsite_url"),
         invoke<number>("get_zoom_factor"),
         invoke<AboutModalDetails>("get_about_modal_details"),
@@ -99,6 +102,7 @@ export async function initTauriApi(): Promise<void> {
         hostName,
         dataDir,
         configDir,
+        userHomeDir,
         docsiteUrl,
         zoomFactor,
         aboutDetails,
@@ -125,6 +129,7 @@ export function buildTauriApi(): AppApi {
         getHostName: () => cachedValues!.hostName,
         getDataDir: () => cachedValues!.dataDir,
         getConfigDir: () => cachedValues!.configDir,
+        getUserHomeDir: () => cachedValues!.userHomeDir,
         getDocsiteUrl: () => cachedValues!.docsiteUrl,
         getZoomFactor: () => cachedValues!.zoomFactor,
         getEnv: (varName: string) => {

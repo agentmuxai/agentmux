@@ -55,6 +55,20 @@ pub fn get_config_dir(state: &Arc<AppState>) -> Result<serde_json::Value, String
     }
 }
 
+/// Get the user home directory used by the frontend for per-agent paths
+/// (working dir, `GH_CONFIG_DIR`, etc.).
+///
+/// Portable returns `<portable>/data`; installed returns `~/.agentmux`;
+/// `AGENTMUX_DATA_HOME`, if set at launch, overrides both.
+/// See `docs/specs/portable-agent-working-dirs.md`.
+pub fn get_user_home_dir(state: &Arc<AppState>) -> Result<serde_json::Value, String> {
+    let dir = state.user_home_dir.lock();
+    match dir.as_ref() {
+        Some(d) => Ok(serde_json::json!(d)),
+        None => Err("User home dir not initialized yet".to_string()),
+    }
+}
+
 /// Ensure a provider auth directory exists and return its absolute path.
 /// Auth dirs are version-isolated under the version-specific config dir.
 pub fn ensure_auth_dir(

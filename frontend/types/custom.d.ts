@@ -88,6 +88,7 @@ declare global {
         getHostName: () => string;
         getDataDir: () => string;
         getConfigDir: () => string;
+        getUserHomeDir: () => string;
         getAboutModalDetails: () => AboutModalDetails;
         getBackendInfo: () => Promise<{ pid?: number; started_at?: string; web_endpoint?: string; version: string }>;
         restartBackend: () => Promise<void>;
