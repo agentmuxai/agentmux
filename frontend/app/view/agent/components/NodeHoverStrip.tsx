@@ -17,6 +17,9 @@ interface NodeHoverStripProps {
     nodeId: string;
     isBookmarked?: boolean;
     onBookmark?: () => void;
+    canExpand?: boolean;
+    isExpanded?: boolean;
+    onExpand?: () => void;
 }
 
 interface StripButtonProps {
@@ -62,6 +65,14 @@ export const NodeHoverStrip = (props: NodeHoverStripProps): JSX.Element => (
                 >
                     {formatLocalized(props.timestamp!)}
                 </time>
+            </Show>
+            <Show when={props.canExpand}>
+                <StripButton
+                    icon={props.isExpanded ? "⊟" : "⊞"}
+                    label={props.isExpanded ? "Collapse" : "Expand"}
+                    active={props.isExpanded === true}
+                    onClick={props.onExpand}
+                />
             </Show>
             <Show when={props.onBookmark}>
                 <StripButton
