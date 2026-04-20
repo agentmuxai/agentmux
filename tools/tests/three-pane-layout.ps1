@@ -132,13 +132,17 @@ function New-AgentMuxThreePaneLayout {
     URL for the left browser pane. Default google.com (search box).
 
     .PARAMETER P2Url
-    URL for the right browser pane. The Phase-1 CDP resolver matches
-    panes by URL, so **this should differ from P1Url** — two panes at
-    the same URL can't be told apart and harness calls will resolve
-    to whichever target CEF's /json returned first, swapping P1/P2
-    for the caller. Default: google.com with a `?q=p2` query param,
-    which keeps Google's search-box DOM intact while producing a
-    distinct URL string.
+    URL for the right browser pane. Default is also google.com — we
+    tried `google.com/?q=p2`, duckduckgo.com, a self-contained
+    data: URL, and example.com to keep the URLs distinct for the
+    Phase-1 URL-match CDP resolver (see SPEC_BROWSER_DOM_API.md §5.5),
+    but every non-google URL caused the second pane to be
+    `on_before_close`'d by CEF ~18 ms after create (see retro
+    2026-04-19 action item #9). Until that's root-caused, "both
+    google.com" is the default that keeps the pane alive — at the
+    cost of the resolver being unable to disambiguate P1 from P2.
+    Callers who need disambiguation can pass distinct URLs and accept
+    the pane-close risk.
 
     .PARAMETER SettleMs
     Milliseconds to wait after pushing the layout actions so the
