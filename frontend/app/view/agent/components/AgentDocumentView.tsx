@@ -157,8 +157,7 @@ export const AgentDocumentView = ({ documentAtom, documentStateAtom, logLines, a
 
     if (scrollToBottomRef) scrollToBottomRef(jumpToBottom);
 
-    // Toggle collapsed state for a node (agent messages only — tool blocks
-    // manage their own expand/collapse via hover + pin).
+    // Toggle collapsed state for collapsible nodes (agent messages, sections, user messages).
     const toggleCollapse = (nodeId: string) => {
         setDocumentState((prev) => {
             const collapsed = new Set(prev.collapsedNodes);
@@ -171,17 +170,12 @@ export const AgentDocumentView = ({ documentAtom, documentStateAtom, logLines, a
         });
     };
 
-    // Toggle the "pinned open" state for a tool node. Tool blocks render
-    // collapsed by default — hover expands, click pins. See
-    // docs/specs/tool-collapse.md.
-    const toggleToolPin = (nodeId: string) => {
+    // Toggle the "pinned open" state for a tool node.
+    const togglePin = (nodeId: string) => {
         setDocumentState((prev) => {
             const pinned = new Set(prev.pinnedNodes);
-            if (pinned.has(nodeId)) {
-                pinned.delete(nodeId);
-            } else {
-                pinned.add(nodeId);
-            }
+            if (pinned.has(nodeId)) pinned.delete(nodeId);
+            else pinned.add(nodeId);
             return { ...prev, pinnedNodes: pinned };
         });
     };
@@ -383,9 +377,25 @@ export const AgentDocumentView = ({ documentAtom, documentStateAtom, logLines, a
             <For each={document()}>
                 {(node) => {
                     const isBookmarked = () => bookmarkedNodeIds?.().has(node.id) ?? false;
-                    const canExpand = () => node.type === "tool";
-                    const isExpanded = () => node.type === "tool" && documentState().pinnedNodes.has(node.id);
-                    const onExpand = node.type === "tool" ? () => toggleToolPin(node.id) : undefined;
+                    const canExpand = () => {
+                        switch (node.type) {
+                            case "tool":
+                            case "agent_message":
+                            case "user_message":
+                            case "section":
+                                return true;
+                            default:
+                                return false;
+                        }
+                    };
+                    const isExpanded = () => {
+                        if (node.type === "tool") return documentState().pinnedNodes.has(node.id);
+                        return !documentState().collapsedNodes.has(node.id);
+                    };
+                    const onExpand = () => {
+                        if (node.type === "tool") togglePin(node.id);
+                        else toggleCollapse(node.id);
+                    };
 
                     const handleContextMenu = (e: MouseEvent) => {
                         if (!onBookmark) return;
@@ -420,7 +430,7 @@ export const AgentDocumentView = ({ documentAtom, documentStateAtom, logLines, a
                                 collapsed={documentState().collapsedNodes.has(node.id)}
                                 onToggle={() => toggleCollapse(node.id)}
                                 toolPinned={documentState().pinnedNodes.has(node.id)}
-                                onToggleToolPin={() => toggleToolPin(node.id)}
+                                onToggleToolPin={() => togglePin(node.id)}
                                 onSubagentClick={onSubagentClick}
                             />
                             <NodeHoverStrip
