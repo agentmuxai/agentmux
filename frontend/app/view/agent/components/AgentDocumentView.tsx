@@ -383,6 +383,9 @@ export const AgentDocumentView = ({ documentAtom, documentStateAtom, logLines, a
             <For each={document()}>
                 {(node) => {
                     const isBookmarked = () => bookmarkedNodeIds?.().has(node.id) ?? false;
+                    const canExpand = () => node.type === "tool";
+                    const isExpanded = () => node.type === "tool" && documentState().pinnedNodes.has(node.id);
+                    const onExpand = node.type === "tool" ? () => toggleToolPin(node.id) : undefined;
 
                     const handleContextMenu = (e: MouseEvent) => {
                         if (!onBookmark) return;
@@ -425,6 +428,9 @@ export const AgentDocumentView = ({ documentAtom, documentStateAtom, logLines, a
                                 nodeId={node.id}
                                 isBookmarked={isBookmarked()}
                                 onBookmark={onBookmark != null ? () => onBookmark(node) : undefined}
+                                canExpand={canExpand()}
+                                isExpanded={isExpanded()}
+                                onExpand={onExpand}
                             />
                         </div>
                     );

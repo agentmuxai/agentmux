@@ -12,11 +12,8 @@
  *     Applies to ALL statuses — running, success, and failed.
  *     Running tools show a ⏳ spinner in the summary; failed tools show ✗.
  *     No content body is rendered in the document flow.
- *   - Hover: expands via the portal overlay on mouseenter, collapses
- *     on mouseleave. The portal escapes the `content-visibility: auto`
- *     paint containment on .agent-document-node-wrapper (see PR #367).
- *   - Click: pins the expanded state. A pinned-open block stays open even
- *     after the mouse leaves. Clicking again unpins.
+ *   - Click summary or strip Expand button: pins the expanded state. The portal
+ *     overlay renders the tool content. Clicking again unpins / collapses.
  *
  * Prior behavior removed in SPEC_AGENT_PANE_FOLLOWUPS items #4 + #5:
  *   running and failed states used to force-expand inline, taking 2+ lines
@@ -32,8 +29,8 @@
  *   without triggering a parent re-render of the component. This bit us
  *   in an earlier version of this file: `pinned` was destructured, and
  *   pin toggles — which mutate `documentState` but not the document
- *   array — never reached the component, so clicking to pin visibly
- *   worked while hovered but collapsed again on mouseleave.
+ *   array — never reached the component, so the pin state appeared to
+ *   reset on the next render cycle.
  */
 
 import clsx from "clsx";
@@ -95,12 +92,10 @@ function findScrollParent(el: HTMLElement): HTMLElement | null {
 const OVERLAY_MAX_HEIGHT_PX = 400;
 
 export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
-    const [hovered, setHovered] = createSignal(false);
-    // Position of the collapsed row in viewport coordinates, recomputed on
-    // mouseenter. The overlay is rendered via a <Portal> to document.body to
-    // escape the paint containment imposed by .agent-document-node-wrapper's
-    // `content-visibility: auto` — otherwise the absolute-positioned overlay
-    // gets clipped at the wrapper's edge and the hover expansion is invisible.
+    // Position of the collapsed row in viewport coordinates, recomputed when
+    // pinned flips true. The overlay is rendered via a <Portal> to document.body
+    // to escape the paint containment imposed by .agent-document-node-wrapper's
+    // `content-visibility: auto` — otherwise the overlay gets clipped.
     const [overlayRect, setOverlayRect] = createSignal<{
         left: number;
         right: number;
@@ -112,22 +107,8 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
 
     let blockRef: HTMLDivElement | undefined;
 
-    // Collapsed-by-default for every status. Running, success, and failed
-    // all get the same one-line treatment (SPEC_AGENT_PANE_FOLLOWUPS items
-    // #4 and #5). Hover reveals the body via the portal overlay; click
-    // pins it open. Progress + error content are still accessible — just
-    // not always-on visually.
-    //
-    // The running state shows a spinner in the collapsed summary; the
-    // failed state shows a red ✗. Both indicate what's happening without
-    // consuming vertical space from the pane.
-    const expanded = () => props.pinned || hovered();
-
-    // All transient / pinned expansion now goes through the portal overlay.
-    // Nothing renders inline in the document flow anymore — so we don't
-    // need a separate `overlayMode` predicate; every expansion IS overlay
-    // mode. Kept as an accessor for parity with the existing SCSS hooks.
-    const overlayMode = () => hovered() || props.pinned;
+    const expanded = () => props.pinned;
+    const overlayMode = () => props.pinned;
 
     const statusIcon = (): string => STATUS_ICON[props.node.status] || "•";
 
@@ -149,32 +130,11 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
         });
     };
 
-    // Hover-leave is deferred by a microtask so that mouseleave on the
-    // summary block followed by mouseenter on the portal overlay doesn't
-    // cause a visible collapse. The portal is rendered to document.body,
-    // not as a DOM descendant of the block — a direct onMouseLeave →
-    // setHovered(false) would momentarily hide the overlay as the cursor
-    // transits the one-pixel gap between the summary row and the portal.
-    let leavePending = 0;
-    const handleMouseEnter = () => {
-        if (leavePending) {
-            clearTimeout(leavePending);
-            leavePending = 0;
+    // Measure position when pin flips true so the portal has coordinates on first render.
+    createEffect(() => {
+        if (props.pinned && blockRef) {
+            measure();
         }
-        measure();
-        setHovered(true);
-    };
-
-    const handleMouseLeave = () => {
-        if (leavePending) clearTimeout(leavePending);
-        leavePending = window.setTimeout(() => {
-            leavePending = 0;
-            setHovered(false);
-        }, 0);
-    };
-
-    onCleanup(() => {
-        if (leavePending) clearTimeout(leavePending);
     });
 
     // Reposition the portal overlay on scroll so a PINNED overlay stays
@@ -292,7 +252,7 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
     };
 
     // Overlay style — only meaningful when overlayMode() is true. Computed
-    // from overlayRect() which is set during handleMouseEnter / handleScroll.
+    // from overlayRect() which is set during measure() / handleScroll.
     //
     // Zoom correction: the portal renders to document.body, outside the
     // .agent-view zoom context. getBoundingClientRect() returns viewport
@@ -341,8 +301,6 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
                 success: props.node.status === "success",
                 failed: props.node.status === "failed",
             })}
-            onMouseEnter={handleMouseEnter}
-            onMouseLeave={handleMouseLeave}
         >
             <div class="agent-tool-summary" onClick={props.onTogglePin}>
                 <span class="agent-tool-status-icon">{statusIcon()}</span>
@@ -382,14 +340,6 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
                         })}
                         style={overlayStyle()}
                         onClick={(e) => e.stopPropagation()}
-                        // Use handleMouseEnter (not an inline setHovered(true))
-                        // so the pending leavePending timeout from the block's
-                        // mouseleave is cleared. Otherwise the timeout fires
-                        // on the next tick after the portal's mouseenter
-                        // has set hovered=true, flipping it back to false
-                        // and collapsing the overlay mid-transit.
-                        onMouseEnter={handleMouseEnter}
-                        onMouseLeave={handleMouseLeave}
                     >
                         {renderToolContent()}
                     </div>
