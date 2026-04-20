@@ -19,6 +19,7 @@ let cachedValues: {
     hostName: string;
     dataDir: string;
     configDir: string;
+    userHomeDir: string;
     docsiteUrl: string;
     zoomFactor: number;
     updaterStatus: UpdaterStatus;
@@ -77,6 +78,7 @@ export async function initCefApi(): Promise<void> {
         hostName,
         dataDir,
         configDir,
+        userHomeDir,
         docsiteUrl,
         zoomFactor,
         aboutDetails,
@@ -88,6 +90,7 @@ export async function initCefApi(): Promise<void> {
         invokeCommand<string>("get_host_name"),
         invokeCommand<string>("get_data_dir"),
         invokeCommand<string>("get_config_dir"),
+        invokeCommand<string>("get_user_home_dir"),
         invokeCommand<string>("get_docsite_url"),
         invokeCommand<number>("get_zoom_factor"),
         invokeCommand<AboutModalDetails>("get_about_modal_details"),
@@ -102,6 +105,7 @@ export async function initCefApi(): Promise<void> {
         hostName,
         dataDir,
         configDir,
+        userHomeDir,
         docsiteUrl,
         zoomFactor,
         aboutDetails,
@@ -256,6 +260,7 @@ export function buildCefApi(): AppApi {
         getHostName: () => cachedValues!.hostName,
         getDataDir: () => cachedValues!.dataDir,
         getConfigDir: () => cachedValues!.configDir,
+        getUserHomeDir: () => cachedValues!.userHomeDir,
         getDocsiteUrl: () => cachedValues!.docsiteUrl,
         getZoomFactor: () => cachedValues!.zoomFactor,
         getEnv: (_varName: string) => {

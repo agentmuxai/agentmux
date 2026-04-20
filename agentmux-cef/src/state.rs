@@ -223,6 +223,18 @@ pub struct AppState {
     /// Version-specific config directory
     pub version_config_dir: Mutex<Option<String>>,
 
+    /// User data home used by the frontend's `agentmuxHome()` helper to
+    /// construct per-agent paths (working dir, `GH_CONFIG_DIR`, etc.).
+    ///
+    /// - Portable: `<portable>/data/` — keeps agent state inside the portable
+    ///   folder so two coexisting portables don't clobber each other on the
+    ///   same `~/.agentmux/agents/<slug>/` path (slugs are unique per Forge
+    ///   DB, not globally; see `docs/specs/portable-agent-working-dirs.md`).
+    /// - Installed: `~/.agentmux/` — preserves existing behavior.
+    ///
+    /// `AGENTMUX_DATA_HOME` env var, if set, overrides both.
+    pub user_home_dir: Mutex<Option<String>>,
+
     /// Active cross-window drag session (at most one at a time).
     pub active_drag: Mutex<Option<DragSession>>,
 
@@ -269,6 +281,7 @@ impl Default for AppState {
             pending_window_labels: Mutex::new(VecDeque::new()),
             version_data_dir: Mutex::new(None),
             version_config_dir: Mutex::new(None),
+            user_home_dir: Mutex::new(None),
             active_drag: Mutex::new(None),
             browser_panes: crate::browser_panes::BrowserPaneManager::new(),
             browser_api: crate::browser_api::BrowserApiState::new(),

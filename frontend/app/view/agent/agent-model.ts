@@ -406,11 +406,23 @@ async function checkNodejsForProvider(providerId: string): Promise<string | null
 }
 
 /**
- * Return the ~/.agentmux base directory as an absolute path.
- * Uses $HOME (Unix/macOS/Git Bash) or $USERPROFILE (Windows cmd/PowerShell)
- * so no bare `~` ever reaches the OS.
+ * Return the AgentMux user-home base directory as an absolute path.
+ *
+ * Routed by the CEF host so per-agent paths (working dir, `GH_CONFIG_DIR`, …)
+ * land in the right place for the instance type:
+ *   - Portable: `<portable>/data`
+ *   - Installed: `~/.agentmux`
+ *   - `AGENTMUX_DATA_HOME` env override: wins over both.
+ *
+ * Falls back to `$HOME/.agentmux` only if the host IPC hasn't populated the
+ * cached value yet (shouldn't happen in practice — `initCefApi` fetches it
+ * before any agent launch).
+ *
+ * See `docs/specs/portable-agent-working-dirs.md`.
  */
 function agentmuxHome(): string {
+    const fromHost = getApi().getUserHomeDir();
+    if (fromHost) return fromHost;
     const home = getApi().getEnv("HOME") || getApi().getEnv("USERPROFILE") || "~";
     return `${home}/.agentmux`;
 }
