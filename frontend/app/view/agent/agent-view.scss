@@ -47,32 +47,43 @@
         content-visibility: auto;
         contain-intrinsic-size: auto 80px;
         contain: layout style;
-        // position: relative anchors the .node-ts timestamp pill.
+        // position: relative anchors the .node-strip hover bar.
         position: relative;
 
-        // Timestamp pill — shown on hover of any node row.
+        // Hover strip — shown on hover/focus of any node row.
         // Pure-CSS visibility: no JS signal needed.
-        .node-ts {
+        .node-strip {
             position: absolute;
             top: 3px;
             right: 6px;
-            font-size: 10px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 2px 4px;
+            font-size: 11px;
             font-family: var(--fixed-font, monospace);
-            color: var(--secondary-text-color);
             background: var(--panel-bg-color, var(--main-bg-color));
             border: 1px solid var(--border-color);
-            border-radius: 3px;
-            padding: 0px 4px;
+            border-radius: 4px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
             pointer-events: none;
             opacity: 0;
             transition: opacity 80ms ease;
             white-space: nowrap;
-            z-index: 5;
+            z-index: 6;
             line-height: 1.6;
+            max-width: calc(100% - 12px);
+            overflow: hidden;
         }
 
-        &:hover .node-ts {
+        &:hover .node-strip,
+        &:focus-within .node-strip {
             opacity: 1;
+        }
+
+        .node-strip-time {
+            color: var(--secondary-text-color);
+            font-variant-numeric: tabular-nums;
         }
     }
 

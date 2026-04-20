@@ -14,7 +14,7 @@ import type { DocumentNode, DocumentState, LogLine, SubagentLinkNode } from "../
 import type { ScrollCommand } from "../hooks/useScrollToNode";
 import { AgentMessageBlock } from "./AgentMessageBlock";
 import { MarkdownBlock } from "./MarkdownBlock";
-import { NodeTimestamp } from "./NodeTimestamp";
+import { NodeHoverStrip } from "./NodeHoverStrip";
 import { SubagentLinkBlock } from "./SubagentLinkBlock";
 import { ToolBlock } from "./ToolBlock";
 import { ContextMenuModel } from "@/app/store/contextmenu";
@@ -431,7 +431,7 @@ export const AgentDocumentView = ({ documentAtom, documentStateAtom, logLines, a
                                 onToggleToolPin={() => toggleToolPin(node.id)}
                                 onSubagentClick={onSubagentClick}
                             />
-                            <NodeTimestamp timestamp={(node as any).timestamp} />
+                            <NodeHoverStrip timestamp={(node as any).timestamp} nodeId={node.id} />
                         </div>
                     );
                 }}
