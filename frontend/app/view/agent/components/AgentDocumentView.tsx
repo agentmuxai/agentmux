@@ -412,17 +412,6 @@ export const AgentDocumentView = ({ documentAtom, documentStateAtom, logLines, a
                             data-node-id={node.id}
                             onContextMenu={handleContextMenu}
                         >
-                            {/* Bookmark indicator button — shown on hover */}
-                            <Show when={onBookmark != null}>
-                                <button
-                                    class="agent-bookmark-btn"
-                                    classList={{ "agent-bookmark-btn--active": isBookmarked() }}
-                                    onClick={(e) => { e.stopPropagation(); onBookmark!(node); }}
-                                    title={isBookmarked() ? "Remove bookmark" : "Bookmark this message"}
-                                >
-                                    {isBookmarked() ? "\uD83D\uDD16" : "\uD83D\uDD16"}
-                                </button>
-                            </Show>
                             <DocumentNodeRenderer
                                 node={node}
                                 collapsed={documentState().collapsedNodes.has(node.id)}
@@ -431,7 +420,12 @@ export const AgentDocumentView = ({ documentAtom, documentStateAtom, logLines, a
                                 onToggleToolPin={() => toggleToolPin(node.id)}
                                 onSubagentClick={onSubagentClick}
                             />
-                            <NodeHoverStrip timestamp={(node as any).timestamp} nodeId={node.id} />
+                            <NodeHoverStrip
+                                timestamp={(node as any).timestamp}
+                                nodeId={node.id}
+                                isBookmarked={isBookmarked()}
+                                onBookmark={onBookmark != null ? () => onBookmark(node) : undefined}
+                            />
                         </div>
                     );
                 }}

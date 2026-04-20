@@ -85,6 +85,37 @@
             color: var(--secondary-text-color);
             font-variant-numeric: tabular-nums;
         }
+
+        .node-strip-btn {
+            pointer-events: auto;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 1px 4px;
+            background: transparent;
+            border: none;
+            border-radius: 3px;
+            color: var(--secondary-text-color);
+            cursor: pointer;
+            font-size: 11px;
+            line-height: 1.2;
+
+            &:hover:not(:disabled) {
+                background: color-mix(in srgb, var(--main-text-color) 10%, transparent);
+                color: var(--main-text-color);
+            }
+
+            &--active {
+                color: var(--warning-color, #eab308);
+            }
+
+            &:disabled,
+            &--disabled {
+                opacity: 0.35;
+                cursor: not-allowed;
+                pointer-events: none;
+            }
+        }
     }
 
     // === Status Log (terminal-style) ===
@@ -2814,48 +2845,6 @@
     .agent-node-bookmarked {
         border-left: 2px solid var(--warning-color, #eab308) !important;
         padding-left: 2px;
-        position: relative;
-    }
-
-    // Small bookmark button shown on hover in the top-right corner of each node wrapper.
-    .agent-bookmark-btn {
-        position: absolute;
-        top: 2px;
-        right: 2px;
-        width: 18px;
-        height: 18px;
-        padding: 0;
-        background: none;
-        border: none;
-        border-radius: 3px;
-        font-size: 11px;
-        line-height: 18px;
-        text-align: center;
-        cursor: pointer;
-        color: var(--secondary-text-color);
-        opacity: 0;
-        transition: opacity 0.12s, color 0.12s, background 0.12s;
-        z-index: 2;
-        user-select: none;
-
-        &--active {
-            color: var(--warning-color, #eab308);
-            opacity: 0.9;
-        }
-
-        &:hover {
-            background: color-mix(in srgb, var(--main-text-color) 10%, transparent);
-            color: var(--warning-color, #eab308);
-        }
-    }
-
-    // Show the bookmark button when the parent wrapper is hovered.
-    .agent-document-node-wrapper:hover .agent-bookmark-btn {
-        opacity: 0.7;
-    }
-
-    // Node wrapper must be position:relative so the absolute bookmark btn works.
-    .agent-document-node-wrapper {
         position: relative;
     }
 
