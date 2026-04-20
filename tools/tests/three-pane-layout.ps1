@@ -153,7 +153,7 @@ function New-AgentMuxThreePaneLayout {
         [Parameter(Mandatory)] $Auth,
         [Parameter(Mandatory)] $TabInfo,
         [string]$P1Url = "https://www.google.com/",
-        [string]$P2Url = "https://www.google.com/",
+        [string]$P2Url = "https://www.google.com/imghp",
         [int]$SettleMs = 3500
     )
 
