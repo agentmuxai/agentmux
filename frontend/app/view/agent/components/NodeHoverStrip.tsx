@@ -50,17 +50,19 @@ const StripButton = (props: StripButtonProps): JSX.Element => {
 };
 
 export const NodeHoverStrip = (props: NodeHoverStripProps): JSX.Element => (
-    <Show when={props.timestamp != null}>
+    <Show when={props.timestamp != null || props.onBookmark != null}>
         <div
             class="node-strip"
             data-node-strip-for={props.nodeId}
         >
-            <time
-                class="node-strip-time"
-                dateTime={new Date(props.timestamp!).toISOString()}
-            >
-                {formatLocalized(props.timestamp!)}
-            </time>
+            <Show when={props.timestamp != null}>
+                <time
+                    class="node-strip-time"
+                    dateTime={new Date(props.timestamp!).toISOString()}
+                >
+                    {formatLocalized(props.timestamp!)}
+                </time>
+            </Show>
             <Show when={props.onBookmark}>
                 <StripButton
                     icon="🔖"
