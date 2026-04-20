@@ -81,8 +81,9 @@ export function buildRuntimeArgs(
         args.push(...permFlags);
     }
 
-    // Apply model and effort only for providers that support these flags
-    if (!providerId || providerId === "claude") {
+    // Apply model and effort for all providers except Kimi, which does not
+    // support the --effort flag and uses different --model values.
+    if (providerId !== "kimi") {
         args.push("--model", config.model);
         args.push("--effort", config.effort);
     }
