@@ -176,13 +176,13 @@ export const AgentDocumentView = ({ documentAtom, documentStateAtom, logLines, a
     // docs/specs/tool-collapse.md.
     const toggleToolPin = (nodeId: string) => {
         setDocumentState((prev) => {
-            const pinned = new Set(prev.pinnedToolNodes);
+            const pinned = new Set(prev.pinnedNodes);
             if (pinned.has(nodeId)) {
                 pinned.delete(nodeId);
             } else {
                 pinned.add(nodeId);
             }
-            return { ...prev, pinnedToolNodes: pinned };
+            return { ...prev, pinnedNodes: pinned };
         });
     };
 
@@ -427,7 +427,7 @@ export const AgentDocumentView = ({ documentAtom, documentStateAtom, logLines, a
                                 node={node}
                                 collapsed={documentState().collapsedNodes.has(node.id)}
                                 onToggle={() => toggleCollapse(node.id)}
-                                toolPinned={documentState().pinnedToolNodes.has(node.id)}
+                                toolPinned={documentState().pinnedNodes.has(node.id)}
                                 onToggleToolPin={() => toggleToolPin(node.id)}
                                 onSubagentClick={onSubagentClick}
                             />
