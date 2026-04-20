@@ -294,8 +294,8 @@ async fn main() {
 
     // Open databases
     let db_dir = base::get_wave_db_dir();
-    let wstore = Arc::new(WaveStore::open(&db_dir.join("wave.db")).unwrap_or_else(|e| {
-        tracing::error!("Failed to open wave store: {}", e);
+    let wstore = Arc::new(WaveStore::open(&db_dir.join("objects.db")).unwrap_or_else(|e| {
+        tracing::error!("Failed to open object store: {}", e);
         std::process::exit(1);
     }));
     let filestore = Arc::new(FileStore::open(&db_dir.join("filestore.db")).unwrap_or_else(|e| {

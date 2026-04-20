@@ -491,7 +491,7 @@ mod tests {
         let db_dir = tmp_dir.path().join("wdb");
         std::fs::create_dir_all(&db_dir).unwrap();
         let wstore = Arc::new(
-            WaveStore::open(&db_dir.join("wave.db")).expect("wstore"),
+            WaveStore::open(&db_dir.join("objects.db")).expect("wstore"),
         );
 
         // Insert a fake Block object with required meta

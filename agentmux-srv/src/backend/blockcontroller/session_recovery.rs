@@ -131,7 +131,7 @@ mod tests {
     #[test]
     fn test_scan_orphans_transfers_flag() {
         let tmp = tempfile::tempdir().unwrap();
-        let wstore = Arc::new(WaveStore::open(&tmp.path().join("wave.db")).unwrap());
+        let wstore = Arc::new(WaveStore::open(&tmp.path().join("objects.db")).unwrap());
 
         // ORef parser requires valid UUIDs, so generate them inline.
         let orphan_id = "11111111-1111-1111-1111-111111111111";
