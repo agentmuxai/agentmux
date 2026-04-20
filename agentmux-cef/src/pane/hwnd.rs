@@ -152,20 +152,7 @@ pub unsafe fn install_pane_focus_redirect(hwnd: *mut std::ffi::c_void) {
 
     // Chromium creates inner HWNDs (widget + render) below the outer HWND.
     // Mouse input reaches the deepest descendant, so we must walk the whole
-    // tree and subclass every one — EXCEPT `Chrome_WidgetWin_1`.
-    //
-    // Chrome_WidgetWin_1 is CEF's top-level-ish widget. Empirically
-    // (v0.33.280 stress test), subclassing it and redirecting its
-    // `WM_SETFOCUS` with `SetFocus(root)` during pane browser init
-    // interrupts CEF's focus handoff and triggers `on_before_close` on the
-    // pane ~6ms after creation. The second browser pane in a layout
-    // reproduces this ~50% of runs (see retro 2026-04-19 #9).
-    //
-    // Chrome_RenderWidgetHostHWND is the actual render widget; that's the
-    // HWND that receives keyboard/mouse input on the embedded page, and it
-    // still needs redirection to keep focus-steal from leaking keystrokes.
-    // Chromium creates it after `on_load_end`, so pane/callbacks reinstalls
-    // the subclass on every load to pick it up.
+    // tree and subclass every one.
     unsafe extern "system" fn enum_children(
         child: *mut std::ffi::c_void,
         _lparam: isize,
@@ -178,23 +165,16 @@ pub unsafe fn install_pane_focus_redirect(hwnd: *mut std::ffi::c_void) {
         if already {
             return 1;
         }
-        let mut class_buf = [0u16; 64];
-        let n = windows_sys::Win32::UI::WindowsAndMessaging::GetClassNameW(
-            child, class_buf.as_mut_ptr(), class_buf.len() as i32,
-        );
-        let class_name = String::from_utf16_lossy(&class_buf[..n as usize]);
-        if class_name == "Chrome_WidgetWin_1" {
-            tracing::info!(
-                "[pane-subclass] skipping Chrome_WidgetWin_1 child HWND {:p} (subclass triggers on_before_close race)",
-                child,
-            );
-            return 1;
-        }
         let orig = SetWindowLongPtrW(child, GWLP_WNDPROC, wndproc_hook as *const () as isize);
         if orig != 0 {
             if let Ok(mut map) = PANE_WNDPROCS.lock() {
                 map.insert(child as usize, orig);
             }
+            let mut class_buf = [0u16; 64];
+            let n = windows_sys::Win32::UI::WindowsAndMessaging::GetClassNameW(
+                child, class_buf.as_mut_ptr(), class_buf.len() as i32,
+            );
+            let class_name = String::from_utf16_lossy(&class_buf[..n as usize]);
             tracing::info!("[pane-subclass] subclassed child HWND {:p} class={}", child, class_name);
         }
         1 // continue
