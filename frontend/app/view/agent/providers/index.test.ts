@@ -11,6 +11,7 @@ import type { ProviderDefinition } from "./index";
 //   - ACP providers:           openclaw, pi — authType "api-key",
 //     outputFormat "acp".
 const OAUTH_CLI_IDS = ["claude", "codex", "gemini"] as const;
+const API_KEY_CLI_IDS = ["kimi"] as const;
 const ACP_IDS = ["openclaw", "pi"] as const;
 
 describe("PROVIDERS", () => {
@@ -30,8 +31,6 @@ describe("PROVIDERS", () => {
             expect(provider.authType).toBeTruthy();
             expect(Array.isArray(provider.authCheckCommand)).toBe(true);
             expect(Array.isArray(provider.authLoginCommand)).toBe(true);
-            expect(provider.npmPackage).toBeTruthy();
-            expect(provider.pinnedVersion).toBeTruthy();
             expect(provider.docsUrl).toBeTruthy();
             expect(provider.icon).toBeTruthy();
         }
@@ -39,6 +38,14 @@ describe("PROVIDERS", () => {
 
     test("OAuth CLI providers are in raw output mode with no default args", () => {
         for (const id of OAUTH_CLI_IDS) {
+            const provider = PROVIDERS[id];
+            expect(provider.outputFormat).toBe("raw");
+            expect(provider.defaultArgs).toEqual([]);
+        }
+    });
+
+    test("API-key CLI providers are in raw output mode with no default args", () => {
+        for (const id of API_KEY_CLI_IDS) {
             const provider = PROVIDERS[id];
             expect(provider.outputFormat).toBe("raw");
             expect(provider.defaultArgs).toEqual([]);
@@ -91,6 +98,32 @@ describe("codex provider", () => {
 
     test("has correct npm package", () => {
         expect(codex.npmPackage).toBe("@openai/codex");
+    });
+});
+
+describe("kimi provider", () => {
+    const kimi = PROVIDERS.kimi;
+
+    test("has correct CLI command", () => {
+        expect(kimi.cliCommand).toBe("kimi");
+    });
+
+    test("has correct auth commands", () => {
+        expect(kimi.authCheckCommand).toEqual(["info"]);
+        expect(kimi.authLoginCommand).toEqual(["login"]);
+    });
+
+    test("has empty npm package (python-based CLI)", () => {
+        expect(kimi.npmPackage).toBe("");
+        expect(kimi.pinnedVersion).toBe("");
+    });
+
+    test("uses subprocess controller", () => {
+        expect(kimi.controllerType).toBe("subprocess");
+    });
+
+    test("has kimi-stream-json styled output format", () => {
+        expect(kimi.styledOutputFormat).toBe("kimi-stream-json");
     });
 });
 

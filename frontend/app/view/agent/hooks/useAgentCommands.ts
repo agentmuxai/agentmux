@@ -232,7 +232,7 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
             const baseArgs = prov.controllerType === "persistent" && prov.persistentLaunchArgs
                 ? prov.persistentLaunchArgs
                 : prov.launchArgs;
-            const updatedArgs = buildRuntimeArgs(baseArgs, runtimeConfig);
+            const updatedArgs = buildRuntimeArgs(baseArgs, runtimeConfig, prov.id);
             try {
                 await RpcApi.SetMetaCommand(TabRpcClient, {
                     oref: WOS.makeORef("block", opts.blockId),
