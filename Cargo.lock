@@ -10,7 +10,7 @@ checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
 name = "agentmux-cef"
-version = "0.33.280"
+version = "0.33.282"
 dependencies = [
  "agentmux-common",
  "axum 0.8.9",
@@ -37,7 +37,7 @@ dependencies = [
 
 [[package]]
 name = "agentmux-common"
-version = "0.33.280"
+version = "0.33.282"
 dependencies = [
  "tokio",
  "tracing",
@@ -45,7 +45,7 @@ dependencies = [
 
 [[package]]
 name = "agentmux-launcher"
-version = "0.33.280"
+version = "0.33.282"
 dependencies = [
  "windows-sys 0.59.0",
  "winres",
@@ -53,7 +53,7 @@ dependencies = [
 
 [[package]]
 name = "agentmux-srv"
-version = "0.33.280"
+version = "0.33.282"
 dependencies = [
  "agentmux-common",
  "async-stream",
@@ -447,9 +447,9 @@ dependencies = [
 
 [[package]]
 name = "cef"
-version = "146.6.0+146.0.11"
+version = "146.7.0+146.0.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8e96a8efed553dd3266f1f9c22f51817032f404ccedc9ed69714eda0b306daab"
+checksum = "d09c05112b644e85d58f9e1bf7d62bc5a21a806a92129d4ed750d8cc9479abff"
 dependencies = [
  "anyhow",
  "cargo_metadata",
@@ -467,9 +467,9 @@ dependencies = [
 
 [[package]]
 name = "cef-dll-sys"
-version = "146.6.0+146.0.11"
+version = "146.7.0+146.0.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c4fe8417ec51c8151a7be069bed3320b0fab029f4582c80322f21bc3543adbaf"
+checksum = "693e287c4fe19ba5ed6f478bed66b1d367b06fbce904eeffafb8359a40dab24b"
 dependencies = [
  "anyhow",
  "cmake",

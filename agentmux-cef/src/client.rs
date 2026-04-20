@@ -778,12 +778,14 @@ wrap_client! {
     }
 }
 
-// FocusHandler used only by browser-pane clients — cancels NAVIGATION focus
-// (triggered by page load) but allows SYSTEM focus (user click, keyboard).
-// Combined with the Win32 WndProc subclass below, this means:
-//   • Page load / JS window.focus() → cancelled at both Chromium and Win32
-//   • User click inside the pane → allowed at both layers, pane gets focus,
-//     user can type into page inputs (e.g. google.com search box)
+// FocusHandler used only by browser-pane clients. Returns 0 for every
+// focus source (never cancels at the CEF level) — cancelling NAVIGATION
+// focus during the very first navigation of a newly-created pane fires
+// CEF's `on_before_close` on that pane ~10ms later. Focus-steal
+// protection lives entirely in the Win32 `WndProc` subclass below
+// (`pane::hwnd::install_pane_focus_redirect`), which redirects programmatic
+// `WM_SETFOCUS` back to the top-level window. User clicks are let through
+// because `WM_LBUTTONDOWN` in the subclass arms `ALLOW_PANE_FOCUS_ONCE`.
 wrap_focus_handler! {
     struct AgentMuxPaneFocusHandler;
 
@@ -793,9 +795,21 @@ wrap_focus_handler! {
             _browser: Option<&mut Browser>,
             source: FocusSource,
         ) -> ::std::os::raw::c_int {
-            let cancel = source == FocusSource::NAVIGATION;
-            tracing::info!("[pane-focus] on_set_focus source={:?} cancel={}", source, cancel);
-            if cancel { 1 } else { 0 }
+            // Previously we cancelled FocusSource::NAVIGATION here to
+            // stop page-load from stealing focus away from the main
+            // window. But cancelling on_set_focus during the very
+            // first navigation of a newly-created pane triggered CEF
+            // to fire `on_before_close` on that pane ~10ms later —
+            // reliably reproducible when creating a 2nd browser pane.
+            // The Win32 WndProc subclass below already redirects
+            // page-load SetFocus to the top-level window (see
+            // `pane::hwnd::install_pane_focus_redirect`), which
+            // handles the original focus-steal concern. Returning 0
+            // here so CEF proceeds with normal focus handling at the
+            // Chromium level; Win32 subclass continues to redirect
+            // any resulting Win32 focus change away from the pane.
+            tracing::info!("[pane-focus] on_set_focus source={:?} cancel=false", source);
+            0
         }
     }
 }
