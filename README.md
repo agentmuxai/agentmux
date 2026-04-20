@@ -23,13 +23,14 @@ Knowledge workers running AI agents across long-horizon tasks are blind while it
 
 AgentMux is an open-source desktop application that surfaces what agents are doing in real time: tool calls, reasoning steps, source citations, output streams, and conflicts between agents. The human role is observer and supervisor, not driver.
 
-Cross-platform (Windows, macOS, Linux). 100% Rust backend (Tokio + Axum). Chromium-based desktop UI. Apache 2.0.
+Cross-platform (Windows, macOS, Linux). 100% Rust backend (Tokio + Axum). CEF host (bundled Chromium). Apache 2.0.
 
 - **Live agent monitoring** — Watch every tool call and decision step as it happens. Catch an agent undoing correct work mid-task and redirect it before the damage compounds.
 - **Multi-agent orchestration** — Run parallel agents and see all of them at once. Spot conflicts before synthesis. Redirect any agent without killing the others.
 - **Guardrail observability** — See which constraints are active and firing. Tune your agent system from live signal, not post-mortem guesswork.
-- **Built-in Claude integration** — Agent sessions are first-class citizens alongside terminals, editor, and system metrics.
+- **Multi-provider agent support** — Claude Code, Codex CLI, and Gemini CLI as first-class providers, alongside terminals, editor, browser, and system metrics.
 - **Forge widget** — Agent picker wired to live Forge data for orchestration workflows.
+- **App API** — Local WebSocket RPC so external tools and agents can open panes, send messages, and read output. See [`docs/api/getting-started.md`](./docs/api/getting-started.md).
 - **Drag and drop** — Rearrange panes by dragging headers, reorder tabs, drag panes and tabs across windows.
 - **Per-pane zoom** — Independent zoom level per pane, plus global chrome zoom.
 - **Real PTY support** — Authentic terminal emulation via xterm.js and portable-pty.
@@ -42,7 +43,7 @@ Cross-platform (Windows, macOS, Linux). 100% Rust backend (Tokio + Axum). Chromi
 | Tool | Version | Purpose |
 |------|---------|---------|
 | **Node.js** | 22 LTS | Frontend build |
-| **Rust** | 1.77+ | Backend + Host |
+| **Rust** | 1.77+ | Backend + CEF host |
 | **[Task](https://taskfile.dev/)** | Latest | Build orchestration |
 | **CMake** | 3.20+ | CEF native build (cef-dll-sys) |
 | **Ninja** | 1.10+ | CEF native build (cef-dll-sys) |
@@ -56,14 +57,16 @@ Platform-specific:
 
 ```bash
 npm install        # install frontend dependencies
-task dev           # Vite hot reload
+task dev           # CEF host + Vite hot reload
 ```
 
 ### Production Build
 
 ```bash
-task package              # Windows portable ZIP
-task package:linux        # Linux portable (planned)
+task package           # Portable ZIP for the host platform
+task package:macos     # macOS DMG
+task package:linux     # Linux AppImage / deb
+task package:msix      # Windows MSIX installer
 ```
 
 ## Widgets
@@ -103,12 +106,28 @@ Nothing on disk moves — working directories, GitHub CLI config dirs, and env v
 
 Click the 👤 button on any agent card to assign external accounts (GitHub PAT, AWS profile, Anthropic API key, etc.) to that agent. Accounts are stored per-agent and survive renames. You can swap, add, or unassign accounts at any time without restarting the agent.
 
+## App API
+
+AgentMux exposes a local WebSocket RPC surface so external tools and agents can drive the host — open agent panes, send messages, read output, and more. It binds to loopback only and is auth-gated per instance.
+
+```javascript
+// ws://127.0.0.1:{WS_PORT}/ws?authkey={AUTH_KEY}
+ws.send(JSON.stringify({
+  wscommand: "rpc",
+  message: { command: "agent.list", reqid: "demo-1", data: {} },
+}));
+```
+
+- **Getting started:** [`docs/api/getting-started.md`](./docs/api/getting-started.md) — connect, discover credentials, make your first call.
+- **Command reference:** [`docs/specs/app-api-extension.md`](./docs/specs/app-api-extension.md).
+- **Implementation status:** [`docs/specs/app-api-status.md`](./docs/specs/app-api-status.md).
+
 ## Architecture
 
 ```
                     ┌─────────────────────────────────┐
                     │           Frontend               │
-                    │   SolidJS + xterm.js + Jotai     │
+                    │   SolidJS + xterm.js             │
                     └──────────────────┬───────────────┘
                                        │
                     ┌──────────────────▼───────────────┐
@@ -126,21 +145,19 @@ Click the 👤 button on any agent card to assign external accounts (GitHub PAT,
 ```
 
 **Stack:**
-- **Frontend:** SolidJS + TypeScript + Vite + Jotai
+- **Frontend:** SolidJS + TypeScript + Vite (state via SolidJS signals)
 - **Desktop:** CEF 146 via cef-rs — bundles its own Chromium (~148 MB ZIP, ~150 ms startup)
 - **Backend:** Rust (Tokio + Axum + SQLite + portable-pty)
 - **Terminal:** xterm.js
-
-> **Note:** The Tauri host was removed. All code is Chromium-based.
 
 ## Build Commands
 
 | Command | Description |
 |---------|-------------|
-| `task dev` | Development mode (Vite hot reload) |
-| `task package` | Windows portable ZIP with launcher |
-| `task build:host` | Build the host binary |
-| `task bundle` | Bundle runtime DLLs |
+| `task dev` | Development mode (CEF host + Vite hot reload) |
+| `task build:host` | Build the CEF host binary |
+| `task bundle` | Bundle CEF runtime DLLs |
+| `task package` | Package a portable build for the host platform |
 | `task build:backend` | Build agentmux-srv |
 | `task build:frontend` | Build frontend only |
 | `task test` | Run tests (vitest) |
@@ -172,7 +189,7 @@ Releases are built by [`agentmuxai/agentmux-builder`](https://github.com/agentmu
 
 1. The builder's workflow checks out this repo at the given ref
 2. Builds run in parallel on `ubuntu-latest`, `macos-latest`, and `windows-latest`
-3. Each job builds the Rust backend binary (agentmux-srv), then builds the host
+3. Each job builds the Rust backend binary (agentmux-srv), then builds the CEF host
 4. macOS builds are code-signed and notarized via Apple Developer credentials
 5. Windows builds include both an NSIS installer and a portable ZIP
 6. A final `create-release` job collects all artifacts and creates a GitHub Release on this repo
@@ -181,7 +198,7 @@ Releases are built by [`agentmuxai/agentmux-builder`](https://github.com/agentmu
 
 ```bash
 # Manual workflow dispatch (pass a tag, branch, or SHA)
-gh workflow run build.yml -R agentmuxai/agentmux-builder -f ref=v0.33.0
+gh workflow run tauri-build.yml -R agentmuxai/agentmux-builder -f ref=v0.33.0
 ```
 
 ### Release artifacts
@@ -206,7 +223,7 @@ git push origin main
 git tag v0.X.Y && git push origin v0.X.Y
 
 # 3. Trigger the builder (builds all platforms, creates GitHub Release)
-gh workflow run build.yml -R agentmuxai/agentmux-builder -f ref=v0.X.Y
+gh workflow run tauri-build.yml -R agentmuxai/agentmux-builder -f ref=v0.X.Y
 
 # 4. Wait for build to complete (~15-20 min)
 gh run list -R agentmuxai/agentmux-builder --limit 1

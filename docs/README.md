@@ -5,6 +5,7 @@ Project documentation organized by type.
 | Directory | Purpose |
 |-----------|---------|
 | `analysis/` | Technical analysis, audits, benchmarks, root cause investigations |
+| `api/` | User-facing API guides (start with `api/getting-started.md`) |
 | `investigations/` | Active bug investigations with reproduction steps |
 | `reports/` | Session reports, handoff notes, bug fix summaries |
 | `research/` | Research into technologies, approaches, and design options |
