@@ -184,7 +184,15 @@ function BlockFull({ nodeModel, viewModel }: FullBlockProps): JSX.Element {
         // IPC; this widens the trigger to every non-pane block
         // (terminal, agent, forge, editor, ...). Idempotent when
         // focus is already on main.
-        invokeCommand("main_window_focus", {}).catch(() => {});
+        //
+        // Pass `window_label` so the backend targets THIS window's
+        // main browser. Without it, `main_window_focus` always
+        // reclaims focus to `label=main` (the first non-pane browser
+        // in state.browsers) — clicking an input in window 2 would
+        // steal focus back to window 1.
+        const params = new URLSearchParams(window.location.search);
+        const windowLabel = params.get("windowLabel") ?? "main";
+        invokeCommand("main_window_focus", { window_label: windowLabel }).catch(() => {});
     };
 
     const setFocusTarget = () => {
