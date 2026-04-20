@@ -27,6 +27,7 @@ pub fn register_app_api_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     register_agent_status(engine, state);
     register_agent_list(engine, state);
     register_agent_output(engine, state);
+    register_pane_open(engine, state);
     register_blockfile_line_count(engine, state);
     register_blockfile_read_range(engine, state);
     register_session_digest(engine, state);
@@ -589,6 +590,190 @@ fn register_agent_output(engine: &Arc<WshRpcEngine>, state: &AppState) {
             })
         }),
     );
+}
+
+// ---------------------------------------------------------------------------
+// pane.open
+// ---------------------------------------------------------------------------
+
+fn register_pane_open(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    let wstore = state.wstore.clone();
+    let event_bus = state.event_bus.clone();
+
+    engine.register_handler(
+        COMMAND_PANE_OPEN,
+        Box::new(move |data, _ctx| {
+            let wstore = wstore.clone();
+            let event_bus = event_bus.clone();
+            Box::pin(async move {
+                let cmd: CommandPaneOpenData = serde_json::from_value(data)
+                    .map_err(|e| format!("pane.open: {e}"))?;
+
+                tracing::info!(view = %cmd.view, "pane.open");
+
+                // Build meta for the requested view, validating required args
+                let meta = build_pane_meta(&cmd)?;
+
+                // Resolve tab
+                let tab_id = resolve_tab_id(&wstore, cmd.tab_id.as_deref())?;
+
+                // Create block
+                let block = crate::backend::wcore::create_block(&wstore, &tab_id, meta)
+                    .map_err(|e| format!("pane.open: create_block: {e}"))?;
+                let block_id = block.oid.clone();
+
+                // Enqueue layout action — split if requested, else append
+                let (actiontype, targetblockid, position) = resolve_placement(
+                    cmd.split_direction.as_deref(),
+                    cmd.split_reference_block_id.as_deref(),
+                );
+                let focused = cmd.focus.unwrap_or(true);
+
+                {
+                    let tab: Tab = wstore.must_get(&tab_id)
+                        .map_err(|e| format!("pane.open: reload tab: {e}"))?;
+                    if let Ok(mut layout) = wstore.must_get::<obj::LayoutState>(&tab.layoutstate) {
+                        let mut actions = layout.pendingbackendactions.take().unwrap_or_default();
+                        actions.push(obj::LayoutActionData {
+                            actiontype,
+                            actionid: uuid::Uuid::new_v4().to_string(),
+                            blockid: block_id.clone(),
+                            nodesize: None,
+                            indexarr: None,
+                            focused,
+                            magnified: false,
+                            ephemeral: false,
+                            targetblockid,
+                            position,
+                        });
+                        layout.pendingbackendactions = Some(actions);
+                        let _ = wstore.update(&mut layout);
+                    }
+                }
+
+                tracing::info!(
+                    block_id = %block_id,
+                    view = %cmd.view,
+                    "pane.open: block created + layout updated"
+                );
+
+                // Broadcast block + tab + layout updates
+                {
+                    let mut updates = Vec::new();
+                    if let Ok(updated_block) = wstore.must_get::<Block>(&block_id) {
+                        updates.push(obj::WaveObjUpdate {
+                            updatetype: "update".into(),
+                            otype: "block".into(),
+                            oid: block_id.clone(),
+                            obj: Some(obj::wave_obj_to_value(&updated_block)),
+                        });
+                    }
+                    if let Ok(updated_tab) = wstore.must_get::<Tab>(&tab_id) {
+                        updates.push(obj::WaveObjUpdate {
+                            updatetype: "update".into(),
+                            otype: "tab".into(),
+                            oid: tab_id.clone(),
+                            obj: Some(obj::wave_obj_to_value(&updated_tab)),
+                        });
+                        if let Ok(updated_layout) = wstore.must_get::<obj::LayoutState>(&updated_tab.layoutstate) {
+                            updates.push(obj::WaveObjUpdate {
+                                updatetype: "update".into(),
+                                otype: "layout".into(),
+                                oid: updated_tab.layoutstate.clone(),
+                                obj: Some(obj::wave_obj_to_value(&updated_layout)),
+                            });
+                        }
+                    }
+                    for update in &updates {
+                        let oref = format!("{}:{}", update.otype, update.oid);
+                        if let Ok(data) = serde_json::to_value(update) {
+                            event_bus.broadcast_event(
+                                &crate::backend::eventbus::WSEventType {
+                                    eventtype: "waveobj:update".to_string(),
+                                    oref,
+                                    data: Some(data),
+                                },
+                            );
+                        }
+                    }
+                }
+
+                Ok(Some(serde_json::to_value(&PaneOpenResult {
+                    block_id,
+                    tab_id,
+                    view: cmd.view,
+                    created: true,
+                }).unwrap()))
+            })
+        }),
+    );
+}
+
+/// Build the metadata map for a pane.open request, validating required args.
+fn build_pane_meta(cmd: &CommandPaneOpenData) -> Result<MetaMapType, String> {
+    let mut meta = MetaMapType::new();
+
+    match cmd.view.as_str() {
+        "editor" => {
+            let file = cmd.file.as_deref().filter(|s| !s.is_empty())
+                .ok_or_else(|| "MISSING_ARG: view=editor requires 'file'".to_string())?;
+            meta.insert("view".to_string(), json!("editor"));
+            meta.insert("file".to_string(), json!(file));
+        }
+        "term" => {
+            meta.insert("view".to_string(), json!("term"));
+            meta.insert("controller".to_string(), json!("shell"));
+            if let Some(cwd) = cmd.cwd.as_deref().filter(|s| !s.is_empty()) {
+                meta.insert("cmd:cwd".to_string(), json!(cwd));
+            }
+        }
+        "browser" => {
+            let url = cmd.url.as_deref().filter(|s| !s.is_empty())
+                .ok_or_else(|| "MISSING_ARG: view=browser requires 'url'".to_string())?;
+            meta.insert("view".to_string(), json!("browser"));
+            meta.insert("url".to_string(), json!(url));
+        }
+        "sysinfo" => {
+            meta.insert("view".to_string(), json!("sysinfo"));
+        }
+        "help" => {
+            meta.insert("view".to_string(), json!("help"));
+        }
+        other => {
+            return Err(format!(
+                "INVALID_VIEW: unsupported view '{other}' (expected editor/term/browser/sysinfo/help)"
+            ));
+        }
+    }
+
+    if let Some(title) = cmd.title.as_deref().filter(|s| !s.is_empty()) {
+        meta.insert("frame:title".to_string(), json!(title));
+    }
+
+    Ok(meta)
+}
+
+/// Translate `split_direction` + `split_reference_block_id` into the backend
+/// layout action triple. Returns `(actiontype, targetblockid, position)`.
+/// Falls back to a plain `insert` if direction/reference are missing.
+fn resolve_placement(
+    direction: Option<&str>,
+    reference: Option<&str>,
+) -> (String, String, String) {
+    let reference = match reference.filter(|s| !s.is_empty()) {
+        Some(r) => r,
+        None => return ("insert".to_string(), String::new(), String::new()),
+    };
+
+    let (actiontype, position) = match direction {
+        Some("right") => (crate::backend::wcore::LAYOUT_ACTION_SPLIT_HORIZONTAL, "after"),
+        Some("left") => (crate::backend::wcore::LAYOUT_ACTION_SPLIT_HORIZONTAL, "before"),
+        Some("down") | Some("below") => (crate::backend::wcore::LAYOUT_ACTION_SPLIT_VERTICAL, "after"),
+        Some("up") | Some("above") => (crate::backend::wcore::LAYOUT_ACTION_SPLIT_VERTICAL, "before"),
+        _ => return ("insert".to_string(), String::new(), String::new()),
+    };
+
+    (actiontype.to_string(), reference.to_string(), position.to_string())
 }
 
 // ---------------------------------------------------------------------------
