@@ -354,19 +354,38 @@ async fn route_command(
             // CEF internally calls SetFocus on the right Chrome_RenderWidgetHostHWND.
             // Also defocus every pane browser so Chromium stops routing input
             // to them.
-            tracing::info!("[ipc] main_window_focus");
+            //
+            // `window_label` arg: routes focus to THE window that sent the
+            // IPC. Without it, we'd iterate state.browsers and take the
+            // first non-pane entry (always `label=main`), so clicking an
+            // input in window 2 would reclaim focus to window 1. Default
+            // "main" for back-compat if an older frontend omits the arg.
+            let window_label = args
+                .get("window_label")
+                .and_then(|v| v.as_str())
+                .unwrap_or("main")
+                .to_string();
+            tracing::info!("[ipc] main_window_focus window_label={}", window_label);
 
-            // Main browser is the one NOT prefixed with browser-pane-. Find
-            // it by excluding pane labels. There's always exactly one "main".
-            let main_browser = {
+            let target_browser = {
                 let browsers = state.browsers.lock();
                 browsers
-                    .iter()
-                    .find(|(k, _)| !k.starts_with("browser-pane-"))
-                    .map(|(k, b)| (k.clone(), b.clone()))
+                    .get(&window_label)
+                    .cloned()
+                    .map(|b| (window_label.clone(), b))
+                    .or_else(|| {
+                        // Fallback: pick any non-pane browser. Covers the
+                        // corner case where the requested window label
+                        // isn't registered yet (race on first DOM focus
+                        // before registerBackendWindow lands).
+                        browsers
+                            .iter()
+                            .find(|(k, _)| !k.starts_with("browser-pane-"))
+                            .map(|(k, b)| (k.clone(), b.clone()))
+                    })
             };
 
-            if let Some((label, _browser)) = main_browser {
+            if let Some((label, _browser)) = target_browser {
                 // Full focus reclaim has to run on the CEF UI thread:
                 // `browser_view_get_for_browser`, `host.set_focus`, and
                 // walking the HWND tree all require it. The task also
@@ -378,7 +397,7 @@ async fn route_command(
                 cef::post_task(cef::ThreadId::UI, Some(&mut task));
                 tracing::info!("[ipc] main_window_focus: posted MainFocusReclaimTask for label={}", label);
             } else {
-                tracing::warn!("[ipc] main_window_focus: no non-pane browser found in state.browsers");
+                tracing::warn!("[ipc] main_window_focus: no browser found for label={}", window_label);
             }
 
             Ok(serde_json::json!(true))

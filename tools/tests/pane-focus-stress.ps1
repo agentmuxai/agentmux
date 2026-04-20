@@ -38,7 +38,14 @@ param(
     # Omit this flag to use whatever layout is currently on screen
     # (requires manual setup per README "Setup before running" §A).
     [switch]$CreateLayout,
-    [int]$TypeDelayMs = 300,
+    # TypeDelayMs: gap between pixel click and SendKeys. Needs to be
+    # long enough for the async `main_window_focus` IPC chain (block.tsx
+    # → ipc.rs → MainFocusReclaimTask → Win32 SetFocus) to complete on
+    # the backend UI thread. 300 ms worked on average but hit a race
+    # 1/24 steps — an in-flight SendKeys delivered 3 keys to the pane
+    # HWND before SetFocus landed on main. 500 ms tolerates the
+    # roundtrip even on a loaded machine.
+    [int]$TypeDelayMs = 500,
     [int]$AfterTypeMs = 400
 )
 
