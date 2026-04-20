@@ -128,10 +128,21 @@ function New-AgentMuxThreePaneLayout {
     on every CreateBlock call so the new blocks land in THIS tab, not
     the previously-focused one.
 
-    .PARAMETER BrowserUrl
-    URL to open in both browser panes. Defaults to google.com because
-    the stress test relies on a known-layout destination — the Google
-    search box is the "type into pane content" target.
+    .PARAMETER P1Url
+    URL for the left browser pane. Default google.com (search box).
+
+    .PARAMETER P2Url
+    URL for the right browser pane. Default is also google.com — we
+    tried `google.com/?q=p2`, duckduckgo.com, a self-contained
+    data: URL, and example.com to keep the URLs distinct for the
+    Phase-1 URL-match CDP resolver (see SPEC_BROWSER_DOM_API.md §5.5),
+    but every non-google URL caused the second pane to be
+    `on_before_close`'d by CEF ~18 ms after create (see retro
+    2026-04-19 action item #9). Until that's root-caused, "both
+    google.com" is the default that keeps the pane alive — at the
+    cost of the resolver being unable to disambiguate P1 from P2.
+    Callers who need disambiguation can pass distinct URLs and accept
+    the pane-close risk.
 
     .PARAMETER SettleMs
     Milliseconds to wait after pushing the layout actions so the
@@ -141,21 +152,18 @@ function New-AgentMuxThreePaneLayout {
     param(
         [Parameter(Mandatory)] $Auth,
         [Parameter(Mandatory)] $TabInfo,
-        [string]$BrowserUrl = "https://www.google.com",
+        [string]$P1Url = "https://www.google.com/",
+        [string]$P2Url = "https://www.google.com/",
         [int]$SettleMs = 3500
     )
 
     $uicontext = @{ activetabid = $TabInfo.tabid }
 
-    # BlockDef for a browser pane. The browser-model.ts code reads
-    # meta.url at construction and navigates automatically — no
-    # subsequent SetMeta needed.
-    $browserDef = @{
-        meta = @{
-            view = "browser"
-            url  = $BrowserUrl
-        }
-    }
+    # BlockDefs for the two browser panes. Keep their URLs distinct
+    # so the Phase-1 CDP resolver can disambiguate them by URL (see
+    # parameter doc above and SPEC_BROWSER_DOM_API.md §5.5).
+    $p1Def = @{ meta = @{ view = "browser"; url = $P1Url } }
+    $p2Def = @{ meta = @{ view = "browser"; url = $P2Url } }
     # Terminal block. controller=shell is required: without it the
     # view renders a "Disconnected from local" overlay (see
     # CLAUDE.md "Terminal blockDef must include `controller: shell`").
@@ -173,13 +181,13 @@ function New-AgentMuxThreePaneLayout {
 
     Write-Verbose "Creating P1 (browser)…"
     $p1 = Invoke-AgentMuxService -Auth $Auth -Service object -Method CreateBlock `
-        -Args @($browserDef, $rtOpts) -Uicontext $uicontext
+        -Args @($p1Def, $rtOpts) -Uicontext $uicontext
     Write-Verbose "Creating T (terminal)…"
     $t  = Invoke-AgentMuxService -Auth $Auth -Service object -Method CreateBlock `
         -Args @($termDef, $rtOpts) -Uicontext $uicontext
     Write-Verbose "Creating P2 (browser)…"
     $p2 = Invoke-AgentMuxService -Auth $Auth -Service object -Method CreateBlock `
-        -Args @($browserDef, $rtOpts) -Uicontext $uicontext
+        -Args @($p2Def, $rtOpts) -Uicontext $uicontext
 
     # Fetch the Tab to get its layoutstate oid. The LayoutState oid
     # differs from the tab oid — the tab stores a reference.
