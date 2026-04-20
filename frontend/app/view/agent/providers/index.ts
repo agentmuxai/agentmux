@@ -148,9 +148,8 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         sessionIdField: "sessionId",
         controllerType: "acp",
     },
-    // Pi — the lightweight coding agent that powers OpenClaw.
-    // Standalone CLI, no gateway required. Pure coding agent with read/write/bash/edit tools.
-    // Ideal when users want a fast, self-contained coding agent without the full OpenClaw stack.
+    // Kimi Code CLI — Moonshot AI's coding agent.
+    // Python-based CLI (not npm). Supports stream-json output and OpenAI-style tool calls.
     kimi: {
         id: "kimi",
         displayName: "Kimi Code CLI",
@@ -176,6 +175,9 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         sessionIdField: "session_id",
         controllerType: "subprocess",
     },
+    // Pi — the lightweight coding agent that powers OpenClaw.
+    // Standalone CLI, no gateway required. Pure coding agent with read/write/bash/edit tools.
+    // Ideal when users want a fast, self-contained coding agent without the full OpenClaw stack.
     pi: {
         id: "pi",
         displayName: "Pi",
