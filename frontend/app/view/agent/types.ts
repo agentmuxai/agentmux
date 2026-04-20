@@ -345,8 +345,8 @@ export type LogFn = (tag: string, text: string, level?: "info" | "error" | "warn
  * Applied as CLI flags on each turn (between --resume spawns).
  */
 export type PermissionMode = "bypass" | "auto" | "acceptEdits" | "plan" | "default";
-export type ModelChoice = null | "opus" | "sonnet" | "haiku";
-export type EffortLevel = null | "low" | "medium" | "high" | "max";
+export type ModelChoice = "opus" | "sonnet" | "haiku";
+export type EffortLevel = "low" | "medium" | "high" | "max";
 
 export interface AgentRuntimeConfig {
     permissionMode: PermissionMode;
@@ -356,8 +356,8 @@ export interface AgentRuntimeConfig {
 
 export const DEFAULT_RUNTIME_CONFIG: AgentRuntimeConfig = {
     permissionMode: "bypass",
-    model: null,
-    effort: null,
+    model: "sonnet",
+    effort: "medium",
 };
 
 /**
