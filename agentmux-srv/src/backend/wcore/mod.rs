@@ -122,25 +122,84 @@ pub fn ensure_initial_data(store: &WaveStore) -> Result<bool, StoreError> {
     // Create initial tab in workspace (pinned, matching Go's isInitialLaunch=true)
     let tab = create_tab_with_opts(store, &ws.oid, "", true)?;
 
-    // Add a default Swarm widget block to the initial tab
+    // Seed the default 3-block layout:
+    //
+    //   ┌────────────────┬──────────────┐
+    //   │                │   sysinfo    │  size 2 of 10 ≈ 20%
+    //   │     agent      ├──────────────┤
+    //   │    (tall)      │              │
+    //   │                │    swarm     │  size 8 of 10 ≈ 80%
+    //   │                │              │
+    //   └────────────────┴──────────────┘
+    //        50% width         50% width
+    //
+    // We build `rootnode` directly instead of queuing `pendingbackendactions`
+    // because the frontend reducer has races when reducing multiple insert+
+    // split actions in a single drain cycle (the stress-harness hit this
+    // earlier — `layoutPersistence.ts` + `layoutNodeModels.ts::getNodeByBlockId`).
+    // A pre-built tree skips the reducer entirely; the frontend just renders.
+    let mut agent_meta = MetaMapType::new();
+    agent_meta.insert("view".to_string(), serde_json::json!("agent"));
+    let agent_block = create_block(store, &tab.oid, agent_meta)?;
+
+    let mut sysinfo_meta = MetaMapType::new();
+    sysinfo_meta.insert("view".to_string(), serde_json::json!("sysinfo"));
+    let sysinfo_block = create_block(store, &tab.oid, sysinfo_meta)?;
+
     let mut swarm_meta = MetaMapType::new();
     swarm_meta.insert("view".to_string(), serde_json::json!("swarm"));
     let swarm_block = create_block(store, &tab.oid, swarm_meta)?;
 
-    // Queue layout action so the frontend renders the swarm block
+    // Node IDs for each tree position. Leaves get their own node IDs distinct
+    // from the block IDs they wrap.
+    let agent_node_id = Uuid::new_v4().to_string();
+    let sysinfo_node_id = Uuid::new_v4().to_string();
+    let swarm_node_id = Uuid::new_v4().to_string();
+    let right_col_id = Uuid::new_v4().to_string();
+    let root_id = Uuid::new_v4().to_string();
+
+    let rootnode = serde_json::json!({
+        "id": root_id,
+        "flexDirection": "row",
+        "size": 10,
+        "children": [
+            {
+                "id": agent_node_id,
+                "flexDirection": "column",
+                "size": 5,
+                "data": { "blockId": agent_block.oid },
+            },
+            {
+                "id": right_col_id,
+                "flexDirection": "column",
+                "size": 5,
+                "children": [
+                    {
+                        "id": sysinfo_node_id,
+                        "flexDirection": "row",
+                        "size": 2,
+                        "data": { "blockId": sysinfo_block.oid },
+                    },
+                    {
+                        "id": swarm_node_id,
+                        "flexDirection": "row",
+                        "size": 8,
+                        "data": { "blockId": swarm_block.oid },
+                    },
+                ],
+            },
+        ],
+    });
+
     let mut layout = store.must_get::<LayoutState>(&tab.layoutstate)?;
-    layout.pendingbackendactions = Some(vec![LayoutActionData {
-        actiontype: "insert".to_string(),
-        actionid: Uuid::new_v4().to_string(),
-        blockid: swarm_block.oid.clone(),
-        nodesize: None,
-        indexarr: None,
-        focused: true,
-        magnified: false,
-        ephemeral: false,
-        targetblockid: String::new(),
-        position: String::new(),
-    }]);
+    layout.rootnode = Some(rootnode);
+    layout.focusednodeid = agent_node_id.clone();
+    layout.leaforder = Some(vec![
+        LeafOrderEntry { nodeid: agent_node_id, blockid: agent_block.oid.clone() },
+        LeafOrderEntry { nodeid: sysinfo_node_id, blockid: sysinfo_block.oid.clone() },
+        LeafOrderEntry { nodeid: swarm_node_id, blockid: swarm_block.oid.clone() },
+    ]);
+    layout.pendingbackendactions = None;
     store.update(&mut layout)?;
 
     Ok(first_launch)
