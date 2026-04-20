@@ -778,12 +778,14 @@ wrap_client! {
     }
 }
 
-// FocusHandler used only by browser-pane clients — cancels NAVIGATION focus
-// (triggered by page load) but allows SYSTEM focus (user click, keyboard).
-// Combined with the Win32 WndProc subclass below, this means:
-//   • Page load / JS window.focus() → cancelled at both Chromium and Win32
-//   • User click inside the pane → allowed at both layers, pane gets focus,
-//     user can type into page inputs (e.g. google.com search box)
+// FocusHandler used only by browser-pane clients. Returns 0 for every
+// focus source (never cancels at the CEF level) — cancelling NAVIGATION
+// focus during the very first navigation of a newly-created pane fires
+// CEF's `on_before_close` on that pane ~10ms later. Focus-steal
+// protection lives entirely in the Win32 `WndProc` subclass below
+// (`pane::hwnd::install_pane_focus_redirect`), which redirects programmatic
+// `WM_SETFOCUS` back to the top-level window. User clicks are let through
+// because `WM_LBUTTONDOWN` in the subclass arms `ALLOW_PANE_FOCUS_ONCE`.
 wrap_focus_handler! {
     struct AgentMuxPaneFocusHandler;
 
