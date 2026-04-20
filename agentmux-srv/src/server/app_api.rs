@@ -18,6 +18,7 @@ use crate::backend::session_archive;
 use crate::backend::storage::wstore::WaveStore;
 
 use super::AppState;
+use crate::server::cli_handlers::resolve_cli_on_path;
 
 /// Register all App API handlers on the RPC engine.
 pub fn register_app_api_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
@@ -128,24 +129,8 @@ fn register_agent_open(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     // This is used for Python-based CLIs like Kimi that are not
                     // distributed on npm.
                     if provider.npm_package.is_empty() {
-                        let path_cmd = if cfg!(windows) {
-                            format!("{}.cmd", provider.cli_command)
-                        } else {
-                            provider.cli_command.to_string()
-                        };
-                        let which_result = if cfg!(windows) {
-                            std::process::Command::new("where").arg(&path_cmd).output()
-                        } else {
-                            std::process::Command::new("which").arg(&path_cmd).output()
-                        };
-                        if let Ok(out) = which_result {
-                            if out.status.success() {
-                                let stdout_str = String::from_utf8_lossy(&out.stdout);
-                                let path = stdout_str.lines().next().unwrap_or("").trim();
-                                if !path.is_empty() && std::path::Path::new(path).exists() {
-                                    resolved_cli_path = path.to_string();
-                                }
-                            }
+                        if let Some(path) = resolve_cli_on_path(provider.cli_command).await {
+                            resolved_cli_path = path;
                         }
                     }
                     if !std::path::Path::new(&resolved_cli_path).exists() {

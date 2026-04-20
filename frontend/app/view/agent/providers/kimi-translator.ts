@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { StreamEvent, ToolCallEvent, ToolResultEvent } from "../types";
+import type { StreamEvent } from "../types";
 import type { OutputTranslator } from "./translator";
 
 /**

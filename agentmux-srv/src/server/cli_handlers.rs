@@ -65,33 +65,17 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
                 // Step 2: Not in versioned dir — check system PATH for non-npm CLIs.
                 if cmd.npm_package.is_empty() {
-                    let path_cmd = if cfg!(windows) {
-                        format!("{}.cmd", cmd.cli_command)
-                    } else {
-                        cmd.cli_command.clone()
-                    };
-                    let which_result = if cfg!(windows) {
-                        tokio::process::Command::new("where").arg(&path_cmd).output().await
-                    } else {
-                        tokio::process::Command::new("which").arg(&path_cmd).output().await
-                    };
-                    if let Ok(out) = which_result {
-                        if out.status.success() {
-                            let stdout_str = String::from_utf8_lossy(&out.stdout);
-                            let path = stdout_str.lines().next().unwrap_or("").trim();
-                            if !path.is_empty() && std::path::Path::new(path).exists() {
-                                let version = get_cli_version(path).await;
-                                tracing::info!(
-                                    path = %path, version = %version,
-                                    "CLI found on system PATH"
-                                );
-                                return Ok(Some(serde_json::to_value(&ResolveCliResult {
-                                    cli_path: path.to_string(),
-                                    version,
-                                    source: "system_path".to_string(),
-                                }).unwrap()));
-                            }
-                        }
+                    if let Some(path) = resolve_cli_on_path(&cmd.cli_command).await {
+                        let version = get_cli_version(&path).await;
+                        tracing::info!(
+                            path = %path, version = %version,
+                            "CLI found on system PATH"
+                        );
+                        return Ok(Some(serde_json::to_value(&ResolveCliResult {
+                            cli_path: path,
+                            version,
+                            source: "system_path".to_string(),
+                        }).unwrap()));
                     }
                     return Err(format!(
                         "{} not found and no npm package configured for this provider",
@@ -390,6 +374,33 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
 /// Re-export from shared crate for internal use.
 pub(crate) fn make_cli_cmd(cli_path: &str) -> tokio::process::Command {
     agentmux_common::make_cli_cmd(cli_path)
+}
+
+/// Resolve a CLI command on the system PATH.
+///
+/// Uses `where` on Windows and `which` on Unix. Returns the absolute path
+/// if the command is found and exists, otherwise `None`.
+pub(crate) async fn resolve_cli_on_path(cli_command: &str) -> Option<String> {
+    let path_cmd = if cfg!(windows) {
+        format!("{}.cmd", cli_command)
+    } else {
+        cli_command.to_string()
+    };
+    let which_result = if cfg!(windows) {
+        tokio::process::Command::new("where").arg(&path_cmd).output().await
+    } else {
+        tokio::process::Command::new("which").arg(&path_cmd).output().await
+    };
+    if let Ok(out) = which_result {
+        if out.status.success() {
+            let stdout_str = String::from_utf8_lossy(&out.stdout);
+            let path = stdout_str.lines().next().unwrap_or("").trim();
+            if !path.is_empty() && std::path::Path::new(path).exists() {
+                return Some(path.to_string());
+            }
+        }
+    }
+    None
 }
 
 async fn get_cli_version(cli_path: &str) -> String {
