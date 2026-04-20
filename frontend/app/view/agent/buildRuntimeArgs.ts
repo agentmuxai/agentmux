@@ -72,15 +72,8 @@ export function buildRuntimeArgs(
     const permFlags = PERMISSION_FLAGS[config.permissionMode] ?? PERMISSION_FLAGS.bypass;
     args.push(...permFlags);
 
-    // Apply model if set
-    if (config.model) {
-        args.push("--model", config.model);
-    }
-
-    // Apply effort if set
-    if (config.effort) {
-        args.push("--effort", config.effort);
-    }
+    args.push("--model", config.model);
+    args.push("--effort", config.effort);
 
     return args;
 }

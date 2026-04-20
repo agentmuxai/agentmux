@@ -68,7 +68,6 @@ function modelChoices(ctx: SlashCommandContext): SlashChoice[] {
         { ...make("opus", "Opus", "Claude Opus — highest quality", "opus"), aliases: ["claude-opus"] },
         { ...make("sonnet", "Sonnet", "Claude Sonnet — balanced", "sonnet"), aliases: ["claude-sonnet"] },
         { ...make("haiku", "Haiku", "Claude Haiku — fastest", "haiku"), aliases: ["claude-haiku"] },
-        make("default", "Default", "Provider default", null),
     ];
 }
 
@@ -79,11 +78,9 @@ export const modelCommand: SlashCommand = {
     arg: { kind: "enum", required: true, choices: modelChoices },
     availability: "any-agent",
     handler: async (ctx, arg): Promise<SlashResult> => {
-        const model: ModelChoice = arg === "default" ? null : (arg as ModelChoice);
-        const result = await updateRuntime(ctx, { model });
+        const result = await updateRuntime(ctx, { model: arg as ModelChoice });
         if (result.ok === false) return runtimeError(result.error);
-        const label = result.updated.model ?? "default";
-        return { kind: "ok", message: `model set to ${label} (applies to next turn)` };
+        return { kind: "ok", message: `model set to ${result.updated.model} (applies to next turn)` };
     },
 };
 
@@ -109,7 +106,6 @@ function effortChoices(ctx: SlashCommandContext): SlashChoice[] {
         make("medium", "Medium", "Balanced reasoning effort", "medium", ["med"]),
         make("high", "High", "High reasoning effort", "high"),
         make("max", "Max", "Maximum reasoning effort", "max"),
-        make("default", "Default", "Provider default", null),
     ];
 }
 
@@ -120,11 +116,9 @@ export const effortCommand: SlashCommand = {
     arg: { kind: "enum", required: true, choices: effortChoices },
     availability: "any-agent",
     handler: async (ctx, arg): Promise<SlashResult> => {
-        const effort: EffortLevel = arg === "default" ? null : (arg as EffortLevel);
-        const result = await updateRuntime(ctx, { effort });
+        const result = await updateRuntime(ctx, { effort: arg as EffortLevel });
         if (result.ok === false) return runtimeError(result.error);
-        const label = result.updated.effort ?? "default";
-        return { kind: "ok", message: `effort set to ${label} (applies to next turn)` };
+        return { kind: "ok", message: `effort set to ${result.updated.effort} (applies to next turn)` };
     },
 };
 
@@ -239,8 +233,8 @@ export const runtimeCommand: SlashCommand = {
         const r = getRuntimeConfig(ctx.block()?.meta);
         const parts = [
             `permission: ${r.permissionMode}`,
-            `model: ${r.model ?? "default"}`,
-            `effort: ${r.effort ?? "default"}`,
+            `model: ${r.model}`,
+            `effort: ${r.effort}`,
         ];
         return { kind: "ok", message: `runtime config — ${parts.join(" · ")}` };
     },
