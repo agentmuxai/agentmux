@@ -81,6 +81,11 @@
             opacity: 1;
         }
 
+        &:focus {
+            outline: 1px solid var(--accent-color, #3b82f6);
+            outline-offset: -1px;
+        }
+
         .node-strip-time {
             color: var(--secondary-text-color);
             font-variant-numeric: tabular-nums;

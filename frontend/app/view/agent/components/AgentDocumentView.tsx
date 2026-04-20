@@ -405,6 +405,31 @@ export const AgentDocumentView = ({ documentAtom, documentStateAtom, logLines, a
                     const onNewAgentFromHere = () =>
                         console.warn("[hover-strip] new agent from here — not yet implemented");
 
+                    const handleRowKey = (e: KeyboardEvent): void => {
+                        if (e.metaKey || e.ctrlKey || e.altKey) return;
+                        switch (e.key.toLowerCase()) {
+                            case "e":
+                                if (canExpand()) { onExpand(); e.preventDefault(); }
+                                break;
+                            case "b":
+                                if (onBookmark != null) { onBookmark(node); e.preventDefault(); }
+                                break;
+                            case "p":
+                                if (onOpenInNewPane) { onOpenInNewPane(); e.preventDefault(); }
+                                break;
+                            case "w":
+                                onOpenInNewWindow(); e.preventDefault();
+                                break;
+                            case "n":
+                                onNewAgentFromHere(); e.preventDefault();
+                                break;
+                            case "escape":
+                                (e.currentTarget as HTMLElement).blur();
+                                e.preventDefault();
+                                break;
+                        }
+                    };
+
                     const handleContextMenu = (e: MouseEvent) => {
                         if (!onBookmark) return;
                         // Don't show bookmark menu on top of text selections — let the parent handle those.
@@ -431,6 +456,8 @@ export const AgentDocumentView = ({ documentAtom, documentStateAtom, logLines, a
                                 "agent-node-search-match": highlightNodeId?.() === node.id,
                             }}
                             data-node-id={node.id}
+                            tabindex="0"
+                            onKeyDown={handleRowKey}
                             onContextMenu={handleContextMenu}
                         >
                             <DocumentNodeRenderer
