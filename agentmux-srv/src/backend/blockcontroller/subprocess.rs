@@ -721,10 +721,34 @@ impl Controller for SubprocessController {
         self.get_status_snapshot()
     }
 
-    fn send_input(&self, _input: BlockInputUnion) -> Result<(), String> {
-        // SubprocessController doesn't accept raw PTY input.
-        // User messages go through spawn_turn() (via AgentInputCommand RPC).
-        Err("subprocess controller does not accept raw input; use AgentInputCommand".to_string())
+    fn send_input(&self, input: BlockInputUnion) -> Result<(), String> {
+        // SubprocessController doesn't accept raw PTY input — user messages
+        // go through spawn_turn() (via AgentInputCommand RPC).
+        //
+        // Signals ARE accepted though: the agent-pane composer's Esc
+        // handler sends SIGINT via `ControllerInputCommand({signame:"SIGINT"})`
+        // when the user wants to cancel an in-flight turn. Route that to
+        // `stop_subprocess(force=true)` so the current subprocess is
+        // killed via `kill_tx`. Without this, Esc was silently rejected
+        // and the agent kept running.
+        if let Some(sig) = input.sig_name.as_deref() {
+            if sig == "SIGINT" || sig == "SIGTERM" {
+                tracing::info!(
+                    block_id = %self.block_id,
+                    sig = %sig,
+                    "subprocess controller: received signal, killing current turn"
+                );
+                return self.stop_subprocess(true);
+            }
+            return Err(format!(
+                "subprocess controller: unsupported signal {sig} (only SIGINT/SIGTERM)"
+            ));
+        }
+        if input.input_data.is_some() {
+            return Err("subprocess controller does not accept raw input; use AgentInputCommand".to_string());
+        }
+        // Term resize / other input types: accepted-no-op.
+        Ok(())
     }
 
     fn controller_type(&self) -> &str {
