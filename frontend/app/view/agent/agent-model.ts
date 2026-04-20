@@ -254,7 +254,16 @@ export class AgentViewModel implements ViewModel {
         // Falls back to the legacy name-derived form if slug is empty
         // (defensive — the v4 migration backfills slug for every row).
         const slug = agent.slug || agent.name.toLowerCase().replace(/[^a-z0-9-_]/g, "-");
-        const workDir = agent.working_directory || `${agentmuxHome()}/agents/${slug}`;
+        // If the persisted working_directory was seeded with a literal `~/.agentmux/...`
+        // path (see `scripts/gen-seed.js`), rewrite its prefix to the host-resolved
+        // `agentmuxHome()`. On portable builds that points into the portable data dir;
+        // on installed builds it matches the original `~/.agentmux/` verbatim. Without
+        // this rewrite the backend rejects the path with "path traversal denied"
+        // because `~/` never gets expanded to an absolute path at the OS layer.
+        const persisted = agent.working_directory ?? "";
+        const workDir = persisted.startsWith("~/.agentmux/")
+            ? `${agentmuxHome()}${persisted.slice("~/.agentmux".length)}`
+            : (persisted || `${agentmuxHome()}/agents/${slug}`);
 
         // Build CLI args: use persistent args if available, otherwise standard launch args
         const isPersistent = provider.controllerType === "persistent";

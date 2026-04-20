@@ -85,9 +85,15 @@ const CONTAINER_SKILL = { ...SKILL, content: SKILL.content.replace(", secrets ac
 const manifest = {
     version: 4,
     agents: [
-        { id: "agentx", name: "AgentX", icon: "\ud83d\udd34", description: "Primary coding agent", working_directory: "~/.agentmux/agents/agentx", shell: "pwsh", agent_bus_id: "agentx", content: { env: "AGENT_NAME=agentx\nAGENTMUX_AGENT_ID=AgentX", startup: HOST_STARTUP }, skills: [SKILL] },
-        { id: "agenty", name: "AgentY", icon: "\ud83d\udfe1", description: "Secondary coding agent", working_directory: "~/.agentmux/agents/agenty", shell: "pwsh", agent_bus_id: "agenty", content: { env: "AGENT_NAME=agenty\nAGENTMUX_AGENT_ID=AgentY", startup: HOST_STARTUP }, skills: [SKILL] },
-        { id: "agentz", name: "AgentZ", icon: "\ud83d\udd35", description: "Tertiary coding agent", working_directory: "~/.agentmux/agents/agentz", shell: "pwsh", agent_bus_id: "agentz", content: { env: "AGENT_NAME=agentz\nAGENTMUX_AGENT_ID=AgentZ", startup: HOST_STARTUP }, skills: [SKILL] },
+        // working_directory intentionally empty for the default host agents so
+        // agent-model.ts resolves it at launch-time via `agentmuxHome()`. That
+        // picks up the portable data dir on portable builds and `~/.agentmux`
+        // on installed builds. Hardcoding `~/.agentmux/agents/<slug>` here
+        // would defeat portable isolation (PR #475) and leave the literal `~`
+        // in the persisted value, which the backend path-canonicaliser rejects.
+        { id: "agentx", name: "AgentX", icon: "\ud83d\udd34", description: "Primary coding agent", working_directory: "", shell: "pwsh", agent_bus_id: "agentx", content: { env: "AGENT_NAME=agentx\nAGENTMUX_AGENT_ID=AgentX", startup: HOST_STARTUP }, skills: [SKILL] },
+        { id: "agenty", name: "AgentY", icon: "\ud83d\udfe1", description: "Secondary coding agent", working_directory: "", shell: "pwsh", agent_bus_id: "agenty", content: { env: "AGENT_NAME=agenty\nAGENTMUX_AGENT_ID=AgentY", startup: HOST_STARTUP }, skills: [SKILL] },
+        { id: "agentz", name: "AgentZ", icon: "\ud83d\udd35", description: "Tertiary coding agent", working_directory: "", shell: "pwsh", agent_bus_id: "agentz", content: { env: "AGENT_NAME=agentz\nAGENTMUX_AGENT_ID=AgentZ", startup: HOST_STARTUP }, skills: [SKILL] },
         { id: "agent1", name: "Agent1", icon: "\ud83d\udfe2", description: "Sandboxed coding agent", working_directory: "/workspace", shell: "bash", agent_bus_id: "agent1", restart_on_crash: true, content: { env: "AGENT_NAME=agent1\nAGENTMUX_AGENT_ID=Agent1", startup: CONTAINER_STARTUP }, skills: [CONTAINER_SKILL] },
         { id: "agent2", name: "Agent2", icon: "\ud83d\udfe0", description: "Sandboxed coding agent", working_directory: "/workspace", shell: "bash", agent_bus_id: "agent2", restart_on_crash: true, content: { env: "AGENT_NAME=agent2\nAGENTMUX_AGENT_ID=Agent2", startup: CONTAINER_STARTUP }, skills: [CONTAINER_SKILL] },
         { id: "agent3", name: "Agent3", icon: "\ud83d\udfe3", description: "Sandboxed coding agent", working_directory: "/workspace", shell: "bash", agent_bus_id: "agent3", restart_on_crash: true, content: { env: "AGENT_NAME=agent3\nAGENTMUX_AGENT_ID=Agent3", startup: CONTAINER_STARTUP }, skills: [CONTAINER_SKILL] },
