@@ -122,11 +122,38 @@ fn register_agent_open(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 } else {
                     format!("{}/node_modules/.bin/{}", provider_dir, provider.cli_command)
                 };
-                if !std::path::Path::new(&npm_bin).exists() {
-                    return Err(format!(
-                        "CLI_NOT_AVAILABLE: {} not installed at {}. Open an agent pane in the UI to trigger installation.",
-                        provider.cli_command, npm_bin
-                    ));
+                let mut resolved_cli_path = npm_bin.clone();
+                if !std::path::Path::new(&resolved_cli_path).exists() {
+                    // Fallback: provider not installed via npm — try system PATH.
+                    // This is used for Python-based CLIs like Kimi that are not
+                    // distributed on npm.
+                    if provider.npm_package.is_empty() {
+                        let path_cmd = if cfg!(windows) {
+                            format!("{}.cmd", provider.cli_command)
+                        } else {
+                            provider.cli_command.to_string()
+                        };
+                        let which_result = if cfg!(windows) {
+                            std::process::Command::new("where").arg(&path_cmd).output()
+                        } else {
+                            std::process::Command::new("which").arg(&path_cmd).output()
+                        };
+                        if let Ok(out) = which_result {
+                            if out.status.success() {
+                                let stdout_str = String::from_utf8_lossy(&out.stdout);
+                                let path = stdout_str.lines().next().unwrap_or("").trim();
+                                if !path.is_empty() && std::path::Path::new(path).exists() {
+                                    resolved_cli_path = path.to_string();
+                                }
+                            }
+                        }
+                    }
+                    if !std::path::Path::new(&resolved_cli_path).exists() {
+                        return Err(format!(
+                            "CLI_NOT_AVAILABLE: {} not installed at {}. Open an agent pane in the UI to trigger installation.",
+                            provider.cli_command, npm_bin
+                        ));
+                    }
                 }
 
                 // 6. Build metadata
@@ -181,11 +208,12 @@ fn register_agent_open(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     "claude" => "claude-stream-json",
                     "codex" => "codex-json",
                     "gemini" => "gemini-json",
+                    "kimi" => "kimi-stream-json",
                     _ => "claude-stream-json",
                 };
                 meta.insert("agentOutputFormat".to_string(), json!(output_format));
                 meta.insert("controller".to_string(), json!(controller_type));
-                meta.insert("cmd".to_string(), json!(&npm_bin));
+                meta.insert("cmd".to_string(), json!(&resolved_cli_path));
                 meta.insert("cmd:args".to_string(), json!(cli_args));
                 meta.insert("cmd:cwd".to_string(), json!(&work_dir));
                 meta.insert("cmd:env".to_string(), serde_json::Value::Object(env_vars));

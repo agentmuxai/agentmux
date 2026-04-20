@@ -63,10 +63,36 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     }).unwrap()));
                 }
 
-                // Step 2: Not in versioned dir — install from network.
-                // Never copy from system PATH — that defeats version isolation and
-                // can copy the wrong binary type (e.g., .exe saved as .cmd).
+                // Step 2: Not in versioned dir — check system PATH for non-npm CLIs.
                 if cmd.npm_package.is_empty() {
+                    let path_cmd = if cfg!(windows) {
+                        format!("{}.cmd", cmd.cli_command)
+                    } else {
+                        cmd.cli_command.clone()
+                    };
+                    let which_result = if cfg!(windows) {
+                        tokio::process::Command::new("where").arg(&path_cmd).output().await
+                    } else {
+                        tokio::process::Command::new("which").arg(&path_cmd).output().await
+                    };
+                    if let Ok(out) = which_result {
+                        if out.status.success() {
+                            let stdout_str = String::from_utf8_lossy(&out.stdout);
+                            let path = stdout_str.lines().next().unwrap_or("").trim();
+                            if !path.is_empty() && std::path::Path::new(path).exists() {
+                                let version = get_cli_version(path).await;
+                                tracing::info!(
+                                    path = %path, version = %version,
+                                    "CLI found on system PATH"
+                                );
+                                return Ok(Some(serde_json::to_value(&ResolveCliResult {
+                                    cli_path: path.to_string(),
+                                    version,
+                                    source: "system_path".to_string(),
+                                }).unwrap()));
+                            }
+                        }
+                    }
                     return Err(format!(
                         "{} not found and no npm package configured for this provider",
                         cmd.cli_command
