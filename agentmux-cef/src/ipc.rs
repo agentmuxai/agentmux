@@ -201,6 +201,7 @@ async fn route_command(
         "get_host_name" => Ok(commands::platform::get_host_name()),
         "get_data_dir" => commands::platform::get_data_dir(state),
         "get_config_dir" => commands::platform::get_config_dir(state),
+        "get_user_home_dir" => commands::platform::get_user_home_dir(state),
         "get_docsite_url" => Ok(commands::platform::get_docsite_url(state)),
         "get_zoom_factor" => Ok(commands::window::get_zoom_factor(state)),
         "get_about_modal_details" => Ok(commands::platform::get_about_modal_details(state)),
