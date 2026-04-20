@@ -20,6 +20,9 @@ interface NodeHoverStripProps {
     canExpand?: boolean;
     isExpanded?: boolean;
     onExpand?: () => void;
+    onOpenInNewPane?: () => void;   // undefined → button hidden (non-tool rows)
+    onOpenInNewWindow?: () => void; // stub — logs console.warn until CEF bridge ships
+    onNewAgentFromHere?: () => void; // stub — requires backend RPC in v2
 }
 
 interface StripButtonProps {
@@ -53,7 +56,14 @@ const StripButton = (props: StripButtonProps): JSX.Element => {
 };
 
 export const NodeHoverStrip = (props: NodeHoverStripProps): JSX.Element => (
-    <Show when={props.timestamp != null || props.onBookmark != null}>
+    <Show when={
+        props.timestamp != null ||
+        props.canExpand ||
+        props.onBookmark != null ||
+        props.onOpenInNewPane != null ||
+        props.onOpenInNewWindow != null ||
+        props.onNewAgentFromHere != null
+    }>
         <div
             class="node-strip"
             data-node-strip-for={props.nodeId}
@@ -80,6 +90,27 @@ export const NodeHoverStrip = (props: NodeHoverStripProps): JSX.Element => (
                     label={props.isBookmarked ? "Remove bookmark" : "Bookmark"}
                     active={props.isBookmarked === true}
                     onClick={props.onBookmark}
+                />
+            </Show>
+            <Show when={props.onOpenInNewPane}>
+                <StripButton
+                    icon="⧉"
+                    label="Open in new pane"
+                    onClick={props.onOpenInNewPane}
+                />
+            </Show>
+            <Show when={props.onOpenInNewWindow}>
+                <StripButton
+                    icon="⊡"
+                    label="Open in new window"
+                    onClick={props.onOpenInNewWindow}
+                />
+            </Show>
+            <Show when={props.onNewAgentFromHere}>
+                <StripButton
+                    icon="✦"
+                    label="New agent from here"
+                    onClick={props.onNewAgentFromHere}
                 />
             </Show>
         </div>

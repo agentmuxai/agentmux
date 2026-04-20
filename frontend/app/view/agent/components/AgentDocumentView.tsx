@@ -396,6 +396,14 @@ export const AgentDocumentView = ({ documentAtom, documentStateAtom, logLines, a
                         if (node.type === "tool") togglePin(node.id);
                         else toggleCollapse(node.id);
                     };
+                    // Phase 6: "new pane" for tool rows — deferred until a scratch view exists.
+                    const onOpenInNewPane = node.type === "tool"
+                        ? () => console.warn("[hover-strip] open in new pane — not yet implemented")
+                        : undefined;
+                    const onOpenInNewWindow = () =>
+                        console.warn("[hover-strip] open in new window — not yet implemented");
+                    const onNewAgentFromHere = () =>
+                        console.warn("[hover-strip] new agent from here — not yet implemented");
 
                     const handleContextMenu = (e: MouseEvent) => {
                         if (!onBookmark) return;
@@ -441,6 +449,9 @@ export const AgentDocumentView = ({ documentAtom, documentStateAtom, logLines, a
                                 canExpand={canExpand()}
                                 isExpanded={isExpanded()}
                                 onExpand={onExpand}
+                                onOpenInNewPane={onOpenInNewPane}
+                                onOpenInNewWindow={onOpenInNewWindow}
+                                onNewAgentFromHere={onNewAgentFromHere}
                             />
                         </div>
                     );
