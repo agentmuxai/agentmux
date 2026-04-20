@@ -150,8 +150,6 @@ ws.send(JSON.stringify({
 - **Backend:** Rust (Tokio + Axum + SQLite + portable-pty)
 - **Terminal:** xterm.js
 
-> **Note:** The Tauri host (`src-tauri/`) is deprecated and no longer maintained. All development uses the CEF host. Tauri code remains in the repo for reference but should not be used.
-
 ## Build Commands
 
 | Command | Description |
@@ -199,9 +197,7 @@ Releases are built by [`agentmuxai/agentmux-builder`](https://github.com/agentmu
 ### Triggering a release
 
 ```bash
-# Manual workflow dispatch (pass a tag, branch, or SHA).
-# The workflow file is still named tauri-build.yml for historical reasons,
-# even though the CEF host replaced Tauri.
+# Manual workflow dispatch (pass a tag, branch, or SHA)
 gh workflow run tauri-build.yml -R agentmuxai/agentmux-builder -f ref=v0.33.0
 ```
 
