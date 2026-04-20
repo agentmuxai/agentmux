@@ -6,7 +6,7 @@
       "name": "AgentX",
       "icon": "🔴",
       "description": "Primary coding agent",
-      "working_directory": "~/.agentmux/agents/agentx",
+      "working_directory": "",
       "shell": "pwsh",
       "agent_bus_id": "agentx",
       "content": {
@@ -28,7 +28,7 @@
       "name": "AgentY",
       "icon": "🟡",
       "description": "Secondary coding agent",
-      "working_directory": "~/.agentmux/agents/agenty",
+      "working_directory": "",
       "shell": "pwsh",
       "agent_bus_id": "agenty",
       "content": {
@@ -50,7 +50,7 @@
       "name": "AgentZ",
       "icon": "🔵",
       "description": "Tertiary coding agent",
-      "working_directory": "~/.agentmux/agents/agentz",
+      "working_directory": "",
       "shell": "pwsh",
       "agent_bus_id": "agentz",
       "content": {
