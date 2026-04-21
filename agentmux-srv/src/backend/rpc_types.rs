@@ -287,6 +287,27 @@ pub const COMMAND_IMPORT_FORGE_FROM_CLAW: &str = "importforgefromclaw";
 // Forge Seed
 pub const COMMAND_RESEED_FORGE_AGENTS: &str = "reseedforgeagents";
 
+// Identity accounts (v6 — replaces localStorage)
+pub const COMMAND_LIST_IDENTITY_ACCOUNTS: &str = "listidentityaccounts";
+pub const COMMAND_GET_IDENTITY_ACCOUNT: &str = "getidentityaccount";
+pub const COMMAND_UPSERT_IDENTITY_ACCOUNT: &str = "upsertidentityaccount";
+pub const COMMAND_DELETE_IDENTITY_ACCOUNT: &str = "deleteidentityaccount";
+
+// Agent ↔ Identity junction
+pub const COMMAND_LINK_AGENT_IDENTITY: &str = "linkagentidentity";
+pub const COMMAND_UNLINK_AGENT_IDENTITY: &str = "unlinkagentidentity";
+pub const COMMAND_LIST_AGENT_IDENTITIES: &str = "listagentidentities";
+
+// Agent instances
+pub const COMMAND_LIST_AGENT_INSTANCES: &str = "listagentinstances";
+pub const COMMAND_GET_AGENT_INSTANCE: &str = "getagentinstance";
+pub const COMMAND_CREATE_AGENT_INSTANCE: &str = "createagentinstance";
+pub const COMMAND_UPDATE_AGENT_INSTANCE: &str = "updateagentinstance";
+pub const COMMAND_DELETE_AGENT_INSTANCE: &str = "deleteagentinstance";
+
+// Agent definition branching
+pub const COMMAND_FORK_AGENT_DEFINITION: &str = "forkagentdefinition";
+
 // App API Tier 1 — agent lifecycle commands
 pub const COMMAND_AGENT_OPEN: &str = "agent.open";
 pub const COMMAND_AGENT_SEND: &str = "agent.send";
@@ -1260,6 +1281,99 @@ pub struct InstallToolResult {
 pub struct InstallFailure {
     pub id: String,
     pub error: String,
+}
+
+// ====================================================================
+// Identity / Instance / Fork payloads (v6)
+// See specs/SPEC_FORGE_IDENTITY_AGENT_INSTANCES_IMPL_2026_04_20.md.
+// Strings use snake_case for cross-language parity with wstore.
+// ====================================================================
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct CommandListIdentityAccountsData {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommandGetIdentityAccountData {
+    pub id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommandDeleteIdentityAccountData {
+    pub id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommandLinkAgentIdentityData {
+    pub agent_id: String,
+    pub account_id: String,
+    pub provider: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommandUnlinkAgentIdentityData {
+    pub agent_id: String,
+    pub provider: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommandListAgentIdentitiesData {
+    pub agent_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct CommandListAgentInstancesData {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub definition_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommandGetAgentInstanceData {
+    pub id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommandCreateAgentInstanceData {
+    pub definition_id: String,
+    #[serde(default)]
+    pub block_id: String,
+    #[serde(default)]
+    pub parent_instance_id: String,
+}
+
+/// Mutable subset of AgentInstance for PATCH-style updates. Every field is
+/// optional — absent fields preserve their current value.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommandUpdateAgentInstanceData {
+    pub id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub block_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
+    /// JSON-encoded `GitHubContext` or empty string. `None` = leave as-is;
+    /// `Some("")` = explicitly clear.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub github_context: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ended_at: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommandDeleteAgentInstanceData {
+    pub id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommandForkAgentDefinitionData {
+    pub source_id: String,
+    #[serde(default)]
+    pub branch_label: String,
 }
 
 // ====================================================================
