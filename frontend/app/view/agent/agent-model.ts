@@ -111,7 +111,7 @@ export class AgentViewModel implements ViewModel {
 
     /**
      * Launch an agent in presentation view.
-     * For Phase 1, agentId maps to a provider ID (claude/codex/gemini).
+     * For Phase 1, agentId maps to a provider ID (claude/codex/gemini/kimi/openclaw/pi).
      * Sets block metadata with CLI config and creates a SubprocessController.
      * The agent CLI is not started until the user sends the first message.
      */
