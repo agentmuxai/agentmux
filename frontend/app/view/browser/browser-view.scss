@@ -96,8 +96,9 @@
 
 .browser-placeholder {
     flex: 1;
-    width: 100%;
+    width: auto; /* was 100% — auto lets flex stretch respect margin */
     position: relative;
+    margin: 2px; /* inset to reveal the 2px pane border drawn by .block-mask */
 }
 
 .browser-empty {
