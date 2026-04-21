@@ -19,8 +19,26 @@ use crate::backend::rpc_types::{
     CommandDeleteForgeSkillData,
     CommandAppendForgeHistoryData, CommandListForgeHistoryData, CommandSearchForgeHistoryData,
     CommandImportForgeFromClawData,
+    // v6 identity / instance / fork
+    COMMAND_LIST_IDENTITY_ACCOUNTS, COMMAND_GET_IDENTITY_ACCOUNT,
+    COMMAND_UPSERT_IDENTITY_ACCOUNT, COMMAND_DELETE_IDENTITY_ACCOUNT,
+    COMMAND_LINK_AGENT_IDENTITY, COMMAND_UNLINK_AGENT_IDENTITY,
+    COMMAND_LIST_AGENT_IDENTITIES,
+    COMMAND_LIST_AGENT_INSTANCES, COMMAND_GET_AGENT_INSTANCE,
+    COMMAND_CREATE_AGENT_INSTANCE, COMMAND_UPDATE_AGENT_INSTANCE,
+    COMMAND_DELETE_AGENT_INSTANCE,
+    COMMAND_FORK_AGENT_DEFINITION,
+    CommandListIdentityAccountsData, CommandGetIdentityAccountData,
+    CommandDeleteIdentityAccountData,
+    CommandLinkAgentIdentityData, CommandUnlinkAgentIdentityData,
+    CommandListAgentIdentitiesData,
+    CommandListAgentInstancesData, CommandGetAgentInstanceData,
+    CommandCreateAgentInstanceData, CommandUpdateAgentInstanceData,
+    CommandDeleteAgentInstanceData,
+    CommandForkAgentDefinitionData,
 };
 use crate::backend::storage::{ForgeAgent, ForgeContent, ForgeSkill};
+use crate::backend::storage::wstore::{AgentInstance, IdentityAccount, InstanceStatus};
 
 use super::AppState;
 
@@ -76,6 +94,8 @@ pub fn register_forge_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     agent_bus_id: cmd.agent_bus_id,
                     is_seeded: 0,
                     accounts: String::new(),
+                    parent_id: String::new(),
+                    branch_label: String::new(),
                 };
                 wstore.forge_insert(&mut agent).map_err(|e| format!("createforgeagent: {e}"))?;
                 broker.publish(crate::backend::wps::WaveEvent {
@@ -132,6 +152,11 @@ pub fn register_forge_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     // don't carry accounts, so falling back to old.accounts prevents
                     // silently wiping saved assignments.
                     accounts: if cmd.accounts.is_empty() { old.accounts.clone() } else { cmd.accounts },
+                    // parent_id + branch_label describe provenance and
+                    // are immutable post-insert (forks are separate rows,
+                    // not in-place edits).
+                    parent_id: old.parent_id.clone(),
+                    branch_label: old.branch_label.clone(),
                 };
                 let found = wstore.forge_update(&agent).map_err(|e| format!("updateforgeagent: {e}"))?;
                 if !found {
@@ -481,6 +506,8 @@ pub fn register_forge_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     agent_bus_id: String::new(),
                     is_seeded: 0,
                     accounts: String::new(),
+                    parent_id: String::new(),
+                    branch_label: String::new(),
                 };
                 wstore.forge_insert(&mut agent).map_err(|e| format!("importforgefromclaw: {e}"))?;
 
@@ -553,6 +580,449 @@ pub fn register_forge_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     "created": report.created,
                     "skipped": report.skipped,
                 })))
+            })
+        }),
+    );
+
+    register_v6_handlers(engine, state);
+}
+
+/// v6 handlers — identity accounts, agent instances, definition branching.
+/// See specs/SPEC_FORGE_IDENTITY_AGENT_INSTANCES_IMPL_2026_04_20.md §Phase 3.
+fn register_v6_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    // ---- Identity account CRUD ----
+
+    let wstore = state.wstore.clone();
+    engine.register_handler(
+        COMMAND_LIST_IDENTITY_ACCOUNTS,
+        Box::new(move |data, _ctx| {
+            let wstore = wstore.clone();
+            Box::pin(async move {
+                let cmd: CommandListIdentityAccountsData =
+                    serde_json::from_value(data).unwrap_or_default();
+                let accounts = wstore
+                    .identity_list(cmd.provider.as_deref())
+                    .map_err(|e| format!("listidentityaccounts: {e}"))?;
+                Ok(Some(serde_json::to_value(&accounts).unwrap_or_default()))
+            })
+        }),
+    );
+
+    let wstore = state.wstore.clone();
+    engine.register_handler(
+        COMMAND_GET_IDENTITY_ACCOUNT,
+        Box::new(move |data, _ctx| {
+            let wstore = wstore.clone();
+            Box::pin(async move {
+                let cmd: CommandGetIdentityAccountData =
+                    serde_json::from_value(data).map_err(|e| format!("getidentityaccount: {e}"))?;
+                match wstore
+                    .identity_get(&cmd.id)
+                    .map_err(|e| format!("getidentityaccount: {e}"))?
+                {
+                    Some(a) => Ok(Some(serde_json::to_value(&a).unwrap_or_default())),
+                    None => Err(format!("getidentityaccount: not found id={}", cmd.id)),
+                }
+            })
+        }),
+    );
+
+    let wstore = state.wstore.clone();
+    let broker = state.broker.clone();
+    engine.register_handler(
+        COMMAND_UPSERT_IDENTITY_ACCOUNT,
+        Box::new(move |data, _ctx| {
+            let wstore = wstore.clone();
+            let broker = broker.clone();
+            Box::pin(async move {
+                // Accept the full IdentityAccount payload. Missing `id` → mint
+                // a fresh UUID; `created_at` and `updated_at` are server-set
+                // so callers don't have to know the current time.
+                let mut account: IdentityAccount = serde_json::from_value(data)
+                    .map_err(|e| format!("upsertidentityaccount: {e}"))?;
+                if account.id.is_empty() {
+                    account.id = uuid::Uuid::new_v4().to_string();
+                }
+                let now = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .map(|d| d.as_millis() as i64)
+                    .unwrap_or(0);
+                if account.created_at == 0 {
+                    account.created_at = now;
+                }
+                account.updated_at = now;
+                wstore
+                    .identity_upsert(&account)
+                    .map_err(|e| format!("upsertidentityaccount: {e}"))?;
+                broker.publish(crate::backend::wps::WaveEvent {
+                    event: "identityaccounts:changed".to_string(),
+                    scopes: vec![],
+                    sender: String::new(),
+                    persist: 0,
+                    data: None,
+                });
+                Ok(Some(serde_json::to_value(&account).unwrap_or_default()))
+            })
+        }),
+    );
+
+    let wstore = state.wstore.clone();
+    let broker = state.broker.clone();
+    engine.register_handler(
+        COMMAND_DELETE_IDENTITY_ACCOUNT,
+        Box::new(move |data, _ctx| {
+            let wstore = wstore.clone();
+            let broker = broker.clone();
+            Box::pin(async move {
+                let cmd: CommandDeleteIdentityAccountData = serde_json::from_value(data)
+                    .map_err(|e| format!("deleteidentityaccount: {e}"))?;
+                let deleted = wstore
+                    .identity_delete(&cmd.id)
+                    .map_err(|e| format!("deleteidentityaccount: {e}"))?;
+                if deleted {
+                    broker.publish(crate::backend::wps::WaveEvent {
+                        event: "identityaccounts:changed".to_string(),
+                        scopes: vec![],
+                        sender: String::new(),
+                        persist: 0,
+                        data: None,
+                    });
+                }
+                Ok(Some(json!({ "deleted": deleted })))
+            })
+        }),
+    );
+
+    // ---- Agent ↔ Identity junction ----
+
+    let wstore = state.wstore.clone();
+    let broker = state.broker.clone();
+    engine.register_handler(
+        COMMAND_LINK_AGENT_IDENTITY,
+        Box::new(move |data, _ctx| {
+            let wstore = wstore.clone();
+            let broker = broker.clone();
+            Box::pin(async move {
+                let cmd: CommandLinkAgentIdentityData = serde_json::from_value(data)
+                    .map_err(|e| format!("linkagentidentity: {e}"))?;
+                wstore
+                    .agent_identity_link(&cmd.agent_id, &cmd.account_id, &cmd.provider)
+                    .map_err(|e| format!("linkagentidentity: {e}"))?;
+                broker.publish(crate::backend::wps::WaveEvent {
+                    event: format!("agentidentities:changed:{}", cmd.agent_id),
+                    scopes: vec![],
+                    sender: String::new(),
+                    persist: 0,
+                    data: None,
+                });
+                Ok(None)
+            })
+        }),
+    );
+
+    let wstore = state.wstore.clone();
+    let broker = state.broker.clone();
+    engine.register_handler(
+        COMMAND_UNLINK_AGENT_IDENTITY,
+        Box::new(move |data, _ctx| {
+            let wstore = wstore.clone();
+            let broker = broker.clone();
+            Box::pin(async move {
+                let cmd: CommandUnlinkAgentIdentityData = serde_json::from_value(data)
+                    .map_err(|e| format!("unlinkagentidentity: {e}"))?;
+                let removed = wstore
+                    .agent_identity_unlink(&cmd.agent_id, &cmd.provider)
+                    .map_err(|e| format!("unlinkagentidentity: {e}"))?;
+                if removed {
+                    broker.publish(crate::backend::wps::WaveEvent {
+                        event: format!("agentidentities:changed:{}", cmd.agent_id),
+                        scopes: vec![],
+                        sender: String::new(),
+                        persist: 0,
+                        data: None,
+                    });
+                }
+                Ok(Some(json!({ "unlinked": removed })))
+            })
+        }),
+    );
+
+    let wstore = state.wstore.clone();
+    engine.register_handler(
+        COMMAND_LIST_AGENT_IDENTITIES,
+        Box::new(move |data, _ctx| {
+            let wstore = wstore.clone();
+            Box::pin(async move {
+                let cmd: CommandListAgentIdentitiesData = serde_json::from_value(data)
+                    .map_err(|e| format!("listagentidentities: {e}"))?;
+                let rows = wstore
+                    .agent_identity_list_for_agent(&cmd.agent_id)
+                    .map_err(|e| format!("listagentidentities: {e}"))?;
+                Ok(Some(serde_json::to_value(&rows).unwrap_or_default()))
+            })
+        }),
+    );
+
+    // ---- Agent instance CRUD ----
+
+    let wstore = state.wstore.clone();
+    engine.register_handler(
+        COMMAND_LIST_AGENT_INSTANCES,
+        Box::new(move |data, _ctx| {
+            let wstore = wstore.clone();
+            Box::pin(async move {
+                let cmd: CommandListAgentInstancesData =
+                    serde_json::from_value(data).unwrap_or_default();
+                let rows = wstore
+                    .instance_list(cmd.definition_id.as_deref(), cmd.status.as_deref())
+                    .map_err(|e| format!("listagentinstances: {e}"))?;
+                Ok(Some(serde_json::to_value(&rows).unwrap_or_default()))
+            })
+        }),
+    );
+
+    let wstore = state.wstore.clone();
+    engine.register_handler(
+        COMMAND_GET_AGENT_INSTANCE,
+        Box::new(move |data, _ctx| {
+            let wstore = wstore.clone();
+            Box::pin(async move {
+                let cmd: CommandGetAgentInstanceData = serde_json::from_value(data)
+                    .map_err(|e| format!("getagentinstance: {e}"))?;
+                match wstore
+                    .instance_get(&cmd.id)
+                    .map_err(|e| format!("getagentinstance: {e}"))?
+                {
+                    Some(i) => Ok(Some(serde_json::to_value(&i).unwrap_or_default())),
+                    None => Err(format!("getagentinstance: not found id={}", cmd.id)),
+                }
+            })
+        }),
+    );
+
+    let wstore = state.wstore.clone();
+    let broker = state.broker.clone();
+    engine.register_handler(
+        COMMAND_CREATE_AGENT_INSTANCE,
+        Box::new(move |data, _ctx| {
+            let wstore = wstore.clone();
+            let broker = broker.clone();
+            Box::pin(async move {
+                let cmd: CommandCreateAgentInstanceData = serde_json::from_value(data)
+                    .map_err(|e| format!("createagentinstance: {e}"))?;
+                let now = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .map(|d| d.as_millis() as i64)
+                    .unwrap_or(0);
+                let inst = AgentInstance {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    definition_id: cmd.definition_id,
+                    parent_instance_id: cmd.parent_instance_id,
+                    block_id: cmd.block_id,
+                    session_id: String::new(),
+                    status: InstanceStatus::Running.as_str().to_string(),
+                    github_context: String::new(),
+                    started_at: now,
+                    ended_at: 0,
+                    created_at: now,
+                };
+                wstore
+                    .instance_create(&inst)
+                    .map_err(|e| format!("createagentinstance: {e}"))?;
+                broker.publish(crate::backend::wps::WaveEvent {
+                    event: format!("agentinstances:changed:{}", inst.definition_id),
+                    scopes: vec![],
+                    sender: String::new(),
+                    persist: 0,
+                    data: None,
+                });
+                Ok(Some(serde_json::to_value(&inst).unwrap_or_default()))
+            })
+        }),
+    );
+
+    let wstore = state.wstore.clone();
+    let broker = state.broker.clone();
+    engine.register_handler(
+        COMMAND_UPDATE_AGENT_INSTANCE,
+        Box::new(move |data, _ctx| {
+            let wstore = wstore.clone();
+            let broker = broker.clone();
+            Box::pin(async move {
+                let cmd: CommandUpdateAgentInstanceData = serde_json::from_value(data)
+                    .map_err(|e| format!("updateagentinstance: {e}"))?;
+                let existing = wstore
+                    .instance_get(&cmd.id)
+                    .map_err(|e| format!("updateagentinstance: {e}"))?
+                    .ok_or_else(|| format!("updateagentinstance: not found id={}", cmd.id))?;
+                let merged = AgentInstance {
+                    id: existing.id.clone(),
+                    definition_id: existing.definition_id.clone(),
+                    parent_instance_id: existing.parent_instance_id.clone(),
+                    block_id: cmd.block_id.unwrap_or(existing.block_id),
+                    session_id: cmd.session_id.unwrap_or(existing.session_id),
+                    status: cmd.status.unwrap_or(existing.status),
+                    github_context: cmd.github_context.unwrap_or(existing.github_context),
+                    started_at: existing.started_at,
+                    ended_at: cmd.ended_at.unwrap_or(existing.ended_at),
+                    created_at: existing.created_at,
+                };
+                wstore
+                    .instance_update(&merged)
+                    .map_err(|e| format!("updateagentinstance: {e}"))?;
+                broker.publish(crate::backend::wps::WaveEvent {
+                    event: format!("agentinstances:changed:{}", merged.definition_id),
+                    scopes: vec![],
+                    sender: String::new(),
+                    persist: 0,
+                    data: None,
+                });
+                Ok(Some(serde_json::to_value(&merged).unwrap_or_default()))
+            })
+        }),
+    );
+
+    let wstore = state.wstore.clone();
+    let broker = state.broker.clone();
+    engine.register_handler(
+        COMMAND_DELETE_AGENT_INSTANCE,
+        Box::new(move |data, _ctx| {
+            let wstore = wstore.clone();
+            let broker = broker.clone();
+            Box::pin(async move {
+                let cmd: CommandDeleteAgentInstanceData = serde_json::from_value(data)
+                    .map_err(|e| format!("deleteagentinstance: {e}"))?;
+                // Read the row first so we can emit a scoped event after.
+                let definition_id = wstore
+                    .instance_get(&cmd.id)
+                    .map_err(|e| format!("deleteagentinstance: {e}"))?
+                    .map(|i| i.definition_id);
+                let deleted = wstore
+                    .instance_delete(&cmd.id)
+                    .map_err(|e| format!("deleteagentinstance: {e}"))?;
+                if let Some(def_id) = definition_id.filter(|_| deleted) {
+                    broker.publish(crate::backend::wps::WaveEvent {
+                        event: format!("agentinstances:changed:{}", def_id),
+                        scopes: vec![],
+                        sender: String::new(),
+                        persist: 0,
+                        data: None,
+                    });
+                }
+                Ok(Some(json!({ "deleted": deleted })))
+            })
+        }),
+    );
+
+    // ---- Definition fork ----
+
+    let wstore = state.wstore.clone();
+    let broker = state.broker.clone();
+    engine.register_handler(
+        COMMAND_FORK_AGENT_DEFINITION,
+        Box::new(move |data, _ctx| {
+            let wstore = wstore.clone();
+            let broker = broker.clone();
+            Box::pin(async move {
+                let cmd: CommandForkAgentDefinitionData = serde_json::from_value(data)
+                    .map_err(|e| format!("forkagentdefinition: {e}"))?;
+
+                // Find the source definition by id.
+                let source = wstore
+                    .forge_list()
+                    .map_err(|e| format!("forkagentdefinition: {e}"))?
+                    .into_iter()
+                    .find(|a| a.id == cmd.source_id)
+                    .ok_or_else(|| format!("forkagentdefinition: source not found: {}", cmd.source_id))?;
+
+                // Build a new definition that shares the source's content but
+                // has a fresh id/slug and records the lineage. Seed-bit is
+                // cleared — forks are always user-owned, not built-in.
+                let now = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .map(|d| d.as_millis() as i64)
+                    .unwrap_or(0);
+                let branch_slug_part = if cmd.branch_label.is_empty() {
+                    "fork".to_string()
+                } else {
+                    crate::backend::storage::wstore::derive_slug(&cmd.branch_label)
+                };
+                let mut fork = ForgeAgent {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    // Empty slug → forge_insert derives + resolves collisions.
+                    slug: format!("{}-{}", source.slug, branch_slug_part),
+                    name: if cmd.branch_label.is_empty() {
+                        format!("{} (fork)", source.name)
+                    } else {
+                        format!("{} [{}]", source.name, cmd.branch_label)
+                    },
+                    icon: source.icon.clone(),
+                    provider: source.provider.clone(),
+                    description: source.description.clone(),
+                    working_directory: String::new(), // force re-resolve via agentmuxHome()
+                    shell: source.shell.clone(),
+                    provider_flags: source.provider_flags.clone(),
+                    auto_start: 0, // forks don't auto-start; explicit launch only
+                    restart_on_crash: source.restart_on_crash,
+                    idle_timeout_minutes: source.idle_timeout_minutes,
+                    created_at: now,
+                    agent_type: source.agent_type.clone(),
+                    environment: source.environment.clone(),
+                    agent_bus_id: String::new(), // fresh bus id so broadcasts don't cross
+                    is_seeded: 0,
+                    accounts: String::new(),
+                    parent_id: source.id.clone(),
+                    branch_label: cmd.branch_label.clone(),
+                };
+                wstore
+                    .forge_insert(&mut fork)
+                    .map_err(|e| format!("forkagentdefinition: {e}"))?;
+
+                // Deep-copy content blobs + skills from source. Cascade foreign
+                // keys on the source are unaffected — we're copying out, not
+                // moving.
+                let source_contents = wstore
+                    .forge_get_all_content(&source.id)
+                    .map_err(|e| format!("forkagentdefinition content: {e}"))?;
+                for c in source_contents {
+                    let new_content = ForgeContent {
+                        agent_id: fork.id.clone(),
+                        content_type: c.content_type,
+                        content: c.content,
+                        updated_at: now,
+                    };
+                    wstore
+                        .forge_set_content(&new_content)
+                        .map_err(|e| format!("forkagentdefinition content: {e}"))?;
+                }
+                let source_skills = wstore
+                    .forge_list_skills(&source.id)
+                    .map_err(|e| format!("forkagentdefinition skills: {e}"))?;
+                for s in source_skills {
+                    let new_skill = ForgeSkill {
+                        id: uuid::Uuid::new_v4().to_string(),
+                        agent_id: fork.id.clone(),
+                        name: s.name,
+                        trigger: s.trigger,
+                        skill_type: s.skill_type,
+                        description: s.description,
+                        content: s.content,
+                        created_at: now,
+                    };
+                    wstore
+                        .forge_insert_skill(&new_skill)
+                        .map_err(|e| format!("forkagentdefinition skill: {e}"))?;
+                }
+
+                broker.publish(crate::backend::wps::WaveEvent {
+                    event: "forgeagents:changed".to_string(),
+                    scopes: vec![],
+                    sender: String::new(),
+                    persist: 0,
+                    data: None,
+                });
+
+                Ok(Some(serde_json::to_value(&fork).unwrap_or_default()))
             })
         }),
     );

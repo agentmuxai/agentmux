@@ -161,6 +161,8 @@ pub fn seed_forge_agents(wstore: &Arc<WaveStore>) -> Result<SeedReport, StoreErr
             agent_bus_id: agent_def.agent_bus_id.clone(),
             is_seeded: 1,
             accounts: String::new(),
+            parent_id: String::new(),
+            branch_label: String::new(),
         };
         wstore.forge_insert(&mut agent)?;
 
@@ -330,6 +332,8 @@ fn reseed_if_needed(
             agent_bus_id: agent_def.agent_bus_id.clone(),
             is_seeded: 1,
             accounts: String::new(),
+            parent_id: String::new(),
+            branch_label: String::new(),
         };
 
         if let Some(existing_agent) = existing_map.get(agent_def.id.as_str()) {
