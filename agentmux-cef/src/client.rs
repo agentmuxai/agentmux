@@ -203,6 +203,41 @@ impl AgentMuxHandler {
         false
     }
 
+    /// Intercept `target="_blank"` / `window.open()` from embedded pages so
+    /// they don't spawn rogue top-level CEF windows. Instead navigate the
+    /// **current** frame to the target URL — matches the UX expectation
+    /// that AgentMux owns window management, not the page.
+    ///
+    /// Returning non-zero cancels popup creation. Applies to both main
+    /// and pane clients: main's frontend never relies on `window.open`
+    /// (link clicks go through `openExternal` IPC), and panes explicitly
+    /// don't want popups. See
+    /// specs/SPEC_BROWSER_PANE_DEFAULT_URL_AND_POPUP_2026_04_21.md.
+    fn on_before_popup(
+        &mut self,
+        browser: Option<&mut Browser>,
+        _frame: Option<&mut Frame>,
+        target_url: Option<&CefString>,
+        _target_disposition: WindowOpenDisposition,
+    ) -> bool {
+        let url = target_url.map(|s| s.to_string()).unwrap_or_default();
+        if url.is_empty() {
+            // Nothing useful to navigate to; just cancel the popup.
+            return true;
+        }
+        if let Some(b) = browser {
+            if let Some(frame) = b.main_frame() {
+                frame.load_url(Some(&CefString::from(url.as_str())));
+            }
+        }
+        tracing::info!(
+            is_pane = %self.is_pane,
+            url = %url,
+            "popup intercepted — navigated current frame in place",
+        );
+        true // cancel the top-level popup creation
+    }
+
     fn on_before_close(&mut self, browser: Option<&mut Browser>) {
         debug_assert_ne!(currently_on(ThreadId::UI), 0);
 
@@ -898,6 +933,30 @@ wrap_life_span_handler! {
         fn on_before_close(&self, browser: Option<&mut Browser>) {
             let mut inner = self.inner.lock();
             inner.on_before_close(browser);
+        }
+
+        fn on_before_popup(
+            &self,
+            browser: Option<&mut Browser>,
+            frame: Option<&mut Frame>,
+            _popup_id: ::std::os::raw::c_int,
+            target_url: Option<&CefString>,
+            _target_frame_name: Option<&CefString>,
+            target_disposition: WindowOpenDisposition,
+            _user_gesture: ::std::os::raw::c_int,
+            _popup_features: Option<&PopupFeatures>,
+            _window_info: Option<&mut WindowInfo>,
+            _client: Option<&mut Option<Client>>,
+            _settings: Option<&mut BrowserSettings>,
+            _extra_info: Option<&mut Option<DictionaryValue>>,
+            _no_javascript_access: Option<&mut ::std::os::raw::c_int>,
+        ) -> ::std::os::raw::c_int {
+            let mut inner = self.inner.lock();
+            if inner.on_before_popup(browser, frame, target_url, target_disposition) {
+                1
+            } else {
+                0
+            }
         }
     }
 }

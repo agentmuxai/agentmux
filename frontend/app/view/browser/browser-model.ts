@@ -12,6 +12,14 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import { getWaveObjectAtom, makeORef } from "@/app/store/wos";
 import { createMemo, createSignal, type Accessor } from "solid-js";
 
+/**
+ * Fallback URL for browser panes created without an explicit `meta.url`.
+ * Keeps blank-spawned panes from landing on about:blank (no signposting,
+ * no backlink). Callers that want a blank pane can pass `"about:blank"`
+ * explicitly. See specs/SPEC_BROWSER_PANE_DEFAULT_URL_AND_POPUP_2026_04_21.md.
+ */
+const DEFAULT_BROWSER_URL = "https://agentmux.ai";
+
 export class BrowserViewModel implements ViewModel {
     viewType = "browser";
     blockId: string;
@@ -73,11 +81,13 @@ export class BrowserViewModel implements ViewModel {
             return title || "Browser";
         });
 
-        // Load URL from block meta on init
+        // Load URL from block meta on init. An empty/missing `url` falls
+        // back to DEFAULT_BROWSER_URL so fresh panes aren't blank (the
+        // widget definition in widgets.json also ships this URL, but the
+        // fallback covers panes created through the API with no meta.url).
         const meta = this.blockAtom()?.meta;
-        if (meta?.["url"]) {
-            this.navigate(meta["url"] as string);
-        }
+        const initialUrl = ((meta?.["url"] as string | undefined) ?? "").trim() || DEFAULT_BROWSER_URL;
+        this.navigate(initialUrl);
     }
 
     navigate(url: string): void {
