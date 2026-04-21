@@ -88,7 +88,7 @@ pub fn on_before_close_pane(state: &Arc<AppState>, label: &str) {
 /// focused HWND; stealing focus away from the pane breaks scrolling.
 /// The FocusHandler cancel + WndProc redirect already keep focus off
 /// the pane during the *initial* navigation focus steal.
-pub fn on_load_end_pane(_state: &Arc<AppState>, browser: &Browser) {
+pub fn on_load_end_pane(state: &Arc<AppState>, browser: &Browser) {
     tracing::info!("[pane-load-end] pane page loaded; reinstalling focus subclass");
 
     #[cfg(target_os = "windows")]
@@ -102,6 +102,58 @@ pub fn on_load_end_pane(_state: &Arc<AppState>, browser: &Browser) {
             }
         }
     }
+
+    // Emit nav-state event so the address bar + back/forward buttons in the
+    // browser pane's frontend view can reflect CEF's real history, not the
+    // fake local `history` array that only saw address-bar submits. This
+    // fires on every load_end (initial navigation, in-pane link clicks,
+    // popup-intercept redirects, back/forward), which is the union of
+    // every case the buttons need to stay in sync with.
+    //
+    // Resolving block_id from the browser: panes are registered in
+    // `state.browsers` under a label like `browser-pane-<block_id>-<seq>`.
+    // Find our label by same-identity check, then strip the suffix.
+    let block_id = {
+        let browsers = state.browsers.lock();
+        browsers
+            .iter()
+            .find(|(_k, b)| {
+                let mut b_clone = b.clone();
+                let mut browser_clone: cef::Browser = browser.clone();
+                b_clone.is_same(Some(&mut browser_clone)) != 0
+            })
+            .and_then(|(label, _)| {
+                // Label shape: browser-pane-<uuid>-<N>. Trim the prefix,
+                // then pop the trailing `-<N>` to get the uuid.
+                let rest = label.strip_prefix("browser-pane-")?;
+                let dash = rest.rfind('-')?;
+                Some(rest[..dash].to_string())
+            })
+    };
+
+    if let Some(block_id) = block_id {
+        let (can_back, can_forward, url) = {
+            let mut b: cef::Browser = browser.clone();
+            let back = cef::ImplBrowser::can_go_back(&b) != 0;
+            let forward = cef::ImplBrowser::can_go_forward(&b) != 0;
+            let url = b
+                .main_frame()
+                .map(|f| cef::CefString::from(&cef::ImplFrame::url(&f)).to_string())
+                .unwrap_or_default();
+            (back, forward, url)
+        };
+        crate::events::emit_event_from_state(
+            state,
+            "browser-pane-nav-state",
+            &serde_json::json!({
+                "block_id": block_id,
+                "url": url,
+                "can_go_back": can_back,
+                "can_go_forward": can_forward,
+            }),
+        );
+    }
+
     #[cfg(not(target_os = "windows"))]
     {
         let _ = browser;
