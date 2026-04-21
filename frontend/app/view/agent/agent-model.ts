@@ -382,6 +382,30 @@ export class AgentViewModel implements ViewModel {
                 blockid: blockId,
                 forcerestart: true,
             });
+
+            // Record this launch as an `AgentInstance` row in the DB so the
+            // backend can track which pane is running which definition,
+            // surface concurrent launches, and (later) carry GitHub work
+            // context. Best-effort — a failure here doesn't abort the
+            // launch (the agent already started). Stash the instance id
+            // into block meta so downstream code (status updates,
+            // bus targeting, lineage) can reference it. See
+            // SPEC_FORGE_IDENTITY_AGENT_INSTANCES_IMPL_2026_04_20.md §Phase 5.
+            try {
+                const inst = await RpcApi.CreateAgentInstanceCommand(TabRpcClient, {
+                    definition_id: agent.id,
+                    block_id: blockId,
+                });
+                await RpcApi.SetMetaCommand(TabRpcClient, {
+                    oref,
+                    meta: { agentInstanceId: inst.id },
+                });
+            } catch (e: any) {
+                Logger.warn(
+                    "agent",
+                    `agent instance row create failed: ${e?.message ?? String(e)}`,
+                );
+            }
         } catch (e: any) {
             Logger.error("agent", "Failed to launch forge agent", { error: String(e) });
         }
