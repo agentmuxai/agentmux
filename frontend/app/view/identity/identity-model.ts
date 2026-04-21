@@ -162,10 +162,55 @@ function setCache(accounts: Account[]): void {
 }
 
 /**
+ * Translate the backend's `SecretRef` (discriminated union, `plaintext_dev`
+ * field name) to the frontend's loose-shape `SecretRef` (`value` field for
+ * the dev plaintext case). Reagent caught a real bug here in PR #480
+ * review: a naked `as unknown as SecretRef` cast hid the field-name
+ * mismatch, so editing a plaintext_dev account loaded from DB rendered
+ * with an empty secret (read `value`, got `undefined`) and a save would
+ * have round-tripped the wrong key back.
+ */
+function secretRefFromBackend(s: IdentityAccount["secret_ref"]): SecretRef {
+    switch (s.backend) {
+        case "env":
+            return { backend: "env", env_var: s.env_var };
+        case "secrets_manager":
+            return {
+                backend: "secrets_manager",
+                sm_path: s.sm_path,
+                sm_json_path: s.sm_json_path,
+            };
+        case "plaintext_dev":
+            return { backend: "plaintext_dev", value: s.plaintext_dev };
+    }
+}
+
+/** Reverse of `secretRefFromBackend`. Defaults plaintext_dev to "" if the
+ * caller hasn't filled it in (the form uses controlled inputs and won't
+ * leave it undefined in practice, but the cast through the loose local
+ * type means TS can't enforce that for us). */
+function secretRefToBackend(s: SecretRef): IdentityAccount["secret_ref"] {
+    switch (s.backend) {
+        case "env":
+            return { backend: "env", env_var: s.env_var ?? "" };
+        case "secrets_manager":
+            return {
+                backend: "secrets_manager",
+                sm_path: s.sm_path ?? "",
+                sm_json_path: s.sm_json_path,
+            };
+        case "plaintext_dev":
+            return { backend: "plaintext_dev", plaintext_dev: s.value ?? "" };
+    }
+}
+
+/**
  * Convert a backend `IdentityAccount` (snake_case, JSON context blob) to
- * the frontend `Account` shape. Most fields map 1:1; we synthesize the
- * `assigned_agents` field as empty (it's deprecated and consumers should
- * use the agent-side reverse index via `agentsAssignedToAccount`).
+ * the frontend `Account` shape. Most fields map 1:1; `secret_ref` goes
+ * through `secretRefFromBackend` to bridge the field-name mismatch
+ * (`plaintext_dev` ↔ `value`). `assigned_agents` is synthesized empty —
+ * it's deprecated and consumers should use the agent-side reverse index
+ * via `agentsAssignedToAccount`.
  */
 function backendToAccount(a: IdentityAccount): Account {
     const ts = (n: number) => new Date(n).toISOString();
@@ -175,7 +220,7 @@ function backendToAccount(a: IdentityAccount): Account {
         provider: a.provider as AccountProvider,
         kind: a.kind as AccountKind,
         display_name: a.display_name,
-        secret_ref: a.secret_ref as unknown as SecretRef,
+        secret_ref: secretRefFromBackend(a.secret_ref),
         context: (a.context as AccountContext) ?? {},
         assigned_agents: [],
         status: (a.status as AccountStatus) ?? "unknown",
@@ -190,19 +235,13 @@ function accountToBackend(a: Account): Partial<IdentityAccount> {
         const n = Date.parse(s);
         return Number.isFinite(n) ? n : 0;
     };
-    // The frontend SecretRef and the backend (global) SecretRef have the
-    // same physical shape but differ in TS modelling — local has all
-    // fields optional, global is a discriminated union. Hoist through
-    // `unknown` to silence the structural mismatch; runtime data is
-    // identical.
-    const secret_ref = a.secret_ref as unknown as IdentityAccount["secret_ref"];
     return {
         id: a.id,
         name: a.name,
         provider: a.provider,
         kind: a.kind,
         display_name: a.display_name,
-        secret_ref,
+        secret_ref: secretRefToBackend(a.secret_ref),
         context: a.context as Record<string, unknown>,
         status: a.status,
         created_at: t(a.created_at),
