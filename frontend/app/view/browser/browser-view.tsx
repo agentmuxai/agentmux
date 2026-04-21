@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { createSignal, onCleanup, onMount, Show, type JSX } from "solid-js";
+import { createEffect, createSignal, onCleanup, onMount, Show, type JSX } from "solid-js";
 import { invokeCommand } from "@/app/platform/ipc";
 import type { BrowserViewModel } from "./browser-model";
 import "./browser-view.scss";
@@ -9,6 +9,20 @@ import "./browser-view.scss";
 export function BrowserViewComponent(props: ViewComponentProps<BrowserViewModel>): JSX.Element {
     const model = props.model;
     const [addressBar, setAddressBar] = createSignal(model.urlAtom() || "");
+    let addressInputRef: HTMLInputElement | undefined;
+    // Reactively mirror the model's URL into the address-bar input whenever
+    // CEF reports a navigation via the `browser-pane-nav-state` event (in-
+    // pane link clicks, redirects, back/forward, popup-intercept). Without
+    // this the input stayed frozen at the last user-submitted text while
+    // `model.urlAtom()` advanced, so the address bar diverged from the
+    // actual pane URL. Skip while the user is actively editing the input
+    // (focused) — otherwise we'd clobber mid-keystroke. Reagent caught
+    // this on PR #484 review.
+    createEffect(() => {
+        const modelUrl = model.urlAtom();
+        if (document.activeElement === addressInputRef) return;
+        if (modelUrl !== addressBar()) setAddressBar(modelUrl);
+    });
     let placeholderRef: HTMLDivElement | undefined;
     let resizeObserver: ResizeObserver | null = null;
     let positionInterval: ReturnType<typeof setInterval> | null = null;
@@ -133,6 +147,7 @@ export function BrowserViewComponent(props: ViewComponentProps<BrowserViewModel>
                     title="Reload"
                 >{"\u21BB"}</button>
                 <input
+                    ref={addressInputRef}
                     class="browser-address-bar"
                     type="text"
                     value={addressBar()}
