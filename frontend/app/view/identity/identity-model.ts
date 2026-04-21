@@ -9,6 +9,9 @@
 
 import { BlockNodeModel } from "@/app/block/blocktypes";
 import { createSignal, type Accessor, type Setter } from "solid-js";
+import { RpcApi } from "@/app/store/rpc-api";
+import { TabRpcClient } from "@/app/store/rpc-util";
+import { Logger } from "@/util/logger";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -113,30 +116,155 @@ export const KIND_LABELS: Record<AccountKind, string> = {
     env_ref: "Environment Variable",
 };
 
-// ── Storage ──────────────────────────────────────────────────────────────────
+// ── Storage (DB-backed via RPC, in-memory cache) ─────────────────────────────
+//
+// As of v0.33.30x (PR #479 + this PR) accounts live in the SQLite
+// `db_identity_accounts` table on the sidecar, not in localStorage. This
+// module keeps an in-memory cache so synchronous callers (e.g. agent
+// startup payload assembly) can stay synchronous.
+//
+// Lifecycle:
+// 1. `primeAccountCache()` runs at app startup and populates the cache
+//    from the DB via `ListIdentityAccountsCommand`.
+// 2. CRUD methods on `IdentityViewModel` go through RPCs and refresh the
+//    cache afterwards.
+// 3. `loadAccounts()` is a synchronous getter that returns whatever's
+//    currently in the cache. First call after process start returns
+//    `[]` if priming hasn't completed yet — callers that need
+//    correctness over latency can `await refreshAccountCache()` first.
 
-const STORAGE_KEY = "agentmux:identity:accounts";
+let _accountCache: Account[] = [];
+const _cacheChangeListeners: Array<(accounts: Account[]) => void> = [];
 
+/** Returns the current cache snapshot (synchronous). */
 export function loadAccounts(): Account[] {
-    try {
-        const raw = localStorage.getItem(STORAGE_KEY);
-        if (!raw) return [];
-        return JSON.parse(raw) as Account[];
-    } catch {
-        return [];
+    return _accountCache;
+}
+
+/** Subscribe to cache updates. Returns an unsubscribe function. */
+export function subscribeAccountChanges(fn: (accounts: Account[]) => void): () => void {
+    _cacheChangeListeners.push(fn);
+    return () => {
+        const idx = _cacheChangeListeners.indexOf(fn);
+        if (idx >= 0) _cacheChangeListeners.splice(idx, 1);
+    };
+}
+
+function setCache(accounts: Account[]): void {
+    _accountCache = accounts;
+    for (const fn of _cacheChangeListeners) {
+        try {
+            fn(_accountCache);
+        } catch {
+            // listener errors must not break other listeners
+        }
     }
 }
 
-function saveAccounts(accounts: Account[]): void {
-    try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(accounts));
-    } catch {
-        // silently ignore storage errors
+/**
+ * Translate the backend's `SecretRef` (discriminated union, `plaintext_dev`
+ * field name) to the frontend's loose-shape `SecretRef` (`value` field for
+ * the dev plaintext case). Reagent caught a real bug here in PR #480
+ * review: a naked `as unknown as SecretRef` cast hid the field-name
+ * mismatch, so editing a plaintext_dev account loaded from DB rendered
+ * with an empty secret (read `value`, got `undefined`) and a save would
+ * have round-tripped the wrong key back.
+ */
+function secretRefFromBackend(s: IdentityAccount["secret_ref"]): SecretRef {
+    switch (s.backend) {
+        case "env":
+            return { backend: "env", env_var: s.env_var };
+        case "secrets_manager":
+            return {
+                backend: "secrets_manager",
+                sm_path: s.sm_path,
+                sm_json_path: s.sm_json_path,
+            };
+        case "plaintext_dev":
+            return { backend: "plaintext_dev", value: s.plaintext_dev };
     }
 }
 
-function generateId(): string {
-    return `acct-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+/** Reverse of `secretRefFromBackend`. Defaults plaintext_dev to "" if the
+ * caller hasn't filled it in (the form uses controlled inputs and won't
+ * leave it undefined in practice, but the cast through the loose local
+ * type means TS can't enforce that for us). */
+function secretRefToBackend(s: SecretRef): IdentityAccount["secret_ref"] {
+    switch (s.backend) {
+        case "env":
+            return { backend: "env", env_var: s.env_var ?? "" };
+        case "secrets_manager":
+            return {
+                backend: "secrets_manager",
+                sm_path: s.sm_path ?? "",
+                sm_json_path: s.sm_json_path,
+            };
+        case "plaintext_dev":
+            return { backend: "plaintext_dev", plaintext_dev: s.value ?? "" };
+    }
+}
+
+/**
+ * Convert a backend `IdentityAccount` (snake_case, JSON context blob) to
+ * the frontend `Account` shape. Most fields map 1:1; `secret_ref` goes
+ * through `secretRefFromBackend` to bridge the field-name mismatch
+ * (`plaintext_dev` ↔ `value`). `assigned_agents` is synthesized empty —
+ * it's deprecated and consumers should use the agent-side reverse index
+ * via `agentsAssignedToAccount`.
+ */
+function backendToAccount(a: IdentityAccount): Account {
+    const ts = (n: number) => new Date(n).toISOString();
+    return {
+        id: a.id,
+        name: a.name,
+        provider: a.provider as AccountProvider,
+        kind: a.kind as AccountKind,
+        display_name: a.display_name,
+        secret_ref: secretRefFromBackend(a.secret_ref),
+        context: (a.context as AccountContext) ?? {},
+        assigned_agents: [],
+        status: (a.status as AccountStatus) ?? "unknown",
+        created_at: ts(a.created_at),
+        updated_at: ts(a.updated_at),
+    };
+}
+
+/** Convert frontend `Account` to backend payload. */
+function accountToBackend(a: Account): Partial<IdentityAccount> {
+    const t = (s: string) => {
+        const n = Date.parse(s);
+        return Number.isFinite(n) ? n : 0;
+    };
+    return {
+        id: a.id,
+        name: a.name,
+        provider: a.provider,
+        kind: a.kind,
+        display_name: a.display_name,
+        secret_ref: secretRefToBackend(a.secret_ref),
+        context: a.context as Record<string, unknown>,
+        status: a.status,
+        created_at: t(a.created_at),
+        updated_at: t(a.updated_at),
+    };
+}
+
+/** Pull the latest account list from the DB and update the cache. */
+export async function refreshAccountCache(): Promise<Account[]> {
+    try {
+        const rows = await RpcApi.ListIdentityAccountsCommand(TabRpcClient, {});
+        const mapped = rows.map(backendToAccount);
+        setCache(mapped);
+        return mapped;
+    } catch (err) {
+        Logger.warn("identity", `refreshAccountCache failed: ${(err as Error)?.message ?? err}`);
+        return _accountCache;
+    }
+}
+
+/** Run once at app startup. Idempotent — repeated calls just refresh. */
+export function primeAccountCache(): void {
+    void refreshAccountCache();
 }
 
 // ── ViewModel ────────────────────────────────────────────────────────────────
@@ -186,7 +314,27 @@ export class IdentityViewModel implements ViewModel {
     constructor(blockId: string, nodeModel: BlockNodeModel) {
         this.blockId = blockId;
         this.nodeModel = nodeModel;
+        // Initial paint from cache (may be empty on first launch).
         this.setAccounts(loadAccounts());
+        // Stay in sync with module-level cache updates from any source
+        // (other panes, RPC events, etc.).
+        const unsub = subscribeAccountChanges((accounts) => {
+            this.setAccounts(accounts);
+            // Keep the selected account fresh if it was edited externally.
+            const sel = this.selectedAccountAtom();
+            if (sel) {
+                const updated = accounts.find((a) => a.id === sel.id);
+                if (updated && updated !== sel) this.setSelectedAccount(updated);
+                if (!updated) this.setSelectedAccount(null);
+            }
+        });
+        // Force a refresh in case the cache hasn't been primed yet.
+        void refreshAccountCache();
+        // No explicit dispose — subscription leaks per ViewModel are
+        // bounded by the number of identity panes ever opened in a
+        // session (small). If this becomes a memory concern, wire
+        // `unsub` to ViewModel teardown (no such hook exists today).
+        void unsub;
     }
 
     // ── Derived helpers ──────────────────────────────────────────────────────
@@ -203,43 +351,66 @@ export class IdentityViewModel implements ViewModel {
 
     // ── CRUD ────────────────────────────────────────────────────────────────
 
-    createAccount = (data: Omit<Account, "id" | "status" | "created_at" | "updated_at">): void => {
+    createAccount = async (data: Omit<Account, "id" | "status" | "created_at" | "updated_at">): Promise<void> => {
         const now = new Date().toISOString();
-        const account: Account = {
+        // Build a frontend-shape Account, then ship to backend. Backend mints
+        // the canonical id + timestamps; we accept whatever it returns.
+        const draft: Account = {
             ...data,
-            id: generateId(),
+            id: "", // backend mints
             status: "unknown",
             created_at: now,
             updated_at: now,
         };
-        const updated = [...this.accountsAtom(), account];
-        this.setAccounts(updated);
-        saveAccounts(updated);
-        this.setFormOpen(false);
-        this.setEditingAccount(null);
-        this.setFormError(null);
-        this.setSelectedAccount(account);
+        try {
+            const saved = await RpcApi.UpsertIdentityAccountCommand(
+                TabRpcClient,
+                accountToBackend(draft),
+            );
+            await refreshAccountCache();
+            this.setFormOpen(false);
+            this.setEditingAccount(null);
+            this.setFormError(null);
+            // Find the round-tripped row in the freshly-refreshed cache
+            // (server timestamps will differ from the draft).
+            const fresh = this.accountsAtom().find((a) => a.id === saved.id);
+            this.setSelectedAccount(fresh ?? backendToAccount(saved));
+        } catch (err) {
+            this.setFormError((err as Error)?.message ?? String(err));
+        }
     };
 
-    updateAccount = (id: string, data: Partial<Omit<Account, "id" | "created_at">>): void => {
-        const updated = this.accountsAtom().map((a) =>
-            a.id === id ? { ...a, ...data, updated_at: new Date().toISOString() } : a
-        );
-        this.setAccounts(updated);
-        saveAccounts(updated);
-        this.setFormOpen(false);
-        this.setEditingAccount(null);
-        this.setFormError(null);
-        const refreshed = updated.find((a) => a.id === id) ?? null;
-        this.setSelectedAccount(refreshed);
+    updateAccount = async (id: string, data: Partial<Omit<Account, "id" | "created_at">>): Promise<void> => {
+        const existing = this.accountsAtom().find((a) => a.id === id);
+        if (!existing) {
+            this.setFormError(`account ${id} not found`);
+            return;
+        }
+        const merged: Account = { ...existing, ...data, updated_at: new Date().toISOString() };
+        try {
+            await RpcApi.UpsertIdentityAccountCommand(TabRpcClient, accountToBackend(merged));
+            await refreshAccountCache();
+            this.setFormOpen(false);
+            this.setEditingAccount(null);
+            this.setFormError(null);
+            const fresh = this.accountsAtom().find((a) => a.id === id);
+            this.setSelectedAccount(fresh ?? null);
+        } catch (err) {
+            this.setFormError((err as Error)?.message ?? String(err));
+        }
     };
 
-    deleteAccount = (id: string): void => {
-        const updated = this.accountsAtom().filter((a) => a.id !== id);
-        this.setAccounts(updated);
-        saveAccounts(updated);
-        if (this.selectedAccountAtom()?.id === id) {
-            this.setSelectedAccount(null);
+    deleteAccount = async (id: string): Promise<void> => {
+        try {
+            await RpcApi.DeleteIdentityAccountCommand(TabRpcClient, { id });
+            await refreshAccountCache();
+            if (this.selectedAccountAtom()?.id === id) {
+                this.setSelectedAccount(null);
+            }
+        } catch (err) {
+            // Surface delete failures via formError so the user sees them
+            // even when the form isn't open.
+            this.setFormError((err as Error)?.message ?? String(err));
         }
     };
 

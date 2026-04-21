@@ -554,6 +554,133 @@ class RpcApiType {
         return client.rpcCall("reseedforgeagents", {}, opts);
     }
 
+    // ── v6: identity / instance / fork ──────────────────────────────────────
+
+    // command "listidentityaccounts" [call]
+    ListIdentityAccountsCommand(
+        client: RpcClient,
+        data: { provider?: string } = {},
+        opts?: RpcOpts,
+    ): Promise<IdentityAccount[]> {
+        return client.rpcCall("listidentityaccounts", data, opts);
+    }
+
+    // command "getidentityaccount" [call]
+    GetIdentityAccountCommand(
+        client: RpcClient,
+        data: { id: string },
+        opts?: RpcOpts,
+    ): Promise<IdentityAccount> {
+        return client.rpcCall("getidentityaccount", data, opts);
+    }
+
+    // command "upsertidentityaccount" [call]
+    UpsertIdentityAccountCommand(
+        client: RpcClient,
+        data: Partial<IdentityAccount>,
+        opts?: RpcOpts,
+    ): Promise<IdentityAccount> {
+        return client.rpcCall("upsertidentityaccount", data, opts);
+    }
+
+    // command "deleteidentityaccount" [call]
+    DeleteIdentityAccountCommand(
+        client: RpcClient,
+        data: { id: string },
+        opts?: RpcOpts,
+    ): Promise<{ deleted: boolean }> {
+        return client.rpcCall("deleteidentityaccount", data, opts);
+    }
+
+    // command "linkagentidentity" [call]
+    LinkAgentIdentityCommand(
+        client: RpcClient,
+        data: { agent_id: string; account_id: string; provider: string },
+        opts?: RpcOpts,
+    ): Promise<void> {
+        return client.rpcCall("linkagentidentity", data, opts);
+    }
+
+    // command "unlinkagentidentity" [call]
+    UnlinkAgentIdentityCommand(
+        client: RpcClient,
+        data: { agent_id: string; provider: string },
+        opts?: RpcOpts,
+    ): Promise<{ unlinked: boolean }> {
+        return client.rpcCall("unlinkagentidentity", data, opts);
+    }
+
+    // command "listagentidentities" [call]
+    ListAgentIdentitiesCommand(
+        client: RpcClient,
+        data: { agent_id: string },
+        opts?: RpcOpts,
+    ): Promise<ForgeAgentIdentity[]> {
+        return client.rpcCall("listagentidentities", data, opts);
+    }
+
+    // command "listagentinstances" [call]
+    ListAgentInstancesCommand(
+        client: RpcClient,
+        data: { definition_id?: string; status?: string } = {},
+        opts?: RpcOpts,
+    ): Promise<AgentInstance[]> {
+        return client.rpcCall("listagentinstances", data, opts);
+    }
+
+    // command "getagentinstance" [call]
+    GetAgentInstanceCommand(
+        client: RpcClient,
+        data: { id: string },
+        opts?: RpcOpts,
+    ): Promise<AgentInstance> {
+        return client.rpcCall("getagentinstance", data, opts);
+    }
+
+    // command "createagentinstance" [call]
+    CreateAgentInstanceCommand(
+        client: RpcClient,
+        data: { definition_id: string; block_id?: string; parent_instance_id?: string },
+        opts?: RpcOpts,
+    ): Promise<AgentInstance> {
+        return client.rpcCall("createagentinstance", data, opts);
+    }
+
+    // command "updateagentinstance" [call]
+    // PATCH semantics — absent fields preserve current value.
+    UpdateAgentInstanceCommand(
+        client: RpcClient,
+        data: {
+            id: string;
+            block_id?: string;
+            session_id?: string;
+            status?: string;
+            github_context?: string;
+            ended_at?: number;
+        },
+        opts?: RpcOpts,
+    ): Promise<AgentInstance> {
+        return client.rpcCall("updateagentinstance", data, opts);
+    }
+
+    // command "deleteagentinstance" [call]
+    DeleteAgentInstanceCommand(
+        client: RpcClient,
+        data: { id: string },
+        opts?: RpcOpts,
+    ): Promise<{ deleted: boolean }> {
+        return client.rpcCall("deleteagentinstance", data, opts);
+    }
+
+    // command "forkagentdefinition" [call]
+    ForkAgentDefinitionCommand(
+        client: RpcClient,
+        data: { source_id: string; branch_label?: string },
+        opts?: RpcOpts,
+    ): Promise<ForgeAgent> {
+        return client.rpcCall("forkagentdefinition", data, opts);
+    }
+
     // command "subprocessspawn" [call]
     SubprocessSpawnCommand(client: RpcClient, data: CommandSubprocessSpawnData, opts?: RpcOpts): Promise<void> {
         return client.rpcCall("subprocessspawn", data, opts);

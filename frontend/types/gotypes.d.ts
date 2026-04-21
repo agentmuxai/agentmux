@@ -220,11 +220,77 @@ declare global {
         is_seeded: number;
         /**
          * JSON-encoded per-provider account refs.
-         * Shape: `{"github":"acct-id"|null,"aws":"acct-id"|null,...}`
-         * Empty string = no accounts assigned. See identity-model.ts for
-         * parseAgentAccounts() / serializeAgentAccounts() helpers.
+         * **Deprecated in v6** — use `db_forge_agent_identities` (junction
+         * table) via `listAgentIdentities` RPC instead. Kept on the type
+         * for compatibility with rows that still carry the legacy blob.
          */
         accounts?: string;
+        /**
+         * Forked-from definition id, or empty string for root definitions.
+         * Added in v6. See specs/SPEC_FORGE_IDENTITY_AGENT_INSTANCES_IMPL_2026_04_20.md.
+         */
+        parent_id?: string;
+        /**
+         * Free-form label describing the branch (e.g. "pr-422-review").
+         * Empty for root definitions. Added in v6.
+         */
+        branch_label?: string;
+    };
+
+    // ── v6: identity, instance, junction ────────────────────────────────────
+
+    /**
+     * Discriminated-union secret reference. Stored as JSON in
+     * `IdentityAccount.secret_ref`. The actual secret value is NEVER stored;
+     * only how to look it up at launch time. `plaintext_dev` is dev-only.
+     */
+    type SecretRef =
+        | { backend: "env"; env_var: string }
+        | { backend: "secrets_manager"; sm_path: string; sm_json_path?: string }
+        | { backend: "plaintext_dev"; plaintext_dev: string };
+
+    type IdentityAccount = {
+        id: string;
+        name: string;
+        provider: string; // "github" | "aws" | "anthropic" | "custom"
+        kind: string;     // "pat" | "role" | "api_key" | "env_ref"
+        display_name?: string;
+        secret_ref: SecretRef;
+        /** Free-form per-provider context. Frontend types it by `provider`. */
+        context: Record<string, unknown>;
+        status?: string; // "unknown" | "ok" | "expired" | "invalid"
+        created_at: number;
+        updated_at: number;
+    };
+
+    type ForgeAgentIdentity = {
+        agent_id: string;
+        account_id: string;
+        provider: string;
+    };
+
+    type AgentInstanceStatus = "running" | "paused" | "stopped" | "crashed" | "detached";
+
+    type GitHubContext = {
+        repo: string; // "owner/repo"
+        pr_number?: number;
+        branch?: string;
+        issue_number?: number;
+        workflow_run_id?: number;
+    };
+
+    type AgentInstance = {
+        id: string;
+        definition_id: string;
+        parent_instance_id?: string;
+        block_id?: string;
+        session_id?: string;
+        status: string; // AgentInstanceStatus
+        /** JSON-encoded GitHubContext, or empty string. */
+        github_context?: string;
+        started_at: number;
+        ended_at?: number;
+        created_at: number;
     };
 
     // ForgeContent
@@ -848,6 +914,8 @@ declare global {
         "widget:order"?: string[];
         "agent:*"?: boolean;
         agentId?: string;
+        /** v6 — DB row id of the AgentInstance currently bound to this pane. */
+        agentInstanceId?: string;
         agentName?: string;
         agentIcon?: string;
         agentMode?: string;

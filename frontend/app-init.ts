@@ -35,6 +35,7 @@ import {
 } from "@/app/store/global";
 import * as WOS from "@/app/store/wos";
 import { loadFonts } from "@/util/fontutil";
+import { primeAccountCache } from "@/app/view/identity/identity-model";
 import { setKeyUtilPlatform } from "@/util/keyutil";
 import { render } from "solid-js/web";
 import { benchMark, benchDump } from "@/util/startup-bench";
@@ -487,6 +488,12 @@ async function initWave(initOpts: AgentMuxInitOpts) {
     initGlobalEventSubs(initOpts);
     subscribeToConnEvents();
     tlog("initEventSubs", t);
+
+    // Prime the identity-account cache from the DB so synchronous callers
+    // (e.g. agent startup payload assembly via `loadAccounts()`) see real
+    // data instead of an empty list. Fire-and-forget; the panel and
+    // launch flow tolerate a momentarily-empty cache.
+    primeAccountCache();
 
     // ensures client/window/workspace are loaded into the cache before rendering
     t = performance.now();
