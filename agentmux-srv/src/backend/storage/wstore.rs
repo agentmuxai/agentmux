@@ -41,8 +41,16 @@ impl WaveStore {
 
     fn configure_and_migrate(conn: Connection) -> Result<Self, StoreError> {
         conn.execute_batch(
+            // `foreign_keys=ON` is per-connection and defaults to OFF in
+            // SQLite. The v6 schema (`db_forge_agent_identities`,
+            // `db_agent_instances`) relies on `ON DELETE CASCADE` to clean
+            // up junction rows and instances when a parent agent or
+            // identity is removed. Without this pragma on the production
+            // connection, cascades silently no-op; migration tests set it
+            // explicitly, which would have masked the gap.
             "PRAGMA journal_mode=WAL;
              PRAGMA busy_timeout=5000;
+             PRAGMA foreign_keys=ON;
              PRAGMA synchronous=NORMAL;
              PRAGMA cache_size=-8000;
              PRAGMA mmap_size=268435456;
