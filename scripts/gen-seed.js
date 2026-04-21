@@ -101,4 +101,29 @@ const manifest = {
     ]
 };
 
-process.stdout.write(JSON.stringify(manifest, null, 2) + "\n");
+// Write the manifest to `agentmux-srv/forge-seed.json` directly rather
+// than emitting it on stdout. Previously this script did
+// `process.stdout.write(...)` and callers redirected via
+// `node gen-seed.js > forge-seed.json`. On Windows PowerShell, stdout
+// redirection transcodes the Node UTF-8 output through the console code
+// page (cp437 / cp1252), corrupting the emoji icons (🔴 → "≡ƒö┤") and
+// em-dashes (— → "ΓÇö"). Git Bash preserves bytes but there was no way
+// to enforce the caller's shell. Writing directly sidesteps the issue.
+//
+// Kept the stdout emit too for callers that pipe elsewhere (e.g. diff
+// tools); gated behind `--stdout`.
+import { writeFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, resolve } from "node:path";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const json = JSON.stringify(manifest, null, 2) + "\n";
+
+if (process.argv.includes("--stdout")) {
+    process.stdout.write(json);
+} else {
+    const outPath = resolve(__dirname, "..", "agentmux-srv", "forge-seed.json");
+    writeFileSync(outPath, json, { encoding: "utf8" });
+    process.stdout.write(`wrote ${outPath}\n`);
+}
