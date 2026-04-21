@@ -76,6 +76,8 @@ pub fn register_forge_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     agent_bus_id: cmd.agent_bus_id,
                     is_seeded: 0,
                     accounts: String::new(),
+                    parent_id: String::new(),
+                    branch_label: String::new(),
                 };
                 wstore.forge_insert(&mut agent).map_err(|e| format!("createforgeagent: {e}"))?;
                 broker.publish(crate::backend::wps::WaveEvent {
@@ -132,6 +134,11 @@ pub fn register_forge_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     // don't carry accounts, so falling back to old.accounts prevents
                     // silently wiping saved assignments.
                     accounts: if cmd.accounts.is_empty() { old.accounts.clone() } else { cmd.accounts },
+                    // parent_id + branch_label describe provenance and
+                    // are immutable post-insert (forks are separate rows,
+                    // not in-place edits).
+                    parent_id: old.parent_id.clone(),
+                    branch_label: old.branch_label.clone(),
                 };
                 let found = wstore.forge_update(&agent).map_err(|e| format!("updateforgeagent: {e}"))?;
                 if !found {
@@ -481,6 +488,8 @@ pub fn register_forge_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     agent_bus_id: String::new(),
                     is_seeded: 0,
                     accounts: String::new(),
+                    parent_id: String::new(),
+                    branch_label: String::new(),
                 };
                 wstore.forge_insert(&mut agent).map_err(|e| format!("importforgefromclaw: {e}"))?;
 

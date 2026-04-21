@@ -433,11 +433,22 @@ pub struct ForgeAgent {
     #[serde(default)]
     pub is_seeded: i64,
     /// JSON-encoded per-provider account references.
-    /// Shape: `{"github":"acct-id"|null,"aws":"acct-id"|null,...}`
-    /// Null or missing provider key = no account assigned for that provider.
-    /// See SPEC_AGENT_IDENTITY_RESTRUCTURE_2026_04_14.md §3.3.
+    /// **Deprecated in v6** — superseded by the `db_forge_agent_identities`
+    /// junction table. Still populated on read for backward compat with
+    /// any existing DB rows; new writes leave it empty. See
+    /// specs/SPEC_FORGE_IDENTITY_AGENT_INSTANCES_IMPL_2026_04_20.md.
     #[serde(default)]
     pub accounts: String,
+    /// Parent definition id (forge_agents.id). Empty string = root
+    /// definition; non-empty = this agent was forked from another.
+    /// Added in v6. See spec §Phase 1.
+    #[serde(default)]
+    pub parent_id: String,
+    /// Label describing the branch (e.g. `"pr-422-review"`,
+    /// `"experiment-refactor"`). Empty for root definitions and for
+    /// branches that didn't set a label. Added in v6.
+    #[serde(default)]
+    pub branch_label: String,
 }
 
 /// Derive a filesystem-safe slug from a display name. Lowercase,
@@ -512,7 +523,8 @@ impl WaveStore {
         let mut stmt = conn.prepare(
             "SELECT id, slug, name, icon, provider, description, working_directory, shell,
                     provider_flags, auto_start, restart_on_crash, idle_timeout_minutes, created_at,
-                    agent_type, environment, agent_bus_id, is_seeded, accounts
+                    agent_type, environment, agent_bus_id, is_seeded, accounts,
+                    parent_id, branch_label
              FROM db_forge_agents ORDER BY created_at ASC",
         )?;
         let rows = stmt.query_map([], |row| {
@@ -535,6 +547,8 @@ impl WaveStore {
                 agent_bus_id: row.get(15)?,
                 is_seeded: row.get(16)?,
                 accounts: row.get(17)?,
+                parent_id: row.get(18)?,
+                branch_label: row.get(19)?,
             })
         })?;
         let mut agents = Vec::new();
@@ -600,8 +614,9 @@ impl WaveStore {
             "INSERT INTO db_forge_agents (id, slug, name, icon, provider, description,
              working_directory, shell, provider_flags, auto_start, restart_on_crash,
              idle_timeout_minutes, created_at, agent_type, environment, agent_bus_id,
-             is_seeded, accounts)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
+             is_seeded, accounts, parent_id, branch_label)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16,
+                     ?17, ?18, ?19, ?20)",
             params![
                 agent.id,
                 agent.slug,
@@ -620,13 +635,18 @@ impl WaveStore {
                 agent.environment,
                 agent.agent_bus_id,
                 agent.is_seeded,
-                agent.accounts
+                agent.accounts,
+                agent.parent_id,
+                agent.branch_label,
             ],
         )?;
         Ok(())
     }
 
     /// Update an existing forge agent (all fields except id, created_at, is_seeded).
+    /// `parent_id` and `branch_label` are NOT updatable post-insert — they
+    /// describe the agent's provenance; renaming or re-branching is done by
+    /// creating a new fork, not mutating the original.
     pub fn forge_update(&self, agent: &ForgeAgent) -> Result<bool, StoreError> {
         let conn = self.conn.lock().unwrap();
         let rows = conn.execute(
@@ -969,6 +989,496 @@ fn format_epoch_date(days_since_epoch: u64) -> String {
 }
 
 // ====================================================================
+// Identity Accounts + Agent Instances + Junction
+// (Phase 2 of SPEC_FORGE_IDENTITY_AGENT_INSTANCES_IMPL_2026_04_20.md)
+// ====================================================================
+
+/// Provider-specific credential reference. Stored as JSON in
+/// `db_identity_accounts.secret_ref`. `backend` is the discriminator.
+/// The actual secret value is NEVER stored in the DB — only how to
+/// look it up at launch time (env var, secrets-manager path, etc.).
+/// `PlaintextDev` exists for local dev convenience and must never be
+/// the default path in production builds.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "backend", rename_all = "snake_case")]
+pub enum SecretRef {
+    Env {
+        env_var: String,
+    },
+    SecretsManager {
+        sm_path: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        sm_json_path: Option<String>,
+    },
+    PlaintextDev {
+        plaintext_dev: String,
+    },
+}
+
+/// An identity account (reusable credential, linked to agents via the
+/// `db_forge_agent_identities` junction). Replaces the browser
+/// localStorage identity store.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IdentityAccount {
+    pub id: String,
+    pub name: String,
+    pub provider: String, // "github" | "aws" | "anthropic" | "custom"
+    pub kind: String,     // "pat" | "role" | "api_key" | "env_ref"
+    #[serde(default)]
+    pub display_name: String,
+    pub secret_ref: SecretRef,
+    /// Free-form JSON context (username, scopes, role ARN, etc.). Stored
+    /// verbatim; frontend types it by `provider`.
+    #[serde(default = "default_context_json")]
+    pub context: serde_json::Value,
+    #[serde(default = "default_identity_status")]
+    pub status: String, // "unknown" | "ok" | "expired" | "invalid"
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+fn default_context_json() -> serde_json::Value {
+    serde_json::json!({})
+}
+
+fn default_identity_status() -> String {
+    "unknown".to_string()
+}
+
+/// Junction row: which identity an agent uses for a given provider.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ForgeAgentIdentity {
+    pub agent_id: String,
+    pub account_id: String,
+    pub provider: String,
+}
+
+/// Instance lifecycle status. Serialised lowercase to match the DB text.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum InstanceStatus {
+    Running,
+    Paused,
+    Stopped,
+    Crashed,
+    Detached,
+}
+
+impl InstanceStatus {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Running => "running",
+            Self::Paused => "paused",
+            Self::Stopped => "stopped",
+            Self::Crashed => "crashed",
+            Self::Detached => "detached",
+        }
+    }
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "running" => Some(Self::Running),
+            "paused" => Some(Self::Paused),
+            "stopped" => Some(Self::Stopped),
+            "crashed" => Some(Self::Crashed),
+            "detached" => Some(Self::Detached),
+            _ => None,
+        }
+    }
+}
+
+/// Optional context describing which GitHub-side unit of work a specific
+/// instance is operating on. Stored as JSON in
+/// `db_agent_instances.github_context` (empty string when unset).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GitHubContext {
+    pub repo: String, // "owner/repo"
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pr_number: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub issue_number: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workflow_run_id: Option<u64>,
+}
+
+/// One row per running/historical execution of an agent definition.
+/// `block_id` / `session_id` / `github_context` are modelled as empty
+/// strings on the wire rather than `Option<String>` to match the
+/// existing forge schema conventions (`NOT NULL DEFAULT ''`). Callers
+/// that need structured absence can use `.is_empty()`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentInstance {
+    pub id: String,
+    pub definition_id: String,
+    #[serde(default)]
+    pub parent_instance_id: String,
+    #[serde(default)]
+    pub block_id: String,
+    #[serde(default)]
+    pub session_id: String,
+    pub status: String,
+    /// JSON-encoded `GitHubContext`, or empty string.
+    #[serde(default)]
+    pub github_context: String,
+    pub started_at: i64,
+    #[serde(default)]
+    pub ended_at: i64,
+    pub created_at: i64,
+}
+
+impl WaveStore {
+    // ---- Identity account CRUD ----
+
+    /// List identity accounts. If `provider` is `Some`, filter to that
+    /// provider; otherwise return every account, ordered by most recent
+    /// update first (so the identity panel shows live accounts on top).
+    pub fn identity_list(
+        &self,
+        provider: Option<&str>,
+    ) -> Result<Vec<IdentityAccount>, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let mut rows_vec = Vec::new();
+        let map_row = |row: &rusqlite::Row| -> rusqlite::Result<IdentityAccount> {
+            let secret_ref_json: String = row.get(5)?;
+            let context_json: String = row.get(6)?;
+            Ok(IdentityAccount {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                provider: row.get(2)?,
+                kind: row.get(3)?,
+                display_name: row.get(4)?,
+                secret_ref: serde_json::from_str(&secret_ref_json).map_err(|e| {
+                    rusqlite::Error::FromSqlConversionFailure(
+                        5,
+                        rusqlite::types::Type::Text,
+                        Box::new(e),
+                    )
+                })?,
+                context: serde_json::from_str(&context_json).unwrap_or_else(|_| serde_json::json!({})),
+                status: row.get(7)?,
+                created_at: row.get(8)?,
+                updated_at: row.get(9)?,
+            })
+        };
+        match provider {
+            Some(p) => {
+                let mut stmt = conn.prepare(
+                    "SELECT id, name, provider, kind, display_name, secret_ref, context,
+                            status, created_at, updated_at
+                     FROM db_identity_accounts
+                     WHERE provider = ?1
+                     ORDER BY updated_at DESC",
+                )?;
+                let iter = stmt.query_map(params![p], map_row)?;
+                for r in iter {
+                    rows_vec.push(r?);
+                }
+            }
+            None => {
+                let mut stmt = conn.prepare(
+                    "SELECT id, name, provider, kind, display_name, secret_ref, context,
+                            status, created_at, updated_at
+                     FROM db_identity_accounts
+                     ORDER BY updated_at DESC",
+                )?;
+                let iter = stmt.query_map([], map_row)?;
+                for r in iter {
+                    rows_vec.push(r?);
+                }
+            }
+        }
+        Ok(rows_vec)
+    }
+
+    pub fn identity_get(&self, id: &str) -> Result<Option<IdentityAccount>, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, name, provider, kind, display_name, secret_ref, context,
+                    status, created_at, updated_at
+             FROM db_identity_accounts WHERE id = ?1",
+        )?;
+        let result = stmt.query_row(params![id], |row| {
+            let secret_ref_json: String = row.get(5)?;
+            let context_json: String = row.get(6)?;
+            Ok(IdentityAccount {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                provider: row.get(2)?,
+                kind: row.get(3)?,
+                display_name: row.get(4)?,
+                secret_ref: serde_json::from_str(&secret_ref_json).map_err(|e| {
+                    rusqlite::Error::FromSqlConversionFailure(
+                        5,
+                        rusqlite::types::Type::Text,
+                        Box::new(e),
+                    )
+                })?,
+                context: serde_json::from_str(&context_json).unwrap_or_else(|_| serde_json::json!({})),
+                status: row.get(7)?,
+                created_at: row.get(8)?,
+                updated_at: row.get(9)?,
+            })
+        });
+        match result {
+            Ok(a) => Ok(Some(a)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    /// Upsert an identity account. If `account.id` is empty the caller
+    /// must generate one first (we don't silently mint ids here — callers
+    /// should know whether they're creating vs updating).
+    pub fn identity_upsert(&self, account: &IdentityAccount) -> Result<(), StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let secret_ref_json = serde_json::to_string(&account.secret_ref)?;
+        let context_json = serde_json::to_string(&account.context)?;
+        conn.execute(
+            "INSERT INTO db_identity_accounts
+                (id, name, provider, kind, display_name, secret_ref, context,
+                 status, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+             ON CONFLICT(id) DO UPDATE SET
+                name = excluded.name,
+                provider = excluded.provider,
+                kind = excluded.kind,
+                display_name = excluded.display_name,
+                secret_ref = excluded.secret_ref,
+                context = excluded.context,
+                status = excluded.status,
+                updated_at = excluded.updated_at",
+            params![
+                account.id,
+                account.name,
+                account.provider,
+                account.kind,
+                account.display_name,
+                secret_ref_json,
+                context_json,
+                account.status,
+                account.created_at,
+                account.updated_at,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn identity_delete(&self, id: &str) -> Result<bool, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let rows = conn.execute("DELETE FROM db_identity_accounts WHERE id = ?1", params![id])?;
+        Ok(rows > 0)
+    }
+
+    // ---- Agent ↔ Identity junction ----
+
+    /// Link an agent to an identity for a given provider. Overwrites any
+    /// existing link for the same (agent_id, provider) — each agent has
+    /// at most one account per provider.
+    pub fn agent_identity_link(
+        &self,
+        agent_id: &str,
+        account_id: &str,
+        provider: &str,
+    ) -> Result<(), StoreError> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO db_forge_agent_identities (agent_id, account_id, provider)
+             VALUES (?1, ?2, ?3)
+             ON CONFLICT(agent_id, provider) DO UPDATE SET account_id = excluded.account_id",
+            params![agent_id, account_id, provider],
+        )?;
+        Ok(())
+    }
+
+    /// Remove the identity link for a given (agent_id, provider).
+    /// Returns true iff a link existed.
+    pub fn agent_identity_unlink(
+        &self,
+        agent_id: &str,
+        provider: &str,
+    ) -> Result<bool, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let rows = conn.execute(
+            "DELETE FROM db_forge_agent_identities WHERE agent_id = ?1 AND provider = ?2",
+            params![agent_id, provider],
+        )?;
+        Ok(rows > 0)
+    }
+
+    /// List all (agent_id, account_id, provider) triples for an agent.
+    pub fn agent_identity_list_for_agent(
+        &self,
+        agent_id: &str,
+    ) -> Result<Vec<ForgeAgentIdentity>, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT agent_id, account_id, provider
+             FROM db_forge_agent_identities
+             WHERE agent_id = ?1
+             ORDER BY provider",
+        )?;
+        let iter = stmt.query_map(params![agent_id], |row| {
+            Ok(ForgeAgentIdentity {
+                agent_id: row.get(0)?,
+                account_id: row.get(1)?,
+                provider: row.get(2)?,
+            })
+        })?;
+        let mut out = Vec::new();
+        for r in iter {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
+    // ---- Agent instance CRUD ----
+
+    /// List instances. Both filters are optional — pass `None` to scan all
+    /// instances. Ordered by `created_at` descending (most recent first).
+    pub fn instance_list(
+        &self,
+        definition_id: Option<&str>,
+        status: Option<&str>,
+    ) -> Result<Vec<AgentInstance>, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        // Build the query dynamically. The parameter count varies, so we
+        // can't reuse a single prepared statement across filter combos.
+        let mut sql = String::from(
+            "SELECT id, definition_id, parent_instance_id, block_id, session_id,
+                    status, github_context, started_at, ended_at, created_at
+             FROM db_agent_instances",
+        );
+        let mut clauses: Vec<&str> = Vec::new();
+        if definition_id.is_some() {
+            clauses.push("definition_id = ?");
+        }
+        if status.is_some() {
+            clauses.push("status = ?");
+        }
+        if !clauses.is_empty() {
+            sql.push_str(" WHERE ");
+            sql.push_str(&clauses.join(" AND "));
+        }
+        sql.push_str(" ORDER BY created_at DESC");
+
+        let mut stmt = conn.prepare(&sql)?;
+        // Build a Vec<String> so parameter lifetimes outlive the query call.
+        // Borrowing the `&str` args directly caused E0597 because they're
+        // bound to the match arms, not the outer scope.
+        let mut param_vals: Vec<String> = Vec::new();
+        if let Some(d) = definition_id {
+            param_vals.push(d.to_string());
+        }
+        if let Some(s) = status {
+            param_vals.push(s.to_string());
+        }
+        let iter = stmt.query_map(rusqlite::params_from_iter(param_vals.iter()), |row| {
+            Ok(AgentInstance {
+                id: row.get(0)?,
+                definition_id: row.get(1)?,
+                parent_instance_id: row.get(2)?,
+                block_id: row.get(3)?,
+                session_id: row.get(4)?,
+                status: row.get(5)?,
+                github_context: row.get(6)?,
+                started_at: row.get(7)?,
+                ended_at: row.get(8)?,
+                created_at: row.get(9)?,
+            })
+        })?;
+        let mut out = Vec::new();
+        for r in iter {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
+    pub fn instance_get(&self, id: &str) -> Result<Option<AgentInstance>, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, definition_id, parent_instance_id, block_id, session_id,
+                    status, github_context, started_at, ended_at, created_at
+             FROM db_agent_instances WHERE id = ?1",
+        )?;
+        let result = stmt.query_row(params![id], |row| {
+            Ok(AgentInstance {
+                id: row.get(0)?,
+                definition_id: row.get(1)?,
+                parent_instance_id: row.get(2)?,
+                block_id: row.get(3)?,
+                session_id: row.get(4)?,
+                status: row.get(5)?,
+                github_context: row.get(6)?,
+                started_at: row.get(7)?,
+                ended_at: row.get(8)?,
+                created_at: row.get(9)?,
+            })
+        });
+        match result {
+            Ok(a) => Ok(Some(a)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    /// Insert a new instance row. Caller is responsible for the id (UUID).
+    pub fn instance_create(&self, inst: &AgentInstance) -> Result<(), StoreError> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO db_agent_instances
+                (id, definition_id, parent_instance_id, block_id, session_id, status,
+                 github_context, started_at, ended_at, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            params![
+                inst.id,
+                inst.definition_id,
+                inst.parent_instance_id,
+                inst.block_id,
+                inst.session_id,
+                inst.status,
+                inst.github_context,
+                inst.started_at,
+                inst.ended_at,
+                inst.created_at,
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Update mutable instance fields. `id`, `definition_id`,
+    /// `parent_instance_id`, `started_at`, `created_at` are immutable
+    /// after insert (they describe provenance, not state).
+    pub fn instance_update(&self, inst: &AgentInstance) -> Result<bool, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let rows = conn.execute(
+            "UPDATE db_agent_instances SET
+                block_id = ?1,
+                session_id = ?2,
+                status = ?3,
+                github_context = ?4,
+                ended_at = ?5
+             WHERE id = ?6",
+            params![
+                inst.block_id,
+                inst.session_id,
+                inst.status,
+                inst.github_context,
+                inst.ended_at,
+                inst.id,
+            ],
+        )?;
+        Ok(rows > 0)
+    }
+
+    pub fn instance_delete(&self, id: &str) -> Result<bool, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let rows = conn.execute("DELETE FROM db_agent_instances WHERE id = ?1", params![id])?;
+        Ok(rows > 0)
+    }
+}
+
+// ====================================================================
 // Tests
 // ====================================================================
 
@@ -1277,6 +1787,8 @@ mod tests {
             agent_bus_id: String::new(),
             is_seeded: 0,
             accounts: String::new(),
+            parent_id: String::new(),
+            branch_label: String::new(),
         };
         store.forge_insert(&mut a1).unwrap();
         // "Agent X" → "agent-x"
@@ -1336,6 +1848,8 @@ mod tests {
             agent_bus_id: String::new(),
             is_seeded: 0,
             accounts: String::new(),
+            parent_id: String::new(),
+            branch_label: String::new(),
         };
         store.forge_insert(&mut a1).unwrap();
         assert_eq!(a1.slug, "explicit");
@@ -1347,5 +1861,202 @@ mod tests {
         a2.slug = "explicit".to_string();
         store.forge_insert(&mut a2).unwrap();
         assert_eq!(a2.slug, "explicit-2");
+    }
+
+    // ---- v6 identity / instance CRUD ----
+
+    fn v6_test_store() -> WaveStore {
+        WaveStore::open_in_memory().unwrap()
+    }
+
+    fn sample_account(id: &str, provider: &str) -> IdentityAccount {
+        IdentityAccount {
+            id: id.to_string(),
+            name: format!("asaf-{provider}"),
+            provider: provider.to_string(),
+            kind: "pat".to_string(),
+            display_name: "".to_string(),
+            secret_ref: SecretRef::Env { env_var: format!("{}_TOKEN", provider.to_uppercase()) },
+            context: serde_json::json!({"username": "asaf"}),
+            status: "unknown".to_string(),
+            created_at: 0,
+            updated_at: 0,
+        }
+    }
+
+    fn sample_agent(id: &str, slug: &str) -> ForgeAgent {
+        ForgeAgent {
+            id: id.to_string(),
+            slug: slug.to_string(),
+            name: id.to_string(),
+            icon: "✦".to_string(),
+            provider: "claude".to_string(),
+            description: "".to_string(),
+            working_directory: "".to_string(),
+            shell: "".to_string(),
+            provider_flags: "".to_string(),
+            auto_start: 0,
+            restart_on_crash: 0,
+            idle_timeout_minutes: 0,
+            created_at: 0,
+            agent_type: "host".to_string(),
+            environment: "".to_string(),
+            agent_bus_id: "".to_string(),
+            is_seeded: 0,
+            accounts: String::new(),
+            parent_id: String::new(),
+            branch_label: String::new(),
+        }
+    }
+
+    #[test]
+    fn test_identity_upsert_round_trip() {
+        let store = v6_test_store();
+        let acct = sample_account("id-gh", "github");
+        store.identity_upsert(&acct).unwrap();
+
+        let fetched = store.identity_get("id-gh").unwrap().expect("row");
+        assert_eq!(fetched.name, "asaf-github");
+        assert_eq!(fetched.provider, "github");
+        assert!(matches!(fetched.secret_ref, SecretRef::Env { ref env_var } if env_var == "GITHUB_TOKEN"));
+        assert_eq!(fetched.context["username"], "asaf");
+    }
+
+    #[test]
+    fn test_identity_list_filtered_by_provider() {
+        let store = v6_test_store();
+        store.identity_upsert(&sample_account("id-gh", "github")).unwrap();
+        store.identity_upsert(&sample_account("id-aws", "aws")).unwrap();
+        store.identity_upsert(&sample_account("id-gh2", "github")).unwrap();
+
+        let all = store.identity_list(None).unwrap();
+        assert_eq!(all.len(), 3);
+        let gh = store.identity_list(Some("github")).unwrap();
+        assert_eq!(gh.len(), 2);
+        assert!(gh.iter().all(|a| a.provider == "github"));
+    }
+
+    #[test]
+    fn test_identity_delete() {
+        let store = v6_test_store();
+        store.identity_upsert(&sample_account("id-gh", "github")).unwrap();
+        assert!(store.identity_delete("id-gh").unwrap());
+        assert!(store.identity_get("id-gh").unwrap().is_none());
+        // Second delete is a no-op.
+        assert!(!store.identity_delete("id-gh").unwrap());
+    }
+
+    #[test]
+    fn test_agent_identity_link_and_unlink() {
+        let store = v6_test_store();
+        let mut agent = sample_agent("ag1", "agent-x");
+        store.forge_insert(&mut agent).unwrap();
+        store.identity_upsert(&sample_account("id-gh", "github")).unwrap();
+
+        store.agent_identity_link("ag1", "id-gh", "github").unwrap();
+        let links = store.agent_identity_list_for_agent("ag1").unwrap();
+        assert_eq!(links.len(), 1);
+        assert_eq!(links[0].account_id, "id-gh");
+
+        // Re-link with a different account overwrites (one account per provider per agent)
+        store.identity_upsert(&sample_account("id-gh2", "github")).unwrap();
+        store.agent_identity_link("ag1", "id-gh2", "github").unwrap();
+        let links = store.agent_identity_list_for_agent("ag1").unwrap();
+        assert_eq!(links.len(), 1);
+        assert_eq!(links[0].account_id, "id-gh2");
+
+        assert!(store.agent_identity_unlink("ag1", "github").unwrap());
+        assert!(store.agent_identity_list_for_agent("ag1").unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_agent_identity_cascade_on_agent_delete() {
+        let store = v6_test_store();
+        let mut agent = sample_agent("ag1", "agent-x");
+        store.forge_insert(&mut agent).unwrap();
+        store.identity_upsert(&sample_account("id-gh", "github")).unwrap();
+        store.agent_identity_link("ag1", "id-gh", "github").unwrap();
+
+        store.forge_delete("ag1").unwrap();
+        assert!(store.agent_identity_list_for_agent("ag1").unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_instance_create_update_filter() {
+        let store = v6_test_store();
+        let mut agent = sample_agent("def1", "agent-x");
+        store.forge_insert(&mut agent).unwrap();
+
+        let inst = AgentInstance {
+            id: "inst1".to_string(),
+            definition_id: "def1".to_string(),
+            parent_instance_id: String::new(),
+            block_id: "block-abc".to_string(),
+            session_id: String::new(),
+            status: InstanceStatus::Running.as_str().to_string(),
+            github_context: String::new(),
+            started_at: 1000,
+            ended_at: 0,
+            created_at: 1000,
+        };
+        store.instance_create(&inst).unwrap();
+
+        let fetched = store.instance_get("inst1").unwrap().expect("row");
+        assert_eq!(fetched.block_id, "block-abc");
+        assert_eq!(fetched.status, "running");
+
+        // Update status → stopped
+        let mut updated = fetched.clone();
+        updated.status = InstanceStatus::Stopped.as_str().to_string();
+        updated.ended_at = 2000;
+        assert!(store.instance_update(&updated).unwrap());
+        assert_eq!(store.instance_get("inst1").unwrap().unwrap().status, "stopped");
+
+        // Filter queries
+        let all = store.instance_list(None, None).unwrap();
+        assert_eq!(all.len(), 1);
+        let by_def = store.instance_list(Some("def1"), None).unwrap();
+        assert_eq!(by_def.len(), 1);
+        let running = store.instance_list(None, Some("running")).unwrap();
+        assert_eq!(running.len(), 0);
+        let stopped = store.instance_list(None, Some("stopped")).unwrap();
+        assert_eq!(stopped.len(), 1);
+    }
+
+    #[test]
+    fn test_instance_cascade_on_definition_delete() {
+        let store = v6_test_store();
+        let mut agent = sample_agent("def1", "agent-x");
+        store.forge_insert(&mut agent).unwrap();
+        let inst = AgentInstance {
+            id: "inst1".to_string(),
+            definition_id: "def1".to_string(),
+            parent_instance_id: String::new(),
+            block_id: String::new(),
+            session_id: String::new(),
+            status: "running".to_string(),
+            github_context: String::new(),
+            started_at: 0,
+            ended_at: 0,
+            created_at: 0,
+        };
+        store.instance_create(&inst).unwrap();
+
+        store.forge_delete("def1").unwrap();
+        assert!(store.instance_get("inst1").unwrap().is_none());
+    }
+
+    #[test]
+    fn test_instance_status_enum_roundtrip() {
+        for s in &[
+            InstanceStatus::Running,
+            InstanceStatus::Paused,
+            InstanceStatus::Stopped,
+            InstanceStatus::Crashed,
+            InstanceStatus::Detached,
+        ] {
+            assert_eq!(Some(*s), InstanceStatus::parse(s.as_str()));
+        }
+        assert_eq!(None, InstanceStatus::parse("nonsense"));
     }
 }
