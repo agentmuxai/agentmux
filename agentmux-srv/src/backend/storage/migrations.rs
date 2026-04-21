@@ -79,6 +79,7 @@ pub fn run_forge_migrations(conn: &Connection) -> Result<(), StoreError> {
     run_forge_v3_migrations(conn)?;
     run_forge_v4_migrations(conn)?;
     run_forge_v5_migrations(conn)?;
+    run_forge_v6_migrations(conn)?;
     Ok(())
 }
 
@@ -291,6 +292,102 @@ pub fn run_forge_v5_migrations(conn: &Connection) -> Result<(), StoreError> {
     Ok(())
 }
 
+/// Forge v6 migrations: identity accounts + agent instances + definition
+/// branching. See specs/SPEC_FORGE_IDENTITY_AGENT_INSTANCES_IMPL_2026_04_20.md.
+///
+/// - `db_identity_accounts`: replaces the browser-localStorage identity store
+///   with a real, portable-aware, DB-backed record.
+/// - `db_forge_agent_identities`: junction table linking agents to identities
+///   (replaces the unused v5 `accounts` JSON blob).
+/// - `db_agent_instances`: one row per running/historical execution of an
+///   agent definition. Tracks which pane it lives in, which provider
+///   session, and optional GitHub context (which PR/branch this run is
+///   operating against).
+/// - `parent_id` + `branch_label` columns on `db_forge_agents`: lets a
+///   definition be forked from another with lineage preserved.
+///
+/// Since no user has populated the v5 `accounts` column meaningfully (it's
+/// always been dev-only localStorage in practice), we don't migrate data from
+/// it — existing identities must be recreated. The `accounts` column itself
+/// stays in the schema as dead weight for now rather than risk a `DROP COLUMN`
+/// on rows that might have partial data; a future v7 can clean it up.
+pub fn run_forge_v6_migrations(conn: &Connection) -> Result<(), StoreError> {
+    // ---- Lineage columns on existing agents table ----
+    let alter_statements = [
+        "ALTER TABLE db_forge_agents ADD COLUMN parent_id TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE db_forge_agents ADD COLUMN branch_label TEXT NOT NULL DEFAULT ''",
+    ];
+    for stmt in &alter_statements {
+        match conn.execute_batch(stmt) {
+            Ok(_) => {}
+            Err(e) => {
+                let msg = e.to_string();
+                if !msg.contains("duplicate column") {
+                    return Err(StoreError::Sqlite(match e {
+                        rusqlite::Error::SqliteFailure(code, _) => {
+                            rusqlite::Error::SqliteFailure(code, Some(msg))
+                        }
+                        other => other,
+                    }));
+                }
+            }
+        }
+    }
+
+    // ---- New tables ----
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS db_identity_accounts (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            provider TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            display_name TEXT NOT NULL DEFAULT '',
+            secret_ref TEXT NOT NULL,
+            context TEXT NOT NULL DEFAULT '{}',
+            status TEXT NOT NULL DEFAULT 'unknown',
+            created_at INTEGER NOT NULL DEFAULT 0,
+            updated_at INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE INDEX IF NOT EXISTS idx_identity_accounts_provider
+            ON db_identity_accounts(provider);
+
+        CREATE TABLE IF NOT EXISTS db_forge_agent_identities (
+            agent_id TEXT NOT NULL,
+            account_id TEXT NOT NULL,
+            provider TEXT NOT NULL,
+            PRIMARY KEY (agent_id, provider),
+            FOREIGN KEY (agent_id) REFERENCES db_forge_agents(id) ON DELETE CASCADE,
+            FOREIGN KEY (account_id) REFERENCES db_identity_accounts(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_forge_agent_identities_account
+            ON db_forge_agent_identities(account_id);
+
+        CREATE TABLE IF NOT EXISTS db_agent_instances (
+            id TEXT PRIMARY KEY,
+            definition_id TEXT NOT NULL,
+            parent_instance_id TEXT NOT NULL DEFAULT '',
+            block_id TEXT NOT NULL DEFAULT '',
+            session_id TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'running',
+            github_context TEXT NOT NULL DEFAULT '',
+            started_at INTEGER NOT NULL DEFAULT 0,
+            ended_at INTEGER NOT NULL DEFAULT 0,
+            created_at INTEGER NOT NULL DEFAULT 0,
+            FOREIGN KEY (definition_id) REFERENCES db_forge_agents(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_agent_instances_definition
+            ON db_agent_instances(definition_id);
+        CREATE INDEX IF NOT EXISTS idx_agent_instances_block
+            ON db_agent_instances(block_id);
+        CREATE INDEX IF NOT EXISTS idx_agent_instances_status
+            ON db_agent_instances(status);
+        CREATE INDEX IF NOT EXISTS idx_agent_instances_parent
+            ON db_agent_instances(parent_instance_id);",
+    )?;
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -405,5 +502,98 @@ mod tests {
             )
             .unwrap();
         assert_eq!(idx_count, 1);
+    }
+
+    #[test]
+    fn test_forge_v6_migrations_create_tables_and_columns() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")
+            .unwrap();
+
+        // Full forge migration chain creates v1..v6
+        run_forge_migrations(&conn).unwrap();
+
+        // All three new tables exist
+        for table in &["db_identity_accounts", "db_forge_agent_identities", "db_agent_instances"] {
+            let count: i64 = conn
+                .query_row(
+                    "SELECT count(*) FROM sqlite_master WHERE type='table' AND name=?1",
+                    [table],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(count, 1, "table {table} should exist");
+        }
+
+        // Lineage columns added to db_forge_agents
+        let cols: Vec<String> = {
+            let mut stmt = conn.prepare("PRAGMA table_info(db_forge_agents)").unwrap();
+            stmt.query_map([], |row| row.get::<_, String>(1))
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap()
+        };
+        assert!(cols.contains(&"parent_id".to_string()));
+        assert!(cols.contains(&"branch_label".to_string()));
+
+        // Indexes created
+        for idx in &[
+            "idx_identity_accounts_provider",
+            "idx_forge_agent_identities_account",
+            "idx_agent_instances_definition",
+            "idx_agent_instances_block",
+            "idx_agent_instances_status",
+            "idx_agent_instances_parent",
+        ] {
+            let count: i64 = conn
+                .query_row(
+                    "SELECT count(*) FROM sqlite_master WHERE type='index' AND name=?1",
+                    [idx],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(count, 1, "index {idx} should exist");
+        }
+    }
+
+    #[test]
+    fn test_forge_v6_migrations_idempotent() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")
+            .unwrap();
+
+        run_forge_migrations(&conn).unwrap();
+        run_forge_migrations(&conn).unwrap();  // second pass must not error
+
+        // Insert an identity + agent + junction to exercise the FKs
+        conn.execute(
+            "INSERT INTO db_forge_agents (id, name, provider, description, slug)
+             VALUES ('ag1', 'AgentX', 'claude', '', 'agentx')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO db_identity_accounts (id, name, provider, kind, secret_ref, created_at, updated_at)
+             VALUES ('id1', 'asaf-github', 'github', 'pat', '{\"backend\":\"env\",\"env_var\":\"GITHUB_TOKEN\"}', 0, 0)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO db_forge_agent_identities (agent_id, account_id, provider)
+             VALUES ('ag1', 'id1', 'github')",
+            [],
+        )
+        .unwrap();
+
+        // FK cascade: deleting the agent removes the junction row
+        conn.execute("DELETE FROM db_forge_agents WHERE id='ag1'", []).unwrap();
+        let remaining: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM db_forge_agent_identities WHERE agent_id='ag1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(remaining, 0, "junction row should cascade-delete");
     }
 }
