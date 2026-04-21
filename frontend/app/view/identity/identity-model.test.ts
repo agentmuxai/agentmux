@@ -13,6 +13,7 @@ import { describe, expect, it } from "vitest";
 // shim. Keep them un-exported in the module so callers don't depend on
 // them, but expose for tests via `__internal__`.
 import * as identityModel from "./identity-model";
+import type { Account } from "./identity-model";
 
 // The helpers aren't re-exported; we round-trip through the public API
 // using a stub Account shape. The conversion happens inside
