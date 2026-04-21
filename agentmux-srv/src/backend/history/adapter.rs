@@ -85,7 +85,7 @@ pub struct ToolUseSummary {
 
 /// One implementation per CLI provider.
 pub trait HistoryAdapter: Send + Sync {
-    /// Provider identifier (e.g., "claude", "codex", "gemini").
+    /// Provider identifier (e.g., "claude", "codex", "gemini", "kimi", "openclaw", "pi").
     fn provider(&self) -> &str;
 
     /// Discover all session file paths on disk.

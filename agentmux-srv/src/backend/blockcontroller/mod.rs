@@ -153,7 +153,7 @@ pub struct BlockControllerRuntimeStatus {
     /// Unix timestamp (ms) when the process was spawned; None until first spawn.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub spawn_ts_ms: Option<i64>,
-    /// True if this pane is running an agent CLI (e.g. claude, codex, gemini).
+    /// True if this pane is running an agent CLI (e.g. claude, codex, gemini, kimi, openclaw, pi).
     #[serde(default, skip_serializing_if = "is_false")]
     pub is_agent_pane: bool,
 }

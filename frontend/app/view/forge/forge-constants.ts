@@ -5,6 +5,7 @@ export const PROVIDERS = [
     { id: "claude", label: "Claude Code", cmd: "claude --output-format stream-json" },
     { id: "codex", label: "Codex CLI", cmd: "codex --full-auto" },
     { id: "gemini", label: "Gemini CLI", cmd: "gemini --yolo" },
+    { id: "kimi", label: "Kimi Code CLI", cmd: "kimi --print --output-format stream-json" },
     { id: "openclaw", label: "OpenClaw", cmd: "acpx --agent openclaw" },
     { id: "pi", label: "Pi", cmd: "pi --json" },
 ] as const;
