@@ -6,7 +6,7 @@
 // native CefBrowserView for sites that block iframes.
 
 import { BlockNodeModel } from "@/app/block/blocktypes";
-import { invokeCommand } from "@/app/platform/ipc";
+import { invokeCommand, listenEvent } from "@/app/platform/ipc";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { getWaveObjectAtom, makeORef } from "@/app/store/wos";
@@ -58,9 +58,12 @@ export class BrowserViewModel implements ViewModel {
     errorAtom: Accessor<string | null> = this._error[0];
     setError = this._error[1];
 
-    // Navigation history (iframe doesn't expose browser history)
-    private history: string[] = [];
-    private historyIndex = -1;
+    /**
+     * Unsubscribe from the backend's `browser-pane-nav-state` event.
+     * Nulled in `dispose()` so we don't leak listeners when the pane
+     * closes and the ViewModel is GC'd.
+     */
+    private _navUnsub: (() => void) | null = null;
 
     blockAtom: Accessor<Block | undefined>;
 
@@ -79,6 +82,37 @@ export class BrowserViewModel implements ViewModel {
         this.viewName = createMemo(() => {
             const title = this.titleAtom();
             return title || "Browser";
+        });
+
+        // Subscribe to nav-state updates fired by the backend on every
+        // `on_load_end_pane`. This is the source of truth for address bar +
+        // back/forward state: CEF knows the real history (including
+        // in-pane link clicks and popup-intercept redirects), and the
+        // local fake history array we used before diverged the moment
+        // the user clicked any link inside the pane. See
+        // specs/SPEC_BROWSER_PANE_Z_ORDER_2026_04_21.md (unrelated but
+        // adjacent) and the nav-state wiring added alongside this PR.
+        void listenEvent<{
+            block_id: string;
+            url: string;
+            can_go_back: boolean;
+            can_go_forward: boolean;
+        }>("browser-pane-nav-state", (payload) => {
+            if (this._closed) return;
+            if (payload.block_id !== this.blockId) return;
+            this.setUrl(payload.url);
+            this.setCanGoBack(payload.can_go_back);
+            this.setCanGoForward(payload.can_go_forward);
+            this.setLoading(false);
+            // Persist the real URL to block meta so pane restore lands
+            // on the last page, not whatever was passed at create time.
+            RpcApi.SetMetaCommand(TabRpcClient, {
+                oref: makeORef("block", this.blockId),
+                meta: { url: payload.url },
+            }).catch(() => {});
+        }).then((unsub) => {
+            if (this._closed) unsub();
+            else this._navUnsub = unsub;
         });
 
         // Load URL from block meta on init. An empty/missing `url` falls
@@ -107,17 +141,13 @@ export class BrowserViewModel implements ViewModel {
         this.setUrl(normalized);
         this.setError(null);
         this.setLoading(true);
+        // can_go_back / can_go_forward are set by the `browser-pane-nav-state`
+        // event subscription; we don't touch them here. CEF is the source of
+        // truth for history state.
 
-        // Update history
-        if (this.historyIndex < this.history.length - 1) {
-            this.history = this.history.slice(0, this.historyIndex + 1);
-        }
-        this.history.push(normalized);
-        this.historyIndex = this.history.length - 1;
-        this.setCanGoBack(this.historyIndex > 0);
-        this.setCanGoForward(false);
-
-        // Persist URL to block meta
+        // Persist the requested URL to block meta immediately so a quick
+        // pane restore before load_end still has something. The nav-state
+        // event will overwrite this with the post-redirect final URL.
         RpcApi.SetMetaCommand(TabRpcClient, {
             oref: makeORef("block", this.blockId),
             meta: { url: normalized },
@@ -126,24 +156,17 @@ export class BrowserViewModel implements ViewModel {
 
     goBack(): void {
         if (this._closed) return;
-        if (this.historyIndex > 0) {
-            this.historyIndex--;
-            this.setUrl(this.history[this.historyIndex]);
-            this.setCanGoBack(this.historyIndex > 0);
-            this.setCanGoForward(true);
-            this.setLoading(true);
-        }
+        // CEF owns the history — we just fire the IPC. The button's
+        // enabled/disabled state came from `can_go_back` in the nav-state
+        // event, so if we got here the browser has somewhere to go.
+        this.setLoading(true);
+        invokeCommand("browser_pane_go_back", { block_id: this.blockId }).catch(() => {});
     }
 
     goForward(): void {
         if (this._closed) return;
-        if (this.historyIndex < this.history.length - 1) {
-            this.historyIndex++;
-            this.setUrl(this.history[this.historyIndex]);
-            this.setCanGoBack(true);
-            this.setCanGoForward(this.historyIndex < this.history.length - 1);
-            this.setLoading(true);
-        }
+        this.setLoading(true);
+        invokeCommand("browser_pane_go_forward", { block_id: this.blockId }).catch(() => {});
     }
 
     reload(): void {
@@ -192,5 +215,9 @@ export class BrowserViewModel implements ViewModel {
 
     dispose(): void {
         this._closed = true;
+        if (this._navUnsub) {
+            this._navUnsub();
+            this._navUnsub = null;
+        }
     }
 }

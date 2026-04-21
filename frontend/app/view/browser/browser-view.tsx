@@ -118,19 +118,13 @@ export function BrowserViewComponent(props: ViewComponentProps<BrowserViewModel>
                 <button
                     class="browser-nav-btn"
                     disabled={!model.canGoBackAtom()}
-                    onClick={() => {
-                        model.goBack();
-                        invokeCommand("browser_pane_go_back", { block_id: model.blockId }).catch(() => {});
-                    }}
+                    onClick={() => model.goBack()}
                     title="Back"
                 >{"\u2190"}</button>
                 <button
                     class="browser-nav-btn"
                     disabled={!model.canGoForwardAtom()}
-                    onClick={() => {
-                        model.goForward();
-                        invokeCommand("browser_pane_go_forward", { block_id: model.blockId }).catch(() => {});
-                    }}
+                    onClick={() => model.goForward()}
                     title="Forward"
                 >{"\u2192"}</button>
                 <button
