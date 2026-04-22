@@ -1876,6 +1876,16 @@
                 word-break: break-word;
             }
         }
+
+        // Collapsed state: show only the first line (ellipsis-truncated).
+        // Driven by AgentDocumentView auto-collapse for large user messages
+        // like the startup session-context payload. The hover strip's expand
+        // button toggles this off.
+        &--collapsed .agent-user-message-content pre {
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
     }
 
     // === Section Headings ===
