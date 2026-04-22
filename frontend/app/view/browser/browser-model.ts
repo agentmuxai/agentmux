@@ -101,7 +101,6 @@ export class BrowserViewModel implements ViewModel {
         }>("browser-pane-nav-state", (payload) => {
             if (this._closed) return;
             if (payload.block_id !== this.blockId) return;
-            console.log("[browser-model] nav-state", payload);
             this.setUrl(payload.url);
             // `url_only` events come from `on_load_end_pane` — they arrive
             // before the navigation controller has fully committed, so the
