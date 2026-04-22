@@ -7,6 +7,7 @@
 
 import { BlockNodeModel } from "@/app/block/blocktypes";
 import { invokeCommand, listenEvent } from "@/app/platform/ipc";
+import { refocusNode } from "@/app/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { getWaveObjectAtom, makeORef } from "@/app/store/wos";
@@ -64,6 +65,15 @@ export class BrowserViewModel implements ViewModel {
      * closes and the ViewModel is GC'd.
      */
     private _navUnsub: (() => void) | null = null;
+
+    /**
+     * Unsubscribe from the backend's `browser-pane-clicked` event.
+     * Fired when the user clicks inside the pane content (which the
+     * DOM never sees because the pane HWND intercepts the click at
+     * Win32 level). We use it to drive `refocusNode` so the block
+     * shows the blue focus border and keyboard shortcuts target it.
+     */
+    private _clickUnsub: (() => void) | null = null;
 
     blockAtom: Accessor<Block | undefined>;
 
@@ -123,6 +133,21 @@ export class BrowserViewModel implements ViewModel {
         }).then((unsub) => {
             if (this._closed) unsub();
             else this._navUnsub = unsub;
+        });
+
+        // Click-to-focus: the pane HWND captures clicks at the Win32 level,
+        // so the DOM onMouseDown on `.browser-placeholder` never fires. The
+        // backend emits this event directly from its WndProc's WM_LBUTTONDOWN
+        // handler (see `pane/hwnd.rs`) using a HWND→block_id map registered
+        // at pane creation. We drive refocusNode so the layout marks this
+        // block as focused (blue border + keyboard shortcut target).
+        void listenEvent<{ block_id: string }>("browser-pane-clicked", (payload) => {
+            if (this._closed) return;
+            if (payload.block_id !== this.blockId) return;
+            refocusNode(this.blockId);
+        }).then((unsub) => {
+            if (this._closed) unsub();
+            else this._clickUnsub = unsub;
         });
 
         // Load URL from block meta on init. An empty/missing `url` falls
@@ -228,6 +253,10 @@ export class BrowserViewModel implements ViewModel {
         if (this._navUnsub) {
             this._navUnsub();
             this._navUnsub = null;
+        }
+        if (this._clickUnsub) {
+            this._clickUnsub();
+            this._clickUnsub = null;
         }
     }
 }
