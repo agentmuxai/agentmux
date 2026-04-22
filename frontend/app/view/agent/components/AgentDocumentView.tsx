@@ -8,7 +8,6 @@
  */
 
 import { createEffect, createSignal, For, Show, type Accessor, type JSX, onCleanup } from "solid-js";
-import { Portal } from "solid-js/web";
 import type { SignalPair } from "../state";
 import type { DocumentNode, DocumentState, LogLine, SubagentLinkNode } from "../types";
 import type { ScrollCommand } from "../hooks/useScrollToNode";
@@ -60,39 +59,20 @@ export const AgentDocumentView = ({ documentAtom, documentStateAtom, logLines, a
     // Guard against concurrent older-history fetches triggered by scroll
     let loadingOlderInFlight = false;
 
-    // Walk up the DOM to find the nearest ancestor with a non-1 CSS zoom.
-    // The portal renders to document.body (outside the zoom context), so we
-    // divide its coordinate constraints by the zoom factor and re-apply zoom
-    // to the portal container so content scales to match the pane.
-    const getAncestorZoom = (el: HTMLElement): number => {
-        let cur: HTMLElement | null = el;
-        while (cur) {
-            const z = parseFloat(getComputedStyle(cur).zoom ?? "1");
-            if (!isNaN(z) && z !== 1) return z;
-            cur = cur.parentElement;
-        }
-        return 1;
+    // Per-line expanded state for the startup log. Hovering any log line
+    // reveals a `NodeHoverStrip` with an expand button; clicking it
+    // toggles that line between single-line ellipsis truncation and
+    // full multi-line wrap. Keyed by stable LogLine.id so new lines
+    // arriving don't disturb already-expanded ones.
+    const [expandedLogIds, setExpandedLogIds] = createSignal<Set<string>>(new Set());
+    const toggleLogExpanded = (id: string) => {
+        setExpandedLogIds((prev) => {
+            const next = new Set(prev);
+            if (next.has(id)) next.delete(id);
+            else next.add(id);
+            return next;
+        });
     };
-
-    // Shared hover state for log line full-text overlay.
-    // One Portal renders the active line's full text at its viewport position.
-    // Using a single shared signal (not per-line) avoids creating N signals in <For>.
-    type LogHover = { text: string; level?: "error" | "warn"; top: number; left: number; width: number; zoom: number };
-    const [logHover, setLogHover] = createSignal<LogHover | null>(null);
-    let logLeavePending = 0;
-    const handleLogEnter = (e: MouseEvent, line: LogLine) => {
-        if (logLeavePending) { clearTimeout(logLeavePending); logLeavePending = 0; }
-        const el = e.currentTarget as HTMLElement;
-        const r = el.getBoundingClientRect();
-        const zoom = getAncestorZoom(el);
-        const hoverLevel = line.level === "error" || line.level === "warn" ? line.level : undefined;
-        setLogHover({ text: `[${line.tag}] ${line.text}`, level: hoverLevel, top: r.top, left: r.left, width: r.width / zoom, zoom });
-    };
-    const handleLogLeave = () => {
-        if (logLeavePending) clearTimeout(logLeavePending);
-        logLeavePending = window.setTimeout(() => { logLeavePending = 0; setLogHover(null); }, 80);
-    };
-    onCleanup(() => { if (logLeavePending) clearTimeout(logLeavePending); });
 
     // Scroll to a node by its data-node-id attribute.
     // Exposed to the parent via scrollToNodeRef so BookmarksPanel can call it.
@@ -253,47 +233,31 @@ export const AgentDocumentView = ({ documentAtom, documentStateAtom, logLines, a
             <Show when={logLines().length > 0}>
                 <div class="agent-status-log">
                     <For each={logLines()}>
-                        {(line) => (
-                            <div
-                                class="agent-status-line"
-                                classList={{
-                                    "agent-status-line--error": line.level === "error",
-                                    "agent-status-line--warn": line.level === "warn",
-                                }}
-                                onMouseEnter={(e) => handleLogEnter(e, line)}
-                                onMouseLeave={handleLogLeave}
-                            >
-                                <span class="agent-status-tag">[{line.tag}]</span> {line.text}
-                            </div>
-                        )}
-                    </For>
-                    {/* Full-text hover overlay — Portal escapes the scroll container's
-                        overflow:auto clipping so the complete line text is visible. */}
-                    <Show when={logHover()}>
-                        {(h) => (
-                            <Portal>
+                        {(line) => {
+                            const isExpanded = () => expandedLogIds().has(line.id);
+                            return (
                                 <div
-                                    class="agent-log-hover-overlay"
+                                    class="hover-strip-host agent-status-line"
                                     classList={{
-                                        "agent-log-hover-overlay--error": h().level === "error",
-                                        "agent-log-hover-overlay--warn": h().level === "warn",
+                                        "agent-status-line--error": line.level === "error",
+                                        "agent-status-line--warn": line.level === "warn",
+                                        "agent-status-line--expanded": isExpanded(),
                                     }}
-                                    style={{
-                                        position: "fixed",
-                                        top: `${h().top}px`,
-                                        left: `${h().left}px`,
-                                        "min-width": `${h().width}px`,
-                                        "max-width": `calc(100vw - ${h().left}px - 16px)`,
-                                        zoom: String(h().zoom),
-                                    }}
-                                    onMouseEnter={() => { if (logLeavePending) { clearTimeout(logLeavePending); logLeavePending = 0; } }}
-                                    onMouseLeave={handleLogLeave}
                                 >
-                                    {h().text}
+                                    <span class="agent-status-line-text">
+                                        <span class="agent-status-tag">[{line.tag}]</span> {line.text}
+                                    </span>
+                                    <NodeHoverStrip
+                                        nodeId={line.id}
+                                        timestamp={line.timestamp}
+                                        canExpand
+                                        isExpanded={isExpanded()}
+                                        onExpand={() => toggleLogExpanded(line.id)}
+                                    />
                                 </div>
-                            </Portal>
-                        )}
-                    </Show>
+                            );
+                        }}
+                    </For>
                     <Show when={authUrl?.()}>
                         {(url) => {
                             const [pasteCode, setPasteCode] = createSignal("");
@@ -450,7 +414,7 @@ export const AgentDocumentView = ({ documentAtom, documentStateAtom, logLines, a
 
                     return (
                         <div
-                            class="agent-document-node-wrapper"
+                            class="hover-strip-host agent-document-node-wrapper"
                             classList={{
                                 "agent-node-bookmarked": isBookmarked(),
                                 "agent-node-search-match": highlightNodeId?.() === node.id,
