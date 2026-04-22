@@ -150,6 +150,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
     // `documentVersion` is bumped whenever we mutate the document externally
     // (history load / prepend), causing useAgentStream to rebuild its
     // nodeIdSet and nodeIndexMap.
+    const stoppingAtom = agentAtoms().stoppingAtom;
     useAgentStream({
         blockId: model.blockId,
         outputFormat: outputFormat(),
@@ -159,6 +160,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         currentToolAtom: agentAtoms().currentToolAtom,
         turnTokensAtom: agentAtoms().turnTokensAtom,
         turnActiveAtom: agentAtoms().turnActiveAtom,
+        stoppingAtom,
         enabled: true,
         documentVersion: history.documentVersion,
     });
@@ -186,6 +188,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         // defers this to the next animation frame so the mounted node is
         // included in scrollHeight. See SPEC_AGENT_PANE_FOLLOWUPS item #1.
         onSent: () => scrollToBottomFn?.(),
+        stoppingAtom,
     });
 
     // Clear session stats and mark turn as active when the user sends a message.
@@ -411,7 +414,8 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                     )}
                 </Show>
                 <AgentStatusLine
-                    loading={status.isLoading() || agentAtoms().turnActiveAtom[0]()}
+                    loading={status.isLoading() || agentAtoms().turnActiveAtom[0]() || stoppingAtom[0]()}
+                    stopping={stoppingAtom[0]()}
                     currentTool={agentAtoms().currentToolAtom[0]()}
                     sessionStats={agentAtoms().sessionStatsAtom[0]()}
                     turnTokens={agentAtoms().turnTokensAtom[0]()}

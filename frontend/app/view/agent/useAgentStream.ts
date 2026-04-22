@@ -26,6 +26,14 @@ interface UseAgentStreamOpts {
     currentToolAtom: SignalPair<string | null>;
     turnTokensAtom: SignalPair<TurnTokens | null>;
     turnActiveAtom: SignalPair<boolean>;
+    /**
+     * True while a user-initiated stop (Esc → SIGINT) is pending. When
+     * session_end arrives and this is true, the hook appends an
+     * "⏹ Interrupted by user" markdown node so the user has durable
+     * visual confirmation that the stop landed. Always cleared on
+     * session_end regardless of whether the row was appended.
+     */
+    stoppingAtom?: SignalPair<boolean>;
     enabled: boolean;
     /**
      * Version signal bumped by external document mutations (e.g. history
@@ -48,6 +56,7 @@ export function useAgentStream({
     currentToolAtom,
     turnTokensAtom,
     turnActiveAtom,
+    stoppingAtom,
     enabled,
     documentVersion,
 }: UseAgentStreamOpts): void {
@@ -57,6 +66,8 @@ export function useAgentStream({
     const [, setTurnActive] = turnActiveAtom;
     const [, setCurrentTool] = currentToolAtom;
     const [, setTurnTokens] = turnTokensAtom;
+    const getStopping = stoppingAtom?.[0];
+    const setStopping = stoppingAtom?.[1];
 
     // Mutable state that doesn't trigger re-renders
     let lineBuffer = "";
@@ -156,6 +167,66 @@ export function useAgentStream({
         pendingUpdates = [];
 
         const [doc] = documentAtom;
+
+        /**
+         * Shared finalization for "the turn is over." Called by both the
+         * real `session_end` event from the CLI's result line AND the
+         * fallback timer armed when the user presses Esc (killing the
+         * subprocess prevents it from emitting its own result event).
+         *
+         * If `getStopping()` is true when this runs, the ending was user-
+         * initiated — append a visible "⏹ Interrupted by user" row to
+         * the document so the user has durable confirmation that the
+         * stop landed.
+         */
+        const finalizeTurn = (stats: SessionStats | null) => {
+            parser.flushPending();
+            setSessionStats(stats);
+            setCurrentTool(null);
+            setTurnTokens(null);
+            setTurnActive(false);
+            if (getStopping?.()) {
+                const interruptedNode: DocumentNode = {
+                    type: "markdown",
+                    id: `interrupted-${Date.now()}`,
+                    content: "⏹ _Interrupted by user_",
+                    timestamp: Date.now(),
+                };
+                if (!nodeIdSet.has(interruptedNode.id)) {
+                    nodeIdSet.add(interruptedNode.id);
+                    pendingNew.push(interruptedNode);
+                    scheduleFlush();
+                }
+                setStopping?.(false);
+            }
+        };
+
+        // Fallback timer: if the user presses Esc and the CLI doesn't
+        // emit `session_end` within 1.5s (normal for a killed subprocess
+        // — TerminateProcess skips any final output), run the same
+        // finalization locally so the UI doesn't hang on "Stopping…".
+        let stopFallbackTimer: number | null = null;
+        if (getStopping && setStopping) {
+            createEffect(() => {
+                const stopping = getStopping();
+                if (stopFallbackTimer != null) {
+                    clearTimeout(stopFallbackTimer);
+                    stopFallbackTimer = null;
+                }
+                if (stopping) {
+                    stopFallbackTimer = window.setTimeout(() => {
+                        stopFallbackTimer = null;
+                        if (getStopping()) finalizeTurn(null);
+                    }, 1500);
+                }
+            });
+            onCleanup(() => {
+                if (stopFallbackTimer != null) {
+                    clearTimeout(stopFallbackTimer);
+                    stopFallbackTimer = null;
+                }
+            });
+        }
 
         // Rebuild dedup set + index map from whatever is currently in the
         // document. `doc()` is wrapped in `untrack` so the createEffect
@@ -305,11 +376,7 @@ export function useAgentStream({
                     // NEXT turn creates fresh nodes instead of appending to the
                     // previous response (which sits above the user's message).
                     if (event.type === "session_end") {
-                        parser.flushPending();
-                        setSessionStats(event.stats ?? null);
-                        setCurrentTool(null);
-                        setTurnTokens(null);
-                        setTurnActive(false);
+                        finalizeTurn(event.stats ?? null);
                         continue;
                     }
                     // Track the currently-running tool for the status line
