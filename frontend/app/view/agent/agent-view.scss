@@ -154,37 +154,55 @@
 
     .agent-status-line {
         color: var(--secondary-text-color);
-        opacity: 0.7;
-        // One-line collapsed by default. The hover strip's expand button
-        // (NodeHoverStrip.canExpand) toggles `--expanded` which wraps the
-        // full text in place — replaces the old Portal hover-tooltip.
-        // The strip itself has an opaque background (same as conversation
-        // rows), so it masks whatever text runs under it on hover — no
-        // need to reserve right padding.
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
+        // No `opacity` on the row itself — CSS opacity inherits into
+        // descendants, which made the hover strip render translucent
+        // even though its background is a solid color. The dim
+        // appearance now lives on `.agent-status-line-text` so the strip
+        // stays 100% opaque.
+        // Line STAYS tight (no min-height). Overflow clip lives on the
+        // inner `.agent-status-line-text` span so the outer row doesn't
+        // clip the absolutely-positioned hover strip. Row has no
+        // `overflow` of its own → strip can paint past the line's bounds
+        // without being chopped by `overflow: hidden`, and the strip's
+        // `z-index: 6` (positive, positioned) keeps it above adjacent
+        // lines' content.
         max-width: 100%;
         cursor: default;
         transition: background 0.1s;
 
+        .agent-status-line-text {
+            display: block;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 100%;
+            opacity: 0.7;
+        }
+
         &:hover {
             background: color-mix(in srgb, var(--main-text-color) 4%, transparent);
+            // Promote the hovered row above following siblings so the
+            // strip's overflowing portion paints over subsequent log
+            // lines (position:relative alone doesn't create a stacking
+            // context; need z-index for that).
+            z-index: 2;
         }
 
         &--expanded {
-            white-space: pre-wrap;
-            overflow: visible;
-            text-overflow: clip;
-            word-break: break-word;
+            .agent-status-line-text {
+                white-space: pre-wrap;
+                overflow: visible;
+                text-overflow: clip;
+                word-break: break-word;
+            }
         }
 
-        &--error {
+        &--error .agent-status-line-text {
             color: var(--error-color);
             opacity: 1;
         }
 
-        &--warn {
+        &--warn .agent-status-line-text {
             color: var(--warning-color);
             opacity: 0.9;
         }
