@@ -95,14 +95,24 @@ export class BrowserViewModel implements ViewModel {
         void listenEvent<{
             block_id: string;
             url: string;
-            can_go_back: boolean;
-            can_go_forward: boolean;
+            can_go_back?: boolean;
+            can_go_forward?: boolean;
+            url_only?: boolean;
         }>("browser-pane-nav-state", (payload) => {
             if (this._closed) return;
             if (payload.block_id !== this.blockId) return;
             this.setUrl(payload.url);
-            this.setCanGoBack(payload.can_go_back);
-            this.setCanGoForward(payload.can_go_forward);
+            // `url_only` events come from `on_load_end_pane` — they arrive
+            // before the navigation controller has fully committed, so the
+            // `can_go_back` / `can_go_forward` values from that hook would
+            // be stale (kimi's investigation identified this race). The
+            // authoritative values come from `on_loading_state_change_pane`
+            // which CEF invokes with direct params. Skip touching the
+            // back/forward atoms on `url_only` events.
+            if (!payload.url_only) {
+                if (payload.can_go_back !== undefined) this.setCanGoBack(payload.can_go_back);
+                if (payload.can_go_forward !== undefined) this.setCanGoForward(payload.can_go_forward);
+            }
             this.setLoading(false);
             // Persist the real URL to block meta so pane restore lands
             // on the last page, not whatever was passed at create time.

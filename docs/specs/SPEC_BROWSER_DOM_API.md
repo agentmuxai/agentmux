@@ -289,7 +289,48 @@ The IPC server already uses `axum`. Add a new scope:
 .route("/agentmux/browser/dispatch_key", post(browser::dispatch_key))
 .route("/agentmux/browser/focus_element", post(browser::focus_element))
 .route("/agentmux/browser/navigate", post(browser::navigate))
+.route("/agentmux/browser/back", post(browser::back))
+.route("/agentmux/browser/forward", post(browser::forward))
+.route("/agentmux/browser/reload", post(browser::reload))
 ```
+
+### 6.2.1 History endpoints — `back` / `forward` / `reload`
+
+Added 2026-04-22. Agents driving a pane during dev/test need to walk the
+pane's back/forward history without a human clicking the toolbar. All three
+share a single request shape:
+
+```json
+POST /agentmux/browser/back     { "block_id": "…" }
+POST /agentmux/browser/forward  { "block_id": "…" }
+POST /agentmux/browser/reload   { "block_id": "…", "ignore_cache": false }
+```
+
+- `back` → CDP `Page.goBack`. No-op when there's no prior entry. Always
+  returns `ok:true`; agents should consult the
+  `browser-pane-nav-state` event (or `POST /eval { expr: "location.href" }`)
+  to confirm the actual current URL.
+- `forward` → CDP `Page.goForward`. Same no-op behaviour at the end of
+  history.
+- `reload` → CDP `Page.reload`. `ignore_cache` defaults to `false`; set
+  true for the equivalent of Ctrl+F5 (bypass the http cache).
+
+All three invalidate `target_cache.forget(block_id)` after the call (the
+pane's URL changes and the next resolver probe needs to re-match). `reload`
+is the exception — no URL change — but invalidating doesn't hurt.
+
+Typical agent workflow that motivated this:
+
+```
+1. POST /navigate { block_id, url: "https://example.com/a" }
+2. POST /click_element { block_id, selector: "a.link-to-b" }
+3. POST /eval { block_id, expr: "location.href" }      // verify we got to /b
+4. POST /back { block_id }                              // return to /a
+5. POST /click_element { block_id, selector: "a.other-link" }
+```
+
+Without steps 4–5, agents had to re-navigate from scratch to explore
+alternate paths.
 
 A new `agentmux-cef/src/browser_api/mod.rs` houses the handlers.
 

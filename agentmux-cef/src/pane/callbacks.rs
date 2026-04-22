@@ -103,44 +103,20 @@ pub fn on_load_end_pane(state: &Arc<AppState>, browser: &Browser) {
         }
     }
 
-    // Emit nav-state event so the address bar + back/forward buttons in the
-    // browser pane's frontend view can reflect CEF's real history, not the
-    // fake local `history` array that only saw address-bar submits. This
-    // fires on every load_end (initial navigation, in-pane link clicks,
-    // popup-intercept redirects, back/forward), which is the union of
-    // every case the buttons need to stay in sync with.
-    //
-    // Resolving block_id from the browser: panes are registered in
-    // `state.browsers` under a label like `browser-pane-<block_id>-<seq>`.
-    // Find our label by same-identity check, then strip the suffix.
-    let block_id = {
-        let browsers = state.browsers.lock();
-        browsers
-            .iter()
-            .find(|(_k, b)| {
-                let mut b_clone = b.clone();
-                let mut browser_clone: cef::Browser = browser.clone();
-                b_clone.is_same(Some(&mut browser_clone)) != 0
-            })
-            .and_then(|(label, _)| {
-                // Label shape: browser-pane-<uuid>-<N>. Trim the prefix,
-                // then pop the trailing `-<N>` to get the uuid.
-                let rest = label.strip_prefix("browser-pane-")?;
-                let dash = rest.rfind('-')?;
-                Some(rest[..dash].to_string())
-            })
-    };
-
-    if let Some(block_id) = block_id {
-        let (can_back, can_forward, url) = {
+    // URL-only event emit at load_end so the address bar catches redirects
+    // that resolve during frame load (e.g. google.com → www.google.com).
+    // `can_go_back` / `can_go_forward` are intentionally not read here —
+    // `on_load_end` fires before the navigation controller commits the
+    // history entry, so calling `browser.can_go_back()` from this hook
+    // can return the pre-navigation state. Those flags flow through the
+    // dedicated `on_loading_state_change_pane` callback below, which CEF
+    // provides with correct values as direct parameters.
+    if let Some(block_id) = resolve_pane_block_id(state, browser) {
+        let url = {
             let mut b: cef::Browser = browser.clone();
-            let back = cef::ImplBrowser::can_go_back(&b) != 0;
-            let forward = cef::ImplBrowser::can_go_forward(&b) != 0;
-            let url = b
-                .main_frame()
+            b.main_frame()
                 .map(|f| cef::CefString::from(&cef::ImplFrame::url(&f)).to_string())
-                .unwrap_or_default();
-            (back, forward, url)
+                .unwrap_or_default()
         };
         crate::events::emit_event_from_state(
             state,
@@ -148,14 +124,81 @@ pub fn on_load_end_pane(state: &Arc<AppState>, browser: &Browser) {
             &serde_json::json!({
                 "block_id": block_id,
                 "url": url,
-                "can_go_back": can_back,
-                "can_go_forward": can_forward,
+                // can_* omitted on purpose — frontend treats missing
+                // fields as "no change" and keeps the last values from
+                // on_loading_state_change.
+                "url_only": true,
             }),
         );
+    } else {
+        tracing::warn!("[pane-load-end] couldn't resolve block_id for nav-state emit");
     }
 
     #[cfg(not(target_os = "windows"))]
     {
         let _ = browser;
     }
+}
+
+/// Pane-specific `on_loading_state_change` body. Called from
+/// `AgentMuxHandler::on_loading_state_change` when `is_pane == true`.
+///
+/// CEF invokes `on_loading_state_change` whenever the navigation controller's
+/// history state changes — navigation start, navigation commit, and after
+/// back/forward. `can_go_back` / `can_go_forward` are provided as direct
+/// parameters (not queried after the fact), so they're guaranteed to reflect
+/// the real committed state rather than the pre-commit race window.
+pub fn on_loading_state_change_pane(
+    state: &Arc<AppState>,
+    browser: &Browser,
+    can_go_back: bool,
+    can_go_forward: bool,
+) {
+    if let Some(block_id) = resolve_pane_block_id(state, browser) {
+        let url = {
+            let mut b: cef::Browser = browser.clone();
+            b.main_frame()
+                .map(|f| cef::CefString::from(&cef::ImplFrame::url(&f)).to_string())
+                .unwrap_or_default()
+        };
+        tracing::info!(
+            block_id = %block_id,
+            can_back = can_go_back,
+            can_forward = can_go_forward,
+            url = %url,
+            "[pane-nav-state] emitting",
+        );
+        crate::events::emit_event_from_state(
+            state,
+            "browser-pane-nav-state",
+            &serde_json::json!({
+                "block_id": block_id,
+                "url": url,
+                "can_go_back": can_go_back,
+                "can_go_forward": can_go_forward,
+            }),
+        );
+    } else {
+        tracing::warn!("[pane-loading-state] couldn't resolve block_id for nav-state emit");
+    }
+}
+
+/// Resolve the `block_id` for a pane browser. Panes are registered in
+/// `state.browsers` under labels like `browser-pane-<uuid>-<seq>`. Find the
+/// label whose browser handle matches the given one by `is_same`, then
+/// strip the prefix and the trailing `-<seq>` to recover the uuid.
+fn resolve_pane_block_id(state: &Arc<AppState>, browser: &Browser) -> Option<String> {
+    let browsers = state.browsers.lock();
+    browsers
+        .iter()
+        .find(|(_k, b)| {
+            let mut b_clone = b.clone();
+            let mut browser_clone: cef::Browser = browser.clone();
+            b_clone.is_same(Some(&mut browser_clone)) != 0
+        })
+        .and_then(|(label, _)| {
+            let rest = label.strip_prefix("browser-pane-")?;
+            let dash = rest.rfind('-')?;
+            Some(rest[..dash].to_string())
+        })
 }
