@@ -358,6 +358,34 @@ impl AgentMuxHandler {
         }
     }
 
+    /// CEF fires this whenever the browser's loading/history state changes
+    /// (navigation started, navigation committed, back/forward enabled).
+    /// `can_go_back` / `can_go_forward` come directly from the navigation
+    /// controller — no need to query `browser.can_go_back()` (which races
+    /// with history commit when called from `on_load_end`).
+    ///
+    /// For panes: emit `browser-pane-nav-state` so the frontend address
+    /// bar + back/forward buttons reflect CEF's real history state.
+    fn on_loading_state_change(
+        &mut self,
+        browser: Option<&mut Browser>,
+        _is_loading: i32,
+        can_go_back: i32,
+        can_go_forward: i32,
+    ) {
+        if !self.is_pane {
+            return;
+        }
+        if let Some(b) = browser.as_deref() {
+            crate::pane::callbacks::on_loading_state_change_pane(
+                &self.state,
+                b,
+                can_go_back != 0,
+                can_go_forward != 0,
+            );
+        }
+    }
+
     fn on_load_end(
         &mut self,
         browser: Option<&mut Browser>,
@@ -971,6 +999,17 @@ wrap_load_handler! {
     }
 
     impl LoadHandler {
+        fn on_loading_state_change(
+            &self,
+            browser: Option<&mut Browser>,
+            is_loading: ::std::os::raw::c_int,
+            can_go_back: ::std::os::raw::c_int,
+            can_go_forward: ::std::os::raw::c_int,
+        ) {
+            let mut inner = self.inner.lock();
+            inner.on_loading_state_change(browser, is_loading, can_go_back, can_go_forward);
+        }
+
         fn on_load_end(
             &self,
             browser: Option<&mut Browser>,
