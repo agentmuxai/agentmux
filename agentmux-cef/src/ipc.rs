@@ -344,6 +344,32 @@ async fn route_command(
             state.browser_panes.focus(block_id, state);
             Ok(serde_json::json!(true))
         }
+        "browser_panes_set_overlay_clip" => {
+            // Apply a clip region to every pane HWND that excludes the given
+            // overlay rectangles. The pane stays visible everywhere except
+            // under the overlays — DOM overlays render through the holes.
+            // Empty list restores full visibility. See
+            // BROWSER_PANE_Z_ORDER_FOCUS_REPORT.md Issue 1.
+            //
+            // Each rect: { x, y, w, h } in main-window client pixel coords.
+            let rects: Vec<(i32, i32, i32, i32)> = args
+                .get("rects")
+                .and_then(|v| v.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|item| {
+                            let x = item.get("x")?.as_i64()? as i32;
+                            let y = item.get("y")?.as_i64()? as i32;
+                            let w = item.get("w")?.as_i64()? as i32;
+                            let h = item.get("h")?.as_i64()? as i32;
+                            Some((x, y, w, h))
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            state.browser_panes.set_pane_overlay_clip(state, &rects);
+            Ok(serde_json::json!(true))
+        }
         "main_window_focus" => {
             // Move keyboard focus back to the main browser when the user
             // clicks a main-DOM input (address bar, etc). Previously this
