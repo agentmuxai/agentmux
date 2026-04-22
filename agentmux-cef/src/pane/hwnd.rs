@@ -15,6 +15,8 @@
 
 #![cfg(target_os = "windows")]
 
+use std::sync::{Arc, Weak};
+
 /// Map of pane HWND -> original WndProc, so the subclass hook can delegate
 /// to the real handler after running its interception logic. The mutex is
 /// held only while mutating the map — hooks that read on the UI thread
@@ -22,6 +24,43 @@
 static PANE_WNDPROCS: std::sync::LazyLock<
     std::sync::Mutex<std::collections::HashMap<usize, isize>>,
 > = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+
+/// Per-pane context, keyed by the pane's outer HWND. Populated by
+/// `install_pane_focus_redirect`. The WndProc hook uses it to emit the
+/// `browser-pane-clicked` event on `WM_LBUTTONDOWN` without needing to
+/// round-trip through CEF callbacks — only the outer HWND is keyed here;
+/// descendants walk up via `GetParent` to find their context.
+#[derive(Clone)]
+struct PaneContext {
+    state: Weak<crate::state::AppState>,
+    block_id: String,
+}
+
+static PANE_HWND_CONTEXT: std::sync::LazyLock<
+    std::sync::Mutex<std::collections::HashMap<usize, PaneContext>>,
+> = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+
+/// Remove every `PANE_HWND_CONTEXT` entry whose context refers to the given
+/// `block_id`. Called from `on_before_close_pane` so the map doesn't grow
+/// unbounded as panes are opened and closed over the session. Keyed by
+/// block_id (not HWND) because the close path has the label/block_id
+/// immediately but not the HWND — by the time CEF fires on_before_close,
+/// the browser's HWND may already be invalid.
+pub fn remove_contexts_for_block(block_id: &str) {
+    if let Ok(mut map) = PANE_HWND_CONTEXT.lock() {
+        let before = map.len();
+        map.retain(|_hwnd, ctx| ctx.block_id != block_id);
+        let removed = before - map.len();
+        if removed > 0 {
+            tracing::info!(
+                block_id = %block_id,
+                removed = removed,
+                remaining = map.len(),
+                "[pane-hwnd] cleaned up hwnd context entries",
+            );
+        }
+    }
+}
 
 /// When `true`, the next `WM_SETFOCUS` delivered to a subclassed pane HWND
 /// is allowed through instead of being redirected back to the parent.
@@ -47,13 +86,49 @@ pub static ALLOW_PANE_FOCUS_ONCE: std::sync::atomic::AtomicBool =
 /// by `pane::callbacks::on_load_end_pane` after every navigation — Chromium
 /// recreates the `Chrome_RenderWidgetHostHWND` on every page load, so the
 /// subclass has to follow along or it ends up stranded on a destroyed HWND.
-pub unsafe fn install_pane_focus_redirect(hwnd: *mut std::ffi::c_void) {
+pub unsafe fn install_pane_focus_redirect(
+    hwnd: *mut std::ffi::c_void,
+    state: Arc<crate::state::AppState>,
+    block_id: String,
+) {
     use std::sync::atomic::Ordering;
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         CallWindowProcW, GetAncestor, SetWindowLongPtrW, GA_ROOT, GWLP_WNDPROC,
         WM_SETFOCUS, WM_KILLFOCUS, WM_LBUTTONDOWN,
     };
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::SetFocus;
+
+    // Register context so the WndProc's WM_LBUTTONDOWN handler can emit
+    // the click event without going through CEF callbacks (which only
+    // fire on Windows-level focus CHANGE — clicks inside an already-
+    // focused pane wouldn't produce a CEF focus callback at all).
+    if let Ok(mut map) = PANE_HWND_CONTEXT.lock() {
+        map.insert(hwnd as usize, PaneContext {
+            state: Arc::downgrade(&state),
+            block_id: block_id.clone(),
+        });
+    }
+
+    /// Walk from `hwnd` up the parent chain looking for a registered pane
+    /// context. Child HWNDs (Chrome_WidgetWin_1, Chrome_RenderWidgetHostHWND)
+    /// aren't themselves in the map — the outer pane HWND is. Safety bound
+    /// of 8 jumps is plenty; Chromium's pane hierarchy is only 2-3 deep.
+    unsafe fn find_context(mut hwnd: *mut std::ffi::c_void) -> Option<PaneContext> {
+        use windows_sys::Win32::UI::WindowsAndMessaging::GetParent;
+        for _ in 0..8 {
+            if let Ok(map) = PANE_HWND_CONTEXT.lock() {
+                if let Some(ctx) = map.get(&(hwnd as usize)) {
+                    return Some(ctx.clone());
+                }
+            }
+            let parent = GetParent(hwnd);
+            if parent.is_null() || parent == hwnd {
+                return None;
+            }
+            hwnd = parent;
+        }
+        None
+    }
 
     unsafe extern "system" fn wndproc_hook(
         hwnd: *mut std::ffi::c_void,
@@ -92,7 +167,30 @@ pub unsafe fn install_pane_focus_redirect(hwnd: *mut std::ffi::c_void) {
         // intercepts the click at Win32 level, not DOM level).
         if msg == WM_LBUTTONDOWN {
             ALLOW_PANE_FOCUS_ONCE.store(true, Ordering::Relaxed);
-            tracing::info!("[pane-wndproc] WM_LBUTTONDOWN — arming focus allow");
+            // Emit the click event directly from the WndProc. We can't
+            // rely on CEF's FocusHandler::on_set_focus to emit, because
+            // CEF only fires that callback when Windows-level focus
+            // *changes* — clicks inside a pane that already has keyboard
+            // focus (the user clicked another DOM pane, then clicked
+            // back into this pane content) produce WM_LBUTTONDOWN but
+            // no CEF focus callback, leaving a flag armed forever.
+            if let Some(ctx) = find_context(hwnd) {
+                if let Some(state) = ctx.state.upgrade() {
+                    tracing::info!(
+                        block_id = %ctx.block_id,
+                        "[pane-wndproc] WM_LBUTTONDOWN — emitting browser-pane-clicked",
+                    );
+                    crate::events::emit_event_from_state(
+                        &state,
+                        "browser-pane-clicked",
+                        &serde_json::json!({ "block_id": ctx.block_id }),
+                    );
+                } else {
+                    tracing::warn!("[pane-wndproc] WM_LBUTTONDOWN — state dropped, skipping emit");
+                }
+            } else {
+                tracing::warn!("[pane-wndproc] WM_LBUTTONDOWN — no pane context for hwnd {:p}", hwnd);
+            }
         }
 
         if msg == WM_SETFOCUS {
