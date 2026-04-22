@@ -39,19 +39,13 @@
         contain: layout style paint;
     }
 
-    .agent-document-node-wrapper {
-        // Each document node gets its own containment box. Off-screen nodes
-        // are skipped by the browser via content-visibility.
-        // contain-intrinsic-size gives the browser a size estimate so scroll
-        // position stays stable when content is virtualized in/out.
-        content-visibility: auto;
-        contain-intrinsic-size: auto 80px;
-        contain: layout style;
-        // position: relative anchors the .node-strip hover bar.
+    // Shared hover-strip anchor. Any element that renders a `.node-strip`
+    // child (document nodes in the conversation, startup status-log
+    // lines) adds this class. Owns the positioning + fade-in rules so
+    // the two call sites stay consistent.
+    .hover-strip-host {
         position: relative;
 
-        // Hover strip — shown on hover/focus of any node row.
-        // Pure-CSS visibility: no JS signal needed.
         .node-strip {
             position: absolute;
             top: 3px;
@@ -63,8 +57,7 @@
             font-size: 11px;
             font-family: var(--fixed-font, monospace);
             // `--panel-bg-color` has 50% alpha (rgba(31,33,31,0.5)); the strip
-            // must be fully opaque so the message content underneath doesn't
-            // bleed through. `--main-bg-color` is solid rgb(34,34,34).
+            // must be fully opaque so content underneath doesn't bleed through.
             background: var(--main-bg-color);
             border: 1px solid var(--border-color);
             border-radius: 4px;
@@ -83,6 +76,16 @@
         &:focus-within .node-strip {
             opacity: 1;
         }
+    }
+
+    .agent-document-node-wrapper {
+        // Each document node gets its own containment box. Off-screen nodes
+        // are skipped by the browser via content-visibility.
+        // contain-intrinsic-size gives the browser a size estimate so scroll
+        // position stays stable when content is virtualized in/out.
+        content-visibility: auto;
+        contain-intrinsic-size: auto 80px;
+        contain: layout style;
 
         &:focus {
             outline: 1px solid var(--accent-color, #3b82f6);
@@ -152,20 +155,28 @@
     .agent-status-line {
         color: var(--secondary-text-color);
         opacity: 0.7;
-        // One-line collapsed by default — errors and warnings often include
-        // stack traces or long diagnostic blobs that wrap into many lines
-        // and dominate the pane. Hover expands to pre-wrap so the user can
-        // read the full text without the pane feeling like a wall of red.
-        // See SPEC_AGENT_PANE_FOLLOWUPS item #5.
+        // One-line collapsed by default. The hover strip's expand button
+        // (NodeHoverStrip.canExpand) toggles `--expanded` which wraps the
+        // full text in place — replaces the old Portal hover-tooltip.
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
         max-width: 100%;
+        // Reserve room for the strip (timestamp + expand button).
+        // Keeps the ellipsis from running under the strip.
+        padding-right: 200px;
         cursor: default;
         transition: background 0.1s;
 
         &:hover {
             background: color-mix(in srgb, var(--main-text-color) 4%, transparent);
+        }
+
+        &--expanded {
+            white-space: pre-wrap;
+            overflow: visible;
+            text-overflow: clip;
+            word-break: break-word;
         }
 
         &--error {
@@ -3237,32 +3248,6 @@
         border-radius: 3px 3px 0 0;
         box-shadow: 0 -6px 20px rgba(0, 0, 0, 0.35);
     }
-}
-
-// ── Log line full-text hover overlay ─────────────────────────────────────────
-// Portal-rendered (document.body) so it escapes the scroll container's
-// overflow:auto clipping. Appears at the exact position of the hovered line
-// and extends rightward to show the full text. No height change in the log
-// panel — zero layout shift ("twitching").
-
-.agent-log-hover-overlay {
-    position: fixed; // set inline via style; this is for z-index / stacking
-    z-index: 300;
-    white-space: pre-wrap;
-    word-break: break-word;
-    font-family: var(--fixed-font, monospace);
-    font-size: 12px;
-    line-height: 1.3;
-    color: var(--secondary-text-color);
-    background: var(--main-bg-color);
-    border: 1px solid var(--border-color);
-    border-radius: 2px;
-    padding: 1px 4px;
-    box-shadow: 2px 2px 8px rgba(0, 0, 0, 0.3);
-    pointer-events: auto;
-
-    &--error { color: var(--error-color); }
-    &--warn  { color: var(--warning-color); }
 }
 
 // ── AgentIdentityPanel (Step 4 of SPEC_AGENT_IDENTITY_RESTRUCTURE) ────────────

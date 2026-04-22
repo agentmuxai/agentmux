@@ -31,9 +31,19 @@ export interface UseLaunchLogs {
 
 export function useLaunchLogs(): UseLaunchLogs {
     const [lines, setLines] = createSignal<LogLine[]>([]);
+    let nextId = 1;
 
     const append = (tag: string, text: string, level?: "info" | "error" | "warn") => {
-        setLines((prev) => [...prev, { tag, text, level: level ?? "info" }]);
+        setLines((prev) => [
+            ...prev,
+            {
+                id: `log-${nextId++}`,
+                tag,
+                text,
+                level: level ?? "info",
+                timestamp: Date.now(),
+            },
+        ]);
     };
 
     const clear = () => setLines([]);
