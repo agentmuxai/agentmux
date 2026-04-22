@@ -244,7 +244,9 @@ export const AgentDocumentView = ({ documentAtom, documentStateAtom, logLines, a
                                         "agent-status-line--expanded": isExpanded(),
                                     }}
                                 >
-                                    <span class="agent-status-tag">[{line.tag}]</span> {line.text}
+                                    <span class="agent-status-line-text">
+                                        <span class="agent-status-tag">[{line.tag}]</span> {line.text}
+                                    </span>
                                     <NodeHoverStrip
                                         nodeId={line.id}
                                         timestamp={line.timestamp}
