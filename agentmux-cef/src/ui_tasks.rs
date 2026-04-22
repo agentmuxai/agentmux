@@ -26,6 +26,32 @@ fn get_window_on_ui(state: &Arc<AppState>, label: &str) -> Option<Window> {
     browser_view.window()
 }
 
+// ── Deferred load_url (used by on_before_popup to avoid UI-thread deadlock)
+//
+// Calling `frame.load_url(url)` synchronously inside a CEF callback that
+// holds the handler's inner lock (e.g. `on_before_popup`) deadlocks on
+// link clicks: `load_url` kicks a new navigation which triggers
+// `on_loading_state_change` on the same thread, which also wants the
+// handler's lock. Posting the navigate as a separate UI task lets the
+// original callback return, release its lock, and the load starts
+// cleanly on the next message-loop turn. ─────────────────────────────────
+
+wrap_task! {
+    pub struct DeferredLoadUrlTask {
+        browser: Browser,
+        url: String,
+    }
+
+    impl Task {
+        fn execute(&self) {
+            let mut browser = self.browser.clone();
+            if let Some(frame) = browser.main_frame() {
+                frame.load_url(Some(&CefString::from(self.url.as_str())));
+            }
+        }
+    }
+}
+
 // ── Close ────────────────────────────────────────────────────────────────
 
 wrap_task! {

@@ -13,7 +13,7 @@ use serde_json::json;
 use super::cdp::CdpSession;
 use super::types::{
     AckData, ApiResponse, ClickElementReq, DispatchKeyReq, Element, EvalData, EvalReq,
-    FocusElementReq, FocusInfoData, FocusInfoReq, NavigateReq, QueryData, QueryReq,
+    FocusElementReq, FocusInfoData, FocusInfoReq, HistoryReq, NavigateReq, QueryData, QueryReq,
     ScreenshotData, ScreenshotReq,
 };
 use crate::state::AppState;
@@ -620,6 +620,106 @@ pub async fn navigate(
     match reply {
         Ok(_) => ok_body(ApiResponse::ok(AckData::new())),
         Err(e) => ok_body(ApiResponse::err(format!("CDP Page.navigate: {e}"))),
+    }
+}
+
+/// `POST /agentmux/browser/back` — walk the pane's history one step back.
+/// Routed through CDP (`Page.goBack`) rather than
+/// `BrowserPaneManager::go_back` to keep the resolver cache honest: the
+/// target URL changes after the hop, so we invalidate the cache entry.
+///
+/// Returns ack-ok even when there's no prior history — CDP is a no-op
+/// in that case, and agents should query `browser-pane-nav-state` events
+/// (or `eval("location.href")`) to confirm what happened.
+pub async fn back(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(req): Json<HistoryReq>,
+) -> (StatusCode, Json<ApiResponse<AckData>>) {
+    if !authorized(&headers, &state.ipc_token) {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(ApiResponse::err("unauthorized: missing or invalid bearer token")),
+        );
+    }
+
+    let mut cdp = match open_cdp_for_block(&state, &req.block_id).await {
+        Ok(c) => c,
+        Err(e) => return ok_body(ApiResponse::err(e)),
+    };
+
+    // `Page.navigateToHistoryEntry` needs an entryId; simpler to call
+    // Page.goBack which CDP exposes directly.
+    let reply = cdp.call("Page.goBack", json!({})).await;
+    let _ = cdp.close().await;
+
+    state.browser_api.target_cache.forget(&req.block_id);
+
+    match reply {
+        Ok(_) => ok_body(ApiResponse::ok(AckData::new())),
+        Err(e) => ok_body(ApiResponse::err(format!("CDP Page.goBack: {e}"))),
+    }
+}
+
+/// `POST /agentmux/browser/forward` — walk the pane's history one step forward.
+/// See `back` for the target-cache rationale.
+pub async fn forward(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(req): Json<HistoryReq>,
+) -> (StatusCode, Json<ApiResponse<AckData>>) {
+    if !authorized(&headers, &state.ipc_token) {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(ApiResponse::err("unauthorized: missing or invalid bearer token")),
+        );
+    }
+
+    let mut cdp = match open_cdp_for_block(&state, &req.block_id).await {
+        Ok(c) => c,
+        Err(e) => return ok_body(ApiResponse::err(e)),
+    };
+
+    let reply = cdp.call("Page.goForward", json!({})).await;
+    let _ = cdp.close().await;
+
+    state.browser_api.target_cache.forget(&req.block_id);
+
+    match reply {
+        Ok(_) => ok_body(ApiResponse::ok(AckData::new())),
+        Err(e) => ok_body(ApiResponse::err(format!("CDP Page.goForward: {e}"))),
+    }
+}
+
+/// `POST /agentmux/browser/reload` — reload the current page. `ignore_cache`
+/// (default false) maps to the CDP flag — true is the equivalent of Ctrl+F5
+/// (bypass the http cache). The pane's current URL is preserved, so no
+/// target-cache invalidation is needed.
+pub async fn reload(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(req): Json<HistoryReq>,
+) -> (StatusCode, Json<ApiResponse<AckData>>) {
+    if !authorized(&headers, &state.ipc_token) {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(ApiResponse::err("unauthorized: missing or invalid bearer token")),
+        );
+    }
+
+    let mut cdp = match open_cdp_for_block(&state, &req.block_id).await {
+        Ok(c) => c,
+        Err(e) => return ok_body(ApiResponse::err(e)),
+    };
+
+    let reply = cdp
+        .call("Page.reload", json!({ "ignoreCache": req.ignore_cache }))
+        .await;
+    let _ = cdp.close().await;
+
+    match reply {
+        Ok(_) => ok_body(ApiResponse::ok(AckData::new())),
+        Err(e) => ok_body(ApiResponse::err(format!("CDP Page.reload: {e}"))),
     }
 }
 

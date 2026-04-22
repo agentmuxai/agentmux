@@ -213,6 +213,18 @@ impl AgentMuxHandler {
     /// (link clicks go through `openExternal` IPC), and panes explicitly
     /// don't want popups. See
     /// specs/SPEC_BROWSER_PANE_DEFAULT_URL_AND_POPUP_2026_04_21.md.
+    ///
+    /// **The `load_url` call is deferred via `post_task`**, not run inline.
+    /// Inline `load_url` caused a UI-thread deadlock on link click:
+    /// `on_before_popup` runs while `AgentMuxLifeSpanHandler` holds
+    /// `self.inner.lock()` (via the wrap macro). Inline `load_url` starts
+    /// a new navigation on the same UI thread, which triggers
+    /// `on_loading_state_change` on `AgentMuxLoadHandler`, which also
+    /// tries to take `self.inner.lock()` → deadlock. The host hung with
+    /// backend heartbeats still running but the whole UI frozen. Posting
+    /// the `load_url` as a separate UI task lets the popup handler
+    /// return, release the lock, then pick up the load on the next loop
+    /// iteration.
     fn on_before_popup(
         &mut self,
         browser: Option<&mut Browser>,
@@ -226,14 +238,17 @@ impl AgentMuxHandler {
             return true;
         }
         if let Some(b) = browser {
-            if let Some(frame) = b.main_frame() {
-                frame.load_url(Some(&CefString::from(url.as_str())));
-            }
+            let browser_clone = b.clone();
+            let mut task = crate::ui_tasks::DeferredLoadUrlTask::new(
+                browser_clone,
+                url.clone(),
+            );
+            cef::post_task(cef::ThreadId::UI, Some(&mut task));
         }
         tracing::info!(
             is_pane = %self.is_pane,
             url = %url,
-            "popup intercepted — navigated current frame in place",
+            "popup intercepted — deferred navigation of current frame",
         );
         true // cancel the top-level popup creation
     }
