@@ -62,7 +62,10 @@
             padding: 2px 4px;
             font-size: 11px;
             font-family: var(--fixed-font, monospace);
-            background: var(--panel-bg-color, var(--main-bg-color));
+            // `--panel-bg-color` has 50% alpha (rgba(31,33,31,0.5)); the strip
+            // must be fully opaque so the message content underneath doesn't
+            // bleed through. `--main-bg-color` is solid rgb(34,34,34).
+            background: var(--main-bg-color);
             border: 1px solid var(--border-color);
             border-radius: 4px;
             box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
