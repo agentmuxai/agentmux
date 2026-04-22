@@ -83,6 +83,19 @@ pub fn on_after_created_pane(state: &Arc<AppState>, browser: &Browser) {
 /// explicit `close()` path already drained it, this is a no-op.
 pub fn on_before_close_pane(state: &Arc<AppState>, label: &str) {
     state.browser_panes.drain_closed_label(label);
+
+    // Labels are `browser-pane-<uuid>-<seq>`; strip prefix + trailing `-<seq>`
+    // to recover the block_id, then wipe any HWND context entries the
+    // WndProc subclass registered for that block.
+    #[cfg(target_os = "windows")]
+    {
+        if let Some(rest) = label.strip_prefix("browser-pane-") {
+            if let Some(dash) = rest.rfind('-') {
+                let block_id = &rest[..dash];
+                crate::pane::hwnd::remove_contexts_for_block(block_id);
+            }
+        }
+    }
 }
 
 /// Called from `AgentMuxHandler::on_load_end` when `is_pane` is true.

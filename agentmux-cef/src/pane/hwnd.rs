@@ -40,6 +40,28 @@ static PANE_HWND_CONTEXT: std::sync::LazyLock<
     std::sync::Mutex<std::collections::HashMap<usize, PaneContext>>,
 > = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
 
+/// Remove every `PANE_HWND_CONTEXT` entry whose context refers to the given
+/// `block_id`. Called from `on_before_close_pane` so the map doesn't grow
+/// unbounded as panes are opened and closed over the session. Keyed by
+/// block_id (not HWND) because the close path has the label/block_id
+/// immediately but not the HWND — by the time CEF fires on_before_close,
+/// the browser's HWND may already be invalid.
+pub fn remove_contexts_for_block(block_id: &str) {
+    if let Ok(mut map) = PANE_HWND_CONTEXT.lock() {
+        let before = map.len();
+        map.retain(|_hwnd, ctx| ctx.block_id != block_id);
+        let removed = before - map.len();
+        if removed > 0 {
+            tracing::info!(
+                block_id = %block_id,
+                removed = removed,
+                remaining = map.len(),
+                "[pane-hwnd] cleaned up hwnd context entries",
+            );
+        }
+    }
+}
+
 /// When `true`, the next `WM_SETFOCUS` delivered to a subclassed pane HWND
 /// is allowed through instead of being redirected back to the parent.
 ///
