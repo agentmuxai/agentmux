@@ -60,6 +60,13 @@ export interface UseAgentCommandsOptions {
      * See SPEC_AGENT_PANE_FOLLOWUPS item #1.
      */
     onSent?: () => void;
+    /**
+     * Flips true when `stopAgent` fires (user pressed Esc on an empty
+     * composer) and back to false when the subsequent `session_end`
+     * arrives. Drives the "Stopping…" status label and the
+     * "⏹ Interrupted by user" chat row appended by `useAgentStream`.
+     */
+    stoppingAtom?: SignalPair<boolean>;
 }
 
 export interface UseAgentCommands {
@@ -258,11 +265,19 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
     };
 
     const stopAgent = (): void => {
+        // Flip stopping → status line renders "Stopping…" immediately.
+        // `useAgentStream` owns the finalization: when `session_end`
+        // arrives it clears stopping + appends the "⏹ Interrupted" row,
+        // and it also runs a fallback timer that does the same cleanup
+        // if `session_end` never arrives (killing a subprocess prevents
+        // the CLI from emitting its own terminating result event).
+        opts.stoppingAtom?.[1](true);
         RpcApi.ControllerInputCommand(TabRpcClient, {
             blockid: opts.blockId,
             signame: "SIGINT",
         }).catch((err) => {
             opts.log("warn", `stop failed: ${err?.message ?? String(err)}`, "warn");
+            opts.stoppingAtom?.[1](false);
         });
     };
 

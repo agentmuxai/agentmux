@@ -34,6 +34,14 @@ export interface AgentAtoms {
     turnTokensAtom: SignalPair<TurnTokens | null>;
     /** True from the moment the user sends a message until session_end arrives. */
     turnActiveAtom: SignalPair<boolean>;
+    /**
+     * True from the moment the user presses Esc (stopAgent) until session_end
+     * arrives. Drives the "Stopping…" label on the status line and triggers
+     * an "⏹ Interrupted by user" chat row to be appended when the session
+     * actually ends — so the user gets immediate acknowledgment *and*
+     * confirmation that the interrupt landed.
+     */
+    stoppingAtom: SignalPair<boolean>;
 }
 
 /**
@@ -65,5 +73,6 @@ export function createAgentAtoms(agentId: string): AgentAtoms {
         currentToolAtom: createSignal<string | null>(null),
         turnTokensAtom: createSignal<TurnTokens | null>(null),
         turnActiveAtom: createSignal<boolean>(false),
+        stoppingAtom: createSignal<boolean>(false),
     };
 }
