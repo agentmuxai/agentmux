@@ -35,6 +35,10 @@ function fmtTokens(t: TurnTokens): string {
 
 interface AgentStatusLineProps {
     loading?: boolean;
+    /** True after Esc → SIGINT, until session_end arrives. Overrides the
+     *  cycling "Working…" phrase with a static "Stopping…" label so the
+     *  user has immediate acknowledgement that the interrupt was received. */
+    stopping?: boolean;
     currentTool?: string | null;
     sessionStats?: SessionStats | null;
     turnTokens?: TurnTokens | null;
@@ -111,7 +115,11 @@ export const AgentStatusLine = (props: AgentStatusLineProps): JSX.Element => {
             <span class="agent-status-line agent-status-line--loading">
                 <span class="agent-spinner-dot" />
                 <span class="agent-status-left">
-                    {props.currentTool ? props.currentTool : `${phrase()}\u2026`}
+                    {props.stopping
+                        ? "Stopping\u2026"
+                        : props.currentTool
+                            ? props.currentTool
+                            : `${phrase()}\u2026`}
                 </span>
                 <span class="agent-status-right">{rightText()}</span>
             </span>
