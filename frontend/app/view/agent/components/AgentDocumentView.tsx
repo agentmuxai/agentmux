@@ -137,6 +137,33 @@ export const AgentDocumentView = ({ documentAtom, documentStateAtom, logLines, a
 
     if (scrollToBottomRef) scrollToBottomRef(jumpToBottom);
 
+    // Auto-collapse large user_messages on first arrival. The startup
+    // session-context payload that `buildStartupPayload` sends is a huge
+    // JSON block that visually dominates the pane; short user turns
+    // (one-line prompts) fit unchanged. Tracked per-node via `seenIds`
+    // so we don't re-collapse after the user has explicitly expanded.
+    const seenUserMessageIds = new Set<string>();
+    createEffect(() => {
+        const doc = document();
+        const toCollapse: string[] = [];
+        for (const n of doc) {
+            if (n.type !== "user_message") continue;
+            if (seenUserMessageIds.has(n.id)) continue;
+            seenUserMessageIds.add(n.id);
+            const msg = (n as any).message ?? "";
+            if (msg.length > 200 || msg.includes("\n")) {
+                toCollapse.push(n.id);
+            }
+        }
+        if (toCollapse.length > 0) {
+            setDocumentState((prev) => {
+                const next = new Set(prev.collapsedNodes);
+                for (const id of toCollapse) next.add(id);
+                return { ...prev, collapsedNodes: next };
+            });
+        }
+    });
+
     // Toggle collapsed state for collapsible nodes (agent messages, sections, user messages).
     const toggleCollapse = (nodeId: string) => {
         setDocumentState((prev) => {
@@ -503,7 +530,10 @@ const DocumentNodeRenderer = (props: DocumentNodeRendererProps): JSX.Element => 
         case "user_message": {
             const node = props.node;
             return (
-                <div class="agent-user-message">
+                <div
+                    class="agent-user-message"
+                    classList={{ "agent-user-message--collapsed": props.collapsed }}
+                >
                     <div class="agent-user-message-content">
                         <pre>{node.message}</pre>
                     </div>
