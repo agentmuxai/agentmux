@@ -326,6 +326,113 @@ impl BrowserPaneManager {
         }
     }
 
+    /// Apply a clip region to every live pane HWND that subtracts the given
+    /// overlay rects (in main-window client coordinates). The pane renders
+    /// normally outside the overlay region; inside it, the HWND is
+    /// transparent so the DOM overlay painted at the same screen position
+    /// shows through.
+    ///
+    /// This is the Win32 "airspace" workaround — native HWNDs always paint
+    /// above DOM regardless of CSS z-index, and `SetWindowRgn` is the one
+    /// mechanism that lets DOM bleed through a specific region of a child
+    /// HWND. Empty `overlay_rects` restores full pane visibility (same as
+    /// calling `clear_pane_overlay_clip`).
+    ///
+    /// No-op on non-Windows: other platforms don't use native child HWNDs
+    /// for panes, so there's no airspace to work around.
+    #[cfg(target_os = "windows")]
+    pub fn set_pane_overlay_clip(&self, state: &Arc<AppState>, overlay_rects: &[(i32, i32, i32, i32)]) {
+        use windows_sys::Win32::Foundation::{POINT, RECT};
+        use windows_sys::Win32::Graphics::Gdi::{
+            CombineRgn, CreateRectRgn, DeleteObject, MapWindowPoints, SetWindowRgn, RGN_DIFF,
+        };
+        use windows_sys::Win32::UI::WindowsAndMessaging::{GetParent, GetWindowRect};
+
+        let labels = self.lifecycle.live_labels();
+        let browsers = state.browsers.lock();
+        for label in &labels {
+            let browser = match browsers.get(label).cloned() {
+                Some(b) => b,
+                None => continue,
+            };
+            let host = match browser.host() {
+                Some(h) => h,
+                None => continue,
+            };
+            let hwnd_raw = host.window_handle();
+            if hwnd_raw.0.is_null() {
+                continue;
+            }
+            let pane_hwnd = hwnd_raw.0 as *mut std::ffi::c_void;
+
+            unsafe {
+                // Empty overlay list = restore full visibility (region=NULL).
+                if overlay_rects.is_empty() {
+                    SetWindowRgn(pane_hwnd as _, std::ptr::null_mut(), 1);
+                    continue;
+                }
+
+                // Resolve the pane's position in its parent (main window)
+                // client coords so we can translate overlay rects (which
+                // arrive in main-window client coords from the frontend)
+                // into pane-local coords for the region API.
+                let parent = GetParent(pane_hwnd as _);
+                if parent.is_null() {
+                    continue;
+                }
+                let mut pane_rect: RECT = std::mem::zeroed();
+                if GetWindowRect(pane_hwnd as _, &mut pane_rect) == 0 {
+                    continue;
+                }
+                // Convert pane_rect from screen coords to parent client
+                // coords by mapping its two corner points.
+                let pts_ptr = &mut pane_rect as *mut RECT as *mut POINT;
+                MapWindowPoints(std::ptr::null_mut(), parent, pts_ptr, 2);
+
+                let pane_w = pane_rect.right - pane_rect.left;
+                let pane_h = pane_rect.bottom - pane_rect.top;
+                if pane_w <= 0 || pane_h <= 0 {
+                    continue;
+                }
+
+                // Build region in pane-local coords: start with full pane,
+                // subtract every overlay rect that intersects it.
+                let region = CreateRectRgn(0, 0, pane_w, pane_h);
+                if region.is_null() {
+                    continue;
+                }
+                for (ox, oy, ow, oh) in overlay_rects {
+                    // Translate overlay rect (window client coords) →
+                    // pane-local coords by subtracting pane's window pos.
+                    let left = ox - pane_rect.left;
+                    let top = oy - pane_rect.top;
+                    let right = left + ow;
+                    let bottom = top + oh;
+                    // Skip if no intersection with the pane's local bounds.
+                    if right <= 0 || bottom <= 0 || left >= pane_w || top >= pane_h {
+                        continue;
+                    }
+                    let overlay_rgn = CreateRectRgn(left, top, right, bottom);
+                    if !overlay_rgn.is_null() {
+                        CombineRgn(region, region, overlay_rgn, RGN_DIFF);
+                        DeleteObject(overlay_rgn as _);
+                    }
+                }
+                // SetWindowRgn takes ownership of the region handle on
+                // success; the system frees it when the window is destroyed
+                // or a new region is set.
+                SetWindowRgn(pane_hwnd as _, region as _, 1);
+            }
+        }
+        tracing::info!(
+            pane_count = labels.len(),
+            overlay_count = overlay_rects.len(),
+            "[pane-airspace] applied overlay clip to pane HWNDs",
+        );
+    }
+    #[cfg(not(target_os = "windows"))]
+    pub fn set_pane_overlay_clip(&self, _state: &Arc<AppState>, _overlay_rects: &[(i32, i32, i32, i32)]) {}
+
     /// Give keyboard focus to the pane's child HWND so keystrokes reach the
     /// embedded page. Called by the frontend's ViewModel.giveFocus() when the
     /// pane becomes the active layout node — without this, focus falls back to

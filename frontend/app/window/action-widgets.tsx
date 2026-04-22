@@ -19,6 +19,7 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import { atoms, createBlock, getApi } from "@/store/global";
 import { fireAndForget, isBlank, makeIconClass } from "@/util/util";
 import { invokeCommand } from "@/app/platform/ipc";
+import { usePaneOverlay } from "@/app/platform/pane-overlay";
 import { createEffect, createSignal, For, onCleanup, Show, type JSX } from "solid-js";
 import { Portal } from "solid-js/web";
 import "./action-widgets.scss";
@@ -155,6 +156,12 @@ const MoreDropdown = ({
     wmap: () => Record<string, WidgetConfigType>;
     ref?: (el: HTMLDivElement) => void;
 }): JSX.Element => {
+    let overlayEl: HTMLDivElement | undefined;
+    // Cut a transparent hole through any browser pane HWND behind this
+    // dropdown so DOM renders above the pane in this rect.
+    // See `frontend/app/platform/pane-overlay.ts`.
+    usePaneOverlay(() => overlayEl);
+
     const handleItemClick = (widget: WidgetConfigType) => {
         handleWidgetSelect(widget);
         onClose();
@@ -181,7 +188,10 @@ const MoreDropdown = ({
 
     return (
         <div
-            ref={ref}
+            ref={(el) => {
+                overlayEl = el;
+                ref?.(el);
+            }}
             class="action-widget-more-dropdown"
             style={{ position: "fixed", top: `${pos().top}px`, right: `${pos().right}px` }}
         >
