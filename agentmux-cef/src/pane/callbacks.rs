@@ -32,7 +32,7 @@ use crate::state::AppState;
 /// 2. Install the WM_SETFOCUS redirect subclass on the pane's HWND tree so
 ///    Chromium's internal focus-steals on page load don't yank keyboard
 ///    focus away from the main window.
-pub fn on_after_created_pane(_state: &Arc<AppState>, browser: &Browser) {
+pub fn on_after_created_pane(state: &Arc<AppState>, browser: &Browser) {
     #[cfg(target_os = "windows")]
     {
         if let Some(host) = browser.host() {
@@ -52,16 +52,25 @@ pub fn on_after_created_pane(_state: &Arc<AppState>, browser: &Browser) {
                 tracing::info!("[pane-zorder] raised pane to top of Z-order");
 
                 // Subclass the pane HWND + its descendants so WM_SETFOCUS
-                // from Chromium gets redirected to the parent.
+                // from Chromium gets redirected to the parent. The state
+                // and block_id let the subclass emit `browser-pane-clicked`
+                // directly on WM_LBUTTONDOWN without relying on CEF focus
+                // callbacks (which don't fire for clicks inside an already-
+                // focused pane).
+                let block_id = resolve_pane_block_id(state, browser).unwrap_or_default();
                 unsafe {
-                    crate::pane::hwnd::install_pane_focus_redirect(hwnd);
+                    crate::pane::hwnd::install_pane_focus_redirect(
+                        hwnd,
+                        state.clone(),
+                        block_id,
+                    );
                 }
             }
         }
     }
     #[cfg(not(target_os = "windows"))]
     {
-        let _ = browser;
+        let _ = (state, browser);
     }
 }
 
@@ -96,8 +105,13 @@ pub fn on_load_end_pane(state: &Arc<AppState>, browser: &Browser) {
         if let Some(host) = browser.host() {
             let wh = host.window_handle();
             if !wh.0.is_null() {
+                let block_id = resolve_pane_block_id(state, browser).unwrap_or_default();
                 unsafe {
-                    crate::pane::hwnd::install_pane_focus_redirect(wh.0 as *mut std::ffi::c_void);
+                    crate::pane::hwnd::install_pane_focus_redirect(
+                        wh.0 as *mut std::ffi::c_void,
+                        state.clone(),
+                        block_id,
+                    );
                 }
             }
         }
