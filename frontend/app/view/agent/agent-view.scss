@@ -76,21 +76,6 @@
         &:focus-within .node-strip {
             opacity: 1;
         }
-    }
-
-    .agent-document-node-wrapper {
-        // Each document node gets its own containment box. Off-screen nodes
-        // are skipped by the browser via content-visibility.
-        // contain-intrinsic-size gives the browser a size estimate so scroll
-        // position stays stable when content is virtualized in/out.
-        content-visibility: auto;
-        contain-intrinsic-size: auto 80px;
-        contain: layout style;
-
-        &:focus {
-            outline: 1px solid var(--accent-color, #3b82f6);
-            outline-offset: -1px;
-        }
 
         .node-strip-time {
             color: var(--secondary-text-color);
@@ -129,6 +114,21 @@
         }
     }
 
+    .agent-document-node-wrapper {
+        // Each document node gets its own containment box. Off-screen nodes
+        // are skipped by the browser via content-visibility.
+        // contain-intrinsic-size gives the browser a size estimate so scroll
+        // position stays stable when content is virtualized in/out.
+        content-visibility: auto;
+        contain-intrinsic-size: auto 80px;
+        contain: layout style;
+
+        &:focus {
+            outline: 1px solid var(--accent-color, #3b82f6);
+            outline-offset: -1px;
+        }
+    }
+
     // === Status Log (terminal-style) ===
     .agent-history-loading {
         padding: 4px 8px;
@@ -158,13 +158,13 @@
         // One-line collapsed by default. The hover strip's expand button
         // (NodeHoverStrip.canExpand) toggles `--expanded` which wraps the
         // full text in place — replaces the old Portal hover-tooltip.
+        // The strip itself has an opaque background (same as conversation
+        // rows), so it masks whatever text runs under it on hover — no
+        // need to reserve right padding.
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
         max-width: 100%;
-        // Reserve room for the strip (timestamp + expand button).
-        // Keeps the ellipsis from running under the strip.
-        padding-right: 200px;
         cursor: default;
         transition: background 0.1s;
 
