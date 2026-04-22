@@ -167,6 +167,23 @@ pub struct NavigateReq {
     pub url: String,
 }
 
+// ── browser.back / .forward / .reload ───────────────────────────────────
+//
+// Share a single request shape — all three only need the target block id.
+// These exist so agents driving a browser pane during dev / tests can walk
+// its history without a human clicking the toolbar. Also useful for the
+// agent workflow where a tool says "open this URL, try to click X, if not
+// found go back and try Y."
+
+#[derive(Debug, Deserialize)]
+pub struct HistoryReq {
+    pub block_id: String,
+    /// Reload only: skip the http cache and force a network refetch.
+    /// Ignored by `back` / `forward`. Defaults to false.
+    #[serde(default)]
+    pub ignore_cache: bool,
+}
+
 // ── Generic "ok:true" success body for write endpoints ──────────────────
 
 #[derive(Debug, Serialize)]
