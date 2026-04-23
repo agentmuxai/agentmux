@@ -226,6 +226,13 @@ pub fn delete_controller(block_id: &str) {
     if let Some(ctrl) = ctrl {
         let _ = ctrl.stop(true, STATUS_DONE);
     }
+    // Drop the process tracker for this block. On Windows the job
+    // object's `KILL_ON_JOB_CLOSE` flag nukes the whole descendant
+    // tree; on Linux/macOS the tracker's `Drop` does the same.
+    // No-op if the tracker global isn't initialized.
+    if let Some(registry) = crate::backend::process_tracker::registry::global() {
+        registry.remove(block_id);
+    }
 }
 
 /// Get all controllers (snapshot).

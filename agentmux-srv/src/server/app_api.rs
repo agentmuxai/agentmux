@@ -28,6 +28,8 @@ pub fn register_app_api_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     register_agent_status(engine, state);
     register_agent_list(engine, state);
     register_agent_output(engine, state);
+    register_agent_process_list(engine, state);
+    register_agent_tracked_blocks(engine, state);
     register_pane_open(engine, state);
     register_blockfile_line_count(engine, state);
     register_blockfile_read_range(engine, state);
@@ -35,6 +37,59 @@ pub fn register_app_api_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     register_session_archive_handler(engine, state);
     register_session_restore_handler(engine, state);
     register_session_export_handler(engine, state);
+}
+
+// ---------------------------------------------------------------------------
+// agent.process-list + agent.tracked-blocks
+// ---------------------------------------------------------------------------
+
+fn register_agent_process_list(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    let process_tracker = state.process_tracker.clone();
+    engine.register_handler(
+        COMMAND_AGENT_PROCESS_LIST,
+        Box::new(move |data, _ctx| {
+            let process_tracker = process_tracker.clone();
+            Box::pin(async move {
+                let cmd: AgentProcessListCommand = serde_json::from_value(data)
+                    .map_err(|e| format!("agent.process-list: {e}"))?;
+                let members = process_tracker.list_block(&cmd.block_id);
+                let confidence = match process_tracker.confidence_of(&cmd.block_id) {
+                    crate::backend::process_tracker::TrackingConfidence::High => "high",
+                    crate::backend::process_tracker::TrackingConfidence::BestEffort => "best_effort",
+                    crate::backend::process_tracker::TrackingConfidence::None => "none",
+                };
+                let processes: Vec<AgentProcessInfo> = members
+                    .into_iter()
+                    .map(|m| AgentProcessInfo {
+                        pid: m.pid,
+                        command: m.command,
+                        rss_bytes: m.rss_bytes,
+                        started_at_ms: m.started_at_ms,
+                    })
+                    .collect();
+                Ok(Some(serde_json::to_value(&AgentProcessListResult {
+                    block_id: cmd.block_id,
+                    confidence: confidence.to_string(),
+                    processes,
+                }).unwrap()))
+            })
+        }),
+    );
+}
+
+fn register_agent_tracked_blocks(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    let process_tracker = state.process_tracker.clone();
+    engine.register_handler(
+        COMMAND_AGENT_TRACKED_BLOCKS,
+        Box::new(move |_data, _ctx| {
+            let process_tracker = process_tracker.clone();
+            Box::pin(async move {
+                Ok(Some(serde_json::to_value(&AgentTrackedBlocksResult {
+                    block_ids: process_tracker.list_all_blocks(),
+                }).unwrap()))
+            })
+        }),
+    );
 }
 
 // ---------------------------------------------------------------------------
