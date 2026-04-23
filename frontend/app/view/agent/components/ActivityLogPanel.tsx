@@ -30,9 +30,18 @@ export const ActivityLogPanel = (props: ActivityLogPanelProps): JSX.Element => {
     // NEW entries arriving — not to every re-render. Without this, the
     // error auto-open effect would fire on every parent render whose
     // entries() array ends in an error (e.g. collapsed + re-expanded).
+    //
+    // Resets to 0 when the parent list drops to empty (e.g. clear() via
+    // /clear slash command), so auto-open works again after reset
+    // instead of requiring the new entry count to exceed the stale
+    // watermark before firing.
     let lastSeenLength = 0;
     createEffect(() => {
         const list = props.entries();
+        if (list.length === 0) {
+            lastSeenLength = 0;
+            return;
+        }
         if (list.length > lastSeenLength) {
             // Scan the newly-arrived slice for any error-level entry.
             for (let i = lastSeenLength; i < list.length; i++) {
