@@ -713,6 +713,38 @@
     color: var(--secondary-text-color);
 }
 
+.swarm-activity-actions {
+    text-align: right;
+    width: 60px;
+}
+
+.swarm-activity-kill-btn {
+    padding: 2px 8px;
+    background: transparent;
+    border: 1px solid color-mix(in srgb, var(--error-color) 50%, transparent);
+    border-radius: 3px;
+    color: var(--error-color);
+    font-family: inherit;
+    font-size: 10px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 80ms ease, border-color 80ms ease;
+
+    &:hover:not(:disabled) {
+        background: color-mix(in srgb, var(--error-color) 15%, transparent);
+        border-color: var(--error-color);
+    }
+    &:disabled {
+        opacity: 0.4;
+        cursor: not-allowed;
+    }
+
+    &--row {
+        padding: 1px 6px;
+        font-size: 10px;
+    }
+}
+
 // ── Animations ──────────────────────────────────────────────────────────
 
 @keyframes swarm-pulse {

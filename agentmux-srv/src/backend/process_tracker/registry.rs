@@ -116,6 +116,32 @@ impl AgentProcessRegistry {
         self.inner.lock().keys().cloned().collect()
     }
 
+    /// Kill the entire process tree for a given block. Returns `true`
+    /// if a tracker was found (the kill was dispatched). Does NOT
+    /// synchronously wait for descendants to actually exit — the
+    /// poller's next tick will pick up the state changes and emit
+    /// `agent:process-exited` events the frontend can react to.
+    pub fn kill_tree(&self, block_id: &str) -> bool {
+        let tracker = self.inner.lock().get(block_id).map(|e| e.tracker.clone());
+        match tracker {
+            Some(t) => {
+                t.kill_tree();
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Kill a single PID if it's a member of the given block's tree.
+    /// Returns `true` if the tracker was found and the PID matched.
+    pub fn kill_pid(&self, block_id: &str, pid: u32) -> bool {
+        let tracker = self.inner.lock().get(block_id).map(|e| e.tracker.clone());
+        match tracker {
+            Some(t) => t.kill_pid(pid),
+            None => false,
+        }
+    }
+
     /// Poll every tracked block's membership and diff against the
     /// last-known set. Emits `agent:process-added` / `-exited` events
     /// for each delta.

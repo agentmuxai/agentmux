@@ -327,6 +327,15 @@ pub const COMMAND_AGENT_PROCESS_LIST: &str = "agent.process-list";
 /// List every block currently tracked (for the swarm aggregate view).
 /// Returns `AgentTrackedBlocksResult`.
 pub const COMMAND_AGENT_TRACKED_BLOCKS: &str = "agent.tracked-blocks";
+/// Terminate a single process by PID if it's a member of a given
+/// block's tracker tree. Silently no-ops if the PID isn't tracked.
+/// Returns `AgentKillResult { ok: bool }`.
+pub const COMMAND_AGENT_KILL_PROCESS: &str = "agent.kill-process";
+/// Terminate the entire process tree for a given block.
+/// On Windows: `TerminateJobObject`. On Linux: `cgroup.kill`. On
+/// macOS: `killpg`. Returns `AgentKillResult { ok: true }` even when
+/// there are no members (idempotent).
+pub const COMMAND_AGENT_KILL_TREE: &str = "agent.kill-tree";
 
 // App API Tier 2 — pane lifecycle commands
 pub const COMMAND_PANE_OPEN: &str = "pane.open";
@@ -791,6 +800,32 @@ pub struct AgentProcessListResult {
 #[serde(rename_all = "snake_case")]
 pub struct AgentTrackedBlocksResult {
     pub block_ids: Vec<String>,
+}
+
+/// Request for `agent.kill-process` — terminate a single PID if it's
+/// in a given block's tracker tree.
+#[derive(Debug, Clone, Deserialize)]
+pub struct AgentKillProcessCommand {
+    pub block_id: String,
+    pub pid: u32,
+}
+
+/// Request for `agent.kill-tree` — nuke every process tracked under a
+/// given block.
+#[derive(Debug, Clone, Deserialize)]
+pub struct AgentKillTreeCommand {
+    pub block_id: String,
+}
+
+/// Response from `agent.kill-process` / `agent.kill-tree`.
+/// `ok: true` means the kill was dispatched; it does NOT guarantee
+/// the OS has fully torn down every descendant by the time the RPC
+/// returns. The swarm activity panel's next refresh will reflect
+/// actual state.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct AgentKillResult {
+    pub ok: bool,
 }
 
 /// Request for blockfile:line_count — count total lines in a blockfile.

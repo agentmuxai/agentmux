@@ -30,6 +30,8 @@ pub fn register_app_api_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     register_agent_output(engine, state);
     register_agent_process_list(engine, state);
     register_agent_tracked_blocks(engine, state);
+    register_agent_kill_process(engine, state);
+    register_agent_kill_tree(engine, state);
     register_pane_open(engine, state);
     register_blockfile_line_count(engine, state);
     register_blockfile_read_range(engine, state);
@@ -87,6 +89,44 @@ fn register_agent_tracked_blocks(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 Ok(Some(serde_json::to_value(&AgentTrackedBlocksResult {
                     block_ids: process_tracker.list_all_blocks(),
                 }).unwrap()))
+            })
+        }),
+    );
+}
+
+fn register_agent_kill_process(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    let process_tracker = state.process_tracker.clone();
+    engine.register_handler(
+        COMMAND_AGENT_KILL_PROCESS,
+        Box::new(move |data, _ctx| {
+            let process_tracker = process_tracker.clone();
+            Box::pin(async move {
+                let cmd: AgentKillProcessCommand = serde_json::from_value(data)
+                    .map_err(|e| format!("agent.kill-process: {e}"))?;
+                tracing::info!(
+                    block_id = %cmd.block_id,
+                    pid = cmd.pid,
+                    "agent.kill-process"
+                );
+                let ok = process_tracker.kill_pid(&cmd.block_id, cmd.pid);
+                Ok(Some(serde_json::to_value(&AgentKillResult { ok }).unwrap()))
+            })
+        }),
+    );
+}
+
+fn register_agent_kill_tree(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    let process_tracker = state.process_tracker.clone();
+    engine.register_handler(
+        COMMAND_AGENT_KILL_TREE,
+        Box::new(move |data, _ctx| {
+            let process_tracker = process_tracker.clone();
+            Box::pin(async move {
+                let cmd: AgentKillTreeCommand = serde_json::from_value(data)
+                    .map_err(|e| format!("agent.kill-tree: {e}"))?;
+                tracing::info!(block_id = %cmd.block_id, "agent.kill-tree");
+                let ok = process_tracker.kill_tree(&cmd.block_id);
+                Ok(Some(serde_json::to_value(&AgentKillResult { ok }).unwrap()))
             })
         }),
     );
