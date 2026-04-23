@@ -42,6 +42,14 @@ interface AgentStatusLineProps {
     currentTool?: string | null;
     sessionStats?: SessionStats | null;
     turnTokens?: TurnTokens | null;
+    /** Count of OS processes currently tracked for this agent block
+     *  (backgrounded bash, dev servers, docker containers, watchers,
+     *  etc.). Drives the `⚙ N` badge; click opens the swarm Activity
+     *  tab. 0 or undefined hides the badge. */
+    processCount?: number;
+    /** Fires when the user clicks the process-count badge — typically
+     *  opens the swarm pane so they can see what's running. */
+    onProcessBadgeClick?: () => void;
 }
 
 export const AgentStatusLine = (props: AgentStatusLineProps): JSX.Element => {
@@ -101,13 +109,35 @@ export const AgentStatusLine = (props: AgentStatusLineProps): JSX.Element => {
         return right.join("  \u00b7  ");
     });
 
+    const processBadge = () => (
+        <Show when={(props.processCount ?? 0) > 0}>
+            <button
+                type="button"
+                class="agent-process-badge"
+                title={`${props.processCount} tracked ${props.processCount === 1 ? "process" : "processes"} spawned by this agent — click to open swarm`}
+                onClick={() => props.onProcessBadgeClick?.()}
+            >
+                <span class="agent-process-badge-icon">⚙</span>
+                <span class="agent-process-badge-count">{props.processCount}</span>
+            </button>
+        </Show>
+    );
+
     return (
         <Show
             when={props.loading}
             fallback={
-                <Show when={statsText()} fallback={<span class="agent-status-line" />}>
+                <Show
+                    when={statsText()}
+                    fallback={
+                        <span class="agent-status-line">
+                            {processBadge()}
+                        </span>
+                    }
+                >
                     <span class="agent-status-line agent-status-line--stats">
                         {statsText()}
+                        {processBadge()}
                     </span>
                 </Show>
             }
@@ -121,7 +151,10 @@ export const AgentStatusLine = (props: AgentStatusLineProps): JSX.Element => {
                             ? props.currentTool
                             : `${phrase()}\u2026`}
                 </span>
-                <span class="agent-status-right">{rightText()}</span>
+                <span class="agent-status-right">
+                    {rightText()}
+                    {processBadge()}
+                </span>
             </span>
         </Show>
     );
