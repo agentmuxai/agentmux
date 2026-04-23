@@ -706,6 +706,37 @@ class RpcApiType {
         return client.rpcCall("agentstop", data, opts);
     }
 
+    // command "agent.process-list" [call]
+    // Returns the OS processes currently tracked under a given agent
+    // block — via Windows Job Objects (or cgroups v2 / process groups
+    // on future platforms). Consumed by the swarm Activity tab.
+    AgentProcessListCommand(
+        client: RpcClient,
+        data: { block_id: string },
+        opts?: RpcOpts,
+    ): Promise<{
+        block_id: string;
+        confidence: "high" | "best_effort" | "none";
+        processes: Array<{
+            pid: number;
+            command: string;
+            rss_bytes: number;
+            started_at_ms: number;
+        }>;
+    }> {
+        return client.rpcCall("agent.process-list", data, opts);
+    }
+
+    // command "agent.tracked-blocks" [call]
+    // Block IDs for which a process tracker is currently registered.
+    AgentTrackedBlocksCommand(
+        client: RpcClient,
+        data: Record<string, never>,
+        opts?: RpcOpts,
+    ): Promise<{ block_ids: string[] }> {
+        return client.rpcCall("agent.tracked-blocks", data, opts);
+    }
+
     // command "writeagentconfig" [call]
     WriteAgentConfigCommand(client: RpcClient, data: CommandWriteAgentConfigData, opts?: RpcOpts): Promise<void> {
         return client.rpcCall("writeagentconfig", data, opts);
