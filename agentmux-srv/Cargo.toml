@@ -1,6 +1,6 @@
 [package]
 name = "agentmux-srv"
-version = "0.33.323"
+version = "0.33.324"
 edition = "2021"
 description = "AgentMux Rust backend server"
 
@@ -50,6 +50,16 @@ tar = "0.4"
 # __fastfail (0xC0000409) is handled separately by WER LocalDumps.
 crash-handler = "0.7"
 minidumper = "0.9"
+# Win32 Job Objects for the agent process tracker. Wraps every agent
+# CLI in a job so `CreateProcess` descendants can be enumerated and
+# killed as a tree. See `backend::process_tracker`.
+windows-sys = { version = "0.59", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_System_JobObjects",
+    "Win32_System_Threading",
+    "Win32_System_ProcessStatus",
+] }
 
 [target.'cfg(windows)'.build-dependencies]
 winres = "0.1"
