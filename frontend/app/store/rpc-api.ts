@@ -737,6 +737,26 @@ class RpcApiType {
         return client.rpcCall("agent.tracked-blocks", data, opts);
     }
 
+    // command "agent.kill-process" [call]
+    // Terminate a single PID in a given block's tracker tree.
+    AgentKillProcessCommand(
+        client: RpcClient,
+        data: { block_id: string; pid: number },
+        opts?: RpcOpts,
+    ): Promise<{ ok: boolean }> {
+        return client.rpcCall("agent.kill-process", data, opts);
+    }
+
+    // command "agent.kill-tree" [call]
+    // Terminate the entire process tree for a block.
+    AgentKillTreeCommand(
+        client: RpcClient,
+        data: { block_id: string },
+        opts?: RpcOpts,
+    ): Promise<{ ok: boolean }> {
+        return client.rpcCall("agent.kill-tree", data, opts);
+    }
+
     // command "writeagentconfig" [call]
     WriteAgentConfigCommand(client: RpcClient, data: CommandWriteAgentConfigData, opts?: RpcOpts): Promise<void> {
         return client.rpcCall("writeagentconfig", data, opts);
