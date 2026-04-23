@@ -257,6 +257,23 @@ impl PersistentSubprocessController {
             "persistent process spawned"
         );
 
+        // Assign the persistent CLI to this block's process tracker.
+        // Matches `SubprocessController`'s identical path — both controller
+        // types share the same swarm-pane visibility story.
+        if pid != 0 {
+            if let Some(registry) = crate::backend::process_tracker::registry::global() {
+                let tracker = registry.ensure_tracker(&self.block_id);
+                if let Err(e) = tracker.assign_process(pid) {
+                    tracing::warn!(
+                        block_id = %self.block_id,
+                        pid = pid,
+                        err = %e,
+                        "[process-tracker] assign_process failed"
+                    );
+                }
+            }
+        }
+
         let (kill_tx, kill_rx) = tokio::sync::oneshot::channel::<bool>();
         let stdin = child.stdin.take().unwrap();
         let stdout = child.stdout.take().unwrap();
