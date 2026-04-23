@@ -9,6 +9,8 @@ import { SignalAtom } from "@/util/util";
 import { AgentViewWrapper } from "./agent-view";
 import { PROVIDERS, resolveProviderAlias } from "./providers";
 import { Logger } from "@/util/logger";
+import { buildInstanceSlug } from "./defaults/instance-slug";
+import type { LaunchOverrides } from "./components/AgentLaunchModal";
 
 export type OverlayTab = "forge" | "identity";
 
@@ -204,7 +206,7 @@ export class AgentViewModel implements ViewModel {
      * to the working directory via WriteAgentConfigCommand, then creates
      * a SubprocessController ready for user input.
      */
-    launchForgeAgent = async (agent: ForgeAgent): Promise<void> => {
+    launchForgeAgent = async (agent: ForgeAgent, overrides?: LaunchOverrides): Promise<void> => {
         const provider = PROVIDERS[agent.provider] ?? PROVIDERS[resolveProviderAlias(agent.provider)];
         if (!provider) {
             Logger.error("agent", "Unknown provider in forge agent", { agentId: agent.id, provider: agent.provider });
@@ -248,12 +250,27 @@ export class AgentViewModel implements ViewModel {
             Logger.error("agent", "Failed to load forge skills", { error: String(e) });
         }
 
-        // Determine working directory. Use the agent's stable slug
-        // (Step 1 of SPEC_AGENT_IDENTITY_RESTRUCTURE_2026_04_14.md) so
-        // renaming the agent doesn't move the directory on disk.
-        // Falls back to the legacy name-derived form if slug is empty
-        // (defensive — the v4 migration backfills slug for every row).
+        // Definition slug: stable across launches of this definition.
+        // Used for identity-scoped paths (GH_CONFIG_DIR, git author
+        // email) so credentials and identity persist even when the
+        // user relaunches the same definition with different instance
+        // names. See SPEC_AGENT_IDENTITY_RESTRUCTURE_2026_04_14.md §1.
         const slug = agent.slug || agent.name.toLowerCase().replace(/[^a-z0-9-_]/g, "-");
+
+        // Instance name: overrides.instanceName wins (modal-supplied);
+        // falls back to the definition's own name for callers that
+        // haven't adopted the modal flow yet (legacy / tests).
+        const instanceName = overrides?.instanceName?.trim() || agent.name;
+
+        // Per-launch slug: `<slug>-<YYYYMMDD-HHMMSS>`. Ensures two
+        // instances of the same definition never share a working
+        // directory even if they're launched with the same name.
+        // Definitions without an override retain the legacy
+        // slug-only path to avoid churn on existing seeded agents.
+        const instanceSlug = overrides?.instanceName
+            ? buildInstanceSlug(overrides.instanceName)
+            : slug;
+
         // If the persisted working_directory was seeded with a literal `~/.agentmux/...`
         // path (see `scripts/gen-seed.js`), rewrite its prefix to the host-resolved
         // `agentmuxHome()`. On portable builds that points into the portable data dir;
@@ -261,9 +278,11 @@ export class AgentViewModel implements ViewModel {
         // this rewrite the backend rejects the path with "path traversal denied"
         // because `~/` never gets expanded to an absolute path at the OS layer.
         const persisted = agent.working_directory ?? "";
-        const workDir = persisted.startsWith("~/.agentmux/")
-            ? `${agentmuxHome()}${persisted.slice("~/.agentmux".length)}`
-            : (persisted || `${agentmuxHome()}/agents/${slug}`);
+        const workDir = overrides?.instanceName
+            ? `${agentmuxHome()}/agents/${instanceSlug}`
+            : persisted.startsWith("~/.agentmux/")
+                ? `${agentmuxHome()}${persisted.slice("~/.agentmux".length)}`
+                : (persisted || `${agentmuxHome()}/agents/${slug}`);
 
         // Build CLI args: use persistent args if available, otherwise standard launch args
         const isPersistent = provider.controllerType === "persistent";
@@ -298,30 +317,31 @@ export class AgentViewModel implements ViewModel {
         // slug so renaming doesn't orphan ~/.agentmux/config/gh-<old>.
         envVars["GH_CONFIG_DIR"] = `${agentmuxHome()}/config/gh-${slug}`;
 
-        // AGENTMUX_AGENT_ID stays as the display name for backwards
-        // compat: shell integration scripts (bash.sh / zsh.sh / pwsh.ps1)
-        // emit OSC sequences carrying this value as the terminal pane
-        // label, and agentmux-mcp routes inter-agent messages by it.
-        // Flipping to slug here would change visible labels and break
-        // routing — that's a separate coordinated migration.
-        envVars["AGENTMUX_AGENT_ID"] = agent.name;
-        // New, additive: the stable slug (Step 2 of identity
-        // restructure). Downstream code can opt into reading this
-        // when it needs the rename-stable form.
+        // AGENTMUX_AGENT_ID: the instance name (modal-supplied or
+        // definition-default). Shell integration scripts emit this
+        // as the terminal pane label, and agentmux-mcp routes
+        // inter-agent messages by it.
+        envVars["AGENTMUX_AGENT_ID"] = instanceName;
+        // Stable definition slug — survives renames and re-launches.
+        // Downstream code reads this when it needs the rename-stable
+        // form (e.g. session-id lookup).
         envVars["AGENTMUX_AGENT_SLUG"] = slug;
-        // Explicit display alias. Today identical to AGENTMUX_AGENT_ID
-        // — once Step 4's downstream coordination flips ID to the
-        // slug, DISPLAY remains the human-readable label.
-        envVars["AGENTMUX_AGENT_DISPLAY"] = agent.name;
+        // Per-instance slug: the working-directory suffix. Lets
+        // downstream code find the instance's scratch dir without
+        // re-parsing paths.
+        envVars["AGENTMUX_INSTANCE_SLUG"] = instanceSlug;
+        // Explicit display alias. Human-readable, unaffected by
+        // slug vs id collapsing in future migrations.
+        envVars["AGENTMUX_AGENT_DISPLAY"] = instanceName;
 
         // Git identity — prevents "Please tell me who you are" errors when
-        // the host machine has no global git config. Derived from the agent's
-        // display name + slug-based placeholder email. The Identity panel can
-        // supply a real email in a follow-on, but this fallback is safe and
-        // satisfies git's format requirement unconditionally.
-        envVars["GIT_AUTHOR_NAME"]     = agent.name;
+        // the host machine has no global git config. Uses the instance
+        // name for author/committer and the stable definition slug for
+        // the placeholder email so commits attribute to "this run" while
+        // still grouping by definition identity.
+        envVars["GIT_AUTHOR_NAME"]     = instanceName;
         envVars["GIT_AUTHOR_EMAIL"]    = `${slug}@agents.local`;
-        envVars["GIT_COMMITTER_NAME"]  = agent.name;
+        envVars["GIT_COMMITTER_NAME"]  = instanceName;
         envVars["GIT_COMMITTER_EMAIL"] = `${slug}@agents.local`;
         // GIT_CONFIG_GLOBAL is intentionally not set: we use the 4 identity
         // env vars above which git always honours, avoiding any path-handling edge cases.
@@ -355,9 +375,9 @@ export class AgentViewModel implements ViewModel {
                     agentId: agent.id,
                     agentProvider: agent.provider,
                     agentOutputFormat: provider.styledOutputFormat,
-                    agentName: agent.name,
+                    agentName: instanceName,
                     agentIcon: agent.icon,
-                    agentMode: agent.agent_type || "host",
+                    agentMode: overrides?.agentType ?? agent.agent_type ?? "host",
                     controller: isPersistent ? "persistent" : "subprocess",
                     cmd: cliBin,
                     "cmd:args": cliArgs,
