@@ -25,26 +25,49 @@ export function useProcessCount(blockId: string): Accessor<number> {
     const [count, setCount] = createSignal(0);
 
     onMount(() => {
-        // Seed the count from the current tracker state so the badge
-        // reflects reality at mount time (important when re-opening a
-        // pane with an already-running agent). Silently tolerate
-        // failure — older backends won't have the RPC and that's fine.
-        void RpcApi.AgentProcessListCommand(TabRpcClient, { block_id: blockId })
-            .then((res) => setCount(res.processes.length))
-            .catch(() => {});
+        // Order matters: subscribe to deltas BEFORE fetching the
+        // snapshot. If we fetched first, events arriving during the
+        // RPC round-trip would increment the count, then the snapshot
+        // `setCount(res.processes.length)` would overwrite — losing
+        // those deltas. Subscribe first, buffer deltas in a local
+        // variable until the snapshot lands, then apply snapshot +
+        // buffered deltas together.
+        let seeded = false;
+        let deltaSincePreSeed = 0;
 
-        // Incremental updates via the delta events the backend emits
-        // every ~2s from its poller.
         const unsubAdded = waveEventSubscribe({
             eventType: "agent:process-added",
             scope: WOS.makeORef("block", blockId),
-            handler: () => setCount((c) => c + 1),
+            handler: () => {
+                if (seeded) setCount((c) => c + 1);
+                else deltaSincePreSeed += 1;
+            },
         });
         const unsubExited = waveEventSubscribe({
             eventType: "agent:process-exited",
             scope: WOS.makeORef("block", blockId),
-            handler: () => setCount((c) => Math.max(0, c - 1)),
+            handler: () => {
+                if (seeded) setCount((c) => Math.max(0, c - 1));
+                else deltaSincePreSeed -= 1;
+            },
         });
+
+        // Seed snapshot. Overlap between the snapshot and buffered
+        // deltas might double-count by ±1 in an edge case; the next
+        // backend poll tick (~2s) will re-align the count via the
+        // same event stream. Worth the cheap correctness trade for
+        // a tiny transient window.
+        // Silently tolerate RPC failure — older backends without the
+        // command fall back to delta-only mode and still converge.
+        void RpcApi.AgentProcessListCommand(TabRpcClient, { block_id: blockId })
+            .then((res) => {
+                setCount(Math.max(0, res.processes.length + deltaSincePreSeed));
+                seeded = true;
+            })
+            .catch(() => {
+                setCount(Math.max(0, deltaSincePreSeed));
+                seeded = true;
+            });
 
         onCleanup(() => {
             unsubAdded?.();
