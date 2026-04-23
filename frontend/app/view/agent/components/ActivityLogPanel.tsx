@@ -82,11 +82,11 @@ export const ActivityLogPanel = (props: ActivityLogPanelProps): JSX.Element => {
                     type="button"
                     class="agent-activity-log-header"
                     onClick={() => setIsOpen(!isOpen())}
-                    title={isOpen() ? "Collapse activity log" : "Expand activity log"}
+                    title={isOpen() ? "Collapse shell log" : "Expand shell log"}
                     aria-expanded={isOpen()}
                 >
                     <span class="agent-activity-log-chevron">{isOpen() ? "⌄" : "›"}</span>
-                    <span class="agent-activity-log-label">activity</span>
+                    <span class="agent-activity-log-label">shell</span>
                     <Show when={!isOpen() && mostRecent()}>
                         {(entry) => (
                             <span class="agent-activity-log-preview">
