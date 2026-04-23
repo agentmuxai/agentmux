@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use chrono::Utc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::json;
@@ -648,6 +649,7 @@ pub fn register_forge_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     }
 
                     // Insert content types
+                    let mut content_ok = true;
                     for (content_type, content) in &agent_import.content {
                         let fc = ForgeContent {
                             agent_id: agent.id.clone(),
@@ -655,10 +657,14 @@ pub fn register_forge_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                             content: content.clone(),
                             updated_at: now,
                         };
-                        let _ = wstore.forge_set_content(&fc);
+                        if let Err(e) = wstore.forge_set_content(&fc) {
+                            log::warn!("import: failed to set content for agent {}: {e}", agent.id);
+                            content_ok = false;
+                        }
                     }
 
                     // Insert skills
+                    let mut skills_ok = true;
                     for skill_import in &agent_import.skills {
                         let skill = ForgeSkill {
                             id: uuid::Uuid::new_v4().to_string(),
@@ -670,10 +676,17 @@ pub fn register_forge_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                             content: skill_import.content.clone(),
                             created_at: now,
                         };
-                        let _ = wstore.forge_insert_skill(&skill);
+                        if let Err(e) = wstore.forge_insert_skill(&skill) {
+                            log::warn!("import: failed to insert skill '{}' for agent {}: {e}", skill.name, agent.id);
+                            skills_ok = false;
+                        }
                     }
 
-                    imported.push(agent_import.name.clone());
+                    if content_ok && skills_ok {
+                        imported.push(agent_import.name.clone());
+                    } else {
+                        skipped.push(agent_import.name.clone());
+                    }
                 }
 
                 broker.publish(crate::backend::wps::WaveEvent {
@@ -738,24 +751,7 @@ pub fn register_forge_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     });
                 }
 
-                let exported_at = {
-                    let now = SystemTime::now()
-                        .duration_since(UNIX_EPOCH)
-                        .unwrap_or_default()
-                        .as_secs();
-                    // Format as ISO 8601 (basic)
-                    let secs = now;
-                    let s = secs % 60;
-                    let m = (secs / 60) % 60;
-                    let h = (secs / 3600) % 24;
-                    let days = secs / 86400;
-                    // Approximate date from epoch (good enough for export metadata)
-                    let year = 1970 + days / 365;
-                    let day_of_year = days % 365;
-                    let month = day_of_year / 30 + 1;
-                    let day = day_of_year % 30 + 1;
-                    format!("{year:04}-{month:02}-{day:02}T{h:02}:{m:02}:{s:02}Z")
-                };
+                let exported_at = Utc::now().to_rfc3339();
 
                 let result = ExportForgeAgentsResult {
                     version: 4,
