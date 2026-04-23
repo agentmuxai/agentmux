@@ -173,6 +173,24 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
     };
 
     /**
+     * Delete a Forge agent after confirmation. The backend
+     * `DeleteForgeAgent` RPC removes the row from the forge table and
+     * emits a `forgeagents:changed` event, which `useForgeAgents`
+     * re-fetches on — so the list updates without manual refresh.
+     */
+    const handleDelete = async (agent: ForgeAgent) => {
+        const ok = window.confirm(
+            `Delete agent "${agent.name}"?\n\nThis removes the definition permanently. Any open panes running it will stay connected until you close them.`
+        );
+        if (!ok) return;
+        try {
+            await RpcApi.DeleteForgeAgentCommand(TabRpcClient, { id: agent.id });
+        } catch (e: any) {
+            alert(`Delete failed: ${e?.message ?? String(e)}`);
+        }
+    };
+
+    /**
      * After a rename, find any open agent panes running this agent and update
      * their block meta agentName so the pane-frame title refreshes immediately.
      */
@@ -238,6 +256,7 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                                         onOpenForge={openForgeFor}
                                         onOpenIdentity={openIdentityFor}
                                         onRename={handleRename}
+                                        onDelete={handleDelete}
                                     />
                                     <Show when={expandedId() === agent.id && !createMode()}>
                                         <AgentCardSettingsPanel
