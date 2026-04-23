@@ -29,7 +29,6 @@ import { PendingMessagesPanel } from "./components/PendingMessagesPanel";
 import { AgentPicker, useForgeAgents } from "./components/AgentPicker";
 import { AgentSearchBar } from "./components/AgentSearchBar";
 import { AgentFocusedPanel } from "./components/AgentFocusedPanel";
-import { AgentActionBar } from "./components/AgentActionBar";
 import { SlashCommandPicker } from "./components/SlashCommandPicker";
 import { SlashHelpPanel } from "./components/SlashHelpPanel";
 import { BookmarksPanel } from "./components/BookmarksPanel";
@@ -450,6 +449,29 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 </div>
             </Show>
 
+            {/* Working…/Stopping… status — deliberately rendered ABOVE
+                the activity log so the user's eye lands on live state
+                before diagnostics. Used to live inside the composer
+                region right above the input; moved here so the activity
+                log doesn't push it off-screen during long agent output. */}
+            <AgentStatusLine
+                loading={status.isLoading() || agentAtoms().turnActiveAtom[0]() || stoppingAtom[0]()}
+                stopping={stoppingAtom[0]()}
+                currentTool={agentAtoms().currentToolAtom[0]()}
+                sessionStats={agentAtoms().sessionStatsAtom[0]()}
+                turnTokens={agentAtoms().turnTokensAtom[0]()}
+                processCount={processCount()}
+                onProcessBadgeClick={() => {
+                    // Open the swarm pane so the user can see every
+                    // process (and eventually kill them). Idempotent
+                    // by design — createBlock doesn't dedupe, so
+                    // clicking repeatedly creates multiple panes.
+                    // Acceptable trade-off until we add a "focus if
+                    // already open" swarm-pane-manager entry point.
+                    createBlock({ meta: { view: "swarm" } });
+                }}
+            />
+
             <ActivityLogPanel entries={logLines} />
             <PendingMessagesPanel pendingMessages={pendingMessagesAtom[0]} />
 
@@ -473,23 +495,6 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                         />
                     )}
                 </Show>
-                <AgentStatusLine
-                    loading={status.isLoading() || agentAtoms().turnActiveAtom[0]() || stoppingAtom[0]()}
-                    stopping={stoppingAtom[0]()}
-                    currentTool={agentAtoms().currentToolAtom[0]()}
-                    sessionStats={agentAtoms().sessionStatsAtom[0]()}
-                    turnTokens={agentAtoms().turnTokensAtom[0]()}
-                    processCount={processCount()}
-                    onProcessBadgeClick={() => {
-                        // Open the swarm pane so the user can see every
-                        // process (and eventually kill them). Idempotent
-                        // by design — createBlock doesn't dedupe, so
-                        // clicking repeatedly creates multiple panes.
-                        // Acceptable trade-off until we add a "focus if
-                        // already open" swarm-pane-manager entry point.
-                        createBlock({ meta: { view: "swarm" } });
-                    }}
-                />
                 <AgentControlBar
                     blockId={model.blockId}
                     blockAtom={block}
@@ -515,7 +520,10 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                     }}
                 />
             </div>
-            <AgentActionBar />
+            {/* AgentActionBar (Add / Import / Export) lives in the
+                AgentPicker view only. Once an agent is loaded the user
+                is working in the conversation; the action bar would
+                just take up vertical space. */}
         </div>
     );
 };
