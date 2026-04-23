@@ -482,6 +482,15 @@ async fn main() {
         4 * 60 * 60 * 1000,
     );
 
+    // Tracks agent-spawned OS processes per block. Registered trackers
+    // live as long as their agent pane; the background poller emits
+    // delta events (`agent:process-added`/`-exited`) to the frontend.
+    let process_tracker = std::sync::Arc::new(
+        backend::process_tracker::registry::AgentProcessRegistry::new(Some(broker.clone())),
+    );
+    backend::process_tracker::registry::set_global(process_tracker.clone());
+    backend::process_tracker::registry::spawn_poller(process_tracker.clone());
+
     let state = AppState {
         auth_key: config.auth_key.clone(),
         version: version.clone(),
@@ -499,6 +508,7 @@ async fn main() {
         lan_discovery,
         local_web_url: local_web_url.clone(),
         http_client: reqwest::Client::new(),
+        process_tracker,
     };
 
     // 6. Emit WAVESRV-ESTART on stderr (exact format from cmd/server/main-server.go:617)

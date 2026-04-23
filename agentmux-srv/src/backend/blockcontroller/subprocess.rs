@@ -347,6 +347,27 @@ impl SubprocessController {
             "subprocess spawned"
         );
 
+        // Assign the child to this block's process tracker so every
+        // descendant it spawns (bg bash, dev servers, watchers, etc.)
+        // is caught by the per-platform tracking mechanism and surfaces
+        // in the swarm activity panel. No-op if the tracker global
+        // hasn't been initialized (tests) or on platforms without a
+        // real tracker impl yet (stub handle accepts silently).
+        // See `backend::process_tracker`.
+        if pid != 0 {
+            if let Some(registry) = crate::backend::process_tracker::registry::global() {
+                let tracker = registry.ensure_tracker(&self.block_id);
+                if let Err(e) = tracker.assign_process(pid) {
+                    tracing::warn!(
+                        block_id = %self.block_id,
+                        pid = pid,
+                        err = %e,
+                        "[process-tracker] assign_process failed"
+                    );
+                }
+            }
+        }
+
         // Store PID
         let (kill_tx, kill_rx) = tokio::sync::oneshot::channel::<bool>();
         {

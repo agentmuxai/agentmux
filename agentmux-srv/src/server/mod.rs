@@ -53,6 +53,12 @@ pub struct AppState {
     pub messagebus: Arc<MessageBus>,
     pub subagent_watcher: Arc<SubagentWatcher>,
     pub history_service: Arc<HistoryService>,
+    /// Tracks every OS-level process each agent CLI has spawned, via
+    /// platform-specific mechanisms (Windows Job Objects, Linux cgroups,
+    /// macOS process groups). Surfaces the tree to the swarm pane and
+    /// provides kill-tree on pane close / host exit.
+    /// See `backend::process_tracker` + `agentmux-ai/AGENT_SPAWNED_PROCESSES_SPEC.md`.
+    pub process_tracker: Arc<crate::backend::process_tracker::registry::AgentProcessRegistry>,
     pub lan_discovery: Option<Arc<LanDiscovery>>,
     /// Local HTTP URL of this instance (e.g. "http://127.0.0.1:PORT").
     /// Used for cross-instance inject forwarding and file registry entries.

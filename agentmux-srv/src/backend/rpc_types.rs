@@ -320,6 +320,13 @@ pub const COMMAND_AGENT_STATUS: &str = "agent.status";
 pub const COMMAND_AGENT_LIST: &str = "agent.list";
 pub const COMMAND_AGENT_OUTPUT: &str = "agent.output";
 pub const COMMAND_AGENT_STREAM: &str = "agent.stream";
+/// List every OS process currently tracked for a given agent block.
+/// Returns `AgentProcessListResult`. Consumed by the swarm activity
+/// panel. See `backend::process_tracker`.
+pub const COMMAND_AGENT_PROCESS_LIST: &str = "agent.process-list";
+/// List every block currently tracked (for the swarm aggregate view).
+/// Returns `AgentTrackedBlocksResult`.
+pub const COMMAND_AGENT_TRACKED_BLOCKS: &str = "agent.tracked-blocks";
 
 // App API Tier 2 — pane lifecycle commands
 pub const COMMAND_PANE_OPEN: &str = "pane.open";
@@ -747,6 +754,43 @@ pub struct AgentOutputResult {
     pub lines: Vec<String>,
     pub total_lines: usize,
     pub has_more: bool,
+}
+
+/// Request for `agent.process-list` — processes tracked under a given block.
+#[derive(Debug, Clone, Deserialize)]
+pub struct AgentProcessListCommand {
+    pub block_id: String,
+}
+
+/// One tracked process row. Mirrors `backend::process_tracker::TrackedProcess`
+/// — defined here so the RPC layer can expose it without leaking the
+/// internal module shape.
+#[derive(Debug, Clone, Serialize)]
+pub struct AgentProcessInfo {
+    pub pid: u32,
+    pub command: String,
+    pub rss_bytes: u64,
+    pub started_at_ms: u64,
+}
+
+/// Response from `agent.process-list`.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct AgentProcessListResult {
+    pub block_id: String,
+    /// Platform confidence level — `"high"`, `"best_effort"`, `"none"`.
+    /// Frontend shows a badge when anything less than `high`.
+    pub confidence: String,
+    pub processes: Vec<AgentProcessInfo>,
+}
+
+/// Response from `agent.tracked-blocks` — the list of block IDs for
+/// which a tracker exists. Swarm pane uses this to render per-agent
+/// groups.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct AgentTrackedBlocksResult {
+    pub block_ids: Vec<String>,
 }
 
 /// Request for blockfile:line_count — count total lines in a blockfile.

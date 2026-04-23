@@ -14,6 +14,7 @@ pub mod history;
 pub mod lan_discovery;
 pub mod messagebus;
 pub mod oref;
+pub mod process_tracker;
 pub mod reactive;
 pub mod readutil;
 pub mod rpc;
