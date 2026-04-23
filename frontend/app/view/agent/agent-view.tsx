@@ -23,6 +23,7 @@ import { useAgentCommands } from "./hooks/useAgentCommands";
 import { AgentControlBar } from "./components/AgentControlBar";
 import { AgentDocumentView } from "./components/AgentDocumentView";
 import { AgentFooter, AgentStatusLine } from "./components/AgentFooter";
+import { PendingMessagesPanel } from "./components/PendingMessagesPanel";
 import { AgentPicker, useForgeAgents } from "./components/AgentPicker";
 import { AgentSearchBar } from "./components/AgentSearchBar";
 import { AgentFocusedPanel } from "./components/AgentFocusedPanel";
@@ -152,6 +153,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
     // (history load / prepend), causing useAgentStream to rebuild its
     // nodeIdSet and nodeIndexMap.
     const stoppingAtom = agentAtoms().stoppingAtom;
+    const pendingMessagesAtom = agentAtoms().pendingMessagesAtom;
     useAgentStream({
         blockId: model.blockId,
         outputFormat: outputFormat(),
@@ -162,6 +164,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         turnTokensAtom: agentAtoms().turnTokensAtom,
         turnActiveAtom: agentAtoms().turnActiveAtom,
         stoppingAtom,
+        pendingMessagesAtom,
         enabled: true,
         documentVersion: history.documentVersion,
     });
@@ -190,6 +193,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         // included in scrollHeight. See SPEC_AGENT_PANE_FOLLOWUPS item #1.
         onSent: () => scrollToBottomFn?.(),
         stoppingAtom,
+        pendingMessagesAtom,
     });
 
     // Clear session stats and mark turn as active when the user sends a message.
@@ -394,6 +398,8 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 </div>
             </Show>
 
+            <PendingMessagesPanel pendingMessages={pendingMessagesAtom[0]} />
+
             <div class="agent-composer-region">
                 <Show when={commands.helpVisible()}>
                     <SlashHelpPanel
@@ -432,6 +438,18 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                     onTyping={() => scrollToBottomFn?.()}
                     onStopAgent={commands.stopAgent}
                     getCompletions={commands.completions}
+                    // Show "Send now" while a turn is running and there's
+                    // something to accelerate — pending queue items or
+                    // text waiting in the composer. On click: SIGINT +
+                    // submit the composer text (which tails the queue;
+                    // process_waiter drains it right after the kill).
+                    showSendNow={() =>
+                        agentAtoms().turnActiveAtom[0]() &&
+                        pendingMessagesAtom[0]().length > 0
+                    }
+                    onSendImmediately={() => {
+                        commands.stopAgent();
+                    }}
                 />
             </div>
             <AgentActionBar />

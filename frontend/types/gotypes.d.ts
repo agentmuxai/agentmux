@@ -1651,6 +1651,7 @@ declare global {
     type CommandAgentInputData = {
         blockid: string;
         message: string;
+        message_id?: string;
     };
 
     // wshrpc.CommandAgentStopData

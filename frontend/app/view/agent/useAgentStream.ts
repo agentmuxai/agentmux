@@ -7,13 +7,14 @@
  * the resulting DocumentNodes into SolidJS signals.
  */
 
-import { getFileSubject } from "@/app/store/wps";
+import { getFileSubject, waveEventSubscribe } from "@/app/store/wps";
+import * as WOS from "@/app/store/wos";
 import { base64ToArray } from "@/util/util";
 import { createEffect, onCleanup, onMount, untrack } from "solid-js";
 import { createTranslator } from "./providers/translator-factory";
+import type { PendingMessage, SignalPair } from "./state";
 import { ClaudeCodeStreamParser } from "./stream-parser";
-import type { SignalPair } from "./state";
-import type { DocumentNode, SessionStats, StreamingState, TurnTokens } from "./types";
+import type { DocumentNode, SessionStats, StreamingState, TurnTokens, UserMessageNode } from "./types";
 
 const OutputFileName = "output";
 
@@ -34,6 +35,13 @@ interface UseAgentStreamOpts {
      * session_end regardless of whether the row was appended.
      */
     stoppingAtom?: SignalPair<boolean>;
+    /**
+     * Pending queue shared with the composer's `sendMessage` path. On
+     * `agent-message-accepted` events, the hook removes the matching
+     * entry and promotes it to a `user_message` document node — this is
+     * the visible "accepted" transition for the user.
+     */
+    pendingMessagesAtom?: SignalPair<PendingMessage[]>;
     enabled: boolean;
     /**
      * Version signal bumped by external document mutations (e.g. history
@@ -57,6 +65,7 @@ export function useAgentStream({
     turnTokensAtom,
     turnActiveAtom,
     stoppingAtom,
+    pendingMessagesAtom,
     enabled,
     documentVersion,
 }: UseAgentStreamOpts): void {
@@ -226,6 +235,58 @@ export function useAgentStream({
                     stopFallbackTimer = null;
                 }
             });
+        }
+
+        // Subscribe to `agent-message-accepted`: when the backend picks
+        // up a queued message, promote the matching entry out of the
+        // pending zone into a real `user_message` document node. That
+        // color shift (amber → accent blue) is the user's visible
+        // "accepted" signal — the spec's core requirement.
+        if (pendingMessagesAtom) {
+            const [getPending, setPending] = pendingMessagesAtom;
+            const acceptedUnsub = waveEventSubscribe({
+                eventType: "agent-message-accepted",
+                scope: WOS.makeORef("block", blockId),
+                handler: (event) => {
+                    const data = (event as any)?.data;
+                    if (!data) return;
+                    const messageId: string | undefined = data.message_id;
+                    if (!messageId) return;
+                    const pending = getPending().find((m) => m.id === messageId);
+                    if (!pending) {
+                        // Accepted event for an id we don't know about.
+                        // Can legitimately happen if the entry was already
+                        // promoted or the pane was re-mounted mid-queue.
+                        return;
+                    }
+                    setPending((prev) => prev.filter((m) => m.id !== messageId));
+                    // A new turn is now running (either the first one,
+                    // which already flipped turnActive via handleSendMessage,
+                    // or one drained from the queue — in that case
+                    // turnActive went false on the *previous* session_end
+                    // and nothing else flips it back, leaving the status
+                    // line stuck on "Worked" with no running animation
+                    // even though the CLI is processing the next message).
+                    setTurnActive(true);
+                    // Append as a normal user_message so it joins the
+                    // conversation stream. Keeps the same id so the new
+                    // node ties back to the pending entry 1:1.
+                    const node: UserMessageNode = {
+                        type: "user_message",
+                        id: pending.id,
+                        message: pending.text,
+                        timestamp: Date.now(),
+                        collapsed: false,
+                        summary: "",
+                    };
+                    if (!nodeIdSet.has(node.id)) {
+                        nodeIdSet.add(node.id);
+                        pendingNew.push(node);
+                        scheduleFlush();
+                    }
+                },
+            });
+            onCleanup(() => acceptedUnsub());
         }
 
         // Rebuild dedup set + index map from whatever is currently in the
