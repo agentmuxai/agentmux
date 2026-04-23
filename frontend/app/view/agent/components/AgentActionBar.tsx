@@ -10,24 +10,6 @@ export const AgentActionBar = (): JSX.Element => {
     const [importing, setImporting] = createSignal(false);
     const [exporting, setExporting] = createSignal(false);
     const [importPayload, setImportPayload] = createSignal<ExportForgeAgentsResult | null>(null);
-    const [addingAgent, setAddingAgent] = createSignal(false);
-
-    async function handleAddAgent() {
-        if (addingAgent()) return;
-        setAddingAgent(true);
-        try {
-            await RpcApi.CreateForgeAgentCommand(TabRpcClient, {
-                name: "New Agent",
-                provider: "claude",
-                icon: "✦",
-                description: "",
-            });
-        } catch (err) {
-            console.error("AgentActionBar: failed to create agent", err);
-        } finally {
-            setAddingAgent(false);
-        }
-    }
 
     function handleImportClick() {
         if (importing()) return;
@@ -92,14 +74,6 @@ export const AgentActionBar = (): JSX.Element => {
     return (
         <>
             <div class="agent-action-bar">
-                <button
-                    class="agent-action-btn"
-                    classList={{ "agent-action-btn-disabled": addingAgent() }}
-                    onClick={handleAddAgent}
-                    title="Create a new forge agent"
-                >
-                    + Add Agent
-                </button>
                 <button
                     class="agent-action-btn"
                     classList={{ "agent-action-btn-disabled": importing() }}
