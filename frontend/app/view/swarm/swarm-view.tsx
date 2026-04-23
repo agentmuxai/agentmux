@@ -11,6 +11,8 @@ import type {
     AgentProcessInfo,
 } from "./swarm-model";
 import { openSubagentPane, isSubagentPaneOpen } from "@/app/store/subagent-pane-manager";
+import { RpcApi } from "@/app/store/rpc-api";
+import { TabRpcClient } from "@/app/store/rpc-util";
 import "./swarm-view.scss";
 
 export function SwarmView(props: ViewComponentProps<SwarmViewModel>): JSX.Element {
@@ -509,6 +511,26 @@ function SwarmActivity({ model }: { model: SwarmViewModel }): JSX.Element {
 }
 
 function SwarmActivityGroup({ group }: { group: AgentProcessGroup }): JSX.Element {
+    const [busy, setBusy] = createSignal(false);
+
+    const killTree = async () => {
+        if (busy()) return;
+        const count = group.processes.length;
+        const suffix = count === 1 ? "process" : "processes";
+        if (!window.confirm(`Kill all ${count} ${suffix} under this agent?`)) return;
+        setBusy(true);
+        try {
+            await RpcApi.AgentKillTreeCommand(TabRpcClient, { block_id: group.block_id });
+            // The ~2s poller refresh in the swarm model will clear the
+            // rows as the backend emits `agent:process-exited` for each
+            // killed member. No manual refresh call needed.
+        } catch {
+            // Silently tolerate — older backends without the RPC.
+        } finally {
+            setBusy(false);
+        }
+    };
+
     return (
         <div class="swarm-activity-group">
             <div class="swarm-activity-group-header">
@@ -537,6 +559,17 @@ function SwarmActivityGroup({ group }: { group: AgentProcessGroup }): JSX.Elemen
                     {group.processes.length}{" "}
                     {group.processes.length === 1 ? "process" : "processes"}
                 </span>
+                <Show when={group.processes.length > 0}>
+                    <button
+                        type="button"
+                        class="swarm-activity-kill-btn"
+                        title="Terminate every process under this agent"
+                        onClick={killTree}
+                        disabled={busy()}
+                    >
+                        Kill tree
+                    </button>
+                </Show>
             </div>
             <Show when={group.processes.length > 0}>
                 <table class="swarm-activity-table">
@@ -545,11 +578,14 @@ function SwarmActivityGroup({ group }: { group: AgentProcessGroup }): JSX.Elemen
                             <th>PID</th>
                             <th>Command</th>
                             <th>RSS</th>
+                            <th></th>
                         </tr>
                     </thead>
                     <tbody>
                         <For each={group.processes}>
-                            {(proc) => <SwarmActivityRow proc={proc} />}
+                            {(proc) => (
+                                <SwarmActivityRow blockId={group.block_id} proc={proc} />
+                            )}
                         </For>
                     </tbody>
                 </table>
@@ -558,7 +594,14 @@ function SwarmActivityGroup({ group }: { group: AgentProcessGroup }): JSX.Elemen
     );
 }
 
-function SwarmActivityRow({ proc }: { proc: AgentProcessInfo }): JSX.Element {
+function SwarmActivityRow({
+    blockId,
+    proc,
+}: {
+    blockId: string;
+    proc: AgentProcessInfo;
+}): JSX.Element {
+    const [busy, setBusy] = createSignal(false);
     // Full path is long; show basename in the cell, full path in the
     // hover title so the user can still read it without scroll.
     const shortCommand = () => {
@@ -571,6 +614,20 @@ function SwarmActivityRow({ proc }: { proc: AgentProcessInfo }): JSX.Element {
         const mb = proc.rss_bytes / 1024 / 1024;
         return mb < 1 ? `${(mb * 1024).toFixed(0)} KB` : `${mb.toFixed(1)} MB`;
     };
+    const killPid = async () => {
+        if (busy()) return;
+        setBusy(true);
+        try {
+            await RpcApi.AgentKillProcessCommand(TabRpcClient, {
+                block_id: blockId,
+                pid: proc.pid,
+            });
+        } catch {
+            // Silently tolerate — older backends without the RPC.
+        } finally {
+            setBusy(false);
+        }
+    };
     return (
         <tr class="swarm-activity-row">
             <td class="swarm-activity-pid">{proc.pid}</td>
@@ -578,6 +635,17 @@ function SwarmActivityRow({ proc }: { proc: AgentProcessInfo }): JSX.Element {
                 {shortCommand()}
             </td>
             <td class="swarm-activity-rss">{fmtRss()}</td>
+            <td class="swarm-activity-actions">
+                <button
+                    type="button"
+                    class="swarm-activity-kill-btn swarm-activity-kill-btn--row"
+                    title={`Terminate PID ${proc.pid}`}
+                    onClick={killPid}
+                    disabled={busy()}
+                >
+                    Kill
+                </button>
+            </td>
         </tr>
     );
 }
