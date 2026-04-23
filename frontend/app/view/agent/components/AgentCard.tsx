@@ -2,45 +2,44 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * AgentCard — a single entry in the agent picker list.
+ * AgentCard — a definition tile in the agent picker.
  *
- * PR 2 of specs/SPEC_CONSOLIDATE_FORGE_IDENTITY_INTO_AGENT_2026_04_13.md
- * adds the ⚙ Forge and 👤 Identity buttons that expand an inline
- * settings panel below the card.
- *
- * Step 3 of SPEC_AGENT_IDENTITY_RESTRUCTURE_2026_04_14.md adds:
- * - Slug displayed as small secondary line under the name.
- * - ✏ hover button for inline rename; Enter saves, Esc cancels.
- *
- * Clicking the card body still launches the agent. The buttons call
- * stopPropagation so they never accidentally trigger launch.
+ * After SPEC_AGENT_DEFINITIONS_MODAL_2026_04_23 the card is driven
+ * by the CLI catalog, not by the ForgeAgent row's user-facing fields.
+ * Title reads as a capability blurb ("Anthropic's coding agent") and
+ * the CLI brand name sits as a caption below, next to a badge for
+ * the primary context file. Clicking the body opens the Launch
+ * modal instead of launching directly.
  *
  * The card is rendered as a <div role="button"> rather than <button>
  * so nested action buttons are valid HTML (buttons can't contain
  * buttons).
  */
 
-import { createSignal, Show, type JSX } from "solid-js";
+import { createMemo, Show, type JSX } from "solid-js";
+import { getCliCatalogEntry } from "../defaults/cli-catalog";
 
 interface AgentCardProps {
     agent: ForgeAgent;
     launching: boolean;
     disabled: boolean;
+    /** Opens the AgentLaunchModal for this definition. */
     onLaunch: (agent: ForgeAgent) => void;
+    /** Opens the inline settings panel (Forge tab). */
     onOpenForge: (agent: ForgeAgent) => void;
-    onOpenIdentity: (agent: ForgeAgent) => void;
-    /** Called when the user commits a rename via the inline ✏ control. */
-    onRename: (agent: ForgeAgent, newName: string) => Promise<string | null>;
     /** Called when the user clicks the 🗑 delete button. Caller is
      *  responsible for confirmation + the `DeleteForgeAgent` RPC. */
     onDelete: (agent: ForgeAgent) => void;
 }
 
 export const AgentCard = (props: AgentCardProps): JSX.Element => {
-    const [renaming, setRenaming] = createSignal(false);
-    const [editName, setEditName] = createSignal("");
-    const [renameError, setRenameError] = createSignal<string | null>(null);
-    const [saving, setSaving] = createSignal(false);
+    const catalog = createMemo(() => getCliCatalogEntry(props.agent.provider));
+
+    const icon = () => props.agent.icon || catalog()?.icon || "•";
+    const title = () => catalog()?.blurb || props.agent.description || props.agent.name;
+    const caption = () => catalog()?.displayName || props.agent.name;
+    const contextBadge = () => catalog()?.primaryContextFile ?? "";
+    const popoverText = () => catalog()?.popoverMarkdown ?? props.agent.description ?? "";
 
     const stopAndRun = (fn: () => void) => (e: MouseEvent) => {
         e.stopPropagation();
@@ -48,64 +47,16 @@ export const AgentCard = (props: AgentCardProps): JSX.Element => {
     };
 
     const handleCardClick = () => {
-        if (!props.disabled && !renaming()) props.onLaunch(props.agent);
+        if (!props.disabled) props.onLaunch(props.agent);
     };
 
     const handleKeyDown = (e: KeyboardEvent) => {
-        if (props.disabled || renaming()) return;
+        if (props.disabled) return;
         if (e.key === "Enter" || e.key === " ") {
             e.preventDefault();
             props.onLaunch(props.agent);
         }
     };
-
-    const startRename = (e: MouseEvent) => {
-        e.stopPropagation();
-        setEditName(props.agent.name);
-        setRenameError(null);
-        setRenaming(true);
-    };
-
-    const cancelRename = (e?: MouseEvent) => {
-        e?.stopPropagation();
-        setRenaming(false);
-        setRenameError(null);
-    };
-
-    const commitRename = async (e?: MouseEvent) => {
-        e?.stopPropagation();
-        const newName = editName().trim();
-        if (!newName) {
-            setRenameError("Name cannot be empty");
-            return;
-        }
-        if (newName === props.agent.name) {
-            setRenaming(false);
-            return;
-        }
-        setSaving(true);
-        const err = await props.onRename(props.agent, newName);
-        setSaving(false);
-        if (err) {
-            setRenameError(err);
-        } else {
-            setRenaming(false);
-            setRenameError(null);
-        }
-    };
-
-    const handleInputKeyDown = (e: KeyboardEvent) => {
-        e.stopPropagation();
-        if (e.key === "Enter") {
-            e.preventDefault();
-            void commitRename();
-        } else if (e.key === "Escape") {
-            e.preventDefault();
-            cancelRename();
-        }
-    };
-
-    const slug = () => props.agent.slug || "";
 
     return (
         <div
@@ -116,101 +67,51 @@ export const AgentCard = (props: AgentCardProps): JSX.Element => {
             role="button"
             tabIndex={props.disabled ? -1 : 0}
             aria-disabled={props.disabled}
+            aria-label={`Launch ${caption()}`}
         >
-            <span class="agent-card-icon">{props.agent.icon}</span>
+            <span class="agent-card-icon">{icon()}</span>
             <span class="agent-card-info">
-                <Show
-                    when={renaming()}
-                    fallback={
-                        <>
-                            <span class="agent-card-name">{props.agent.name}</span>
-                            <Show when={slug()}>
-                                <span class="agent-card-slug">{slug()}</span>
-                            </Show>
-                            <Show when={props.agent.description}>
-                                <span class="agent-card-desc">{props.agent.description}</span>
-                            </Show>
-                        </>
-                    }
-                >
-                    <div class="agent-card-rename-row" onClick={(e) => e.stopPropagation()}>
-                        <input
-                            class={`agent-card-rename-input${renameError() ? " agent-card-rename-input--error" : ""}`}
-                            type="text"
-                            value={editName()}
-                            onInput={(e) => {
-                                setEditName(e.currentTarget.value);
-                                setRenameError(null);
-                            }}
-                            onKeyDown={handleInputKeyDown}
-                            disabled={saving()}
-                            ref={(el) => setTimeout(() => el?.focus(), 0)}
-                            aria-label="Rename agent"
-                        />
-                        <button
-                            class="agent-card-rename-btn agent-card-rename-btn--confirm"
-                            onClick={(e) => { e.stopPropagation(); void commitRename(); }}
-                            disabled={saving()}
-                            type="button"
-                            title="Save (Enter)"
-                        >
-                            {"\u2713"}
-                        </button>
-                        <button
-                            class="agent-card-rename-btn agent-card-rename-btn--cancel"
-                            onClick={cancelRename}
-                            disabled={saving()}
-                            type="button"
-                            title="Cancel (Esc)"
-                        >
-                            {"\u2715"}
-                        </button>
-                    </div>
-                    <Show when={renameError()}>
-                        <span class="agent-card-desc" style={{ color: "var(--error-color, #e55)" }}>{renameError()}</span>
+                <span class="agent-card-title">{title()}</span>
+                <span class="agent-card-caption">
+                    <span class="agent-card-cli-name">{caption()}</span>
+                    <Show when={contextBadge()}>
+                        <span class="agent-card-context-badge" title={`Reads ${contextBadge()} at startup`}>
+                            {contextBadge()}
+                        </span>
                     </Show>
-                </Show>
+                </span>
             </span>
-            <Show when={!renaming()}>
-                <div class="agent-card-actions">
+            <div class="agent-card-actions">
+                <Show when={popoverText()}>
                     <button
-                        class="agent-card-action-btn"
-                        onClick={startRename}
-                        title="Rename this agent"
-                        disabled={props.disabled}
+                        class="agent-card-action-btn agent-card-action-btn--info"
+                        onClick={stopAndRun(() => { /* popover handled by native title for now */ })}
+                        title={popoverText()}
                         type="button"
+                        aria-label={`About ${caption()}`}
                     >
-                        {"\u270F"}
+                        {"\u24D8"}
                     </button>
-                    <button
-                        class="agent-card-action-btn"
-                        onClick={stopAndRun(() => props.onOpenForge(props.agent))}
-                        title="Configure this agent in the Forge"
-                        disabled={props.disabled}
-                        type="button"
-                    >
-                        {"\u2699"}
-                    </button>
-                    <button
-                        class="agent-card-action-btn"
-                        onClick={stopAndRun(() => props.onOpenIdentity(props.agent))}
-                        title="Manage this agent's identity"
-                        disabled={props.disabled}
-                        type="button"
-                    >
-                        {"\uD83D\uDC64"}
-                    </button>
-                    <button
-                        class="agent-card-action-btn agent-card-action-btn--delete"
-                        onClick={stopAndRun(() => props.onDelete(props.agent))}
-                        title="Delete this agent"
-                        disabled={props.disabled}
-                        type="button"
-                    >
-                        {"\uD83D\uDDD1"}
-                    </button>
-                </div>
-            </Show>
+                </Show>
+                <button
+                    class="agent-card-action-btn"
+                    onClick={stopAndRun(() => props.onOpenForge(props.agent))}
+                    title="Configure this definition in the Forge"
+                    disabled={props.disabled}
+                    type="button"
+                >
+                    {"\u2699"}
+                </button>
+                <button
+                    class="agent-card-action-btn agent-card-action-btn--delete"
+                    onClick={stopAndRun(() => props.onDelete(props.agent))}
+                    title="Delete this definition"
+                    disabled={props.disabled}
+                    type="button"
+                >
+                    {"\uD83D\uDDD1"}
+                </button>
+            </div>
             <Show when={props.launching}>
                 <span class="agent-card-spinner" />
             </Show>

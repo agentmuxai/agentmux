@@ -85,4 +85,4 @@ function WaveModal(props: WaveModalProps): JSX.Element {
     );
 }
 
-export { WaveModal };
+export { Modal, ModalHeader, ModalContent, ModalFooter, WaveModal };
