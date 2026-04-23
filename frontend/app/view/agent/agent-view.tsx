@@ -26,6 +26,7 @@ import { AgentFooter, AgentStatusLine } from "./components/AgentFooter";
 import { AgentPicker, useForgeAgents } from "./components/AgentPicker";
 import { AgentSearchBar } from "./components/AgentSearchBar";
 import { AgentFocusedPanel } from "./components/AgentFocusedPanel";
+import { AgentActionBar } from "./components/AgentActionBar";
 import { SlashCommandPicker } from "./components/SlashCommandPicker";
 import { SlashHelpPanel } from "./components/SlashHelpPanel";
 import { BookmarksPanel } from "./components/BookmarksPanel";
@@ -433,6 +434,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                     getCompletions={commands.completions}
                 />
             </div>
+            <AgentActionBar />
         </div>
     );
 };

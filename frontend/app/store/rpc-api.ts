@@ -549,6 +549,16 @@ class RpcApiType {
         return client.rpcCall("importforgefromclaw", data, opts);
     }
 
+    // command "importforgeagents" [call]
+    ImportForgeAgentsCommand(client: RpcClient, data: CommandImportForgeAgentsData, opts?: RpcOpts): Promise<ImportForgeAgentsResult> {
+        return client.rpcCall("importforgeagents", data, opts);
+    }
+
+    // command "exportforgeagents" [call]
+    ExportForgeAgentsCommand(client: RpcClient, opts?: RpcOpts): Promise<ExportForgeAgentsResult> {
+        return client.rpcCall("exportforgeagents", {}, opts);
+    }
+
     // command "reseedforgeagents" [call]
     ReseedForgeAgentsCommand(client: RpcClient, opts?: RpcOpts): Promise<void> {
         return client.rpcCall("reseedforgeagents", {}, opts);
