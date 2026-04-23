@@ -2254,6 +2254,191 @@
         }
     }
 
+    // === Agent Action Bar (bottom buttons) ===
+    .agent-action-bar {
+        display: flex;
+        flex-direction: row;
+        gap: 4px;
+        padding: 4px 6px;
+        border-top: 1px solid var(--border-color);
+        background: color-mix(in srgb, var(--main-text-color) 3%, transparent);
+        flex-shrink: 0;
+
+        .agent-action-btn {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 4px;
+            height: 24px;
+            font-size: 12px;
+            color: var(--secondary-text-color);
+            background: transparent;
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            cursor: pointer;
+            white-space: nowrap;
+            transition: background 0.1s, color 0.1s;
+
+            &:hover {
+                background: color-mix(in srgb, var(--main-text-color) 8%, transparent);
+                color: var(--main-text-color);
+            }
+
+            &:active {
+                background: color-mix(in srgb, var(--main-text-color) 14%, transparent);
+            }
+
+            &.agent-action-btn-disabled {
+                opacity: 0.4;
+                cursor: default;
+                pointer-events: none;
+            }
+        }
+    }
+
+    // === Import Preview Modal ===
+    .agent-import-overlay {
+        position: absolute;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.5);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 200;
+
+        .agent-import-modal {
+            background: var(--main-bg-color);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            width: 420px;
+            max-width: 90vw;
+            max-height: 70vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+
+            .agent-import-modal-header {
+                padding: 12px 16px;
+                border-bottom: 1px solid var(--border-color);
+                font-size: 14px;
+                font-weight: 600;
+                color: var(--main-text-color);
+                flex-shrink: 0;
+            }
+
+            .agent-import-modal-body {
+                padding: 12px 16px;
+                overflow-y: auto;
+                flex: 1;
+
+                .agent-import-count {
+                    font-size: 12px;
+                    color: var(--secondary-text-color);
+                    margin-bottom: 8px;
+                }
+
+                .agent-import-list {
+                    display: flex;
+                    flex-direction: column;
+                    gap: 4px;
+                    margin-bottom: 10px;
+
+                    .agent-import-row {
+                        display: flex;
+                        align-items: center;
+                        gap: 6px;
+                        font-size: 12px;
+                        color: var(--main-text-color);
+                        padding: 2px 0;
+
+                        &.agent-import-row-skip {
+                            opacity: 0.5;
+                        }
+
+                        .agent-import-row-status {
+                            width: 16px;
+                            text-align: center;
+                            flex-shrink: 0;
+                        }
+
+                        .agent-import-row-icon {
+                            flex-shrink: 0;
+                        }
+
+                        .agent-import-row-name {
+                            font-weight: 500;
+                        }
+
+                        .agent-import-row-desc,
+                        .agent-import-row-skip-label {
+                            color: var(--secondary-text-color);
+                            font-size: 11px;
+                        }
+                    }
+                }
+
+                .agent-import-summary {
+                    font-size: 12px;
+                    color: var(--secondary-text-color);
+                    border-top: 1px solid var(--border-color);
+                    padding-top: 8px;
+                }
+
+                .agent-import-result {
+                    font-size: 13px;
+                    color: var(--main-text-color);
+                    text-align: center;
+                    padding: 20px 0;
+                }
+            }
+
+            .agent-import-modal-footer {
+                display: flex;
+                justify-content: flex-end;
+                gap: 8px;
+                padding: 10px 16px;
+                border-top: 1px solid var(--border-color);
+                flex-shrink: 0;
+
+                .agent-import-btn {
+                    height: 28px;
+                    padding: 0 14px;
+                    font-size: 12px;
+                    border-radius: 4px;
+                    cursor: pointer;
+                    border: 1px solid var(--border-color);
+                    transition: background 0.1s, color 0.1s;
+
+                    &.agent-import-btn-cancel {
+                        background: transparent;
+                        color: var(--secondary-text-color);
+
+                        &:hover {
+                            background: color-mix(in srgb, var(--main-text-color) 8%, transparent);
+                            color: var(--main-text-color);
+                        }
+                    }
+
+                    &.agent-import-btn-confirm {
+                        background: color-mix(in srgb, var(--main-text-color) 12%, transparent);
+                        color: var(--main-text-color);
+
+                        &:hover {
+                            background: color-mix(in srgb, var(--main-text-color) 20%, transparent);
+                        }
+
+                        &.agent-action-btn-disabled {
+                            opacity: 0.4;
+                            cursor: default;
+                            pointer-events: none;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // === Setup Wizard ===
     .setup-wizard {
         display: flex;

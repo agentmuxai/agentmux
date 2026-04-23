@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use chrono::Utc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::json;
@@ -11,7 +12,7 @@ use crate::backend::rpc_types::{
     COMMAND_LIST_FORGE_SKILLS, COMMAND_CREATE_FORGE_SKILL, COMMAND_UPDATE_FORGE_SKILL,
     COMMAND_DELETE_FORGE_SKILL,
     COMMAND_APPEND_FORGE_HISTORY, COMMAND_LIST_FORGE_HISTORY, COMMAND_SEARCH_FORGE_HISTORY,
-    COMMAND_IMPORT_FORGE_FROM_CLAW,
+    COMMAND_IMPORT_FORGE_FROM_CLAW, COMMAND_IMPORT_FORGE_AGENTS, COMMAND_EXPORT_FORGE_AGENTS,
     COMMAND_RESEED_FORGE_AGENTS,
     CommandCreateForgeAgentData, CommandUpdateForgeAgentData, CommandDeleteForgeAgentData,
     CommandGetForgeContentData, CommandSetForgeContentData, CommandGetAllForgeContentData,
@@ -19,6 +20,8 @@ use crate::backend::rpc_types::{
     CommandDeleteForgeSkillData,
     CommandAppendForgeHistoryData, CommandListForgeHistoryData, CommandSearchForgeHistoryData,
     CommandImportForgeFromClawData,
+    CommandImportForgeAgentsData, ImportForgeAgentsResult,
+    ExportForgeAgentsResult, ForgeAgentExport, ForgeSkillExport,
     // v6 identity / instance / fork
     COMMAND_LIST_IDENTITY_ACCOUNTS, COMMAND_GET_IDENTITY_ACCOUNT,
     COMMAND_UPSERT_IDENTITY_ACCOUNT, COMMAND_DELETE_IDENTITY_ACCOUNT,
@@ -580,6 +583,183 @@ pub fn register_forge_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     "created": report.created,
                     "skipped": report.skipped,
                 })))
+            })
+        }),
+    );
+
+    // importforgeagents — bulk import from JSON export format
+    let wstore_ifa = state.wstore.clone();
+    let broker_ifa = state.broker.clone();
+    engine.register_handler(
+        COMMAND_IMPORT_FORGE_AGENTS,
+        Box::new(move |data, _ctx| {
+            let wstore = wstore_ifa.clone();
+            let broker = broker_ifa.clone();
+            Box::pin(async move {
+                let cmd: CommandImportForgeAgentsData = serde_json::from_value(data)
+                    .map_err(|e| format!("importforgeagents: {e}"))?;
+
+                let now = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis() as i64;
+
+                let mut imported: Vec<String> = Vec::new();
+                let mut skipped: Vec<String> = Vec::new();
+                let mut failed: Vec<String> = Vec::new();
+
+                for agent_import in cmd.agents {
+                    // Check for existing agent by slug (id field from export)
+                    let existing = wstore.forge_list()
+                        .unwrap_or_default()
+                        .into_iter()
+                        .any(|a| a.slug == agent_import.id);
+
+                    if existing {
+                        skipped.push(agent_import.name.clone());
+                        continue;
+                    }
+
+                    let mut agent = ForgeAgent {
+                        id: uuid::Uuid::new_v4().to_string(),
+                        slug: agent_import.id.clone(),
+                        name: agent_import.name.clone(),
+                        icon: agent_import.icon.clone(),
+                        provider: agent_import.provider.clone(),
+                        description: agent_import.description.clone(),
+                        working_directory: agent_import.working_directory.clone(),
+                        shell: agent_import.shell.clone(),
+                        provider_flags: String::new(),
+                        auto_start: 0,
+                        restart_on_crash: if agent_import.restart_on_crash { 1 } else { 0 },
+                        idle_timeout_minutes: 0,
+                        created_at: now,
+                        agent_type: agent_import.agent_type.clone(),
+                        environment: agent_import.environment.clone(),
+                        agent_bus_id: agent_import.agent_bus_id.clone(),
+                        is_seeded: 0,
+                        accounts: String::new(),
+                        parent_id: String::new(),
+                        branch_label: String::new(),
+                    };
+
+                    if let Err(e) = wstore.forge_insert(&mut agent) {
+                        failed.push(format!("{}: {e}", agent_import.name));
+                        continue;
+                    }
+
+                    // Insert content types
+                    let mut content_ok = true;
+                    for (content_type, content) in &agent_import.content {
+                        let fc = ForgeContent {
+                            agent_id: agent.id.clone(),
+                            content_type: content_type.clone(),
+                            content: content.clone(),
+                            updated_at: now,
+                        };
+                        if let Err(e) = wstore.forge_set_content(&fc) {
+                            log::warn!("import: failed to set content for agent {}: {e}", agent.id);
+                            content_ok = false;
+                        }
+                    }
+
+                    // Insert skills
+                    let mut skills_ok = true;
+                    for skill_import in &agent_import.skills {
+                        let skill = ForgeSkill {
+                            id: uuid::Uuid::new_v4().to_string(),
+                            agent_id: agent.id.clone(),
+                            name: skill_import.name.clone(),
+                            trigger: skill_import.trigger.clone(),
+                            skill_type: skill_import.skill_type.clone(),
+                            description: skill_import.description.clone(),
+                            content: skill_import.content.clone(),
+                            created_at: now,
+                        };
+                        if let Err(e) = wstore.forge_insert_skill(&skill) {
+                            log::warn!("import: failed to insert skill '{}' for agent {}: {e}", skill.name, agent.id);
+                            skills_ok = false;
+                        }
+                    }
+
+                    if content_ok && skills_ok {
+                        imported.push(agent_import.name.clone());
+                    } else {
+                        failed.push(agent_import.name.clone());
+                    }
+                }
+
+                broker.publish(crate::backend::wps::WaveEvent {
+                    event: "forgeagents:changed".to_string(),
+                    scopes: vec![],
+                    sender: String::new(),
+                    persist: 0,
+                    data: None,
+                });
+
+                let result = ImportForgeAgentsResult { imported, skipped, failed };
+                Ok(Some(serde_json::to_value(&result).unwrap_or_default()))
+            })
+        }),
+    );
+
+    // exportforgeagents — export all forge agents with content and skills
+    let wstore_efa = state.wstore.clone();
+    engine.register_handler(
+        COMMAND_EXPORT_FORGE_AGENTS,
+        Box::new(move |_data, _ctx| {
+            let wstore = wstore_efa.clone();
+            Box::pin(async move {
+                let agents = wstore.forge_list()
+                    .map_err(|e| format!("exportforgeagents: list: {e}"))?;
+
+                let mut agent_exports: Vec<ForgeAgentExport> = Vec::new();
+
+                for agent in agents {
+                    let content_map = wstore.forge_get_all_content(&agent.id)
+                        .unwrap_or_default()
+                        .into_iter()
+                        .map(|fc| (fc.content_type, fc.content))
+                        .collect::<std::collections::HashMap<String, String>>();
+
+                    let skills = wstore.forge_list_skills(&agent.id)
+                        .unwrap_or_default()
+                        .into_iter()
+                        .map(|s| ForgeSkillExport {
+                            name: s.name,
+                            trigger: s.trigger,
+                            skill_type: s.skill_type,
+                            description: s.description,
+                            content: s.content,
+                        })
+                        .collect::<Vec<_>>();
+
+                    agent_exports.push(ForgeAgentExport {
+                        id: agent.slug.clone(),
+                        name: agent.name,
+                        icon: agent.icon,
+                        description: agent.description,
+                        provider: agent.provider,
+                        shell: agent.shell,
+                        working_directory: agent.working_directory,
+                        agent_bus_id: agent.agent_bus_id,
+                        agent_type: agent.agent_type,
+                        environment: agent.environment,
+                        restart_on_crash: agent.restart_on_crash != 0,
+                        content: content_map,
+                        skills,
+                    });
+                }
+
+                let exported_at = Utc::now().to_rfc3339();
+
+                let result = ExportForgeAgentsResult {
+                    version: 4,
+                    exported_at,
+                    source: "agentmux-export".to_string(),
+                    agents: agent_exports,
+                };
+                Ok(Some(serde_json::to_value(&result).unwrap_or_default()))
             })
         }),
     );
