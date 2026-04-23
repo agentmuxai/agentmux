@@ -166,15 +166,19 @@ fn register_agent_open(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 for key in provider.unset_env {
                     env_vars.insert(key.to_string(), json!(""));
                 }
+                // Use AGENTMUX_CONFIG_HOME so portable installs stay self-contained.
+                // Falls back to ~/.agentmux/config for non-portable installs.
+                let config_home = std::env::var("AGENTMUX_CONFIG_HOME")
+                    .unwrap_or_else(|_| format!("{}/.agentmux/config", home));
                 // Auth dir
-                let auth_dir = format!("{}/.agentmux/config/auth/{}", home, provider.auth_dir_name);
+                let auth_dir = format!("{}/auth/{}", config_home, provider.auth_dir_name);
                 let _ = std::fs::create_dir_all(&auth_dir);
                 env_vars.insert(provider.auth_config_dir_env_var.to_string(), json!(auth_dir));
                 for (k, v) in provider.auth_extra_env {
                     env_vars.insert(k.to_string(), json!(v));
                 }
                 // Agent identity
-                env_vars.insert("GH_CONFIG_DIR".to_string(), json!(format!("~/.agentmux/config/gh-{}", agent_slug)));
+                env_vars.insert("GH_CONFIG_DIR".to_string(), json!(format!("{}/gh-{}", config_home, agent_slug)));
                 env_vars.insert("AGENTMUX_AGENT_ID".to_string(), json!(&agent.name));
                 // Exit delay only for subprocess
                 if !is_persistent {
