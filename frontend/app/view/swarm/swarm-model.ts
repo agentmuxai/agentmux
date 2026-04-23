@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { BlockNodeModel } from "@/app/block/blocktypes";
+import { RpcApi } from "@/app/store/rpc-api";
+import { TabRpcClient } from "@/app/store/rpc-util";
 import { waveEventSubscribe } from "@/app/store/wps";
 import { callBackendService } from "@/store/wos";
 import { createSignal, type Accessor, type Setter } from "solid-js";
@@ -66,7 +68,39 @@ export interface HistorySession {
     messages: HistoryMessage[];
 }
 
-export type SwarmTab = "overview" | "history" | "search";
+export type SwarmTab = "overview" | "activity" | "history" | "search";
+
+// ── Activity tab types ──────────────────────────────────────────────────
+// Mirrors `backend::process_tracker::TrackedProcess` + RPC responses
+// `AgentProcessListResult` / `AgentTrackedBlocksResult`.
+
+/**
+ * Tracking confidence for a block's process tracker. `"high"` on
+ * Windows (Job Objects) and Linux (cgroups v2); `"best_effort"` on
+ * macOS (process groups — escape via `setsid` or launchd is possible);
+ * `"none"` when no tracker is registered.
+ */
+export type TrackingConfidence = "high" | "best_effort" | "none";
+
+export interface AgentProcessInfo {
+    pid: number;
+    command: string;
+    rss_bytes: number;
+    started_at_ms: number;
+}
+
+/**
+ * Per-block tracker snapshot. Keyed by block_id in the UI. The
+ * swarm Activity tab groups agents by block and renders their
+ * processes below each group header.
+ */
+export interface AgentProcessGroup {
+    block_id: string;
+    /** Display name for the agent (resolved from block meta at render time). */
+    agent_name?: string;
+    confidence: TrackingConfidence;
+    processes: AgentProcessInfo[];
+}
 
 // ── ViewModel ────────────────────────────────────────────────────────────
 
@@ -97,6 +131,12 @@ export class SwarmViewModel implements ViewModel {
     private _subagents = createSignal<ActiveSubagent[]>([]);
     subagentsAtom: Accessor<ActiveSubagent[]> = this._subagents[0];
     private setSubagents: Setter<ActiveSubagent[]> = this._subagents[1];
+
+    // Activity tab — per-block process-tracker groups. Populated by the
+    // swarm-side `refreshActivity()` call plus delta events.
+    private _activity = createSignal<AgentProcessGroup[]>([]);
+    activityAtom: Accessor<AgentProcessGroup[]> = this._activity[0];
+    private setActivity: Setter<AgentProcessGroup[]> = this._activity[1];
 
     // Search
     private _searchQuery = createSignal<string>("");
@@ -165,7 +205,62 @@ export class SwarmViewModel implements ViewModel {
             handler: () => this.loadSubagents(),
         });
         if (unsubCompleted) this.unsubs.push(unsubCompleted);
+
+        // Process tracker deltas — refresh the Activity tab on every
+        // add/exit. Cheap (one RPC returning a small JSON), debouncing
+        // isn't needed since events fire on a ~2s cadence from the
+        // backend poller.
+        const unsubProcAdded = waveEventSubscribe({
+            eventType: "agent:process-added",
+            handler: () => this.refreshActivity(),
+        });
+        if (unsubProcAdded) this.unsubs.push(unsubProcAdded);
+        const unsubProcExited = waveEventSubscribe({
+            eventType: "agent:process-exited",
+            handler: () => this.refreshActivity(),
+        });
+        if (unsubProcExited) this.unsubs.push(unsubProcExited);
+
+        // Seed the Activity tab on mount so the list is populated
+        // before the user clicks the tab (avoids empty-on-open flash).
+        this.refreshActivity();
     }
+
+    /**
+     * Refresh the Activity tab: list every tracked block, then fetch
+     * each block's process list + confidence level, then set the atom.
+     * Runs serially — block counts are small (a few agents at most).
+     */
+    refreshActivity = async (): Promise<void> => {
+        try {
+            const { block_ids } = await RpcApi.AgentTrackedBlocksCommand(TabRpcClient, {});
+            const groups: AgentProcessGroup[] = await Promise.all(
+                block_ids.map(async (block_id) => {
+                    try {
+                        const res = await RpcApi.AgentProcessListCommand(TabRpcClient, {
+                            block_id,
+                        });
+                        return {
+                            block_id: res.block_id,
+                            confidence: res.confidence,
+                            processes: res.processes,
+                        };
+                    } catch {
+                        return {
+                            block_id,
+                            confidence: "none" as TrackingConfidence,
+                            processes: [],
+                        };
+                    }
+                }),
+            );
+            this.setActivity(groups);
+        } catch {
+            // Silent fail — tracker global may not be initialized (tests),
+            // or backend may not have the new RPC yet (older version
+            // running in dev). Empty list is a safe default.
+        }
+    };
 
     loadOverview = async (): Promise<void> => {
         this.setLoading(true);

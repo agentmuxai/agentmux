@@ -2,7 +2,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { createSignal, For, Show, type JSX } from "solid-js";
-import type { SwarmViewModel, ActiveSubagent, HistorySessionMeta, HistoryMessage } from "./swarm-model";
+import type {
+    SwarmViewModel,
+    ActiveSubagent,
+    HistorySessionMeta,
+    HistoryMessage,
+    AgentProcessGroup,
+    AgentProcessInfo,
+} from "./swarm-model";
 import { openSubagentPane, isSubagentPaneOpen } from "@/app/store/subagent-pane-manager";
 import "./swarm-view.scss";
 
@@ -20,6 +27,15 @@ export function SwarmView(props: ViewComponentProps<SwarmViewModel>): JSX.Elemen
                         onClick={() => model.setTab("overview")}
                     >
                         Overview
+                    </button>
+                    <button
+                        class={`swarm-tab ${model.tabAtom() === "activity" ? "active" : ""}`}
+                        onClick={() => {
+                            model.setTab("activity");
+                            void model.refreshActivity();
+                        }}
+                    >
+                        Activity
                     </button>
                     <button
                         class={`swarm-tab ${model.tabAtom() === "history" ? "active" : ""}`}
@@ -42,6 +58,9 @@ export function SwarmView(props: ViewComponentProps<SwarmViewModel>): JSX.Elemen
             <div class="swarm-content">
                 <Show when={model.tabAtom() === "overview"}>
                     <SwarmOverview model={model} />
+                </Show>
+                <Show when={model.tabAtom() === "activity"}>
+                    <SwarmActivity model={model} />
                 </Show>
                 <Show when={model.tabAtom() === "history"}>
                     <SwarmHistory model={model} />
@@ -447,5 +466,118 @@ function SwarmSearch({ model }: { model: SwarmViewModel }): JSX.Element {
                 <div class="swarm-empty">No results found</div>
             </Show>
         </div>
+    );
+}
+
+// ── Activity Tab ────────────────────────────────────────────────────────
+// Read-only view of every OS process each agent has spawned — via the
+// per-platform tracker mechanism (Windows Job Objects today; Linux +
+// macOS in follow-up PRs). Driven by `agent.tracked-blocks` +
+// `agent.process-list` RPCs, refreshed on every `agent:process-added`
+// / `agent:process-exited` delta event.
+//
+// Kill / kill-tree buttons + close-time confirm are a later PR.
+// See `agentmux-ai/AGENT_SPAWNED_PROCESSES_SPEC.md`.
+
+function SwarmActivity({ model }: { model: SwarmViewModel }): JSX.Element {
+    const groups = () => model.activityAtom();
+    const totalProcesses = () =>
+        groups().reduce((sum, g) => sum + g.processes.length, 0);
+
+    return (
+        <div class="swarm-activity">
+            <Show when={groups().length === 0}>
+                <div class="swarm-empty">
+                    No active agents. Open an agent pane and run a turn —
+                    processes the agent spawns will appear here.
+                </div>
+            </Show>
+
+            <Show when={groups().length > 0}>
+                <div class="swarm-activity-summary">
+                    Tracking {groups().length}{" "}
+                    {groups().length === 1 ? "agent" : "agents"} ·{" "}
+                    {totalProcesses()}{" "}
+                    {totalProcesses() === 1 ? "process" : "processes"}
+                </div>
+                <For each={groups()}>
+                    {(group) => <SwarmActivityGroup group={group} />}
+                </For>
+            </Show>
+        </div>
+    );
+}
+
+function SwarmActivityGroup({ group }: { group: AgentProcessGroup }): JSX.Element {
+    return (
+        <div class="swarm-activity-group">
+            <div class="swarm-activity-group-header">
+                <span class="swarm-activity-group-id" title={group.block_id}>
+                    {group.block_id.slice(0, 8)}…
+                </span>
+                <Show when={group.confidence !== "high"}>
+                    <span
+                        class="swarm-activity-confidence"
+                        classList={{
+                            "swarm-activity-confidence--best-effort":
+                                group.confidence === "best_effort",
+                            "swarm-activity-confidence--none":
+                                group.confidence === "none",
+                        }}
+                        title={
+                            group.confidence === "best_effort"
+                                ? "Tracking is best-effort on this platform — descendants that call setsid or register with launchd can escape."
+                                : "No tracker registered — the process list may be empty even if the agent has spawned processes."
+                        }
+                    >
+                        ⚠ {group.confidence === "best_effort" ? "best-effort" : "untracked"}
+                    </span>
+                </Show>
+                <span class="swarm-activity-group-count">
+                    {group.processes.length}{" "}
+                    {group.processes.length === 1 ? "process" : "processes"}
+                </span>
+            </div>
+            <Show when={group.processes.length > 0}>
+                <table class="swarm-activity-table">
+                    <thead>
+                        <tr>
+                            <th>PID</th>
+                            <th>Command</th>
+                            <th>RSS</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <For each={group.processes}>
+                            {(proc) => <SwarmActivityRow proc={proc} />}
+                        </For>
+                    </tbody>
+                </table>
+            </Show>
+        </div>
+    );
+}
+
+function SwarmActivityRow({ proc }: { proc: AgentProcessInfo }): JSX.Element {
+    // Full path is long; show basename in the cell, full path in the
+    // hover title so the user can still read it without scroll.
+    const shortCommand = () => {
+        const c = proc.command || "(unknown)";
+        const slash = Math.max(c.lastIndexOf("/"), c.lastIndexOf("\\"));
+        return slash >= 0 ? c.slice(slash + 1) : c;
+    };
+    const fmtRss = () => {
+        if (proc.rss_bytes === 0) return "—";
+        const mb = proc.rss_bytes / 1024 / 1024;
+        return mb < 1 ? `${(mb * 1024).toFixed(0)} KB` : `${mb.toFixed(1)} MB`;
+    };
+    return (
+        <tr class="swarm-activity-row">
+            <td class="swarm-activity-pid">{proc.pid}</td>
+            <td class="swarm-activity-command" title={proc.command}>
+                {shortCommand()}
+            </td>
+            <td class="swarm-activity-rss">{fmtRss()}</td>
+        </tr>
     );
 }
