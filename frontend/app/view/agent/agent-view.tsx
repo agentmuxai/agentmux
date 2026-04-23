@@ -158,6 +158,49 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
     // platforms without a real tracker. See `hooks/useProcessCount.ts`.
     const processCount = useProcessCount(model.blockId);
 
+    // Pane-close confirm: when the user closes this pane with tracked
+    // processes still alive, intercept the layout's `onClose` with a
+    // confirm dialog. Accept → `agent.kill-tree` RPC then proceed with
+    // close. Cancel → abort, pane stays open. Zero tracked processes
+    // → original close path, no prompt.
+    //
+    // We wrap `nodeModel.onClose` in place rather than adding a new
+    // ViewModel hook — ViewModel has no `beforeClose` / `canClose`
+    // surface today, and threading one through would touch the layout
+    // + block-frame + pane-actions tree. A local wrapper is enough for
+    // v1 of this feature.
+    onMount(() => {
+        const original = model.nodeModel.onClose;
+        const wrapped = () => {
+            const count = processCount();
+            if (count <= 0) {
+                original?.();
+                return;
+            }
+            const suffix = count === 1 ? "process" : "processes";
+            const ok = window.confirm(
+                `This agent has ${count} ${suffix} still running.\n\n` +
+                `Close and kill them all?`
+            );
+            if (!ok) return;
+            // Kill first, then proceed with layout close. `finally` so
+            // the close still happens even if the kill RPC errors —
+            // we've already committed to closing, and the tracker's
+            // Drop impl in `delete_controller` will nuke what survived.
+            void RpcApi.AgentKillTreeCommand(TabRpcClient, {
+                block_id: model.blockId,
+            }).finally(() => original?.());
+        };
+        model.nodeModel.onClose = wrapped;
+        onCleanup(() => {
+            // Only restore if we're still the wrapper — avoids
+            // clobbering a later wrapper set by someone else.
+            if (model.nodeModel.onClose === wrapped) {
+                model.nodeModel.onClose = original;
+            }
+        });
+    });
+
     // Subscribe to subprocess output and parse into DocumentNodes.
     // `documentVersion` is bumped whenever we mutate the document externally
     // (history load / prepend), causing useAgentStream to rebuild its
