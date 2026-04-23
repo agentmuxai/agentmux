@@ -1844,6 +1844,73 @@ declare global {
         byte_count: number;
     };
 
+    // CommandImportForgeAgentsData
+    type ForgeSkillImport = {
+        name: string;
+        trigger: string;
+        skill_type: string;
+        description: string;
+        content: string;
+    };
+
+    type ForgeAgentImport = {
+        id: string;
+        name: string;
+        icon: string;
+        description: string;
+        provider: string;
+        shell: string;
+        working_directory: string;
+        agent_bus_id: string;
+        agent_type: string;
+        environment: string;
+        restart_on_crash: boolean;
+        content: Record<string, string>;
+        skills: ForgeSkillImport[];
+    };
+
+    type CommandImportForgeAgentsData = {
+        agents: ForgeAgentImport[];
+    };
+
+    type ImportForgeAgentsResult = {
+        imported: string[];
+        skipped: string[];
+        failed: string[];
+    };
+
+    // ExportForgeAgentsResult
+    type ForgeSkillExport = {
+        name: string;
+        trigger: string;
+        skill_type: string;
+        description: string;
+        content: string;
+    };
+
+    type ForgeAgentExport = {
+        id: string;
+        name: string;
+        icon: string;
+        description: string;
+        provider: string;
+        shell: string;
+        working_directory: string;
+        agent_bus_id: string;
+        agent_type: string;
+        environment: string;
+        restart_on_crash: boolean;
+        content: Record<string, string>;
+        skills: ForgeSkillExport[];
+    };
+
+    type ExportForgeAgentsResult = {
+        version: number;
+        exported_at: string;
+        source: string;
+        agents: ForgeAgentExport[];
+    };
+
 }
 
 export {}

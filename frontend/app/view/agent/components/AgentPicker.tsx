@@ -19,6 +19,7 @@ import type { AgentViewModel } from "../agent-model";
 import { AgentCard } from "./AgentCard";
 import { NewAgentCard } from "./NewAgentCard";
 import { AgentCardSettingsPanel, type SettingsTab } from "./AgentCardSettingsPanel";
+import { AgentActionBar } from "./AgentActionBar";
 
 // ── useForgeAgents hook ───────────────────────────────────────────────────────
 
@@ -219,6 +220,7 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                             />
                         </Show>
                     </div>
+                    <AgentActionBar />
                 </div>
             }
         >
@@ -278,6 +280,7 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                         </div>
                     </Show>
                 </div>
+                <AgentActionBar />
             </div>
         </Show>
     );
