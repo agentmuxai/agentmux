@@ -283,6 +283,10 @@ pub const COMMAND_SEARCH_FORGE_HISTORY: &str = "searchforgehistory";
 
 // Forge Import
 pub const COMMAND_IMPORT_FORGE_FROM_CLAW: &str = "importforgefromclaw";
+pub const COMMAND_IMPORT_FORGE_AGENTS: &str = "importforgeagents";
+
+// Forge Export
+pub const COMMAND_EXPORT_FORGE_AGENTS: &str = "exportforgeagents";
 
 // Forge Seed
 pub const COMMAND_RESEED_FORGE_AGENTS: &str = "reseedforgeagents";
@@ -1252,6 +1256,80 @@ pub struct CommandSearchForgeHistoryData {
 pub struct CommandImportForgeFromClawData {
     pub workspace_path: String,
     pub agent_name: String,
+}
+
+/// Input for importforgeagents
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommandImportForgeAgentsData {
+    pub agents: Vec<ForgeAgentImport>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ForgeAgentImport {
+    pub id: String,
+    pub name: String,
+    pub icon: String,
+    pub description: String,
+    pub provider: String,
+    pub shell: String,
+    pub working_directory: String,
+    pub agent_bus_id: String,
+    pub agent_type: String,
+    pub environment: String,
+    pub restart_on_crash: bool,
+    pub content: std::collections::HashMap<String, String>,
+    pub skills: Vec<ForgeSkillImport>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ForgeSkillImport {
+    pub name: String,
+    pub trigger: String,
+    pub skill_type: String,
+    pub description: String,
+    pub content: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImportForgeAgentsResult {
+    pub imported: Vec<String>,
+    pub skipped: Vec<String>,
+    pub failed: Vec<String>,
+}
+
+/// Response for exportforgeagents
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExportForgeAgentsResult {
+    pub version: u32,
+    pub exported_at: String,
+    pub source: String,
+    pub agents: Vec<ForgeAgentExport>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ForgeAgentExport {
+    pub id: String,
+    pub name: String,
+    pub icon: String,
+    pub description: String,
+    pub provider: String,
+    pub shell: String,
+    pub working_directory: String,
+    pub agent_bus_id: String,
+    pub agent_type: String,
+    pub environment: String,
+    pub restart_on_crash: bool,
+    pub content: std::collections::HashMap<String, String>,
+    pub skills: Vec<ForgeSkillExport>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ForgeSkillExport {
+    pub name: String,
+    pub trigger: String,
+    pub skill_type: String,
+    pub description: String,
+    pub content: String,
 }
 
 // ====================================================================
