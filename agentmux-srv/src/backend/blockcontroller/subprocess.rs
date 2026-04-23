@@ -60,6 +60,11 @@ pub struct SubprocessSpawnConfig {
     /// JSON field name in the CLI's init event that contains the session/thread ID.
     /// e.g. "session_id" (Claude/Gemini) or "thread_id" (Codex).
     pub session_id_field: String,
+    /// Optional client-supplied message id. Echoed back via the
+    /// `agent-message-accepted` event when this config transitions from
+    /// queued → running so the frontend can pair the event with a
+    /// pending `PendingMessage`. None means no feedback is emitted.
+    pub message_id: Option<String>,
 }
 
 /// Inner state protected by mutex.
@@ -194,6 +199,31 @@ impl SubprocessController {
         }
     }
 
+    /// Emit `agent-message-accepted` for the given config, if it carries
+    /// a `message_id`. Called from both `spawn_turn` (direct path) and
+    /// the `process_waiter` drain site (queue path). No-op if the config
+    /// has no id, or the broker isn't configured.
+    fn emit_message_accepted(&self, config: &SubprocessSpawnConfig) {
+        let Some(id) = config.message_id.as_deref() else { return };
+        let Some(ref broker) = self.broker else { return };
+        let event = super::super::wps::WaveEvent {
+            event: super::super::wps::EVENT_AGENT_MESSAGE_ACCEPTED.to_string(),
+            scopes: vec![format!("block:{}", self.block_id)],
+            sender: String::new(),
+            persist: 0,
+            data: Some(serde_json::json!({
+                "block_id": self.block_id,
+                "message_id": id,
+            })),
+        };
+        broker.publish(event);
+        tracing::info!(
+            block_id = %self.block_id,
+            message_id = %id,
+            "emitted agent-message-accepted"
+        );
+    }
+
     /// Get the stored session ID (if any).
     #[allow(dead_code)]
     pub fn session_id(&self) -> Option<String> {
@@ -218,6 +248,12 @@ impl SubprocessController {
             inner.pending_messages.push_back(config);
             return Ok(());
         }
+
+        // Direct-spawn path (queue was empty): emit the accepted event
+        // now so the frontend can promote its pending entry. The
+        // drain-from-queue path (in process_waiter) emits the same
+        // event just before calling spawn_turn recursively.
+        self.emit_message_accepted(&config);
 
         // Build CLI args, appending resume flag + session_id if we have one and the provider supports it
         let mut args = config.cli_args.clone();
@@ -871,6 +907,7 @@ mod tests {
             message: "test".to_string(),
             resume_flag: String::new(),
             session_id_field: "session_id".to_string(),
+            message_id: None,
         };
 
         let result = ctrl.spawn_turn(config);

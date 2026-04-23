@@ -42,6 +42,26 @@ export interface AgentAtoms {
      * confirmation that the interrupt landed.
      */
     stoppingAtom: SignalPair<boolean>;
+    /**
+     * Messages sent by the user that the backend hasn't picked up yet.
+     * Rendered in a pending zone between the conversation and the composer.
+     * When the backend emits `agent-message-accepted` for a given id, the
+     * frontend removes the entry from here and appends a normal `user_message`
+     * node to the conversation document — that color shift is the visual
+     * "accepted" signal. FIFO, matches the backend's `VecDeque` queue.
+     */
+    pendingMessagesAtom: SignalPair<PendingMessage[]>;
+}
+
+/**
+ * Message held on the frontend while waiting for the backend to pick it up.
+ * `id` is generated client-side and round-tripped through `AgentInputCommand`
+ * so the `agent-message-accepted` event can match it.
+ */
+export interface PendingMessage {
+    id: string;
+    text: string;
+    createdAt: number;
 }
 
 /**
@@ -74,5 +94,6 @@ export function createAgentAtoms(agentId: string): AgentAtoms {
         turnTokensAtom: createSignal<TurnTokens | null>(null),
         turnActiveAtom: createSignal<boolean>(false),
         stoppingAtom: createSignal<boolean>(false),
+        pendingMessagesAtom: createSignal<PendingMessage[]>([]),
     };
 }

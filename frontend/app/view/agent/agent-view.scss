@@ -2201,11 +2201,85 @@
         }
     }
 
+    // === Pending queue zone ===
+    // Rendered between the conversation document and the composer.
+    // Holds `user_message`s the frontend has sent but the backend
+    // hasn't yet picked up. When the backend emits
+    // `agent-message-accepted` for an id, `useAgentStream` removes
+    // the entry here and appends a matching `user_message` node to
+    // the conversation — color shifts from amber (pending) to accent
+    // blue (accepted), which is the user's visible "accepted" signal.
+    // See AGENT_PANE_QUEUED_MESSAGE_FEEDBACK_SPEC.md.
+    .agent-pending-zone {
+        border-top: 1px solid var(--border-color);
+        background: color-mix(in srgb, var(--warning-color) 6%, var(--main-bg-color));
+        padding: 4px 6px;
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+        max-height: 30vh;
+        overflow-y: auto;
+        font-size: 12px;
+        flex-shrink: 0;
+
+        .agent-pending-header {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            color: var(--warning-color);
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            opacity: 0.9;
+        }
+
+        .agent-pending-item {
+            padding: 3px 5px;
+            border-left: 2px solid var(--warning-color);
+            border-radius: 2px;
+            background: color-mix(in srgb, var(--warning-color) 4%, transparent);
+            pre {
+                margin: 0;
+                white-space: pre-wrap;
+                word-break: break-word;
+                color: color-mix(in srgb, var(--main-text-color) 80%, transparent);
+            }
+        }
+    }
+
     // === Agent Footer ===
     .agent-footer {
         border-top: 1px solid var(--border-color);
         background: color-mix(in srgb, var(--main-text-color) 3%, transparent);
         padding: 2px 2px;
+
+        // "Send now" — appears when there's something queued AND a turn
+        // is running. Clicking it fires SIGINT; the backend's queue
+        // drains the oldest pending message as soon as the killed
+        // process exits.
+        .agent-send-immediately-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            margin: 2px 2px 4px;
+            padding: 2px 8px;
+            background: color-mix(in srgb, var(--accent-color) 20%, transparent);
+            border: 1px solid var(--accent-color);
+            border-radius: 3px;
+            color: var(--accent-color);
+            font-family: inherit;
+            font-size: 11px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background 80ms ease;
+            &:hover {
+                background: color-mix(in srgb, var(--accent-color) 30%, transparent);
+            }
+            .agent-send-immediately-icon {
+                font-size: 12px;
+                line-height: 1;
+            }
+        }
 
         .agent-input-container {
             display: flex;
