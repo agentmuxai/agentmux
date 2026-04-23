@@ -9,7 +9,7 @@ import { createAgentAtoms } from "./state";
 import type { SubagentLinkNode } from "./types";
 import { openSubagentPane, isSubagentPaneOpen } from "@/app/store/subagent-pane-manager";
 import { useAgentStream } from "./useAgentStream";
-import { useLaunchLogs } from "./hooks/useLaunchLogs";
+import { useActivityLog } from "./hooks/useActivityLog";
 import { useSessionDigest } from "./hooks/useSessionDigest";
 import { useHistoryPagination } from "./hooks/useHistoryPagination";
 import { useAgentControllerStatus } from "./hooks/useAgentControllerStatus";
@@ -21,6 +21,7 @@ import { useSubagentEvents } from "./hooks/useSubagentEvents";
 import { useControllerStatusEvents } from "./hooks/useControllerStatusEvents";
 import { useAgentCommands } from "./hooks/useAgentCommands";
 import { AgentControlBar } from "./components/AgentControlBar";
+import { ActivityLogPanel } from "./components/ActivityLogPanel";
 import { AgentDocumentView } from "./components/AgentDocumentView";
 import { AgentFooter, AgentStatusLine } from "./components/AgentFooter";
 import { PendingMessagesPanel } from "./components/PendingMessagesPanel";
@@ -87,8 +88,11 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
 
     const agentAtoms = createMemo(() => createAgentAtoms(model.blockId));
 
-    // Log buffer — the LogFn is passed down to every hook that needs it.
-    const { lines: logLines, append: log } = useLaunchLogs();
+    // Activity log — collects per-session diagnostic entries from launch
+    // flow, subprocess lifecycle, slash commands, errors, etc. Rendered
+    // in the collapsible `<ActivityLogPanel>` above the composer.
+    // `log` is passed down to every hook whose signature takes a `LogFn`.
+    const { lines: logLines, append: log } = useActivityLog();
 
     // Startup sequence callback ref — assigned after commands + handleSendMessage
     // are defined (below), so the onReady callback can reference them.
@@ -377,7 +381,6 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
             <AgentDocumentView
                 documentAtom={agentAtoms().documentAtom}
                 documentStateAtom={agentAtoms().documentStateAtom}
-                logLines={logLines}
                 authUrl={status.authUrl}
                 authProviderId={provider()?.id ?? providerKey()}
                 onSubagentClick={handleSubagentClick}
@@ -398,6 +401,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 </div>
             </Show>
 
+            <ActivityLogPanel entries={logLines} />
             <PendingMessagesPanel pendingMessages={pendingMessagesAtom[0]} />
 
             <div class="agent-composer-region">

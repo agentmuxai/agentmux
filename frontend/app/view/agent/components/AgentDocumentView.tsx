@@ -4,12 +4,16 @@
 /**
  * AgentDocumentView — Renders the styled document as a list of DocumentNodes.
  * Routes each node type to the appropriate block component.
- * When no document nodes exist yet, shows accumulated log lines (terminal-style).
+ *
+ * Diagnostic / launch-flow logs used to render inline at the top of this
+ * scroll area. That moved to the dedicated `<ActivityLogPanel>` docked
+ * above the composer in the activity-log-panel PR — see
+ * `agentmux-ai/AGENT_PANE_ACTIVITY_LOG_SPEC.md`.
  */
 
 import { createEffect, createSignal, For, Show, type Accessor, type JSX, onCleanup } from "solid-js";
 import type { SignalPair } from "../state";
-import type { DocumentNode, DocumentState, LogLine, SubagentLinkNode } from "../types";
+import type { DocumentNode, DocumentState, SubagentLinkNode } from "../types";
 import type { ScrollCommand } from "../hooks/useScrollToNode";
 import { AgentMessageBlock } from "./AgentMessageBlock";
 import { MarkdownBlock } from "./MarkdownBlock";
@@ -21,7 +25,6 @@ import { ContextMenuModel } from "@/app/store/contextmenu";
 interface AgentDocumentViewProps {
     documentAtom: SignalPair<DocumentNode[]>;
     documentStateAtom: SignalPair<DocumentState>;
-    logLines: Accessor<LogLine[]>;
     authUrl?: Accessor<string | null>;
     /** Provider ID for the active auth flow — used when submitting a pasted auth code. */
     authProviderId?: string;
@@ -51,28 +54,13 @@ interface AgentDocumentViewProps {
     highlightNodeId?: Accessor<string | null>;
 }
 
-export const AgentDocumentView = ({ documentAtom, documentStateAtom, logLines, authUrl, authProviderId, onSubagentClick, onLoadOlder, loadingOlder, bookmarkedNodeIds, onBookmark, scrollCommand, scrollToBottomRef, highlightNodeId }: AgentDocumentViewProps): JSX.Element => {
+export const AgentDocumentView = ({ documentAtom, documentStateAtom, authUrl, authProviderId, onSubagentClick, onLoadOlder, loadingOlder, bookmarkedNodeIds, onBookmark, scrollCommand, scrollToBottomRef, highlightNodeId }: AgentDocumentViewProps): JSX.Element => {
     const [document] = documentAtom;
     const [documentState, setDocumentState] = documentStateAtom;
     let scrollRef!: HTMLDivElement;
     let autoScroll = true;
     // Guard against concurrent older-history fetches triggered by scroll
     let loadingOlderInFlight = false;
-
-    // Per-line expanded state for the startup log. Hovering any log line
-    // reveals a `NodeHoverStrip` with an expand button; clicking it
-    // toggles that line between single-line ellipsis truncation and
-    // full multi-line wrap. Keyed by stable LogLine.id so new lines
-    // arriving don't disturb already-expanded ones.
-    const [expandedLogIds, setExpandedLogIds] = createSignal<Set<string>>(new Set());
-    const toggleLogExpanded = (id: string) => {
-        setExpandedLogIds((prev) => {
-            const next = new Set(prev);
-            if (next.has(id)) next.delete(id);
-            else next.add(id);
-            return next;
-        });
-    };
 
     // Scroll to a node by its data-node-id attribute.
     // Exposed to the parent via scrollToNodeRef so BookmarksPanel can call it.
@@ -196,10 +184,11 @@ export const AgentDocumentView = ({ documentAtom, documentStateAtom, logLines, a
         }
     };
 
-    // Scroll when document or log signals change — throttled to one RAF per batch
+    // Scroll when the document changes — throttled to one RAF per batch.
+    // Activity log no longer lives in this scroll container, so its
+    // length is no longer a trigger (that panel scrolls internally).
     createEffect(() => {
         const _docLen = document().length;
-        const _logLen = logLines().length;
         if (scrollRafId == null) {
             scrollRafId = requestAnimationFrame(() => {
                 scrollRafId = null;
@@ -256,109 +245,83 @@ export const AgentDocumentView = ({ documentAtom, documentStateAtom, logLines, a
                 <div class="agent-history-loading">Loading older messages...</div>
             </Show>
 
-            {/* Log lines always shown at the top */}
-            <Show when={logLines().length > 0}>
-                <div class="agent-status-log">
-                    <For each={logLines()}>
-                        {(line) => {
-                            const isExpanded = () => expandedLogIds().has(line.id);
-                            return (
-                                <div
-                                    class="hover-strip-host agent-status-line"
-                                    classList={{
-                                        "agent-status-line--error": line.level === "error",
-                                        "agent-status-line--warn": line.level === "warn",
-                                        "agent-status-line--expanded": isExpanded(),
+            {/* OAuth code-paste box, rendered at top of conversation while a
+                login flow has a pending auth URL. Previously nested inside
+                `.agent-status-log` with the activity log lines; the log
+                moved to `<ActivityLogPanel>` above the composer, so the
+                auth box stays here on its own. */}
+            <Show when={authUrl?.()}>
+                {(url) => {
+                    const [pasteCode, setPasteCode] = createSignal("");
+                    const [pasting, setPasting] = createSignal(false);
+                    const [pasteResult, setPasteResult] = createSignal<string | null>(null);
+
+                    const handleSubmitCode = async () => {
+                        const code = pasteCode().trim();
+                        if (!code) return;
+                        setPasting(true);
+                        setPasteResult(null);
+                        try {
+                            const { getApi } = await import("@/app/store/global");
+                            await getApi().setProviderAuth(authProviderId ?? "claude", code);
+                            setPasteResult("Code accepted — waiting for confirmation...");
+                            setPasteCode("");
+                        } catch (err: any) {
+                            setPasteResult(`Error: ${err?.message ?? String(err)}`);
+                        } finally {
+                            setPasting(false);
+                        }
+                    };
+
+                    return (
+                        <div class="agent-auth-url-box">
+                            <div class="agent-auth-url-label">Open this URL to log in:</div>
+                            <div class="agent-auth-url-row">
+                                <span class="agent-auth-url-text">{url()}</span>
+                                <button
+                                    class="agent-auth-url-copy"
+                                    onClick={() => { import("@/util/clipboard").then(c => c.writeText(url())); }}
+                                    title="Copy URL"
+                                >
+                                    Copy
+                                </button>
+                            </div>
+                            <div class="agent-auth-paste-row">
+                                <input
+                                    class="agent-auth-paste-input"
+                                    type="text"
+                                    placeholder="Paste auth code from Anthropic..."
+                                    value={pasteCode()}
+                                    onInput={(e) => setPasteCode((e.target as HTMLInputElement).value)}
+                                    onKeyDown={(e) => { if (e.key === "Enter") void handleSubmitCode(); }}
+                                />
+                                <button
+                                    class="agent-auth-url-copy"
+                                    title="Paste from clipboard"
+                                    onClick={() => {
+                                        import("@/util/clipboard").then(c => c.readText()).then(text => {
+                                            if (text) setPasteCode(text.trim());
+                                        }).catch(() => {
+                                            setPasteResult("Could not read clipboard — paste manually");
+                                        });
                                     }}
                                 >
-                                    <span class="agent-status-line-text">
-                                        <span class="agent-status-tag">[{line.tag}]</span> {line.text}
-                                    </span>
-                                    <NodeHoverStrip
-                                        nodeId={line.id}
-                                        timestamp={line.timestamp}
-                                        canExpand
-                                        isExpanded={isExpanded()}
-                                        onExpand={() => toggleLogExpanded(line.id)}
-                                    />
-                                </div>
-                            );
-                        }}
-                    </For>
-                    <Show when={authUrl?.()}>
-                        {(url) => {
-                            const [pasteCode, setPasteCode] = createSignal("");
-                            const [pasting, setPasting] = createSignal(false);
-                            const [pasteResult, setPasteResult] = createSignal<string | null>(null);
-
-                            const handleSubmitCode = async () => {
-                                const code = pasteCode().trim();
-                                if (!code) return;
-                                setPasting(true);
-                                setPasteResult(null);
-                                try {
-                                    const { getApi } = await import("@/app/store/global");
-                                    await getApi().setProviderAuth(authProviderId ?? "claude", code);
-                                    setPasteResult("Code accepted — waiting for confirmation...");
-                                    setPasteCode("");
-                                } catch (err: any) {
-                                    setPasteResult(`Error: ${err?.message ?? String(err)}`);
-                                } finally {
-                                    setPasting(false);
-                                }
-                            };
-
-                            return (
-                                <div class="agent-auth-url-box">
-                                    <div class="agent-auth-url-label">Open this URL to log in:</div>
-                                    <div class="agent-auth-url-row">
-                                        <span class="agent-auth-url-text">{url()}</span>
-                                        <button
-                                            class="agent-auth-url-copy"
-                                            onClick={() => { import("@/util/clipboard").then(c => c.writeText(url())); }}
-                                            title="Copy URL"
-                                        >
-                                            Copy
-                                        </button>
-                                    </div>
-                                    <div class="agent-auth-paste-row">
-                                        <input
-                                            class="agent-auth-paste-input"
-                                            type="text"
-                                            placeholder="Paste auth code from Anthropic..."
-                                            value={pasteCode()}
-                                            onInput={(e) => setPasteCode((e.target as HTMLInputElement).value)}
-                                            onKeyDown={(e) => { if (e.key === "Enter") void handleSubmitCode(); }}
-                                        />
-                                        <button
-                                            class="agent-auth-url-copy"
-                                            title="Paste from clipboard"
-                                            onClick={() => {
-                                                import("@/util/clipboard").then(c => c.readText()).then(text => {
-                                                    if (text) setPasteCode(text.trim());
-                                                }).catch(() => {
-                                                    setPasteResult("Could not read clipboard — paste manually");
-                                                });
-                                            }}
-                                        >
-                                            Paste
-                                        </button>
-                                        <button
-                                            class="agent-auth-url-copy"
-                                            onClick={handleSubmitCode}
-                                            disabled={!pasteCode().trim() || pasting()}
-                                        >
-                                            {pasting() ? "..." : "Submit"}
-                                        </button>
-                                    </div>
-                                    <Show when={pasteResult()}>
-                                        <div class="agent-auth-paste-result">{pasteResult()}</div>
-                                    </Show>
-                                </div>
-                            );
-                        }}
-                    </Show>
-                </div>
+                                    Paste
+                                </button>
+                                <button
+                                    class="agent-auth-url-copy"
+                                    onClick={handleSubmitCode}
+                                    disabled={!pasteCode().trim() || pasting()}
+                                >
+                                    {pasting() ? "..." : "Submit"}
+                                </button>
+                            </div>
+                            <Show when={pasteResult()}>
+                                <div class="agent-auth-paste-result">{pasteResult()}</div>
+                            </Show>
+                        </div>
+                    );
+                }}
             </Show>
 
             {/* Document nodes render below log lines.
