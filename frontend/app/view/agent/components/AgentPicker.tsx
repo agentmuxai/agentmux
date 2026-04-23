@@ -90,9 +90,15 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                 setNodejsError(props.model.nodejsError);
                 props.model.nodejsError = null;
             }
+            // Close the modal only on the happy path. If
+            // `launchForgeAgent` ever throws (it currently logs-and-
+            // swallows, but that can change), letting the error
+            // propagate lets the modal's own try/catch surface the
+            // message to the user instead of the modal silently
+            // disappearing under a `finally` close.
+            setLaunchModalAgent(null);
         } finally {
             setLaunching(null);
-            setLaunchModalAgent(null);
         }
     };
 
