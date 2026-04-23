@@ -17,6 +17,7 @@ import { useInSessionSearch } from "./hooks/useInSessionSearch";
 import { useBookmarks } from "./hooks/useBookmarks";
 import { useScrollToNode } from "./hooks/useScrollToNode";
 import { useAgentKeyboard } from "./hooks/useAgentKeyboard";
+import { useProcessCount } from "./hooks/useProcessCount";
 import { useSubagentEvents } from "./hooks/useSubagentEvents";
 import { useControllerStatusEvents } from "./hooks/useControllerStatusEvents";
 import { useAgentCommands } from "./hooks/useAgentCommands";
@@ -35,7 +36,7 @@ import { BookmarksPanel } from "./components/BookmarksPanel";
 import { SessionDigestBanner } from "./components/SessionDigestBanner";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { getApi } from "@/app/store/global";
+import { createBlock, getApi } from "@/app/store/global";
 import { ContextMenuModel } from "@/app/store/contextmenu";
 import { parseAgentAccounts, loadAccounts } from "@/app/view/identity/identity-model";
 import { buildStartupPayload, resolveAccounts } from "./startup/buildStartupPayload";
@@ -151,6 +152,11 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         documentAtom: agentAtoms().documentAtom,
         log,
     });
+
+    // Count of OS processes currently tracked for this block — drives
+    // the `⚙ N` badge on the status line. Silently returns 0 on
+    // platforms without a real tracker. See `hooks/useProcessCount.ts`.
+    const processCount = useProcessCount(model.blockId);
 
     // Subscribe to subprocess output and parse into DocumentNodes.
     // `documentVersion` is bumped whenever we mutate the document externally
@@ -430,6 +436,16 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                     currentTool={agentAtoms().currentToolAtom[0]()}
                     sessionStats={agentAtoms().sessionStatsAtom[0]()}
                     turnTokens={agentAtoms().turnTokensAtom[0]()}
+                    processCount={processCount()}
+                    onProcessBadgeClick={() => {
+                        // Open the swarm pane so the user can see every
+                        // process (and eventually kill them). Idempotent
+                        // by design — createBlock doesn't dedupe, so
+                        // clicking repeatedly creates multiple panes.
+                        // Acceptable trade-off until we add a "focus if
+                        // already open" swarm-pane-manager entry point.
+                        createBlock({ meta: { view: "swarm" } });
+                    }}
                 />
                 <AgentControlBar
                     blockId={model.blockId}
