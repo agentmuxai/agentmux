@@ -31,6 +31,11 @@ pub const EVENT_INSTALL_PROGRESS: &str = "install_progress";
 pub const EVENT_CONFIG: &str = "config";
 #[allow(dead_code)]
 pub const EVENT_USER_INPUT: &str = "userinput";
+/// Fired by `SubprocessController::spawn_turn` when a user message is
+/// picked up (either direct-spawn or queue drain). Frontend uses this to
+/// promote pending `PendingMessage` entries into the conversation
+/// document. Payload: `{ block_id, message_id }`.
+pub const EVENT_AGENT_MESSAGE_ACCEPTED: &str = "agent-message-accepted";
 #[allow(dead_code)]
 pub const EVENT_ROUTE_GONE: &str = "route:gone";
 #[allow(dead_code)]

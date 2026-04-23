@@ -485,6 +485,13 @@ pub struct CommandAgentInputData {
     pub blockid: String,
     /// The user's JSON message string.
     pub message: String,
+    /// Optional client-supplied id. Echoed back via the
+    /// `agent-message-accepted` event when this message transitions
+    /// from queued to running so the frontend can match its pending
+    /// `PendingMessage` entry and promote it into the conversation
+    /// document. Absent for pre-existing callers; treated as no-id.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message_id: Option<String>,
 }
 
 /// Data for AgentStopCommand — stop the running subprocess.

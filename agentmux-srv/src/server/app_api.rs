@@ -396,6 +396,7 @@ fn register_agent_send(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         message: cmd.message,
                         resume_flag,
                         session_id_field,
+                        message_id: None,
                     };
                     subprocess_ctrl.spawn_turn(config)?;
                 } else {

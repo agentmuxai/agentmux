@@ -709,6 +709,7 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                     message: cmd.message,
                     resume_flag: "--resume".to_string(),
                     session_id_field: "session_id".to_string(),
+                    message_id: None,
                 };
                 subprocess_ctrl.spawn_turn(config)?;
                 Ok(None)
@@ -794,6 +795,7 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                         message: cmd.message,
                         resume_flag,
                         session_id_field,
+                        message_id: cmd.message_id,
                     };
                     subprocess_ctrl.spawn_turn(config)?;
                 } else {

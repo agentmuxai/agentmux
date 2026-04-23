@@ -67,6 +67,13 @@ export interface UseAgentCommandsOptions {
      * "⏹ Interrupted by user" chat row appended by `useAgentStream`.
      */
     stoppingAtom?: SignalPair<boolean>;
+    /**
+     * Queue of messages sent to the backend but not yet accepted.
+     * `sendMessage` appends here (instead of directly to the document)
+     * and `useAgentStream` removes entries on `agent-message-accepted`,
+     * promoting them into the document at that moment.
+     */
+    pendingMessagesAtom?: SignalPair<import("../state").PendingMessage[]>;
 }
 
 export interface UseAgentCommands {
@@ -124,7 +131,6 @@ export interface UseAgentCommands {
 // `commands/providers/`, not an edit here.
 
 export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommands {
-    const [, setDocument] = opts.documentAtom;
 
     // Registry is rebuilt whenever the provider changes so
     // provider-scoped commands swap in/out. Global commands are
@@ -201,35 +207,38 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
     };
 
     const sendMessage = async (message: string): Promise<void> => {
-        setDocument((prev) => [
-            ...prev,
-            {
-                type: "user_message",
-                id: `user_${Date.now()}`,
-                message,
-                timestamp: Date.now(),
-                collapsed: false,
-                summary: "",
-            } as DocumentNode,
-        ]);
-
-        // Defer the scroll-to-bottom by one animation frame so the
-        // user_message node has a chance to mount in the DOM before the
-        // scroll math runs. Calling it synchronously lands the scroll
-        // ABOVE the new message because scrollHeight doesn't include the
-        // unmounted node yet. See SPEC_AGENT_PANE_FOLLOWUPS item #1.
-        if (opts.onSent) {
-            requestAnimationFrame(() => opts.onSent?.());
-        }
-
-        // Intercept slash commands via the registry. Claude runs in
-        // stream-json mode so the CLI doesn't see these as control
-        // commands — we handle them client-side. Unknown `/foo` falls
-        // through to AgentInputCommand via the "passthrough" outcome.
+        // Intercept slash commands FIRST — some (/clear, /login) are
+        // handled client-side and must not touch the backend queue at
+        // all. Unknown `/foo` falls through to a real turn.
         const trimmed = message.trim();
         if (trimmed.startsWith("/")) {
             const outcome = await dispatchSlashCommand(trimmed, registry(), buildCommandContext());
             if (outcome.kind === "handled") return;
+        }
+
+        // Stable id shared between the pending entry and the backend's
+        // `message_id` field on `AgentInputCommand`. The backend echoes
+        // it via `agent-message-accepted` when it picks up this config,
+        // and `useAgentStream` uses that to promote the pending entry
+        // into a real `user_message` document node.
+        const messageId = `user_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+
+        // Append to the pending zone. No direct write to `document` —
+        // the acceptance event promotes it. This is the architecture
+        // from AGENT_PANE_QUEUED_MESSAGE_FEEDBACK_SPEC.md (two lists,
+        // migration on accept).
+        const setPending = opts.pendingMessagesAtom?.[1];
+        if (setPending) {
+            setPending((prev) => [
+                ...prev,
+                { id: messageId, text: message, createdAt: Date.now() },
+            ]);
+        }
+
+        // Defer the scroll-to-bottom by one animation frame so the
+        // pending row has a chance to mount before the scroll math runs.
+        if (opts.onSent) {
+            requestAnimationFrame(() => opts.onSent?.());
         }
 
         // Apply runtime args (permission mode, model, effort) before this turn.
@@ -253,8 +262,13 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         RpcApi.AgentInputCommand(TabRpcClient, {
             blockid: opts.blockId,
             message,
+            message_id: messageId,
         }).catch((err) => {
             opts.log("error", err?.message ?? String(err), "error");
+            // RPC outright failed — remove the pending entry so the user
+            // doesn't see a ghost row for a message the backend never
+            // received. Log already surfaces the error elsewhere.
+            setPending?.((prev) => prev.filter((m) => m.id !== messageId));
         });
     };
 
