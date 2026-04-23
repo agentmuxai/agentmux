@@ -362,8 +362,13 @@ export class AgentViewModel implements ViewModel {
             envVars["CLAUDE_CODE_EXIT_AFTER_STOP_DELAY"] = "30000";
         }
 
-        // Build config files to write via backend RPC
-        const configFiles = buildConfigFiles(contentMap, skills, agent);
+        // Build config files to write via backend RPC. Pass the
+        // resolved instance name so the injected agentmux MCP server
+        // advertises the same identity the shell / git / pane title
+        // already use — otherwise inter-agent messaging routes on
+        // the definition name while everything else advertises the
+        // instance name (caught by codex on PR #504).
+        const configFiles = buildConfigFiles(contentMap, skills, agent, instanceName);
 
         const oref = WOS.makeORef("block", this.blockId);
         const blockId = this.blockId;
@@ -497,15 +502,20 @@ function resolveCliDir(version: string, providerId: string): string {
 function buildConfigFiles(
     contentMap: Record<string, string>,
     skills: ForgeSkill[] = [],
-    agent?: ForgeAgent
+    agent?: ForgeAgent,
+    instanceName?: string,
 ): AgentConfigFile[] {
     const files: AgentConfigFile[] = [];
 
-    // Template variables for {{}} substitution
+    // Template variables for {{}} substitution. `AGENT` / `AGENT_DISPLAY`
+    // prefer the resolved instance name so templates that reference
+    // the agent identity (CLAUDE.md, skills) match what the shell
+    // and MCP advertise for this run.
     const templateVars: Record<string, string> = {};
     if (agent) {
-        templateVars["AGENT"] = agent.name;
-        templateVars["AGENT_DISPLAY"] = agent.name;
+        const displayName = instanceName || agent.name;
+        templateVars["AGENT"] = displayName;
+        templateVars["AGENT_DISPLAY"] = displayName;
         templateVars["AGENT_SLUG"] = agent.slug || agent.name.toLowerCase().replace(/[^a-z0-9-_]/g, "-");
         templateVars["WORKING_DIR"] = agent.working_directory || "";
         templateVars["AGENT_ID"] = agent.id;
@@ -555,7 +565,7 @@ function buildConfigFiles(
     }
 
     // Build .mcp.json: auto-inject AgentMux MCP + merge user-provided config
-    const mcpConfig = buildMcpConfig(contentMap["mcp"], agent);
+    const mcpConfig = buildMcpConfig(contentMap["mcp"], agent, instanceName);
     if (mcpConfig) {
         files.push({ path: ".mcp.json", content: mcpConfig });
     }
@@ -576,8 +586,16 @@ function expandTemplate(content: string, vars: Record<string, string>): string {
  * Build .mcp.json content with auto-injected AgentMux MCP server.
  * Merges with user-provided MCP config if present.
  */
-function buildMcpConfig(userMcpContent: string | undefined, agent?: ForgeAgent): string | null {
-    // Auto-inject AgentMux MCP server for inter-agent messaging
+function buildMcpConfig(
+    userMcpContent: string | undefined,
+    agent?: ForgeAgent,
+    instanceName?: string,
+): string | null {
+    // Auto-inject AgentMux MCP server for inter-agent messaging.
+    // `AGENTMUX_AGENT_ID` must match the shell's / pane title's
+    // `AGENTMUX_AGENT_ID` (the resolved instance name), otherwise
+    // inter-agent routing targets the definition name while
+    // everything else advertises the instance name.
     const agentMuxServer: Record<string, any> = {
         type: "stdio",
         command: "agentmux-mcp",
@@ -585,7 +603,7 @@ function buildMcpConfig(userMcpContent: string | undefined, agent?: ForgeAgent):
         env: {} as Record<string, string>,
     };
     if (agent) {
-        agentMuxServer.env["AGENTMUX_AGENT_ID"] = agent.name;
+        agentMuxServer.env["AGENTMUX_AGENT_ID"] = instanceName || agent.name;
         if (agent.agent_bus_id) {
             agentMuxServer.env["AGENTMUX_AGENT_BUS_ID"] = agent.agent_bus_id;
         }
