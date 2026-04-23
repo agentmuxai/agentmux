@@ -141,15 +141,93 @@
         margin-bottom: 2px;
     }
 
-    .agent-status-log {
-        padding: 2px 4px;
+    // === Activity log panel ===
+    // Collapsible log of per-session diagnostic entries (launch flow,
+    // subprocess lifecycle, slash-command outcomes, errors). Docked
+    // above the composer. Replaces the old always-visible
+    // `.agent-status-log` block that lived at the top of the
+    // conversation. Auto-opens when a new error arrives; otherwise
+    // default-collapsed with a one-line preview of the most recent entry.
+    // See `agentmux-ai/AGENT_PANE_ACTIVITY_LOG_SPEC.md`.
+    .agent-activity-log {
+        border-top: 1px solid var(--border-color);
         font-family: var(--fixed-font);
         font-size: 12px;
         line-height: 1.3;
-        border-bottom: 1px solid var(--border-color);
-        margin-bottom: 1px;
         user-select: text;
-        cursor: text;
+        flex-shrink: 0;
+
+        &--has-error .agent-activity-log-header {
+            color: var(--error-color);
+        }
+        &--has-warn .agent-activity-log-header {
+            color: var(--warning-color);
+        }
+
+        .agent-activity-log-header {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            width: 100%;
+            padding: 2px 6px;
+            background: transparent;
+            border: none;
+            color: var(--secondary-text-color);
+            font: inherit;
+            text-align: left;
+            cursor: pointer;
+            transition: background 80ms ease;
+
+            &:hover {
+                background: color-mix(in srgb, var(--main-text-color) 4%, transparent);
+            }
+        }
+
+        .agent-activity-log-chevron {
+            display: inline-block;
+            width: 10px;
+            text-align: center;
+            opacity: 0.7;
+        }
+
+        .agent-activity-log-label {
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            opacity: 0.8;
+            flex-shrink: 0;
+        }
+
+        .agent-activity-log-preview {
+            flex: 1;
+            min-width: 0;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            overflow: hidden;
+            white-space: nowrap;
+            text-overflow: ellipsis;
+            opacity: 0.65;
+        }
+
+        .agent-activity-log-preview-text {
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .agent-activity-log-count {
+            font-size: 10px;
+            opacity: 0.5;
+            flex-shrink: 0;
+            font-variant-numeric: tabular-nums;
+        }
+
+        .agent-activity-log-body {
+            max-height: 30vh;
+            overflow-y: auto;
+            padding: 2px 4px 4px;
+            border-top: 1px solid var(--border-color);
+        }
     }
 
     .agent-status-line {

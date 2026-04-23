@@ -25,7 +25,7 @@
  * Dependencies (passed as options):
  *   - blockId   — the block this status belongs to
  *   - provider  — accessor returning the current provider definition
- *   - log       — LogFn from useLaunchLogs (or any compatible)
+ *   - log       — LogFn from useActivityLog (or any compatible)
  *
  * `setAuthUrl` is exposed alongside the accessor because the slash-command
  * `/login` handler in agent-view.tsx needs to manually set the OAuth URL
