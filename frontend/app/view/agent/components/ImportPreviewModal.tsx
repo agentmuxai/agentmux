@@ -1,7 +1,7 @@
 // Copyright 2024-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { createMemo, createSignal, For, onMount, Show, type JSX } from "solid-js";
+import { createEffect, createMemo, createSignal, For, Show, type JSX } from "solid-js";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 
@@ -15,7 +15,8 @@ export const ImportPreviewModal = (props: ImportPreviewModalProps): JSX.Element 
     const [importing, setImporting] = createSignal(false);
     const [resultMsg, setResultMsg] = createSignal<string | null>(null);
 
-    onMount(async () => {
+    createEffect(async () => {
+        if (props.payload == null) return;
         try {
             const agents = await RpcApi.ListForgeAgentsCommand(TabRpcClient);
             setExistingSlugs(new Set((agents ?? []).map((a) => a.slug)));

@@ -685,7 +685,7 @@ pub fn register_forge_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     if content_ok && skills_ok {
                         imported.push(agent_import.name.clone());
                     } else {
-                        skipped.push(agent_import.name.clone());
+                        failed.push(agent_import.name.clone());
                     }
                 }
 
