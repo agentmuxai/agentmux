@@ -974,90 +974,148 @@
         flex-direction: column;
         flex-shrink: 0;
 
-        // Status line rendered above the control bar.
-        .agent-status-line {
-            min-height: 14px;
-            font-size: 10px;
-            color: var(--secondary-text-color);
-            opacity: 0.6;
-            padding: 2px 8px;
-            display: flex;
-            align-items: center;
-            gap: 5px;
-            font-family: var(--fixed-font, monospace);
+        // NOTE: the `.agent-status-line` used to live here scoped to
+        // `.agent-composer-region`, but PR #502 hoisted it above the
+        // activity log so long agent output can't push it off-screen.
+        // The rules now live at `.agent-view` top-level (below).
+    }
 
-            &.agent-status-line--loading {
-                color: #8cc8ff;
-                opacity: 1;
-                width: 100%;
+    // Status line: shown between the conversation document and the
+    // activity log while the agent is thinking, or between turns to
+    // display run stats. Sits outside `.agent-composer-region` so it
+    // stays visible regardless of how much log/document content is
+    // stacked above the composer. Scoped as a direct child so the
+    // rules don't collide with the tool-row `.agent-status-line`
+    // (which lives deeper inside `AgentDocumentView`).
+    > .agent-status-line {
+        min-height: 14px;
+        font-size: 10px;
+        color: var(--secondary-text-color);
+        opacity: 0.6;
+        padding: 2px 8px;
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        font-family: var(--fixed-font, monospace);
 
-                .agent-status-left {
-                    flex: 1;
-                    min-width: 0;
-                    overflow: hidden;
-                    text-overflow: ellipsis;
-                    white-space: nowrap;
-                }
+        &.agent-status-line--loading {
+            color: #8cc8ff;
+            opacity: 1;
+            width: 100%;
 
-                .agent-status-right {
-                    flex-shrink: 0;
-                    opacity: 0.7;
-                    margin-left: 8px;
-                }
+            // Spotlight sweep overlay — an off-color (soft magenta)
+            // highlight that glides across the row and bounces back
+            // while the agent is working. Sits on top of the baseline
+            // color but behind the text/dot via z-index. Uses
+            // `mix-blend-mode: screen` so it reads as light over the
+            // dark theme without washing out text on light themes.
+            position: relative;
+            overflow: hidden;
+            isolation: isolate;
+
+            &::before {
+                content: "";
+                position: absolute;
+                top: 0;
+                bottom: 0;
+                left: 0;
+                width: 40%;
+                pointer-events: none;
+                background: linear-gradient(
+                    90deg,
+                    transparent 0%,
+                    rgba(224, 170, 255, 0.10) 35%,
+                    rgba(224, 170, 255, 0.30) 50%,
+                    rgba(224, 170, 255, 0.10) 65%,
+                    transparent 100%
+                );
+                mix-blend-mode: screen;
+                animation: agent-spotlight-sweep 2.8s ease-in-out infinite alternate;
+                z-index: 0;
+                will-change: transform;
             }
 
-            &.agent-status-line--stats {
-                opacity: 0.5;
-                gap: 0;
+            .agent-spinner-dot,
+            .agent-status-left,
+            .agent-status-right {
+                position: relative;
+                z-index: 1;
+            }
+
+            .agent-status-left {
+                flex: 1;
+                min-width: 0;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+            }
+
+            .agent-status-right {
+                flex-shrink: 0;
+                opacity: 0.7;
+                margin-left: 8px;
             }
         }
 
-        .agent-spinner-dot {
-            width: 7px;
-            height: 7px;
-            border-radius: 50%;
-            background: #8cc8ff;
-            flex-shrink: 0;
-            animation: agent-pulse 1.2s ease-in-out infinite;
+        &.agent-status-line--stats {
+            opacity: 0.5;
+            gap: 0;
+        }
+    }
+
+    .agent-spinner-dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: #8cc8ff;
+        flex-shrink: 0;
+        animation: agent-pulse 1.2s ease-in-out infinite;
+        // Subtle halo that breathes with the pulse — gives the dot
+        // a little more life without interfering with the spotlight.
+        box-shadow: 0 0 6px rgba(140, 200, 255, 0.55);
+    }
+
+    @keyframes agent-pulse {
+        0%, 100% { opacity: 0.4; transform: scale(0.85); }
+        50% { opacity: 1; transform: scale(1.3); }
+    }
+
+    @keyframes agent-spotlight-sweep {
+        0%   { transform: translateX(-100%); }
+        100% { transform: translateX(250%); }
+    }
+
+    // Process-count badge: visible whenever the agent has at least
+    // one tracked OS process. Click opens the swarm Activity tab.
+    // See `hooks/useProcessCount.ts` + PR #497 backend.
+    .agent-process-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 3px;
+        margin-left: 8px;
+        padding: 1px 6px;
+        background: color-mix(in srgb, var(--accent-color) 12%, transparent);
+        border: 1px solid color-mix(in srgb, var(--accent-color) 40%, transparent);
+        border-radius: 10px;
+        color: var(--accent-color);
+        font-family: inherit;
+        font-size: 10px;
+        font-weight: 500;
+        cursor: pointer;
+        transition: background 80ms ease, border-color 80ms ease;
+
+        &:hover {
+            background: color-mix(in srgb, var(--accent-color) 22%, transparent);
+            border-color: var(--accent-color);
         }
 
-        @keyframes agent-pulse {
-            0%, 100% { opacity: 0.4; transform: scale(0.85); }
-            50% { opacity: 1; transform: scale(1.3); }
+        .agent-process-badge-icon {
+            font-size: 11px;
+            line-height: 1;
         }
 
-        // Process-count badge: visible whenever the agent has at least
-        // one tracked OS process. Click opens the swarm Activity tab.
-        // See `hooks/useProcessCount.ts` + PR #497 backend.
-        .agent-process-badge {
-            display: inline-flex;
-            align-items: center;
-            gap: 3px;
-            margin-left: 8px;
-            padding: 1px 6px;
-            background: color-mix(in srgb, var(--accent-color) 12%, transparent);
-            border: 1px solid color-mix(in srgb, var(--accent-color) 40%, transparent);
-            border-radius: 10px;
-            color: var(--accent-color);
-            font-family: inherit;
-            font-size: 10px;
-            font-weight: 500;
-            cursor: pointer;
-            transition: background 80ms ease, border-color 80ms ease;
-
-            &:hover {
-                background: color-mix(in srgb, var(--accent-color) 22%, transparent);
-                border-color: var(--accent-color);
-            }
-
-            .agent-process-badge-icon {
-                font-size: 11px;
-                line-height: 1;
-            }
-
-            .agent-process-badge-count {
-                font-variant-numeric: tabular-nums;
-            }
+        .agent-process-badge-count {
+            font-variant-numeric: tabular-nums;
         }
     }
 

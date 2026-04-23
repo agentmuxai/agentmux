@@ -270,10 +270,6 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                                 </>
                             )}
                         </For>
-                        <NewAgentCard
-                            disabled={busy()}
-                            onClick={openCreateNew}
-                        />
                         <Show when={expandedId() === "__new__" && createMode()}>
                             <AgentCardSettingsPanel
                                 blockId={props.model.blockId}
