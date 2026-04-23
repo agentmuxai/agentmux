@@ -31,6 +31,9 @@ interface AgentCardProps {
     onOpenIdentity: (agent: ForgeAgent) => void;
     /** Called when the user commits a rename via the inline ✏ control. */
     onRename: (agent: ForgeAgent, newName: string) => Promise<string | null>;
+    /** Called when the user clicks the 🗑 delete button. Caller is
+     *  responsible for confirmation + the `DeleteForgeAgent` RPC. */
+    onDelete: (agent: ForgeAgent) => void;
 }
 
 export const AgentCard = (props: AgentCardProps): JSX.Element => {
@@ -196,6 +199,15 @@ export const AgentCard = (props: AgentCardProps): JSX.Element => {
                         type="button"
                     >
                         {"\uD83D\uDC64"}
+                    </button>
+                    <button
+                        class="agent-card-action-btn agent-card-action-btn--delete"
+                        onClick={stopAndRun(() => props.onDelete(props.agent))}
+                        title="Delete this agent"
+                        disabled={props.disabled}
+                        type="button"
+                    >
+                        {"\uD83D\uDDD1"}
                     </button>
                 </div>
             </Show>
