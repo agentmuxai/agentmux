@@ -658,7 +658,7 @@ pub fn register_forge_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                             updated_at: now,
                         };
                         if let Err(e) = wstore.forge_set_content(&fc) {
-                            log::warn!("import: failed to set content for agent {}: {e}", agent.id);
+                            tracing::warn!("import: failed to set content for agent {}: {e}", agent.id);
                             content_ok = false;
                         }
                     }
@@ -677,7 +677,7 @@ pub fn register_forge_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                             created_at: now,
                         };
                         if let Err(e) = wstore.forge_insert_skill(&skill) {
-                            log::warn!("import: failed to insert skill '{}' for agent {}: {e}", skill.name, agent.id);
+                            tracing::warn!("import: failed to insert skill '{}' for agent {}: {e}", skill.name, agent.id);
                             skills_ok = false;
                         }
                     }
