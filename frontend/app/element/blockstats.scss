@@ -5,7 +5,7 @@
     position: absolute;
     top: calc(var(--header-height) + 4px);
     right: 6px;
-    z-index: 5;
+    z-index: var(--z-xterm-overlay);
     display: flex;
     gap: 6px;
     font-size: 11px;
@@ -23,10 +23,10 @@
     }
 
     &.cpu-medium .stats-cpu {
-        color: var(--warning-color, #f59e0b);
+        color: var(--warning-color);
     }
 
     &.cpu-high .stats-cpu {
-        color: var(--error-color, #ef4444);
+        color: var(--error-color);
     }
 }
