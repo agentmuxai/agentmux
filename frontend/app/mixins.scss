@@ -129,6 +129,8 @@
 }
 
 /// Visually hidden but still read by assistive tech. Standard pattern.
+/// Uses `clip-path: inset(50%)` (modern; replaces the deprecated
+/// `clip` property) plus the usual width/height/overflow combo.
 @mixin sr-only {
     position: absolute;
     width: 1px;
@@ -136,7 +138,7 @@
     padding: 0;
     margin: -1px;
     overflow: hidden;
-    clip: rect(0, 0, 0, 0);
+    clip-path: inset(50%);
     white-space: nowrap;
     border: 0;
 }
