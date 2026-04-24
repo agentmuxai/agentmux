@@ -26,18 +26,28 @@
  */
 
 import {
+    createContext,
     createEffect,
     createSignal,
     createUniqueId,
     JSX,
     onCleanup,
-    onMount,
     Show,
+    useContext,
     type Component,
 } from "solid-js";
 import { Portal } from "solid-js/web";
 
 import "./modal-v2.scss";
+
+// ── Context ──────────────────────────────────────────────────────────────────
+// Shares the Modal's auto-generated title id with a nested ModalHeader
+// so `aria-labelledby` on the dialog root resolves to the heading that
+// ModalHeader actually renders. Without this context the two sides
+// generate independent ids via `createUniqueId()` and never match,
+// breaking the labelling contract.
+
+const ModalTitleIdContext = createContext<string | undefined>(undefined);
 
 // ── Modal stack ──────────────────────────────────────────────────────────────
 // Module-level so multiple Modal instances share it. ESC and backdrop
@@ -120,6 +130,10 @@ export const Modal: Component<ModalProps> = (props) => {
     let previousFocus: HTMLElement | null = null;
     let inertSiblings: HTMLElement[] = [];
     let previousBodyOverflow = "";
+    // Store the document we opened in so `closeModal` restores state
+    // on the same body — `resolveMountDocument()` at close time could
+    // point at a different window if focus moved across CEF windows.
+    let mountDoc: Document | null = null;
 
     const [mounted, setMounted] = createSignal(false);
 
@@ -139,17 +153,19 @@ export const Modal: Component<ModalProps> = (props) => {
     const openModal = (): void => {
         previousFocus = (document.activeElement as HTMLElement) ?? null;
 
-        // Lock body scroll on the originating document.
-        const doc = resolveMountDocument();
-        previousBodyOverflow = doc.body.style.overflow;
-        doc.body.style.overflow = "hidden";
+        // Lock body scroll on the originating document. Cache the
+        // document so closeModal restores state on the same body
+        // even if focus moved to a different CEF window meanwhile.
+        mountDoc = resolveMountDocument();
+        previousBodyOverflow = mountDoc.body.style.overflow;
+        mountDoc.body.style.overflow = "hidden";
 
         // Inert background siblings so assistive tech + keyboard
         // focus can't escape. Skip if `inert` isn't supported
         // (older CEF versions) — focus trap still handles keyboard.
         inertSiblings = [];
         if ("inert" in HTMLElement.prototype) {
-            for (const child of Array.from(doc.body.children) as HTMLElement[]) {
+            for (const child of Array.from(mountDoc.body.children) as HTMLElement[]) {
                 // The Portal mount target is doc.body, so the modal-root
                 // becomes a body child after mount. We inert everything
                 // else and rely on the modal's own focus trap.
@@ -188,9 +204,11 @@ export const Modal: Component<ModalProps> = (props) => {
         for (const el of inertSiblings) el.removeAttribute("inert");
         inertSiblings = [];
 
-        // Restore body scroll.
-        const doc = resolveMountDocument();
-        doc.body.style.overflow = previousBodyOverflow;
+        // Restore body scroll on the same document we locked. Falling
+        // back to `document` if mountDoc was never set is a defensive
+        // no-op — openModal should have set it before this ran.
+        (mountDoc ?? document).body.style.overflow = previousBodyOverflow;
+        mountDoc = null;
 
         setMounted(false);
 
@@ -240,41 +258,54 @@ export const Modal: Component<ModalProps> = (props) => {
         (firstFocusable(panelRef) ?? panelRef).focus();
     };
 
+    // ARIA labelling precedence: only one of aria-label / aria-labelledby
+    // should be set. `aria-labelledby` wins over `aria-label` per the ARIA
+    // spec, so sending both would ignore the caller's explicit `ariaLabel`
+    // prop. Fall through in order: explicit labelledby → explicit label →
+    // auto-wired via the ModalHeader's context-shared id.
+    const labelledById = (): string | undefined => {
+        if (props.ariaLabelledBy) return props.ariaLabelledBy;
+        if (props.ariaLabel) return undefined; // label wins when no labelledby
+        return defaultTitleId;
+    };
+
     return (
         <Show when={mounted()}>
             <Portal mount={resolveMountDocument().body}>
-                <div
-                    class="modal-root"
-                    role="dialog"
-                    aria-modal="true"
-                    aria-label={props.ariaLabel}
-                    aria-labelledby={props.ariaLabelledBy ?? defaultTitleId}
-                    aria-describedby={props.ariaDescribedBy}
-                    tabIndex={-1}
-                    onKeyDown={handleKeyDown}
-                >
-                    <div class="modal-backdrop" onClick={handleBackdropClick} />
-                    <span
-                        class="modal-focus-sentinel"
-                        tabindex="0"
-                        aria-hidden="true"
-                        onFocus={onSentinelStartFocus}
-                    />
+                <ModalTitleIdContext.Provider value={defaultTitleId}>
                     <div
-                        ref={panelRef}
-                        class="modal-panel"
-                        data-size={props.size ?? "md"}
+                        class="modal-root"
+                        role="dialog"
+                        aria-modal="true"
+                        aria-label={props.ariaLabelledBy ? undefined : props.ariaLabel}
+                        aria-labelledby={labelledById()}
+                        aria-describedby={props.ariaDescribedBy}
                         tabIndex={-1}
+                        onKeyDown={handleKeyDown}
                     >
-                        {props.children}
+                        <div class="modal-backdrop" onClick={handleBackdropClick} />
+                        <span
+                            class="modal-focus-sentinel"
+                            tabindex="0"
+                            aria-hidden="true"
+                            onFocus={onSentinelStartFocus}
+                        />
+                        <div
+                            ref={panelRef}
+                            class="modal-panel"
+                            data-size={props.size ?? "md"}
+                            tabIndex={-1}
+                        >
+                            {props.children}
+                        </div>
+                        <span
+                            class="modal-focus-sentinel"
+                            tabindex="0"
+                            aria-hidden="true"
+                            onFocus={onSentinelEndFocus}
+                        />
                     </div>
-                    <span
-                        class="modal-focus-sentinel"
-                        tabindex="0"
-                        aria-hidden="true"
-                        onFocus={onSentinelEndFocus}
-                    />
-                </div>
+                </ModalTitleIdContext.Provider>
             </Portal>
         </Show>
     );
@@ -290,10 +321,15 @@ export interface ModalHeaderProps {
 }
 
 export const ModalHeader: Component<ModalHeaderProps> = (props) => {
+    // When rendered inside a <Modal>, inherit the title id the Modal
+    // wired into `aria-labelledby`. When used standalone, fall back
+    // to a freshly-generated id so we still get a valid element id.
+    const contextTitleId = useContext(ModalTitleIdContext);
     const fallbackId = createUniqueId();
+    const resolvedId = () => props.id ?? contextTitleId ?? fallbackId;
     return (
         <header class="modal-panel-header">
-            <h2 class="modal-panel-title" id={props.id ?? fallbackId}>
+            <h2 class="modal-panel-title" id={resolvedId()}>
                 {props.title}
             </h2>
             <Show when={props.description}>
