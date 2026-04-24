@@ -5,7 +5,6 @@ import { atoms, getApi, windowInstanceNumAtom, windowCountAtom, backendStatusAto
 import { Show, type JSX } from "solid-js";
 import { BackendStatus } from "./BackendStatus";
 import { ConfigStatus } from "./ConfigStatus";
-import { ConnectionStatus } from "./ConnectionStatus";
 import { HostPopover } from "./HostPopover";
 import { SystemStats } from "./SystemStats";
 import { TokenUsageIndicator } from "./TokenUsageIndicator";
@@ -35,7 +34,6 @@ const StatusBar = (): JSX.Element => {
             <div class="status-bar-center" />
             <div class="status-bar-right">
                 <TokenUsageIndicator />
-                <ConnectionStatus />
                 <ConfigStatus />
                 <UpdateStatus />
                 <HostPopover />

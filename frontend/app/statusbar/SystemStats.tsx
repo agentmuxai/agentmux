@@ -117,19 +117,23 @@ const SystemStats = (): JSX.Element => {
                         <span class="stat-disk-arrow">↑</span>{formatRate(s().netSent)}{" "}
                         <span class="stat-disk-arrow">↓</span>{formatRate(s().netRecv)}
                     </span>
-                    {/* TODO: disk I/O reads zero on Windows — investigate sysinfo Disk::usage() delta behavior */}
-                    <Show when={s().diskRead > 0 || s().diskWrite > 0}>
-                        <span class="stat-separator">|</span>
-                        <span
-                            class="stat-mono stat-disk"
-                            data-tip-wrap=""
-                            data-tip="Disk I/O — read rate (R) and write rate (W) across all disks."
-                            aria-label="Disk I/O"
-                        >
-                            <span class="stat-disk-arrow">R</span>{formatRate(s().diskRead)}{" "}
-                            <span class="stat-disk-arrow">W</span>{formatRate(s().diskWrite)}
-                        </span>
-                    </Show>
+                    {/* Disk I/O stays mounted even at 0/0 so the bar's layout
+                        is stable — matches the network widget's always-visible
+                        treatment (§4.3 of SPEC_STATUSBAR_TOKEN_USAGE).
+                        Windows note: sysinfo currently reports disk read/write
+                        as zero; readout will show muted `R0K W0K` until that's
+                        addressed. Preferable to a missing widget. */}
+                    <span class="stat-separator">|</span>
+                    <span
+                        class="stat-mono stat-disk"
+                        classList={{ "stat-idle": s().diskRead === 0 && s().diskWrite === 0 }}
+                        data-tip-wrap=""
+                        data-tip="Disk I/O — read rate (R) and write rate (W) across all disks. Muted when idle."
+                        aria-label="Disk I/O"
+                    >
+                        <span class="stat-disk-arrow">R</span>{formatRate(s().diskRead)}{" "}
+                        <span class="stat-disk-arrow">W</span>{formatRate(s().diskWrite)}
+                    </span>
                 </div>
             )}
         </Show>

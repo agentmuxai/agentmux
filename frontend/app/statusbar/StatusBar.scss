@@ -121,13 +121,13 @@
 
     .stat-net {
         min-width: 12ch; // fits "↑999M ↓999M"
+    }
 
-        // Muted zero state — §4.3 of SPEC_STATUSBAR_TOKEN_USAGE. The
-        // widget stays mounted at 0/0 but visually quiets so it doesn't
-        // compete with the active readouts next to it.
-        &.stat-idle {
-            opacity: 0.45;
-        }
+    // Muted zero state — §4.3 of SPEC_STATUSBAR_TOKEN_USAGE. Any
+    // always-mounted stat (net, disk) visually quiets to 0.45 opacity
+    // when at 0/0 so it doesn't compete with the active readouts.
+    .stat-mono.stat-idle {
+        opacity: 0.45;
     }
 
     .stat-disk-arrow {
