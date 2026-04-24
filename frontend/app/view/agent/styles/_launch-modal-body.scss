@@ -1,0 +1,140 @@
+// Copyright 2024-2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// AgentLaunchModal — opens when user clicks a definition card.
+// Collects instance name + host/container runtime.
+// Top-level (rendered through modal-v2 portal).
+// ── AgentLaunchModal ─────────────────────────────────────────────────────────
+// Modal that opens when the user clicks a definition card in the
+// picker. Collects instance name + host/container runtime. See
+// docs/specs/SPEC_AGENT_DEFINITIONS_MODAL_2026_04_23.md §6.
+
+.agent-launch-modal-body {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    min-width: 420px;
+    max-width: 540px;
+}
+
+.agent-launch-modal-blurb {
+    margin: 0;
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--secondary-text-color);
+}
+
+.agent-launch-modal-field {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+
+    // Reset <fieldset> browser defaults so it lines up with the <label>s.
+    border: none;
+    padding: 0;
+    margin: 0;
+}
+
+.agent-launch-modal-label {
+    font-size: 11px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--secondary-text-color);
+}
+
+.agent-launch-modal-input {
+    font-size: 13px;
+    font-family: inherit;
+    color: var(--main-text-color);
+    background: color-mix(in srgb, var(--main-text-color) 5%, transparent);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    padding: var(--space-1-5) var(--space-2);
+    outline: none;
+
+    &:focus {
+        border-color: var(--accent-color);
+        background: color-mix(in srgb, var(--accent-color) 6%, transparent);
+    }
+
+    &:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
+}
+
+.agent-launch-modal-hint {
+    font-size: 11px;
+    color: color-mix(in srgb, var(--secondary-text-color) 70%, transparent);
+}
+
+.agent-launch-modal-runtime {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1-5);
+}
+
+.agent-launch-modal-radio {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-2);
+    padding: var(--space-1-5) var(--space-2);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background 0.08s, border-color 0.08s;
+
+    &:has(input:checked) {
+        border-color: var(--accent-color);
+        background: color-mix(in srgb, var(--accent-color) 8%, transparent);
+    }
+
+    &:hover:not(.agent-launch-modal-radio--disabled) {
+        background: color-mix(in srgb, var(--main-text-color) 4%, transparent);
+    }
+
+    &.agent-launch-modal-radio--disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
+
+    > span {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-0-5);
+    }
+}
+
+.agent-launch-modal-preview {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1-5);
+    font-size: 11px;
+    color: var(--secondary-text-color);
+    padding: var(--space-1-5) var(--space-2);
+    background: color-mix(in srgb, var(--main-text-color) 3%, transparent);
+    border: 1px dashed var(--border-color);
+    border-radius: 4px;
+
+    code {
+        font-family: var(--termfontfamily, monospace);
+        font-size: 11px;
+        color: var(--main-text-color);
+        background: transparent;
+    }
+}
+
+.agent-launch-modal-preview-label {
+    font-weight: 500;
+    flex-shrink: 0;
+}
+
+.agent-launch-modal-error {
+    font-size: 12px;
+    color: var(--error-color);
+    padding: var(--space-1-5) var(--space-2);
+    background: color-mix(in srgb, var(--error-color) 10%, transparent);
+    border-radius: 3px;
+}
+

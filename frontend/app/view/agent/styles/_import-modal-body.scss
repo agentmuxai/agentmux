@@ -1,0 +1,71 @@
+// Copyright 2024-2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// Import Preview Modal — shows catalog entries being imported.
+// Top-level (rendered through modal-v2 portal).
+// ── Import Preview Modal ─────────────────────────────────────────────────────
+// Inner content styles for the Modal v2-rendered import preview. Kept
+// at top level because modal-v2 portals to `document.body`, so
+// selectors nested inside `.agent-view` never match (caught by reagent
+// on PR #513).
+
+.agent-import-count {
+    font-size: 12px;
+    color: var(--secondary-text-color);
+    margin-bottom: var(--space-2);
+}
+
+.agent-import-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    margin-bottom: 10px;
+}
+
+.agent-import-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1-5);
+    font-size: 12px;
+    color: var(--main-text-color);
+    padding: var(--space-0-5) 0;
+
+    &.agent-import-row-skip {
+        opacity: 0.5;
+    }
+
+    .agent-import-row-status {
+        width: 16px;
+        text-align: center;
+        flex-shrink: 0;
+    }
+
+    .agent-import-row-icon {
+        flex-shrink: 0;
+    }
+
+    .agent-import-row-name {
+        font-weight: 500;
+    }
+
+    .agent-import-row-desc,
+    .agent-import-row-skip-label {
+        color: var(--secondary-text-color);
+        font-size: 11px;
+    }
+}
+
+.agent-import-summary {
+    font-size: 12px;
+    color: var(--secondary-text-color);
+    border-top: 1px solid var(--border-color);
+    padding-top: var(--space-2);
+}
+
+.agent-import-result {
+    font-size: 13px;
+    color: var(--main-text-color);
+    text-align: center;
+    padding: var(--space-5) 0;
+}
+
