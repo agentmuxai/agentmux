@@ -1,0 +1,171 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// Status-bar token-usage indicator + breakdown popover.
+// Spec: docs/specs/SPEC_STATUSBAR_TOKEN_USAGE_2026_04_24.md.
+
+.token-usage-indicator {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    height: 100%;
+    padding: 0 5px;
+    background: transparent;
+    border: none;
+    color: inherit;
+    font-family: inherit;
+    font-size: inherit;
+    cursor: pointer;
+    white-space: nowrap;
+    border-radius: 2px;
+    opacity: 0.7;
+    transition: background 80ms ease, opacity 80ms ease;
+
+    &:hover {
+        background: var(--hover-bg-color);
+        opacity: 1;
+    }
+
+    &:focus-visible {
+        outline: 1px solid var(--accent-color);
+        outline-offset: -1px;
+    }
+
+    // Zero-state: kept visible as an affordance but visually quiet
+    // so it doesn't compete with non-zero readouts. §4.1 of spec.
+    &--idle {
+        opacity: 0.35;
+
+        &:hover {
+            opacity: 0.7;
+        }
+    }
+
+    .token-usage-indicator-icon {
+        font-size: 11px;
+        line-height: 1;
+    }
+
+    .token-usage-indicator-counts {
+        font-family: var(--fixed-font, monospace);
+        font-size: 10px;
+    }
+
+    .token-usage-indicator-arrow {
+        opacity: 0.55;
+        margin-right: 1px;
+    }
+}
+
+.token-usage-breakdown {
+    background: var(--modal-bg-color);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+    color: var(--main-text-color);
+    font-size: 12px;
+    zoom: var(--zoomfactor);
+    // Above the status bar and above browser panes — sits in the same
+    // stacking tier as modal-v2's overlays. pane-overlay.ts clips the
+    // pane HWND beneath this rect so the DOM content paints on top.
+    z-index: var(--zindex-modal-wrapper);
+    display: flex;
+    flex-direction: column;
+    padding: var(--space-2) 0;
+    user-select: none;
+
+    .token-usage-breakdown-header {
+        padding: 0 var(--space-3) var(--space-1-5);
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: var(--space-2);
+        border-bottom: 1px solid var(--border-color);
+    }
+
+    .token-usage-breakdown-title {
+        font-weight: 600;
+        font-size: 13px;
+    }
+
+    .token-usage-breakdown-subtitle {
+        color: var(--secondary-text-color);
+        font-size: 11px;
+    }
+
+    .token-usage-breakdown-rows {
+        display: flex;
+        flex-direction: column;
+        padding: var(--space-1-5) 0;
+        gap: 2px;
+    }
+
+    .token-usage-breakdown-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: var(--space-0-5) var(--space-3);
+        font-size: 12px;
+
+        &.token-usage-breakdown-total {
+            margin-top: var(--space-1);
+            padding-top: var(--space-1-5);
+            border-top: 1px solid var(--border-color);
+            font-weight: 600;
+        }
+    }
+
+    .token-usage-breakdown-row-name {
+        color: var(--main-text-color);
+    }
+
+    .token-usage-breakdown-row-counts {
+        font-family: var(--fixed-font, monospace);
+        color: var(--secondary-text-color);
+
+        .token-usage-indicator-arrow {
+            opacity: 0.55;
+            margin-right: 1px;
+        }
+    }
+
+    .token-usage-breakdown-total .token-usage-breakdown-row-counts {
+        color: var(--main-text-color);
+    }
+
+    .token-usage-breakdown-empty {
+        padding: var(--space-3) var(--space-3);
+        color: var(--secondary-text-color);
+        font-size: 11px;
+        text-align: center;
+    }
+
+    .token-usage-breakdown-footer {
+        padding: var(--space-1-5) var(--space-3) 0;
+        border-top: 1px solid var(--border-color);
+        display: flex;
+        justify-content: flex-end;
+    }
+
+    .token-usage-breakdown-reset {
+        background: transparent;
+        border: 1px solid transparent;
+        color: var(--error-color);
+        font-family: inherit;
+        font-size: 11px;
+        padding: var(--space-0-5) var(--space-2);
+        border-radius: 3px;
+        cursor: pointer;
+        transition: background 80ms ease, border-color 80ms ease;
+
+        &:hover:not(:disabled) {
+            background: color-mix(in srgb, var(--error-color) 12%, transparent);
+            border-color: color-mix(in srgb, var(--error-color) 40%, transparent);
+        }
+
+        &:disabled {
+            opacity: 0.3;
+            cursor: default;
+        }
+    }
+}

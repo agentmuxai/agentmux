@@ -234,6 +234,9 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         pendingMessagesAtom,
         enabled: true,
         documentVersion: history.documentVersion,
+        // Provider id (lowercase catalog key) attributes completed-turn
+        // tokens to the correct row in the status-bar token-usage store.
+        provider: providerKey(),
     });
 
     // Mutable ref to the scrollToBottom function exposed by
