@@ -1,0 +1,386 @@
+// Copyright 2024-2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// Agent picker list + card + card-settings panel. Wrapped in .agent-view so the cascade chain matches
+// the pre-split file (SPEC_AGENT_VIEW_SCSS_SPLIT_2026_04_24).
+.agent-view {
+    // === Agent Picker ===
+    .agent-picker {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+        padding: var(--space-4);
+        gap: var(--space-3);
+    }
+
+    .agent-picker-list {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-2);
+        flex: 1;
+        overflow-y: auto;
+        // Cap list width so individual cards don't stretch to an
+        // awkwardly wide pane. The flex:1 info column inside each
+        // card expands to fill the card, which left a large gap
+        // between the title text and the action buttons on wide
+        // layouts. `max-width` + `align-self: center` keeps cards
+        // readable at narrow and wide pane widths alike.
+        max-width: 520px;
+        width: 100%;
+        align-self: center;
+    }
+
+    .agent-card {
+        position: relative;                // anchor for absolutely-positioned actions
+        display: flex;
+        align-items: center;
+        gap: var(--space-3);
+        padding: var(--space-3) 14px;
+        border: 1px solid var(--border-color);
+        background: color-mix(in srgb, var(--main-text-color) 3%, transparent);
+        border-radius: 6px;
+        cursor: pointer;
+        transition: all 0.15s;
+        color: var(--main-text-color);
+        text-align: left;
+        width: 100%;
+
+        &:hover:not(:disabled) {
+            border-color: var(--accent-color);
+            background: color-mix(in srgb, var(--accent-color) 8%, transparent);
+        }
+
+        &:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        &--launching {
+            border-color: var(--accent-color);
+            background: color-mix(in srgb, var(--accent-color) 6%, transparent);
+        }
+
+        &--new {
+            border-style: dashed;
+            background: transparent;
+
+            .agent-card-icon {
+                font-weight: bold;
+                color: var(--secondary-text-color);
+            }
+
+            &:hover:not(:disabled) .agent-card-icon {
+                color: var(--accent-color);
+            }
+        }
+
+        &--disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        // Actions float in the top-left corner of the card so the
+        // icon + title + caption take the full horizontal width.
+        // Absolute positioning keeps them out of the flex row that
+        // lays out icon + info — no reserved gutter, no ellipsis
+        // truncation halfway through long titles. Hidden by default
+        // so the card reads clean; hover/focus reveals them.
+        .agent-card-actions {
+            position: absolute;
+            top: 6px;
+            left: 6px;
+            display: flex;
+            gap: var(--space-1);
+            opacity: 0;
+            transition: opacity 0.15s;
+            z-index: 1;
+        }
+
+        &:hover .agent-card-actions,
+        &:focus-within .agent-card-actions {
+            opacity: 1;
+        }
+
+        .agent-card-action-btn {
+            width: 26px;
+            height: 26px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0;
+            border: 1px solid var(--border-color);
+            // Fully opaque background so the icon/text behind the
+            // absolutely-positioned actions doesn't bleed through.
+            background: var(--main-bg-color);
+            border-radius: 4px;
+            color: var(--main-text-color);
+            font-size: 13px;
+            cursor: pointer;
+            transition: all 0.1s;
+
+            &:hover:not(:disabled) {
+                border-color: var(--accent-color);
+                background: color-mix(in srgb, var(--accent-color) 15%, var(--main-bg-color));
+            }
+
+            &:disabled {
+                opacity: 0.4;
+                cursor: not-allowed;
+            }
+        }
+
+        .agent-card-icon {
+            font-size: 22px;
+            flex-shrink: 0;
+            width: 28px;
+            text-align: center;
+        }
+
+        .agent-card-info {
+            display: flex;
+            flex-direction: column;
+            gap: var(--space-0-5);
+            flex: 1;
+            min-width: 0;
+        }
+
+        .agent-card-name {
+            font-size: 13px;
+            font-weight: 500;
+        }
+
+        .agent-card-desc {
+            font-size: 11px;
+            color: var(--secondary-text-color);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .agent-card-slug {
+            font-size: 10px;
+            color: color-mix(in srgb, var(--secondary-text-color) 65%, transparent);
+            font-family: var(--termfontfamily, monospace);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        // Definition card (post-SPEC_AGENT_DEFINITIONS_MODAL) — title
+        // is a capability blurb; the CLI brand name and context-file
+        // badge live in the caption row below.
+        .agent-card-title {
+            font-size: 13px;
+            font-weight: 500;
+            color: var(--main-text-color);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .agent-card-caption {
+            font-size: 11px;
+            font-weight: 500;
+            color: var(--secondary-text-color);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        // Inline rename row — replaces the name span while editing
+        .agent-card-rename-row {
+            display: flex;
+            align-items: center;
+            gap: var(--space-1);
+        }
+
+        .agent-card-rename-input {
+            flex: 1;
+            min-width: 0;
+            font-size: 13px;
+            font-weight: 500;
+            font-family: inherit;
+            color: var(--main-text-color);
+            background: color-mix(in srgb, var(--main-text-color) 6%, transparent);
+            border: 1px solid var(--accent-color);
+            border-radius: 3px;
+            padding: 1px 5px;
+            outline: none;
+
+            &.agent-card-rename-input--error {
+                border-color: var(--error-color);
+            }
+        }
+
+        .agent-card-rename-btn {
+            width: 22px;
+            height: 22px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0;
+            border: 1px solid var(--border-color);
+            background: color-mix(in srgb, var(--main-text-color) 5%, transparent);
+            border-radius: 3px;
+            color: var(--main-text-color);
+            font-size: 11px;
+            cursor: pointer;
+            flex-shrink: 0;
+
+            &:hover {
+                border-color: var(--accent-color);
+                background: color-mix(in srgb, var(--accent-color) 15%, transparent);
+            }
+
+            &--confirm:hover {
+                color: var(--success-color);
+                border-color: var(--success-color);
+                background: color-mix(in srgb, var(--success-color) 15%, transparent);
+            }
+
+            &--cancel:hover {
+                color: var(--error-color);
+                border-color: var(--error-color);
+                background: color-mix(in srgb, var(--error-color) 15%, transparent);
+            }
+        }
+
+        .agent-card-spinner {
+            width: 14px;
+            height: 14px;
+            border: 2px solid color-mix(in srgb, var(--accent-color) 25%, transparent);
+            border-top-color: var(--accent-color);
+            border-radius: 50%;
+            animation: agent-spin 0.8s linear infinite;
+            flex-shrink: 0;
+        }
+    }
+
+    .agent-card-settings-panel {
+        margin: var(--space-1) 0 var(--space-3) 0;
+        border: 1px solid var(--accent-color);
+        border-radius: 6px;
+        background: color-mix(in srgb, var(--main-bg-color) 95%, transparent);
+        overflow: hidden;
+        // Guarantee a visible content area below the header. Without
+        // an explicit minimum the panel collapses to just its border
+        // (the "blue line" bug) because the picker-list parent is
+        // `flex: 1` and this panel had no `flex-shrink: 0` floor.
+        min-height: 320px;
+        max-height: 60vh;
+        flex-shrink: 0;
+        display: flex;
+        flex-direction: column;
+
+        .agent-card-settings-header {
+            display: flex;
+            align-items: center;
+            gap: var(--space-2);
+            padding: var(--space-2) 10px;
+            border-bottom: 1px solid var(--border-color);
+            background: color-mix(in srgb, var(--accent-color) 5%, transparent);
+        }
+
+        .agent-card-settings-tabs {
+            display: flex;
+            gap: var(--space-1);
+            flex: 1;
+        }
+
+        .agent-card-settings-tab {
+            padding: var(--space-1) 10px;
+            border: 1px solid var(--border-color);
+            background: transparent;
+            color: var(--secondary-text-color);
+            border-radius: 4px;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.1s;
+
+            &:hover:not(.active) {
+                color: var(--main-text-color);
+                border-color: var(--main-text-color);
+            }
+
+            &.active {
+                color: var(--main-text-color);
+                border-color: var(--accent-color);
+                background: color-mix(in srgb, var(--accent-color) 12%, transparent);
+            }
+        }
+
+        .agent-card-settings-close {
+            width: 24px;
+            height: 24px;
+            padding: 0;
+            border: none;
+            background: transparent;
+            color: var(--secondary-text-color);
+            font-size: 14px;
+            cursor: pointer;
+            border-radius: 4px;
+
+            &:hover {
+                color: var(--main-text-color);
+                background: color-mix(in srgb, var(--main-text-color) 8%, transparent);
+            }
+        }
+
+        .agent-card-settings-body {
+            flex: 1;
+            overflow: auto;
+            padding: var(--space-2);
+            min-height: 0;
+
+            // ForgeDetail / IdentityPanel were designed for full-pane
+            // rendering and set `height: 100%` on their root. Percent
+            // heights don't resolve inside this flex container because
+            // the panel is sized by content (capped at 60vh), so the
+            // 100% chain collapses to 0 and the body renders empty —
+            // which combined with the panel's 1px accent border shows
+            // as just a horizontal blue line under the agent card.
+            // Override: let them flow naturally + fill available space.
+            .forge-pane,
+            .identity-view {
+                height: auto;
+                min-height: 100%;
+            }
+        }
+    }
+
+    .agent-nodejs-notice {
+        display: flex;
+        gap: var(--space-3);
+        padding: var(--space-3);
+        margin: var(--space-2) 0;
+        border-radius: 6px;
+        background: rgba(245, 158, 11, 0.08);
+        border: 1px solid rgba(245, 158, 11, 0.3);
+
+        .nodejs-notice-icon {
+            font-size: 18px;
+            color: var(--warning-color);
+            flex-shrink: 0;
+            padding-top: var(--space-0-5);
+        }
+
+        .nodejs-notice-title {
+            font-weight: 600;
+            font-size: 13px;
+            margin-bottom: var(--space-1);
+        }
+
+        .nodejs-notice-text {
+            font-size: 12px;
+            color: var(--secondary-text-color);
+            line-height: 1.4;
+        }
+
+        .nodejs-notice-hint {
+            font-size: 11px;
+            color: var(--secondary-text-color);
+            font-style: italic;
+            margin-top: var(--space-1-5);
+        }
+    }
+}
