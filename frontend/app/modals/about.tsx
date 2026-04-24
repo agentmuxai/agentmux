@@ -21,6 +21,7 @@ const AboutModal = ({}: AboutModalProps) => {
             onClose={() => modalsModel.popModal()}
             size="md"
             ariaLabel="About AgentMux"
+            showCloseButton
         >
             <ModalBody>
                 <div class="flex flex-col gap-[26px] w-full pb-[34px]">
