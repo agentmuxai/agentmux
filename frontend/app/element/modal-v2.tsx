@@ -34,9 +34,12 @@ import {
     onCleanup,
     Show,
     useContext,
+    type Accessor,
     type Component,
 } from "solid-js";
 import { Portal } from "solid-js/web";
+
+import { usePaneOverlay } from "@/app/platform/pane-overlay";
 
 import "./modal-v2.scss";
 
@@ -48,6 +51,20 @@ import "./modal-v2.scss";
 // breaking the labelling contract.
 
 const ModalTitleIdContext = createContext<string | undefined>(undefined);
+
+// ── Pane airspace clip ───────────────────────────────────────────────────────
+// Native browser-pane HWNDs composite above the HTML renderer, so CSS
+// z-index can't stack a modal over a visible pane. `usePaneOverlay`
+// registers the modal-root rect with the backend, which subtracts it
+// from every pane's Win32 region so the pane's HWND paints transparent
+// where the modal is. Rendered inside <Show> so registration is bound
+// to the modal's open/close lifecycle, not its component instance.
+// Full rationale: docs/specs/SPEC_MODAL_PANE_CLIP_2026_04_24.md.
+
+const ModalPaneOverlayClip: Component<{ getEl: Accessor<HTMLElement | null | undefined> }> = (p) => {
+    usePaneOverlay(p.getEl);
+    return null;
+};
 
 // ── Modal stack ──────────────────────────────────────────────────────────────
 // Module-level so multiple Modal instances share it. ESC and backdrop
@@ -185,6 +202,7 @@ export const Modal: Component<ModalProps> = (props) => {
     const defaultTitleId = `modal-title-${id}`;
 
     let panelRef: HTMLDivElement | undefined;
+    let rootRef: HTMLDivElement | undefined;
     let previousFocus: HTMLElement | null = null;
     // Cache the document we acquired the lock on so release targets the
     // same body, even if focus moved across CEF windows meanwhile.
@@ -311,6 +329,7 @@ export const Modal: Component<ModalProps> = (props) => {
             <Portal mount={resolveMountDocument().body}>
                 <ModalTitleIdContext.Provider value={defaultTitleId}>
                     <div
+                        ref={rootRef}
                         class="modal-root"
                         data-placement={props.placement ?? "center"}
                         role="dialog"
@@ -321,6 +340,7 @@ export const Modal: Component<ModalProps> = (props) => {
                         tabIndex={-1}
                         onKeyDown={handleKeyDown}
                     >
+                        <ModalPaneOverlayClip getEl={() => rootRef} />
                         <div class="modal-backdrop" onClick={handleBackdropClick} />
                         <span
                             class="modal-focus-sentinel"
