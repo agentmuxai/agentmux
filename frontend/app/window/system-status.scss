@@ -1,6 +1,13 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+/* stylelint-disable color-no-hex --
+   The Windows 11 close-button hover (#c42b1c) and press (#b7201b)
+   red are OS brand colours that must match Windows exactly — they
+   aren't theme-relative and don't map to a semantic token. The
+   only hex in this file is for those explicit brand values plus
+   a few surface-relative blacks/whites used in the titlebar. */
+
 .system-status {
     display: flex;
     flex-direction: row;

@@ -122,7 +122,7 @@
                         &--input {
                             background: transparent;
                             border: none;
-                            border-bottom: 1px solid var(--accent-color, #888);
+                            border-bottom: 1px solid var(--accent-color);
                             outline: none;
                             color: inherit;
                             font: inherit;
@@ -348,7 +348,7 @@
                     }
 
                     > i {
-                        color: #e6ba1e;
+                        color: var(--warning-color);
                         font-size: 16px;
                     }
 
