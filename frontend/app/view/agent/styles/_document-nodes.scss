@@ -1,0 +1,717 @@
+// Copyright 2024-2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// Document-node rendering — markdown / code / diff / bash / message
+// blocks rendered inside the agent conversation. Largest section of
+// the original `agent-view.scss` (~700 lines). Wrapped in
+// `.agent-view` so the cascade chain matches the pre-split file
+// (SPEC_AGENT_VIEW_SCSS_SPLIT_2026_04_24).
+.agent-view {
+    .agent-raw-output {
+        margin: 0;
+        padding: 1px 0;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        font-size: var(--termfontsize, 13px);
+        line-height: 1.3;
+        color: var(--main-text-color);
+    }
+
+    // === Markdown Block ===
+    .agent-markdown-block {
+        padding: 1px var(--space-1);
+        color: var(--main-text-color);
+        opacity: 0.9;
+        user-select: text;
+        cursor: text;
+
+        &.thinking-block {
+            opacity: 0.6;
+            font-style: italic;
+            border-left: 2px solid var(--secondary-text-color);
+            padding-left: var(--space-2);
+            background: color-mix(in srgb, var(--main-text-color) 2%, transparent);
+        }
+
+        p {
+            margin: 1px 0;
+        }
+
+        code {
+            background: color-mix(in srgb, var(--main-text-color) 8%, transparent);
+            padding: 1px var(--space-1);
+            border-radius: 2px;
+        }
+
+        pre {
+            background: color-mix(in srgb, var(--main-text-color) 5%, transparent);
+            padding: var(--space-1) var(--space-1-5);
+            border-radius: 3px;
+            overflow-x: auto;
+        }
+    }
+
+    // === Tool Block ===
+    .agent-tool-block {
+        // position:relative anchors the `.agent-tool-content` absolute
+        // overlay in `.overlay-mode` (hover / pinned). See
+        // specs/SPEC_TOOL_OVERLAY_AND_SCROLL_ON_TYPE_2026_04_13.md §2.
+        position: relative;
+        border: none;
+        border-left: 2px solid var(--border-color);
+        border-radius: 0;
+        background: transparent;
+        cursor: pointer;
+        transition: background 0.1s;
+
+        &:hover {
+            background: color-mix(in srgb, var(--main-text-color) 3%, transparent);
+        }
+
+        &.running {
+            border-left: 2px solid var(--warning-color);
+        }
+
+        &.success {
+            border-left: 2px solid var(--success-color);
+        }
+
+        &.failed {
+            border-left: 2px solid var(--error-color);
+        }
+
+        // Single-line collapsed summary — see docs/specs/tool-collapse.md.
+        // When the block is collapsed (no `.expanded` class), this row is
+        // the ONLY thing rendered; it must stay on one line regardless of
+        // how long the tool summary is. The trailing ellipsis signals
+        // expandable content.
+        .agent-tool-summary {
+            display: flex;
+            align-items: center;
+            gap: var(--space-1);
+            padding: var(--space-0-5) var(--space-1);
+            user-select: none;
+            // Force single-line regardless of content width
+            white-space: nowrap;
+            overflow: hidden;
+            min-width: 0;
+            max-width: 100%;
+
+            .agent-tool-status-icon {
+                flex-shrink: 0;
+                width: 12px;
+                text-align: center;
+                color: var(--secondary-text-color);
+                font-size: 11px;
+            }
+
+            .agent-tool-name {
+                flex: 1 1 auto;
+                min-width: 0;
+                font-weight: 500;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+            }
+
+            .agent-tool-duration {
+                flex-shrink: 0;
+                color: var(--secondary-text-color);
+                font-size: 11px;
+            }
+
+            .agent-tool-ellipsis {
+                flex-shrink: 0;
+                margin-left: var(--space-1);
+                color: var(--secondary-text-color);
+                opacity: 0.6;
+                font-size: 11px;
+            }
+        }
+
+        // When pinned open, the click-to-pin state gets a subtle accent
+        // on the left border so users can tell they've stuck a block open.
+        &.pinned {
+            border-left: 2px solid var(--accent-color);
+        }
+
+        // Status icon color variants for the collapsed row
+        &.success .agent-tool-status-icon { color: var(--success-color); }
+        &.failed  .agent-tool-status-icon { color: var(--error-color); }
+        &.running .agent-tool-status-icon { color: var(--warning-color); }
+
+        .agent-tool-content {
+            padding: 0 var(--space-1) var(--space-1) var(--space-4);
+            user-select: text;
+            cursor: text;
+        }
+
+        // Overlay mode is implemented via a <Portal> to document.body so
+        // the overlay escapes the `content-visibility: auto` paint
+        // containment on `.agent-document-node-wrapper`. Without the
+        // portal, the absolute-positioned overlay would be paint-clipped
+        // at the wrapper's edge and invisible on hover.
+        //
+        // See .agent-tool-content--portal below for the portaled element's
+        // visual styling (background, border, shadow, z-index).
+        //
+        // The inline `.agent-tool-content` rule above still applies when
+        // the block is force-expanded (running/failed) — those render
+        // inline in the document flow, not in the portal.
+
+        .agent-tool-loading {
+            color: var(--secondary-text-color);
+            padding: var(--space-2) 0;
+        }
+
+        .agent-tool-open-pane {
+            background: none;
+            border: 1px solid var(--border-color);
+            border-radius: 3px;
+            color: var(--accent-color);
+            cursor: pointer;
+            font-size: 13px;
+            padding: 1px var(--space-1-5);
+            line-height: 1;
+            flex-shrink: 0;
+
+            &:hover {
+                background: var(--accent-color);
+                color: #fff; /* stylelint-disable-line color-no-hex */
+            }
+        }
+
+        .agent-tool-agent {
+            .agent-tool-agent-desc {
+                color: var(--secondary-text-color);
+                font-size: 12px;
+                margin-bottom: var(--space-1);
+            }
+
+            .agent-tool-agent-result {
+                font-size: 12px;
+                white-space: pre-wrap;
+                overflow-wrap: anywhere;
+                max-height: 200px;
+                overflow-y: auto;
+            }
+        }
+
+        .agent-tool-show-more {
+            margin-top: var(--space-2);
+            padding: var(--space-1) var(--space-3);
+            background: var(--accent-color);
+            color: var(--main-bg-color);
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 11px;
+
+            &:hover {
+                opacity: 0.9;
+            }
+        }
+    }
+
+    // === Diff Viewer ===
+    // === Shared Shiki highlighted-code base ===
+    // Shiki emits <pre><code> with <span class="line"> per line.
+    // We wrap in our own <pre class="agent-highlighted-code"> and inject innerHTML.
+    .agent-highlighted-code {
+        font-family: var(--termfontfamily, "JetBrains Mono", monospace);
+        font-size: 12px;
+        line-height: 1.5;
+        margin: 0;
+        overflow-x: auto;
+        background: transparent; // Shiki adds its own bg on the <code> element
+        color: var(--main-text-color);
+        white-space: pre;
+
+        // Shiki wraps each line in <span class="line"> — give lines display:block
+        // so backgrounds and padding work correctly.
+        :global(.line) {
+            display: block;
+            padding: 0 var(--space-1-5);
+            min-height: 1.5em;
+        }
+
+        // Shiki adds background-color on the <pre> via inline style — remove it
+        // so our themed background (from the parent container) wins.
+        &[style*="background"] {
+            background: transparent !important; /* stylelint-disable-line declaration-no-important */
+        }
+    }
+
+    .agent-diff {
+        background: var(--main-bg-color);
+        border: none;
+        border-left: 2px solid var(--border-color);
+        border-radius: 0;
+        overflow-x: auto;
+        font-size: 12px;
+
+        .agent-diff-header {
+            background: color-mix(in srgb, var(--main-text-color) 10%, transparent);
+            padding: 3px var(--space-1-5);
+            font-weight: bold;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        // Plain-render diff classes (used before Shiki resolves and as fallback)
+        .agent-diff-add {
+            background: color-mix(in srgb, green 15%, transparent);
+            color: var(--success-color);
+        }
+
+        .agent-diff-del {
+            background: color-mix(in srgb, red 15%, transparent);
+            color: var(--error-color);
+        }
+
+        .agent-diff-hunk {
+            background: color-mix(in srgb, blue 10%, transparent);
+            color: var(--accent-color);
+        }
+
+        .agent-diff-ctx {
+            color: var(--secondary-text-color);
+        }
+
+        // Highlighted variant wrapper: header stays as a div, Shiki content
+        // goes into a separate <pre> so innerHTML doesn't destroy the header.
+        .agent-diff-highlighted-body {
+            margin: 0;
+            padding: 0;
+            background: transparent;
+            border: none;
+            overflow-x: auto;
+        }
+
+        // Highlighted variant: Shiki emits <span class="line agent-diff-add">
+        // so the same colour rules above apply automatically. We additionally
+        // strip the Shiki-generated span colour on add/del lines so our
+        // contrasting palette (not Shiki's) wins for the diff chrome.
+        &.agent-diff--highlighted {
+            :global(.line.agent-diff-add) {
+                background: color-mix(in srgb, green 15%, transparent);
+                // Shiki token colours are preserved; only the line bg is forced.
+            }
+            :global(.line.agent-diff-del) {
+                background: color-mix(in srgb, red 15%, transparent);
+            }
+            :global(.line.agent-diff-hunk) {
+                background: color-mix(in srgb, blue 10%, transparent);
+                color: var(--accent-color);
+            }
+            :global(.line.agent-diff-ctx) {
+                // default Shiki token colours — no override needed
+            }
+            :global(.agent-diff-marker) {
+                opacity: 0.6;
+                user-select: none;
+                margin-right: var(--space-0-5);
+            }
+            :global(.agent-diff-hunk-text) {
+                color: var(--accent-color);
+                opacity: 0.8;
+            }
+        }
+    }
+
+    .agent-diff-empty {
+        color: var(--secondary-text-color);
+        padding: var(--space-1) var(--space-1-5);
+        background: color-mix(in srgb, var(--main-text-color) 3%, transparent);
+        border-radius: 3px;
+    }
+
+    // === Bash Output ===
+    .agent-bash {
+        background: var(--main-bg-color);
+        border: none;
+        border-left: 2px solid var(--border-color);
+        border-radius: 0;
+        overflow-x: auto;
+
+        .agent-bash-cmd {
+            background: color-mix(in srgb, var(--main-text-color) 5%, transparent);
+            padding: 3px var(--space-1-5);
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            // flex-start so the $ and the command text align at their tops
+            // when the command wraps to multiple lines.
+            align-items: flex-start;
+            gap: var(--space-1-5);
+
+            .agent-bash-dollar {
+                color: var(--accent-color);
+                flex-shrink: 0;
+                // Keep the $ on the first line, aligned with the first line of
+                // the command even when it wraps.
+                padding-top: 1px;
+            }
+
+            // HighlightedCode inside the cmd row: inline, no extra padding/bg
+            .agent-bash-cmd-code {
+                flex: 1;
+                min-width: 0; // allow flex child to shrink below content width
+                margin: 0;
+                padding: 0;
+                background: transparent;
+                border: none;
+                overflow: visible;
+                white-space: pre-wrap;
+                // Force breaks inside long tokens (long paths, base64, etc.)
+                // so commands never overflow the portal width.
+                word-break: break-all;
+
+                :global(.line) {
+                    display: inline;
+                    padding: 0;
+                }
+            }
+        }
+
+        .agent-bash-output {
+            padding: 3px var(--space-1-5);
+            margin: 0;
+            max-height: 400px;
+            overflow-y: auto;
+
+            &.has-error {
+                border-left: 2px solid var(--error-color);
+            }
+
+            .agent-bash-stderr {
+                color: var(--error-color);
+            }
+        }
+
+        .agent-bash-exit {
+            padding: var(--space-0-5) var(--space-1-5);
+            font-size: 11px;
+            border-top: 1px solid var(--border-color);
+            background: color-mix(in srgb, var(--main-text-color) 3%, transparent);
+
+            &.exit-success {
+                color: var(--success-color);
+            }
+
+            &.exit-error {
+                color: var(--error-color);
+            }
+        }
+    }
+
+    // === Agent Message Block ===
+    .agent-message-block {
+        border: none;
+        border-left: 2px solid var(--border-color);
+        border-radius: 0;
+        background: transparent;
+        cursor: pointer;
+
+        &.incoming {
+            border-left: 2px solid var(--accent-color);
+        }
+
+        &.outgoing {
+            border-left: 2px solid var(--secondary-text-color);
+            opacity: 0.7;
+        }
+
+        &.mux {
+            border-left-style: solid;
+        }
+
+        &.ject {
+            border-left-style: dashed;
+        }
+
+        .agent-message-summary {
+            display: flex;
+            align-items: center;
+            gap: var(--space-1-5);
+            padding: 3px var(--space-1);
+            user-select: none;
+
+            .agent-message-chevron {
+                color: var(--secondary-text-color);
+                font-size: 10px;
+            }
+
+            .agent-message-icon {
+                flex: 1;
+            }
+
+            .agent-message-time {
+                color: var(--secondary-text-color);
+                font-size: 11px;
+            }
+        }
+
+        .agent-message-content {
+            padding: 0 var(--space-1) var(--space-1) var(--space-4);
+            cursor: default;
+
+            .agent-message-meta {
+                display: flex;
+                gap: var(--space-4);
+                padding: var(--space-1) 0 var(--space-2) 0;
+                font-size: 11px;
+                color: var(--secondary-text-color);
+            }
+
+            .agent-message-body {
+                background: color-mix(in srgb, var(--main-text-color) 5%, transparent);
+                padding: var(--space-1) var(--space-1-5);
+                border-radius: 3px;
+                margin: 0;
+                white-space: pre-wrap;
+            }
+        }
+    }
+
+    // === Subagent Link ===
+    .agent-subagent-link {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: var(--space-2) var(--space-3);
+        border: 1px solid var(--border-color);
+        border-left: 2px solid var(--accent-color);
+        border-radius: 4px;
+        cursor: pointer;
+        transition: all 0.15s;
+        user-select: none;
+
+        &:hover {
+            background: color-mix(in srgb, var(--accent-color) 8%, transparent);
+            border-color: var(--accent-color);
+        }
+
+        &.active {
+            border-left-color: var(--warning-color);
+
+            .agent-subagent-link-icon {
+                animation: pulse 1.5s ease-in-out infinite;
+            }
+        }
+
+        &.completed {
+            border-left-color: var(--success-color);
+            opacity: 0.8;
+        }
+
+        .agent-subagent-link-icon {
+            font-size: 14px;
+            flex-shrink: 0;
+        }
+
+        .agent-subagent-link-info {
+            display: flex;
+            align-items: center;
+            gap: var(--space-2);
+            flex: 1;
+            min-width: 0;
+        }
+
+        .agent-subagent-link-slug {
+            font-size: 12px;
+            font-weight: 500;
+            color: var(--main-text-color);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .agent-subagent-link-id {
+            font-size: 10px;
+            color: var(--secondary-text-color);
+            opacity: 0.6;
+            font-family: var(--fixed-font);
+        }
+
+        .agent-subagent-link-action {
+            color: var(--accent-color);
+            font-size: 14px;
+            flex-shrink: 0;
+            opacity: 0;
+            transition: opacity 0.1s;
+        }
+
+        &:hover .agent-subagent-link-action {
+            opacity: 1;
+        }
+    }
+
+    // === User Message ===
+    .agent-user-message {
+        padding: 3px var(--space-1);
+        background: color-mix(in srgb, var(--accent-color) 5%, transparent);
+        border-left: 2px solid var(--accent-color);
+        border-radius: 2px;
+        user-select: text;
+        cursor: text;
+
+        .agent-user-message-content {
+            pre {
+                margin: 0;
+                white-space: pre-wrap;
+                overflow-wrap: anywhere;
+            }
+        }
+
+        // Collapsed state: show only the first line (ellipsis-truncated).
+        // Driven by AgentDocumentView auto-collapse for large user messages
+        // like the startup session-context payload. The hover strip's expand
+        // button toggles this off.
+        &--collapsed .agent-user-message-content pre {
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+    }
+
+    // === Section Headings ===
+    .agent-section {
+        margin-top: var(--space-1-5);
+        padding: var(--space-0-5) 0;
+
+        &.level-1 h1 {
+            font-size: 18px;
+            font-weight: bold;
+            margin: var(--space-1) 0;
+            border-bottom: 2px solid var(--border-color);
+            padding-bottom: var(--space-0-5);
+        }
+
+        &.level-2 h2 {
+            font-size: 15px;
+            font-weight: bold;
+            margin: 3px 0;
+        }
+
+        &.level-3 h3 {
+            font-size: 13px;
+            font-weight: 500;
+            margin: var(--space-0-5) 0;
+            opacity: 0.8;
+        }
+    }
+
+    // === Read Tool ===
+    .agent-tool-read {
+        .agent-tool-file-path {
+            color: var(--accent-color);
+            margin-bottom: var(--space-1);
+            font-weight: 500;
+        }
+
+        .agent-tool-read-content {
+            background: var(--main-bg-color);
+            border: 1px solid var(--border-color);
+            border-radius: 3px;
+            max-height: 400px;
+            overflow-y: auto;
+            margin: 0;
+            // Shiki <pre> override: ensure our bg wins
+            &[style*="background"] {
+                background: var(--main-bg-color) !important; /* stylelint-disable-line declaration-no-important */
+            }
+        }
+    }
+
+    // === Write Tool ===
+    .agent-tool-write {
+        .agent-tool-file-path {
+            color: var(--accent-color);
+            margin-bottom: var(--space-0-5);
+            font-weight: 500;
+        }
+
+        .agent-tool-write-info {
+            color: var(--secondary-text-color);
+            font-size: 11px;
+        }
+    }
+
+    // === Search Tools (Grep/Glob) ===
+    .agent-tool-search {
+        .agent-tool-pattern {
+            color: var(--accent-color);
+            margin-bottom: var(--space-1);
+            font-weight: 500;
+        }
+
+        .agent-tool-search-results {
+            background: var(--main-bg-color);
+            border: 1px solid var(--border-color);
+            padding: var(--space-1) var(--space-1-5);
+            border-radius: 3px;
+            max-height: 400px;
+            overflow-y: auto;
+            margin: 0;
+            font-size: 11px;
+        }
+    }
+
+    // === Generic Tool ===
+    .agent-tool-generic,
+    .agent-tool-task-info {
+        background: var(--main-bg-color);
+        border: 1px solid var(--border-color);
+        padding: var(--space-1) var(--space-1-5);
+        border-radius: 3px;
+        max-height: 400px;
+        overflow-y: auto;
+        margin: 0;
+        font-size: 11px;
+    }
+
+    // === Compact Result ===
+    .agent-tool-compact-result {
+        font-size: 11px;
+
+        .agent-tool-compact-summary {
+            display: flex;
+            align-items: baseline;
+            gap: var(--space-1);
+            color: var(--main-text-color);
+            opacity: 0.85;
+            line-height: 1.4;
+
+            &.clickable {
+                cursor: pointer;
+                &:hover {
+                    opacity: 1;
+                }
+            }
+        }
+
+        .agent-tool-compact-chevron {
+            font-size: 9px;
+            flex-shrink: 0;
+            width: 10px;
+        }
+
+        .agent-tool-compact-text {
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .agent-tool-compact-json {
+            background: var(--main-bg-color);
+            border: 1px solid var(--border-color);
+            padding: var(--space-1) var(--space-1-5);
+            border-radius: 3px;
+            max-height: 400px;
+            overflow-y: auto;
+            margin: var(--space-1) 0 0 0;
+            font-size: 11px;
+            white-space: pre-wrap;
+            overflow-wrap: anywhere;
+        }
+    }
+}
