@@ -35,7 +35,7 @@ import { BookmarksPanel } from "./components/BookmarksPanel";
 import { SessionDigestBanner } from "./components/SessionDigestBanner";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { createBlock, getApi } from "@/app/store/global";
+import { createBlock, getApi, WOS } from "@/app/store/global";
 import { ContextMenuModel } from "@/app/store/contextmenu";
 import { parseAgentAccounts, loadAccounts } from "@/app/view/identity/identity-model";
 import { buildStartupPayload, resolveAccounts } from "./startup/buildStartupPayload";
@@ -337,12 +337,77 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         },
     });
 
-    // Per-pane zoom: read term:zoom from block meta (same key as terminal panes)
+    // Per-pane zoom: read term:zoom from block meta (same key as terminal panes).
     const zoomFactor = createMemo(() => {
         const meta = block()?.meta;
         const z = meta?.["term:zoom"];
         if (z == null || typeof z !== "number" || isNaN(z)) return 1.0;
         return Math.max(0.5, Math.min(2.0, z));
+    });
+
+    // Persist a zoom change to block meta. Null when back at 1.0 so
+    // the key round-trips clean instead of persisting a default.
+    const setZoom = (next: number): void => {
+        const clamped = Math.max(0.5, Math.min(2.0, Math.round(next * 100) / 100));
+        void RpcApi.SetMetaCommand(TabRpcClient, {
+            oref: WOS.makeORef("block", model.blockId),
+            meta: { "term:zoom": clamped === 1.0 ? null : clamped },
+        });
+    };
+
+    let rootRef: HTMLDivElement | undefined;
+
+    // Ctrl+Wheel to zoom — capture phase on the root so we intercept
+    // before child scroll handlers (AgentDocumentView's scrollable
+    // region) and before CEF's native page zoom. Same pattern as
+    // `term.tsx`.
+    onMount(() => {
+        if (!rootRef) return;
+        const el = rootRef;
+        const handleCtrlWheel = (ev: WheelEvent) => {
+            if (!ev.ctrlKey) return;
+            ev.preventDefault();
+            ev.stopPropagation();
+            const STEP = 0.1;
+            const delta = ev.deltaY > 0 ? -STEP : STEP;
+            setZoom(zoomFactor() + delta);
+        };
+        el.addEventListener("wheel", handleCtrlWheel, { passive: false, capture: true });
+        onCleanup(() => el.removeEventListener("wheel", handleCtrlWheel, { capture: true }));
+    });
+
+    // Ctrl+Plus / Ctrl+Minus / Ctrl+0 for keyboard zoom. Attached to
+    // `document` in capture phase with a containment check against
+    // `rootRef`, so:
+    //   - it fires regardless of which descendant (textarea, doc view,
+    //     etc.) currently has focus;
+    //   - it only fires for this pane (multiple agent panes each
+    //     zoom independently);
+    //   - it wins over a child that might call stopPropagation on
+    //     Ctrl+±.
+    onMount(() => {
+        if (!rootRef) return;
+        const el = rootRef;
+        const handleKey = (ev: KeyboardEvent) => {
+            if (!ev.ctrlKey || ev.altKey || ev.metaKey) return;
+            if (!(ev.target instanceof Node) || !el.contains(ev.target)) return;
+            const STEP = 0.1;
+            if (ev.key === "+" || ev.key === "=") {
+                ev.preventDefault();
+                ev.stopPropagation();
+                setZoom(zoomFactor() + STEP);
+            } else if (ev.key === "-" || ev.key === "_") {
+                ev.preventDefault();
+                ev.stopPropagation();
+                setZoom(zoomFactor() - STEP);
+            } else if (ev.key === "0") {
+                ev.preventDefault();
+                ev.stopPropagation();
+                setZoom(1.0);
+            }
+        };
+        document.addEventListener("keydown", handleKey, { capture: true });
+        onCleanup(() => document.removeEventListener("keydown", handleKey, { capture: true }));
     });
 
     // Handle subagent link click — open a subagent pane
@@ -377,9 +442,11 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
 
     return (
         <div
+            ref={rootRef}
             class="agent-view agent-view--presentation"
             style={{ zoom: zoomFactor() }}
             onContextMenu={handleContextMenu}
+            tabIndex={-1}
         >
             {/* Pane title + back button now live in the block frame header,
                 driven by AgentViewModel.viewName / viewIcon / endIconButtons.

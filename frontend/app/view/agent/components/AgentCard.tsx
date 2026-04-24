@@ -38,7 +38,6 @@ export const AgentCard = (props: AgentCardProps): JSX.Element => {
     const icon = () => props.agent.icon || catalog()?.icon || "•";
     const title = () => catalog()?.blurb || props.agent.description || props.agent.name;
     const caption = () => catalog()?.displayName || props.agent.name;
-    const contextBadge = () => catalog()?.primaryContextFile ?? "";
     const popoverText = () => catalog()?.popoverMarkdown ?? props.agent.description ?? "";
 
     const stopAndRun = (fn: () => void) => (e: MouseEvent) => {
@@ -72,14 +71,7 @@ export const AgentCard = (props: AgentCardProps): JSX.Element => {
             <span class="agent-card-icon">{icon()}</span>
             <span class="agent-card-info">
                 <span class="agent-card-title">{title()}</span>
-                <span class="agent-card-caption">
-                    <span class="agent-card-cli-name">{caption()}</span>
-                    <Show when={contextBadge()}>
-                        <span class="agent-card-context-badge" title={`Reads ${contextBadge()} at startup`}>
-                            {contextBadge()}
-                        </span>
-                    </Show>
-                </span>
+                <span class="agent-card-caption">{caption()}</span>
             </span>
             <div class="agent-card-actions">
                 <Show when={popoverText()}>
