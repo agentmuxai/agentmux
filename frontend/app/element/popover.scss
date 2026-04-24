@@ -7,7 +7,7 @@
     position: absolute;
     z-index: var(--z-popover);
     display: flex;
-    padding: 2px;
+    padding: var(--space-0-5);
     gap: 1px;
     border-radius: 4px;
     border: 1px solid var(--border-color);

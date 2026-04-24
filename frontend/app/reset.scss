@@ -113,7 +113,7 @@
     }
 
     ::file-selector-button {
-        margin-inline-end: 4px;
+        margin-inline-end: var(--space-1);
     }
 
     ::placeholder {

@@ -7,7 +7,7 @@
     right: 6px;
     z-index: var(--z-xterm-overlay);
     display: flex;
-    gap: 6px;
+    gap: var(--space-1-5);
     font-size: 11px;
     font-variant-numeric: tabular-nums;
     opacity: 0.5;

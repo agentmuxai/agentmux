@@ -70,7 +70,7 @@
     .notification {
         width: 100%;
         color: var(--main-text-color);
-        padding: 12px 10px;
+        padding: var(--space-3) 10px;
         display: flex;
         flex-direction: column;
         position: relative;
@@ -80,9 +80,9 @@
         position: relative;
         display: flex;
         width: 380px;
-        padding: 16px 24px 16px 16px;
+        padding: var(--space-4) 24px 16px 16px;
         align-items: flex-start;
-        gap: 12px;
+        gap: var(--space-3);
         border-radius: 8px;
         border: 0.5px solid rgba(255, 255, 255, 0.12);
         background: var(--modal-bg-color);
@@ -92,7 +92,7 @@
     .notification-inner {
         display: flex;
         align-items: flex-start;
-        column-gap: 6px;
+        column-gap: var(--space-1-5);
 
         .notification-icon {
             margin-right: 5px;
