@@ -44,15 +44,13 @@ export const AgentLaunchModal = (props: AgentLaunchModalProps): JSX.Element => {
     const [image, setImage] = createSignal<string>("");
     const [submitting, setSubmitting] = createSignal(false);
     const [error, setError] = createSignal<string | null>(null);
+    const [showAdvanced, setShowAdvanced] = createSignal(false);
 
-    // Live preview — the backend computes the real stamp on submit,
-    // but showing something now reassures the user that their name
-    // will become a directory.
-    const previewDir = createMemo(() => {
-        const trimmed = name().trim();
-        if (!trimmed) return "";
-        return `data/agents/${buildInstanceSlug(trimmed)}/`;
-    });
+    // Live preview of the instance slug — shown inside Advanced as
+    // "Its files will live in <slug>" so power users can see what
+    // their name will become. The backend stamps the real slug on
+    // submit, but this is close enough for the user to recognise it.
+    const hasName = () => name().trim().length > 0;
 
     const canSubmit = () => !submitting() && slugifyInstanceName(name()).length > 0;
 
@@ -110,7 +108,7 @@ export const AgentLaunchModal = (props: AgentLaunchModalProps): JSX.Element => {
                     </Show>
 
                     <label class="agent-launch-modal-field">
-                        <span class="agent-launch-modal-label">Name</span>
+                        <span class="agent-launch-modal-label">Give this agent a name</span>
                         <input
                             class="agent-launch-modal-input"
                             type="text"
@@ -119,15 +117,15 @@ export const AgentLaunchModal = (props: AgentLaunchModalProps): JSX.Element => {
                             value={name()}
                             onInput={(e) => setName(e.currentTarget.value)}
                             disabled={submitting()}
-                            aria-label="Instance name"
+                            aria-label="Agent name"
                         />
                         <span class="agent-launch-modal-hint">
-                            1–64 characters. Becomes part of the working directory.
+                            So you can tell it apart from other agents. 1–64 characters.
                         </span>
                     </label>
 
                     <fieldset class="agent-launch-modal-field agent-launch-modal-runtime">
-                        <legend class="agent-launch-modal-label">Runtime</legend>
+                        <legend class="agent-launch-modal-label">Where should it run?</legend>
                         <label class="agent-launch-modal-radio">
                             <input
                                 type="radio"
@@ -137,9 +135,9 @@ export const AgentLaunchModal = (props: AgentLaunchModalProps): JSX.Element => {
                                 disabled={submitting()}
                             />
                             <span>
-                                <strong>Host</strong>
+                                <strong>On this computer</strong>
                                 <span class="agent-launch-modal-hint">
-                                    Runs on your machine with your shell.
+                                    Fastest. The agent can read and change files on your machine.
                                 </span>
                             </span>
                         </label>
@@ -155,44 +153,58 @@ export const AgentLaunchModal = (props: AgentLaunchModalProps): JSX.Element => {
                                 disabled={submitting() || !containerSupported()}
                             />
                             <span>
-                                <strong>Container</strong>
+                                <strong>In a safe sandbox</strong>
                                 <span class="agent-launch-modal-hint">
                                     {containerSupported()
-                                        ? "Runs inside Docker/Podman — sandboxed."
-                                        : "Not supported for this CLI."}
+                                        ? "Slower to start, but the agent can't touch files outside its own workspace. Recommended for untrusted tasks."
+                                        : "Not available for this agent."}
                                 </span>
                             </span>
                         </label>
                     </fieldset>
 
-                    <Show when={runtime() === "container" && containerSupported()}>
-                        <label class="agent-launch-modal-field">
-                            <span class="agent-launch-modal-label">Image</span>
-                            <input
-                                class="agent-launch-modal-input"
-                                type="text"
-                                placeholder={catalog()?.containerImage ?? ""}
-                                value={image()}
-                                onInput={(e) => setImage(e.currentTarget.value)}
-                                disabled={submitting()}
-                                aria-label="Container image"
-                            />
-                            <span class="agent-launch-modal-hint">
-                                Leave blank to use the default image.
-                            </span>
-                        </label>
-                    </Show>
-
-                    <Show when={previewDir()}>
-                        <div class="agent-launch-modal-preview">
-                            <span class="agent-launch-modal-preview-label">Working dir:</span>
-                            <code>{previewDir()}</code>
-                        </div>
-                    </Show>
-
                     <Show when={error()}>
                         <div class="agent-launch-modal-error">{error()}</div>
                     </Show>
+
+                    <details
+                        class="agent-launch-modal-advanced"
+                        open={showAdvanced()}
+                        onToggle={(e) => setShowAdvanced(e.currentTarget.open)}
+                    >
+                        <summary class="agent-launch-modal-advanced-summary">
+                            Advanced options
+                        </summary>
+                        <div class="agent-launch-modal-advanced-body">
+                            <label
+                                class="agent-launch-modal-field"
+                                classList={{ "agent-launch-modal-field--disabled": runtime() !== "container" }}
+                            >
+                                <span class="agent-launch-modal-label">Override sandbox base</span>
+                                <input
+                                    class="agent-launch-modal-input"
+                                    type="text"
+                                    placeholder={catalog()?.containerImage ?? ""}
+                                    value={image()}
+                                    onInput={(e) => setImage(e.currentTarget.value)}
+                                    disabled={submitting() || runtime() !== "container" || !containerSupported()}
+                                    aria-label="Sandbox base image"
+                                />
+                                <span class="agent-launch-modal-hint">
+                                    {runtime() === "container"
+                                        ? "Leave blank unless you know exactly which base image you need."
+                                        : "Only applies to the sandbox runtime."}
+                                </span>
+                            </label>
+
+                            <Show when={hasName()}>
+                                <div class="agent-launch-modal-preview">
+                                    <span class="agent-launch-modal-preview-label">Its files will live in</span>
+                                    <code>{buildInstanceSlug(name().trim())}</code>
+                                </div>
+                            </Show>
+                        </div>
+                    </details>
                 </div>
             </ModalBody>
             <ModalFooter>
