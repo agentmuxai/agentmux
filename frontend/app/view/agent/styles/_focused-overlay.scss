@@ -1,0 +1,125 @@
+// Copyright 2024-2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// Focused overlay — title-bar action buttons (rename / forge / identity). Wrapped in .agent-view so the cascade chain matches
+// the pre-split file (SPEC_AGENT_VIEW_SCSS_SPLIT_2026_04_24).
+.agent-view {
+    // === Focused Overlay (title-bar action buttons: rename / forge / identity) ===
+    .agent-focused-overlay {
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        // Cover top ~50% of chat area — same proportion as the picker overlay.
+        height: 50%;
+        z-index: 20;
+        display: flex;
+        flex-direction: column;
+    }
+
+    .agent-focused-panel {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        background: var(--panel-bg-color, var(--main-bg-color));
+        border-bottom: 1px solid var(--border-color, rgba(255, 255, 255, 0.12));
+        overflow: hidden;
+
+        // Reuse agent-card-settings-panel styles inside this panel.
+        .agent-card-settings-panel {
+            flex: 1;
+            overflow: hidden;
+        }
+    }
+
+    .agent-focused-panel-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: var(--space-2) var(--space-3);
+        border-bottom: 1px solid var(--border-color, rgba(255, 255, 255, 0.1));
+        flex-shrink: 0;
+    }
+
+    .agent-focused-panel-title {
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--main-text-color);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        opacity: 0.7;
+    }
+
+    .agent-focused-panel-close {
+        background: none;
+        border: none;
+        cursor: pointer;
+        color: var(--secondary-text-color);
+        font-size: 12px;
+        padding: var(--space-0-5) var(--space-1);
+        border-radius: 3px;
+        line-height: 1;
+
+        &:hover {
+            background: rgba(255, 255, 255, 0.08);
+            color: var(--main-text-color);
+        }
+    }
+
+    .agent-focused-panel-body {
+        flex: 1;
+        overflow: auto;
+        padding: var(--space-3);
+    }
+
+    .agent-focused-rename {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-2);
+        padding: var(--space-4);
+
+        .agent-card-rename-input {
+            width: 100%;
+        }
+    }
+
+    .agent-focused-rename-error {
+        font-size: 12px;
+        color: var(--error-color);
+    }
+
+    .agent-focused-rename-actions {
+        display: flex;
+        gap: var(--space-2);
+        margin-top: var(--space-1);
+    }
+
+    .agent-focused-rename-btn {
+        padding: var(--space-1) var(--space-3);
+        border-radius: 4px;
+        font-size: 12px;
+        cursor: pointer;
+        border: 1px solid var(--border-color, rgba(255, 255, 255, 0.2));
+        background: rgba(255, 255, 255, 0.05);
+        color: var(--main-text-color);
+
+        &:hover:not(:disabled) {
+            background: rgba(255, 255, 255, 0.1);
+        }
+
+        &:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        &--confirm {
+            background: var(--accent-color);
+            border-color: var(--accent-color);
+            color: #fff; /* stylelint-disable-line color-no-hex */
+
+            &:hover:not(:disabled) {
+                filter: brightness(1.1);
+            }
+        }
+    }
+}

@@ -1,0 +1,88 @@
+// Copyright 2024-2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// Session digest banner (summary shown after long sessions). Wrapped in .agent-view so the cascade chain matches
+// the pre-split file (SPEC_AGENT_VIEW_SCSS_SPLIT_2026_04_24).
+.agent-view {
+    // === Session digest banner ===
+
+    .agent-session-digest {
+        margin: var(--space-1) 0 var(--space-0-5);
+        padding: var(--space-1-5) var(--space-2);
+        background: color-mix(in srgb, var(--accent-color) 8%, transparent);
+        border: 1px solid var(--accent-color);
+        border-radius: 4px;
+        font-size: 12px;
+        flex-shrink: 0;
+    }
+
+    .agent-session-digest-header {
+        display: flex;
+        align-items: center;
+        gap: var(--space-1-5);
+        font-weight: 600;
+        color: var(--main-text-color);
+    }
+
+    .agent-session-digest-title {
+        flex: 1;
+        color: var(--accent-color);
+        font-size: 12px;
+    }
+
+    .agent-session-digest-age {
+        font-weight: normal;
+        opacity: 0.7;
+        font-size: 11px;
+    }
+
+    .agent-session-digest-toggle,
+    .agent-session-digest-action {
+        background: none;
+        border: none;
+        cursor: pointer;
+        padding: var(--space-0-5) 5px;
+        color: var(--secondary-text-color);
+        opacity: 0.75;
+        font-size: 12px;
+        line-height: 1;
+        border-radius: 3px;
+        transition: opacity 0.1s, background 0.1s;
+        flex-shrink: 0;
+
+        &:hover:not(:disabled) {
+            opacity: 1;
+            background: color-mix(in srgb, var(--accent-color) 15%, transparent);
+        }
+
+        &:disabled {
+            cursor: default;
+            opacity: 0.4;
+        }
+    }
+
+    .agent-session-digest-dismiss:hover:not(:disabled) {
+        background: color-mix(in srgb, var(--error-color) 15%, transparent);
+        color: var(--error-color);
+    }
+
+    .agent-session-digest-body {
+        padding: var(--space-1-5) var(--space-0-5) var(--space-0-5);
+        line-height: 1.5;
+        color: var(--main-text-color);
+
+        // Markdown renders <p> tags — tighten spacing inside the banner
+        p {
+            margin: 0 0 var(--space-1);
+            &:last-child { margin-bottom: 0; }
+        }
+    }
+
+    .agent-session-digest-loading,
+    .agent-session-digest-empty {
+        padding: var(--space-1-5) var(--space-0-5) var(--space-0-5);
+        opacity: 0.6;
+        font-style: italic;
+        color: var(--secondary-text-color);
+    }
+}
