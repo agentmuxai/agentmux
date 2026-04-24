@@ -534,8 +534,19 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
             {/* Queue sits directly below the feed so the user's newly-
                 typed message lands next to the live conversation it's
                 queued against. Previously lived below the activity log;
-                repositioning per SPEC_AGENT_PANE_ZONE_ORDER_WORKED_FOOTER_2026_04_24. */}
-            <PendingMessagesPanel pendingMessages={pendingMessagesAtom[0]} />
+                repositioning per SPEC_AGENT_PANE_ZONE_ORDER_WORKED_FOOTER_2026_04_24.
+                "Send now" lives inside the queue header (right side)
+                so it sits adjacent to the messages it accelerates. */}
+            <PendingMessagesPanel
+                pendingMessages={pendingMessagesAtom[0]}
+                showSendNow={() =>
+                    agentAtoms().turnActiveAtom[0]() &&
+                    pendingMessagesAtom[0]().length > 0
+                }
+                onSendImmediately={() => {
+                    commands.stopAgent();
+                }}
+            />
 
             {/* Working…/Stopping… status — reads as "what the agent is
                 doing about the queue above". Used to live inside the
@@ -593,18 +604,6 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                     onTyping={() => scrollToBottomFn?.()}
                     onStopAgent={commands.stopAgent}
                     getCompletions={commands.completions}
-                    // Show "Send now" while a turn is running and there's
-                    // something to accelerate — pending queue items or
-                    // text waiting in the composer. On click: SIGINT +
-                    // submit the composer text (which tails the queue;
-                    // process_waiter drains it right after the kill).
-                    showSendNow={() =>
-                        agentAtoms().turnActiveAtom[0]() &&
-                        pendingMessagesAtom[0]().length > 0
-                    }
-                    onSendImmediately={() => {
-                        commands.stopAgent();
-                    }}
                 />
             </div>
             {/* AgentActionBar (Add / Import / Export) lives in the

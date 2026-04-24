@@ -203,19 +203,6 @@ interface AgentFooterProps {
      * If absent, autocomplete is disabled.
      */
     getCompletions?: (prefix: string) => SlashCommand[];
-    /**
-     * Show the "Send now" button above the composer. Caller typically
-     * passes `turnActive() && (hasText || pendingCount > 0)` so the
-     * button appears only when there's something to force through and
-     * the agent is currently busy.
-     */
-    showSendNow?: () => boolean;
-    /**
-     * Fires when the user clicks "Send now". Caller is expected to
-     * `stopAgent()` (SIGINT) and then — if the composer has text —
-     * call `onSendMessage` with it. See AGENT_PANE_QUEUED_MESSAGE_FEEDBACK_SPEC.md.
-     */
-    onSendImmediately?: () => void;
 }
 
 export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
@@ -375,17 +362,9 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
 
     return (
         <div class="agent-footer">
-            <Show when={props.showSendNow?.()}>
-                <button
-                    type="button"
-                    class="agent-send-immediately-btn"
-                    onClick={() => props.onSendImmediately?.()}
-                    title="Stop the current turn and process the queue now"
-                >
-                    <span class="agent-send-immediately-icon">⏭</span>
-                    <span>Send now</span>
-                </button>
-            </Show>
+            {/* "Send now" now renders inside PendingMessagesPanel (right
+                of the queue header) so it sits next to the messages it
+                accelerates, not above the composer. */}
             <div class="agent-input-container">
                 <Show when={autocompletePrefix() !== null && completions().length > 0}>
                     <SlashAutocomplete
