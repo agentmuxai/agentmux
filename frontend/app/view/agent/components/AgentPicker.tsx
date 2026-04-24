@@ -19,6 +19,7 @@ import { AgentCard } from "./AgentCard";
 import { AgentCardSettingsPanel } from "./AgentCardSettingsPanel";
 import { AgentActionBar } from "./AgentActionBar";
 import { AgentLaunchModal, type LaunchOverrides } from "./AgentLaunchModal";
+import { ConfirmModal } from "@/element/modal-v2";
 
 // ── useForgeAgents hook ───────────────────────────────────────────────────────
 
@@ -67,6 +68,8 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
     const [launching, setLaunching] = createSignal<string | null>(null);
     const [nodejsError, setNodejsError] = createSignal<string | null>(null);
     const [launchModalAgent, setLaunchModalAgent] = createSignal<ForgeAgent | null>(null);
+    const [deleteCandidate, setDeleteCandidate] = createSignal<ForgeAgent | null>(null);
+    const [deleteError, setDeleteError] = createSignal<string | null>(null);
     const agents = useForgeAgents();
 
     // Inline Forge-settings panel: which definition is expanded.
@@ -112,20 +115,26 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
     };
 
     /**
-     * Delete a Forge definition after confirmation. The backend
-     * `DeleteForgeAgent` RPC removes the row and emits a
+     * Stage a Forge definition for deletion — the actual delete runs
+     * via `handleDeleteConfirm` when the user confirms in the modal.
+     * The backend `DeleteForgeAgent` RPC removes the row and emits a
      * `forgeagents:changed` event, which `useForgeAgents` re-fetches
      * on — so the list updates without manual refresh.
      */
-    const handleDelete = async (agent: ForgeAgent) => {
-        const ok = window.confirm(
-            `Delete definition "${agent.name}"?\n\nThis removes it permanently. Any open panes running instances of it will stay connected until you close them.`
-        );
-        if (!ok) return;
+    const handleDelete = (agent: ForgeAgent) => {
+        setDeleteError(null);
+        setDeleteCandidate(agent);
+    };
+
+    const handleDeleteConfirm = async () => {
+        const agent = deleteCandidate();
+        if (!agent) return;
         try {
             await RpcApi.DeleteForgeAgentCommand(TabRpcClient, { id: agent.id });
+            setDeleteCandidate(null);
         } catch (e: any) {
-            alert(`Delete failed: ${e?.message ?? String(e)}`);
+            setDeleteError(e?.message ?? String(e));
+            // Leave the modal open so the user sees the error.
         }
     };
 
@@ -200,6 +209,28 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                         onCancel={() => setLaunchModalAgent(null)}
                         onSubmit={handleLaunchSubmit}
                     />
+                )}
+            </Show>
+            <Show when={deleteCandidate()}>
+                {(agent) => (
+                    <ConfirmModal
+                        open={true}
+                        title={`Delete definition "${agent().name}"?`}
+                        description="This removes it permanently. Any open panes running instances of it will stay connected until you close them."
+                        confirmLabel="Delete"
+                        destructive
+                        onConfirm={handleDeleteConfirm}
+                        onCancel={() => {
+                            setDeleteCandidate(null);
+                            setDeleteError(null);
+                        }}
+                    >
+                        <Show when={deleteError()}>
+                            <div class="agent-picker-delete-error">
+                                Delete failed: {deleteError()}
+                            </div>
+                        </Show>
+                    </ConfirmModal>
                 )}
             </Show>
         </>
