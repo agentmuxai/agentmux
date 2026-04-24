@@ -25,20 +25,27 @@ export function slugifyInstanceName(name: string): string {
         .replace(/[^a-z0-9-_]/g, "");
 }
 
-/** Format a Date as `YYYYMMDD-HHMMSS` in the caller's local time. */
+/**
+ * Format a Date as `YYYYMMDD-HHMMSS-mmm` in the caller's local time.
+ * The millisecond suffix makes the stamp unique across realistic
+ * concurrent launches — two clicks in the same millisecond are not
+ * a failure mode we optimise for. Codex flagged sub-second collisions
+ * on PR #504 (https://github.com/agentmuxai/agentmux/pull/504); this
+ * form closes that gap without reaching for UUIDs.
+ */
 export function formatLocalStamp(d: Date): string {
-    const pad = (n: number) => String(n).padStart(2, "0");
+    const pad = (n: number, w = 2) => String(n).padStart(w, "0");
     return (
         `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}` +
-        `-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`
+        `-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}` +
+        `-${pad(d.getMilliseconds(), 3)}`
     );
 }
 
 /**
  * Build the per-instance slug for a given name at the given time.
- * `<slug>-<stamp>` — stable, filesystem-safe, and unique at 1s
- * granularity. Sub-second collisions are resolved by the backend
- * with a `-1`, `-2`, … suffix.
+ * `<slug>-<stamp>` — stable, filesystem-safe, and unique at 1ms
+ * granularity.
  */
 export function buildInstanceSlug(name: string, at: Date = new Date()): string {
     return `${slugifyInstanceName(name)}-${formatLocalStamp(at)}`;
