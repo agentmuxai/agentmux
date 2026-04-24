@@ -5,7 +5,9 @@
     position: fixed;
     inset: 0;
     background: rgba(0, 0, 0, 0.45);
-    z-index: 900;
+    // Command palette is a modal — lives in the modal slot.
+    // Backdrop + container are siblings; DOM order controls paint.
+    z-index: var(--z-modal);
 }
 
 .command-palette-container {
@@ -19,7 +21,7 @@
     border: 1px solid var(--border-color, #444);
     border-radius: 8px;
     box-shadow: 0 16px 48px rgba(0, 0, 0, 0.6);
-    z-index: 901;
+    z-index: var(--z-modal);
     display: flex;
     flex-direction: column;
     overflow: hidden;
