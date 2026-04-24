@@ -35,7 +35,7 @@
 .action-widget-drop-indicator {
     width: 2px;
     height: 18px;
-    background-color: var(--accent-color, #7c6bff);
+    background-color: var(--accent-color);
     border-radius: 1px;
     flex-shrink: 0;
     pointer-events: none;
@@ -53,7 +53,7 @@
     height: 100%;
     cursor: pointer;
     border-radius: 4px;
-    color: var(--secondary-text-color, #888);
+    color: var(--secondary-text-color);
     font-size: 12px;
     white-space: nowrap;
 
@@ -80,9 +80,12 @@
 // ── More dropdown ─────────────────────────────────────────────────────────────
 
 .action-widget-more-dropdown {
-    z-index: 9999;
-    background: var(--main-bg-color, #1e1e1e);
-    border: 1px solid var(--border-color, rgba(255, 255, 255, 0.12));
+    // Dropdown sits in the flyout slot — needs to paint above modals
+    // it's anchored against (it's part of the window action surface,
+    // not modal content).
+    z-index: var(--z-flyout-menu);
+    background: var(--main-bg-color);
+    border: 1px solid var(--border-color);
     border-radius: 6px;
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
     min-width: 170px;
@@ -97,7 +100,7 @@
         padding: 6px 14px;
         cursor: pointer;
         font-size: 13px;
-        color: var(--secondary-text-color, #aaa);
+        color: var(--secondary-text-color);
 
         &:hover {
             background: var(--hoverbg-color, rgba(255, 255, 255, 0.08));
