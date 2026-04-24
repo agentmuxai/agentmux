@@ -2,12 +2,14 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // Command palette modal — opened via Ctrl+P, lists all registered commands.
+// Migrated to the shared `element/modal-v2` primitive; the palette's
+// specific chrome (search row + scroll list) lives in the panel body.
 
 import { commandRegistry, type CommandEntry } from "@/app/store/command-registry";
 import { modalsModel } from "@/app/store/modalmodel";
 import { disableGlobalKeybindings, enableGlobalKeybindings } from "@/app/store/keymodel";
+import { Modal } from "@/element/modal-v2";
 import { createMemo, createSignal, For, onCleanup, onMount, type JSX } from "solid-js";
-import { Portal } from "solid-js/web";
 import "./command-palette.scss";
 
 const CATEGORY_ORDER: string[] = ["Open", "Split", "Window", "Tab", "Pane", "Dev"];
@@ -49,7 +51,10 @@ const CommandPaletteModal = (): JSX.Element => {
 
     onMount(() => {
         disableGlobalKeybindings();
-        inputRef?.focus();
+        // Modal-v2 will focus the first focusable after Portal mount
+        // (the search input). Keep a defensive explicit focus() in case
+        // the order of focusable elements ever changes.
+        queueMicrotask(() => inputRef?.focus());
     });
 
     onCleanup(() => {
@@ -72,13 +77,9 @@ const CommandPaletteModal = (): JSX.Element => {
         }, 0);
     }
 
+    // Arrow keys + Enter are palette-specific navigation. ESC and
+    // backdrop close are handled by modal-v2 → `onClose`.
     function handleKeyDown(e: KeyboardEvent) {
-        if (e.key === "Escape") {
-            e.preventDefault();
-            e.stopPropagation();
-            close();
-            return;
-        }
         if (e.key === "ArrowDown") {
             e.preventDefault();
             setSelectedIdx((i) => Math.min(i + 1, filtered().length - 1));
@@ -102,8 +103,13 @@ const CommandPaletteModal = (): JSX.Element => {
     }
 
     return (
-        <Portal mount={document.getElementById("main") ?? document.body}>
-            <div class="command-palette-backdrop" onClick={close} />
+        <Modal
+            open={true}
+            onClose={close}
+            placement="top"
+            panelClass="command-palette-panel"
+            ariaLabel="Command palette"
+        >
             <div class="command-palette-container" onKeyDown={handleKeyDown}>
                 <div class="command-palette-input-row">
                     <i class="fa-sharp fa-solid fa-magnifying-glass command-palette-search-icon" />
@@ -146,7 +152,7 @@ const CommandPaletteModal = (): JSX.Element => {
                     )}
                 </div>
             </div>
-        </Portal>
+        </Modal>
     );
 };
 

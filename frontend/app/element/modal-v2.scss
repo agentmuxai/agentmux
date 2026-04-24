@@ -14,6 +14,13 @@
     place-items: center;
     padding: var(--space-6);
 
+    // Top-anchored placement for command-palette-style surfaces that
+    // drop from the top of the viewport.
+    &[data-placement="top"] {
+        align-items: start;
+        padding-top: 15vh;
+    }
+
     // The root itself is focusable as a last-resort target (when the
     // panel has no focusable children, `firstFocusable(panelRef)`
     // returns null and we fall back to panelRef. panelRef has
