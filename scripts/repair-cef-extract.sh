@@ -16,56 +16,112 @@
 set -euo pipefail
 
 ROOT="${CARGO_TARGET_DIR:-target}/release/build"
-# Find the latest cef-dll-sys build dir that has an `out/` subdir.
-# Multiple hashes can coexist; we want the one that actually did work.
-DEST_DIR=""
-for d in "$ROOT"/cef-dll-sys-*/out/cef_windows_x86_64; do
-    if [ -d "$d" ]; then
-        DEST_DIR="$d"
-        break
+
+# Repair every cef-dll-sys build dir that has a `cef_windows_x86_64/`
+# extract — multiple hashes can coexist (e.g. build-script-only vs.
+# the actual compiled crate), and a lexicographic-first match may not
+# be the hash cargo's current build is watching. Touching all of them
+# is idempotent: complete extracts are left alone, partial ones get
+# the missing subdirs restored. Codex flagged this in #543 review.
+any_candidates=0
+any_repaired=0
+global_rc=1  # 1 = no candidates found; flipped to 0 if we visit any.
+
+for DEST_DIR in "$ROOT"/cef-dll-sys-*/out/cef_windows_x86_64; do
+    if [ ! -d "$DEST_DIR" ]; then
+        continue
+    fi
+    any_candidates=1
+    global_rc=0
+
+    # Sibling raw-extract dir (source of truth for headers/source).
+    SRC_PARENT="$(dirname "$DEST_DIR")"
+    SRC_DIR=""
+    for cand in "$SRC_PARENT"/cef_binary_*/; do
+        if [ -d "$cand" ]; then
+            SRC_DIR="$cand"
+            break
+        fi
+    done
+
+    # --- libcef_dll and include: directory-level renames ------------
+    # download-cef moves each of these as a whole directory into
+    # cef_windows_x86_64/. When the rename failed the dest is absent;
+    # restore it by copying the whole source directory.
+    for sub in libcef_dll include; do
+        dest="$DEST_DIR/$sub"
+        if [ ! -e "$dest" ] || { [ -d "$dest" ] && [ -z "$(ls -A "$dest" 2>/dev/null)" ]; }; then
+            if [ -z "$SRC_DIR" ]; then
+                echo "repair-cef-extract: $dest missing and no cef_binary_*/ source" >&2
+                exit 2
+            fi
+            src="$SRC_DIR$sub"
+            if [ ! -d "$src" ]; then
+                echo "repair-cef-extract: source $src missing" >&2
+                exit 2
+            fi
+            rm -rf "$dest"
+            cp -r "$src" "$dest"
+            echo "repair-cef-extract: restored $dest"
+            any_repaired=1
+        fi
+    done
+
+    # --- Resources: content-level merge, NOT a nested dir -----------
+    # download-cef's `for entry in fs::read_dir(&resources)?` loop
+    # moves each entry from cef_binary_*/Resources/ INTO the root of
+    # cef_windows_x86_64/ (chrome_100_percent.pak, icudtl.dat,
+    # locales/, …). A naive `cp -r Resources DEST/` would instead
+    # create a nested cef_windows_x86_64/Resources/ that
+    # bundle:windows (Taskfile.yml $cefDir/*.pak, $cefDir/locales/*)
+    # never reads — Codex P1 on #543. Always merge entries into root;
+    # never create a nested Resources/ directory.
+    #
+    # `icudtl.dat` is the well-known resource we use as the
+    # content-present marker. Its absence means the Resources-loop in
+    # download-cef never completed for this extract.
+    if [ ! -e "$DEST_DIR/icudtl.dat" ]; then
+        # Prefer a stray nested Resources/ if a prior (buggy) repair
+        # left files there — those entries are canonical because
+        # download-cef may have already drained the cef_binary_*/Resources/
+        # source during its partial run. Fall back to the source extract.
+        merge_src=""
+        if [ -d "$DEST_DIR/Resources" ] && [ -n "$(ls -A "$DEST_DIR/Resources" 2>/dev/null)" ]; then
+            merge_src="$DEST_DIR/Resources"
+        elif [ -n "$SRC_DIR" ] && [ -d "$SRC_DIR/Resources" ]; then
+            merge_src="${SRC_DIR}Resources"
+        fi
+        if [ -n "$merge_src" ]; then
+            for entry in "$merge_src"/*; do
+                [ -e "$entry" ] || continue  # glob may expand empty
+                name="$(basename "$entry")"
+                dest="$DEST_DIR/$name"
+                if [ ! -e "$dest" ]; then
+                    cp -r "$entry" "$dest"
+                fi
+            done
+            echo "repair-cef-extract: merged $merge_src/ into $DEST_DIR root"
+            any_repaired=1
+        fi
+    fi
+
+    # Tidy up any nested Resources/ (stray from a prior buggy repair,
+    # or drained-empty from download-cef). Its files are now in root
+    # so the dir itself is redundant at best, misleading at worst
+    # (the bundler glob would otherwise re-include duplicate .paks).
+    if [ -d "$DEST_DIR/Resources" ]; then
+        rm -rf "$DEST_DIR/Resources"
     fi
 done
 
-if [ -z "$DEST_DIR" ]; then
-    # No cef_windows_x86_64 yet — extraction hasn't run at all, nothing to repair.
+if [ "$any_candidates" = "0" ]; then
+    # No cef_windows_x86_64 anywhere — extraction hasn't run, nothing
+    # for us to do. Signal to the wrapper so it can decide whether to
+    # re-run cargo or give up.
     exit 1
 fi
 
-# Sibling raw-extract dir (source of truth for headers/source)
-SRC_PARENT="$(dirname "$DEST_DIR")"
-SRC_DIR=""
-for d in "$SRC_PARENT"/cef_binary_*/; do
-    if [ -d "$d" ]; then
-        SRC_DIR="$d"
-        break
-    fi
-done
-
-repaired=0
-for sub in libcef_dll include Resources; do
-    dest="$DEST_DIR/$sub"
-    # "Present but empty" counts as missing for Resources (the rename loop
-    # drained its contents into DEST_DIR but Resources/ itself is left behind).
-    if [ ! -e "$dest" ] || { [ -d "$dest" ] && [ -z "$(ls -A "$dest" 2>/dev/null)" ]; }; then
-        if [ -z "$SRC_DIR" ]; then
-            echo "repair-cef-extract: $dest missing and no cef_binary_*/ source to copy from" >&2
-            exit 2
-        fi
-        src="$SRC_DIR$sub"
-        if [ ! -d "$src" ]; then
-            # Resources was drained — nothing to copy; that's fine.
-            [ "$sub" = "Resources" ] && continue
-            echo "repair-cef-extract: source $src missing" >&2
-            exit 2
-        fi
-        rm -rf "$dest"
-        cp -r "$src" "$dest"
-        echo "repair-cef-extract: restored $dest"
-        repaired=1
-    fi
-done
-
-if [ "$repaired" = "1" ]; then
+if [ "$any_repaired" = "1" ]; then
     echo "repair-cef-extract: CEF extract repaired; re-running build should succeed"
 fi
 exit 0
