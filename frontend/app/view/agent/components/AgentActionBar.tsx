@@ -1,15 +1,20 @@
 // Copyright 2024-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { createSignal, type JSX } from "solid-js";
+import { createSignal, Show, type JSX } from "solid-js";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
+import { Button } from "@/element/button";
+import { Modal, ModalBody, ModalFooter, ModalHeader } from "@/element/modal-v2";
 import { ImportPreviewModal } from "./ImportPreviewModal";
 
 export const AgentActionBar = (): JSX.Element => {
     const [importing, setImporting] = createSignal(false);
     const [exporting, setExporting] = createSignal(false);
     const [importPayload, setImportPayload] = createSignal<ExportForgeAgentsResult | null>(null);
+    // Error dialog replaces the four `alert()` callsites — in-app,
+    // styled, focus-managed, matches the rest of the UI.
+    const [errorMsg, setErrorMsg] = createSignal<string | null>(null);
 
     function handleImportClick() {
         if (importing()) return;
@@ -27,17 +32,17 @@ export const AgentActionBar = (): JSX.Element => {
                 try {
                     parsed = JSON.parse(text);
                 } catch {
-                    alert("Invalid file — expected AgentMux export format (JSON parse error)");
+                    setErrorMsg("Invalid file — expected AgentMux export format (JSON parse error)");
                     return;
                 }
                 if (!parsed?.agents || !Array.isArray(parsed.agents)) {
-                    alert("Invalid file — expected AgentMux export format (missing agents array)");
+                    setErrorMsg("Invalid file — expected AgentMux export format (missing agents array)");
                     return;
                 }
                 setImportPayload(parsed);
             } catch (err) {
                 console.error("AgentActionBar: import read error", err);
-                alert("Failed to read file");
+                setErrorMsg("Failed to read file");
             } finally {
                 setImporting(false);
             }
@@ -65,7 +70,7 @@ export const AgentActionBar = (): JSX.Element => {
             URL.revokeObjectURL(url);
         } catch (err) {
             console.error("AgentActionBar: export error", err);
-            alert("Export failed");
+            setErrorMsg("Export failed");
         } finally {
             setExporting(false);
         }
@@ -95,6 +100,20 @@ export const AgentActionBar = (): JSX.Element => {
                 payload={importPayload()}
                 onClose={() => setImportPayload(null)}
             />
+            <Show when={errorMsg()}>
+                <Modal
+                    open={true}
+                    onClose={() => setErrorMsg(null)}
+                    size="sm"
+                    ariaLabel="Error"
+                >
+                    <ModalHeader title="Something went wrong" />
+                    <ModalBody>{errorMsg()}</ModalBody>
+                    <ModalFooter>
+                        <Button onClick={() => setErrorMsg(null)}>Close</Button>
+                    </ModalFooter>
+                </Modal>
+            </Show>
         </>
     );
 };
