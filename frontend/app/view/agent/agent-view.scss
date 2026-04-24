@@ -2583,70 +2583,6 @@
         }
     }
 
-    // === Import Preview Modal ===
-    // Outer chrome (overlay / panel / header / footer / buttons) is
-    // now provided by `element/modal-v2`. Only the inner content
-    // styles for the list + summary remain here.
-    .agent-import-count {
-        font-size: 12px;
-        color: var(--secondary-text-color);
-        margin-bottom: 8px;
-    }
-
-    .agent-import-list {
-        display: flex;
-        flex-direction: column;
-        gap: 4px;
-        margin-bottom: 10px;
-    }
-
-    .agent-import-row {
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        font-size: 12px;
-        color: var(--main-text-color);
-        padding: 2px 0;
-
-        &.agent-import-row-skip {
-            opacity: 0.5;
-        }
-
-        .agent-import-row-status {
-            width: 16px;
-            text-align: center;
-            flex-shrink: 0;
-        }
-
-        .agent-import-row-icon {
-            flex-shrink: 0;
-        }
-
-        .agent-import-row-name {
-            font-weight: 500;
-        }
-
-        .agent-import-row-desc,
-        .agent-import-row-skip-label {
-            color: var(--secondary-text-color);
-            font-size: 11px;
-        }
-    }
-
-    .agent-import-summary {
-        font-size: 12px;
-        color: var(--secondary-text-color);
-        border-top: 1px solid var(--border-color);
-        padding-top: 8px;
-    }
-
-    .agent-import-result {
-        font-size: 13px;
-        color: var(--main-text-color);
-        text-align: center;
-        padding: 20px 0;
-    }
-
     // === Setup Wizard ===
     .setup-wizard {
         display: flex;
@@ -3965,4 +3901,70 @@
     padding: 6px 8px;
     background: color-mix(in srgb, var(--error-color, #e06c75) 10%, transparent);
     border-radius: 3px;
+}
+
+// ── Import Preview Modal ─────────────────────────────────────────────────────
+// Inner content styles for the Modal v2-rendered import preview. Kept
+// at top level because modal-v2 portals to `document.body`, so
+// selectors nested inside `.agent-view` never match (caught by reagent
+// on PR #513).
+
+.agent-import-count {
+    font-size: 12px;
+    color: var(--secondary-text-color);
+    margin-bottom: 8px;
+}
+
+.agent-import-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-bottom: 10px;
+}
+
+.agent-import-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--main-text-color);
+    padding: 2px 0;
+
+    &.agent-import-row-skip {
+        opacity: 0.5;
+    }
+
+    .agent-import-row-status {
+        width: 16px;
+        text-align: center;
+        flex-shrink: 0;
+    }
+
+    .agent-import-row-icon {
+        flex-shrink: 0;
+    }
+
+    .agent-import-row-name {
+        font-weight: 500;
+    }
+
+    .agent-import-row-desc,
+    .agent-import-row-skip-label {
+        color: var(--secondary-text-color);
+        font-size: 11px;
+    }
+}
+
+.agent-import-summary {
+    font-size: 12px;
+    color: var(--secondary-text-color);
+    border-top: 1px solid var(--border-color);
+    padding-top: 8px;
+}
+
+.agent-import-result {
+    font-size: 13px;
+    color: var(--main-text-color);
+    text-align: center;
+    padding: 20px 0;
 }
