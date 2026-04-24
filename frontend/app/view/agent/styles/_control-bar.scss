@@ -1,0 +1,324 @@
+// Copyright 2024-2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// Picker empty state + presentation view modifier + control bar. Wrapped in .agent-view so the cascade chain matches
+// the pre-split file (SPEC_AGENT_VIEW_SCSS_SPLIT_2026_04_24).
+.agent-view {
+    // === Picker Empty State ===
+    .agent-picker-empty {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        height: 100%;
+        gap: 10px;
+        padding: var(--space-6);
+        text-align: center;
+
+        .agent-picker-empty-icon {
+            font-size: 28px;
+            opacity: 0.4;
+        }
+
+        .agent-picker-empty-title {
+            font-size: 14px;
+            font-weight: 500;
+            color: var(--main-text-color);
+        }
+
+        .agent-picker-empty-desc {
+            font-size: 12px;
+            color: var(--secondary-text-color);
+            max-width: 240px;
+            line-height: 1.5;
+        }
+    }
+
+    @keyframes pulse {
+        0%, 100% { opacity: 0.6; }
+        50% { opacity: 1; }
+    }
+
+    // === Presentation View ===
+    &--presentation {
+        display: flex;
+        flex-direction: column;
+    }
+
+    // === Control Bar ===
+    // Anchored to the bottom of the pane below AgentFooter (see
+    // SPEC_AGENT_PANE_FOLLOWUPS item #7). Border on top so it reads
+    // as a sub-footer visually separated from the composer above.
+    .agent-control-bar {
+        border-top: 1px solid var(--border-color);
+        background: color-mix(in srgb, var(--main-text-color) 2%, transparent);
+        flex-shrink: 0;
+        font-size: 11px;
+    }
+
+    // Composer region wraps AgentFooter + AgentControlBar at the pane
+    // bottom. Flex column so the footer sits above the control bar
+    // and the two read as a single unit.
+    .agent-composer-region {
+        display: flex;
+        flex-direction: column;
+        flex-shrink: 0;
+
+        // NOTE: the `.agent-status-line` used to live here scoped to
+        // `.agent-composer-region`, but PR #502 hoisted it above the
+        // activity log so long agent output can't push it off-screen.
+        // The rules now live at `.agent-view` top-level (below).
+    }
+
+    // Status line: shown between the conversation document and the
+    // activity log while the agent is thinking, or between turns to
+    // display run stats. Sits outside `.agent-composer-region` so it
+    // stays visible regardless of how much log/document content is
+    // stacked above the composer. Scoped as a direct child so the
+    // rules don't collide with the tool-row `.agent-status-line`
+    // (which lives deeper inside `AgentDocumentView`).
+    > .agent-status-line {
+        min-height: 14px;
+        font-size: 10px;
+        color: var(--secondary-text-color);
+        opacity: 0.6;
+        padding: var(--space-0-5) var(--space-2);
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        font-family: var(--fixed-font, monospace);
+
+        &.agent-status-line--loading {
+            color: var(--accent-color);
+            opacity: 1;
+            width: 100%;
+
+            // Spotlight sweep overlay — an off-color (soft magenta)
+            // highlight that glides across the row and bounces back
+            // while the agent is working. Sits on top of the baseline
+            // color but behind the text/dot via z-index. Uses
+            // `mix-blend-mode: screen` so it reads as light over the
+            // dark theme without washing out text on light themes.
+            position: relative;
+            overflow: hidden;
+            isolation: isolate;
+
+            &::before {
+                content: "";
+                position: absolute;
+                top: 0;
+                bottom: 0;
+                left: 0;
+                width: 40%;
+                pointer-events: none;
+                background: linear-gradient(
+                    90deg,
+                    transparent 0%,
+                    rgba(224, 170, 255, 0.10) 35%,
+                    rgba(224, 170, 255, 0.30) 50%,
+                    rgba(224, 170, 255, 0.10) 65%,
+                    transparent 100%
+                );
+                mix-blend-mode: screen;
+                animation: agent-spotlight-sweep 2.8s ease-in-out infinite alternate;
+                z-index: 0;
+                will-change: transform;
+            }
+
+            .agent-spinner-dot,
+            .agent-status-left,
+            .agent-status-right {
+                position: relative;
+                z-index: 1;
+            }
+
+            .agent-status-left {
+                flex: 1;
+                min-width: 0;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+            }
+
+            .agent-status-right {
+                flex-shrink: 0;
+                opacity: 0.7;
+                margin-left: var(--space-2);
+            }
+        }
+
+        &.agent-status-line--stats {
+            opacity: 0.5;
+            gap: 0;
+        }
+    }
+
+    .agent-spinner-dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: var(--accent-color);
+        flex-shrink: 0;
+        animation: agent-pulse 1.2s ease-in-out infinite;
+        // Subtle halo that breathes with the pulse — gives the dot
+        // a little more life without interfering with the spotlight.
+        box-shadow: 0 0 6px rgba(140, 200, 255, 0.55);
+    }
+
+    @keyframes agent-pulse {
+        0%, 100% { opacity: 0.4; transform: scale(0.85); }
+        50% { opacity: 1; transform: scale(1.3); }
+    }
+
+    @keyframes agent-spotlight-sweep {
+        0%   { transform: translateX(-100%); }
+        100% { transform: translateX(250%); }
+    }
+
+    // Process-count badge: visible whenever the agent has at least
+    // one tracked OS process. Click opens the swarm Activity tab.
+    // See `hooks/useProcessCount.ts` + PR #497 backend.
+    .agent-process-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 3px;
+        margin-left: var(--space-2);
+        padding: 1px var(--space-1-5);
+        background: color-mix(in srgb, var(--accent-color) 12%, transparent);
+        border: 1px solid color-mix(in srgb, var(--accent-color) 40%, transparent);
+        border-radius: 10px;
+        color: var(--accent-color);
+        font-family: inherit;
+        font-size: 10px;
+        font-weight: 500;
+        cursor: pointer;
+        transition: background 80ms ease, border-color 80ms ease;
+
+        &:hover {
+            background: color-mix(in srgb, var(--accent-color) 22%, transparent);
+            border-color: var(--accent-color);
+        }
+
+        .agent-process-badge-icon {
+            font-size: 11px;
+            line-height: 1;
+        }
+
+        .agent-process-badge-count {
+            font-variant-numeric: tabular-nums;
+        }
+    }
+
+
+    .agent-interrupted-banner {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--space-2);
+        padding: var(--space-1) var(--space-2);
+        background: color-mix(in srgb, var(--accent-color) 14%, transparent);
+        border-bottom: 1px solid color-mix(in srgb, var(--accent-color) 30%, transparent);
+        font-size: 11px;
+        color: var(--main-text-color);
+
+        .agent-interrupted-label {
+            flex: 1 1 auto;
+            min-width: 0;
+        }
+    }
+
+    .agent-large-session-banner {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--space-2);
+        padding: var(--space-1) var(--space-2);
+        background: color-mix(in srgb, var(--warning-color) 14%, transparent);
+        border-bottom: 1px solid color-mix(in srgb, var(--warning-color) 30%, transparent);
+        font-size: 11px;
+        color: var(--main-text-color);
+
+        .agent-large-session-label {
+            flex: 1 1 auto;
+            min-width: 0;
+        }
+    }
+
+    .agent-control-bar-header {
+        display: flex;
+        align-items: center;
+        gap: var(--space-1);
+        padding: 3px var(--space-1-5);
+        cursor: pointer;
+        user-select: none;
+        color: var(--secondary-text-color);
+
+        &:hover {
+            color: var(--main-text-color);
+            background: color-mix(in srgb, var(--main-text-color) 4%, transparent);
+        }
+    }
+
+    .agent-control-chevron {
+        font-size: 9px;
+        width: 10px;
+        flex-shrink: 0;
+    }
+
+    .agent-control-summary {
+        display: flex;
+        align-items: center;
+        gap: var(--space-1);
+    }
+
+    .agent-control-nondefault {
+        color: var(--warning-color);
+        font-weight: 700;
+    }
+
+    .agent-control-bar-body {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--space-2);
+        padding: var(--space-1) var(--space-2) var(--space-1-5) var(--space-4);
+    }
+
+    .agent-control-row {
+        display: flex;
+        align-items: center;
+        gap: var(--space-1);
+    }
+
+    .agent-control-label {
+        color: var(--secondary-text-color);
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        min-width: 36px;
+    }
+
+    .agent-control-select {
+        background: var(--main-bg-color);
+        color: var(--main-text-color);
+        border: 1px solid var(--border-color);
+        border-radius: 3px;
+        padding: var(--space-0-5) var(--space-1);
+        font-size: 11px;
+        font-family: inherit;
+        cursor: pointer;
+        outline: none;
+
+        &:hover {
+            border-color: var(--accent-color);
+        }
+
+        &:focus {
+            border-color: var(--accent-color);
+            box-shadow: 0 0 0 1px var(--accent-color);
+        }
+    }
+
+    @keyframes agent-spin {
+        to { transform: rotate(360deg); }
+    }
+}
