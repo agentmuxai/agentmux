@@ -1,0 +1,36 @@
+{
+    "extends": ["stylelint-config-standard-scss"],
+    "rules": {
+        "color-no-hex": [true, {
+            "message": "Raw hex colours are forbidden — use a `--color-*` / `--*-color` token from `theme.scss` (SPEC_DESIGN_SYSTEM §5.2). Add the file to `.stylelintignore` only as a temporary grandfather; remove the entry when the file is migrated."
+        }],
+        "declaration-property-value-allowed-list": {
+            "z-index": ["/^var\\(--z(index)?-/", "/^calc\\(/", "0", "auto", "unset", "inherit", "initial"]
+        },
+        "declaration-no-important": [true, {
+            "message": "`!important` is forbidden — fix the underlying specificity or selector. If unavoidable, document the reason in a comment AND grandfather the file via `.stylelintignore`."
+        }],
+        "scss/comment-no-empty": null,
+        "no-descending-specificity": null,
+        "color-function-notation": null,
+        "alpha-value-notation": null,
+        "scss/dollar-variable-pattern": null,
+        "media-feature-range-notation": null,
+        "selector-class-pattern": null,
+        "scss/double-slash-comment-empty-line-before": null,
+        "scss/at-mixin-pattern": null,
+        "scss/at-function-pattern": null,
+        "scss/at-rule-conditional-no-parentheses": null,
+        "scss/at-each-key-value-single-line": null,
+        "scss/load-no-partial-leading-underscore": null,
+        "scss/no-global-function-names": null,
+        "comment-empty-line-before": null,
+        "block-no-empty": null,
+        "no-empty-source": null,
+        "value-keyword-case": null,
+        "function-no-unknown": null,
+        "selector-pseudo-class-no-unknown": [true, {
+            "ignorePseudoClasses": ["global", "deep"]
+        }]
+    }
+}
