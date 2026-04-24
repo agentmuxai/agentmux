@@ -12,8 +12,8 @@
 .user-status-item {
     display: flex;
     align-items: center;
-    padding: 8px;
-    margin-bottom: 6px;
+    padding: var(--space-2);
+    margin-bottom: var(--space-1-5);
     cursor: pointer;
     transition: background-color 0.3s ease;
 }

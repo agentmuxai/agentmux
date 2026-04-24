@@ -25,7 +25,7 @@
         border-radius: 6px;
         margin: 0;
         border: var(--border-color);
-        padding: 5px 0 5px 16px;
+        padding: 5px 0 5px var(--space-4);
         min-height: 30px;
         color: inherit;
 
@@ -41,12 +41,12 @@
     .userinput-checkbox-container {
         display: flex;
         flex-direction: column;
-        gap: 6px;
+        gap: var(--space-1-5);
 
         .userinput-checkbox-row {
             display: flex;
             align-items: center;
-            gap: 6px;
+            gap: var(--space-1-5);
 
             .userinput-checkbox {
                 accent-color: var(--accent-color);
