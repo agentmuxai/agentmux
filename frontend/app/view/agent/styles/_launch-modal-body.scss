@@ -138,3 +138,55 @@
     border-radius: 3px;
 }
 
+// Advanced disclosure — collapsed by default. Reveals the container-image
+// override + the "files will live in <slug>" preview. Hidden by default so
+// first-time users aren't confronted with container base images and
+// filesystem slugs. See SPEC_LAUNCH_MODAL_PLAIN_LANGUAGE_2026_04_24.md.
+
+.agent-launch-modal-advanced {
+    border-top: 1px dashed var(--border-color);
+    padding-top: var(--space-2);
+}
+
+.agent-launch-modal-advanced-summary {
+    cursor: pointer;
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--secondary-text-color);
+    user-select: none;
+    list-style: none;         // hide default triangle marker in webkit
+    padding: var(--space-1) 0;
+
+    // Render our own chevron so it matches the design system look and
+    // doesn't inherit Chromium's default triangle.
+    &::before {
+        content: "▸";
+        display: inline-block;
+        width: 1em;
+        margin-right: var(--space-1);
+        transition: transform 0.1s ease;
+    }
+
+    &:hover {
+        color: var(--main-text-color);
+    }
+}
+
+.agent-launch-modal-advanced[open] .agent-launch-modal-advanced-summary::before {
+    transform: rotate(90deg);
+}
+
+.agent-launch-modal-advanced-body {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    padding-top: var(--space-2);
+}
+
+// When Advanced is open but runtime is "host", the image field is shown
+// but disabled with a note explaining when it applies. Visual hint that
+// this input is inactive in the current context.
+.agent-launch-modal-field--disabled {
+    opacity: 0.6;
+}
+
