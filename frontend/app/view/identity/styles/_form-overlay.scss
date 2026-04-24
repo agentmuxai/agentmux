@@ -1,0 +1,121 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// Add/Edit form overlay.
+
+// ── Add/Edit form overlay ─────────────────────────────────────────────────────
+
+.identity-form-overlay {
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.6);
+    display: flex;
+    align-items: flex-start;
+    justify-content: flex-end;
+    // Pane-level modal — sits in the existing element-modal slot.
+    z-index: var(--zindex-elem-modal);
+}
+
+.identity-form {
+    width: 340px;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    background: var(--panel-bg-color);
+    border-left: 1px solid var(--border-color);
+    overflow: hidden;
+}
+
+.identity-form-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border-color);
+    font-weight: 600;
+    font-size: 13px;
+    flex-shrink: 0;
+}
+
+.identity-form-close {
+    background: transparent;
+    border: none;
+    color: var(--secondary-text-color);
+    cursor: pointer;
+    font-size: 14px;
+    padding: var(--space-0-5) var(--space-1-5);
+    border-radius: 3px;
+
+    &:hover { background: var(--hover-bg-color); }
+}
+
+.identity-form-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: var(--space-3) 14px;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+
+    &::-webkit-scrollbar {
+        width: 4px;
+    }
+    &::-webkit-scrollbar-thumb {
+        background: var(--border-color);
+        border-radius: 2px;
+    }
+}
+
+.identity-form-field {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.identity-form-label {
+    font-size: 11px;
+    color: var(--secondary-text-color);
+}
+
+.identity-input,
+.identity-select {
+    padding: 5px var(--space-2);
+    font-size: 12px;
+    background: var(--form-element-bg-color);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    color: var(--main-text-color);
+    outline: none;
+    width: 100%;
+
+    &:focus {
+        border-color: var(--accent-color);
+    }
+}
+
+.identity-form-error {
+    padding: var(--space-1-5) 10px;
+    font-size: 12px;
+    background: rgba(239, 68, 68, 0.1);
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    border-radius: 4px;
+    color: var(--error-color);
+}
+
+.identity-form-warning {
+    padding: var(--space-1-5) 10px;
+    font-size: 11px;
+    background: rgba(245, 158, 11, 0.1);
+    border: 1px solid rgba(245, 158, 11, 0.3);
+    border-radius: 4px;
+    color: var(--warning-color);
+}
+
+.identity-form-footer {
+    display: flex;
+    gap: var(--space-2);
+    padding: 10px 14px;
+    border-top: 1px solid var(--border-color);
+    flex-shrink: 0;
+    justify-content: flex-end;
+}

@@ -1,0 +1,53 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// Per-agent account assignments matrix.
+
+// ── Assignments matrix ────────────────────────────────────────────────────────
+
+.identity-assignments {
+    height: 100%;
+    overflow: auto;
+    padding: var(--space-3);
+}
+
+.identity-matrix {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+
+    th, td {
+        padding: var(--space-1-5) 10px;
+        text-align: left;
+        border-bottom: 1px solid var(--border-color);
+    }
+
+    th {
+        font-size: 10px;
+        font-weight: 600;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--secondary-text-color);
+    }
+
+    .identity-matrix-agent {
+        font-size: 12px;
+        color: var(--main-text-color);
+    }
+
+    .identity-matrix-cell {
+        vertical-align: middle;
+    }
+
+    .identity-matrix-empty-cell {
+        color: var(--secondary-text-color);
+    }
+
+    .identity-matrix-empty {
+        text-align: center;
+        color: var(--secondary-text-color);
+        padding: var(--space-5);
+        font-style: italic;
+    }
+}
+
