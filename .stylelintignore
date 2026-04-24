@@ -11,16 +11,9 @@ node_modules/
 frontend/app/app.scss
 frontend/app/block/block.scss
 frontend/app/block/titlebar.scss
-frontend/app/drag/drag-overlay.scss
-frontend/app/element/avatar.scss
 frontend/app/element/button.scss
-frontend/app/element/collapsiblemenu.scss
-frontend/app/element/expandablemenu.scss
-frontend/app/element/input.scss
 frontend/app/element/markdown.scss
 frontend/app/element/modal-v2.scss
-frontend/app/element/search.scss
-frontend/app/element/toggle.scss
 frontend/app/mixins.scss
 frontend/app/modals/command-palette.scss
 frontend/app/modals/typeaheadmodal.scss
@@ -32,7 +25,6 @@ frontend/app/tab/tabbar.scss
 frontend/app/theme.scss
 frontend/app/view/agent/agent-view.scss
 frontend/app/view/browser/browser-view.scss
-frontend/app/view/chat/chatmessages.scss
 frontend/app/view/editor/editor-view.scss
 frontend/app/view/identity/identity-view.scss
 frontend/app/view/subagent/subagent-view.scss
