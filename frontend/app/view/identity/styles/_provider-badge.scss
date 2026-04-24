@@ -1,0 +1,48 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// Provider badge chip.
+
+// ── Provider badge ────────────────────────────────────────────────────────────
+
+.identity-provider-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 9px;
+    font-weight: 700;
+    width: 26px;
+    height: 18px;
+    border-radius: 3px;
+    letter-spacing: 0;
+    flex-shrink: 0;
+
+    /* stylelint-disable color-no-hex --
+       Provider-brand colour swatches (GitHub dark grey, AWS amber,
+       Anthropic purple, custom slate). Vendor identity colours,
+       not theme-relative — they shouldn't be tokenised. */
+    &.provider-github {
+        background: #21262d;
+        color: #e6edf3;
+    }
+    &.provider-aws {
+        background: #161b22;
+        color: #f0a500;
+    }
+    &.provider-anthropic {
+        background: #161b22;
+        color: #c084fc;
+    }
+    &.provider-custom {
+        background: #1e293b;
+        color: #94a3b8;
+    }
+    /* stylelint-enable color-no-hex */
+
+    &.matrix-badge {
+        font-size: 10px;
+        width: auto;
+        padding: 1px 5px;
+    }
+}
+
