@@ -3,7 +3,13 @@
 
 .notification {
     &.hovered {
-        background: var(--modal-bg-color);
+        // Slight lift from `--modal-bg-color` so the row's hover state
+        // is visibly distinct from the popover surface beneath it
+        // (codex P2 on PR #531). Compositing the standard
+        // `--hover-bg-color` overlay onto the modal bg gives the same
+        // ~4% brightness bump the previous raw `#292929` hex provided
+        // without reintroducing a literal.
+        background: color-mix(in srgb, var(--modal-bg-color), var(--main-text-color) 4%);
     }
 
     .notification-title {
