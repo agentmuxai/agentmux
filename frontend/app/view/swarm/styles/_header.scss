@@ -1,0 +1,63 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// Swarm header toolbar + scrollable content container.
+
+// ── Header ──────────────────────────────────────────────────────────────
+
+.swarm-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: var(--space-2) 14px;
+    border-bottom: 1px solid var(--border-color);
+    background: color-mix(in srgb, var(--accent-color) 5%, transparent);
+    flex-shrink: 0;
+}
+
+.swarm-header-icon {
+    font-size: 16px;
+}
+
+.swarm-header-title {
+    font-size: 13px;
+    font-weight: 600;
+    flex: 1;
+}
+
+.swarm-tabs {
+    display: flex;
+    gap: var(--space-0-5);
+}
+
+.swarm-tab {
+    padding: var(--space-1) var(--space-3);
+    border: none;
+    background: transparent;
+    color: var(--secondary-text-color);
+    font-size: 11px;
+    font-family: inherit;
+    cursor: pointer;
+    border-radius: 4px;
+    transition: all 0.1s;
+
+    &:hover {
+        background: color-mix(in srgb, var(--main-text-color) 6%, transparent);
+        color: var(--main-text-color);
+    }
+
+    &.active {
+        background: color-mix(in srgb, var(--accent-color) 15%, transparent);
+        color: var(--accent-color);
+        font-weight: 500;
+    }
+}
+
+// ── Content ─────────────────────────────────────────────────────────────
+
+.swarm-content {
+    flex: 1;
+    overflow-y: auto;
+    padding: var(--space-3) 14px;
+}
+
