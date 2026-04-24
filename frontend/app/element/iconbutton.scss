@@ -28,9 +28,13 @@
         cursor: default;
     }
 
-    &.disabled {
+    // `&:hover` (above) raises opacity to 1; `&.disabled:hover`
+    // makes the override explicit so we don't rely on `!important`
+    // to keep the disabled state visually distinct on hover.
+    &.disabled,
+    &.disabled:hover {
         cursor: default;
-        opacity: 0.45 !important;
+        opacity: 0.45;
     }
 
     &.toggle {
