@@ -245,6 +245,30 @@ static PI: ProviderConfig = ProviderConfig {
     docs_url: "https://github.com/badlogic/pi-mono",
 };
 
+// GitHub Copilot CLI — Microsoft's coding agent. Runs in ACP mode via
+// `--acp` so the existing ACP controller drives it. Non-interactive
+// `-p`/`--prompt` doesn't accept stdin prompts (github/copilot-cli#96,
+// #1046), hence ACP.
+static COPILOT: ProviderConfig = ProviderConfig {
+    id: "copilot",
+    display_name: "GitHub Copilot CLI",
+    cli_command: "copilot",
+    controller_type: ControllerType::Acp,
+    launch_args: &["--acp"],
+    persistent_launch_args: None,
+    resume_flag: None,
+    session_id_field: "sessionId",
+    styled_output_format: "acp",
+    auth_config_dir_env_var: "COPILOT_HOME",
+    auth_dir_name: "copilot",
+    auth_extra_env: &[],
+    unset_env: &[],
+    npm_package: "@github/copilot",
+    pinned_version: "latest",
+    icon: "github",
+    docs_url: "https://docs.github.com/copilot/concepts/agents/about-copilot-cli",
+};
+
 // ─── Static registry ─────────────────────────────────────────────────────────
 
 static REGISTRY: LazyLock<HashMap<&'static str, &'static ProviderConfig>> = LazyLock::new(|| {
@@ -255,6 +279,7 @@ static REGISTRY: LazyLock<HashMap<&'static str, &'static ProviderConfig>> = Lazy
     m.insert(KIMI.id, &KIMI);
     m.insert(OPENCLAW.id, &OPENCLAW);
     m.insert(PI.id, &PI);
+    m.insert(COPILOT.id, &COPILOT);
     m
 });
 
@@ -269,6 +294,9 @@ static ALIASES: LazyLock<HashMap<&'static str, &'static str>> = LazyLock::new(||
     m.insert("kimi_code", "kimi");
     m.insert("openclaw-cli", "openclaw");
     m.insert("open-claw", "openclaw");
+    m.insert("copilot-cli", "copilot");
+    m.insert("github-copilot", "copilot");
+    m.insert("copilot_cli", "copilot");
     m
 });
 
@@ -306,7 +334,7 @@ pub fn get_provider(id: &str) -> Option<&'static ProviderConfig> {
 /// Return an iterator over all registered providers in insertion order.
 pub fn get_provider_list() -> impl Iterator<Item = &'static ProviderConfig> {
     // Stable canonical order matches the TypeScript PROVIDERS object order.
-    static ORDER: &[&str] = &["claude", "codex", "gemini", "kimi", "openclaw", "pi"];
+    static ORDER: &[&str] = &["claude", "codex", "gemini", "kimi", "openclaw", "pi", "copilot"];
     ORDER.iter().filter_map(|id| REGISTRY.get(*id).copied())
 }
 
