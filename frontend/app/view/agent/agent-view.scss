@@ -591,9 +591,19 @@
         gap: 8px;
         flex: 1;
         overflow-y: auto;
+        // Cap list width so individual cards don't stretch to an
+        // awkwardly wide pane. The flex:1 info column inside each
+        // card expands to fill the card, which left a large gap
+        // between the title text and the action buttons on wide
+        // layouts. `max-width` + `align-self: center` keeps cards
+        // readable at narrow and wide pane widths alike.
+        max-width: 520px;
+        width: 100%;
+        align-self: center;
     }
 
     .agent-card {
+        position: relative;                // anchor for absolutely-positioned actions
         display: flex;
         align-items: center;
         gap: 12px;
@@ -641,12 +651,21 @@
             cursor: not-allowed;
         }
 
+        // Actions float in the top-left corner of the card so the
+        // icon + title + caption take the full horizontal width.
+        // Absolute positioning keeps them out of the flex row that
+        // lays out icon + info — no reserved gutter, no ellipsis
+        // truncation halfway through long titles. Hidden by default
+        // so the card reads clean; hover/focus reveals them.
         .agent-card-actions {
+            position: absolute;
+            top: 6px;
+            left: 6px;
             display: flex;
             gap: 4px;
-            margin-left: auto;
             opacity: 0;
             transition: opacity 0.15s;
+            z-index: 1;
         }
 
         &:hover .agent-card-actions,
@@ -662,7 +681,9 @@
             justify-content: center;
             padding: 0;
             border: 1px solid var(--border-color);
-            background: color-mix(in srgb, var(--main-text-color) 5%, transparent);
+            // Fully opaque background so the icon/text behind the
+            // absolutely-positioned actions doesn't bleed through.
+            background: var(--main-bg-color);
             border-radius: 4px;
             color: var(--main-text-color);
             font-size: 13px;
@@ -671,7 +692,7 @@
 
             &:hover:not(:disabled) {
                 border-color: var(--accent-color);
-                background: color-mix(in srgb, var(--accent-color) 15%, transparent);
+                background: color-mix(in srgb, var(--accent-color) 15%, var(--main-bg-color));
             }
 
             &:disabled {
@@ -730,31 +751,12 @@
         }
 
         .agent-card-caption {
-            display: flex;
-            align-items: center;
-            gap: 6px;
             font-size: 11px;
-            color: var(--secondary-text-color);
-            min-width: 0;
-        }
-
-        .agent-card-cli-name {
             font-weight: 500;
+            color: var(--secondary-text-color);
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
-        }
-
-        .agent-card-context-badge {
-            flex-shrink: 0;
-            font-family: var(--termfontfamily, monospace);
-            font-size: 10px;
-            color: color-mix(in srgb, var(--accent-color) 85%, var(--main-text-color));
-            background: color-mix(in srgb, var(--accent-color) 12%, transparent);
-            border: 1px solid color-mix(in srgb, var(--accent-color) 30%, transparent);
-            border-radius: 3px;
-            padding: 1px 5px;
-            line-height: 1.2;
         }
 
         // Inline rename row — replaces the name span while editing
