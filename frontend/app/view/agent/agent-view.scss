@@ -3980,3 +3980,72 @@
     background: color-mix(in srgb, var(--error-color) 10%, transparent);
     border-radius: var(--radius-sm);
 }
+
+// ── AgentCard ⓘ popover (PR F) ───────────────────────────────────────────────
+// Top level because Popover portals to document.body. Renders the
+// catalog's `popoverMarkdown` plus small metadata chips (primary
+// context file, MCP support).
+
+.agent-card-action-btn--info {
+    &.agent-card-action-btn--open {
+        // Flipped look while the popover is open — mirror hover state
+        // so the user sees which card is speaking.
+        border-color: var(--accent-color);
+        background: color-mix(in srgb, var(--accent-color) 15%, var(--main-bg-color));
+    }
+}
+
+.agent-card-info-popover {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    width: 320px;
+    max-width: 360px;
+    padding: var(--space-3);
+    font-size: var(--text-sm);
+    line-height: var(--leading-normal);
+    color: var(--main-text-color);
+    background: var(--main-bg-color);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-lg);
+}
+
+.agent-card-info-popover-title {
+    font-size: var(--text-md);
+    font-weight: var(--font-weight-bold);
+    line-height: var(--leading-tight);
+    color: var(--main-text-color);
+}
+
+.agent-card-info-popover-meta {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-2);
+    font-size: var(--text-xs);
+
+    code {
+        font-family: var(--font-mono);
+        font-size: var(--text-xs);
+        padding: 1px var(--space-1);
+        background: color-mix(in srgb, var(--main-text-color) 6%, transparent);
+        border-radius: var(--radius-sm);
+        color: var(--main-text-color);
+    }
+}
+
+.agent-card-info-popover-label {
+    flex-shrink: 0;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    font-size: 10px;
+    font-weight: var(--font-weight-medium);
+    color: var(--secondary-text-color);
+}
+
+.agent-card-info-popover-body {
+    font-size: var(--text-sm);
+    line-height: var(--leading-normal);
+    color: var(--secondary-text-color);
+    white-space: pre-wrap;
+}
