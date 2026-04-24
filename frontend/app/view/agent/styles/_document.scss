@@ -1,0 +1,132 @@
+// Copyright 2024-2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// Document container + status log (terminal-style). Wrapped in .agent-view so the cascade chain matches
+// the pre-split file (SPEC_AGENT_VIEW_SCSS_SPLIT_2026_04_24).
+.agent-view {
+    // === Document Container ===
+    .agent-document {
+        flex: 1;
+        overflow-y: auto;
+        padding: var(--space-0-5) var(--space-1);
+        display: flex;
+        flex-direction: column;
+        gap: 1px;
+        user-select: text;
+        cursor: text;
+        // Isolate layout/paint from siblings — critical for typing smoothness
+        // when many nodes are present. The actual off-screen skip happens via
+        // `content-visibility: auto` on each `.agent-document-node-wrapper`
+        // child below; this containment here just scopes the blast radius so
+        // mutations inside the scroll container don't invalidate layout
+        // outside it.
+        contain: layout style paint;
+    }
+
+    // Shared hover-strip anchor. Any element that renders a `.node-strip`
+    // child (document nodes in the conversation, startup status-log
+    // lines) adds this class. Owns the positioning + fade-in rules so
+    // the two call sites stay consistent.
+    .hover-strip-host {
+        position: relative;
+
+        .node-strip {
+            position: absolute;
+            top: 3px;
+            right: 6px;
+            display: flex;
+            align-items: center;
+            gap: var(--space-1-5);
+            padding: var(--space-0-5) var(--space-1);
+            font-size: 11px;
+            font-family: var(--fixed-font, monospace);
+            // `--panel-bg-color` has 50% alpha (rgba(31,33,31,0.5)); the strip
+            // must be fully opaque so content underneath doesn't bleed through.
+            background: var(--main-bg-color);
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 80ms ease;
+            white-space: nowrap;
+            z-index: 6;
+            line-height: 1.6;
+            max-width: calc(100% - 12px);
+            overflow: hidden;
+        }
+
+        &:hover .node-strip,
+        &:focus-within .node-strip {
+            opacity: 1;
+        }
+
+        .node-strip-time {
+            color: var(--secondary-text-color);
+            font-variant-numeric: tabular-nums;
+        }
+
+        .node-strip-btn {
+            pointer-events: auto;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 1px var(--space-1);
+            background: transparent;
+            border: none;
+            border-radius: 3px;
+            color: var(--secondary-text-color);
+            cursor: pointer;
+            font-size: 11px;
+            line-height: 1.2;
+
+            &:hover:not(:disabled) {
+                background: color-mix(in srgb, var(--main-text-color) 10%, transparent);
+                color: var(--main-text-color);
+            }
+
+            &--active {
+                color: var(--warning-color);
+            }
+
+            &:disabled,
+            &--disabled {
+                opacity: 0.35;
+                cursor: not-allowed;
+                pointer-events: none;
+            }
+        }
+    }
+
+    .agent-document-node-wrapper {
+        // Each document node gets its own containment box. Off-screen nodes
+        // are skipped by the browser via content-visibility.
+        // contain-intrinsic-size gives the browser a size estimate so scroll
+        // position stays stable when content is virtualized in/out.
+        content-visibility: auto;
+        contain-intrinsic-size: auto 80px;
+        contain: layout style;
+
+        &:focus {
+            outline: 1px solid var(--accent-color);
+            outline-offset: -1px;
+        }
+    }
+
+    // === Status Log (terminal-style) ===
+    .agent-history-loading {
+        padding: var(--space-1) var(--space-2);
+        font-family: var(--fixed-font);
+        font-size: 11px;
+        color: var(--secondary-text-color);
+        opacity: 0.6;
+        text-align: center;
+        border-bottom: 1px solid var(--border-color);
+        margin-bottom: var(--space-0-5);
+    }
+
+
+
+
+
+}
