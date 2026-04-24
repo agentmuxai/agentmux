@@ -36,6 +36,7 @@ import { SessionDigestBanner } from "./components/SessionDigestBanner";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { createBlock, getApi, WOS } from "@/app/store/global";
+import { ConfirmModal } from "@/element/modal-v2";
 import { ContextMenuModel } from "@/app/store/contextmenu";
 import { parseAgentAccounts, loadAccounts } from "@/app/view/identity/identity-model";
 import { buildStartupPayload, resolveAccounts } from "./startup/buildStartupPayload";
@@ -158,8 +159,8 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
     const processCount = useProcessCount(model.blockId);
 
     // Pane-close confirm: when the user closes this pane with tracked
-    // processes still alive, intercept the layout's `onClose` with a
-    // confirm dialog. Accept → `agent.kill-tree` RPC then proceed with
+    // processes still alive, intercept the layout's `onClose` and raise
+    // a ConfirmModal. Accept → `agent.kill-tree` RPC then proceed with
     // close. Cancel → abort, pane stays open. Zero tracked processes
     // → original close path, no prompt.
     //
@@ -168,6 +169,11 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
     // surface today, and threading one through would touch the layout
     // + block-frame + pane-actions tree. A local wrapper is enough for
     // v1 of this feature.
+    const [closeConfirm, setCloseConfirm] = createSignal<{
+        count: number;
+        originalClose: () => void;
+    } | null>(null);
+
     onMount(() => {
         const original = model.nodeModel.onClose;
         const wrapped = () => {
@@ -176,19 +182,10 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 original?.();
                 return;
             }
-            const suffix = count === 1 ? "process" : "processes";
-            const ok = window.confirm(
-                `This agent has ${count} ${suffix} still running.\n\n` +
-                `Close and kill them all?`
-            );
-            if (!ok) return;
-            // Kill first, then proceed with layout close. `finally` so
-            // the close still happens even if the kill RPC errors —
-            // we've already committed to closing, and the tracker's
-            // Drop impl in `delete_controller` will nuke what survived.
-            void RpcApi.AgentKillTreeCommand(TabRpcClient, {
-                block_id: model.blockId,
-            }).finally(() => original?.());
+            // Stash the original close so the modal can invoke it on
+            // confirm. Not calling original() here keeps the pane open
+            // until the user decides.
+            setCloseConfirm({ count, originalClose: () => original?.() });
         };
         model.nodeModel.onClose = wrapped;
         onCleanup(() => {
@@ -199,6 +196,24 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
             }
         });
     });
+
+    const handleCloseConfirmAccept = async () => {
+        const info = closeConfirm();
+        if (!info) return;
+        try {
+            // Kill first, then proceed with layout close. The tracker's
+            // Drop impl in `delete_controller` will nuke what survived
+            // if the RPC errors — we've already committed to closing.
+            await RpcApi.AgentKillTreeCommand(TabRpcClient, {
+                block_id: model.blockId,
+            });
+        } catch {
+            // swallow — close proceeds regardless
+        } finally {
+            setCloseConfirm(null);
+            info.originalClose();
+        }
+    };
 
     // Subscribe to subprocess output and parse into DocumentNodes.
     // `documentVersion` is bumped whenever we mutate the document externally
@@ -591,6 +606,23 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 AgentPicker view only. Once an agent is loaded the user
                 is working in the conversation; the action bar would
                 just take up vertical space. */}
+            <Show when={closeConfirm()}>
+                {(info) => (
+                    <ConfirmModal
+                        open={true}
+                        title="Close pane?"
+                        description={
+                            `This agent has ${info().count} ${
+                                info().count === 1 ? "process" : "processes"
+                            } still running. Close and kill them all?`
+                        }
+                        confirmLabel="Close and kill"
+                        destructive
+                        onConfirm={handleCloseConfirmAccept}
+                        onCancel={() => setCloseConfirm(null)}
+                    />
+                )}
+            </Show>
         </div>
     );
 };
