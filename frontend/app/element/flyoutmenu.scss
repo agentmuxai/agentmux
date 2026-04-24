@@ -5,7 +5,7 @@
 
 .menu {
     position: absolute;
-    z-index: 1000;
+    z-index: var(--z-flyout-menu);
     display: flex;
     max-width: 400px;
     min-width: 125px;
