@@ -4,7 +4,10 @@
 .cross-drag-overlay {
     position: fixed;
     inset: 0;
-    z-index: 9999;
+    // Intentionally below modals/popovers — if a drag lands while a
+    // modal is open, the modal keeps focus. Matches the z-index
+    // hierarchy in SPEC_DESIGN_SYSTEM §5.3.
+    z-index: var(--z-drag-overlay);
     display: flex;
     align-items: center;
     justify-content: center;
