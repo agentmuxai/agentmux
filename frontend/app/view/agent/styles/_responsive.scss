@@ -1,0 +1,33 @@
+// Copyright 2024-2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// Responsive container queries — compact layout on narrow panes. Wrapped in .agent-view so the cascade chain matches
+// the pre-split file (SPEC_AGENT_VIEW_SCSS_SPLIT_2026_04_24).
+.agent-view {
+    // === Responsive Container Queries ===
+
+    // Narrow pane: compact agent cards
+    @container agent-pane (max-width: 249px) {
+        .agent-picker {
+            padding: 10px;
+        }
+
+        .agent-card {
+            padding: 10px;
+            gap: 10px;
+
+            .agent-card-icon {
+                font-size: 18px;
+                width: 22px;
+            }
+
+            .agent-card-name {
+                font-size: 12px;
+            }
+        }
+
+        .agent-document {
+            padding: var(--space-2);
+        }
+    }
+}
