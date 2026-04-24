@@ -1,0 +1,208 @@
+// Copyright 2024-2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// Connection status indicator + responsive container queries (nearby). Wrapped in .agent-view so the cascade chain matches
+// the pre-split file (SPEC_AGENT_VIEW_SCSS_SPLIT_2026_04_24).
+.agent-view {
+    // === Connection Status ===
+    .agent-connection-status {
+        display: flex;
+        align-items: center;
+        gap: var(--space-3);
+        padding: var(--space-4);
+        background: color-mix(in srgb, var(--main-text-color) 3%, transparent);
+        border-top: 1px solid var(--border-color);
+
+        &.connected {
+            .connection-icon {
+                color: var(--success-color);
+                font-size: 18px;
+            }
+
+            .connection-info {
+                flex: 1;
+
+                .connection-label {
+                    font-size: 11px;
+                    color: var(--success-color);
+                    font-weight: 500;
+                }
+
+                .connection-email {
+                    font-size: 12px;
+                    color: var(--main-text-color);
+                    opacity: 0.8;
+                }
+            }
+
+            .connection-disconnect-btn {
+                padding: var(--space-1-5) 10px;
+                background: transparent;
+                border: 1px solid var(--border-color);
+                border-radius: 4px;
+                color: var(--secondary-text-color);
+                font-size: 12px;
+                cursor: pointer;
+                transition: all 0.15s;
+
+                &:hover {
+                    background: color-mix(in srgb, var(--error-color) 10%, transparent);
+                    border-color: var(--error-color);
+                    color: var(--error-color);
+                }
+
+                i {
+                    font-size: 12px;
+                }
+            }
+        }
+
+        &.connecting {
+            .connection-icon {
+                color: var(--warning-color);
+                font-size: 18px;
+            }
+
+            .connection-info {
+                flex: 1;
+
+                .connection-label {
+                    font-size: 12px;
+                    color: var(--warning-color);
+                    font-weight: 500;
+                }
+
+                .connection-hint {
+                    font-size: 10px;
+                    color: var(--secondary-text-color);
+                    opacity: 0.7;
+                }
+            }
+        }
+
+        &.error {
+            .connection-icon {
+                color: var(--error-color);
+                font-size: 18px;
+            }
+
+            .connection-info {
+                flex: 1;
+
+                .connection-label {
+                    font-size: 12px;
+                    color: var(--error-color);
+                    font-weight: 500;
+                }
+
+                .connection-error {
+                    font-size: 10px;
+                    color: var(--error-color);
+                    opacity: 0.8;
+                }
+            }
+
+            .connection-retry-btn {
+                padding: var(--space-1-5) var(--space-3);
+                background: var(--error-color);
+                border: none;
+                border-radius: 4px;
+                color: var(--main-bg-color);
+                font-size: 11px;
+                font-weight: 500;
+                cursor: pointer;
+                transition: opacity 0.15s;
+
+                &:hover {
+                    opacity: 0.9;
+                }
+            }
+        }
+
+        &.disconnected {
+            flex-direction: column;
+            align-items: stretch;
+            gap: var(--space-3);
+            padding: var(--space-6) var(--space-4);
+
+            .connection-message {
+                text-align: center;
+
+                .connection-title {
+                    font-size: 14px;
+                    font-weight: 500;
+                    color: var(--main-text-color);
+                    margin-bottom: var(--space-2);
+                }
+
+                .connection-description {
+                    font-size: 11px;
+                    color: var(--secondary-text-color);
+                    opacity: 0.7;
+                    line-height: 1.5;
+                }
+            }
+
+            .connection-connect-btn {
+                padding: 10px var(--space-5);
+                background: var(--accent-color);
+                border: none;
+                border-radius: 4px;
+                color: var(--main-bg-color);
+                font-size: 12px;
+                font-weight: 500;
+                cursor: pointer;
+                transition: opacity 0.15s;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                gap: var(--space-2);
+
+                &:hover {
+                    opacity: 0.9;
+                }
+
+                i {
+                    font-size: 14px;
+                }
+            }
+
+            .connection-fallback {
+                text-align: center;
+                font-size: 10px;
+                color: var(--secondary-text-color);
+                opacity: 0.6;
+                padding-top: var(--space-2);
+                border-top: 1px solid color-mix(in srgb, var(--border-color) 50%, transparent);
+
+                code {
+                    background: color-mix(in srgb, var(--main-text-color) 8%, transparent);
+                    padding: var(--space-0-5) var(--space-1);
+                    border-radius: 2px;
+                }
+            }
+
+            .connection-apikey-form {
+                display: flex;
+                gap: var(--space-2);
+                align-items: center;
+
+                .connection-apikey-input {
+                    flex: 1;
+                    padding: 10px var(--space-3);
+                    background: var(--main-bg-color);
+                    border: 1px solid var(--border-color);
+                    border-radius: 4px;
+                    color: var(--main-text-color);
+                    font-family: inherit;
+                    font-size: 12px;
+
+                    &:focus {
+                        outline: none;
+                        border-color: var(--accent-color);
+                    }
+                }
+            }
+        }
+    }
+}
