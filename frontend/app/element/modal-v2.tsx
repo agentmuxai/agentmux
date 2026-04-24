@@ -71,6 +71,52 @@ const remove = (id: string): void => {
     if (idx >= 0) stack.splice(idx, 1);
 };
 
+// ── Per-document scroll + inert lock ────────────────────────────────────────
+// Reference-counted so stacked modals (or modals closing out of order)
+// don't release the lock prematurely. Codex flagged the unconditional
+// release on PR #511; the shared state below handles stacking cleanly.
+
+interface DocumentLockState {
+    openCount: number;
+    previousOverflow: string;
+    inertSiblings: HTMLElement[];
+}
+
+const docLocks = new WeakMap<Document, DocumentLockState>();
+
+function acquireDocumentLock(doc: Document): void {
+    const existing = docLocks.get(doc);
+    if (existing) {
+        existing.openCount++;
+        return;
+    }
+    const state: DocumentLockState = {
+        openCount: 1,
+        previousOverflow: doc.body.style.overflow,
+        inertSiblings: [],
+    };
+    doc.body.style.overflow = "hidden";
+    if ("inert" in HTMLElement.prototype) {
+        for (const child of Array.from(doc.body.children) as HTMLElement[]) {
+            if (!child.classList.contains("modal-root") && !child.hasAttribute("inert")) {
+                child.setAttribute("inert", "");
+                state.inertSiblings.push(child);
+            }
+        }
+    }
+    docLocks.set(doc, state);
+}
+
+function releaseDocumentLock(doc: Document): void {
+    const state = docLocks.get(doc);
+    if (!state) return;
+    state.openCount--;
+    if (state.openCount > 0) return;
+    for (const el of state.inertSiblings) el.removeAttribute("inert");
+    doc.body.style.overflow = state.previousOverflow;
+    docLocks.delete(doc);
+}
+
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 const FOCUSABLE_SELECTOR = [
@@ -128,11 +174,11 @@ export const Modal: Component<ModalProps> = (props) => {
 
     let panelRef: HTMLDivElement | undefined;
     let previousFocus: HTMLElement | null = null;
-    let inertSiblings: HTMLElement[] = [];
-    let previousBodyOverflow = "";
-    // Store the document we opened in so `closeModal` restores state
-    // on the same body — `resolveMountDocument()` at close time could
-    // point at a different window if focus moved across CEF windows.
+    // Cache the document we acquired the lock on so release targets the
+    // same body, even if focus moved across CEF windows meanwhile.
+    // Per-doc scroll + inert state lives in the shared `docLocks` map
+    // (reference-counted — handles stacked / out-of-order closes
+    // correctly; see Codex P1 on PR #511).
     let mountDoc: Document | null = null;
 
     const [mounted, setMounted] = createSignal(false);
@@ -153,30 +199,12 @@ export const Modal: Component<ModalProps> = (props) => {
     const openModal = (): void => {
         previousFocus = (document.activeElement as HTMLElement) ?? null;
 
-        // Lock body scroll on the originating document. Cache the
-        // document so closeModal restores state on the same body
-        // even if focus moved to a different CEF window meanwhile.
+        // Acquire the per-document scroll + inert lock. Reference-
+        // counted: the first modal in a document performs the actual
+        // lock; later modals just bump the count so the lock stays
+        // active until the *last* modal closes.
         mountDoc = resolveMountDocument();
-        previousBodyOverflow = mountDoc.body.style.overflow;
-        mountDoc.body.style.overflow = "hidden";
-
-        // Inert background siblings so assistive tech + keyboard
-        // focus can't escape. Skip if `inert` isn't supported
-        // (older CEF versions) — focus trap still handles keyboard.
-        inertSiblings = [];
-        if ("inert" in HTMLElement.prototype) {
-            for (const child of Array.from(mountDoc.body.children) as HTMLElement[]) {
-                // The Portal mount target is doc.body, so the modal-root
-                // becomes a body child after mount. We inert everything
-                // else and rely on the modal's own focus trap.
-                if (!child.classList.contains("modal-root")) {
-                    if (!child.hasAttribute("inert")) {
-                        child.setAttribute("inert", "");
-                        inertSiblings.push(child);
-                    }
-                }
-            }
-        }
+        acquireDocumentLock(mountDoc);
 
         // Register in the stack so ESC / backdrop dispatch to topmost.
         push({ id, close: props.onClose });
@@ -200,14 +228,11 @@ export const Modal: Component<ModalProps> = (props) => {
     const closeModal = (): void => {
         remove(id);
 
-        // Restore inert attribute on siblings.
-        for (const el of inertSiblings) el.removeAttribute("inert");
-        inertSiblings = [];
-
-        // Restore body scroll on the same document we locked. Falling
-        // back to `document` if mountDoc was never set is a defensive
-        // no-op — openModal should have set it before this ran.
-        (mountDoc ?? document).body.style.overflow = previousBodyOverflow;
+        // Release the per-document lock. If this was the last modal
+        // in its document, the lock's cleanup also restores scroll
+        // and clears inert. Lower modals in a stack don't release
+        // the lock until they're gone too.
+        if (mountDoc) releaseDocumentLock(mountDoc);
         mountDoc = null;
 
         setMounted(false);
