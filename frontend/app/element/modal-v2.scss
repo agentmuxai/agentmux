@@ -71,6 +71,39 @@
     @include mixins.sr-only;
 }
 
+// ── Close button (opt-in via showCloseButton prop) ───────────────────────────
+
+.modal-panel-close-btn {
+    position: absolute;
+    top: var(--space-2);
+    right: var(--space-2);
+    width: 28px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: var(--radius-md);
+    color: var(--secondary-text-color);
+    font-size: var(--text-md);
+    line-height: 1;
+    cursor: pointer;
+    transition: all var(--motion-fast);
+
+    &:hover {
+        color: var(--main-text-color);
+        background: color-mix(in srgb, var(--main-text-color) 8%, transparent);
+        border-color: var(--border-color);
+    }
+
+    &:focus-visible {
+        outline: none;
+        box-shadow: var(--shadow-focus-ring);
+    }
+}
+
 // ── Panel subcomponents ──────────────────────────────────────────────────────
 
 .modal-panel-header {
