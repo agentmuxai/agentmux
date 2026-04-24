@@ -178,5 +178,5 @@ const PopoverContent = (props: PopoverContentProps): JSX.Element => {
     );
 };
 
-export { Popover, PopoverButton, PopoverContent };
-export type { PopoverButtonProps, PopoverContentProps };
+export { Popover, PopoverButton, PopoverContent, PopoverContext };
+export type { PopoverButtonProps, PopoverContentProps, PopoverContextType };

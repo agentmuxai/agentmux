@@ -7,16 +7,21 @@
  * After SPEC_AGENT_DEFINITIONS_MODAL_2026_04_23 the card is driven
  * by the CLI catalog, not by the ForgeAgent row's user-facing fields.
  * Title reads as a capability blurb ("Anthropic's coding agent") and
- * the CLI brand name sits as a caption below, next to a badge for
- * the primary context file. Clicking the body opens the Launch
- * modal instead of launching directly.
+ * the CLI brand name sits as a caption below. Clicking the body opens
+ * the Launch modal instead of launching directly.
+ *
+ * The ⓘ button uses the Popover primitive (PR F of the definitions
+ * spec) so users get the catalog's full CLI deep-dive text — startup
+ * flow, MCP support, memory behaviour — on click, rather than a
+ * native tooltip truncated by the OS.
  *
  * The card is rendered as a <div role="button"> rather than <button>
  * so nested action buttons are valid HTML (buttons can't contain
  * buttons).
  */
 
-import { createMemo, Show, type JSX } from "solid-js";
+import { createMemo, Show, useContext, type Component, type JSX } from "solid-js";
+import { Popover, PopoverContext, PopoverContent } from "@/element/popover";
 import { getCliCatalogEntry } from "../defaults/cli-catalog";
 
 interface AgentCardProps {
@@ -32,6 +37,31 @@ interface AgentCardProps {
     onDelete: (agent: ForgeAgent) => void;
 }
 
+/**
+ * The ⓘ trigger. Custom trigger (not `PopoverButton`) so we keep
+ * the existing `agent-card-action-btn` chrome instead of inheriting
+ * the default `Button` styling. Uses `PopoverContext` directly.
+ */
+const InfoPopoverTrigger: Component<{ ariaLabel: string }> = (props) => {
+    const ctx = useContext(PopoverContext);
+    return (
+        <button
+            ref={(el) => ctx?.registerReference(el)}
+            class="agent-card-action-btn agent-card-action-btn--info"
+            classList={{ "agent-card-action-btn--open": ctx?.isOpen() }}
+            onClick={(e) => {
+                e.stopPropagation();
+                ctx?.togglePopover();
+            }}
+            type="button"
+            aria-label={props.ariaLabel}
+            aria-expanded={ctx?.isOpen()}
+        >
+            {"\u24D8"}
+        </button>
+    );
+};
+
 export const AgentCard = (props: AgentCardProps): JSX.Element => {
     const catalog = createMemo(() => getCliCatalogEntry(props.agent.provider));
 
@@ -39,6 +69,8 @@ export const AgentCard = (props: AgentCardProps): JSX.Element => {
     const title = () => catalog()?.blurb || props.agent.description || props.agent.name;
     const caption = () => catalog()?.displayName || props.agent.name;
     const popoverText = () => catalog()?.popoverMarkdown ?? props.agent.description ?? "";
+    const primaryContextFile = () => catalog()?.primaryContextFile ?? "";
+    const mcpSupport = () => catalog()?.mcpSupport ?? "";
 
     const stopAndRun = (fn: () => void) => (e: MouseEvent) => {
         e.stopPropagation();
@@ -73,17 +105,27 @@ export const AgentCard = (props: AgentCardProps): JSX.Element => {
                 <span class="agent-card-title">{title()}</span>
                 <span class="agent-card-caption">{caption()}</span>
             </span>
-            <div class="agent-card-actions">
+            <div class="agent-card-actions" onClick={(e) => e.stopPropagation()}>
                 <Show when={popoverText()}>
-                    <button
-                        class="agent-card-action-btn agent-card-action-btn--info"
-                        onClick={stopAndRun(() => { /* popover handled by native title for now */ })}
-                        title={popoverText()}
-                        type="button"
-                        aria-label={`About ${caption()}`}
-                    >
-                        {"\u24D8"}
-                    </button>
+                    <Popover placement="right-start" offset={8}>
+                        <InfoPopoverTrigger ariaLabel={`About ${caption()}`} />
+                        <PopoverContent className="agent-card-info-popover">
+                            <div class="agent-card-info-popover-title">{caption()}</div>
+                            <Show when={primaryContextFile()}>
+                                <div class="agent-card-info-popover-meta">
+                                    <span class="agent-card-info-popover-label">Context file</span>
+                                    <code>{primaryContextFile()}</code>
+                                </div>
+                            </Show>
+                            <Show when={mcpSupport() && mcpSupport() !== "none"}>
+                                <div class="agent-card-info-popover-meta">
+                                    <span class="agent-card-info-popover-label">MCP</span>
+                                    <code>{mcpSupport()}</code>
+                                </div>
+                            </Show>
+                            <div class="agent-card-info-popover-body">{popoverText()}</div>
+                        </PopoverContent>
+                    </Popover>
                 </Show>
                 <button
                     class="agent-card-action-btn"
