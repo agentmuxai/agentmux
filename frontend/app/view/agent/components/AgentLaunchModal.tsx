@@ -12,7 +12,7 @@
 
 import { createMemo, createSignal, Show, type JSX } from "solid-js";
 import { Button } from "@/element/button";
-import { Modal, ModalContent, ModalFooter, ModalHeader } from "@/element/modal";
+import { Modal, ModalBody, ModalFooter, ModalHeader } from "@/element/modal-v2";
 import { getCliCatalogEntry } from "../defaults/cli-catalog";
 import { buildInstanceSlug, slugifyInstanceName } from "../defaults/instance-slug";
 
@@ -82,20 +82,26 @@ export const AgentLaunchModal = (props: AgentLaunchModalProps): JSX.Element => {
         // Success: parent closes the modal so we leave submitting true.
     };
 
+    // Modal v2 handles ESC (topmost-aware), backdrop click, focus
+    // trap, focus restoration, and scroll lock. We only need to add
+    // Enter-to-submit since the modal doesn't prescribe form semantics.
     const handleKeyDown = (e: KeyboardEvent) => {
         if (e.key === "Enter" && canSubmit()) {
             e.preventDefault();
             void handleSubmit();
-        } else if (e.key === "Escape") {
-            e.preventDefault();
-            props.onCancel();
         }
     };
 
     return (
-        <Modal onClickOut={() => { if (!submitting()) props.onCancel(); }}>
+        <Modal
+            open={true}
+            onClose={() => { if (!submitting()) props.onCancel(); }}
+            closeOnBackdropClick={!submitting()}
+            closeOnEscape={!submitting()}
+            size="md"
+        >
             <ModalHeader title={`Launch ${displayName()}`} />
-            <ModalContent>
+            <ModalBody>
                 <div class="agent-launch-modal-body" onKeyDown={handleKeyDown}>
                     <Show when={catalog()}>
                         <p class="agent-launch-modal-blurb">
@@ -113,7 +119,6 @@ export const AgentLaunchModal = (props: AgentLaunchModalProps): JSX.Element => {
                             value={name()}
                             onInput={(e) => setName(e.currentTarget.value)}
                             disabled={submitting()}
-                            ref={(el) => setTimeout(() => el?.focus(), 0)}
                             aria-label="Instance name"
                         />
                         <span class="agent-launch-modal-hint">
@@ -189,7 +194,7 @@ export const AgentLaunchModal = (props: AgentLaunchModalProps): JSX.Element => {
                         <div class="agent-launch-modal-error">{error()}</div>
                     </Show>
                 </div>
-            </ModalContent>
+            </ModalBody>
             <ModalFooter>
                 <Button onClick={props.onCancel} disabled={submitting()}>
                     Cancel
