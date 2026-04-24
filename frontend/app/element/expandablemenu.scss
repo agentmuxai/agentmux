@@ -14,7 +14,7 @@
 .expandable-menu-item-group-title {
     display: flex;
     align-items: center;
-    padding: var(--space-2) 12px; /* Left and right padding, we'll adjust this for the right side */
+    padding: var(--space-2) var(--space-3); /* Left and right padding, we'll adjust this for the right side */
     cursor: pointer;
     box-sizing: border-box;
     border-radius: 4px;

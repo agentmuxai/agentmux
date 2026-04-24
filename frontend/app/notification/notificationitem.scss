@@ -62,7 +62,7 @@
         position: absolute;
         top: 5px;
         right: 5px;
-        padding: 10px 8px;
+        padding: 10px var(--space-2);
         font-size: 11px;
         color: rgb(from var(--main-text-color) r g b / 0.5);
     }
@@ -80,7 +80,7 @@
         position: relative;
         display: flex;
         width: 380px;
-        padding: var(--space-4) 24px 16px 16px;
+        padding: var(--space-4) var(--space-6) var(--space-4) var(--space-4);
         align-items: flex-start;
         gap: var(--space-3);
         border-radius: 8px;
