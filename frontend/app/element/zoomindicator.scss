@@ -6,7 +6,9 @@
     top: 50%;
     left: 50%;
     transform: translate(-50%, -50%);
-    z-index: 10000;
+    // Sits in the context-menu slot so the zoom-level toast always
+    // paints above every other overlay (modals, popovers, flyouts).
+    z-index: var(--z-context-menu);
     pointer-events: none;
 
     animation: zoom-fade-in-out 1.5s ease-out;
