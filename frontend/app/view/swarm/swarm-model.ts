@@ -234,11 +234,6 @@ export class SwarmViewModel implements ViewModel {
     }
 
     /**
-     * Refresh the Activity tab: list every tracked block, then fetch
-     * each block's process list + confidence level, then set the atom.
-     * Runs serially — block counts are small (a few agents at most).
-     */
-    /**
      * Refresh the Instances tab — list every AgentInstance row in
      * the database. Sorted newest-first since the most recent runs
      * are the most likely target for "open it again". Backend
@@ -253,6 +248,11 @@ export class SwarmViewModel implements ViewModel {
         }
     };
 
+    /**
+     * Refresh the Activity tab: list every tracked block, then fetch
+     * each block's process list + confidence level, then set the atom.
+     * Runs serially — block counts are small (a few agents at most).
+     */
     refreshActivity = async (): Promise<void> => {
         try {
             const { block_ids } = await RpcApi.AgentTrackedBlocksCommand(TabRpcClient, {});
