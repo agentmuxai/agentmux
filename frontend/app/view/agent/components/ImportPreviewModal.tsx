@@ -4,6 +4,8 @@
 import { createEffect, createMemo, createSignal, For, Show, type JSX } from "solid-js";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
+import { Button } from "@/element/button";
+import { Modal, ModalBody, ModalFooter, ModalHeader } from "@/element/modal-v2";
 
 interface ImportPreviewModalProps {
     payload: ExportForgeAgentsResult | null;
@@ -72,67 +74,66 @@ export const ImportPreviewModal = (props: ImportPreviewModalProps): JSX.Element 
         }
     }
 
-    function handleBackdropClick(e: MouseEvent) {
-        if (e.target === e.currentTarget) props.onClose();
-    }
-
     return (
         <Show when={props.payload != null}>
-            <div class="agent-import-overlay" onClick={handleBackdropClick}>
-                <div class="agent-import-modal">
-                    <div class="agent-import-modal-header">Import Agents</div>
-                    <div class="agent-import-modal-body">
-                        <Show
-                            when={resultMsg() == null}
-                            fallback={<div class="agent-import-result">{resultMsg()}</div>}
-                        >
-                            <div class="agent-import-count">
-                                Found {agentRows().length} agent{agentRows().length !== 1 ? "s" : ""} in file:
-                            </div>
-                            <div class="agent-import-list">
-                                <For each={agentRows()}>
-                                    {(row) => (
-                                        <div classList={{
-                                            "agent-import-row": true,
-                                            "agent-import-row-skip": row.skip,
-                                        }}>
-                                            <span class="agent-import-row-status">
-                                                {row.skip ? "⏭" : "✓"}
-                                            </span>
-                                            <span class="agent-import-row-icon">{row.agent.icon}</span>
-                                            <span class="agent-import-row-name">{row.agent.name}</span>
-                                            <Show when={row.agent.description}>
-                                                <span class="agent-import-row-desc"> — {row.agent.description}</span>
-                                            </Show>
-                                            <Show when={row.skip}>
-                                                <span class="agent-import-row-skip-label"> (already exists)</span>
-                                            </Show>
-                                        </div>
-                                    )}
-                                </For>
-                            </div>
-                            <div class="agent-import-summary">
-                                {toImportCount()} will be imported
-                                <Show when={skipCount() > 0}>
-                                    {" "}&middot; {skipCount()} will be skipped
-                                </Show>
-                            </div>
-                        </Show>
-                    </div>
-                    <div class="agent-import-modal-footer">
-                        <button class="agent-import-btn agent-import-btn-cancel" onClick={props.onClose}>
-                            Cancel
-                        </button>
-                        <button
-                            class="agent-import-btn agent-import-btn-confirm"
-                            classList={{ "agent-action-btn-disabled": importing() || toImportCount() === 0 }}
-                            onClick={handleConfirm}
-                        >
-                            {importing() ? "Importing…" : `Import ${toImportCount()} Agent${toImportCount() !== 1 ? "s" : ""}`}
-                        </button>
-                    </div>
-                </div>
-            </div>
+            <Modal
+                open={true}
+                onClose={() => { if (!importing()) props.onClose(); }}
+                closeOnBackdropClick={!importing()}
+                closeOnEscape={!importing()}
+                size="md"
+            >
+                <ModalHeader title="Import Agents" />
+                <ModalBody>
+                    <Show
+                        when={resultMsg() == null}
+                        fallback={<div class="agent-import-result">{resultMsg()}</div>}
+                    >
+                        <div class="agent-import-count">
+                            Found {agentRows().length} agent{agentRows().length !== 1 ? "s" : ""} in file:
+                        </div>
+                        <div class="agent-import-list">
+                            <For each={agentRows()}>
+                                {(row) => (
+                                    <div classList={{
+                                        "agent-import-row": true,
+                                        "agent-import-row-skip": row.skip,
+                                    }}>
+                                        <span class="agent-import-row-status">
+                                            {row.skip ? "⏭" : "✓"}
+                                        </span>
+                                        <span class="agent-import-row-icon">{row.agent.icon}</span>
+                                        <span class="agent-import-row-name">{row.agent.name}</span>
+                                        <Show when={row.agent.description}>
+                                            <span class="agent-import-row-desc"> — {row.agent.description}</span>
+                                        </Show>
+                                        <Show when={row.skip}>
+                                            <span class="agent-import-row-skip-label"> (already exists)</span>
+                                        </Show>
+                                    </div>
+                                )}
+                            </For>
+                        </div>
+                        <div class="agent-import-summary">
+                            {toImportCount()} will be imported
+                            <Show when={skipCount() > 0}>
+                                {" "}&middot; {skipCount()} will be skipped
+                            </Show>
+                        </div>
+                    </Show>
+                </ModalBody>
+                <ModalFooter>
+                    <Button onClick={props.onClose} disabled={importing()}>
+                        Cancel
+                    </Button>
+                    <Button
+                        onClick={handleConfirm}
+                        disabled={importing() || toImportCount() === 0}
+                    >
+                        {importing() ? "Importing…" : `Import ${toImportCount()} Agent${toImportCount() !== 1 ? "s" : ""}`}
+                    </Button>
+                </ModalFooter>
+            </Modal>
         </Show>
     );
 };
