@@ -64,3 +64,79 @@
         }
     }
 }
+
+// ─── Design-System Phase 1 — layout + accessibility helpers ──────────────
+// Introduced by SPEC_DESIGN_SYSTEM_2026_04_23. Keep each mixin one-purpose
+// and grep-friendly; complex multi-property bundles belong in component
+// SCSS, not here. See the spec for the rationale behind each helper.
+
+/// Center children both axes. Shortcut for the `display: flex;
+/// align-items: center; justify-content: center;` triple that recurs
+/// hundreds of times across the frontend.
+@mixin flex-center {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/// Vertical flex column with no implicit spacing. Pair with
+/// `gap: var(--space-N)` at the call site.
+@mixin flex-col {
+    display: flex;
+    flex-direction: column;
+}
+
+/// Fill the positioned ancestor. Equivalent to `position: absolute;
+/// top: 0; right: 0; bottom: 0; left: 0;`. Useful for overlays.
+@mixin abs-fill {
+    position: absolute;
+    inset: 0;
+}
+
+/// Multi-line clamp with ellipsis. `$n` is the number of lines.
+@mixin truncate-lines($n) {
+    display: -webkit-box;
+    -webkit-line-clamp: $n;
+    -webkit-box-orient: vertical;
+    line-clamp: $n;
+    overflow: hidden;
+}
+
+/// Accessible focus ring. Use on `&:focus-visible` for interactive
+/// elements; theme-aware via `--shadow-focus-ring`.
+@mixin focus-ring {
+    outline: none;
+    box-shadow: var(--shadow-focus-ring);
+}
+
+/// Media queries keyed off a minimum / maximum width. Pass a token
+/// value or literal — we don't ship canonical breakpoints yet since
+/// the app has effectively none; this is infrastructure for when we do.
+@mixin media-up($w) {
+    @media (min-width: #{$w}) { @content; }
+}
+
+@mixin media-down($w) {
+    @media (max-width: calc(#{$w} - 1px)) { @content; }
+}
+
+/// Respect user's `prefers-reduced-motion` setting. Wrap any non-
+/// essential animation in this so motion-sensitive users opt out.
+@mixin respect-reduced-motion {
+    @media (prefers-reduced-motion: reduce) {
+        @content;
+    }
+}
+
+/// Visually hidden but still read by assistive tech. Standard pattern.
+@mixin sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
