@@ -11,16 +11,16 @@
 .system-status {
     display: flex;
     flex-direction: row;
-    gap: 6px;
+    gap: var(--space-1-5);
     height: 100%;
     align-items: center;
     justify-content: flex-end;
     margin-left: auto;
-    margin-right: 6px;
+    margin-right: var(--space-1-5);
 
     .config-error-button {
         color: black;
-        padding: 0 6px;
+        padding: 0 var(--space-1-5);
         flex: 0 0 fit-content;
     }
 
@@ -47,7 +47,7 @@
         align-self: stretch;
         align-items: stretch;
 
-        // `.window-header` has `padding-top: 6px` for the tab bar; the caption
+        // `.window-header` has `padding-top: var(--space-1-5)` for the tab bar; the caption
         // buttons need to override that and reach the absolute top of the
         // title bar, or the hover background leaves a 6-px strip at the top
         // uncovered. Pull the container up with a negative margin and grow
@@ -118,7 +118,7 @@
 
 .config-error-message {
     max-width: 500px;
-    margin-bottom: 20px;
+    margin-bottom: var(--space-5);
 
     h3 {
         font-weight: bold;

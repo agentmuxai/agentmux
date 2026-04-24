@@ -9,7 +9,7 @@
     display: flex;
     max-width: 400px;
     min-width: 125px;
-    padding: 2px;
+    padding: var(--space-0-5);
     flex-direction: column;
     justify-content: flex-end;
     align-items: flex-start;
@@ -24,7 +24,7 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 4px 6px;
+    padding: var(--space-1) 6px;
     cursor: pointer;
     color: var(--main-text-color);
     font-size: 12px;

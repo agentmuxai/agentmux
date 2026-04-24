@@ -41,12 +41,12 @@
     .userinput-checkbox-container {
         display: flex;
         flex-direction: column;
-        gap: 6px;
+        gap: var(--space-1-5);
 
         .userinput-checkbox-row {
             display: flex;
             align-items: center;
-            gap: 6px;
+            gap: var(--space-1-5);
 
             .userinput-checkbox {
                 accent-color: var(--accent-color);

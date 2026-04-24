@@ -11,7 +11,7 @@
 
 .config-error-message {
     max-width: 500px;
-    margin-bottom: 20px;
+    margin-bottom: var(--space-5);
 
     h3 {
         font-weight: bold;
@@ -21,7 +21,7 @@
 }
 
 .window-header {
-    padding-top: 6px;
+    padding-top: var(--space-1-5);
     position: relative;
     user-select: none;
     display: flex;

@@ -13,8 +13,8 @@
 .browser-nav-bar {
     display: flex;
     align-items: center;
-    gap: 4px;
-    padding: 4px 8px;
+    gap: var(--space-1);
+    padding: var(--space-1) 8px;
     background: var(--main-bg-color);
     border-bottom: 1px solid var(--border-color);
     flex-shrink: 0;
@@ -80,7 +80,7 @@
 }
 
 .browser-error {
-    padding: 12px 16px;
+    padding: var(--space-3) 16px;
     background: rgba(255, 80, 80, 0.1);
     color: var(--error-color);
     font-size: 13px;
@@ -91,14 +91,14 @@
 .browser-error-hint {
     font-size: 11px;
     color: var(--secondary-text-color);
-    margin-top: 4px;
+    margin-top: var(--space-1);
 }
 
 .browser-placeholder {
     flex: 1;
     width: auto; /* was 100% — auto lets flex stretch respect margin */
     position: relative;
-    margin: 2px; /* inset to reveal the 2px pane border drawn by .block-mask */
+    margin: var(--space-0-5); /* inset to reveal the 2px pane border drawn by .block-mask */
 }
 
 .browser-empty {
@@ -107,7 +107,7 @@
     align-items: center;
     justify-content: center;
     height: 100%;
-    gap: 12px;
+    gap: var(--space-3);
     color: var(--secondary-text-color);
 }
 

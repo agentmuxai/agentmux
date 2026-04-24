@@ -14,7 +14,7 @@
 .expandable-menu-item-group-title {
     display: flex;
     align-items: center;
-    padding: 8px 12px; /* Left and right padding, we'll adjust this for the right side */
+    padding: var(--space-2) 12px; /* Left and right padding, we'll adjust this for the right side */
     cursor: pointer;
     box-sizing: border-box;
     border-radius: 4px;
@@ -45,7 +45,7 @@
 }
 
 .expandable-menu-item-left {
-    margin-right: 8px; /* Space for the left element */
+    margin-right: var(--space-2); /* Space for the left element */
 }
 
 .expandable-menu-item-right {
@@ -60,7 +60,7 @@
 .expandable-menu-item-group-content {
     max-height: 0;
     overflow: hidden;
-    margin-left: 16px; /* Retaining left indentation */
+    margin-left: var(--space-4); /* Retaining left indentation */
     margin-right: 0; /* Removing right padding */
 
     &.open {
