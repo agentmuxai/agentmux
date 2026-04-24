@@ -26,6 +26,8 @@
         "scss/no-global-function-names": null,
         "scss/at-mixin-argumentless-call-parentheses": null,
         "scss/load-partial-extension": null,
+        "selector-pseudo-element-colon-notation": null,
+        "declaration-block-no-redundant-longhand-properties": null,
         "length-zero-no-unit": null,
         "shorthand-property-no-redundant-values": null,
         "comment-empty-line-before": null,
