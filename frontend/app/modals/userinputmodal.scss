@@ -1,10 +1,6 @@
 // Copyright 2024-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-// `.userinput-header` was replaced by `<ModalHeader>` from modal-v2
-// during the migration — the bold + text-color styling comes from
-// the modal's own `.modal-panel-title` rule.
-
 .userinput-body {
     display: flex;
     flex-direction: column;
