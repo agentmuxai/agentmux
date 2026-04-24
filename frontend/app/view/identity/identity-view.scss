@@ -7,8 +7,8 @@
     height: 100%;
     overflow: hidden;
     font-size: 13px;
-    color: var(--main-text-color, #e2e8f0);
-    background: var(--main-bg-color, #0f172a);
+    color: var(--main-text-color);
+    background: var(--main-bg-color);
 }
 
 // ── Header ───────────────────────────────────────────────────────────────────
@@ -18,14 +18,14 @@
     align-items: center;
     gap: 8px;
     padding: 8px 12px;
-    border-bottom: 1px solid var(--border-color, #1e293b);
+    border-bottom: 1px solid var(--border-color);
     flex-shrink: 0;
 }
 
 .identity-header-title {
     font-weight: 600;
     font-size: 13px;
-    color: var(--main-text-color, #e2e8f0);
+    color: var(--main-text-color);
     margin-right: 4px;
 }
 
@@ -40,18 +40,18 @@
     border-radius: 4px;
     border: none;
     background: transparent;
-    color: var(--secondary-text-color, #94a3b8);
+    color: var(--secondary-text-color);
     cursor: pointer;
     transition: background 0.1s, color 0.1s;
 
     &:hover {
-        background: var(--hover-bg-color, #1e293b);
-        color: var(--main-text-color, #e2e8f0);
+        background: var(--hover-bg-color);
+        color: var(--main-text-color);
     }
 
     &.active {
-        background: var(--active-bg-color, #1e293b);
-        color: var(--main-text-color, #e2e8f0);
+        background: var(--highlight-bg-color);
+        color: var(--main-text-color);
     }
 }
 
@@ -60,13 +60,13 @@
     padding: 3px 10px;
     font-size: 12px;
     border-radius: 4px;
-    border: 1px solid var(--border-color, #334155);
+    border: 1px solid var(--border-color);
     background: transparent;
-    color: var(--accent-color, #a78bfa);
+    color: var(--accent-color);
     cursor: pointer;
 
     &:hover {
-        background: var(--hover-bg-color, #1e293b);
+        background: var(--hover-bg-color);
     }
 }
 
@@ -95,7 +95,7 @@
         width: 4px;
     }
     &::-webkit-scrollbar-thumb {
-        background: var(--border-color, #334155);
+        background: var(--border-color);
         border-radius: 2px;
     }
 }
@@ -112,7 +112,7 @@
     font-weight: 600;
     letter-spacing: 0.08em;
     text-transform: uppercase;
-    color: var(--secondary-text-color, #64748b);
+    color: var(--secondary-text-color);
 }
 
 // ── Account row ───────────────────────────────────────────────────────────────
@@ -126,12 +126,12 @@
     transition: background 0.1s;
 
     &:hover {
-        background: var(--hover-bg-color, #1e293b);
+        background: var(--hover-bg-color);
     }
 
     &.selected {
-        background: var(--selected-bg-color, #1e293b);
-        border-left: 2px solid var(--accent-color, #a78bfa);
+        background: var(--highlight-bg-color);
+        border-left: 2px solid var(--accent-color);
         padding-left: 10px;
     }
 }
@@ -152,13 +152,13 @@
 
 .identity-display-name {
     font-size: 11px;
-    color: var(--secondary-text-color, #64748b);
+    color: var(--secondary-text-color);
 }
 
 .identity-agent-count {
     font-size: 11px;
-    color: var(--secondary-text-color, #64748b);
-    background: var(--tag-bg-color, #1e293b);
+    color: var(--secondary-text-color);
+    background: var(--panel-bg-color);
     padding: 1px 5px;
     border-radius: 3px;
 }
@@ -177,6 +177,10 @@
     letter-spacing: 0;
     flex-shrink: 0;
 
+    /* stylelint-disable color-no-hex --
+       Provider-brand colour swatches (GitHub dark grey, AWS amber,
+       Anthropic purple, custom slate). Vendor identity colours,
+       not theme-relative — they shouldn't be tokenised. */
     &.provider-github {
         background: #21262d;
         color: #e6edf3;
@@ -193,6 +197,7 @@
         background: #1e293b;
         color: #94a3b8;
     }
+    /* stylelint-enable color-no-hex */
 
     &.matrix-badge {
         font-size: 10px;
@@ -210,11 +215,11 @@
     border-radius: 50%;
     flex-shrink: 0;
 
-    &.status-valid     { background: #22c55e; }
-    &.status-expired   { background: #ef4444; }
-    &.status-invalid   { background: #ef4444; }
-    &.status-checking  { background: #f59e0b; animation: pulse 1s infinite; }
-    &.status-unknown   { background: #475569; }
+    &.status-valid     { background: var(--success-color); }
+    &.status-expired   { background: var(--error-color); }
+    &.status-invalid   { background: var(--error-color); }
+    &.status-checking  { background: var(--warning-color); animation: pulse 1s infinite; }
+    &.status-unknown   { background: var(--secondary-text-color); }
 
     &.detail-status {
         width: 8px;
@@ -233,7 +238,7 @@
 .identity-detail {
     width: 280px;
     flex-shrink: 0;
-    border-left: 1px solid var(--border-color, #1e293b);
+    border-left: 1px solid var(--border-color);
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -244,7 +249,7 @@
     align-items: center;
     gap: 8px;
     padding: 10px 12px;
-    border-bottom: 1px solid var(--border-color, #1e293b);
+    border-bottom: 1px solid var(--border-color);
     flex-shrink: 0;
 }
 
@@ -265,7 +270,7 @@
 
 .identity-detail-subname {
     font-size: 11px;
-    color: var(--secondary-text-color, #64748b);
+    color: var(--secondary-text-color);
 }
 
 .identity-detail-body {
@@ -277,7 +282,7 @@
         width: 4px;
     }
     &::-webkit-scrollbar-thumb {
-        background: var(--border-color, #334155);
+        background: var(--border-color);
         border-radius: 2px;
     }
 }
@@ -287,7 +292,7 @@
     font-weight: 600;
     letter-spacing: 0.08em;
     text-transform: uppercase;
-    color: var(--secondary-text-color, #64748b);
+    color: var(--secondary-text-color);
     margin: 10px 0 4px;
 
     &:first-child {
@@ -304,7 +309,7 @@
 
 .identity-detail-label {
     font-size: 11px;
-    color: var(--secondary-text-color, #64748b);
+    color: var(--secondary-text-color);
     min-width: 80px;
     flex-shrink: 0;
 }
@@ -316,7 +321,7 @@
 
 .identity-detail-empty {
     font-size: 11px;
-    color: var(--secondary-text-color, #64748b);
+    color: var(--secondary-text-color);
     font-style: italic;
 }
 
@@ -331,15 +336,15 @@
     font-size: 11px;
     padding: 1px 6px;
     border-radius: 3px;
-    background: var(--tag-bg-color, #1e293b);
-    color: var(--main-text-color, #e2e8f0);
+    background: var(--panel-bg-color);
+    color: var(--main-text-color);
 }
 
 .identity-detail-actions {
     display: flex;
     gap: 8px;
     padding: 10px 12px;
-    border-top: 1px solid var(--border-color, #1e293b);
+    border-top: 1px solid var(--border-color);
     flex-shrink: 0;
 }
 
@@ -356,19 +361,19 @@
     &:hover { opacity: 0.85; }
 
     &.identity-btn-primary {
-        background: var(--accent-color, #a78bfa);
-        color: #0f172a;
-        border-color: var(--accent-color, #a78bfa);
+        background: var(--accent-color);
+        color: var(--button-text-color);
+        border-color: var(--accent-color);
     }
     &.identity-btn-secondary {
         background: transparent;
-        color: var(--secondary-text-color, #94a3b8);
-        border-color: var(--border-color, #334155);
+        color: var(--secondary-text-color);
+        border-color: var(--border-color);
     }
     &.identity-btn-danger {
         background: transparent;
-        color: #ef4444;
-        border-color: #ef4444;
+        color: var(--error-color);
+        border-color: var(--error-color);
         margin-left: auto;
     }
 }
@@ -389,7 +394,7 @@
     th, td {
         padding: 6px 10px;
         text-align: left;
-        border-bottom: 1px solid var(--border-color, #1e293b);
+        border-bottom: 1px solid var(--border-color);
     }
 
     th {
@@ -397,12 +402,12 @@
         font-weight: 600;
         letter-spacing: 0.06em;
         text-transform: uppercase;
-        color: var(--secondary-text-color, #64748b);
+        color: var(--secondary-text-color);
     }
 
     .identity-matrix-agent {
         font-size: 12px;
-        color: var(--main-text-color, #e2e8f0);
+        color: var(--main-text-color);
     }
 
     .identity-matrix-cell {
@@ -410,12 +415,12 @@
     }
 
     .identity-matrix-empty-cell {
-        color: var(--secondary-text-color, #475569);
+        color: var(--secondary-text-color);
     }
 
     .identity-matrix-empty {
         text-align: center;
-        color: var(--secondary-text-color, #64748b);
+        color: var(--secondary-text-color);
         padding: 20px;
         font-style: italic;
     }
@@ -430,7 +435,7 @@
     justify-content: center;
     height: 200px;
     gap: 10px;
-    color: var(--secondary-text-color, #64748b);
+    color: var(--secondary-text-color);
     font-size: 13px;
 
     p { margin: 0; }
@@ -440,13 +445,13 @@
     padding: 5px 14px;
     font-size: 12px;
     border-radius: 4px;
-    border: 1px solid var(--accent-color, #a78bfa);
+    border: 1px solid var(--accent-color);
     background: transparent;
-    color: var(--accent-color, #a78bfa);
+    color: var(--accent-color);
     cursor: pointer;
 
     &:hover {
-        background: var(--hover-bg-color, #1e293b);
+        background: var(--hover-bg-color);
     }
 }
 
@@ -459,7 +464,8 @@
     display: flex;
     align-items: flex-start;
     justify-content: flex-end;
-    z-index: 100;
+    // Pane-level modal — sits in the existing element-modal slot.
+    z-index: var(--zindex-elem-modal);
 }
 
 .identity-form {
@@ -467,8 +473,8 @@
     height: 100%;
     display: flex;
     flex-direction: column;
-    background: var(--panel-bg-color, #0f172a);
-    border-left: 1px solid var(--border-color, #1e293b);
+    background: var(--panel-bg-color);
+    border-left: 1px solid var(--border-color);
     overflow: hidden;
 }
 
@@ -477,7 +483,7 @@
     align-items: center;
     justify-content: space-between;
     padding: 10px 14px;
-    border-bottom: 1px solid var(--border-color, #1e293b);
+    border-bottom: 1px solid var(--border-color);
     font-weight: 600;
     font-size: 13px;
     flex-shrink: 0;
@@ -486,13 +492,13 @@
 .identity-form-close {
     background: transparent;
     border: none;
-    color: var(--secondary-text-color, #94a3b8);
+    color: var(--secondary-text-color);
     cursor: pointer;
     font-size: 14px;
     padding: 2px 6px;
     border-radius: 3px;
 
-    &:hover { background: var(--hover-bg-color, #1e293b); }
+    &:hover { background: var(--hover-bg-color); }
 }
 
 .identity-form-body {
@@ -507,7 +513,7 @@
         width: 4px;
     }
     &::-webkit-scrollbar-thumb {
-        background: var(--border-color, #334155);
+        background: var(--border-color);
         border-radius: 2px;
     }
 }
@@ -520,22 +526,22 @@
 
 .identity-form-label {
     font-size: 11px;
-    color: var(--secondary-text-color, #94a3b8);
+    color: var(--secondary-text-color);
 }
 
 .identity-input,
 .identity-select {
     padding: 5px 8px;
     font-size: 12px;
-    background: var(--input-bg-color, #1e293b);
-    border: 1px solid var(--border-color, #334155);
+    background: var(--form-element-bg-color);
+    border: 1px solid var(--border-color);
     border-radius: 4px;
-    color: var(--main-text-color, #e2e8f0);
+    color: var(--main-text-color);
     outline: none;
     width: 100%;
 
     &:focus {
-        border-color: var(--accent-color, #a78bfa);
+        border-color: var(--accent-color);
     }
 }
 
@@ -545,7 +551,7 @@
     background: rgba(239, 68, 68, 0.1);
     border: 1px solid rgba(239, 68, 68, 0.3);
     border-radius: 4px;
-    color: #ef4444;
+    color: var(--error-color);
 }
 
 .identity-form-warning {
@@ -554,14 +560,14 @@
     background: rgba(245, 158, 11, 0.1);
     border: 1px solid rgba(245, 158, 11, 0.3);
     border-radius: 4px;
-    color: #f59e0b;
+    color: var(--warning-color);
 }
 
 .identity-form-footer {
     display: flex;
     gap: 8px;
     padding: 10px 14px;
-    border-top: 1px solid var(--border-color, #1e293b);
+    border-top: 1px solid var(--border-color);
     flex-shrink: 0;
     justify-content: flex-end;
 }
