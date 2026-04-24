@@ -14,9 +14,14 @@
     // blue (accepted), which is the user's visible "accepted" signal.
     // See AGENT_PANE_QUEUED_MESSAGE_FEEDBACK_SPEC.md.
     .agent-pending-zone {
-        border-top: 1px solid var(--border-color);
+        // Queue sits directly below the feed (post-reorder PR). Dashed
+        // top border visually pins it to the feed above; solid bottom
+        // border separates it from the "Working…" status line below.
+        // Per SPEC_AGENT_PANE_ZONE_ORDER_WORKED_FOOTER_2026_04_24.md §5.3.
+        border-top: 1px dashed var(--border-color);
+        border-bottom: 1px solid var(--border-color);
         background: color-mix(in srgb, var(--warning-color) 6%, var(--main-bg-color));
-        padding: var(--space-1) var(--space-1-5);
+        padding: var(--space-0-5) var(--space-1-5);
         display: flex;
         flex-direction: column;
         gap: 3px;

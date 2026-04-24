@@ -85,21 +85,31 @@ export const AgentStatusLine = (props: AgentStatusLineProps): JSX.Element => {
         if (props.loading && !props.currentTool) setLastPhrase(phrase());
     });
 
-    // Reactive derived values used in both branches.
-    const statsText = createMemo((): string | null => {
+    // Completed-turn summary split into two groups so tokens + duration
+    // (the numbers users ask about most) sit on the primary line and
+    // cost + turn count take the secondary role. Per
+    // docs/specs/SPEC_AGENT_PANE_ZONE_ORDER_WORKED_FOOTER_2026_04_24.md §4.2.
+    const workedPrimary = createMemo((): string | null => {
         const stats = props.sessionStats;
         if (!stats) return null;
-        const parts: string[] = [];
-        parts.push(ingToEd(lastPhrase()));
-        if (stats.cost_usd != null) parts.push(`$${stats.cost_usd.toFixed(3)}`);
+        const parts: string[] = [ingToEd(lastPhrase())];
         if (stats.duration_ms != null) {
             const s = Math.round(stats.duration_ms / 1000);
             parts.push(s < 60 ? `${Math.max(1, s)}s` : `${Math.floor(s / 60)}m ${s % 60}s`);
         }
+        if (props.turnTokens) parts.push(fmtTokens(props.turnTokens));
+        return parts.join("  \u00b7  ");
+    });
+
+    const workedSecondary = createMemo((): string | null => {
+        const stats = props.sessionStats;
+        if (!stats) return null;
+        const parts: string[] = [];
+        if (stats.cost_usd != null) parts.push(`$${stats.cost_usd.toFixed(3)}`);
         if (stats.num_turns) {
             parts.push(`${stats.num_turns} ${stats.num_turns === 1 ? "turn" : "turns"}`);
         }
-        return parts.join("  \u00b7  ");
+        return parts.length ? parts.join("  \u00b7  ") : null;
     });
 
     const rightText = createMemo((): string => {
@@ -128,7 +138,7 @@ export const AgentStatusLine = (props: AgentStatusLineProps): JSX.Element => {
             when={props.loading}
             fallback={
                 <Show
-                    when={statsText()}
+                    when={workedPrimary()}
                     fallback={
                         <span class="agent-status-line">
                             {processBadge()}
@@ -136,8 +146,15 @@ export const AgentStatusLine = (props: AgentStatusLineProps): JSX.Element => {
                     }
                 >
                     <span class="agent-status-line agent-status-line--stats">
-                        {statsText()}
-                        {processBadge()}
+                        <span class="agent-status-left">{workedPrimary()}</span>
+                        <span class="agent-status-right">
+                            <Show when={workedSecondary()}>
+                                <span class="agent-status-line-secondary">
+                                    {workedSecondary()}
+                                </span>
+                            </Show>
+                            {processBadge()}
+                        </span>
                     </span>
                 </Show>
             }

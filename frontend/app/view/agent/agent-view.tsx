@@ -531,11 +531,17 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 </div>
             </Show>
 
-            {/* Working…/Stopping… status — deliberately rendered ABOVE
-                the activity log so the user's eye lands on live state
-                before diagnostics. Used to live inside the composer
-                region right above the input; moved here so the activity
-                log doesn't push it off-screen during long agent output. */}
+            {/* Queue sits directly below the feed so the user's newly-
+                typed message lands next to the live conversation it's
+                queued against. Previously lived below the activity log;
+                repositioning per SPEC_AGENT_PANE_ZONE_ORDER_WORKED_FOOTER_2026_04_24. */}
+            <PendingMessagesPanel pendingMessages={pendingMessagesAtom[0]} />
+
+            {/* Working…/Stopping… status — reads as "what the agent is
+                doing about the queue above". Used to live inside the
+                composer region right above the input; moved here so the
+                activity log doesn't push it off-screen during long
+                agent output. */}
             <AgentStatusLine
                 loading={status.isLoading() || agentAtoms().turnActiveAtom[0]() || stoppingAtom[0]()}
                 stopping={stoppingAtom[0]()}
@@ -555,7 +561,6 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
             />
 
             <ActivityLogPanel entries={logLines} />
-            <PendingMessagesPanel pendingMessages={pendingMessagesAtom[0]} />
 
             <div class="agent-composer-region">
                 <Show when={commands.helpVisible()}>
