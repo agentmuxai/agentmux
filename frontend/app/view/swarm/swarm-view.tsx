@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { createSignal, For, Show, type JSX } from "solid-js";
+import { ConfirmModal } from "@/element/modal-v2";
 import type {
     SwarmViewModel,
     ActiveSubagent,
@@ -512,12 +513,14 @@ function SwarmActivity({ model }: { model: SwarmViewModel }): JSX.Element {
 
 function SwarmActivityGroup({ group }: { group: AgentProcessGroup }): JSX.Element {
     const [busy, setBusy] = createSignal(false);
+    const [confirmOpen, setConfirmOpen] = createSignal(false);
 
-    const killTree = async () => {
+    const killTree = () => {
         if (busy()) return;
-        const count = group.processes.length;
-        const suffix = count === 1 ? "process" : "processes";
-        if (!window.confirm(`Kill all ${count} ${suffix} under this agent?`)) return;
+        setConfirmOpen(true);
+    };
+
+    const handleKillConfirm = async () => {
         setBusy(true);
         try {
             await RpcApi.AgentKillTreeCommand(TabRpcClient, { block_id: group.block_id });
@@ -528,6 +531,7 @@ function SwarmActivityGroup({ group }: { group: AgentProcessGroup }): JSX.Elemen
             // Silently tolerate — older backends without the RPC.
         } finally {
             setBusy(false);
+            setConfirmOpen(false);
         }
     };
 
@@ -589,6 +593,21 @@ function SwarmActivityGroup({ group }: { group: AgentProcessGroup }): JSX.Elemen
                         </For>
                     </tbody>
                 </table>
+            </Show>
+            <Show when={confirmOpen()}>
+                <ConfirmModal
+                    open={true}
+                    title="Kill all processes?"
+                    description={
+                        `This will terminate ${group.processes.length} ${
+                            group.processes.length === 1 ? "process" : "processes"
+                        } under this agent.`
+                    }
+                    confirmLabel="Kill all"
+                    destructive
+                    onConfirm={handleKillConfirm}
+                    onCancel={() => setConfirmOpen(false)}
+                />
             </Show>
         </div>
     );
