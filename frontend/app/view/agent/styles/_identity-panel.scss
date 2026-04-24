@@ -1,0 +1,167 @@
+// Copyright 2024-2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// AgentIdentityPanel — identity/provider management UI.
+// Top-level because rendered through a portal (identity modal).
+// ── AgentIdentityPanel (Step 4 of SPEC_AGENT_IDENTITY_RESTRUCTURE) ────────────
+
+.agent-identity-panel {
+    padding: 10px var(--space-3);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    font-size: 12px;
+    color: var(--main-text-color);
+}
+
+.agent-identity-header {
+    padding-bottom: var(--space-1-5);
+    border-bottom: 1px solid var(--border-color);
+}
+
+.agent-identity-title {
+    font-size: 11px;
+    color: color-mix(in srgb, var(--secondary-text-color) 80%, transparent);
+}
+
+.agent-identity-agent-name {
+    font-weight: 600;
+    color: var(--main-text-color);
+}
+
+.agent-identity-providers {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+}
+
+.agent-identity-provider-row {
+    display: grid;
+    grid-template-columns: 16px 72px 1fr auto;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-1) var(--space-1-5);
+    border-radius: 3px;
+
+    &:hover {
+        background: color-mix(in srgb, var(--highlight-bg-color) 50%, transparent);
+    }
+}
+
+.agent-identity-provider-icon {
+    font-size: 13px;
+    text-align: center;
+    opacity: 0.6;
+}
+
+.agent-identity-provider-label {
+    font-size: 11px;
+    color: color-mix(in srgb, var(--secondary-text-color) 80%, transparent);
+    white-space: nowrap;
+}
+
+.agent-identity-provider-assignment {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1-5);
+    min-width: 0;
+    overflow: hidden;
+}
+
+.agent-identity-account-name {
+    font-size: 12px;
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.agent-identity-username {
+    font-size: 11px;
+    color: color-mix(in srgb, var(--secondary-text-color) 70%, transparent);
+    font-family: var(--fixed-font, monospace);
+}
+
+.agent-identity-none {
+    font-size: 11px;
+    color: color-mix(in srgb, var(--secondary-text-color) 50%, transparent);
+    font-style: italic;
+}
+
+.agent-identity-provider-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
+    flex-shrink: 0;
+}
+
+.agent-identity-select {
+    font-size: 11px;
+    background: var(--panel-bg-color, var(--main-bg-color));
+    color: var(--main-text-color);
+    border: 1px solid var(--border-color);
+    border-radius: 3px;
+    padding: var(--space-0-5) var(--space-1);
+    max-width: 140px;
+    cursor: pointer;
+
+    &:focus {
+        outline: 1px solid var(--accent-color);
+        outline-offset: 1px;
+    }
+
+    &:disabled {
+        opacity: 0.5;
+        cursor: default;
+    }
+}
+
+.agent-identity-new-btn,
+.agent-identity-unassign-btn {
+    font-size: 11px;
+    background: none;
+    border: 1px solid var(--border-color);
+    border-radius: 3px;
+    color: color-mix(in srgb, var(--secondary-text-color) 80%, transparent);
+    padding: var(--space-0-5) 5px;
+    cursor: pointer;
+    white-space: nowrap;
+
+    &:hover:not(:disabled) {
+        background: color-mix(in srgb, var(--highlight-bg-color) 60%, transparent);
+        color: var(--main-text-color);
+    }
+
+    &:disabled {
+        opacity: 0.4;
+        cursor: default;
+    }
+}
+
+.agent-identity-unassign-btn {
+    padding: var(--space-0-5) var(--space-1-5);
+    border-color: color-mix(in srgb, var(--error-color) 50%, transparent);
+    color: color-mix(in srgb, var(--error-color) 70%, transparent);
+
+    &:hover:not(:disabled) {
+        background: color-mix(in srgb, var(--error-color) 15%, transparent);
+        color: var(--error-color);
+    }
+}
+
+.agent-identity-error {
+    font-size: 11px;
+    color: var(--error-color);
+    padding: var(--space-1) var(--space-1-5);
+    background: color-mix(in srgb, var(--error-color) 10%, transparent);
+    border-radius: 3px;
+}
+
+.agent-identity-unsaved {
+    padding: var(--space-3);
+    font-size: 12px;
+    color: color-mix(in srgb, var(--secondary-text-color) 70%, transparent);
+    text-align: center;
+    font-style: italic;
+}
+
