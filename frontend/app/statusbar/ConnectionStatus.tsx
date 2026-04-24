@@ -66,15 +66,25 @@ const ConnectionStatus = (): JSX.Element => {
         });
     };
 
+    // Always render so the bar's layout is stable — §4.3 of
+    // SPEC_STATUSBAR_TOKEN_USAGE applies the same rule to the net
+    // widget. "0 remote" is a legitimate idle state and should look
+    // idle, not be absent.
+    const isIdle = () => total() === 0 && errorCount() === 0 && connectingCount() === 0;
     return (
-        <Show when={total() > 0}>
-            <div class="status-bar-item clickable" title="Click to view connections" onClick={handleClick}>
-                <span class="status-icon" style={{ color: color() }}>
-                    {icon()}
-                </span>
-                <span style={{ color: color() }}>{label()}</span>
-            </div>
-        </Show>
+        <div
+            class="status-bar-item clickable"
+            classList={{ "status-bar-item--idle": isIdle() }}
+            data-tip-wrap=""
+            data-tip="Remote SSH/WSL connections — click for details. Shows error / connecting counts when active."
+            aria-label="Remote connections"
+            onClick={handleClick}
+        >
+            <span class="status-icon" style={{ color: color() }}>
+                {icon()}
+            </span>
+            <span style={{ color: color() }}>{label()}</span>
+        </div>
     );
 };
 

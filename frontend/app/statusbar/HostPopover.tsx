@@ -63,7 +63,9 @@ const HostPopover = (): JSX.Element => {
             <div style={{ position: "relative" }} ref={popoverRef}>
                 <div
                     class="status-bar-item clickable"
-                    title="Click for host details"
+                    data-tip-wrap=""
+                    data-tip="Host name + LAN peers discovered on the local network. Click for details."
+                    aria-label="Host info"
                     onClick={handleClick}
                 >
                     <span class="status-hostname">

@@ -135,6 +135,45 @@
         margin-right: 1px;
     }
 
+    // Instant CSS-only tooltip. Native `title` has a browser-controlled
+    // delay (~500 ms on Windows); users want these to pop immediately.
+    // Any status-bar child carrying `data-tip="…"` gets a hover balloon
+    // above it with no entry animation. Keep native `title` off these
+    // elements (causes double tooltips); `aria-label` covers screen-
+    // reader a11y.
+    [data-tip] {
+        position: relative;
+
+        &:hover::after,
+        &:focus-visible::after {
+            content: attr(data-tip);
+            position: absolute;
+            bottom: calc(100% + 4px);
+            left: 50%;
+            transform: translateX(-50%);
+            padding: var(--space-1) var(--space-1-5);
+            background: var(--modal-bg-color);
+            color: var(--main-text-color);
+            border: 1px solid var(--border-color);
+            border-radius: 3px;
+            font-size: 11px;
+            white-space: nowrap;
+            max-width: 320px;
+            pointer-events: none;
+            z-index: calc(var(--zindex-modal-wrapper) + 10);
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+        }
+
+        // Allow wrapping when the text is long enough that nowrap
+        // would overflow the viewport. Setting a width triggers
+        // soft-wrap instead of clip.
+        &[data-tip-wrap]:hover::after,
+        &[data-tip-wrap]:focus-visible::after {
+            white-space: normal;
+            width: 280px;
+        }
+    }
+
     .stat-separator {
         opacity: 0.2;
         margin: 0 var(--space-0-5);

@@ -57,7 +57,9 @@ const UpdateStatus = (): JSX.Element => {
             <div
                 class={`status-bar-item${clickable() ? " clickable" : ""}`}
                 onClick={clickable() ? handleClick : undefined}
-                title={label()}
+                data-tip-wrap=""
+                data-tip={`Update status: ${label()}. ${clickable() ? "Click to install." : ""}`}
+                aria-label={`Update: ${label()}`}
             >
                 <span class="status-icon" style={{ color: color() }}>
                     {icon()}

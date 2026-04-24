@@ -70,17 +70,35 @@ const SystemStats = (): JSX.Element => {
         <Show when={stats()}>
             {(s) => (
                 <div class="status-bar-item system-stats">
-                    <span class="stat-mono stat-cpu" style={{ color: cpuColor(s().cpu) }}>
+                    <span
+                        class="stat-mono stat-cpu"
+                        style={{ color: cpuColor(s().cpu) }}
+                        data-tip-wrap=""
+                        data-tip="CPU usage across all cores. Turns amber above 80%, red above 95%."
+                        aria-label="CPU usage"
+                    >
                         CPU {Math.round(s().cpu)}%
                     </span>
                     <Show when={s().gpu != null}>
                         <span class="stat-separator">|</span>
-                        <span class="stat-mono stat-gpu" style={{ color: cpuColor(s().gpu!) }}>
+                        <span
+                            class="stat-mono stat-gpu"
+                            style={{ color: cpuColor(s().gpu!) }}
+                            data-tip-wrap=""
+                            data-tip="GPU usage — whichever GPU the system reports as primary."
+                            aria-label="GPU usage"
+                        >
                             GPU {Math.round(s().gpu!)}%
                         </span>
                     </Show>
                     <span class="stat-separator">|</span>
-                    <span class="stat-mono stat-mem" style={{ color: memColor(s().memUsed, s().memTotal) }}>
+                    <span
+                        class="stat-mono stat-mem"
+                        style={{ color: memColor(s().memUsed, s().memTotal) }}
+                        data-tip-wrap=""
+                        data-tip="Memory in use / total installed. Turns amber over 90%."
+                        aria-label="Memory usage"
+                    >
                         Mem {formatMemBytes(s().memUsed)}/{formatMemBytes(s().memTotal)}
                     </span>
                     {/* Network indicator stays mounted even at 0/0 so the user
@@ -92,6 +110,9 @@ const SystemStats = (): JSX.Element => {
                     <span
                         class="stat-mono stat-net"
                         classList={{ "stat-idle": s().netSent === 0 && s().netRecv === 0 }}
+                        data-tip-wrap=""
+                        data-tip="Network traffic — total upload (↑) and download (↓) across all interfaces. Muted when idle."
+                        aria-label="Network traffic"
                     >
                         <span class="stat-disk-arrow">↑</span>{formatRate(s().netSent)}{" "}
                         <span class="stat-disk-arrow">↓</span>{formatRate(s().netRecv)}
@@ -99,7 +120,12 @@ const SystemStats = (): JSX.Element => {
                     {/* TODO: disk I/O reads zero on Windows — investigate sysinfo Disk::usage() delta behavior */}
                     <Show when={s().diskRead > 0 || s().diskWrite > 0}>
                         <span class="stat-separator">|</span>
-                        <span class="stat-mono stat-disk">
+                        <span
+                            class="stat-mono stat-disk"
+                            data-tip-wrap=""
+                            data-tip="Disk I/O — read rate (R) and write rate (W) across all disks."
+                            aria-label="Disk I/O"
+                        >
                             <span class="stat-disk-arrow">R</span>{formatRate(s().diskRead)}{" "}
                             <span class="stat-disk-arrow">W</span>{formatRate(s().diskWrite)}
                         </span>

@@ -15,7 +15,13 @@ const ConfigStatus = (): JSX.Element => {
 
     return (
         <Show when={fullConfig()?.configerrors != null && fullConfig().configerrors.length > 0}>
-            <div class="status-bar-item clickable" onClick={handleClick} title="Click to view config errors">
+            <div
+                class="status-bar-item clickable"
+                onClick={handleClick}
+                data-tip-wrap=""
+                data-tip="One or more AgentMux config files has errors. Click to view details."
+                aria-label="Config errors"
+            >
                 <span class="status-icon" style={{ color: "var(--error-color)" }}>
                     ⚠
                 </span>
