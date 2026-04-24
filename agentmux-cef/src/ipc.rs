@@ -351,7 +351,17 @@ async fn route_command(
             // Empty list restores full visibility. See
             // BROWSER_PANE_Z_ORDER_FOCUS_REPORT.md Issue 1.
             //
+            // `window_label` scopes the clip to panes owned by the
+            // requesting window so a modal in window B doesn't also
+            // hide panes in window A (Codex P1 on PR #544). Defaults to
+            // "main" for back-compat with older frontends that omit it.
+            //
             // Each rect: { x, y, w, h } in main-window client pixel coords.
+            let window_label = args
+                .get("window_label")
+                .and_then(|v| v.as_str())
+                .unwrap_or("main")
+                .to_string();
             let rects: Vec<(i32, i32, i32, i32)> = args
                 .get("rects")
                 .and_then(|v| v.as_array())
@@ -367,7 +377,9 @@ async fn route_command(
                         .collect()
                 })
                 .unwrap_or_default();
-            state.browser_panes.set_pane_overlay_clip(state, &rects);
+            state
+                .browser_panes
+                .set_pane_overlay_clip(state, &window_label, &rects);
             Ok(serde_json::json!(true))
         }
         "main_window_focus" => {
