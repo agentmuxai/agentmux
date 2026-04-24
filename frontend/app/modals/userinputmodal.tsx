@@ -1,12 +1,13 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { Modal } from "@/app/modals/modal";
+import { Button } from "@/element/button";
 import { Markdown } from "@/element/markdown";
+import { Modal, ModalBody, ModalFooter, ModalHeader } from "@/element/modal-v2";
 import { modalsModel } from "@/store/modalmodel";
 import * as keyutil from "@/util/keyutil";
 import { fireAndForget } from "@/util/util";
-import { createSignal, Show, type JSX } from "solid-js";
+import { createSignal, onCleanup, Show, type JSX } from "solid-js";
 import { UserInputService } from "../store/services";
 import "./userinputmodal.scss";
 
@@ -62,31 +63,35 @@ const UserInputModal = (userInputRequest: UserInputRequest) => {
     };
 
     const handleKeyDown = (waveEvent: WaveKeyboardEvent): boolean => {
-        if (keyutil.checkKeyPressed(waveEvent, "Escape")) {
-            handleSendErrResponse();
-            return;
-        }
+        // Enter submits; ESC is handled by modal-v2's closeOnEscape
+        // which calls our onClose → handleSendErrResponse.
         if (keyutil.checkKeyPressed(waveEvent, "Enter")) {
             handleSubmit();
             return true;
         }
     };
 
-    // Countdown timer using setInterval
+    // Countdown timer using setInterval — fires an err response when it
+    // hits zero. Cleanup on unmount so a cancel/submit stops the tick
+    // AND clears the pending 300ms-delayed err-response so dismissing
+    // within that window doesn't double-fire handleSendErrResponse
+    // against a stale request (would pop a sibling modal).
     let intervalId: ReturnType<typeof setInterval>;
-    const startCountdown = () => {
-        intervalId = setInterval(() => {
-            setCountdown((prev) => {
-                if (prev <= 1) {
-                    clearInterval(intervalId);
-                    setTimeout(() => handleSendErrResponse(), 300);
-                    return 0;
-                }
-                return prev - 1;
-            });
-        }, 1000);
-    };
-    startCountdown();
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    intervalId = setInterval(() => {
+        setCountdown((prev) => {
+            if (prev <= 1) {
+                clearInterval(intervalId);
+                timeoutId = setTimeout(() => handleSendErrResponse(), 300);
+                return 0;
+            }
+            return prev - 1;
+        });
+    }, 1000);
+    onCleanup(() => {
+        clearInterval(intervalId);
+        if (timeoutId !== null) clearTimeout(timeoutId);
+    });
 
     const queryText = (): JSX.Element => {
         if (userInputRequest.markdown) {
@@ -144,18 +149,26 @@ const UserInputModal = (userInputRequest: UserInputRequest) => {
 
     return (
         <Modal
-            onOk={() => handleSubmit()}
-            onCancel={() => handleNegativeResponse()}
-            onClose={() => handleSendErrResponse()}
-            okLabel={userInputRequest.oklabel}
-            cancelLabel={userInputRequest.cancellabel}
+            open={true}
+            onClose={handleSendErrResponse}
+            size="md"
         >
-            <div class="userinput-header">{userInputRequest.title + ` (${countdown()}s)`}</div>
-            <div class="userinput-body">
-                {queryText()}
-                {inputBox()}
-                {optionalCheckbox()}
-            </div>
+            <ModalHeader title={`${userInputRequest.title} (${countdown()}s)`} />
+            <ModalBody>
+                <div class="userinput-body">
+                    {queryText()}
+                    {inputBox()}
+                    {optionalCheckbox()}
+                </div>
+            </ModalBody>
+            <ModalFooter>
+                <Button onClick={handleNegativeResponse}>
+                    {userInputRequest.cancellabel ?? "Cancel"}
+                </Button>
+                <Button onClick={handleSubmit}>
+                    {userInputRequest.oklabel ?? "Ok"}
+                </Button>
+            </ModalFooter>
         </Modal>
     );
 };
