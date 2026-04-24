@@ -454,7 +454,7 @@
     font-size: 12px;
     line-height: 1.5;
     white-space: pre-wrap;
-    word-break: break-word;
+    overflow-wrap: anywhere;
     max-height: 300px;
     overflow-y: auto;
 }
@@ -596,7 +596,7 @@
     color: var(--main-text-color);
     opacity: 0.8;
     white-space: pre-wrap;
-    word-break: break-word;
+    overflow-wrap: anywhere;
     max-height: 80px;
     overflow: hidden;
 }
