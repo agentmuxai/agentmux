@@ -175,6 +175,38 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         sessionIdField: "session_id",
         controllerType: "subprocess",
     },
+    // GitHub Copilot CLI — Microsoft's coding agent.
+    // Runs in ACP mode (`--acp` flag) so the existing ACP controller
+    // can drive it the same way it drives Pi and OpenClaw. The CLI's
+    // `-p`/`--prompt` non-interactive mode doesn't accept stdin for
+    // the prompt yet (github/copilot-cli#96, #1046), so ACP is the
+    // only path that composes with our existing subprocess+stdin
+    // controller model. Documentation and CLI reference come from
+    // discussion #493 (research-cli-context-files-2026-04-22).
+    copilot: {
+        id: "copilot",
+        displayName: "GitHub Copilot CLI",
+        cliCommand: "copilot",
+        defaultArgs: [],
+        styledArgs: ["--acp"],
+        outputFormat: "acp",
+        styledOutputFormat: "acp",
+        authType: "oauth",
+        authCheckCommand: ["auth", "status"],
+        authLoginCommand: ["auth", "login"],
+        npmPackage: "@github/copilot",
+        pinnedVersion: "latest",
+        docsUrl: "https://docs.github.com/copilot/concepts/agents/about-copilot-cli",
+        windowsInstallCommand: "npm install -g @github/copilot",
+        unixInstallCommand: "npm install -g @github/copilot",
+        icon: "github",
+        authConfigDirEnvVar: "COPILOT_HOME",
+        authDirName: "copilot",
+        launchArgs: ["--acp"],
+        resumeFlag: null,
+        sessionIdField: "sessionId",
+        controllerType: "acp",
+    },
     // Pi — the lightweight coding agent that powers OpenClaw.
     // Standalone CLI, no gateway required. Pure coding agent with read/write/bash/edit tools.
     // Ideal when users want a fast, self-contained coding agent without the full OpenClaw stack.
@@ -214,6 +246,9 @@ const PROVIDER_ALIASES: Record<string, string> = {
     "kimi_code": "kimi",
     "openclaw-cli": "openclaw",
     "open-claw": "openclaw",
+    "copilot-cli": "copilot",
+    "github-copilot": "copilot",
+    "copilot_cli": "copilot",
 };
 
 export function resolveProviderAlias(id: string): string {

@@ -119,14 +119,18 @@ const CLI_DEFS = [
         description: "ACP orchestration platform",
         bus: "openclaw",
     },
-    // NOTE: GitHub Copilot CLI is documented in the catalog but not
-    // registered in frontend PROVIDERS yet — launching it would fail.
-    // Re-add once `providers/index.ts` has a copilot entry with
-    // launchArgs, controllerType, authCheckCommand, etc.
+    {
+        id: "copilot",
+        name: "Copilot",
+        provider: "copilot",
+        icon: "\u26F6",                  // ⛶
+        description: "Microsoft's coding agent",
+        bus: "copilot",
+    },
 ];
 
 const manifest = {
-    version: 5,
+    version: 6,
     agents: CLI_DEFS.map((d) => ({
         id: d.id,
         name: d.name,
