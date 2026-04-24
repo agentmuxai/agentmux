@@ -1,0 +1,86 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// Animations + Instances tab (PR G of SPEC_AGENT_DEFINITIONS_MODAL).
+
+// ── Animations ──────────────────────────────────────────────────────────
+
+@keyframes swarm-pulse {
+    0%, 100% { opacity: 0.6; }
+    50% { opacity: 1; }
+}
+
+// ── Instances tab (PR G of SPEC_AGENT_DEFINITIONS_MODAL) ─────────────────
+
+.swarm-instances {
+    padding: var(--space-3);
+    overflow-y: auto;
+    height: 100%;
+}
+
+.swarm-instances-summary {
+    margin-bottom: var(--space-2);
+    font-size: var(--text-xs);
+    color: var(--secondary-text-color);
+}
+
+.swarm-instances-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: var(--text-sm);
+
+    th, td {
+        padding: var(--space-1-5) var(--space-2);
+        text-align: left;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    th {
+        font-size: var(--text-xs);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--secondary-text-color);
+        font-weight: var(--font-weight-medium);
+        border-bottom: 1px solid var(--border-color);
+    }
+
+    tbody tr {
+        border-bottom: 1px solid color-mix(in srgb, var(--border-color) 50%, transparent);
+
+        &:hover {
+            background: color-mix(in srgb, var(--main-text-color) 4%, transparent);
+        }
+    }
+}
+
+.swarm-instance-status {
+    display: inline-block;
+    padding: 1px var(--space-1-5);
+    border-radius: var(--radius-sm);
+    font-size: var(--text-xs);
+    font-family: var(--font-mono);
+    text-transform: lowercase;
+
+    &--running {
+        background: color-mix(in srgb, var(--success-color) 18%, transparent);
+        color: var(--success-color);
+    }
+    &--paused {
+        background: color-mix(in srgb, var(--warning-color) 18%, transparent);
+        color: var(--warning-color);
+    }
+    &--stopped {
+        background: color-mix(in srgb, var(--secondary-text-color) 14%, transparent);
+        color: var(--secondary-text-color);
+    }
+    &--crashed {
+        background: color-mix(in srgb, var(--error-color) 18%, transparent);
+        color: var(--error-color);
+    }
+    &--detached {
+        background: color-mix(in srgb, var(--accent-color) 14%, transparent);
+        color: var(--accent-color);
+    }
+}
