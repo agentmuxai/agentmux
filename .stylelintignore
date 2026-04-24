@@ -8,4 +8,3 @@ dist/
 node_modules/
 
 # === Grandfathered SCSS files (Phase 3+ migration removes one per PR) ===
-frontend/app/view/agent/agent-view.scss
