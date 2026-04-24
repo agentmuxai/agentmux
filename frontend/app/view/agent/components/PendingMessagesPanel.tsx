@@ -20,6 +20,12 @@ import type { PendingMessage } from "../state";
 
 interface PendingMessagesPanelProps {
     pendingMessages: Accessor<PendingMessage[]>;
+    /** True when the user should be offered a "Send now" shortcut —
+     *  typically: a turn is running AND the queue is non-empty. */
+    showSendNow?: Accessor<boolean>;
+    /** Fires when the user clicks "Send now". Caller is expected to
+     *  SIGINT the running turn so the queued messages drain. */
+    onSendImmediately?: () => void;
 }
 
 export const PendingMessagesPanel = (props: PendingMessagesPanelProps): JSX.Element => (
@@ -27,11 +33,22 @@ export const PendingMessagesPanel = (props: PendingMessagesPanelProps): JSX.Elem
         <div class="agent-pending-zone">
             <div class="agent-pending-header">
                 <span class="agent-spinner-dot" />
-                <span>
+                <span class="agent-pending-header-text">
                     Queued — will send when the agent is idle (
                     {props.pendingMessages().length}
                     {props.pendingMessages().length === 1 ? " message" : " messages"})
                 </span>
+                <Show when={props.showSendNow?.()}>
+                    <button
+                        type="button"
+                        class="agent-send-immediately-btn"
+                        onClick={() => props.onSendImmediately?.()}
+                        title="Stop the current turn and process the queue now"
+                    >
+                        <span class="agent-send-immediately-icon">⏭</span>
+                        <span>Send now</span>
+                    </button>
+                </Show>
             </div>
             <For each={props.pendingMessages()}>
                 {(msg) => (

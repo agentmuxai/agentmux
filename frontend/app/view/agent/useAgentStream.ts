@@ -74,7 +74,7 @@ export function useAgentStream({
     const [, setSessionStats] = sessionStatsAtom;
     const [, setTurnActive] = turnActiveAtom;
     const [, setCurrentTool] = currentToolAtom;
-    const [, setTurnTokens] = turnTokensAtom;
+    const [getTurnTokens, setTurnTokens] = turnTokensAtom;
     const getStopping = stoppingAtom?.[0];
     const setStopping = stoppingAtom?.[1];
 
@@ -190,7 +190,18 @@ export function useAgentStream({
          */
         const finalizeTurn = (stats: SessionStats | null) => {
             parser.flushPending();
-            setSessionStats(stats);
+            // Snapshot live turn tokens into SessionStats before nulling
+            // the live signal. The Worked footer reads from sessionStats
+            // (since turnTokens is cleared on session_end); without this
+            // merge the headline tokens-in-Worked feature shows nothing.
+            // Per PR #549 reagent/codex P1.
+            const tokens = getTurnTokens();
+            const mergedStats: SessionStats | null = stats
+                ? { ...stats, input_tokens: tokens?.input, output_tokens: tokens?.output }
+                : tokens
+                    ? { input_tokens: tokens.input, output_tokens: tokens.output }
+                    : null;
+            setSessionStats(mergedStats);
             setCurrentTool(null);
             setTurnTokens(null);
             setTurnActive(false);

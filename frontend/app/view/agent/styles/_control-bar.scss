@@ -150,6 +150,33 @@
         &.agent-status-line--stats {
             opacity: 0.5;
             gap: 0;
+
+            // Two-group layout: primary on the left (Worked · duration ·
+            // tokens), secondary on the right (cost · turn count + any
+            // process badge). Matches the running-turn layout so nothing
+            // jumps when the turn transitions from Working → Worked.
+            // Per SPEC_AGENT_PANE_ZONE_ORDER_WORKED_FOOTER_2026_04_24.md §4.2.
+            justify-content: space-between;
+
+            .agent-status-left {
+                flex: 1;
+                min-width: 0;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+            }
+
+            .agent-status-right {
+                flex-shrink: 0;
+                margin-left: var(--space-2);
+                display: inline-flex;
+                align-items: center;
+                gap: var(--space-1-5);
+            }
+
+            .agent-status-line-secondary {
+                color: var(--secondary-text-color);
+            }
         }
     }
 

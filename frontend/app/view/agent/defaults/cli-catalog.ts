@@ -55,7 +55,7 @@ export const CLI_CATALOG: CliCatalogEntry[] = [
         primaryContextFile: "CLAUDE.md",
         mcpSupport: "stdio+http",
         popoverMarkdown:
-            "Walks CWD → root loading CLAUDE.md + CLAUDE.local.md at each level. Merges ~/.claude/CLAUDE.md and org policy. Reads .claude/rules/**. MCP over stdio + HTTP. Auto-memory in ~/.claude/projects/<hash>/memory/. No size limit (guideline: keep CLAUDE.md under 200 lines).",
+            "Anthropic's coding agent. Strong at reasoning through long sessions and explaining its thinking as it works. Good when you want it to read widely across a codebase before changing anything. Best if you already use Claude.",
         hostSupported: true,
         containerSupported: true,
         containerImage: "agentmux/claude:latest",
@@ -68,7 +68,7 @@ export const CLI_CATALOG: CliCatalogEntry[] = [
         primaryContextFile: "AGENTS.md",
         mcpSupport: "stdio+http+oauth",
         popoverMarkdown:
-            "Loads AGENTS.md: global → git root → CWD, concatenated (32KB limit). Config is TOML at ~/.codex/config.toml. 6 concurrent agent threads by default. MCP over stdio, HTTP, OAuth. Enterprise-enforced requirements.toml supported.",
+            "OpenAI's coding agent. Fast and focused — good at small, well-defined tasks and quick refactors. Can work on several files in parallel. Uses your OpenAI account.",
         hostSupported: true,
         containerSupported: true,
         containerImage: "agentmux/codex:latest",
@@ -81,7 +81,7 @@ export const CLI_CATALOG: CliCatalogEntry[] = [
         primaryContextFile: "GEMINI.md",
         mcpSupport: "stdio+http",
         popoverMarkdown:
-            "Loads ~/.gemini/GEMINI.md + ./GEMINI.md (walks up to .git). Subdirectory GEMINI.md files load just-in-time (v0.34.0+). Plan Mode is default — read-only until user approves writes. GEMINI_SYSTEM_MD replaces the system prompt entirely.",
+            "Google's coding agent. Very large context window — it can look at a lot of code at once. Defaults to reading + planning before it writes anything, so it's a safer pick when you're still deciding what to change. Uses your Google account.",
         hostSupported: true,
         containerSupported: true,
         containerImage: "agentmux/gemini:latest",
@@ -94,7 +94,7 @@ export const CLI_CATALOG: CliCatalogEntry[] = [
         primaryContextFile: "AGENTS.md",
         mcpSupport: "stdio+http",
         popoverMarkdown:
-            "Discovers AGENTS.md in project root (auto-generates via /init if absent). Config TOML at ~/.kimi/. MCP at ~/.kimi/mcp.json. Injects KIMI_* system-prompt vars (KIMI_NOW, KIMI_WORK_DIR, KIMI_AGENTS_MD, etc.). Context window: 262,144 tokens (K2.6).",
+            "An open-source coding agent from Moonshot with a huge memory — it can hold a lot of project history in mind at once. Good when you need it to remember a long conversation or read many files without losing track.",
         hostSupported: true,
         containerSupported: true,
         containerImage: "agentmux/kimi:latest",
@@ -107,7 +107,7 @@ export const CLI_CATALOG: CliCatalogEntry[] = [
         primaryContextFile: "AGENTS.md or CLAUDE.md",
         mcpSupport: "stdio+http",
         popoverMarkdown:
-            "Reads ~/.pi/agent/AGENTS.md (or CLAUDE.md) globally plus .pi/AGENTS.md walked from CWD. 4 built-in tools (Read, Write, Edit, Bash) — everything else via extensions. 15+ model providers. Supports ACP so another agent can orchestrate it. Disable context with -nc.",
+            "A flexible agent that can run on your choice of model — Claude, OpenAI, Google, and more. Pick this if you want to try different models against the same task, or if you have API keys from several providers and want to switch easily.",
         hostSupported: true,
         containerSupported: true,
         containerImage: "agentmux/pi:latest",
@@ -120,7 +120,7 @@ export const CLI_CATALOG: CliCatalogEntry[] = [
         primaryContextFile: "AGENTS.md + SOUL.md + …",
         mcpSupport: "none",
         popoverMarkdown:
-            "OpenClaw is an orchestrator, not a coding agent itself. Manages N child agents (Pi, Claude, Codex, Gemini) over ACP (JSON-RPC 2.0 / stdio). First-turn injects AGENTS.md + SOUL.md + TOOLS.md + IDENTITY.md + USER.md + HEARTBEAT.md + MEMORY.md + BOOTSTRAP.md. Single Gateway daemon with lane-aware FIFO queue.",
+            "Not a coding agent itself — it runs *other* agents for you and keeps them coordinated. Pick this when you want several agents working in parallel and handing tasks to each other, rather than doing the work directly.",
         hostSupported: true,
         containerSupported: false,
     },
@@ -132,7 +132,7 @@ export const CLI_CATALOG: CliCatalogEntry[] = [
         primaryContextFile: "AGENTS.md",
         mcpSupport: "stdio+http",
         popoverMarkdown:
-            "Reads AGENTS.md + .github/copilot-instructions.md + .github/instructions/**/*.instructions.md. Also reads CLAUDE.md and GEMINI.md at repo root as compat. Config JSONC at ~/.copilot/config.json. Shift+Tab cycles Interactive → Plan → Autopilot. Built-in subagents: Explore / Task / Plan / Code-review. MCP user-scope only today.",
+            "GitHub's coding agent. Integrates closely with GitHub repos and pull requests. Has a switch between Interactive, Plan, and Autopilot so you can choose how much freedom it gets. Best if you mostly work on GitHub and have a Copilot subscription.",
         hostSupported: true,
         containerSupported: true,
         containerImage: "agentmux/copilot:latest",

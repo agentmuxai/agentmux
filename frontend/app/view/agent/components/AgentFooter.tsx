@@ -85,21 +85,36 @@ export const AgentStatusLine = (props: AgentStatusLineProps): JSX.Element => {
         if (props.loading && !props.currentTool) setLastPhrase(phrase());
     });
 
-    // Reactive derived values used in both branches.
-    const statsText = createMemo((): string | null => {
+    // Completed-turn summary split into two groups so tokens + duration
+    // (the numbers users ask about most) sit on the primary line and
+    // cost + turn count take the secondary role. Tokens read from
+    // sessionStats rather than turnTokens because finalizeTurn nulls
+    // the live turnTokens signal on session_end — the snapshot lives
+    // in sessionStats.input_tokens / output_tokens. Per PR #549 review.
+    // Spec: docs/specs/SPEC_AGENT_PANE_ZONE_ORDER_WORKED_FOOTER_2026_04_24.md §4.2.
+    const workedPrimary = createMemo((): string | null => {
         const stats = props.sessionStats;
         if (!stats) return null;
-        const parts: string[] = [];
-        parts.push(ingToEd(lastPhrase()));
-        if (stats.cost_usd != null) parts.push(`$${stats.cost_usd.toFixed(3)}`);
+        const parts: string[] = [ingToEd(lastPhrase())];
         if (stats.duration_ms != null) {
             const s = Math.round(stats.duration_ms / 1000);
             parts.push(s < 60 ? `${Math.max(1, s)}s` : `${Math.floor(s / 60)}m ${s % 60}s`);
         }
+        if (stats.input_tokens != null || stats.output_tokens != null) {
+            parts.push(fmtTokens({ input: stats.input_tokens ?? 0, output: stats.output_tokens ?? 0 }));
+        }
+        return parts.join("  \u00b7  ");
+    });
+
+    const workedSecondary = createMemo((): string | null => {
+        const stats = props.sessionStats;
+        if (!stats) return null;
+        const parts: string[] = [];
+        if (stats.cost_usd != null) parts.push(`$${stats.cost_usd.toFixed(3)}`);
         if (stats.num_turns) {
             parts.push(`${stats.num_turns} ${stats.num_turns === 1 ? "turn" : "turns"}`);
         }
-        return parts.join("  \u00b7  ");
+        return parts.length ? parts.join("  \u00b7  ") : null;
     });
 
     const rightText = createMemo((): string => {
@@ -128,7 +143,7 @@ export const AgentStatusLine = (props: AgentStatusLineProps): JSX.Element => {
             when={props.loading}
             fallback={
                 <Show
-                    when={statsText()}
+                    when={workedPrimary()}
                     fallback={
                         <span class="agent-status-line">
                             {processBadge()}
@@ -136,8 +151,15 @@ export const AgentStatusLine = (props: AgentStatusLineProps): JSX.Element => {
                     }
                 >
                     <span class="agent-status-line agent-status-line--stats">
-                        {statsText()}
-                        {processBadge()}
+                        <span class="agent-status-left">{workedPrimary()}</span>
+                        <span class="agent-status-right">
+                            <Show when={workedSecondary()}>
+                                <span class="agent-status-line-secondary">
+                                    {workedSecondary()}
+                                </span>
+                            </Show>
+                            {processBadge()}
+                        </span>
                     </span>
                 </Show>
             }
@@ -186,19 +208,6 @@ interface AgentFooterProps {
      * If absent, autocomplete is disabled.
      */
     getCompletions?: (prefix: string) => SlashCommand[];
-    /**
-     * Show the "Send now" button above the composer. Caller typically
-     * passes `turnActive() && (hasText || pendingCount > 0)` so the
-     * button appears only when there's something to force through and
-     * the agent is currently busy.
-     */
-    showSendNow?: () => boolean;
-    /**
-     * Fires when the user clicks "Send now". Caller is expected to
-     * `stopAgent()` (SIGINT) and then — if the composer has text —
-     * call `onSendMessage` with it. See AGENT_PANE_QUEUED_MESSAGE_FEEDBACK_SPEC.md.
-     */
-    onSendImmediately?: () => void;
 }
 
 export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
@@ -358,17 +367,9 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
 
     return (
         <div class="agent-footer">
-            <Show when={props.showSendNow?.()}>
-                <button
-                    type="button"
-                    class="agent-send-immediately-btn"
-                    onClick={() => props.onSendImmediately?.()}
-                    title="Stop the current turn and process the queue now"
-                >
-                    <span class="agent-send-immediately-icon">⏭</span>
-                    <span>Send now</span>
-                </button>
-            </Show>
+            {/* "Send now" now renders inside PendingMessagesPanel (right
+                of the queue header) so it sits next to the messages it
+                accelerates, not above the composer. */}
             <div class="agent-input-container">
                 <Show when={autocompletePrefix() !== null && completions().length > 0}>
                     <SlashAutocomplete
