@@ -98,7 +98,7 @@
     flex: 1;
     width: auto; /* was 100% — auto lets flex stretch respect margin */
     position: relative;
-    margin: var(--space-0-5); /* inset to reveal the var(--space-0-5) pane border drawn by .block-mask */
+    margin: var(--space-0-5); /* inset to reveal the 2px pane border drawn by .block-mask */
 }
 
 .browser-empty {
