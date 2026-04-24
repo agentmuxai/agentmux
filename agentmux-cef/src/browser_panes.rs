@@ -340,13 +340,48 @@ impl BrowserPaneManager {
     ///
     /// No-op on non-Windows: other platforms don't use native child HWNDs
     /// for panes, so there's no airspace to work around.
+    ///
+    /// `window_label` scopes the clip to panes whose top-level ancestor
+    /// matches the requesting window. Without it, a modal opened in
+    /// window B would clip panes in window A (see Codex P1 on PR #544).
+    /// Empty string matches today's legacy callers that don't know their
+    /// window label — falls through to the no-filter behaviour for
+    /// back-compat until every caller is updated.
     #[cfg(target_os = "windows")]
-    pub fn set_pane_overlay_clip(&self, state: &Arc<AppState>, overlay_rects: &[(i32, i32, i32, i32)]) {
+    pub fn set_pane_overlay_clip(
+        &self,
+        state: &Arc<AppState>,
+        window_label: &str,
+        overlay_rects: &[(i32, i32, i32, i32)],
+    ) {
         use windows_sys::Win32::Foundation::{POINT, RECT};
         use windows_sys::Win32::Graphics::Gdi::{
             CombineRgn, CreateRectRgn, DeleteObject, MapWindowPoints, SetWindowRgn, RGN_DIFF,
         };
-        use windows_sys::Win32::UI::WindowsAndMessaging::{GetParent, GetWindowRect};
+        use windows_sys::Win32::UI::WindowsAndMessaging::{
+            GetAncestor, GetParent, GetWindowRect, GA_ROOT,
+        };
+
+        // Resolve the requesting window's top-level HWND so we can filter
+        // panes by ownership. If the label is unknown we fall through with
+        // no filter — matches pre-scoping behaviour rather than silently
+        // doing nothing.
+        let requesting_top_level: *mut std::ffi::c_void = if window_label.is_empty() {
+            std::ptr::null_mut()
+        } else {
+            let browsers = state.browsers.lock();
+            match browsers.get(window_label).and_then(|b| b.host()) {
+                Some(host) => {
+                    let h = host.window_handle();
+                    if h.0.is_null() {
+                        std::ptr::null_mut()
+                    } else {
+                        unsafe { GetAncestor(h.0 as _, GA_ROOT) as *mut std::ffi::c_void }
+                    }
+                }
+                None => std::ptr::null_mut(),
+            }
+        };
 
         let labels = self.lifecycle.live_labels();
         let browsers = state.browsers.lock();
@@ -364,6 +399,16 @@ impl BrowserPaneManager {
                 continue;
             }
             let pane_hwnd = hwnd_raw.0 as *mut std::ffi::c_void;
+
+            // Window-scope filter. Skip panes whose top-level HWND differs
+            // from the requesting window's. `null` requesting = legacy
+            // caller / no-op filter (applies to all panes).
+            if !requesting_top_level.is_null() {
+                let pane_top = unsafe { GetAncestor(pane_hwnd as _, GA_ROOT) as *mut std::ffi::c_void };
+                if pane_top != requesting_top_level {
+                    continue;
+                }
+            }
 
             unsafe {
                 // Empty overlay list = restore full visibility (region=NULL).
@@ -431,7 +476,13 @@ impl BrowserPaneManager {
         );
     }
     #[cfg(not(target_os = "windows"))]
-    pub fn set_pane_overlay_clip(&self, _state: &Arc<AppState>, _overlay_rects: &[(i32, i32, i32, i32)]) {}
+    pub fn set_pane_overlay_clip(
+        &self,
+        _state: &Arc<AppState>,
+        _window_label: &str,
+        _overlay_rects: &[(i32, i32, i32, i32)],
+    ) {
+    }
 
     /// Give keyboard focus to the pane's child HWND so keystrokes reach the
     /// embedded page. Called by the frontend's ViewModel.giveFocus() when the
