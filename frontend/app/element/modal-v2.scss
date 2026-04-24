@@ -175,7 +175,7 @@
 .modal-btn--confirm {
     background: var(--accent-color);
     border-color: var(--accent-color);
-    color: var(--button-text-color, #000);
+    color: var(--button-text-color);
 
     &:hover:not(:disabled) {
         background: color-mix(in srgb, var(--accent-color) 85%, var(--main-text-color));
@@ -186,12 +186,17 @@
 .modal-btn--destructive {
     background: var(--error-color);
     border-color: var(--error-color);
+    /* stylelint-disable color-no-hex --
+       Pure white text on the red destructive button is intentional
+       for contrast; no semantic token currently maps to "always
+       white regardless of theme". */
     color: #fff;
 
     &:hover:not(:disabled) {
         background: color-mix(in srgb, var(--error-color) 85%, #fff);
         border-color: color-mix(in srgb, var(--error-color) 85%, #fff);
     }
+    /* stylelint-enable color-no-hex */
 }
 
 // ── Animations ───────────────────────────────────────────────────────────────

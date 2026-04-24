@@ -7,7 +7,7 @@
     height: 100%;
     width: 100%;
     overflow: hidden;
-    background: var(--block-bg-color, #1e1e1e);
+    background: var(--block-bg-color);
 }
 
 .browser-nav-bar {
@@ -15,8 +15,8 @@
     align-items: center;
     gap: 4px;
     padding: 4px 8px;
-    background: var(--header-bg-color, #252525);
-    border-bottom: 1px solid var(--border-color, #333);
+    background: var(--main-bg-color);
+    border-bottom: 1px solid var(--border-color);
     flex-shrink: 0;
 }
 
@@ -26,7 +26,7 @@
     border: none;
     border-radius: 4px;
     background: transparent;
-    color: var(--main-text-color, #ccc);
+    color: var(--main-text-color);
     font-size: 14px;
     cursor: pointer;
     display: flex;
@@ -34,7 +34,7 @@
     justify-content: center;
 
     &:hover:not(:disabled) {
-        background: var(--highlight-bg-color, #333);
+        background: var(--highlight-bg-color);
     }
 
     &:disabled {
@@ -53,22 +53,22 @@
     flex: 1;
     height: 28px;
     padding: 0 10px;
-    border: 1px solid var(--border-color, #444);
+    border: 1px solid var(--border-color);
     border-radius: 14px;
-    background: var(--input-bg-color, #1a1a1a);
-    color: var(--main-text-color, #ddd);
+    background: var(--form-element-bg-color);
+    color: var(--main-text-color);
     font-family: var(--termfontfamily, "JetBrains Mono", monospace);
     font-size: 12px;
 
     &:focus {
         outline: none;
-        border-color: var(--accent-color, #58a6ff);
+        border-color: var(--accent-color);
     }
 }
 
 .browser-loading-bar {
     height: 2px;
-    background: var(--accent-color, #58a6ff);
+    background: var(--accent-color);
     animation: browser-loading 1.5s ease-in-out infinite;
     flex-shrink: 0;
 }
@@ -82,7 +82,7 @@
 .browser-error {
     padding: 12px 16px;
     background: rgba(255, 80, 80, 0.1);
-    color: #ff6b6b;
+    color: var(--error-color);
     font-size: 13px;
     border-bottom: 1px solid rgba(255, 80, 80, 0.2);
     flex-shrink: 0;
@@ -90,7 +90,7 @@
 
 .browser-error-hint {
     font-size: 11px;
-    color: var(--secondary-text-color, #888);
+    color: var(--secondary-text-color);
     margin-top: 4px;
 }
 
@@ -108,7 +108,7 @@
     justify-content: center;
     height: 100%;
     gap: 12px;
-    color: var(--secondary-text-color, #666);
+    color: var(--secondary-text-color);
 }
 
 .browser-empty-icon {

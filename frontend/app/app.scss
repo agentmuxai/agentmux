@@ -100,12 +100,17 @@ a {
 }
 
 .prefers-reduced-motion {
+    /* stylelint-disable declaration-no-important --
+       Accessibility override: must beat every component's own
+       transition rules; `!important` is the standard pattern for
+       this `prefers-reduced-motion` workaround. */
     * {
         transition-duration: none !important;
         transition-timing-function: none !important;
         transition-property: none !important;
         transition-delay: none !important;
     }
+    /* stylelint-enable declaration-no-important */
 }
 
 .flash-error-container {

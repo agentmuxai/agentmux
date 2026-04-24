@@ -157,7 +157,10 @@
     button,
     input:where([type="button"], [type="reset"], [type="submit"]),
     ::file-selector-button {
-        appearance: button;
+        // `appearance: auto` is the modern equivalent of the
+        // deprecated `appearance: button` keyword — same effect,
+        // future-proof.
+        appearance: auto;
     }
 
     ::-webkit-inner-spin-button,
@@ -166,7 +169,9 @@
     }
 
     [hidden]:where(:not([hidden="until-found"])) {
-        display: none !important;
+        // UA-style reset: must beat any component's `display:` rule
+        // — `!important` matches the browser default for `[hidden]`.
+        display: none !important; /* stylelint-disable-line declaration-no-important */
     }
 
     table {
