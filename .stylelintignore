@@ -13,10 +13,8 @@ frontend/app/block/block.scss
 frontend/app/block/titlebar.scss
 frontend/app/drag/drag-overlay.scss
 frontend/app/element/avatar.scss
-frontend/app/element/blockstats.scss
 frontend/app/element/button.scss
 frontend/app/element/collapsiblemenu.scss
-frontend/app/element/copybutton.scss
 frontend/app/element/emojipalette.scss
 frontend/app/element/expandablemenu.scss
 frontend/app/element/flyoutmenu.scss
@@ -33,7 +31,6 @@ frontend/app/element/quickelems.scss
 frontend/app/element/search.scss
 frontend/app/element/toggle.scss
 frontend/app/element/windowdrag.scss
-frontend/app/element/zoomindicator.scss
 frontend/app/mixins.scss
 frontend/app/modals/command-palette.scss
 frontend/app/modals/typeaheadmodal.scss
