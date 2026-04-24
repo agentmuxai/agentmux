@@ -126,7 +126,72 @@ Layout:
   `ConfirmModal` (reuses modal-v2's preset) with destructive
   styling, since resetting loses the running total.
 
-### 4.3 Interaction model
+### 4.3 Always-visible network indicator
+
+Today the network-activity widget (the ↑/↓ live indicator on the
+status bar) **hides itself when both input and output are `0/0`**,
+which is the default idle state. As a result the first thing a new
+user notices about the bar is a *missing* widget — they can't tell
+whether the app is talking to the backend at all.
+
+Change: keep the network indicator mounted at all times. A zero
+state should render as a muted `↑0 ↓0` (same styling as the
+token-usage indicator's zero state in §4.1). Users should be able
+to glance at the bar and see "nothing going in or out right now"
+instead of wondering whether the widget is broken or hidden.
+
+Rationale: same as the token-usage indicator — a visible-but-muted
+zero is a more honest default than hiding the control, and it
+removes a class of "is this thing working?" support questions.
+
+### 4.4 Responsive two-row layout on narrow widths
+
+When the AgentMux window gets narrow (or the user zooms in), the
+left-group stats and the right-group info (network, version,
+token-usage indicator) start overlapping. Today the bar simply
+overflows — the right group gets clipped or overlaps the left
+group.
+
+Change: when the content of the bar would overflow a single row,
+wrap to two rows:
+
+```
+┌ status bar (wide) ─────────────────────────────────────────┐
+│ <left-group stats>            🪙 ↑12k ↓3k   ↑0 ↓0  v0.33.x │
+└────────────────────────────────────────────────────────────┘
+
+┌ status bar (narrow) ──────────┐
+│ <left-group stats>            │
+│          🪙 ↑12k ↓3k  ↑0 ↓0  v0.33.x │
+└───────────────────────────────┘
+```
+
+- Row 1 = left group (stats) only — anchored to the left edge.
+- Row 2 = right group (token usage + network + version) —
+  anchored to the right edge (flush right).
+- Both rows preserve their internal justification; neither group
+  re-orders when it wraps.
+- The bar's total height grows from 1 row to 2 rows when wrapped.
+  Other panes flex to accommodate the extra vertical space
+  (parent layout is already flex-column on `.window`).
+
+Implementation options (pick in review):
+
+1. **Container query** (`@container (max-width: Xpx)`): switch
+   `.status-bar` from `flex-row justify-content: space-between`
+   to `flex-column` with each group set to
+   `align-self: flex-start` / `align-self: flex-end`
+   respectively.
+2. **`flex-wrap: wrap` + width hint**: give the left and right
+   groups a `flex-basis` that triggers wrap at the overflow
+   point; the right group naturally falls to the next row.
+
+Option 2 is simpler and self-adjusting to content width. Option 1
+gives us an explicit breakpoint we control. Default
+recommendation: option 2, with a `min-height` on the bar so the
+first row doesn't shrink visually when the second row appears.
+
+### 4.5 Interaction model
 
 - Click indicator → popover opens.
 - Click outside / Esc → closes.
