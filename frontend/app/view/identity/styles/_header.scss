@@ -1,0 +1,71 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// Identity view header + body wrapper.
+
+// ── Header ───────────────────────────────────────────────────────────────────
+
+.identity-header {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-3);
+    border-bottom: 1px solid var(--border-color);
+    flex-shrink: 0;
+}
+
+.identity-header-title {
+    font-weight: 600;
+    font-size: 13px;
+    color: var(--main-text-color);
+    margin-right: var(--space-1);
+}
+
+.identity-tabs {
+    display: flex;
+    gap: var(--space-0-5);
+}
+
+.identity-tab {
+    padding: 3px 10px;
+    font-size: 12px;
+    border-radius: 4px;
+    border: none;
+    background: transparent;
+    color: var(--secondary-text-color);
+    cursor: pointer;
+    transition: background 0.1s, color 0.1s;
+
+    &:hover {
+        background: var(--hover-bg-color);
+        color: var(--main-text-color);
+    }
+
+    &.active {
+        background: var(--highlight-bg-color);
+        color: var(--main-text-color);
+    }
+}
+
+.identity-add-btn {
+    margin-left: auto;
+    padding: 3px 10px;
+    font-size: 12px;
+    border-radius: 4px;
+    border: 1px solid var(--border-color);
+    background: transparent;
+    color: var(--accent-color);
+    cursor: pointer;
+
+    &:hover {
+        background: var(--hover-bg-color);
+    }
+}
+
+// ── Body ─────────────────────────────────────────────────────────────────────
+
+.identity-body {
+    flex: 1;
+    overflow: hidden;
+}
+

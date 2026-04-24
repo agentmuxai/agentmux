@@ -1,0 +1,32 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// Account status indicator dot.
+
+// ── Status dot ────────────────────────────────────────────────────────────────
+
+.status-dot {
+    display: inline-block;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    flex-shrink: 0;
+
+    &.status-valid     { background: var(--success-color); }
+    &.status-expired   { background: var(--error-color); }
+    &.status-invalid   { background: var(--error-color); }
+    &.status-checking  { background: var(--warning-color); animation: pulse 1s infinite; }
+    &.status-unknown   { background: var(--secondary-text-color); }
+
+    &.detail-status {
+        width: 8px;
+        height: 8px;
+        margin-left: var(--space-1);
+    }
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+}
+
