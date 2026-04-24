@@ -28,9 +28,26 @@ interface OverlayRect {
 const overlayRects = new Map<number, OverlayRect>();
 let nextOverlayId = 1;
 
+/**
+ * Window label of the host window this frontend instance belongs to.
+ * Set by the CEF launcher on each window's startup URL via `?windowLabel=`.
+ * Defaults to `"main"` so single-window builds work unchanged. Backend
+ * uses this to scope the overlay clip to panes owned by THIS window
+ * (fixes Codex P1 on PR #544: without scoping, a modal in window B
+ * would clip panes in window A).
+ */
+function currentWindowLabel(): string {
+    try {
+        return new URLSearchParams(window.location.search).get("windowLabel") ?? "main";
+    } catch {
+        return "main";
+    }
+}
+
 function sendClip(): void {
     const rects = Array.from(overlayRects.values());
-    invokeCommand("browser_panes_set_overlay_clip", { rects }).catch(() => {});
+    const window_label = currentWindowLabel();
+    invokeCommand("browser_panes_set_overlay_clip", { rects, window_label }).catch(() => {});
 }
 
 function rectFromElement(el: HTMLElement): OverlayRect {
