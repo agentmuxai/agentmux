@@ -1,0 +1,144 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// Conversation viewer pane (transcript + tool blocks).
+
+// ── Conversation Viewer ────────────────────────────────────────────────
+
+.swarm-conversation {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+}
+
+.swarm-conversation-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding-bottom: var(--space-2);
+    border-bottom: 1px solid var(--border-color);
+    margin-bottom: var(--space-2);
+    flex-shrink: 0;
+}
+
+.swarm-conversation-back {
+    padding: var(--space-1) var(--space-2);
+    background: transparent;
+    border: 1px solid var(--border-color);
+    border-radius: 3px;
+    color: var(--secondary-text-color);
+    font-family: inherit;
+    font-size: 11px;
+    cursor: pointer;
+    flex-shrink: 0;
+
+    &:hover {
+        border-color: var(--accent-color);
+        color: var(--accent-color);
+    }
+}
+
+.swarm-conversation-title {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    min-width: 0;
+}
+
+.swarm-conversation-slug {
+    font-size: 12px;
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.swarm-conversation-meta {
+    font-size: 10px;
+    color: var(--secondary-text-color);
+}
+
+.swarm-conversation-messages {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    overflow-y: auto;
+    flex: 1;
+}
+
+.swarm-message {
+    padding: var(--space-2) 10px;
+    border-radius: 4px;
+
+    &.swarm-message-user {
+        background: color-mix(in srgb, var(--accent-color) 8%, transparent);
+        border-left: 2px solid var(--accent-color);
+    }
+
+    &.swarm-message-assistant {
+        background: color-mix(in srgb, var(--main-text-color) 4%, transparent);
+        border-left: 2px solid var(--secondary-text-color);
+    }
+}
+
+.swarm-message-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: var(--space-1);
+}
+
+.swarm-message-role {
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: var(--secondary-text-color);
+}
+
+.swarm-message-time {
+    font-size: 10px;
+    color: var(--secondary-text-color);
+    opacity: 0.5;
+}
+
+.swarm-message-content {
+    font-size: 12px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    max-height: 300px;
+    overflow-y: auto;
+}
+
+.swarm-message-tools {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    margin-top: var(--space-1);
+}
+
+.swarm-tool-use {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-1-5);
+    padding: 3px var(--space-1-5);
+    background: color-mix(in srgb, var(--main-text-color) 4%, transparent);
+    border-radius: 3px;
+    font-size: 11px;
+}
+
+.swarm-tool-name {
+    font-weight: 500;
+    color: var(--accent-color);
+    flex-shrink: 0;
+}
+
+.swarm-tool-args {
+    color: var(--secondary-text-color);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-size: 10px;
+}
+

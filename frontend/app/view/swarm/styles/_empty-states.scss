@@ -1,0 +1,42 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// Empty-state placeholders for no-subagents / no-activity.
+
+// ── Empty States ────────────────────────────────────────────────────────
+
+.swarm-empty {
+    padding: var(--space-3);
+    font-size: 12px;
+    color: var(--secondary-text-color);
+    text-align: center;
+    opacity: 0.6;
+}
+
+.swarm-empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 48px var(--space-6);
+    gap: 10px;
+    text-align: center;
+}
+
+.swarm-empty-icon {
+    font-size: 32px;
+    opacity: 0.3;
+}
+
+.swarm-empty-title {
+    font-size: 14px;
+    font-weight: 500;
+}
+
+.swarm-empty-desc {
+    font-size: 12px;
+    color: var(--secondary-text-color);
+    max-width: 280px;
+    line-height: 1.5;
+}
+
