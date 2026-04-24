@@ -10,7 +10,7 @@ checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
 name = "agentmux-cef"
-version = "0.33.381"
+version = "0.33.382"
 dependencies = [
  "agentmux-common",
  "axum 0.8.9",
@@ -37,7 +37,7 @@ dependencies = [
 
 [[package]]
 name = "agentmux-common"
-version = "0.33.381"
+version = "0.33.382"
 dependencies = [
  "tokio",
  "tracing",
@@ -45,7 +45,7 @@ dependencies = [
 
 [[package]]
 name = "agentmux-launcher"
-version = "0.33.381"
+version = "0.33.382"
 dependencies = [
  "windows-sys 0.59.0",
  "winres",
@@ -53,7 +53,7 @@ dependencies = [
 
 [[package]]
 name = "agentmux-srv"
-version = "0.33.381"
+version = "0.33.382"
 dependencies = [
  "agentmux-common",
  "async-stream",
