@@ -72,19 +72,26 @@ const UserInputModal = (userInputRequest: UserInputRequest) => {
     };
 
     // Countdown timer using setInterval — fires an err response when it
-    // hits zero. Cleanup on unmount so a cancel/submit stops the tick.
+    // hits zero. Cleanup on unmount so a cancel/submit stops the tick
+    // AND clears the pending 300ms-delayed err-response so dismissing
+    // within that window doesn't double-fire handleSendErrResponse
+    // against a stale request (would pop a sibling modal).
     let intervalId: ReturnType<typeof setInterval>;
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
     intervalId = setInterval(() => {
         setCountdown((prev) => {
             if (prev <= 1) {
                 clearInterval(intervalId);
-                setTimeout(() => handleSendErrResponse(), 300);
+                timeoutId = setTimeout(() => handleSendErrResponse(), 300);
                 return 0;
             }
             return prev - 1;
         });
     }, 1000);
-    onCleanup(() => clearInterval(intervalId));
+    onCleanup(() => {
+        clearInterval(intervalId);
+        if (timeoutId !== null) clearTimeout(timeoutId);
+    });
 
     const queryText = (): JSX.Element => {
         if (userInputRequest.markdown) {
