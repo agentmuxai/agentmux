@@ -1,33 +1,27 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
+//
+// Command-palette specific styles. Outer chrome (backdrop, z-index,
+// scroll lock, inert) is provided by modal-v2; this file only styles
+// the panel sizing + inner search row + result list.
 
-.command-palette-backdrop {
-    position: fixed;
-    inset: 0;
-    background: rgba(0, 0, 0, 0.45);
-    // Command palette is a modal — lives in the modal slot.
-    // Backdrop + container are siblings; DOM order controls paint.
-    z-index: var(--z-modal);
+// Override modal-v2's default panel width for the palette. Applied
+// via the `panelClass="command-palette-panel"` prop passed to Modal.
+.modal-panel.command-palette-panel {
+    width: 560px;
+    max-width: 92vw;
+    max-height: 480px;
+    padding: 0;
+    // Panel content manages its own scrolling in the list area, so
+    // let overflow fall through.
+    overflow: hidden;
 }
 
 .command-palette-container {
-    position: fixed;
-    top: 20%;
-    left: 50%;
-    transform: translateX(-50%);
-    width: 560px;
-    max-height: 480px;
-    background: var(--modal-bg-color, #1e1e1e);
-    border: 1px solid var(--border-color, #444);
-    border-radius: 8px;
-    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.6);
-    z-index: var(--z-modal);
     display: flex;
     flex-direction: column;
-    overflow: hidden;
-
-    // Ensure command palette is above all other content
-    isolation: isolate;
+    height: 100%;
+    max-height: inherit;
 }
 
 .command-palette-input-row {
