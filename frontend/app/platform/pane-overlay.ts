@@ -49,22 +49,31 @@ function rectFromElement(el: HTMLElement): OverlayRect {
  * *over* the pane instead of being occluded by it. Call this inside any
  * component rendering a DOM overlay that could overlap a pane.
  *
- * The hook reads the element's bounding rect on mount and unmount — for
- * dynamically-sized or -positioned overlays, add a ResizeObserver /
- * IntersectionObserver on top (not yet needed; MoreDropdown is static).
+ * The hook reads the element's bounding rect on mount, re-reads it on
+ * `window.resize` (so viewport-sized overlays like the modal-v2 backdrop
+ * follow resizes correctly), and deregisters on unmount. Overlays that
+ * move independently of window resize (dropped anchors, animated
+ * transitions) can layer a `ResizeObserver` / `IntersectionObserver` on
+ * top and re-call the hook — for now, window resize is the only
+ * observed mutation in the live surfaces.
  *
  * Safe to nest — each call registers its own rect, the union is applied.
  * No-op on platforms without native pane HWNDs (backend IPC is a no-op).
  */
 export function usePaneOverlay(getEl: Accessor<HTMLElement | null | undefined>): void {
     const id = nextOverlayId++;
-    onMount(() => {
+    const update = (): void => {
         const el = getEl();
         if (!el) return;
         overlayRects.set(id, rectFromElement(el));
         sendClip();
+    };
+    onMount(() => {
+        update();
+        window.addEventListener("resize", update);
     });
     onCleanup(() => {
+        window.removeEventListener("resize", update);
         if (overlayRects.delete(id)) {
             sendClip();
         }
