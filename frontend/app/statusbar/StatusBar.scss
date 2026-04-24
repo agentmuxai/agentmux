@@ -1,11 +1,21 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+@use "./token-usage";
+
 .status-bar {
+    // Responsive 2-row wrap (§4.4 of SPEC_STATUSBAR_TOKEN_USAGE).
+    // When the left + right groups can't share one row (narrow window
+    // or zoom-in), the right group falls to the next row. `flex-wrap`
+    // does the work; `min-height: 22px` keeps the visual rhythm of
+    // the single-row layout; each group's `align-self` anchors it
+    // to its side of the bar so justification survives the wrap.
     display: flex;
     flex-direction: row;
+    flex-wrap: wrap;
     align-items: center;
-    height: 22px;
+    justify-content: space-between;
+    min-height: 22px;
     flex-shrink: 0;
     font-size: 11px;
     zoom: var(--zoomfactor);
@@ -23,10 +33,19 @@
         flex-direction: row;
         align-items: center;
         gap: var(--space-1);
+        flex: 0 1 auto;
+        align-self: flex-start;
+        min-height: 22px;
     }
 
     .status-bar-center {
-        flex-grow: 1;
+        // When wrapped, `flex-basis: 100%` below forces the right group
+        // to the next row. On a single-row layout the `flex-grow: 1`
+        // behaviour comes from the combination: center is zero-width
+        // by content, but its presence between left and right lets the
+        // flex justification space them apart.
+        flex: 1 1 auto;
+        min-height: 0;
     }
 
     .status-bar-right {
@@ -34,6 +53,15 @@
         flex-direction: row;
         align-items: center;
         gap: var(--space-1);
+        flex: 0 1 auto;
+        align-self: flex-end;
+        min-height: 22px;
+        // When the row can't hold both groups, the right group wraps.
+        // `margin-left: auto` keeps it flush right in the new row so
+        // the "justification preserved on both rows" rule holds. On a
+        // single row the explicit `justify-content: space-between` on
+        // the parent still does the work.
+        margin-left: auto;
     }
 
     .status-bar-item {
@@ -93,6 +121,13 @@
 
     .stat-net {
         min-width: 12ch; // fits "↑999M ↓999M"
+
+        // Muted zero state — §4.3 of SPEC_STATUSBAR_TOKEN_USAGE. The
+        // widget stays mounted at 0/0 but visually quiets so it doesn't
+        // compete with the active readouts next to it.
+        &.stat-idle {
+            opacity: 0.45;
+        }
     }
 
     .stat-disk-arrow {

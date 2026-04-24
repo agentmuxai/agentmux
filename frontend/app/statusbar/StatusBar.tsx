@@ -8,6 +8,7 @@ import { ConfigStatus } from "./ConfigStatus";
 import { ConnectionStatus } from "./ConnectionStatus";
 import { HostPopover } from "./HostPopover";
 import { SystemStats } from "./SystemStats";
+import { TokenUsageIndicator } from "./TokenUsageIndicator";
 import { UpdateStatus } from "./UpdateStatus";
 import "./StatusBar.scss";
 
@@ -33,6 +34,7 @@ const StatusBar = (): JSX.Element => {
             </div>
             <div class="status-bar-center" />
             <div class="status-bar-right">
+                <TokenUsageIndicator />
                 <ConnectionStatus />
                 <ConfigStatus />
                 <UpdateStatus />

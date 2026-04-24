@@ -83,13 +83,19 @@ const SystemStats = (): JSX.Element => {
                     <span class="stat-mono stat-mem" style={{ color: memColor(s().memUsed, s().memTotal) }}>
                         Mem {formatMemBytes(s().memUsed)}/{formatMemBytes(s().memTotal)}
                     </span>
-                    <Show when={s().netSent > 0 || s().netRecv > 0}>
-                        <span class="stat-separator">|</span>
-                        <span class="stat-mono stat-net">
-                            <span class="stat-disk-arrow">↑</span>{formatRate(s().netSent)}{" "}
-                            <span class="stat-disk-arrow">↓</span>{formatRate(s().netRecv)}
-                        </span>
-                    </Show>
+                    {/* Network indicator stays mounted even at 0/0 so the user
+                        can glance at the bar and see "nothing going in or out",
+                        instead of wondering whether the widget broke. Zero
+                        state is visually muted via CSS. Per
+                        SPEC_STATUSBAR_TOKEN_USAGE_2026_04_24.md §4.3. */}
+                    <span class="stat-separator">|</span>
+                    <span
+                        class="stat-mono stat-net"
+                        classList={{ "stat-idle": s().netSent === 0 && s().netRecv === 0 }}
+                    >
+                        <span class="stat-disk-arrow">↑</span>{formatRate(s().netSent)}{" "}
+                        <span class="stat-disk-arrow">↓</span>{formatRate(s().netRecv)}
+                    </span>
                     {/* TODO: disk I/O reads zero on Windows — investigate sysinfo Disk::usage() delta behavior */}
                     <Show when={s().diskRead > 0 || s().diskWrite > 0}>
                         <span class="stat-separator">|</span>

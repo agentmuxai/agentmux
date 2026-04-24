@@ -15,6 +15,7 @@ import { createTranslator } from "./providers/translator-factory";
 import type { PendingMessage, SignalPair } from "./state";
 import { ClaudeCodeStreamParser } from "./stream-parser";
 import type { DocumentNode, SessionStats, StreamingState, TurnTokens, UserMessageNode } from "./types";
+import { recordTurn } from "@/store/token-usage";
 
 const OutputFileName = "output";
 
@@ -50,6 +51,14 @@ interface UseAgentStreamOpts {
      * updates continue to target the correct nodes.
      */
     documentVersion?: () => number;
+    /**
+     * Provider id (from CLI_CATALOG — "claude", "codex", "gemini", …).
+     * Used to attribute completed-turn tokens to the right row in the
+     * status-bar token-usage store. Optional for back-compat; missing
+     * provider means tokens aren't aggregated (the per-pane stats still
+     * work). Per SPEC_STATUSBAR_TOKEN_USAGE_2026_04_24.md §5.1.
+     */
+    provider?: string;
 }
 
 /**
@@ -68,6 +77,7 @@ export function useAgentStream({
     pendingMessagesAtom,
     enabled,
     documentVersion,
+    provider,
 }: UseAgentStreamOpts): void {
     const [, setDocument] = documentAtom;
     const [, setStreaming] = streamingStateAtom;
@@ -202,6 +212,14 @@ export function useAgentStream({
                     ? { input_tokens: tokens.input, output_tokens: tokens.output }
                     : null;
             setSessionStats(mergedStats);
+            // Aggregate the completed turn's tokens into the global
+            // session-local token-usage store so the status bar's
+            // indicator + breakdown popover stay up to date. Guarded
+            // against double-counting by recordTurn's own no-op-on-zero
+            // check — see SPEC_STATUSBAR_TOKEN_USAGE_2026_04_24.md §5.1.
+            if (provider && tokens) {
+                recordTurn(provider, tokens);
+            }
             setCurrentTool(null);
             setTurnTokens(null);
             setTurnActive(false);
