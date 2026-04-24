@@ -68,7 +68,7 @@ export interface HistorySession {
     messages: HistoryMessage[];
 }
 
-export type SwarmTab = "overview" | "activity" | "history" | "search";
+export type SwarmTab = "overview" | "activity" | "instances" | "history" | "search";
 
 // ── Activity tab types ──────────────────────────────────────────────────
 // Mirrors `backend::process_tracker::TrackedProcess` + RPC responses
@@ -137,6 +137,13 @@ export class SwarmViewModel implements ViewModel {
     private _activity = createSignal<AgentProcessGroup[]>([]);
     activityAtom: Accessor<AgentProcessGroup[]> = this._activity[0];
     private setActivity: Setter<AgentProcessGroup[]> = this._activity[1];
+
+    // Instances tab — every AgentInstance ever created on this tab.
+    // Surfaces a "where's that agent I started earlier?" answer per
+    // SPEC_AGENT_DEFINITIONS_MODAL_2026_04_23 PR G.
+    private _instances = createSignal<AgentInstance[]>([]);
+    instancesAtom: Accessor<AgentInstance[]> = this._instances[0];
+    private setInstances: Setter<AgentInstance[]> = this._instances[1];
 
     // Search
     private _searchQuery = createSignal<string>("");
@@ -225,6 +232,21 @@ export class SwarmViewModel implements ViewModel {
         // before the user clicks the tab (avoids empty-on-open flash).
         this.refreshActivity();
     }
+
+    /**
+     * Refresh the Instances tab — list every AgentInstance row in
+     * the database. Sorted newest-first since the most recent runs
+     * are the most likely target for "open it again". Backend
+     * sorts at the SQL layer.
+     */
+    refreshInstances = async (): Promise<void> => {
+        try {
+            const list = await RpcApi.ListAgentInstancesCommand(TabRpcClient, {});
+            this.setInstances(list ?? []);
+        } catch {
+            // Silent fail — older backends without the RPC.
+        }
+    };
 
     /**
      * Refresh the Activity tab: list every tracked block, then fetch
