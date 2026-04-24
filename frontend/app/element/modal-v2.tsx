@@ -159,6 +159,14 @@ export interface ModalProps {
     closeOnEscape?: boolean;
     /** Width preset. `fit` = auto. Default `md`. */
     size?: "sm" | "md" | "lg" | "xl" | "fit";
+    /** Vertical placement of the panel. `center` (default) centers
+     *  with the grid; `top` anchors near the top of the viewport —
+     *  matches command-palette-style surfaces that drop down from
+     *  the top of the screen. */
+    placement?: "center" | "top";
+    /** Optional extra class on the panel — lets a caller apply
+     *  component-specific layout without sidestepping the primitive. */
+    panelClass?: string;
     /** Override aria-labelledby. By default resolves from a nested ModalHeader. */
     ariaLabel?: string;
     ariaLabelledBy?: string;
@@ -300,6 +308,7 @@ export const Modal: Component<ModalProps> = (props) => {
                 <ModalTitleIdContext.Provider value={defaultTitleId}>
                     <div
                         class="modal-root"
+                        data-placement={props.placement ?? "center"}
                         role="dialog"
                         aria-modal="true"
                         aria-label={props.ariaLabelledBy ? undefined : props.ariaLabel}
@@ -317,7 +326,7 @@ export const Modal: Component<ModalProps> = (props) => {
                         />
                         <div
                             ref={panelRef}
-                            class="modal-panel"
+                            class={`modal-panel ${props.panelClass ?? ""}`}
                             data-size={props.size ?? "md"}
                             tabIndex={-1}
                         >
