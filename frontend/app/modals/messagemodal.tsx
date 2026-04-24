@@ -1,11 +1,11 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { Modal } from "@/app/modals/modal";
+import { Button } from "@/element/button";
+import { Modal, ModalBody, ModalFooter } from "@/element/modal-v2";
 import { modalsModel } from "@/app/store/modalmodel";
 
 import type { JSX } from "solid-js";
-import "./messagemodal.scss";
 
 const MessageModal = ({ children }: { children: JSX.Element }) => {
     function closeModal() {
@@ -13,8 +13,11 @@ const MessageModal = ({ children }: { children: JSX.Element }) => {
     }
 
     return (
-        <Modal class="message-modal" onOk={() => closeModal()} onClose={() => closeModal()}>
-            {children}
+        <Modal open={true} onClose={closeModal} size="md" ariaLabel="Message">
+            <ModalBody>{children}</ModalBody>
+            <ModalFooter>
+                <Button onClick={closeModal}>Ok</Button>
+            </ModalFooter>
         </Modal>
     );
 };
