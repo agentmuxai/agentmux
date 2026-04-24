@@ -24,7 +24,7 @@
     .agent-document {
         flex: 1;
         overflow-y: auto;
-        padding: 2px 4px;
+        padding: var(--space-0-5) var(--space-1);
         display: flex;
         flex-direction: column;
         gap: 1px;
@@ -52,8 +52,8 @@
             right: 6px;
             display: flex;
             align-items: center;
-            gap: 6px;
-            padding: 2px 4px;
+            gap: var(--space-1-5);
+            padding: var(--space-0-5) var(--space-1);
             font-size: 11px;
             font-family: var(--fixed-font, monospace);
             // `--panel-bg-color` has 50% alpha (rgba(31,33,31,0.5)); the strip
@@ -87,7 +87,7 @@
             display: inline-flex;
             align-items: center;
             justify-content: center;
-            padding: 1px 4px;
+            padding: 1px var(--space-1);
             background: transparent;
             border: none;
             border-radius: 3px;
@@ -131,14 +131,14 @@
 
     // === Status Log (terminal-style) ===
     .agent-history-loading {
-        padding: 4px 8px;
+        padding: var(--space-1) var(--space-2);
         font-family: var(--fixed-font);
         font-size: 11px;
         color: var(--secondary-text-color);
         opacity: 0.6;
         text-align: center;
         border-bottom: 1px solid var(--border-color);
-        margin-bottom: 2px;
+        margin-bottom: var(--space-0-5);
     }
 
     // === Activity log panel ===
@@ -167,9 +167,9 @@
         .agent-activity-log-header {
             display: flex;
             align-items: center;
-            gap: 6px;
+            gap: var(--space-1-5);
             width: 100%;
-            padding: 2px 6px;
+            padding: var(--space-0-5) var(--space-1-5);
             background: transparent;
             border: none;
             color: var(--secondary-text-color);
@@ -203,7 +203,7 @@
             min-width: 0;
             display: inline-flex;
             align-items: center;
-            gap: 4px;
+            gap: var(--space-1);
             overflow: hidden;
             white-space: nowrap;
             text-overflow: ellipsis;
@@ -225,7 +225,7 @@
         .agent-activity-log-body {
             max-height: 30vh;
             overflow-y: auto;
-            padding: 2px 4px 4px;
+            padding: var(--space-0-5) var(--space-1) var(--space-1);
             border-top: 1px solid var(--border-color);
         }
     }
@@ -291,8 +291,8 @@
     }
 
     .agent-auth-url-box {
-        margin-top: 8px;
-        padding: 10px 12px;
+        margin-top: var(--space-2);
+        padding: 10px var(--space-3);
         background: var(--panel-bg-color, rgba(74, 158, 255, 0.08));
         border: 1px solid var(--accent-color);
         border-radius: 6px;
@@ -302,7 +302,7 @@
     .agent-auth-url-label {
         font-size: 11px;
         color: var(--accent-color);
-        margin-bottom: 6px;
+        margin-bottom: var(--space-1-5);
         font-weight: 600;
         letter-spacing: 0.3px;
     }
@@ -311,7 +311,7 @@
         position: relative;
         display: flex;
         align-items: center;
-        padding: 8px 10px;
+        padding: var(--space-2) 10px;
         background: rgba(0, 0, 0, 0.35);
         border-radius: 4px;
         cursor: default;
@@ -337,7 +337,7 @@
         right: 8px;
         top: 50%;
         transform: translateY(-50%) scale(0.95);
-        padding: 4px 12px;
+        padding: var(--space-1) var(--space-3);
         font-size: 10px;
         font-weight: 600;
         background: var(--accent-color);
@@ -361,12 +361,12 @@
     .agent-auth-paste-row {
         display: flex;
         align-items: center;
-        gap: 6px;
-        margin-top: 8px;
+        gap: var(--space-1-5);
+        margin-top: var(--space-2);
 
         .agent-auth-paste-input {
             flex: 1;
-            padding: 6px 10px;
+            padding: var(--space-1-5) 10px;
             background: rgba(0, 0, 0, 0.35);
             border: 1px solid rgba(74, 158, 255, 0.3);
             border-radius: 4px;
@@ -403,7 +403,7 @@
     // === Retry Login Bar ===
     .agent-retry-bar {
         flex-shrink: 0;
-        padding: 2px 4px;
+        padding: var(--space-0-5) var(--space-1);
         display: flex;
         justify-content: center;
         border-top: 1px solid var(--border-color, rgba(255,255,255,0.1));
@@ -432,7 +432,7 @@
         align-items: center;
         justify-content: center;
         height: 100%;
-        gap: 16px;
+        gap: var(--space-4);
 
         .agent-empty-text {
             color: var(--secondary-text-color);
@@ -442,7 +442,7 @@
     }
 
     .agent-connect-btn {
-        padding: 8px 24px;
+        padding: var(--space-2) var(--space-6);
         border: 1px solid var(--accent-color);
         background: transparent;
         color: var(--accent-color);
@@ -489,7 +489,7 @@
         display: flex;
         align-items: center;
         justify-content: space-between;
-        padding: 8px 12px;
+        padding: var(--space-2) var(--space-3);
         border-bottom: 1px solid var(--border-color, rgba(255, 255, 255, 0.1));
         flex-shrink: 0;
     }
@@ -509,7 +509,7 @@
         cursor: pointer;
         color: var(--secondary-text-color);
         font-size: 12px;
-        padding: 2px 4px;
+        padding: var(--space-0-5) var(--space-1);
         border-radius: 3px;
         line-height: 1;
 
@@ -522,14 +522,14 @@
     .agent-focused-panel-body {
         flex: 1;
         overflow: auto;
-        padding: 12px;
+        padding: var(--space-3);
     }
 
     .agent-focused-rename {
         display: flex;
         flex-direction: column;
-        gap: 8px;
-        padding: 16px;
+        gap: var(--space-2);
+        padding: var(--space-4);
 
         .agent-card-rename-input {
             width: 100%;
@@ -543,12 +543,12 @@
 
     .agent-focused-rename-actions {
         display: flex;
-        gap: 8px;
-        margin-top: 4px;
+        gap: var(--space-2);
+        margin-top: var(--space-1);
     }
 
     .agent-focused-rename-btn {
-        padding: 4px 12px;
+        padding: var(--space-1) var(--space-3);
         border-radius: 4px;
         font-size: 12px;
         cursor: pointer;
@@ -581,14 +581,14 @@
         display: flex;
         flex-direction: column;
         height: 100%;
-        padding: 16px;
-        gap: 12px;
+        padding: var(--space-4);
+        gap: var(--space-3);
     }
 
     .agent-picker-list {
         display: flex;
         flex-direction: column;
-        gap: 8px;
+        gap: var(--space-2);
         flex: 1;
         overflow-y: auto;
         // Cap list width so individual cards don't stretch to an
@@ -606,8 +606,8 @@
         position: relative;                // anchor for absolutely-positioned actions
         display: flex;
         align-items: center;
-        gap: 12px;
-        padding: 12px 14px;
+        gap: var(--space-3);
+        padding: var(--space-3) 14px;
         border: 1px solid var(--border-color);
         background: color-mix(in srgb, var(--main-text-color) 3%, transparent);
         border-radius: 6px;
@@ -662,7 +662,7 @@
             top: 6px;
             left: 6px;
             display: flex;
-            gap: 4px;
+            gap: var(--space-1);
             opacity: 0;
             transition: opacity 0.15s;
             z-index: 1;
@@ -711,7 +711,7 @@
         .agent-card-info {
             display: flex;
             flex-direction: column;
-            gap: 2px;
+            gap: var(--space-0-5);
             flex: 1;
             min-width: 0;
         }
@@ -763,7 +763,7 @@
         .agent-card-rename-row {
             display: flex;
             align-items: center;
-            gap: 4px;
+            gap: var(--space-1);
         }
 
         .agent-card-rename-input {
@@ -829,7 +829,7 @@
     }
 
     .agent-card-settings-panel {
-        margin: 4px 0 12px 0;
+        margin: var(--space-1) 0 var(--space-3) 0;
         border: 1px solid var(--accent-color);
         border-radius: 6px;
         background: color-mix(in srgb, var(--main-bg-color) 95%, transparent);
@@ -847,20 +847,20 @@
         .agent-card-settings-header {
             display: flex;
             align-items: center;
-            gap: 8px;
-            padding: 8px 10px;
+            gap: var(--space-2);
+            padding: var(--space-2) 10px;
             border-bottom: 1px solid var(--border-color);
             background: color-mix(in srgb, var(--accent-color) 5%, transparent);
         }
 
         .agent-card-settings-tabs {
             display: flex;
-            gap: 4px;
+            gap: var(--space-1);
             flex: 1;
         }
 
         .agent-card-settings-tab {
-            padding: 4px 10px;
+            padding: var(--space-1) 10px;
             border: 1px solid var(--border-color);
             background: transparent;
             color: var(--secondary-text-color);
@@ -901,7 +901,7 @@
         .agent-card-settings-body {
             flex: 1;
             overflow: auto;
-            padding: 8px;
+            padding: var(--space-2);
             min-height: 0;
 
             // ForgeDetail / IdentityPanel were designed for full-pane
@@ -922,9 +922,9 @@
 
     .agent-nodejs-notice {
         display: flex;
-        gap: 12px;
-        padding: 12px;
-        margin: 8px 0;
+        gap: var(--space-3);
+        padding: var(--space-3);
+        margin: var(--space-2) 0;
         border-radius: 6px;
         background: rgba(245, 158, 11, 0.08);
         border: 1px solid rgba(245, 158, 11, 0.3);
@@ -933,13 +933,13 @@
             font-size: 18px;
             color: var(--warning-color);
             flex-shrink: 0;
-            padding-top: 2px;
+            padding-top: var(--space-0-5);
         }
 
         .nodejs-notice-title {
             font-weight: 600;
             font-size: 13px;
-            margin-bottom: 4px;
+            margin-bottom: var(--space-1);
         }
 
         .nodejs-notice-text {
@@ -952,7 +952,7 @@
             font-size: 11px;
             color: var(--secondary-text-color);
             font-style: italic;
-            margin-top: 6px;
+            margin-top: var(--space-1-5);
         }
     }
 
@@ -964,7 +964,7 @@
         justify-content: center;
         height: 100%;
         gap: 10px;
-        padding: 24px;
+        padding: var(--space-6);
         text-align: center;
 
         .agent-picker-empty-icon {
@@ -1034,7 +1034,7 @@
         font-size: 10px;
         color: var(--secondary-text-color);
         opacity: 0.6;
-        padding: 2px 8px;
+        padding: var(--space-0-5) var(--space-2);
         display: flex;
         align-items: center;
         gap: 5px;
@@ -1095,7 +1095,7 @@
             .agent-status-right {
                 flex-shrink: 0;
                 opacity: 0.7;
-                margin-left: 8px;
+                margin-left: var(--space-2);
             }
         }
 
@@ -1134,8 +1134,8 @@
         display: inline-flex;
         align-items: center;
         gap: 3px;
-        margin-left: 8px;
-        padding: 1px 6px;
+        margin-left: var(--space-2);
+        padding: 1px var(--space-1-5);
         background: color-mix(in srgb, var(--accent-color) 12%, transparent);
         border: 1px solid color-mix(in srgb, var(--accent-color) 40%, transparent);
         border-radius: 10px;
@@ -1173,7 +1173,7 @@
     }
 
     .slash-picker__title {
-        padding: 4px 10px;
+        padding: var(--space-1) 10px;
         font-size: 11px;
         font-weight: 600;
         text-transform: uppercase;
@@ -1185,14 +1185,14 @@
     .slash-picker__list {
         flex: 1;
         overflow-y: auto;
-        padding: 2px 0;
+        padding: var(--space-0-5) 0;
     }
 
     .slash-picker__row {
         display: flex;
         align-items: baseline;
-        gap: 8px;
-        padding: 4px 10px;
+        gap: var(--space-2);
+        padding: var(--space-1) 10px;
         cursor: pointer;
         line-height: 1.4;
         color: var(--main-text-color);
@@ -1228,7 +1228,7 @@
 
     .slash-picker__hint {
         display: flex;
-        gap: 12px;
+        gap: var(--space-3);
         padding: 3px 10px;
         border-top: 1px solid var(--border-color);
         font-size: 10px;
@@ -1257,7 +1257,7 @@
         display: flex;
         align-items: baseline;
         gap: 10px;
-        padding: 4px 10px;
+        padding: var(--space-1) 10px;
         cursor: pointer;
         line-height: 1.4;
         color: var(--main-text-color);
@@ -1287,7 +1287,7 @@
 
     .slash-autocomplete__hint {
         display: flex;
-        gap: 12px;
+        gap: var(--space-3);
         padding: 3px 10px;
         border-top: 1px solid var(--border-color);
         font-size: 10px;
@@ -1310,7 +1310,7 @@
         display: flex;
         align-items: center;
         justify-content: space-between;
-        padding: 4px 10px;
+        padding: var(--space-1) 10px;
         border-bottom: 1px solid var(--border-color);
         background: color-mix(in srgb, var(--main-bg-color) 90%, transparent);
     }
@@ -1348,15 +1348,15 @@
     .slash-help__body {
         flex: 1;
         overflow-y: auto;
-        padding: 4px 0;
+        padding: var(--space-1) 0;
     }
 
     .slash-help__group + .slash-help__group {
-        margin-top: 4px;
+        margin-top: var(--space-1);
     }
 
     .slash-help__group-label {
-        padding: 4px 10px 2px;
+        padding: var(--space-1) 10px var(--space-0-5);
         font-size: 10px;
         font-weight: 600;
         text-transform: uppercase;
@@ -1369,7 +1369,7 @@
         display: grid;
         grid-template-columns: 130px auto auto 1fr;
         align-items: baseline;
-        gap: 8px;
+        gap: var(--space-2);
         padding: 3px 10px;
         cursor: pointer;
         line-height: 1.4;
@@ -1412,7 +1412,7 @@
 
     .slash-help__hint {
         display: flex;
-        gap: 12px;
+        gap: var(--space-3);
         padding: 3px 10px;
         border-top: 1px solid var(--border-color);
         font-size: 10px;
@@ -1424,8 +1424,8 @@
         display: flex;
         align-items: center;
         justify-content: space-between;
-        gap: 8px;
-        padding: 4px 8px;
+        gap: var(--space-2);
+        padding: var(--space-1) var(--space-2);
         background: color-mix(in srgb, var(--accent-color) 14%, transparent);
         border-bottom: 1px solid color-mix(in srgb, var(--accent-color) 30%, transparent);
         font-size: 11px;
@@ -1441,8 +1441,8 @@
         display: flex;
         align-items: center;
         justify-content: space-between;
-        gap: 8px;
-        padding: 4px 8px;
+        gap: var(--space-2);
+        padding: var(--space-1) var(--space-2);
         background: color-mix(in srgb, var(--warning-color) 14%, transparent);
         border-bottom: 1px solid color-mix(in srgb, var(--warning-color) 30%, transparent);
         font-size: 11px;
@@ -1457,8 +1457,8 @@
     .agent-control-bar-header {
         display: flex;
         align-items: center;
-        gap: 4px;
-        padding: 3px 6px;
+        gap: var(--space-1);
+        padding: 3px var(--space-1-5);
         cursor: pointer;
         user-select: none;
         color: var(--secondary-text-color);
@@ -1478,7 +1478,7 @@
     .agent-control-summary {
         display: flex;
         align-items: center;
-        gap: 4px;
+        gap: var(--space-1);
     }
 
     .agent-control-nondefault {
@@ -1489,14 +1489,14 @@
     .agent-control-bar-body {
         display: flex;
         flex-wrap: wrap;
-        gap: 8px;
-        padding: 4px 8px 6px 16px;
+        gap: var(--space-2);
+        padding: var(--space-1) var(--space-2) var(--space-1-5) var(--space-4);
     }
 
     .agent-control-row {
         display: flex;
         align-items: center;
-        gap: 4px;
+        gap: var(--space-1);
     }
 
     .agent-control-label {
@@ -1512,7 +1512,7 @@
         color: var(--main-text-color);
         border: 1px solid var(--border-color);
         border-radius: 3px;
-        padding: 2px 4px;
+        padding: var(--space-0-5) var(--space-1);
         font-size: 11px;
         font-family: inherit;
         cursor: pointer;
@@ -1545,7 +1545,7 @@
 
     // === Markdown Block ===
     .agent-markdown-block {
-        padding: 1px 4px;
+        padding: 1px var(--space-1);
         color: var(--main-text-color);
         opacity: 0.9;
         user-select: text;
@@ -1555,7 +1555,7 @@
             opacity: 0.6;
             font-style: italic;
             border-left: 2px solid var(--secondary-text-color);
-            padding-left: 8px;
+            padding-left: var(--space-2);
             background: color-mix(in srgb, var(--main-text-color) 2%, transparent);
         }
 
@@ -1565,13 +1565,13 @@
 
         code {
             background: color-mix(in srgb, var(--main-text-color) 8%, transparent);
-            padding: 1px 4px;
+            padding: 1px var(--space-1);
             border-radius: 2px;
         }
 
         pre {
             background: color-mix(in srgb, var(--main-text-color) 5%, transparent);
-            padding: 4px 6px;
+            padding: var(--space-1) var(--space-1-5);
             border-radius: 3px;
             overflow-x: auto;
         }
@@ -1614,8 +1614,8 @@
         .agent-tool-summary {
             display: flex;
             align-items: center;
-            gap: 4px;
-            padding: 2px 4px;
+            gap: var(--space-1);
+            padding: var(--space-0-5) var(--space-1);
             user-select: none;
             // Force single-line regardless of content width
             white-space: nowrap;
@@ -1648,7 +1648,7 @@
 
             .agent-tool-ellipsis {
                 flex-shrink: 0;
-                margin-left: 4px;
+                margin-left: var(--space-1);
                 color: var(--secondary-text-color);
                 opacity: 0.6;
                 font-size: 11px;
@@ -1667,7 +1667,7 @@
         &.running .agent-tool-status-icon { color: var(--warning-color); }
 
         .agent-tool-content {
-            padding: 0 4px 4px 16px;
+            padding: 0 var(--space-1) var(--space-1) var(--space-4);
             user-select: text;
             cursor: text;
         }
@@ -1687,7 +1687,7 @@
 
         .agent-tool-loading {
             color: var(--secondary-text-color);
-            padding: 8px 0;
+            padding: var(--space-2) 0;
         }
 
         .agent-tool-open-pane {
@@ -1697,7 +1697,7 @@
             color: var(--accent-color);
             cursor: pointer;
             font-size: 13px;
-            padding: 1px 6px;
+            padding: 1px var(--space-1-5);
             line-height: 1;
             flex-shrink: 0;
 
@@ -1711,7 +1711,7 @@
             .agent-tool-agent-desc {
                 color: var(--secondary-text-color);
                 font-size: 12px;
-                margin-bottom: 4px;
+                margin-bottom: var(--space-1);
             }
 
             .agent-tool-agent-result {
@@ -1724,8 +1724,8 @@
         }
 
         .agent-tool-show-more {
-            margin-top: 8px;
-            padding: 4px 12px;
+            margin-top: var(--space-2);
+            padding: var(--space-1) var(--space-3);
             background: var(--accent-color);
             color: var(--main-bg-color);
             border: none;
@@ -1757,7 +1757,7 @@
         // so backgrounds and padding work correctly.
         :global(.line) {
             display: block;
-            padding: 0 6px;
+            padding: 0 var(--space-1-5);
             min-height: 1.5em;
         }
 
@@ -1778,7 +1778,7 @@
 
         .agent-diff-header {
             background: color-mix(in srgb, var(--main-text-color) 10%, transparent);
-            padding: 3px 6px;
+            padding: 3px var(--space-1-5);
             font-weight: bold;
             border-bottom: 1px solid var(--border-color);
         }
@@ -1835,7 +1835,7 @@
             :global(.agent-diff-marker) {
                 opacity: 0.6;
                 user-select: none;
-                margin-right: 2px;
+                margin-right: var(--space-0-5);
             }
             :global(.agent-diff-hunk-text) {
                 color: var(--accent-color);
@@ -1846,7 +1846,7 @@
 
     .agent-diff-empty {
         color: var(--secondary-text-color);
-        padding: 4px 6px;
+        padding: var(--space-1) var(--space-1-5);
         background: color-mix(in srgb, var(--main-text-color) 3%, transparent);
         border-radius: 3px;
     }
@@ -1861,13 +1861,13 @@
 
         .agent-bash-cmd {
             background: color-mix(in srgb, var(--main-text-color) 5%, transparent);
-            padding: 3px 6px;
+            padding: 3px var(--space-1-5);
             border-bottom: 1px solid var(--border-color);
             display: flex;
             // flex-start so the $ and the command text align at their tops
             // when the command wraps to multiple lines.
             align-items: flex-start;
-            gap: 6px;
+            gap: var(--space-1-5);
 
             .agent-bash-dollar {
                 color: var(--accent-color);
@@ -1899,7 +1899,7 @@
         }
 
         .agent-bash-output {
-            padding: 3px 6px;
+            padding: 3px var(--space-1-5);
             margin: 0;
             max-height: 400px;
             overflow-y: auto;
@@ -1914,7 +1914,7 @@
         }
 
         .agent-bash-exit {
-            padding: 2px 6px;
+            padding: var(--space-0-5) var(--space-1-5);
             font-size: 11px;
             border-top: 1px solid var(--border-color);
             background: color-mix(in srgb, var(--main-text-color) 3%, transparent);
@@ -1957,8 +1957,8 @@
         .agent-message-summary {
             display: flex;
             align-items: center;
-            gap: 6px;
-            padding: 3px 4px;
+            gap: var(--space-1-5);
+            padding: 3px var(--space-1);
             user-select: none;
 
             .agent-message-chevron {
@@ -1977,20 +1977,20 @@
         }
 
         .agent-message-content {
-            padding: 0 4px 4px 16px;
+            padding: 0 var(--space-1) var(--space-1) var(--space-4);
             cursor: default;
 
             .agent-message-meta {
                 display: flex;
-                gap: 16px;
-                padding: 4px 0 8px 0;
+                gap: var(--space-4);
+                padding: var(--space-1) 0 var(--space-2) 0;
                 font-size: 11px;
                 color: var(--secondary-text-color);
             }
 
             .agent-message-body {
                 background: color-mix(in srgb, var(--main-text-color) 5%, transparent);
-                padding: 4px 6px;
+                padding: var(--space-1) var(--space-1-5);
                 border-radius: 3px;
                 margin: 0;
                 white-space: pre-wrap;
@@ -2003,7 +2003,7 @@
         display: flex;
         align-items: center;
         gap: 10px;
-        padding: 8px 12px;
+        padding: var(--space-2) var(--space-3);
         border: 1px solid var(--border-color);
         border-left: 2px solid var(--accent-color);
         border-radius: 4px;
@@ -2037,7 +2037,7 @@
         .agent-subagent-link-info {
             display: flex;
             align-items: center;
-            gap: 8px;
+            gap: var(--space-2);
             flex: 1;
             min-width: 0;
         }
@@ -2073,7 +2073,7 @@
 
     // === User Message ===
     .agent-user-message {
-        padding: 3px 4px;
+        padding: 3px var(--space-1);
         background: color-mix(in srgb, var(--accent-color) 5%, transparent);
         border-left: 2px solid var(--accent-color);
         border-radius: 2px;
@@ -2101,15 +2101,15 @@
 
     // === Section Headings ===
     .agent-section {
-        margin-top: 6px;
-        padding: 2px 0;
+        margin-top: var(--space-1-5);
+        padding: var(--space-0-5) 0;
 
         &.level-1 h1 {
             font-size: 18px;
             font-weight: bold;
-            margin: 4px 0;
+            margin: var(--space-1) 0;
             border-bottom: 2px solid var(--border-color);
-            padding-bottom: 2px;
+            padding-bottom: var(--space-0-5);
         }
 
         &.level-2 h2 {
@@ -2121,7 +2121,7 @@
         &.level-3 h3 {
             font-size: 13px;
             font-weight: 500;
-            margin: 2px 0;
+            margin: var(--space-0-5) 0;
             opacity: 0.8;
         }
     }
@@ -2130,7 +2130,7 @@
     .agent-tool-read {
         .agent-tool-file-path {
             color: var(--accent-color);
-            margin-bottom: 4px;
+            margin-bottom: var(--space-1);
             font-weight: 500;
         }
 
@@ -2152,7 +2152,7 @@
     .agent-tool-write {
         .agent-tool-file-path {
             color: var(--accent-color);
-            margin-bottom: 2px;
+            margin-bottom: var(--space-0-5);
             font-weight: 500;
         }
 
@@ -2166,14 +2166,14 @@
     .agent-tool-search {
         .agent-tool-pattern {
             color: var(--accent-color);
-            margin-bottom: 4px;
+            margin-bottom: var(--space-1);
             font-weight: 500;
         }
 
         .agent-tool-search-results {
             background: var(--main-bg-color);
             border: 1px solid var(--border-color);
-            padding: 4px 6px;
+            padding: var(--space-1) var(--space-1-5);
             border-radius: 3px;
             max-height: 400px;
             overflow-y: auto;
@@ -2187,7 +2187,7 @@
     .agent-tool-task-info {
         background: var(--main-bg-color);
         border: 1px solid var(--border-color);
-        padding: 4px 6px;
+        padding: var(--space-1) var(--space-1-5);
         border-radius: 3px;
         max-height: 400px;
         overflow-y: auto;
@@ -2202,7 +2202,7 @@
         .agent-tool-compact-summary {
             display: flex;
             align-items: baseline;
-            gap: 4px;
+            gap: var(--space-1);
             color: var(--main-text-color);
             opacity: 0.85;
             line-height: 1.4;
@@ -2230,11 +2230,11 @@
         .agent-tool-compact-json {
             background: var(--main-bg-color);
             border: 1px solid var(--border-color);
-            padding: 4px 6px;
+            padding: var(--space-1) var(--space-1-5);
             border-radius: 3px;
             max-height: 400px;
             overflow-y: auto;
-            margin: 4px 0 0 0;
+            margin: var(--space-1) 0 0 0;
             font-size: 11px;
             white-space: pre-wrap;
             overflow-wrap: anywhere;
@@ -2246,20 +2246,20 @@
         display: flex;
         justify-content: space-between;
         align-items: center;
-        padding: 4px 6px;
+        padding: var(--space-1) var(--space-1-5);
         background: color-mix(in srgb, var(--main-text-color) 5%, transparent);
         border-bottom: 1px solid var(--border-color);
 
         .agent-header-info {
             display: flex;
             flex-direction: column;
-            gap: 4px;
+            gap: var(--space-1);
         }
 
         .agent-header-title {
             display: flex;
             align-items: center;
-            gap: 8px;
+            gap: var(--space-2);
             font-size: 14px;
             font-weight: 500;
 
@@ -2280,7 +2280,7 @@
 
         .agent-header-stats {
             display: flex;
-            gap: 12px;
+            gap: var(--space-3);
             font-size: 11px;
             color: var(--secondary-text-color);
 
@@ -2307,10 +2307,10 @@
     // === Process Controls ===
     .agent-process-controls {
         display: flex;
-        gap: 8px;
+        gap: var(--space-2);
 
         .agent-control-btn {
-            padding: 6px 12px;
+            padding: var(--space-1-5) var(--space-3);
             border: 1px solid var(--border-color);
             border-radius: 4px;
             background: color-mix(in srgb, var(--main-text-color) 5%, transparent);
@@ -2354,7 +2354,7 @@
             width: 250px;
             border-right: 1px solid var(--border-color);
             background: color-mix(in srgb, var(--main-text-color) 2%, transparent);
-            padding: 12px;
+            padding: var(--space-3);
             overflow-y: auto;
         }
 
@@ -2367,20 +2367,20 @@
     .agent-filter-controls {
         .agent-filter-title {
             font-weight: 500;
-            margin-bottom: 12px;
+            margin-bottom: var(--space-3);
             color: var(--accent-color);
         }
 
         .agent-filter-options {
             display: flex;
             flex-direction: column;
-            gap: 8px;
+            gap: var(--space-2);
         }
 
         .agent-filter-option {
             display: flex;
             align-items: center;
-            gap: 8px;
+            gap: var(--space-2);
             cursor: pointer;
             font-size: 12px;
 
@@ -2398,7 +2398,7 @@
         position: absolute;
         top: 12px;
         right: 16px;
-        padding: 6px 12px;
+        padding: var(--space-1-5) var(--space-3);
         background: color-mix(in srgb, var(--accent-color) 10%, transparent);
         border: 1px solid var(--accent-color);
         border-radius: 4px;
@@ -2424,7 +2424,7 @@
     .agent-pending-zone {
         border-top: 1px solid var(--border-color);
         background: color-mix(in srgb, var(--warning-color) 6%, var(--main-bg-color));
-        padding: 4px 6px;
+        padding: var(--space-1) var(--space-1-5);
         display: flex;
         flex-direction: column;
         gap: 3px;
@@ -2436,7 +2436,7 @@
         .agent-pending-header {
             display: flex;
             align-items: center;
-            gap: 6px;
+            gap: var(--space-1-5);
             color: var(--warning-color);
             font-size: 10px;
             text-transform: uppercase;
@@ -2462,7 +2462,7 @@
     .agent-footer {
         border-top: 1px solid var(--border-color);
         background: color-mix(in srgb, var(--main-text-color) 3%, transparent);
-        padding: 2px 2px;
+        padding: var(--space-0-5) var(--space-0-5);
 
         // "Send now" — appears when there's something queued AND a turn
         // is running. Clicking it fires SIGINT; the backend's queue
@@ -2471,9 +2471,9 @@
         .agent-send-immediately-btn {
             display: inline-flex;
             align-items: center;
-            gap: 4px;
-            margin: 2px 2px 4px;
-            padding: 2px 8px;
+            gap: var(--space-1);
+            margin: var(--space-0-5) var(--space-0-5) var(--space-1);
+            padding: var(--space-0-5) var(--space-2);
             background: color-mix(in srgb, var(--accent-color) 20%, transparent);
             border: 1px solid var(--accent-color);
             border-radius: 3px;
@@ -2500,7 +2500,7 @@
 
             .agent-input {
                 width: 100%;
-                padding: 3px 4px;
+                padding: 3px var(--space-1);
                 background: var(--main-bg-color);
                 border: 1px solid var(--border-color);
                 border-radius: 2px;
@@ -2531,7 +2531,7 @@
                 font-size: 9px;
                 color: var(--secondary-text-color);
                 opacity: 0.5;
-                padding: 0 2px;
+                padding: 0 var(--space-0-5);
                 line-height: 1.2;
                 display: flex;
                 align-items: center;
@@ -2543,8 +2543,8 @@
     .agent-action-bar {
         display: flex;
         flex-direction: row;
-        gap: 4px;
-        padding: 4px 6px;
+        gap: var(--space-1);
+        padding: var(--space-1) var(--space-1-5);
         border-top: 1px solid var(--border-color);
         background: color-mix(in srgb, var(--main-text-color) 3%, transparent);
         flex-shrink: 0;
@@ -2554,7 +2554,7 @@
             display: flex;
             align-items: center;
             justify-content: center;
-            gap: 4px;
+            gap: var(--space-1);
             height: 24px;
             font-size: 12px;
             color: var(--secondary-text-color);
@@ -2590,7 +2590,7 @@
         background: var(--main-bg-color);
 
         .setup-wizard-header {
-            padding: 24px 24px 16px;
+            padding: var(--space-6) var(--space-6) var(--space-4);
             border-bottom: 1px solid var(--border-color);
             text-align: center;
 
@@ -2598,20 +2598,20 @@
                 font-size: 18px;
                 font-weight: 600;
                 color: var(--main-text-color);
-                margin-bottom: 4px;
+                margin-bottom: var(--space-1);
             }
 
             .setup-wizard-subtitle {
                 font-size: 12px;
                 color: var(--secondary-text-color);
-                margin-bottom: 16px;
+                margin-bottom: var(--space-4);
             }
 
             .setup-wizard-steps {
                 display: flex;
                 align-items: center;
                 justify-content: center;
-                gap: 8px;
+                gap: var(--space-2);
             }
 
             .setup-wizard-step-connector {
@@ -2624,7 +2624,7 @@
                 display: flex;
                 flex-direction: column;
                 align-items: center;
-                gap: 4px;
+                gap: var(--space-1);
 
                 .setup-wizard-step-dot {
                     width: 24px;
@@ -2675,20 +2675,20 @@
         .setup-wizard-content {
             flex: 1;
             overflow-y: auto;
-            padding: 24px;
+            padding: var(--space-6);
         }
 
         .setup-wizard-error {
             background: color-mix(in srgb, var(--error-color) 10%, transparent);
             border: 1px solid var(--error-color);
             border-radius: 4px;
-            padding: 8px 12px;
-            margin-bottom: 16px;
+            padding: var(--space-2) var(--space-3);
+            margin-bottom: var(--space-4);
             font-size: 12px;
             color: var(--error-color);
             display: flex;
             align-items: center;
-            gap: 8px;
+            gap: var(--space-2);
 
             .setup-wizard-error-icon {
                 font-weight: bold;
@@ -2700,26 +2700,26 @@
             font-size: 14px;
             font-weight: 600;
             color: var(--main-text-color);
-            margin-bottom: 4px;
+            margin-bottom: var(--space-1);
         }
 
         .setup-wizard-section-desc {
             font-size: 11px;
             color: var(--secondary-text-color);
-            margin-bottom: 16px;
+            margin-bottom: var(--space-4);
         }
 
         .setup-wizard-cli-list {
             display: flex;
             flex-direction: column;
-            gap: 8px;
-            margin-bottom: 16px;
+            gap: var(--space-2);
+            margin-bottom: var(--space-4);
         }
 
         .setup-wizard-cli-card {
             border: 1px solid var(--border-color);
             border-radius: 4px;
-            padding: 12px;
+            padding: var(--space-3);
             display: flex;
             justify-content: space-between;
             align-items: center;
@@ -2743,9 +2743,9 @@
                 .setup-wizard-cli-status {
                     display: flex;
                     align-items: center;
-                    gap: 6px;
+                    gap: var(--space-1-5);
                     font-size: 11px;
-                    margin-top: 2px;
+                    margin-top: var(--space-0-5);
 
                     .status-dot {
                         width: 6px;
@@ -2770,7 +2770,7 @@
                     font-size: 10px;
                     color: var(--secondary-text-color);
                     opacity: 0.7;
-                    margin-top: 2px;
+                    margin-top: var(--space-0-5);
                 }
             }
 
@@ -2778,18 +2778,18 @@
                 display: flex;
                 flex-direction: column;
                 align-items: flex-end;
-                gap: 6px;
+                gap: var(--space-1-5);
 
                 .setup-wizard-install-info {
                     display: flex;
                     flex-direction: column;
                     align-items: flex-end;
-                    gap: 4px;
+                    gap: var(--space-1);
                     font-size: 10px;
 
                     code {
                         background: color-mix(in srgb, var(--main-text-color) 8%, transparent);
-                        padding: 2px 6px;
+                        padding: var(--space-0-5) var(--space-1-5);
                         border-radius: 2px;
                     }
 
@@ -2808,7 +2808,7 @@
         .setup-wizard-detecting {
             text-align: center;
             color: var(--secondary-text-color);
-            padding: 24px;
+            padding: var(--space-6);
             font-size: 12px;
         }
 
@@ -2816,23 +2816,23 @@
             text-align: center;
             color: var(--warning-color);
             font-size: 11px;
-            padding: 8px;
+            padding: var(--space-2);
         }
 
         .setup-wizard-provider-list {
             display: flex;
             flex-direction: column;
-            gap: 8px;
-            margin-bottom: 16px;
+            gap: var(--space-2);
+            margin-bottom: var(--space-4);
         }
 
         .setup-wizard-provider-card {
             display: flex;
             align-items: center;
-            gap: 12px;
+            gap: var(--space-3);
             border: 1px solid var(--border-color);
             border-radius: 4px;
-            padding: 12px;
+            padding: var(--space-3);
             cursor: pointer;
             transition: all 0.15s;
 
@@ -2859,7 +2859,7 @@
                 .setup-wizard-provider-detail {
                     font-size: 10px;
                     color: var(--secondary-text-color);
-                    margin-top: 2px;
+                    margin-top: var(--space-0-5);
                 }
             }
         }
@@ -2867,11 +2867,11 @@
         .setup-wizard-summary {
             border: 1px solid var(--border-color);
             border-radius: 4px;
-            padding: 16px;
-            margin-bottom: 16px;
+            padding: var(--space-4);
+            margin-bottom: var(--space-4);
             display: flex;
             flex-direction: column;
-            gap: 8px;
+            gap: var(--space-2);
 
             .setup-wizard-summary-row {
                 display: flex;
@@ -2889,7 +2889,7 @@
 
                     code {
                         background: color-mix(in srgb, var(--main-text-color) 8%, transparent);
-                        padding: 1px 4px;
+                        padding: 1px var(--space-1);
                         border-radius: 2px;
                         font-size: 11px;
                     }
@@ -2900,11 +2900,11 @@
         .setup-wizard-actions {
             display: flex;
             justify-content: flex-end;
-            gap: 8px;
+            gap: var(--space-2);
         }
 
         .setup-wizard-btn {
-            padding: 8px 16px;
+            padding: var(--space-2) var(--space-4);
             border-radius: 4px;
             font-size: 12px;
             font-weight: 500;
@@ -2930,7 +2930,7 @@
             }
 
             &.start {
-                padding: 10px 24px;
+                padding: 10px var(--space-6);
                 font-size: 13px;
             }
 
@@ -2941,7 +2941,7 @@
             }
 
             &.small {
-                padding: 4px 10px;
+                padding: var(--space-1) 10px;
                 font-size: 10px;
             }
         }
@@ -2965,7 +2965,7 @@
             align-items: center;
             gap: 14px;
             text-align: center;
-            padding: 32px;
+            padding: var(--space-8);
 
             .agent-auth-spinner {
                 font-size: 36px;
@@ -3009,7 +3009,7 @@
         }
 
         .agent-document {
-            padding: 8px;
+            padding: var(--space-2);
         }
     }
 
@@ -3017,8 +3017,8 @@
     .agent-connection-status {
         display: flex;
         align-items: center;
-        gap: 12px;
-        padding: 16px;
+        gap: var(--space-3);
+        padding: var(--space-4);
         background: color-mix(in srgb, var(--main-text-color) 3%, transparent);
         border-top: 1px solid var(--border-color);
 
@@ -3045,7 +3045,7 @@
             }
 
             .connection-disconnect-btn {
-                padding: 6px 10px;
+                padding: var(--space-1-5) 10px;
                 background: transparent;
                 border: 1px solid var(--border-color);
                 border-radius: 4px;
@@ -3112,7 +3112,7 @@
             }
 
             .connection-retry-btn {
-                padding: 6px 12px;
+                padding: var(--space-1-5) var(--space-3);
                 background: var(--error-color);
                 border: none;
                 border-radius: 4px;
@@ -3131,8 +3131,8 @@
         &.disconnected {
             flex-direction: column;
             align-items: stretch;
-            gap: 12px;
-            padding: 24px 16px;
+            gap: var(--space-3);
+            padding: var(--space-6) var(--space-4);
 
             .connection-message {
                 text-align: center;
@@ -3141,7 +3141,7 @@
                     font-size: 14px;
                     font-weight: 500;
                     color: var(--main-text-color);
-                    margin-bottom: 8px;
+                    margin-bottom: var(--space-2);
                 }
 
                 .connection-description {
@@ -3153,7 +3153,7 @@
             }
 
             .connection-connect-btn {
-                padding: 10px 20px;
+                padding: 10px var(--space-5);
                 background: var(--accent-color);
                 border: none;
                 border-radius: 4px;
@@ -3165,7 +3165,7 @@
                 display: flex;
                 align-items: center;
                 justify-content: center;
-                gap: 8px;
+                gap: var(--space-2);
 
                 &:hover {
                     opacity: 0.9;
@@ -3181,24 +3181,24 @@
                 font-size: 10px;
                 color: var(--secondary-text-color);
                 opacity: 0.6;
-                padding-top: 8px;
+                padding-top: var(--space-2);
                 border-top: 1px solid color-mix(in srgb, var(--border-color) 50%, transparent);
 
                 code {
                     background: color-mix(in srgb, var(--main-text-color) 8%, transparent);
-                    padding: 2px 4px;
+                    padding: var(--space-0-5) var(--space-1);
                     border-radius: 2px;
                 }
             }
 
             .connection-apikey-form {
                 display: flex;
-                gap: 8px;
+                gap: var(--space-2);
                 align-items: center;
 
                 .connection-apikey-input {
                     flex: 1;
-                    padding: 10px 12px;
+                    padding: 10px var(--space-3);
                     background: var(--main-bg-color);
                     border: 1px solid var(--border-color);
                     border-radius: 4px;
@@ -3221,7 +3221,7 @@
     // Subtle left-border highlight on bookmarked nodes.
     .agent-node-bookmarked {
         border-left: 2px solid var(--warning-color) !important; /* stylelint-disable-line declaration-no-important */
-        padding-left: 2px;
+        padding-left: var(--space-0-5);
         position: relative;
     }
 
@@ -3239,8 +3239,8 @@
     .agent-bookmarks-header {
         display: flex;
         align-items: center;
-        gap: 6px;
-        padding: 4px 8px;
+        gap: var(--space-1-5);
+        padding: var(--space-1) var(--space-2);
         cursor: pointer;
         user-select: none;
         border-bottom: 1px solid var(--border-color);
@@ -3271,7 +3271,7 @@
         color: var(--secondary-text-color);
         background: color-mix(in srgb, var(--main-text-color) 10%, transparent);
         border-radius: 8px;
-        padding: 1px 6px;
+        padding: 1px var(--space-1-5);
         min-width: 16px;
         text-align: center;
     }
@@ -3285,11 +3285,11 @@
     .agent-bookmarks-list {
         overflow-y: auto;
         flex: 1;
-        padding: 2px 0;
+        padding: var(--space-0-5) 0;
     }
 
     .agent-bookmarks-empty {
-        padding: 8px 10px;
+        padding: var(--space-2) 10px;
         font-size: 11px;
         color: var(--secondary-text-color);
         font-style: italic;
@@ -3297,7 +3297,7 @@
     }
 
     .agent-bookmark-entry {
-        padding: 4px 8px;
+        padding: var(--space-1) var(--space-2);
         cursor: pointer;
         transition: background 0.1s;
         border-bottom: 1px solid color-mix(in srgb, var(--border-color) 50%, transparent);
@@ -3314,7 +3314,7 @@
     .agent-bookmark-entry-main {
         display: flex;
         align-items: center;
-        gap: 6px;
+        gap: var(--space-1-5);
         min-width: 0;
     }
 
@@ -3337,7 +3337,7 @@
         color: var(--main-text-color);
         border: 1px solid var(--accent-color);
         border-radius: 2px;
-        padding: 1px 4px;
+        padding: 1px var(--space-1);
         outline: none;
         min-width: 0;
     }
@@ -3393,8 +3393,8 @@
         flex-shrink: 0;
         display: flex;
         align-items: center;
-        gap: 4px;
-        padding: 4px 8px;
+        gap: var(--space-1);
+        padding: var(--space-1) var(--space-2);
         background: color-mix(in srgb, var(--accent-color) 6%, var(--main-bg-color));
         border-bottom: 1px solid var(--border-color);
         // Sticky so it stays visible while the document scrolls beneath it
@@ -3410,7 +3410,7 @@
         color: var(--main-text-color);
         border: 1px solid var(--border-color);
         border-radius: 3px;
-        padding: 3px 6px;
+        padding: 3px var(--space-1-5);
         font-size: 12px;
         font-family: inherit;
         outline: none;
@@ -3461,7 +3461,7 @@
 
         &--close {
             font-size: 14px;
-            margin-left: 2px;
+            margin-left: var(--space-0-5);
 
             &:hover {
                 background: color-mix(in srgb, var(--error-color) 15%, transparent);
@@ -3480,7 +3480,7 @@
         border-left: 3px solid var(--accent-color) !important; /* stylelint-disable-line declaration-no-important */
         border-radius: 2px;
         // Small padding-left offset to compensate for the border
-        padding-left: 4px;
+        padding-left: var(--space-1);
         // Brief animation so the highlight is immediately noticeable when
         // navigating between matches
         animation: search-match-flash 0.25s ease-out;
@@ -3498,8 +3498,8 @@
     // === Session digest banner ===
 
     .agent-session-digest {
-        margin: 4px 0 2px;
-        padding: 6px 8px;
+        margin: var(--space-1) 0 var(--space-0-5);
+        padding: var(--space-1-5) var(--space-2);
         background: color-mix(in srgb, var(--accent-color) 8%, transparent);
         border: 1px solid var(--accent-color);
         border-radius: 4px;
@@ -3510,7 +3510,7 @@
     .agent-session-digest-header {
         display: flex;
         align-items: center;
-        gap: 6px;
+        gap: var(--space-1-5);
         font-weight: 600;
         color: var(--main-text-color);
     }
@@ -3532,7 +3532,7 @@
         background: none;
         border: none;
         cursor: pointer;
-        padding: 2px 5px;
+        padding: var(--space-0-5) 5px;
         color: var(--secondary-text-color);
         opacity: 0.75;
         font-size: 12px;
@@ -3558,20 +3558,20 @@
     }
 
     .agent-session-digest-body {
-        padding: 6px 2px 2px;
+        padding: var(--space-1-5) var(--space-0-5) var(--space-0-5);
         line-height: 1.5;
         color: var(--main-text-color);
 
         // Markdown renders <p> tags — tighten spacing inside the banner
         p {
-            margin: 0 0 4px;
+            margin: 0 0 var(--space-1);
             &:last-child { margin-bottom: 0; }
         }
     }
 
     .agent-session-digest-loading,
     .agent-session-digest-empty {
-        padding: 6px 2px 2px;
+        padding: var(--space-1-5) var(--space-0-5) var(--space-0-5);
         opacity: 0.6;
         font-style: italic;
         color: var(--secondary-text-color);
@@ -3595,7 +3595,7 @@
     box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
     max-height: min(400px, 60vh);
     overflow-y: auto;
-    padding: 6px 10px 8px 20px;
+    padding: var(--space-1-5) 10px var(--space-2) var(--space-5);
     cursor: default;
     user-select: text;
     font-family: var(--fixed-font, monospace);
@@ -3614,16 +3614,16 @@
 // ── AgentIdentityPanel (Step 4 of SPEC_AGENT_IDENTITY_RESTRUCTURE) ────────────
 
 .agent-identity-panel {
-    padding: 10px 12px;
+    padding: 10px var(--space-3);
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: var(--space-2);
     font-size: 12px;
     color: var(--main-text-color);
 }
 
 .agent-identity-header {
-    padding-bottom: 6px;
+    padding-bottom: var(--space-1-5);
     border-bottom: 1px solid var(--border-color);
 }
 
@@ -3640,15 +3640,15 @@
 .agent-identity-providers {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: var(--space-1);
 }
 
 .agent-identity-provider-row {
     display: grid;
     grid-template-columns: 16px 72px 1fr auto;
     align-items: center;
-    gap: 8px;
-    padding: 4px 6px;
+    gap: var(--space-2);
+    padding: var(--space-1) var(--space-1-5);
     border-radius: 3px;
 
     &:hover {
@@ -3671,7 +3671,7 @@
 .agent-identity-provider-assignment {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: var(--space-1-5);
     min-width: 0;
     overflow: hidden;
 }
@@ -3699,7 +3699,7 @@
 .agent-identity-provider-actions {
     display: flex;
     align-items: center;
-    gap: 4px;
+    gap: var(--space-1);
     flex-shrink: 0;
 }
 
@@ -3709,7 +3709,7 @@
     color: var(--main-text-color);
     border: 1px solid var(--border-color);
     border-radius: 3px;
-    padding: 2px 4px;
+    padding: var(--space-0-5) var(--space-1);
     max-width: 140px;
     cursor: pointer;
 
@@ -3731,7 +3731,7 @@
     border: 1px solid var(--border-color);
     border-radius: 3px;
     color: color-mix(in srgb, var(--secondary-text-color) 80%, transparent);
-    padding: 2px 5px;
+    padding: var(--space-0-5) 5px;
     cursor: pointer;
     white-space: nowrap;
 
@@ -3747,7 +3747,7 @@
 }
 
 .agent-identity-unassign-btn {
-    padding: 2px 6px;
+    padding: var(--space-0-5) var(--space-1-5);
     border-color: color-mix(in srgb, var(--error-color) 50%, transparent);
     color: color-mix(in srgb, var(--error-color) 70%, transparent);
 
@@ -3760,13 +3760,13 @@
 .agent-identity-error {
     font-size: 11px;
     color: var(--error-color);
-    padding: 4px 6px;
+    padding: var(--space-1) var(--space-1-5);
     background: color-mix(in srgb, var(--error-color) 10%, transparent);
     border-radius: 3px;
 }
 
 .agent-identity-unsaved {
-    padding: 12px;
+    padding: var(--space-3);
     font-size: 12px;
     color: color-mix(in srgb, var(--secondary-text-color) 70%, transparent);
     text-align: center;
@@ -3796,7 +3796,7 @@
 .agent-launch-modal-field {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: var(--space-1);
 
     // Reset <fieldset> browser defaults so it lines up with the <label>s.
     border: none;
@@ -3819,7 +3819,7 @@
     background: color-mix(in srgb, var(--main-text-color) 5%, transparent);
     border: 1px solid var(--border-color);
     border-radius: 4px;
-    padding: 6px 8px;
+    padding: var(--space-1-5) var(--space-2);
     outline: none;
 
     &:focus {
@@ -3841,14 +3841,14 @@
 .agent-launch-modal-runtime {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: var(--space-1-5);
 }
 
 .agent-launch-modal-radio {
     display: flex;
     align-items: flex-start;
-    gap: 8px;
-    padding: 6px 8px;
+    gap: var(--space-2);
+    padding: var(--space-1-5) var(--space-2);
     border: 1px solid var(--border-color);
     border-radius: 4px;
     cursor: pointer;
@@ -3871,17 +3871,17 @@
     > span {
         display: flex;
         flex-direction: column;
-        gap: 2px;
+        gap: var(--space-0-5);
     }
 }
 
 .agent-launch-modal-preview {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: var(--space-1-5);
     font-size: 11px;
     color: var(--secondary-text-color);
-    padding: 6px 8px;
+    padding: var(--space-1-5) var(--space-2);
     background: color-mix(in srgb, var(--main-text-color) 3%, transparent);
     border: 1px dashed var(--border-color);
     border-radius: 4px;
@@ -3902,7 +3902,7 @@
 .agent-launch-modal-error {
     font-size: 12px;
     color: var(--error-color);
-    padding: 6px 8px;
+    padding: var(--space-1-5) var(--space-2);
     background: color-mix(in srgb, var(--error-color) 10%, transparent);
     border-radius: 3px;
 }
@@ -3916,23 +3916,23 @@
 .agent-import-count {
     font-size: 12px;
     color: var(--secondary-text-color);
-    margin-bottom: 8px;
+    margin-bottom: var(--space-2);
 }
 
 .agent-import-list {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: var(--space-1);
     margin-bottom: 10px;
 }
 
 .agent-import-row {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: var(--space-1-5);
     font-size: 12px;
     color: var(--main-text-color);
-    padding: 2px 0;
+    padding: var(--space-0-5) 0;
 
     &.agent-import-row-skip {
         opacity: 0.5;
@@ -3963,14 +3963,14 @@
     font-size: 12px;
     color: var(--secondary-text-color);
     border-top: 1px solid var(--border-color);
-    padding-top: 8px;
+    padding-top: var(--space-2);
 }
 
 .agent-import-result {
     font-size: 13px;
     color: var(--main-text-color);
     text-align: center;
-    padding: 20px 0;
+    padding: var(--space-5) 0;
 }
 
 // Error line shown inside the delete-confirm modal when the RPC fails.

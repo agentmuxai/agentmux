@@ -7,12 +7,12 @@
     right: 6px;
     z-index: var(--z-xterm-overlay);
     display: flex;
-    gap: 6px;
+    gap: var(--space-1-5);
     font-size: 11px;
     font-variant-numeric: tabular-nums;
     opacity: 0.5;
     white-space: nowrap;
-    padding: 1px 6px;
+    padding: 1px var(--space-1-5);
     border-radius: 3px;
     background: rgba(0, 0, 0, 0.3);
     pointer-events: none;

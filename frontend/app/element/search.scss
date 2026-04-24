@@ -42,7 +42,7 @@
 
     .right-buttons {
         gap: 5px;
-        padding-left: 4px;
+        padding-left: var(--space-1);
         button {
             font-size: 12px;
         }

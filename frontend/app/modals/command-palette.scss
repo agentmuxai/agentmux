@@ -27,7 +27,7 @@
 .command-palette-input-row {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--space-2);
     padding: 10px 14px;
     border-bottom: 1px solid var(--border-color);
     flex-shrink: 0;
@@ -68,7 +68,7 @@
 .command-palette-list {
     overflow-y: auto;
     flex: 1;
-    padding: 4px 0;
+    padding: var(--space-1) 0;
 
     &::-webkit-scrollbar {
         width: 6px;
@@ -125,7 +125,7 @@
 }
 
 .command-palette-empty {
-    padding: 24px 14px;
+    padding: var(--space-6) 14px;
     text-align: center;
     color: var(--secondary-text-color);
     font-size: 13px;

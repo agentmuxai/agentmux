@@ -81,11 +81,11 @@
             box-sizing: content-box;
 
             &[align="right"] {
-                padding-left: 20px;
+                padding-left: var(--space-5);
             }
 
             &[align="left"] {
-                padding-right: 20px;
+                padding-right: var(--space-5);
             }
         }
 
