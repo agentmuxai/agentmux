@@ -1,5 +1,5 @@
 {
-  "version": 5,
+  "version": 6,
   "agents": [
     {
       "id": "claude",
@@ -133,6 +133,30 @@
       "agent_bus_id": "openclaw",
       "content": {
         "env": "AGENT_NAME=openclaw\nAGENTMUX_AGENT_ID=OpenClaw",
+        "startup": "## Verification Round\n\nRun each check below. Fix failures before proceeding. Report results in a table.\n\n### 1. Identity\n```bash\ngh auth status\ngit config user.name && git config user.email\n```\nIf `gh auth status` fails, run `gh auth login`.\n\n### 2. Dev Tools\nInstall if missing, then verify:\n```bash\nnpm list -g @a5af/secrets @a5af/deploy-cli @a5af/database-cli @a5af/api-testing @a5af/file-tools @a5af/e2e-cli @a5af/reagent-cli @a5af/workspace-health 2>/dev/null | grep '@a5af/' || npm install -g @a5af/secrets @a5af/deploy-cli @a5af/database-cli @a5af/api-testing @a5af/file-tools @a5af/e2e-cli @a5af/reagent-cli @a5af/workspace-health\n```\nVerify key tools:\n```bash\nsecrets --version && deploy --version && reagent --version\n```\n\n### 3. Secrets Access\n```bash\nsecrets health services/infra services/prod\n```\n\n### 4. MCP Servers\nCheck AgentBus connectivity — list available peer agents.\n\n### Report\n\n| Check | Status | Details |\n|-------|--------|--------|\n| GitHub | OK/FAIL | username |\n| Git Identity | OK/FAIL | name, email |\n| Dev Tools | OK/FAIL | count installed |\n| Secrets | OK/FAIL | accessible secrets |\n| MCP AgentBus | OK/FAIL | peer count |\n\nIf all pass: \"Verification complete — ready to work.\"\nIf any FAIL: attempt fix. If unfixable, report and ask."
+      },
+      "skills": [
+        {
+          "name": "Startup Verification",
+          "trigger": "startup",
+          "skill_type": "prompt",
+          "description": "Re-run tool verification checks and report status table",
+          "content": "Run the verification round from your startup instructions. Check identity (gh, git), dev-tools (@a5af/* packages — install if missing), secrets access, and MCP servers. Report a status table with OK/FAIL for each check. Fix any failures automatically if possible."
+        }
+      ]
+    },
+    {
+      "id": "copilot",
+      "name": "Copilot",
+      "icon": "⛶",
+      "provider": "copilot",
+      "agent_type": "host",
+      "description": "Microsoft's coding agent",
+      "working_directory": "",
+      "shell": "pwsh",
+      "agent_bus_id": "copilot",
+      "content": {
+        "env": "AGENT_NAME=copilot\nAGENTMUX_AGENT_ID=Copilot",
         "startup": "## Verification Round\n\nRun each check below. Fix failures before proceeding. Report results in a table.\n\n### 1. Identity\n```bash\ngh auth status\ngit config user.name && git config user.email\n```\nIf `gh auth status` fails, run `gh auth login`.\n\n### 2. Dev Tools\nInstall if missing, then verify:\n```bash\nnpm list -g @a5af/secrets @a5af/deploy-cli @a5af/database-cli @a5af/api-testing @a5af/file-tools @a5af/e2e-cli @a5af/reagent-cli @a5af/workspace-health 2>/dev/null | grep '@a5af/' || npm install -g @a5af/secrets @a5af/deploy-cli @a5af/database-cli @a5af/api-testing @a5af/file-tools @a5af/e2e-cli @a5af/reagent-cli @a5af/workspace-health\n```\nVerify key tools:\n```bash\nsecrets --version && deploy --version && reagent --version\n```\n\n### 3. Secrets Access\n```bash\nsecrets health services/infra services/prod\n```\n\n### 4. MCP Servers\nCheck AgentBus connectivity — list available peer agents.\n\n### Report\n\n| Check | Status | Details |\n|-------|--------|--------|\n| GitHub | OK/FAIL | username |\n| Git Identity | OK/FAIL | name, email |\n| Dev Tools | OK/FAIL | count installed |\n| Secrets | OK/FAIL | accessible secrets |\n| MCP AgentBus | OK/FAIL | peer count |\n\nIf all pass: \"Verification complete — ready to work.\"\nIf any FAIL: attempt fix. If unfixable, report and ask."
       },
       "skills": [
