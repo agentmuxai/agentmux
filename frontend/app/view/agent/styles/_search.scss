@@ -1,0 +1,114 @@
+// Copyright 2024-2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// In-session search bar + search-match highlight. Wrapped in .agent-view so the cascade chain matches
+// the pre-split file (SPEC_AGENT_VIEW_SCSS_SPLIT_2026_04_24).
+.agent-view {
+    // === In-session Search Bar ===
+
+    .agent-search-bar {
+        flex-shrink: 0;
+        display: flex;
+        align-items: center;
+        gap: var(--space-1);
+        padding: var(--space-1) var(--space-2);
+        background: color-mix(in srgb, var(--accent-color) 6%, var(--main-bg-color));
+        border-bottom: 1px solid var(--border-color);
+        // Sticky so it stays visible while the document scrolls beneath it
+        position: sticky;
+        top: 0;
+        z-index: 10;
+    }
+
+    .agent-search-input {
+        flex: 1;
+        min-width: 0;
+        background: var(--main-bg-color);
+        color: var(--main-text-color);
+        border: 1px solid var(--border-color);
+        border-radius: 3px;
+        padding: 3px var(--space-1-5);
+        font-size: 12px;
+        font-family: inherit;
+        outline: none;
+        transition: border-color 0.15s;
+
+        &:focus {
+            border-color: var(--accent-color);
+        }
+
+        &::placeholder {
+            color: var(--secondary-text-color);
+            opacity: 0.6;
+        }
+    }
+
+    .agent-search-counter {
+        flex-shrink: 0;
+        font-size: 11px;
+        color: var(--secondary-text-color);
+        white-space: nowrap;
+        min-width: 56px;
+        text-align: right;
+        opacity: 0.75;
+    }
+
+    .agent-search-btn {
+        flex-shrink: 0;
+        width: 22px;
+        height: 22px;
+        padding: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: none;
+        border: 1px solid transparent;
+        border-radius: 3px;
+        cursor: pointer;
+        color: var(--secondary-text-color);
+        font-size: 11px;
+        line-height: 1;
+        transition: background 0.1s, color 0.1s, border-color 0.1s;
+
+        &:hover {
+            background: color-mix(in srgb, var(--accent-color) 15%, transparent);
+            border-color: var(--border-color);
+            color: var(--main-text-color);
+        }
+
+        &--close {
+            font-size: 14px;
+            margin-left: var(--space-0-5);
+
+            &:hover {
+                background: color-mix(in srgb, var(--error-color) 15%, transparent);
+                border-color: color-mix(in srgb, var(--error-color) 40%, transparent);
+                color: var(--error-color);
+            }
+        }
+    }
+
+    // === Search-match highlight ===
+
+    .agent-node-search-match {
+        // Subtle accent-tinted background to flag the matched node
+        background: color-mix(in srgb, var(--accent-color) 10%, transparent) !important; /* stylelint-disable-line declaration-no-important */
+        // Left border acts as a gutter indicator
+        border-left: 3px solid var(--accent-color) !important; /* stylelint-disable-line declaration-no-important */
+        border-radius: 2px;
+        // Small padding-left offset to compensate for the border
+        padding-left: var(--space-1);
+        // Brief animation so the highlight is immediately noticeable when
+        // navigating between matches
+        animation: search-match-flash 0.25s ease-out;
+    }
+
+    @keyframes search-match-flash {
+        from {
+            background: color-mix(in srgb, var(--accent-color) 28%, transparent);
+        }
+        to {
+            background: color-mix(in srgb, var(--accent-color) 10%, transparent);
+        }
+    }
+}
