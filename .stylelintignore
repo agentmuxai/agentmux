@@ -8,15 +8,10 @@ dist/
 node_modules/
 
 # === Grandfathered SCSS files (Phase 3+ migration removes one per PR) ===
-frontend/app/block/block.scss
 frontend/app/element/markdown.scss
 frontend/app/statusbar/StatusBar.scss
 frontend/app/tab/tab.scss
-frontend/app/theme.scss
 frontend/app/view/agent/agent-view.scss
 frontend/app/view/identity/identity-view.scss
-frontend/app/view/subagent/subagent-view.scss
 frontend/app/view/swarm/swarm-view.scss
 frontend/app/view/term/term.scss
-frontend/app/window/system-status.scss
-frontend/layout/lib/tilelayout.scss

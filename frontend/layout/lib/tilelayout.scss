@@ -63,9 +63,13 @@
         &:hover .line {
             visibility: visible;
 
-            // Ignore the prefers-reduced-motion override, since we are not applying a true animation here, just a delay.
+            // Ignore the prefers-reduced-motion override, since we're
+            // not applying a true animation here, just a delay before
+            // showing the resize line.
+            /* stylelint-disable declaration-no-important */
             transition-property: visibility !important;
             transition-delay: var(--animation-time-s) !important;
+            /* stylelint-enable declaration-no-important */
         }
     }
 
@@ -92,7 +96,11 @@
         .tile-preview-container {
             position: absolute;
             top: 10000px;
-            white-space: nowrap !important;
+            // `!important` required because the drag-preview's node
+            // may inherit `white-space: pre-wrap` from the block it's
+            // previewing; forcing nowrap keeps the measurement pass
+            // consistent regardless of the underlying content.
+            white-space: nowrap !important; /* stylelint-disable-line declaration-no-important */
             user-select: none;
             -webkit-user-select: none;
 

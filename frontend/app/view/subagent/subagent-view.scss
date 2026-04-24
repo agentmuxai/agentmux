@@ -76,7 +76,7 @@
     letter-spacing: 0.5px;
 
     &.subagent-status-active {
-        color: var(--success-color, #4ade80);
+        color: var(--success-color);
         background: rgba(74, 222, 128, 0.12);
     }
     &.subagent-status-completed {
@@ -144,7 +144,7 @@
     font-size: 12px;
     line-height: 1.5;
     white-space: pre-wrap;
-    word-break: break-word;
+    overflow-wrap: anywhere;
     font-family: var(--termfontfamily);
 }
 
@@ -164,7 +164,7 @@
 }
 
 .subagent-event-result-header.error {
-    color: var(--error-color, #f87171);
+    color: var(--error-color);
 }
 
 .subagent-expand-icon {
@@ -194,13 +194,13 @@
     font-family: var(--termfontfamily);
     line-height: 1.4;
     white-space: pre-wrap;
-    word-break: break-word;
+    overflow-wrap: anywhere;
     max-height: 200px;
     overflow-y: auto;
 }
 
 .subagent-event-output.error {
-    border-left: 2px solid var(--error-color, #f87171);
+    border-left: 2px solid var(--error-color);
 }
 
 .subagent-event-progress {

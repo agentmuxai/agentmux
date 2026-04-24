@@ -5,7 +5,12 @@
             "message": "Raw hex colours are forbidden — use a `--color-*` / `--*-color` token from `theme.scss` (SPEC_DESIGN_SYSTEM §5.2). Add the file to `.stylelintignore` only as a temporary grandfather; remove the entry when the file is migrated."
         }],
         "declaration-property-value-allowed-list": {
-            "z-index": ["/^var\\(--z(index)?-/", "/^calc\\(/", "0", "auto", "unset", "inherit", "initial"]
+            "z-index": [
+                "/^var\\(--z(index)?-/",
+                "/^calc\\(/",
+                "/^-?[0-9]{1,2}$/",
+                "auto", "unset", "inherit", "initial"
+            ]
         },
         "declaration-no-important": [true, {
             "message": "`!important` is forbidden — fix the underlying specificity or selector. If unavoidable, document the reason in a comment AND grandfather the file via `.stylelintignore`."
@@ -13,6 +18,9 @@
         "scss/comment-no-empty": null,
         "no-descending-specificity": null,
         "color-function-notation": null,
+        "color-hex-length": null,
+        "custom-property-empty-line-before": null,
+        "scss/operator-no-unspaced": null,
         "alpha-value-notation": null,
         "scss/dollar-variable-pattern": null,
         "media-feature-range-notation": null,

@@ -1,6 +1,11 @@
 // Copyright 2024-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+/* stylelint-disable color-no-hex --
+   theme.scss is the canonical source of colour primitives — hex
+   literals live here by design. Other component SCSS files must
+   reference these tokens instead of their own hex. */
+
 :root {
     --main-text-color: #f7f7f7;
     --title-font-size: 18px;
