@@ -41,6 +41,15 @@ export function SwarmView(props: ViewComponentProps<SwarmViewModel>): JSX.Elemen
                         Activity
                     </button>
                     <button
+                        class={`swarm-tab ${model.tabAtom() === "instances" ? "active" : ""}`}
+                        onClick={() => {
+                            model.setTab("instances");
+                            void model.refreshInstances();
+                        }}
+                    >
+                        Instances
+                    </button>
+                    <button
                         class={`swarm-tab ${model.tabAtom() === "history" ? "active" : ""}`}
                         onClick={() => {
                             model.setTab("history");
@@ -64,6 +73,9 @@ export function SwarmView(props: ViewComponentProps<SwarmViewModel>): JSX.Elemen
                 </Show>
                 <Show when={model.tabAtom() === "activity"}>
                     <SwarmActivity model={model} />
+                </Show>
+                <Show when={model.tabAtom() === "instances"}>
+                    <SwarmInstances model={model} />
                 </Show>
                 <Show when={model.tabAtom() === "history"}>
                     <SwarmHistory model={model} />
@@ -508,6 +520,98 @@ function SwarmActivity({ model }: { model: SwarmViewModel }): JSX.Element {
                 </For>
             </Show>
         </div>
+    );
+}
+
+// ── Instances Tab ───────────────────────────────────────────────────────
+// Lists every AgentInstance (a launched run of a definition). Click
+// "Open" to bring the pane that started the run back into focus, or
+// to (re-)launch a fresh pane for stopped/crashed instances.
+//
+// Implements PR G of SPEC_AGENT_DEFINITIONS_MODAL_2026_04_23.
+
+function SwarmInstances({ model }: { model: SwarmViewModel }): JSX.Element {
+    const instances = () => model.instancesAtom();
+
+    // Newest-first: AgentInstance.created_at is millis since epoch;
+    // a desc sort puts the most recent run on top.
+    const sorted = () =>
+        [...instances()].sort((a, b) => (b.created_at ?? 0) - (a.created_at ?? 0));
+
+    return (
+        <div class="swarm-instances">
+            <Show when={sorted().length === 0}>
+                <div class="swarm-empty">
+                    No instances yet. Launch an agent from the agent
+                    pane to populate this list.
+                </div>
+            </Show>
+
+            <Show when={sorted().length > 0}>
+                <div class="swarm-instances-summary">
+                    {sorted().length}{" "}
+                    {sorted().length === 1 ? "instance" : "instances"}
+                </div>
+                <table class="swarm-instances-table">
+                    <thead>
+                        <tr>
+                            <th>Status</th>
+                            <th>Definition</th>
+                            <th>Started</th>
+                            <th>Block</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <For each={sorted()}>
+                            {(inst) => <SwarmInstanceRow inst={inst} />}
+                        </For>
+                    </tbody>
+                </table>
+            </Show>
+        </div>
+    );
+}
+
+function SwarmInstanceRow({ inst }: { inst: AgentInstance }): JSX.Element {
+    const fmtAge = (created_at?: number): string => {
+        if (!created_at) return "—";
+        const ageMs = Date.now() - created_at;
+        const ageS = Math.floor(ageMs / 1000);
+        if (ageS < 60) return `${ageS}s ago`;
+        const ageM = Math.floor(ageS / 60);
+        if (ageM < 60) return `${ageM}m ago`;
+        const ageH = Math.floor(ageM / 60);
+        if (ageH < 24) return `${ageH}h ago`;
+        return `${Math.floor(ageH / 24)}d ago`;
+    };
+
+    return (
+        <tr class="swarm-instance-row">
+            <td>
+                <span
+                    class={`swarm-instance-status swarm-instance-status--${inst.status}`}
+                    title={inst.status}
+                >
+                    {inst.status}
+                </span>
+            </td>
+            <td title={inst.definition_id}>{inst.definition_id}</td>
+            <td>{fmtAge(inst.created_at)}</td>
+            <td title={inst.block_id ?? ""}>
+                {inst.block_id ? `${inst.block_id.slice(0, 8)}…` : "—"}
+            </td>
+            <td>
+                {/*
+                    "Open" doesn't yet bring focus to the running pane —
+                    that requires a tab/block focus RPC we don't have
+                    surfaced yet. For now this row is informational so
+                    users can answer "what have I launched?" without
+                    having to scroll through tabs. A `focusBlock(id)`
+                    RPC + button is the natural follow-up.
+                */}
+            </td>
+        </tr>
     );
 }
 
