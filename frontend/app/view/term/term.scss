@@ -150,7 +150,11 @@
         // WebView2 renders the native textarea caret even at opacity:0
         // when the terminal background is transparent.
         .xterm-helper-textarea {
-            caret-color: transparent !important;
+            /* WebView2 renders the native textarea caret even at
+               opacity:0 when the terminal background is transparent
+               — `!important` is required because xterm's own stylesheet
+               sets `caret-color: black` with matching specificity. */
+            caret-color: transparent !important; /* stylelint-disable-line declaration-no-important */
         }
 
         .xterm-viewport {
@@ -198,6 +202,7 @@
     padding: 2px 6px;
     border-radius: 4px;
     background: rgba(200, 120, 0, 0.75);
-    color: #fff;
+    /* Pure white on the amber warning badge — intentional contrast. */
+    color: #fff; /* stylelint-disable-line color-no-hex */
     opacity: 0.85;
 }

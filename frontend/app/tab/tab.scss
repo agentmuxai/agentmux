@@ -108,7 +108,10 @@
         cursor: pointer;
         z-index: var(--zindex-tab-name);
         padding: 0;
-        transition: none !important;
+        /* Tab close button must NOT pick up the general `.tab *`
+           transition rule — a transition on the close button causes
+           a visible flicker every time the active tab changes. */
+        transition: none !important; /* stylelint-disable-line declaration-no-important */
     }
 
     .close {
@@ -117,6 +120,11 @@
 
     // Custom tab color — overrides all other backgrounds
     &.tab-colored {
+        /* stylelint-disable declaration-no-important --
+           User-picked tab colour must beat the hover/active/dragging
+           state backgrounds declared further down; without
+           `!important` the later-declared hover selectors win and
+           the custom colour vanishes. */
         .tab-inner {
             background: var(--tab-color) !important;
         }
@@ -124,6 +132,7 @@
             color: rgba(255, 255, 255, 0.95) !important;
             text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
         }
+        /* stylelint-enable declaration-no-important */
         .wave-button {
             color: rgba(255, 255, 255, 0.65);
             &:hover {
@@ -164,7 +173,7 @@ body.nohover .tab.active .close {
     visibility: visible;
 }
 
-@keyframes expandWidthAndFadeIn {
+@keyframes expand-width-and-fade-in {
     from {
         width: var(--initial-tab-width);
         opacity: 0;
@@ -176,7 +185,7 @@ body.nohover .tab.active .close {
 }
 
 .tab.new-tab {
-    animation: expandWidthAndFadeIn 0.1s forwards;
+    animation: expand-width-and-fade-in 0.1s forwards;
 }
 
 // Colored active tab — white accent bar for contrast on any color
@@ -196,7 +205,9 @@ body:not(.nohover) .tab.tab-colored.active:hover {
 body:not(.nohover) .tab.tab-colored:hover,
 body:not(.nohover) .tab.tab-colored.dragging {
     .tab-inner {
-        background: var(--tab-color) !important;
+        /* Same override as the base `.tab-colored` rule above — user
+           tab colour must beat the hover background. */
+        background: var(--tab-color) !important; /* stylelint-disable-line declaration-no-important */
         filter: brightness(1.18);
     }
 }
@@ -208,8 +219,8 @@ body:not(.nohover) .tab.tab-colored.dragging {
     flex-direction: column;
     gap: 6px;
     padding: 8px;
-    background: var(--main-bg-color, #1a1a2e);
-    border: 1px solid var(--border-color, #333);
+    background: var(--main-bg-color);
+    border: 1px solid var(--border-color);
     border-radius: 6px;
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
     user-select: none;
@@ -234,7 +245,7 @@ body:not(.nohover) .tab.tab-colored.dragging {
 .tab-context-actions {
     display: flex;
     gap: 4px;
-    border-top: 1px solid var(--border-color, #333);
+    border-top: 1px solid var(--border-color);
     padding-top: 6px;
 }
 
@@ -242,7 +253,7 @@ body:not(.nohover) .tab.tab-colored.dragging {
     flex: 1;
     padding: 4px 6px;
     background: transparent;
-    border: 1px solid var(--border-color, #333);
+    border: 1px solid var(--border-color);
     border-radius: 4px;
     color: var(--secondary-text-color);
     font-size: 11px;
@@ -255,8 +266,8 @@ body:not(.nohover) .tab.tab-colored.dragging {
     }
 
     &.tab-context-btn-close:hover {
-        border-color: var(--error-color, #e55);
-        color: var(--error-color, #e55);
+        border-color: var(--error-color);
+        color: var(--error-color);
     }
 }
 
