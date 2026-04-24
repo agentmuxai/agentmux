@@ -200,7 +200,7 @@
 
 .status-bar-restart-btn {
     width: 100%;
-    padding: var(--space-1) 8px;
+    padding: var(--space-1) var(--space-2);
     background: var(--error-color);
     /* Pure white on red — intentional for the restart button;
        no semantic token maps to "always white regardless of theme". */

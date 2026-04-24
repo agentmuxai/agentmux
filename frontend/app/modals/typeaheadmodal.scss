@@ -40,7 +40,7 @@
         input {
             width: 100%;
             flex-shrink: 0;
-            padding: var(--space-1) 6px;
+            padding: var(--space-1) var(--space-1-5);
             height: 24px;
         }
 
@@ -73,14 +73,14 @@
             line-height: 12px;
             opacity: 0.7;
             letter-spacing: 0.11px;
-            padding: var(--space-1) 0px 0px 4px;
+            padding: var(--space-1) 0px 0px var(--space-1);
         }
 
         .suggestion-item {
             width: 100%;
             cursor: pointer;
             display: flex;
-            padding: var(--space-1-5) 8px;
+            padding: var(--space-1-5) var(--space-2);
             align-items: center;
             gap: var(--space-2);
             align-self: stretch;

@@ -41,7 +41,7 @@
 }
 
 .swarm-tab {
-    padding: var(--space-1) 12px;
+    padding: var(--space-1) var(--space-3);
     border: none;
     background: transparent;
     color: var(--secondary-text-color);
@@ -111,7 +111,7 @@
     display: flex;
     align-items: center;
     gap: 10px;
-    padding: var(--space-2) 12px;
+    padding: var(--space-2) var(--space-3);
     border: 1px solid var(--border-color);
     border-radius: 4px;
     cursor: pointer;
@@ -199,7 +199,7 @@
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    padding: 48px 24px;
+    padding: 48px var(--space-6);
     gap: 10px;
     text-align: center;
 }
@@ -332,7 +332,7 @@
 }
 
 .swarm-history-load-more-btn {
-    padding: var(--space-1-5) 16px;
+    padding: var(--space-1-5) var(--space-4);
     background: transparent;
     border: 1px solid var(--border-color);
     border-radius: 3px;
@@ -370,7 +370,7 @@
 }
 
 .swarm-conversation-back {
-    padding: var(--space-1) 8px;
+    padding: var(--space-1) var(--space-2);
     background: transparent;
     border: 1px solid var(--border-color);
     border-radius: 3px;
@@ -470,7 +470,7 @@
     display: flex;
     align-items: baseline;
     gap: var(--space-1-5);
-    padding: 3px 6px;
+    padding: 3px var(--space-1-5);
     background: color-mix(in srgb, var(--main-text-color) 4%, transparent);
     border-radius: 3px;
     font-size: 11px;
@@ -580,7 +580,7 @@
 
 .swarm-search-result-type {
     color: var(--secondary-text-color);
-    padding: 1px 4px;
+    padding: 1px var(--space-1);
     background: color-mix(in srgb, var(--main-text-color) 6%, transparent);
     border-radius: 2px;
 }
@@ -607,7 +607,7 @@
 // See `agentmux-ai/AGENT_SPAWNED_PROCESSES_SPEC.md` + PR #497 backend.
 
 .swarm-activity {
-    padding: var(--space-1-5) 8px;
+    padding: var(--space-1-5) var(--space-2);
     display: flex;
     flex-direction: column;
     gap: var(--space-2);
@@ -619,7 +619,7 @@
     text-transform: uppercase;
     letter-spacing: 0.5px;
     opacity: 0.7;
-    padding: var(--space-0-5) 4px;
+    padding: var(--space-0-5) var(--space-1);
 }
 
 .swarm-activity-group {
@@ -632,7 +632,7 @@
     display: flex;
     align-items: center;
     gap: var(--space-2);
-    padding: var(--space-1) 8px;
+    padding: var(--space-1) var(--space-2);
     border-bottom: 1px solid var(--border-color);
     font-family: var(--fixed-font, monospace);
     font-size: 12px;
@@ -673,7 +673,7 @@
     font-size: 11px;
 
     thead th {
-        padding: 3px 8px;
+        padding: 3px var(--space-2);
         text-align: left;
         font-weight: normal;
         font-size: 10px;
@@ -684,7 +684,7 @@
     }
 
     td {
-        padding: var(--space-0-5) 8px;
+        padding: var(--space-0-5) var(--space-2);
         border-bottom: 1px solid color-mix(in srgb, var(--border-color) 40%, transparent);
     }
 
@@ -719,7 +719,7 @@
 }
 
 .swarm-activity-kill-btn {
-    padding: var(--space-0-5) 8px;
+    padding: var(--space-0-5) var(--space-2);
     background: transparent;
     border: 1px solid color-mix(in srgb, var(--error-color) 50%, transparent);
     border-radius: 3px;
@@ -740,7 +740,7 @@
     }
 
     &--row {
-        padding: 1px 6px;
+        padding: 1px var(--space-1-5);
         font-size: 10px;
     }
 }

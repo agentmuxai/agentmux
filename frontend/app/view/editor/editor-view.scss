@@ -46,7 +46,7 @@
 }
 
 .editor-open-btn {
-    padding: var(--space-1-5) 16px;
+    padding: var(--space-1-5) var(--space-4);
     border: 1px solid var(--border-color);
     border-radius: 4px;
     background: var(--accent-color);
@@ -69,7 +69,7 @@
 }
 
 .editor-error {
-    padding: var(--space-2) 12px;
+    padding: var(--space-2) var(--space-3);
     background: rgba(255, 80, 80, 0.15);
     color: var(--error-color);
     font-size: 12px;

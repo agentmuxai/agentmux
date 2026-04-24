@@ -199,7 +199,7 @@
     pointer-events: none;
     font-size: 10px;
     font-family: var(--termfontfamily, monospace);
-    padding: var(--space-0-5) 6px;
+    padding: var(--space-0-5) var(--space-1-5);
     border-radius: 4px;
     background: rgba(200, 120, 0, 0.75);
     /* Pure white on the amber warning badge — intentional contrast. */

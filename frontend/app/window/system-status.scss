@@ -52,12 +52,12 @@
         // title bar, or the hover background leaves a 6-px strip at the top
         // uncovered. Pull the container up with a negative margin and grow
         // its height by the same amount so flex still respects it.
-        margin-top: -6px;
+        margin-top: -var(--space-1-5);
         height: calc(100% + 6px);
 
         // Butt up against the edge — Win11 caption buttons have no
         // right-margin padding.
-        margin-right: -6px;
+        margin-right: -var(--space-1-5);
 
         // Overlay alphas tuned for the AgentMux title-bar surface, which is
         // noticeably darker than Win11's default Mica. Raw Fluent tokens
