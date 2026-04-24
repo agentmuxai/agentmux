@@ -24,7 +24,8 @@
     "package:portable": "task package:portable",
     "test": "vitest",
     "coverage": "vitest run --coverage",
-    "clean": "task clean"
+    "clean": "task clean",
+    "lint:scss": "stylelint \"frontend/**/*.scss\" --allow-empty-input"
   },
   "devDependencies": {
     "@eslint/js": "^8.57.0",
@@ -56,6 +57,8 @@
     "prettier-plugin-jsdoc": "^1.8.0",
     "prettier-plugin-organize-imports": "^4.3.0",
     "sass": "1.97.2",
+    "stylelint": "^17.9.0",
+    "stylelint-config-standard-scss": "^17.0.0",
     "tailwindcss": "^4.1.18",
     "tailwindcss-animate": "^1.0.7",
     "ts-node": "^10.9.2",
