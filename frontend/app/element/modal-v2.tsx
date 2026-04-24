@@ -167,6 +167,10 @@ export interface ModalProps {
     /** Optional extra class on the panel — lets a caller apply
      *  component-specific layout without sidestepping the primitive. */
     panelClass?: string;
+    /** Renders an X close button in the top-right corner of the panel.
+     *  Clicking it invokes `onClose`. Useful for informational modals
+     *  where the only disposition is "dismiss" — AboutModal, etc. */
+    showCloseButton?: boolean;
     /** Override aria-labelledby. By default resolves from a nested ModalHeader. */
     ariaLabel?: string;
     ariaLabelledBy?: string;
@@ -330,6 +334,16 @@ export const Modal: Component<ModalProps> = (props) => {
                             data-size={props.size ?? "md"}
                             tabIndex={-1}
                         >
+                            <Show when={props.showCloseButton}>
+                                <button
+                                    type="button"
+                                    class="modal-panel-close-btn"
+                                    aria-label="Close"
+                                    onClick={() => props.onClose()}
+                                >
+                                    {"\u2715"}
+                                </button>
+                            </Show>
                             {props.children}
                         </div>
                         <span
