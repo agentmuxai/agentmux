@@ -219,6 +219,12 @@ export interface SessionStats {
     cost_usd?: number;    // from result.cost_usd
     duration_ms?: number; // from result.duration_ms
     num_turns?: number;   // from result.num_turns
+    /** Snapshot of TurnTokens.input at finalizeTurn — preserved here
+     *  because the live TurnTokens signal is nulled on session_end
+     *  before the Worked footer renders. See PR #549 reagent/codex P1. */
+    input_tokens?: number;
+    /** Snapshot of TurnTokens.output at finalizeTurn (see above). */
+    output_tokens?: number;
 }
 
 /**

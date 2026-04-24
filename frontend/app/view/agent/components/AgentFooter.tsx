@@ -87,8 +87,11 @@ export const AgentStatusLine = (props: AgentStatusLineProps): JSX.Element => {
 
     // Completed-turn summary split into two groups so tokens + duration
     // (the numbers users ask about most) sit on the primary line and
-    // cost + turn count take the secondary role. Per
-    // docs/specs/SPEC_AGENT_PANE_ZONE_ORDER_WORKED_FOOTER_2026_04_24.md §4.2.
+    // cost + turn count take the secondary role. Tokens read from
+    // sessionStats rather than turnTokens because finalizeTurn nulls
+    // the live turnTokens signal on session_end — the snapshot lives
+    // in sessionStats.input_tokens / output_tokens. Per PR #549 review.
+    // Spec: docs/specs/SPEC_AGENT_PANE_ZONE_ORDER_WORKED_FOOTER_2026_04_24.md §4.2.
     const workedPrimary = createMemo((): string | null => {
         const stats = props.sessionStats;
         if (!stats) return null;
@@ -97,7 +100,9 @@ export const AgentStatusLine = (props: AgentStatusLineProps): JSX.Element => {
             const s = Math.round(stats.duration_ms / 1000);
             parts.push(s < 60 ? `${Math.max(1, s)}s` : `${Math.floor(s / 60)}m ${s % 60}s`);
         }
-        if (props.turnTokens) parts.push(fmtTokens(props.turnTokens));
+        if (stats.input_tokens != null || stats.output_tokens != null) {
+            parts.push(fmtTokens({ input: stats.input_tokens ?? 0, output: stats.output_tokens ?? 0 }));
+        }
         return parts.join("  \u00b7  ");
     });
 
