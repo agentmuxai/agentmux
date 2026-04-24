@@ -1,7 +1,7 @@
 // Copyright 2024-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-@import url("../../../node_modules/highlight.js/scss/github-dark-dimmed.scss");
+@import "../../../node_modules/highlight.js/scss/github-dark-dimmed.scss";
 
 .markdown {
     display: flex;
@@ -24,6 +24,12 @@
             overflow: hidden;
         }
 
+        /* stylelint-disable declaration-no-important --
+           Markdown rendering inserts paragraph/list margins that
+           break the block's visual containment; forcing the first
+           heading and last child to 0 margin is the standard fix
+           and must beat the rehype styles that land at higher
+           specificity. */
         *:last-child {
             margin-bottom: 0 !important;
         }
@@ -31,6 +37,7 @@
         .heading:not(.heading ~ .heading) {
             margin-top: 0 !important;
         }
+        /* stylelint-enable declaration-no-important */
 
         .heading {
             color: var(--main-text-color);
@@ -87,7 +94,7 @@
         }
 
         a {
-            color: #32afff;
+            color: var(--term-bright-blue);
         }
 
         ul {
@@ -118,7 +125,7 @@
             code {
                 line-height: 1.5;
                 white-space: pre-wrap;
-                word-wrap: break-word;
+                overflow-wrap: break-word;
                 overflow: auto;
                 overflow: hidden;
                 background-color: transparent;
