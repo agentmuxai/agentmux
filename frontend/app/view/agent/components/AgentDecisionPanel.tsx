@@ -73,12 +73,14 @@ export const AgentDecisionPanel = (props: AgentDecisionPanelProps): JSX.Element 
     // depending on which branch is mounted; widened to HTMLElement
     // so both ref assignments type-check.
     let rootRef: HTMLElement | undefined;
-    // Per-instance scope-radio group name. Hardcoding the same name
-    // across panels caused multi-pane scope desync (reagent P2 round-5):
-    // picking scope in pane A's panel cleared pane B's radio via
-    // native radio-group rules, even though both Solid signals were
-    // correct.
-    const scopeGroupName = `agent-decision-scope-${createUniqueId()}`;
+    // Per-instance unique IDs. Anything that's `name=` on a radio,
+    // `id=` on an element targeted by aria-describedby/-labelledby,
+    // or otherwise globally addressable in the DOM must be scoped
+    // per-instance. Hardcoding caused multi-pane desync — reagent
+    // P2 round-5 (radio name) + round-6 (deny-error id).
+    const uid = createUniqueId();
+    const scopeGroupName = `agent-decision-scope-${uid}`;
+    const denyErrorId = `agent-decision-deny-error-${uid}`;
 
     const head = createMemo<ToolNode | null>(() => props.pending()[0] ?? null);
     const queueDepth = () => props.pending().length;
@@ -391,11 +393,11 @@ export const AgentDecisionPanel = (props: AgentDecisionPanelProps): JSX.Element 
                             rows={3}
                             autofocus
                             aria-invalid={denyError() != null}
-                            aria-describedby={denyError() ? "agent-decision-deny-error" : undefined}
+                            aria-describedby={denyError() ? denyErrorId : undefined}
                         />
                         <Show when={denyError()}>
                             <span
-                                id="agent-decision-deny-error"
+                                id={denyErrorId}
                                 class="agent-decision-panel-feedback-error"
                                 role="alert"
                             >
