@@ -1,6 +1,6 @@
 [package]
 name = "agentmux-common"
-version = "0.33.392"
+version = "0.33.393"
 edition = "2021"
 description = "Shared utilities for AgentMux crates"
 

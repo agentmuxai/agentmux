@@ -376,29 +376,59 @@ per adapter:
 Unsupported providers gate the prompt feature off in the agent
 card's UI so the user can't pick a mode the CLI can't honour.
 
-### 9.1 Detection strategy
+### 9.1 Detection strategy + delivery mechanism
 
-A spec-refresh ground-truth (2026-04-24): Claude Code CLI in
-non-bypass + non-interactive mode (`--print --output-format
-stream-json`) does not currently emit a structured
-`permission_request` JSON event when it gates a tool call. It
-prompts on the controlling tty for `y/n`, which is what causes
-the sidecar's stdin to hang (issue #551 §Problem). Two plausible
-paths forward:
+Spec-refresh ground-truth (2026-04-24, updated 2026-04-25
+during PR #557 review):
 
-1. **Lobby Anthropic for a structured stream-json event.**
-   Cleanest. Out of our hands; treat as a stretch goal.
-2. **Synthesise a `PermissionRequestEvent` ourselves** by
-   detecting the y/n prompt pattern in the CLI's mixed-format
-   output: when the parser sees a recognisable
-   "Allow tool call to <X>? [y/n]" line, materialise the event,
-   suppress the raw line from the document, and stash the
-   prompt's tty descriptor so `tool:decision` can answer it.
+**Detection.** Claude Code CLI in non-bypass + non-interactive
+mode (`--print --output-format stream-json`) does not emit a
+structured `permission_request` JSON event. The original
+spec assumed the CLI would prompt y/n on stdin and we'd snoop
+the output for it. In fact, in `--print` mode the CLI does
+not read stdin at all — there's no interactive prompt to
+answer. Permission gating happens entirely via the
+`--permission-mode` flag set at spawn time.
 
-Path 2 ships in v1.x; path 1 is preferred if upstream cooperates.
-v1's first PR delivers the *type plumbing* and a stub adapter
-hook so the rest of the system can be built against the shape
-without committing to a specific detection strategy yet.
+**Delivery.** Because the running subprocess never asks the
+user mid-turn, there's nothing to "write y/n to." Codex's P1
+on PR #557 caught the matching issue at the controller layer:
+`SubprocessController::send_input` rejects raw `input_data`
+(returns `Err("...use AgentInputCommand")`). Even if it
+accepted bytes, the subprocess wouldn't read them.
+
+**This means the v1 design as originally drafted (mid-turn
+y/n write) cannot work against `--print` Claude.** Two viable
+paths forward; PR-3b / PR-4 picks one:
+
+1. **Rules-persistence-only model.** Each turn runs to
+   completion; the user's decision becomes a persisted rule
+   (`.agentmux/permissions.json`). The NEXT turn launches
+   with a tightened `--permission-mode` (or pre-allowed tool
+   list) reflecting accumulated rules. UI flow becomes
+   "after a turn lands with denied tool calls, the panel
+   asks 'remember this for next time?' rather than gating
+   the live turn." Smaller scope; matches today's
+   architecture; loses the "interrupt the agent" power-feature
+   from the original spec but ships v1 cleanly.
+
+2. **Interactive-mode subprocess launch.** Spawn Claude CLI
+   *without* `--print` so it prompts on a real tty; capture
+   stdout for the panel; write y/n to a controller that
+   actually pipes to stdin. Requires a new controller type
+   parallel to `SubprocessController`, a tty pump, and
+   parsing of mixed text-mode output. Larger scope; matches
+   the issue's original vision.
+
+PR-3a (the in-flight PR #557) lands the IPC contract +
+frontend wiring + audit logging. The handler **no-ops the
+delivery** (logs only) so it doesn't regress behaviour.
+PR-3b implements path 1 and revisits whether path 2 is
+worth a follow-up.
+
+PR-1's type plumbing + PR-2's panel UI still lay the right
+foundation either way — the open question is only where the
+decision *goes* once it's made.
 
 ---
 

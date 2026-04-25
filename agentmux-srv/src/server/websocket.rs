@@ -17,12 +17,14 @@ use crate::backend::blockcontroller;
 use crate::backend::rpc::engine::WshRpcEngine;
 use crate::backend::rpc_types::{
     CommandBlockInputData, CommandControllerResyncData, CommandEventReadHistoryData,
-    CommandGetMetaData, CommandSetMetaData, RpcMessage, COMMAND_CONTROLLER_INPUT,
+    CommandGetMetaData, CommandSetMetaData, CommandToolDecisionData,
+    RpcMessage, COMMAND_CONTROLLER_INPUT,
     COMMAND_CONTROLLER_RESYNC, COMMAND_EVENT_READ_HISTORY, COMMAND_EVENT_SUB, COMMAND_EVENT_UNSUB,
     COMMAND_EVENT_UNSUB_ALL, COMMAND_GET_FULL_CONFIG, COMMAND_GET_META,
     COMMAND_GET_AI_RATE_LIMIT, COMMAND_ROUTE_ANNOUNCE, COMMAND_ROUTE_UNANNOUNCE,
     COMMAND_SET_META, COMMAND_SET_CONFIG, COMMAND_APP_INFO,
-    COMMAND_SUBPROCESS_SPAWN, COMMAND_AGENT_INPUT, COMMAND_AGENT_STOP, COMMAND_WRITE_AGENT_CONFIG,
+    COMMAND_SUBPROCESS_SPAWN, COMMAND_AGENT_INPUT, COMMAND_AGENT_STOP, COMMAND_TOOL_DECISION,
+    COMMAND_WRITE_AGENT_CONFIG,
     CommandSubprocessSpawnData, CommandAgentInputData, CommandAgentStopData, CommandWriteAgentConfigData,
 };
 use crate::backend::obj::{Block, TermSize, WaveObjUpdate, wave_obj_to_value};
@@ -649,6 +651,65 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                     .map_err(|e| format!("controllerinput: {e}"))?;
                 let input = parse_block_input(&cmd)?;
                 blockcontroller::send_input(&cmd.blockid, input)?;
+                Ok(None)
+            })
+        }),
+    );
+
+    // tooldecision → reply to a per-tool-call permission gate.
+    //
+    // The original PR-3a draft tried to write `y\n` / `n\n` to the
+    // subprocess's stdin via `blockcontroller::send_input`. Codex P1
+    // on PR #557 caught that this would fail: `SubprocessController::
+    // send_input` (and `PersistentSubprocessController::send_input`)
+    // both reject raw `input_data`, returning `Err("...use
+    // AgentInputCommand")`. The deeper truth is that AgentMux runs
+    // the agent CLI in non-interactive `--print` mode — the CLI
+    // never reads stdin and a y/n write would be a no-op even if
+    // the controller accepted it. See SPEC_DECISION_PROMPT
+    // _2026_04_24.md §9.1.
+    //
+    // For now this handler accepts the decision, validates the
+    // payload, logs it (audit trail via `~/.agentmux/logs/`), and
+    // returns Ok. The actual delivery mechanism (rule-persistence
+    // for next-turn application, or interactive-mode subprocess
+    // launch with stdin write) is decided in PR-3b / PR-4 once we
+    // pick a CLI integration strategy.
+    engine.register_handler(
+        COMMAND_TOOL_DECISION,
+        Box::new(|data, _ctx| {
+            Box::pin(async move {
+                let cmd: CommandToolDecisionData = serde_json::from_value(data)
+                    .map_err(|e| format!("tooldecision: {e}"))?;
+                match cmd.outcome.as_str() {
+                    "allow" | "deny" => {}
+                    other => {
+                        return Err(format!(
+                            "tooldecision: invalid outcome '{}' (expected 'allow' or 'deny')",
+                            other
+                        ));
+                    }
+                }
+                // Validate scope so PR-3b's rules-persistence layer
+                // can trust the value without re-checking. Reagent P1
+                // round-3 on PR #557.
+                match cmd.scope.as_str() {
+                    "once" | "session" | "project" | "global" => {}
+                    other => {
+                        return Err(format!(
+                            "tooldecision: invalid scope '{}' (expected 'once'/'session'/'project'/'global')",
+                            other
+                        ));
+                    }
+                }
+                tracing::info!(
+                    block_id = %cmd.blockid,
+                    request_id = %cmd.request_id,
+                    outcome = %cmd.outcome,
+                    scope = %cmd.scope,
+                    has_feedback = cmd.feedback.is_some(),
+                    "[tooldecision] received (delivery mechanism deferred to PR-3b/PR-4)"
+                );
                 Ok(None)
             })
         }),

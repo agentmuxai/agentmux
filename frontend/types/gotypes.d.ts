@@ -152,6 +152,16 @@ declare global {
         termsize?: TermSize;
     };
 
+    // wshrpc.CommandToolDecisionData — per-tool-call permission reply.
+    // Spec: docs/specs/SPEC_DECISION_PROMPT_2026_04_24.md §4.3.
+    type CommandToolDecisionData = {
+        blockid: string;
+        request_id: string;
+        outcome: "allow" | "deny";
+        scope: "once" | "session" | "project" | "global";
+        feedback?: string;
+    };
+
     // wshrpc.CommandBlockSetViewData
     type CommandBlockSetViewData = {
         blockid: string;
