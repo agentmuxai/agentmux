@@ -218,6 +218,11 @@
         "window:zoom": {
           "type": "number"
         },
+        "window:theme": {
+          "type": "string",
+          "enum": ["default", "midnight", "high-contrast", "monokai", "nord", "dracula", "catppuccin", "tokyo-night", "gruvbox"],
+          "description": "UI color theme. Options: default (dark grey + blue), midnight (deep navy), high-contrast (black + cyan), monokai (warm dark + green), nord (arctic blue-grey), dracula (purple dark), catppuccin (pastel dark + mauve), tokyo-night (blue-purple), gruvbox (retro warm + yellow)"
+        },
         "telemetry:*": {
           "type": "boolean"
         },

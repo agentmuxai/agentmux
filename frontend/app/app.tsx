@@ -139,6 +139,14 @@ function AppSettingsUpdater() {
         // Apply Tauri-level window transparency and platform blur effects
         const isBlur = windowSettings?.["window:blur"] ?? false;
         getApi().setWindowTransparency(isTransparentOrBlur, isBlur, opacity);
+
+        // Apply color theme
+        const theme = windowSettings?.["window:theme"];
+        if (theme && theme !== "default") {
+            document.documentElement.setAttribute("data-theme", theme);
+        } else {
+            document.documentElement.removeAttribute("data-theme");
+        }
     });
     return null;
 }
