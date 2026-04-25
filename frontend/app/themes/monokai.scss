@@ -1,0 +1,59 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+//
+// Monokai — warm dark, vivid pink/green/yellow palette
+
+[data-theme="monokai"] {
+    --main-bg-color: #272822;
+    --panel-bg-color: rgba(36, 37, 31, 0.6);
+    --block-bg-color: rgba(26, 27, 22, 0.7);
+    --block-bg-solid-color: #1a1b16;
+    --modal-bg-color: #2d2e27;
+
+    --main-text-color: #f8f8f2;
+    --secondary-text-color: #cfcfc2;
+    --grey-text-color: #75715e;
+
+    --accent-color: #a6e22e;
+    --link-color: #a6e22e;
+
+    --border-color: rgba(255, 255, 255, 0.12);
+    --form-element-border-color: rgba(255, 255, 255, 0.1);
+    --keybinding-border-color: rgba(248, 248, 242, 0.2);
+
+    --hover-bg-color: rgba(166, 226, 46, 0.08);
+    --highlight-bg-color: rgba(166, 226, 46, 0.16);
+
+    --error-color: #f92672;
+    --warning-color: #e6db74;
+    --success-color: #a6e22e;
+
+    --button-grey-bg: rgba(255, 255, 255, 0.05);
+    --button-grey-hover-bg: rgba(255, 255, 255, 0.1);
+    --button-grey-border-color: rgba(255, 255, 255, 0.12);
+    --button-green-bg: #a6e22e;
+    --button-red-bg: #f92672;
+    --button-yellow-bg: #e6db74;
+
+    --scrollbar-thumb-color: rgba(255, 255, 255, 0.15);
+    --scrollbar-thumb-hover-color: rgba(166, 226, 46, 0.4);
+
+    --term-background: #272822;
+    --term-foreground: #f8f8f2;
+    --term-black: #272822;
+    --term-red: #f92672;
+    --term-green: #a6e22e;
+    --term-yellow: #e6db74;
+    --term-blue: #66d9ef;
+    --term-magenta: #ae81ff;
+    --term-cyan: #66d9ef;
+    --term-white: #f8f8f2;
+    --term-bright-black: #75715e;
+    --term-bright-red: #f92672;
+    --term-bright-green: #a6e22e;
+    --term-bright-yellow: #e6db74;
+    --term-bright-blue: #66d9ef;
+    --term-bright-magenta: #ae81ff;
+    --term-bright-cyan: #66d9ef;
+    --term-bright-white: #f9f8f5;
+}
