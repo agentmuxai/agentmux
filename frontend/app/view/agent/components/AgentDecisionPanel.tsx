@@ -56,12 +56,20 @@ const SCOPE_HINT: Record<DecisionOutcome["scope"], string> = {
 
 const SCOPE_ORDER: DecisionOutcome["scope"][] = ["once", "session", "project", "global"];
 
+// Tiny child that calls usePaneOverlay against the panel root ref.
+// Same pattern as modal-v2's `ModalPaneOverlayClip` — mounted only
+// when the panel is visible, so `onMount` runs while `rootRef` is
+// already attached to the live DOM element. Calling usePaneOverlay
+// from the outer component would register undefined on first mount
+// (the `<Show>` hasn't materialised yet) and never refresh on
+// reveal — codex P1 on PR #556.
+const DecisionPanelClip = (p: { getEl: Accessor<HTMLElement | null | undefined> }): JSX.Element => {
+    usePaneOverlay(p.getEl);
+    return null;
+};
+
 export const AgentDecisionPanel = (props: AgentDecisionPanelProps): JSX.Element => {
     let rootRef: HTMLDivElement | undefined;
-    // Win32 airspace cut so the panel paints over any browser pane
-    // HWND in the same window. Same primitive used by modal-v2 and
-    // MoreDropdown — see frontend/app/platform/pane-overlay.ts.
-    usePaneOverlay(() => rootRef);
 
     const head = createMemo<ToolNode | null>(() => props.pending()[0] ?? null);
     const queueDepth = () => props.pending().length;
@@ -237,9 +245,9 @@ export const AgentDecisionPanel = (props: AgentDecisionPanelProps): JSX.Element 
                 }}
                 role="dialog"
                 aria-label="Permission decision required"
-                onKeyDown={handleKey}
                 tabIndex={-1}
             >
+                <DecisionPanelClip getEl={() => rootRef} />
                 <div class="agent-decision-panel-header">
                     <span class="agent-decision-panel-icon" aria-hidden="true">⚠</span>
                     <span class="agent-decision-panel-title">
