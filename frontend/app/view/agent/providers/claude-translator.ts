@@ -1,7 +1,7 @@
 // Copyright 2025, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { SessionStats, StreamEvent } from "../types";
+import type { PermissionRequestEvent, SessionStats, StreamEvent } from "../types";
 import type { OutputTranslator } from "./translator";
 
 /**
@@ -79,6 +79,20 @@ export class ClaudeTranslator implements OutputTranslator {
         this.currentToolName = null;
         this.toolInputBuffer = "";
         this.toolNameById.clear();
+    }
+
+    /**
+     * Stub. Claude Code CLI does not currently emit a structured
+     * `permission_request` stream event; in non-bypass + non-interactive
+     * mode it prompts y/n on the controlling tty. Detection strategy
+     * (line-pattern recognition vs. waiting for an upstream event) is
+     * decided in a later v1 PR — see
+     * docs/specs/SPEC_DECISION_PROMPT_2026_04_24.md §9.1. This hook is
+     * here so the rest of the system can wire to the right interface
+     * shape today.
+     */
+    parsePermissionRequest(_raw: unknown): PermissionRequestEvent | null {
+        return null;
     }
 
     private isStreamEvent(event: any): boolean {
