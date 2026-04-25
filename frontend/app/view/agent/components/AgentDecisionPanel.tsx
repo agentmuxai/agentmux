@@ -17,7 +17,7 @@
  * downstream of "user clicked Allow / Deny" can be exercised.
  */
 
-import { createMemo, createSignal, For, Show, type Accessor, type JSX } from "solid-js";
+import { createEffect, createMemo, createSignal, For, onCleanup, Show, type Accessor, type JSX } from "solid-js";
 import { usePaneOverlay } from "@/app/platform/pane-overlay";
 import type { PermissionRequestEvent, ToolNode } from "../types";
 
@@ -109,6 +109,12 @@ export const AgentDecisionPanel = (props: AgentDecisionPanelProps): JSX.Element 
         }
     };
 
+    // Visible validation message when Send-denial is pressed without
+    // the required feedback. Cleared on next keystroke in the textarea.
+    // Reagent P1: previously the deny silently no-op'd, leaving the user
+    // stuck with no indication why nothing happened.
+    const [denyError, setDenyError] = createSignal<string | null>(null);
+
     const dispatchDeny = () => {
         const r = request();
         if (!r) return;
@@ -116,7 +122,7 @@ export const AgentDecisionPanel = (props: AgentDecisionPanelProps): JSX.Element 
         // §10 open question: empty deny scopes only allowed for "once".
         // Pragmatic default: empty allowed for once, required for others.
         if (scope() !== "once" && text.length === 0) {
-            // Keep deny mode open; rely on the textarea's required cue.
+            setDenyError("Feedback is required when the denial applies beyond just this call.");
             return;
         }
         void props.onDecide({
@@ -127,18 +133,36 @@ export const AgentDecisionPanel = (props: AgentDecisionPanelProps): JSX.Element 
         });
         setDenyMode(false);
         setFeedback("");
+        setDenyError(null);
+    };
+
+    const isEditableTarget = (target: EventTarget | null): boolean => {
+        const el = target as HTMLElement | null;
+        if (!el) return false;
+        const tag = el.tagName;
+        if (tag === "INPUT" || tag === "TEXTAREA") return true;
+        if (el.isContentEditable) return true;
+        return false;
     };
 
     const handleKey = (e: KeyboardEvent) => {
+        const target = e.target as HTMLElement | null;
+        const inPanel = !!rootRef && !!target && rootRef.contains(target);
+        const editable = isEditableTarget(target);
+        const inFeedback = inPanel && target?.tagName === "TEXTAREA";
+
         if (e.key === "Escape") {
+            // Esc always defers, no matter where focus is — the user
+            // is signalling "not now".
             e.preventDefault();
+            e.stopPropagation();
             props.onDefer?.();
             return;
         }
-        // Letter-keyed scope only when not typing into the feedback textarea.
-        const target = e.target as HTMLElement | null;
-        const inFeedback = target?.tagName === "TEXTAREA";
-        if (!inFeedback && e.key.length === 1) {
+        // Letter-keyed scope: only when not typing into any editable
+        // (composer, feedback textarea, etc.). Composer keystrokes
+        // would otherwise be hijacked.
+        if (!editable && e.key.length === 1) {
             const map: Record<string, DecisionOutcome["scope"]> = {
                 o: "once", s: "session", p: "project", g: "global",
             };
@@ -150,20 +174,46 @@ export const AgentDecisionPanel = (props: AgentDecisionPanelProps): JSX.Element 
             }
         }
         if (e.key === "Enter") {
-            if (denyMode()) {
-                if (e.shiftKey || (target?.tagName !== "TEXTAREA")) {
+            // Inside the deny feedback textarea: Enter inserts a newline
+            // (default browser behaviour); Shift+Enter sends the denial.
+            if (inFeedback) {
+                if (e.shiftKey) {
                     e.preventDefault();
                     dispatchDeny();
                 }
-            } else if (e.shiftKey) {
-                e.preventDefault();
-                setDenyMode(true);
-            } else {
-                e.preventDefault();
-                dispatchAllow(e);
+                return;
             }
+            // Outside any editable element OR inside the panel itself:
+            // Enter = Allow (or arm high-risk), Shift+Enter = enter deny mode.
+            if (!editable || inPanel) {
+                if (denyMode()) {
+                    e.preventDefault();
+                    dispatchDeny();
+                } else if (e.shiftKey) {
+                    e.preventDefault();
+                    setDenyMode(true);
+                } else {
+                    e.preventDefault();
+                    dispatchAllow(e);
+                }
+            }
+            // If editable and not in panel (composer): let the composer
+            // handle Enter. The user must click the panel to act on it.
         }
     };
+
+    // Install a global capture-phase keydown listener while the panel
+    // is open so decision shortcuts work even when focus is elsewhere
+    // (e.g. the composer textarea). Codex P1 on PR #556: previously the
+    // panel's `onKeyDown` only fired when the panel itself was focused,
+    // but the panel has tabIndex=-1 and never auto-focuses, so keys
+    // never reached the handler in practice.
+    createEffect(() => {
+        if (!request()) return;
+        const onWindowKey = (e: KeyboardEvent) => handleKey(e);
+        window.addEventListener("keydown", onWindowKey, true);
+        onCleanup(() => window.removeEventListener("keydown", onWindowKey, true));
+    });
 
     const previewText = (): string | null => {
         const p = request()?.preview;
@@ -248,12 +298,27 @@ export const AgentDecisionPanel = (props: AgentDecisionPanelProps): JSX.Element 
                         <span>Tell the agent why (sent verbatim on the next turn)</span>
                         <textarea
                             class="agent-decision-panel-feedback-input"
+                            classList={{ "agent-decision-panel-feedback-input--error": denyError() != null }}
                             value={feedback()}
                             placeholder="e.g. don't delete my node_modules; run npm ci"
-                            onInput={(e) => setFeedback(e.currentTarget.value)}
+                            onInput={(e) => {
+                                setFeedback(e.currentTarget.value);
+                                if (denyError()) setDenyError(null);
+                            }}
                             rows={3}
                             autofocus
+                            aria-invalid={denyError() != null}
+                            aria-describedby={denyError() ? "agent-decision-deny-error" : undefined}
                         />
+                        <Show when={denyError()}>
+                            <span
+                                id="agent-decision-deny-error"
+                                class="agent-decision-panel-feedback-error"
+                                role="alert"
+                            >
+                                {denyError()}
+                            </span>
+                        </Show>
                     </label>
                 </Show>
 

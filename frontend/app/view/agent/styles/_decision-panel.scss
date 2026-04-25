@@ -198,6 +198,16 @@
     &:focus {
         border-color: var(--accent-color);
     }
+
+    &--error {
+        border-color: var(--error-color);
+    }
+}
+
+.agent-decision-panel-feedback-error {
+    font-size: 11px;
+    color: var(--error-color);
+    margin-top: var(--space-0-5);
 }
 
 .agent-decision-panel-actions {
@@ -224,12 +234,16 @@
         &:hover {
             background: color-mix(in srgb, var(--success-color) 35%, transparent);
         }
+    }
 
-        &--armed {
-            background: color-mix(in srgb, var(--accent-color) 30%, transparent);
-            border-color: var(--accent-color);
-            color: var(--accent-color);
-        }
+    // High-risk Allow's armed state — JSX applies the standalone
+    // `agent-decision-panel-btn--armed` class. Previously nested under
+    // `--allow`, which compiled to `--allow--armed` and never matched.
+    // Codex/reagent P1 on PR #556.
+    &--armed {
+        background: color-mix(in srgb, var(--accent-color) 30%, transparent);
+        border-color: var(--accent-color);
+        color: var(--accent-color);
     }
 
     &--deny {
