@@ -82,6 +82,15 @@ class RpcApiType {
         return client.rpcCall("controllerinput", data, opts);
     }
 
+    // command "tooldecision" [call]
+    // Reply to a per-tool-call permission gate. Today the backend
+    // validates the payload and logs the decision (audit trail) —
+    // actual delivery to the agent CLI is deferred to PR-3b/PR-4
+    // per SPEC_DECISION_PROMPT_2026_04_24.md §9.1.
+    ToolDecisionCommand(client: RpcClient, data: CommandToolDecisionData, opts?: RpcOpts): Promise<void> {
+        return client.rpcCall("tooldecision", data, opts);
+    }
+
     // command "controllerresync" [call]
     ControllerResyncCommand(client: RpcClient, data: CommandControllerResyncData, opts?: RpcOpts): Promise<void> {
         return client.rpcCall("controllerresync", data, opts);

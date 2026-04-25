@@ -149,6 +149,14 @@ pub const COMMAND_CONTROLLER_RESTART: &str = "controllerrestart";
 pub const COMMAND_CONTROLLER_STOP: &str = "controllerstop";
 pub const COMMAND_CONTROLLER_RESYNC: &str = "controllerresync";
 
+/// Per-tool-call permission decision RPC. Frontend sends after the
+/// user clicks Allow / Deny in `AgentDecisionPanel`. Today the
+/// handler validates the payload and logs the decision (audit
+/// trail); actual delivery to the agent CLI — rules persistence
+/// vs. interactive subprocess — is deferred to PR-3b/PR-4 per
+/// docs/specs/SPEC_DECISION_PROMPT_2026_04_24.md §9.1.
+pub const COMMAND_TOOL_DECISION: &str = "tooldecision";
+
 // Subprocess agent commands
 pub const COMMAND_SUBPROCESS_SPAWN: &str = "subprocessspawn";
 pub const COMMAND_AGENT_INPUT: &str = "agentinput";
@@ -475,6 +483,30 @@ pub struct CommandBlockInputData {
     pub signame: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub termsize: Option<serde_json::Value>,
+}
+
+/// Data for `tooldecision` — frontend's reply to a per-tool-call
+/// permission gate. Today the backend validates the outcome and
+/// logs the decision; actual delivery to the agent CLI is deferred
+/// to PR-3b/PR-4 (rules persistence vs. interactive subprocess
+/// path). Spec:
+/// docs/specs/SPEC_DECISION_PROMPT_2026_04_24.md §9.1.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct CommandToolDecisionData {
+    pub blockid: String,
+    /// Opaque id matched against a `PermissionRequestEvent`. Echoed
+    /// in the audit log so the audit trail can be cross-referenced.
+    pub request_id: String,
+    /// "allow" or "deny". Anything else returns an error.
+    pub outcome: String,
+    /// "once" / "session" / "project" / "global". Captured so the
+    /// rules-persistence layer (PR-3b) can write a matching rule
+    /// without re-asking the user.
+    pub scope: String,
+    /// User-typed denial reason. Optional. Future PR will relay
+    /// this verbatim into the agent's next prompt.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub feedback: Option<String>,
 }
 
 // ---- Subprocess agent command data types ----
