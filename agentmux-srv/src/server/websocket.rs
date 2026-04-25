@@ -690,6 +690,18 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                         ));
                     }
                 }
+                // Validate scope so PR-3b's rules-persistence layer
+                // can trust the value without re-checking. Reagent P1
+                // round-3 on PR #557.
+                match cmd.scope.as_str() {
+                    "once" | "session" | "project" | "global" => {}
+                    other => {
+                        return Err(format!(
+                            "tooldecision: invalid scope '{}' (expected 'once'/'session'/'project'/'global')",
+                            other
+                        ));
+                    }
+                }
                 tracing::info!(
                     block_id = %cmd.blockid,
                     request_id = %cmd.request_id,
