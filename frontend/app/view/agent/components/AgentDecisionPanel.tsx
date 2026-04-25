@@ -168,11 +168,17 @@ export const AgentDecisionPanel = (props: AgentDecisionPanelProps): JSX.Element 
         const inFeedback = inPanel && target?.tagName === "TEXTAREA";
 
         if (e.key === "Escape") {
-            // Esc defers when focus is in this pane (already gated above).
-            // Outside this pane: not our event.
-            e.preventDefault();
-            e.stopPropagation();
-            props.onDefer?.();
+            // Esc defers ONLY when focus is non-editable or in the
+            // panel itself. Reagent P1 round-3: Esc in the composer
+            // textarea (or any editable in the pane) needs to keep its
+            // normal meaning — dismiss autocomplete, cancel slash
+            // picker, etc. Symmetric with the Enter / scope-letter
+            // guards below.
+            if (!editable || inPanel) {
+                e.preventDefault();
+                e.stopPropagation();
+                props.onDefer?.();
+            }
             return;
         }
         // Letter-keyed scope: only when not typing into any editable
