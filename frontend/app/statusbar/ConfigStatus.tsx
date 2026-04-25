@@ -18,8 +18,7 @@ const ConfigStatus = (): JSX.Element => {
             <div
                 class="status-bar-item clickable"
                 onClick={handleClick}
-                data-tip-wrap=""
-                data-tip="One or more AgentMux config files has errors. Click to view details."
+                data-tip="Config errors, click to view"
                 aria-label="Config errors"
             >
                 <span class="status-icon" style={{ color: "var(--error-color)" }}>

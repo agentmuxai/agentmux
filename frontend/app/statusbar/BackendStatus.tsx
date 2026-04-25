@@ -129,8 +129,7 @@ const BackendStatus = (): JSX.Element => {
             <div style={{ position: "relative" }} ref={popoverRef}>
                 <div
                     class="status-bar-item clickable"
-                    data-tip-wrap=""
-                    data-tip="AgentMux backend sidecar — uptime, process health, restart controls. Click for details."
+                    data-tip="Backend status, click for details"
                     aria-label="Backend status"
                     onClick={handleClick}
                 >

@@ -43,8 +43,7 @@ const StatusBar = (): JSX.Element => {
                         fallback={
                             <span
                                 class="status-version status-version-offline"
-                                data-tip-wrap=""
-                                data-tip="AgentMux is offline — backend sidecar has crashed. Restart via the Backend widget on the left."
+                                data-tip="Backend offline"
                                 aria-label="Backend offline"
                             >
                                 v{version}
@@ -54,8 +53,7 @@ const StatusBar = (): JSX.Element => {
                         <span
                             class="status-version clickable"
                             onClick={handleNewWindow}
-                            data-tip-wrap=""
-                            data-tip="AgentMux version. Click to open a new window."
+                            data-tip="Click to open new window"
                             aria-label="AgentMux version"
                         >
                             v{version}

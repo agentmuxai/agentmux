@@ -73,8 +73,7 @@ const SystemStats = (): JSX.Element => {
                     <span
                         class="stat-mono stat-cpu"
                         style={{ color: cpuColor(s().cpu) }}
-                        data-tip-wrap=""
-                        data-tip="CPU usage across all cores. Turns amber above 80%, red above 95%."
+                        data-tip="CPU usage"
                         aria-label="CPU usage"
                     >
                         CPU {Math.round(s().cpu)}%
@@ -84,8 +83,7 @@ const SystemStats = (): JSX.Element => {
                         <span
                             class="stat-mono stat-gpu"
                             style={{ color: cpuColor(s().gpu!) }}
-                            data-tip-wrap=""
-                            data-tip="GPU usage — whichever GPU the system reports as primary."
+                            data-tip="GPU usage"
                             aria-label="GPU usage"
                         >
                             GPU {Math.round(s().gpu!)}%
@@ -95,8 +93,7 @@ const SystemStats = (): JSX.Element => {
                     <span
                         class="stat-mono stat-mem"
                         style={{ color: memColor(s().memUsed, s().memTotal) }}
-                        data-tip-wrap=""
-                        data-tip="Memory in use / total installed. Turns amber over 90%."
+                        data-tip="Memory used and total"
                         aria-label="Memory usage"
                     >
                         Mem {formatMemBytes(s().memUsed)}/{formatMemBytes(s().memTotal)}
@@ -110,8 +107,7 @@ const SystemStats = (): JSX.Element => {
                     <span
                         class="stat-mono stat-net"
                         classList={{ "stat-idle": s().netSent === 0 && s().netRecv === 0 }}
-                        data-tip-wrap=""
-                        data-tip="Network traffic — total upload (↑) and download (↓) across all interfaces. Muted when idle."
+                        data-tip="Network upload and download"
                         aria-label="Network traffic"
                     >
                         <span class="stat-disk-arrow">↑</span>{formatRate(s().netSent)}{" "}
@@ -127,8 +123,7 @@ const SystemStats = (): JSX.Element => {
                     <span
                         class="stat-mono stat-disk"
                         classList={{ "stat-idle": s().diskRead === 0 && s().diskWrite === 0 }}
-                        data-tip-wrap=""
-                        data-tip="Disk I/O — read rate (R) and write rate (W) across all disks. Muted when idle."
+                        data-tip="Disk read and write"
                         aria-label="Disk I/O"
                     >
                         <span class="stat-disk-arrow">R</span>{formatRate(s().diskRead)}{" "}

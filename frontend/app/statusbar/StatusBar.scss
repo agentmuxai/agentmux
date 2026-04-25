@@ -149,6 +149,10 @@
             content: attr(data-tip);
             position: absolute;
             bottom: calc(100% + 4px);
+            // Default centered. Edge-anchored variants below override
+            // the horizontal anchor for items inside .status-bar-left
+            // and .status-bar-right so tooltips don't overflow the
+            // window's left or right edge.
             left: 50%;
             transform: translateX(-50%);
             padding: var(--space-1) var(--space-1-5);
@@ -163,15 +167,25 @@
             z-index: calc(var(--zindex-modal-wrapper) + 10);
             box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
         }
+    }
 
-        // Allow wrapping when the text is long enough that nowrap
-        // would overflow the viewport. Setting a width triggers
-        // soft-wrap instead of clip.
-        &[data-tip-wrap]:hover::after,
-        &[data-tip-wrap]:focus-visible::after {
-            white-space: normal;
-            width: 280px;
-        }
+    // Items in the LEFT group anchor their tooltip to the item's left
+    // edge (tooltip extends rightward). Prevents overflow off the
+    // window's left side for the very first item.
+    .status-bar-left [data-tip]:hover::after,
+    .status-bar-left [data-tip]:focus-visible::after {
+        left: 0;
+        transform: none;
+    }
+
+    // Items in the RIGHT group anchor to the item's right edge
+    // (tooltip extends leftward). Prevents overflow off the window's
+    // right side for the version + last-widget items.
+    .status-bar-right [data-tip]:hover::after,
+    .status-bar-right [data-tip]:focus-visible::after {
+        left: auto;
+        right: 0;
+        transform: none;
     }
 
     .stat-separator {
