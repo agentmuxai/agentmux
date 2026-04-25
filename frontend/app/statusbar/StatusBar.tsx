@@ -5,7 +5,6 @@ import { atoms, getApi, windowInstanceNumAtom, windowCountAtom, backendStatusAto
 import { Show, type JSX } from "solid-js";
 import { BackendStatus } from "./BackendStatus";
 import { ConfigStatus } from "./ConfigStatus";
-import { ConnectionStatus } from "./ConnectionStatus";
 import { HostPopover } from "./HostPopover";
 import { SystemStats } from "./SystemStats";
 import { TokenUsageIndicator } from "./TokenUsageIndicator";
@@ -35,7 +34,6 @@ const StatusBar = (): JSX.Element => {
             <div class="status-bar-center" />
             <div class="status-bar-right">
                 <TokenUsageIndicator />
-                <ConnectionStatus />
                 <ConfigStatus />
                 <UpdateStatus />
                 <HostPopover />
@@ -43,7 +41,11 @@ const StatusBar = (): JSX.Element => {
                     <Show
                         when={backendStatusAtom() !== "crashed"}
                         fallback={
-                            <span class="status-version status-version-offline" title="Backend offline">
+                            <span
+                                class="status-version status-version-offline"
+                                data-tip="Backend offline"
+                                aria-label="Backend offline"
+                            >
                                 v{version}
                             </span>
                         }
@@ -51,7 +53,8 @@ const StatusBar = (): JSX.Element => {
                         <span
                             class="status-version clickable"
                             onClick={handleNewWindow}
-                            title="Open New AgentMux Window"
+                            data-tip="Click to open new window"
+                            aria-label="AgentMux version"
                         >
                             v{version}
                             <Show when={windowCount() > 1}>
