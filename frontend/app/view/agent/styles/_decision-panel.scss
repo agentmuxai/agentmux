@@ -1,0 +1,312 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// AgentDecisionPanel — surfaced for per-tool-call permission gates.
+// Spec: docs/specs/SPEC_DECISION_PROMPT_2026_04_24.md §5.
+
+.agent-decision-panel {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-3);
+    margin: 0 var(--space-1-5);
+    background: color-mix(in srgb, var(--warning-color) 8%, var(--main-bg-color));
+    border: 1px solid color-mix(in srgb, var(--warning-color) 50%, transparent);
+    border-radius: 4px;
+    font-size: 12px;
+    flex-shrink: 0;
+
+    // Visual escalation when the gated tool is high-risk. Reads as
+    // "stop and look" rather than "answer this when convenient".
+    &--high-risk {
+        background: color-mix(in srgb, var(--error-color) 10%, var(--main-bg-color));
+        border-color: color-mix(in srgb, var(--error-color) 60%, transparent);
+    }
+
+    // Brief flash after the first Enter on a high-risk Allow — tells
+    // the user "we received the keystroke, hit it again to commit".
+    &--armed {
+        animation: agent-decision-panel-armed 0.5s ease-out;
+    }
+}
+
+// Minimized variant — shown after Defer / Esc. Compact, single-row
+// affordance that keeps the prompt reachable. Click expands. Per
+// SPEC_DECISION_PROMPT_DESIGN §4.3.
+.agent-decision-panel-minimized {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    margin: 0 var(--space-1-5);
+    padding: var(--space-1) var(--space-3);
+    background: color-mix(in srgb, var(--warning-color) 6%, var(--main-bg-color));
+    border: 1px solid color-mix(in srgb, var(--warning-color) 40%, transparent);
+    border-radius: 4px;
+    color: var(--warning-color);
+    font-family: inherit;
+    font-size: 11px;
+    cursor: pointer;
+    text-align: left;
+    transition: background 80ms ease, border-color 80ms ease;
+    flex-shrink: 0;
+
+    &:hover {
+        background: color-mix(in srgb, var(--warning-color) 12%, var(--main-bg-color));
+        border-color: var(--warning-color);
+    }
+
+    &--high-risk {
+        background: color-mix(in srgb, var(--error-color) 8%, var(--main-bg-color));
+        border-color: color-mix(in srgb, var(--error-color) 50%, transparent);
+        color: var(--error-color);
+
+        &:hover {
+            background: color-mix(in srgb, var(--error-color) 14%, var(--main-bg-color));
+            border-color: var(--error-color);
+        }
+    }
+}
+
+.agent-decision-panel-minimized-cta {
+    margin-left: auto;
+    color: var(--secondary-text-color);
+    font-size: 10px;
+}
+
+@keyframes agent-decision-panel-armed {
+    0%   { background: color-mix(in srgb, var(--accent-color) 30%, var(--main-bg-color)); }
+    100% { background: color-mix(in srgb, var(--error-color) 10%, var(--main-bg-color)); }
+}
+
+.agent-decision-panel-header {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1-5);
+    font-weight: 600;
+    color: var(--warning-color);
+
+    .agent-decision-panel--high-risk & {
+        color: var(--error-color);
+    }
+}
+
+.agent-decision-panel-icon {
+    font-size: 14px;
+    line-height: 1;
+}
+
+.agent-decision-panel-title {
+    flex: 1;
+    min-width: 0;
+}
+
+.agent-decision-panel-queue,
+.agent-decision-panel-risk {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 2px 5px;
+    border-radius: 2px;
+    background: color-mix(in srgb, var(--main-text-color) 10%, transparent);
+    color: var(--secondary-text-color);
+    font-weight: 500;
+}
+
+.agent-decision-panel-risk {
+    background: color-mix(in srgb, var(--error-color) 25%, transparent);
+    color: var(--error-color);
+}
+
+.agent-decision-panel-meta {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 2px var(--space-2);
+    margin: 0;
+
+    dt {
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--secondary-text-color);
+        align-self: baseline;
+    }
+
+    dd {
+        margin: 0;
+        color: var(--main-text-color);
+        overflow-wrap: anywhere;
+
+        code {
+            font-family: var(--fixed-font, monospace);
+            font-size: 11px;
+            color: var(--accent-color);
+            background: color-mix(in srgb, var(--accent-color) 8%, transparent);
+            padding: 1px 4px;
+            border-radius: 2px;
+        }
+    }
+}
+
+.agent-decision-panel-preview {
+    margin: 0;
+    padding: var(--space-1-5) var(--space-2);
+    background: var(--main-bg-color);
+    border: 1px solid var(--border-color);
+    border-radius: 3px;
+    max-height: 160px;
+    overflow-y: auto;
+    font-family: var(--fixed-font, monospace);
+    font-size: 11px;
+    line-height: 1.4;
+
+    code {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        color: var(--main-text-color);
+    }
+}
+
+.agent-decision-panel-scope {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-0-5);
+    border: none;
+    padding: 0;
+    margin: 0;
+
+    legend {
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--secondary-text-color);
+        padding: 0;
+        margin-bottom: var(--space-0-5);
+    }
+}
+
+.agent-decision-panel-scope-option {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1-5);
+    padding: var(--space-0-5) var(--space-1);
+    border-radius: 2px;
+    cursor: pointer;
+    transition: background 80ms ease;
+
+    &:hover {
+        background: color-mix(in srgb, var(--main-text-color) 4%, transparent);
+    }
+
+    &--active {
+        background: color-mix(in srgb, var(--accent-color) 12%, transparent);
+    }
+}
+
+.agent-decision-panel-scope-label {
+    flex: 0 0 5em;
+    font-weight: 500;
+    color: var(--main-text-color);
+}
+
+.agent-decision-panel-scope-hint {
+    color: var(--secondary-text-color);
+    font-size: 11px;
+}
+
+.agent-decision-panel-feedback {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-0-5);
+
+    span {
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--secondary-text-color);
+    }
+}
+
+.agent-decision-panel-feedback-input {
+    font-family: inherit;
+    font-size: 12px;
+    line-height: 1.4;
+    color: var(--main-text-color);
+    background: var(--main-bg-color);
+    border: 1px solid var(--border-color);
+    border-radius: 3px;
+    padding: var(--space-1) var(--space-2);
+    resize: vertical;
+    outline: none;
+
+    &:focus {
+        border-color: var(--accent-color);
+    }
+
+    &--error {
+        border-color: var(--error-color);
+    }
+}
+
+.agent-decision-panel-feedback-error {
+    font-size: 11px;
+    color: var(--error-color);
+    margin-top: var(--space-0-5);
+}
+
+.agent-decision-panel-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: var(--space-1-5);
+}
+
+.agent-decision-panel-btn {
+    padding: var(--space-1) var(--space-3);
+    font-family: inherit;
+    font-size: 12px;
+    font-weight: 500;
+    border-radius: 3px;
+    cursor: pointer;
+    border: 1px solid transparent;
+    transition: background 80ms ease, border-color 80ms ease;
+
+    &--allow {
+        background: color-mix(in srgb, var(--success-color) 22%, transparent);
+        border-color: color-mix(in srgb, var(--success-color) 50%, transparent);
+        color: var(--success-color);
+
+        &:hover {
+            background: color-mix(in srgb, var(--success-color) 35%, transparent);
+        }
+    }
+
+    // High-risk Allow's armed state — JSX applies the standalone
+    // `agent-decision-panel-btn--armed` class. Previously nested under
+    // `--allow`, which compiled to `--allow--armed` and never matched.
+    // Codex/reagent P1 on PR #556.
+    &--armed {
+        background: color-mix(in srgb, var(--accent-color) 30%, transparent);
+        border-color: var(--accent-color);
+        color: var(--accent-color);
+    }
+
+    &--deny {
+        background: color-mix(in srgb, var(--error-color) 18%, transparent);
+        border-color: color-mix(in srgb, var(--error-color) 50%, transparent);
+        color: var(--error-color);
+
+        &:hover {
+            background: color-mix(in srgb, var(--error-color) 30%, transparent);
+        }
+    }
+
+    &--cancel {
+        background: transparent;
+        border-color: var(--border-color);
+        color: var(--secondary-text-color);
+
+        &:hover {
+            background: color-mix(in srgb, var(--main-text-color) 6%, transparent);
+            color: var(--main-text-color);
+        }
+    }
+}

@@ -23,6 +23,7 @@ import { useControllerStatusEvents } from "./hooks/useControllerStatusEvents";
 import { useAgentCommands } from "./hooks/useAgentCommands";
 import { AgentControlBar } from "./components/AgentControlBar";
 import { ActivityLogPanel } from "./components/ActivityLogPanel";
+import { AgentDecisionPanel } from "./components/AgentDecisionPanel";
 import { AgentDocumentView } from "./components/AgentDocumentView";
 import { AgentFooter, AgentStatusLine } from "./components/AgentFooter";
 import { PendingMessagesPanel } from "./components/PendingMessagesPanel";
@@ -116,7 +117,42 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
 
     // Auth + launch flow state and the onCleanup that kills the CLI
     // if the pane closes mid-login.
-    const [, setDocument] = agentAtoms().documentAtom;
+    const [getDocument, setDocument] = agentAtoms().documentAtom;
+
+    // Pending decision queue — every ToolNode whose
+    // `status === "pending_approval"`, oldest first. The decision
+    // panel renders the head; Allow / Deny clears the node by
+    // transitioning its status. Defer is HANDLED INSIDE THE PANEL
+    // (it minimizes locally) — per
+    // docs/specs/SPEC_DECISION_PROMPT_DESIGN_2026_04_25.md §7,
+    // the parent must NOT filter pending. The actual
+    // `tool:decision` IPC + sidecar stdin write lands in PR-3.
+    const pendingDecisions = (): import("./types").ToolNode[] => {
+        const docs = getDocument();
+        const out: import("./types").ToolNode[] = [];
+        for (const n of docs) {
+            if (n.type === "tool" && n.status === "pending_approval") out.push(n);
+        }
+        return out;
+    };
+
+    const handleDecide = (decision: import("./components/AgentDecisionPanel").DecisionOutcome) => {
+        // Local-only resolution for v1 PR-2. The IPC call to the sidecar
+        // (which writes y/n to the subprocess's stdin and registers any
+        // session/project/global rule) is added in PR-3; for now this
+        // just clears the pending state so the UI flow can be exercised.
+        setDocument((prev) =>
+            prev.map((n) => {
+                if (n.type !== "tool" || n.status !== "pending_approval") return n;
+                if (n.pendingPermission?.request_id !== decision.request_id) return n;
+                return {
+                    ...n,
+                    status: decision.outcome === "allow" ? "running" : "denied",
+                    pendingPermission: undefined,
+                };
+            }),
+        );
+    };
     const status = useAgentControllerStatus({
         blockId: model.blockId,
         provider,
@@ -533,6 +569,24 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                     </button>
                 </div>
             </Show>
+
+            {/* Permission decision panel — surfaced when one or more
+                tool calls are gated by the CLI awaiting user approval.
+                Sits above the queue so it can't be missed. The panel
+                renders nothing when no ToolNode is in pending_approval.
+                v1 PR-2 wires the UI; PR-3 adds the IPC + sidecar stdin
+                write so decisions actually reach the subprocess.
+                Spec: docs/specs/SPEC_DECISION_PROMPT_2026_04_24.md §5. */}
+            <AgentDecisionPanel
+                pending={pendingDecisions}
+                onDecide={handleDecide}
+                onDefer={() => {
+                    // Logging only — the panel itself manages the
+                    // minimized state (per doc §7 + §4.3) so the
+                    // prompt remains reachable.
+                    log("agent", "Decision minimized");
+                }}
+            />
 
             {/* Queue sits directly below the feed so the user's newly-
                 typed message lands next to the live conversation it's
