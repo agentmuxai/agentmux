@@ -150,10 +150,11 @@ pub const COMMAND_CONTROLLER_STOP: &str = "controllerstop";
 pub const COMMAND_CONTROLLER_RESYNC: &str = "controllerresync";
 
 /// Per-tool-call permission decision RPC. Frontend sends after the
-/// user clicks Allow / Deny in `AgentDecisionPanel`. The handler
-/// writes `y\n` / `n\n` to the subprocess's stdin so the agent CLI
-/// receives the y/n it was waiting for. Spec:
-/// docs/specs/SPEC_DECISION_PROMPT_2026_04_24.md §4.3.
+/// user clicks Allow / Deny in `AgentDecisionPanel`. Today the
+/// handler validates the payload and logs the decision (audit
+/// trail); actual delivery to the agent CLI — rules persistence
+/// vs. interactive subprocess — is deferred to PR-3b/PR-4 per
+/// docs/specs/SPEC_DECISION_PROMPT_2026_04_24.md §9.1.
 pub const COMMAND_TOOL_DECISION: &str = "tooldecision";
 
 // Subprocess agent commands
@@ -485,16 +486,16 @@ pub struct CommandBlockInputData {
 }
 
 /// Data for `tooldecision` — frontend's reply to a per-tool-call
-/// permission gate. Backend translates `outcome` to a y/n write on
-/// the subprocess's stdin. `request_id` and `feedback` are carried
-/// through for audit logging + future feedback-relay paths but are
-/// not consumed by the v1 stdin-write path. Spec:
-/// docs/specs/SPEC_DECISION_PROMPT_2026_04_24.md §4.3.
+/// permission gate. Today the backend validates the outcome and
+/// logs the decision; actual delivery to the agent CLI is deferred
+/// to PR-3b/PR-4 (rules persistence vs. interactive subprocess
+/// path). Spec:
+/// docs/specs/SPEC_DECISION_PROMPT_2026_04_24.md §9.1.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct CommandToolDecisionData {
     pub blockid: String,
     /// Opaque id matched against a `PermissionRequestEvent`. Echoed
-    /// in the audit log; not needed for the stdin write itself.
+    /// in the audit log so the audit trail can be cross-referenced.
     pub request_id: String,
     /// "allow" or "deny". Anything else returns an error.
     pub outcome: String,
