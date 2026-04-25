@@ -211,22 +211,51 @@ The parent must NOT:
 
 When changing the panel, verify each:
 
+**State**
+
 - [ ] All seven transient signals reset on a single
   `createEffect(request_id)` and nowhere else.
+- [ ] High-risk armed flag does not survive a request change.
+
+**Keyboard**
+
 - [ ] Exactly one keyboard handler exists; no `onKeyDown`
   attribute on any panel-owned element.
 - [ ] All key branches early-return on `!inOwnPane`.
 - [ ] All key branches respect the `!editable || inPanel`
   guard (Enter, Esc, scope letters).
+
+**Click handlers (parity with keyboard equivalents)**
+
+- [ ] Defer button click is symmetric with Esc — both call
+  `setMinimized(true)` and `props.onDefer?.()`. (Reagent
+  round-5 caught the click branch missing the minimize call.)
+- [ ] Allow button click is symmetric with Enter — both honour
+  the high-risk gate (shift modifier or armed-state).
+- [ ] Deny button click is symmetric with Shift+Enter and
+  the deny-mode Enter dispatch.
+
+**Lifecycle**
+
 - [ ] `usePaneOverlay` is called from a child mounted INSIDE
   the `<Show>`, not from the outer component.
-- [ ] High-risk armed flag does not survive a request change.
 - [ ] Defer leaves the prompt reachable: minimized button
   still renders, click expands, new request auto-expands.
 - [ ] Empty deny + non-`once` scope shows a visible error,
   doesn't silently no-op.
+
+**Multi-pane / multi-instance**
+
 - [ ] Two open panels (different panes) do not cross-trigger
   on a single keystroke.
+- [ ] DOM identifiers that natively imply mutual exclusion
+  (radio `name`, `<datalist>` ids, etc.) are per-instance via
+  `createUniqueId()`. (Reagent round-5: shared
+  `name="agent-decision-scope"` caused multi-pane scope
+  selection to desync.)
+- [ ] Two panels with different head requests show
+  independent state — selecting scope in one does NOT change
+  the rendered selection in the other.
 
 ## 9. Rollback path
 

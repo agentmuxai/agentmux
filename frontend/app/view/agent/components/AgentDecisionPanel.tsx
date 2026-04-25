@@ -17,7 +17,7 @@
  * downstream of "user clicked Allow / Deny" can be exercised.
  */
 
-import { createEffect, createMemo, createSignal, For, onCleanup, Show, type Accessor, type JSX } from "solid-js";
+import { createEffect, createMemo, createSignal, createUniqueId, For, onCleanup, Show, type Accessor, type JSX } from "solid-js";
 import { usePaneOverlay } from "@/app/platform/pane-overlay";
 import type { PermissionRequestEvent, ToolNode } from "../types";
 
@@ -73,6 +73,12 @@ export const AgentDecisionPanel = (props: AgentDecisionPanelProps): JSX.Element 
     // depending on which branch is mounted; widened to HTMLElement
     // so both ref assignments type-check.
     let rootRef: HTMLElement | undefined;
+    // Per-instance scope-radio group name. Hardcoding the same name
+    // across panels caused multi-pane scope desync (reagent P2 round-5):
+    // picking scope in pane A's panel cleared pane B's radio via
+    // native radio-group rules, even though both Solid signals were
+    // correct.
+    const scopeGroupName = `agent-decision-scope-${createUniqueId()}`;
 
     const head = createMemo<ToolNode | null>(() => props.pending()[0] ?? null);
     const queueDepth = () => props.pending().length;
@@ -359,7 +365,7 @@ export const AgentDecisionPanel = (props: AgentDecisionPanelProps): JSX.Element 
                             >
                                 <input
                                     type="radio"
-                                    name="agent-decision-scope"
+                                    name={scopeGroupName}
                                     checked={scope() === s}
                                     onChange={() => setScope(s)}
                                 />
@@ -442,7 +448,15 @@ export const AgentDecisionPanel = (props: AgentDecisionPanelProps): JSX.Element 
                             <button
                                 type="button"
                                 class="agent-decision-panel-btn agent-decision-panel-btn--cancel"
-                                onClick={() => props.onDefer?.()}
+                                onClick={() => {
+                                    // Symmetric with Esc handler: minimize the
+                                    // panel into the compact "Decision pending"
+                                    // bar, then notify parent (logging only).
+                                    // Reagent P1 round-5 — without setMinimized,
+                                    // the click was a visible no-op.
+                                    setMinimized(true);
+                                    props.onDefer?.();
+                                }}
                             >
                                 Defer
                             </button>
