@@ -656,38 +656,48 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
         }),
     );
 
-    // tooldecision → reply to a per-tool-call permission gate. Writes
-    // y\n / n\n to the subprocess's stdin so the agent CLI receives
-    // the y/n it was waiting for. v1 PR-3a: stdin write only — rules
-    // persistence (PR-3b) and feedback relay (later) are layered on
-    // top without changing this handler. Spec:
-    // docs/specs/SPEC_DECISION_PROMPT_2026_04_24.md §4.3.
+    // tooldecision → reply to a per-tool-call permission gate.
+    //
+    // The original PR-3a draft tried to write `y\n` / `n\n` to the
+    // subprocess's stdin via `blockcontroller::send_input`. Codex P1
+    // on PR #557 caught that this would fail: `SubprocessController::
+    // send_input` (and `PersistentSubprocessController::send_input`)
+    // both reject raw `input_data`, returning `Err("...use
+    // AgentInputCommand")`. The deeper truth is that AgentMux runs
+    // the agent CLI in non-interactive `--print` mode — the CLI
+    // never reads stdin and a y/n write would be a no-op even if
+    // the controller accepted it. See SPEC_DECISION_PROMPT
+    // _2026_04_24.md §9.1.
+    //
+    // For now this handler accepts the decision, validates the
+    // payload, logs it (audit trail via `~/.agentmux/logs/`), and
+    // returns Ok. The actual delivery mechanism (rule-persistence
+    // for next-turn application, or interactive-mode subprocess
+    // launch with stdin write) is decided in PR-3b / PR-4 once we
+    // pick a CLI integration strategy.
     engine.register_handler(
         COMMAND_TOOL_DECISION,
         Box::new(|data, _ctx| {
             Box::pin(async move {
                 let cmd: CommandToolDecisionData = serde_json::from_value(data)
                     .map_err(|e| format!("tooldecision: {e}"))?;
-                let stdin_payload: &[u8] = match cmd.outcome.as_str() {
-                    "allow" => b"y\n",
-                    "deny" => b"n\n",
+                match cmd.outcome.as_str() {
+                    "allow" | "deny" => {}
                     other => {
                         return Err(format!(
                             "tooldecision: invalid outcome '{}' (expected 'allow' or 'deny')",
                             other
                         ));
                     }
-                };
+                }
                 tracing::info!(
                     block_id = %cmd.blockid,
                     request_id = %cmd.request_id,
                     outcome = %cmd.outcome,
                     scope = %cmd.scope,
                     has_feedback = cmd.feedback.is_some(),
-                    "[tooldecision] writing y/n to subprocess stdin"
+                    "[tooldecision] received (delivery mechanism deferred to PR-3b/PR-4)"
                 );
-                let input = blockcontroller::BlockInputUnion::data(stdin_payload.to_vec());
-                blockcontroller::send_input(&cmd.blockid, input)?;
                 Ok(None)
             })
         }),
