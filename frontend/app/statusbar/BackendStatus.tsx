@@ -129,7 +129,8 @@ const BackendStatus = (): JSX.Element => {
             <div style={{ position: "relative" }} ref={popoverRef}>
                 <div
                     class="status-bar-item clickable"
-                    title="Click for backend details"
+                    data-tip="Backend status, click for details"
+                    aria-label="Backend status"
                     onClick={handleClick}
                 >
                     <span class={`status-icon${iconSpin() ? " status-icon-spin" : ""}`} style={{ color: color() }}>

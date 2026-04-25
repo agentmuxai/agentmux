@@ -85,8 +85,8 @@ export const TokenUsageIndicator = (): JSX.Element => {
                 classList={{ "token-usage-indicator--idle": isZero() }}
                 onClick={handleToggle}
                 onKeyDown={handleKeyDown}
-                aria-label="Token usage — click for per-service breakdown"
-                title="Token usage (this session)"
+                aria-label="Token usage, click for breakdown"
+                data-tip="Total tokens this session"
             >
                 <span class="token-usage-indicator-icon" aria-hidden="true">🪙</span>
                 <span class="token-usage-indicator-counts">

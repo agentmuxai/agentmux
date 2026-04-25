@@ -70,17 +70,32 @@ const SystemStats = (): JSX.Element => {
         <Show when={stats()}>
             {(s) => (
                 <div class="status-bar-item system-stats">
-                    <span class="stat-mono stat-cpu" style={{ color: cpuColor(s().cpu) }}>
+                    <span
+                        class="stat-mono stat-cpu"
+                        style={{ color: cpuColor(s().cpu) }}
+                        data-tip="CPU usage"
+                        aria-label="CPU usage"
+                    >
                         CPU {Math.round(s().cpu)}%
                     </span>
                     <Show when={s().gpu != null}>
                         <span class="stat-separator">|</span>
-                        <span class="stat-mono stat-gpu" style={{ color: cpuColor(s().gpu!) }}>
+                        <span
+                            class="stat-mono stat-gpu"
+                            style={{ color: cpuColor(s().gpu!) }}
+                            data-tip="GPU usage"
+                            aria-label="GPU usage"
+                        >
                             GPU {Math.round(s().gpu!)}%
                         </span>
                     </Show>
                     <span class="stat-separator">|</span>
-                    <span class="stat-mono stat-mem" style={{ color: memColor(s().memUsed, s().memTotal) }}>
+                    <span
+                        class="stat-mono stat-mem"
+                        style={{ color: memColor(s().memUsed, s().memTotal) }}
+                        data-tip="Memory used and total"
+                        aria-label="Memory usage"
+                    >
                         Mem {formatMemBytes(s().memUsed)}/{formatMemBytes(s().memTotal)}
                     </span>
                     {/* Network indicator stays mounted even at 0/0 so the user
@@ -92,18 +107,28 @@ const SystemStats = (): JSX.Element => {
                     <span
                         class="stat-mono stat-net"
                         classList={{ "stat-idle": s().netSent === 0 && s().netRecv === 0 }}
+                        data-tip="Network upload and download"
+                        aria-label="Network traffic"
                     >
                         <span class="stat-disk-arrow">↑</span>{formatRate(s().netSent)}{" "}
                         <span class="stat-disk-arrow">↓</span>{formatRate(s().netRecv)}
                     </span>
-                    {/* TODO: disk I/O reads zero on Windows — investigate sysinfo Disk::usage() delta behavior */}
-                    <Show when={s().diskRead > 0 || s().diskWrite > 0}>
-                        <span class="stat-separator">|</span>
-                        <span class="stat-mono stat-disk">
-                            <span class="stat-disk-arrow">R</span>{formatRate(s().diskRead)}{" "}
-                            <span class="stat-disk-arrow">W</span>{formatRate(s().diskWrite)}
-                        </span>
-                    </Show>
+                    {/* Disk I/O stays mounted even at 0/0 so the bar's layout
+                        is stable — matches the network widget's always-visible
+                        treatment (§4.3 of SPEC_STATUSBAR_TOKEN_USAGE).
+                        Windows note: sysinfo currently reports disk read/write
+                        as zero; readout will show muted `R0K W0K` until that's
+                        addressed. Preferable to a missing widget. */}
+                    <span class="stat-separator">|</span>
+                    <span
+                        class="stat-mono stat-disk"
+                        classList={{ "stat-idle": s().diskRead === 0 && s().diskWrite === 0 }}
+                        data-tip="Disk read and write"
+                        aria-label="Disk I/O"
+                    >
+                        <span class="stat-disk-arrow">R</span>{formatRate(s().diskRead)}{" "}
+                        <span class="stat-disk-arrow">W</span>{formatRate(s().diskWrite)}
+                    </span>
                 </div>
             )}
         </Show>

@@ -15,7 +15,12 @@ const ConfigStatus = (): JSX.Element => {
 
     return (
         <Show when={fullConfig()?.configerrors != null && fullConfig().configerrors.length > 0}>
-            <div class="status-bar-item clickable" onClick={handleClick} title="Click to view config errors">
+            <div
+                class="status-bar-item clickable"
+                onClick={handleClick}
+                data-tip="Config errors, click to view"
+                aria-label="Config errors"
+            >
                 <span class="status-icon" style={{ color: "var(--error-color)" }}>
                     ⚠
                 </span>
