@@ -35,7 +35,7 @@
     --term-foreground: #c8d0e8;
     --term-black: #0a0c16;
     --term-red: #e06c75;
-    --term-green: #7ab4ff;
+    --term-green: #57c7a0;
     --term-yellow: #e5c07b;
     --term-blue: #528bff;
     --term-magenta: #c678dd;
@@ -43,10 +43,26 @@
     --term-white: #c8d0e8;
     --term-bright-black: #3a4060;
     --term-bright-red: #ef6b73;
-    --term-bright-green: #98c8ff;
+    --term-bright-green: #7edebb;
     --term-bright-yellow: #f0c97a;
     --term-bright-blue: #7ab4ff;
     --term-bright-magenta: #d898f0;
     --term-bright-cyan: #7ee8f0;
     --term-bright-white: #e8eaf6;
+
+    // Tailwind @theme token sync — keeps utility classes (text-foreground, bg-accent-400, etc.) in theme
+    --color-background: var(--main-bg-color);
+    --color-foreground: var(--main-text-color);
+    --color-primary: var(--main-text-color);
+    --color-muted-foreground: var(--secondary-text-color);
+    --color-secondary: var(--secondary-text-color);
+    --color-muted: var(--grey-text-color);
+    --color-accent-400: var(--accent-color);
+    --color-error: var(--error-color);
+    --color-warning: var(--warning-color);
+    --color-success: var(--success-color);
+    --color-panel: var(--panel-bg-color);
+    --color-hover: var(--hover-bg-color);
+    --color-border: var(--border-color);
+    --color-modalbg: var(--modal-bg-color);
 }
