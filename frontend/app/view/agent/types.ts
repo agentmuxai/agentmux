@@ -160,12 +160,23 @@ export interface ToolNode {
     id: string;
     tool: "Read" | "Edit" | "Bash" | "Write" | "Grep" | "Glob" | "Task" | "Agent" | "Other";
     params: ToolParams;
-    status: "running" | "success" | "failed";
+    /** Lifecycle:
+     *  - `running`           — call dispatched, awaiting result
+     *  - `pending_approval`  — provider gated the call; user owes a decision
+     *  - `success`           — completed without error
+     *  - `failed`            — completed with error
+     *  - `denied`            — user denied the call via the decision panel
+     *  Spec: docs/specs/SPEC_DECISION_PROMPT_2026_04_24.md §4.2.
+     */
+    status: "running" | "pending_approval" | "success" | "failed" | "denied";
     duration?: number; // Seconds
     result?: ToolResult;
     collapsed: boolean;
     summary: string; // e.g., "📖 Read auth.ts (0.3s) ✓"
     timestamp?: number; // Unix ms — when this tool call was initiated
+    /** Set when status === "pending_approval". Carried into the
+     *  decision panel + echoed back through `tool:decision` IPC. */
+    pendingPermission?: PermissionRequestEvent;
 }
 
 /**
@@ -247,7 +258,8 @@ export type StreamEvent =
     | ToolResultEvent
     | AgentMessageEvent
     | UserMessageEvent
-    | SessionEndEvent;
+    | SessionEndEvent
+    | PermissionRequestEvent;
 
 export interface TextEvent {
     type: "text";
@@ -270,11 +282,49 @@ export interface ToolResultEvent {
     type: "tool_result";
     tool: string;
     id: string;
-    status: "success" | "failed";
+    status: "success" | "failed" | "denied";
     duration?: number;
     result?: any;
     exitCode?: number;
 }
+
+/**
+ * Per-tool-call permission gate. Emitted by the provider adapter
+ * when the CLI asks the user to allow / deny a specific tool call.
+ *
+ * Today's adapters return null from their `parsePermissionRequest`
+ * hook (no structured CLI event yet — see
+ * docs/specs/SPEC_DECISION_PROMPT_2026_04_24.md §9.1). The type is
+ * defined here so the rest of the system (UI panel, IPC handler,
+ * memory store) can be built against the shape while the
+ * detection strategy is still being chosen.
+ *
+ * Spec: docs/specs/SPEC_DECISION_PROMPT_2026_04_24.md §4.1.
+ */
+export interface PermissionRequestEvent {
+    type: "permission_request";
+    /** Opaque id; echoed back in the `tool:decision` IPC. */
+    request_id: string;
+    /** Tool the agent wants to invoke ("bash", "str_replace", …). */
+    tool: string;
+    /** Path / command / url the tool will act on. May be null when
+     *  the tool's args don't have a single canonical target. */
+    target: string | null;
+    /** Provider-supplied rationale. Optional. */
+    reason?: string;
+    /** Optional preview content (diff text, bash command, …). */
+    preview?: PermissionPreview;
+    /** Risk classification — drives whether single-keystroke
+     *  approval is allowed or a confirm step is required. Defaults
+     *  to "medium" when the adapter doesn't supply one. */
+    risk?: "low" | "medium" | "high";
+}
+
+export type PermissionPreview =
+    | { kind: "diff"; content: string }
+    | { kind: "bash"; command: string }
+    | { kind: "text"; content: string }
+    | { kind: "none" };
 
 export interface AgentMessageEvent {
     type: "agent_message";

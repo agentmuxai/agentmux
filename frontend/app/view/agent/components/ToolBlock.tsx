@@ -54,8 +54,10 @@ interface ToolBlockProps {
 
 const STATUS_ICON: Record<ToolNode["status"], string> = {
     running: "⏳",
+    pending_approval: "⚠",
     success: "✓",
     failed: "✗",
+    denied: "⊘",
 };
 
 // Walk upward from `el` to find the first ancestor with a non-1 CSS zoom.

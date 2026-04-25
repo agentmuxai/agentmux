@@ -358,7 +358,9 @@ New `decisionPrompt` block in `settings-template.jsonc`:
 ## 9. Provider adapters
 
 Today each provider has an adapter under
-`frontend/app/view/agent/translators/`. Add a
+`frontend/app/view/agent/providers/` (entries: `claude-translator.ts`,
+`codex-translator.ts`, `gemini-translator.ts`, `kimi-translator.ts`,
+`acp-translator.ts`, dispatched via `translator-factory.ts`). Add a
 `parsePermissionRequest(raw): PermissionRequestEvent | null` hook
 per adapter:
 
@@ -373,6 +375,30 @@ per adapter:
 
 Unsupported providers gate the prompt feature off in the agent
 card's UI so the user can't pick a mode the CLI can't honour.
+
+### 9.1 Detection strategy
+
+A spec-refresh ground-truth (2026-04-24): Claude Code CLI in
+non-bypass + non-interactive mode (`--print --output-format
+stream-json`) does not currently emit a structured
+`permission_request` JSON event when it gates a tool call. It
+prompts on the controlling tty for `y/n`, which is what causes
+the sidecar's stdin to hang (issue #551 §Problem). Two plausible
+paths forward:
+
+1. **Lobby Anthropic for a structured stream-json event.**
+   Cleanest. Out of our hands; treat as a stretch goal.
+2. **Synthesise a `PermissionRequestEvent` ourselves** by
+   detecting the y/n prompt pattern in the CLI's mixed-format
+   output: when the parser sees a recognisable
+   "Allow tool call to <X>? [y/n]" line, materialise the event,
+   suppress the raw line from the document, and stash the
+   prompt's tty descriptor so `tool:decision` can answer it.
+
+Path 2 ships in v1.x; path 1 is preferred if upstream cooperates.
+v1's first PR delivers the *type plumbing* and a stub adapter
+hook so the rest of the system can be built against the shape
+without committing to a specific detection strategy yet.
 
 ---
 
