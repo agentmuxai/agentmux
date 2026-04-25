@@ -155,13 +155,21 @@ export const AgentDecisionPanel = (props: AgentDecisionPanelProps): JSX.Element 
 
     const handleKey = (e: KeyboardEvent) => {
         const target = e.target as HTMLElement | null;
+        // Scope every shortcut to events originating inside this
+        // panel's own pane. Without this check, a pending prompt in
+        // pane A would react to keys from pane B (Esc, Enter, etc.)
+        // and multiple open prompts in different panes would all
+        // dispatch on the same keystroke. Codex P1 on PR #556.
+        const paneRoot = rootRef?.closest(".agent-view") as HTMLElement | null;
+        if (paneRoot && target && !paneRoot.contains(target)) return;
+
         const inPanel = !!rootRef && !!target && rootRef.contains(target);
         const editable = isEditableTarget(target);
         const inFeedback = inPanel && target?.tagName === "TEXTAREA";
 
         if (e.key === "Escape") {
-            // Esc always defers, no matter where focus is — the user
-            // is signalling "not now".
+            // Esc defers when focus is in this pane (already gated above).
+            // Outside this pane: not our event.
             e.preventDefault();
             e.stopPropagation();
             props.onDefer?.();
