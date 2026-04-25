@@ -1,0 +1,75 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+//
+// Nord — arctic blue-grey, calm and readable
+
+[data-theme="nord"] {
+    --main-bg-color: #2e3440;
+    --panel-bg-color: rgba(39, 44, 54, 0.6);
+    --block-bg-color: rgba(30, 34, 42, 0.7);
+    --block-bg-solid-color: #1e222a;
+    --modal-bg-color: #3b4252;
+
+    --main-text-color: #eceff4;
+    --secondary-text-color: #d8dee9;
+    --grey-text-color: #616e88;
+
+    --accent-color: #88c0d0;
+    --link-color: #81a1c1;
+
+    --border-color: rgba(136, 192, 208, 0.2);
+    --form-element-border-color: rgba(136, 192, 208, 0.15);
+    --keybinding-border-color: rgba(136, 192, 208, 0.3);
+
+    --hover-bg-color: rgba(136, 192, 208, 0.08);
+    --highlight-bg-color: rgba(136, 192, 208, 0.16);
+
+    --error-color: #bf616a;
+    --warning-color: #ebcb8b;
+    --success-color: #a3be8c;
+
+    --button-grey-bg: rgba(255, 255, 255, 0.05);
+    --button-grey-hover-bg: rgba(136, 192, 208, 0.1);
+    --button-grey-border-color: rgba(136, 192, 208, 0.2);
+    --button-green-bg: #a3be8c;
+    --button-red-bg: #bf616a;
+    --button-yellow-bg: #ebcb8b;
+
+    --scrollbar-thumb-color: rgba(136, 192, 208, 0.2);
+    --scrollbar-thumb-hover-color: rgba(136, 192, 208, 0.45);
+
+    --term-background: #2e3440;
+    --term-foreground: #d8dee9;
+    --term-black: #3b4252;
+    --term-red: #bf616a;
+    --term-green: #a3be8c;
+    --term-yellow: #ebcb8b;
+    --term-blue: #81a1c1;
+    --term-magenta: #b48ead;
+    --term-cyan: #88c0d0;
+    --term-white: #e5e9f0;
+    --term-bright-black: #4c566a;
+    --term-bright-red: #bf616a;
+    --term-bright-green: #a3be8c;
+    --term-bright-yellow: #ebcb8b;
+    --term-bright-blue: #81a1c1;
+    --term-bright-magenta: #b48ead;
+    --term-bright-cyan: #8fbcbb;
+    --term-bright-white: #eceff4;
+
+    // Tailwind @theme token sync — keeps utility classes (text-foreground, bg-accent-400, etc.) in theme
+    --color-background: var(--main-bg-color);
+    --color-foreground: var(--main-text-color);
+    --color-primary: var(--main-text-color);
+    --color-muted-foreground: var(--secondary-text-color);
+    --color-secondary: var(--secondary-text-color);
+    --color-muted: var(--grey-text-color);
+    --color-accent-400: var(--accent-color);
+    --color-error: var(--error-color);
+    --color-warning: var(--warning-color);
+    --color-success: var(--success-color);
+    --color-panel: var(--panel-bg-color);
+    --color-hover: var(--hover-bg-color);
+    --color-border: var(--border-color);
+    --color-modalbg: var(--modal-bg-color);
+}

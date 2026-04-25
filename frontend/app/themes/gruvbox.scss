@@ -1,0 +1,75 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+//
+// Gruvbox Dark — retro warm dark, earthy yellows and greens
+
+[data-theme="gruvbox"] {
+    --main-bg-color: #282828;
+    --panel-bg-color: rgba(32, 32, 32, 0.6);
+    --block-bg-color: rgba(20, 20, 20, 0.7);
+    --block-bg-solid-color: #1d2021;
+    --modal-bg-color: #3c3836;
+
+    --main-text-color: #ebdbb2;
+    --secondary-text-color: #d5c4a1;
+    --grey-text-color: #7c6f64;
+
+    --accent-color: #d79921;
+    --link-color: #83a598;
+
+    --border-color: rgba(215, 153, 33, 0.2);
+    --form-element-border-color: rgba(215, 153, 33, 0.15);
+    --keybinding-border-color: rgba(215, 153, 33, 0.3);
+
+    --hover-bg-color: rgba(215, 153, 33, 0.08);
+    --highlight-bg-color: rgba(215, 153, 33, 0.16);
+
+    --error-color: #cc241d;
+    --warning-color: #d79921;
+    --success-color: #98971a;
+
+    --button-grey-bg: rgba(255, 255, 255, 0.04);
+    --button-grey-hover-bg: rgba(215, 153, 33, 0.1);
+    --button-grey-border-color: rgba(215, 153, 33, 0.2);
+    --button-green-bg: #98971a;
+    --button-red-bg: #cc241d;
+    --button-yellow-bg: #d79921;
+
+    --scrollbar-thumb-color: rgba(215, 153, 33, 0.2);
+    --scrollbar-thumb-hover-color: rgba(215, 153, 33, 0.45);
+
+    --term-background: #282828;
+    --term-foreground: #ebdbb2;
+    --term-black: #282828;
+    --term-red: #cc241d;
+    --term-green: #98971a;
+    --term-yellow: #d79921;
+    --term-blue: #458588;
+    --term-magenta: #b16286;
+    --term-cyan: #689d6a;
+    --term-white: #a89984;
+    --term-bright-black: #928374;
+    --term-bright-red: #fb4934;
+    --term-bright-green: #b8bb26;
+    --term-bright-yellow: #fabd2f;
+    --term-bright-blue: #83a598;
+    --term-bright-magenta: #d3869b;
+    --term-bright-cyan: #8ec07c;
+    --term-bright-white: #ebdbb2;
+
+    // Tailwind @theme token sync — keeps utility classes (text-foreground, bg-accent-400, etc.) in theme
+    --color-background: var(--main-bg-color);
+    --color-foreground: var(--main-text-color);
+    --color-primary: var(--main-text-color);
+    --color-muted-foreground: var(--secondary-text-color);
+    --color-secondary: var(--secondary-text-color);
+    --color-muted: var(--grey-text-color);
+    --color-accent-400: var(--accent-color);
+    --color-error: var(--error-color);
+    --color-warning: var(--warning-color);
+    --color-success: var(--success-color);
+    --color-panel: var(--panel-bg-color);
+    --color-hover: var(--hover-bg-color);
+    --color-border: var(--border-color);
+    --color-modalbg: var(--modal-bg-color);
+}

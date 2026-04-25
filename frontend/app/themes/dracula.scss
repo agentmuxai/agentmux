@@ -1,0 +1,75 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+//
+// Dracula — purple-forward dark, vibrant palette
+
+[data-theme="dracula"] {
+    --main-bg-color: #282a36;
+    --panel-bg-color: rgba(33, 34, 44, 0.6);
+    --block-bg-color: rgba(24, 25, 32, 0.7);
+    --block-bg-solid-color: #1e1f29;
+    --modal-bg-color: #2e303d;
+
+    --main-text-color: #f8f8f2;
+    --secondary-text-color: #c5c8d1;
+    --grey-text-color: #6272a4;
+
+    --accent-color: #bd93f9;
+    --link-color: #8be9fd;
+
+    --border-color: rgba(189, 147, 249, 0.2);
+    --form-element-border-color: rgba(189, 147, 249, 0.15);
+    --keybinding-border-color: rgba(189, 147, 249, 0.3);
+
+    --hover-bg-color: rgba(189, 147, 249, 0.08);
+    --highlight-bg-color: rgba(189, 147, 249, 0.16);
+
+    --error-color: #ff5555;
+    --warning-color: #ffb86c;
+    --success-color: #50fa7b;
+
+    --button-grey-bg: rgba(255, 255, 255, 0.05);
+    --button-grey-hover-bg: rgba(189, 147, 249, 0.1);
+    --button-grey-border-color: rgba(189, 147, 249, 0.2);
+    --button-green-bg: #50fa7b;
+    --button-red-bg: #ff5555;
+    --button-yellow-bg: #f1fa8c;
+
+    --scrollbar-thumb-color: rgba(189, 147, 249, 0.2);
+    --scrollbar-thumb-hover-color: rgba(189, 147, 249, 0.45);
+
+    --term-background: #282a36;
+    --term-foreground: #f8f8f2;
+    --term-black: #21222c;
+    --term-red: #ff5555;
+    --term-green: #50fa7b;
+    --term-yellow: #f1fa8c;
+    --term-blue: #6272a4;
+    --term-magenta: #ff79c6;
+    --term-cyan: #8be9fd;
+    --term-white: #f8f8f2;
+    --term-bright-black: #6272a4;
+    --term-bright-red: #ff6e6e;
+    --term-bright-green: #69ff94;
+    --term-bright-yellow: #ffffa5;
+    --term-bright-blue: #d6acff;
+    --term-bright-magenta: #ff92df;
+    --term-bright-cyan: #a4ffff;
+    --term-bright-white: #ffffff;
+
+    // Tailwind @theme token sync — keeps utility classes (text-foreground, bg-accent-400, etc.) in theme
+    --color-background: var(--main-bg-color);
+    --color-foreground: var(--main-text-color);
+    --color-primary: var(--main-text-color);
+    --color-muted-foreground: var(--secondary-text-color);
+    --color-secondary: var(--secondary-text-color);
+    --color-muted: var(--grey-text-color);
+    --color-accent-400: var(--accent-color);
+    --color-error: var(--error-color);
+    --color-warning: var(--warning-color);
+    --color-success: var(--success-color);
+    --color-panel: var(--panel-bg-color);
+    --color-hover: var(--hover-bg-color);
+    --color-border: var(--border-color);
+    --color-modalbg: var(--modal-bg-color);
+}

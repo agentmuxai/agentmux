@@ -1,0 +1,75 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+//
+// High Contrast — pure black, white text, cyan accent. WCAG AA compliant.
+
+[data-theme="high-contrast"] {
+    --main-bg-color: #000000;
+    --panel-bg-color: rgba(0, 0, 0, 0.9);
+    --block-bg-color: #000000;
+    --block-bg-solid-color: #000000;
+    --modal-bg-color: #111111;
+
+    --main-text-color: #ffffff;
+    --secondary-text-color: #e0e0e0;
+    --grey-text-color: #a0a0a0;
+
+    --accent-color: rgb(0, 220, 255);
+    --link-color: #00dcff;
+
+    --border-color: rgba(255, 255, 255, 0.4);
+    --form-element-border-color: rgba(255, 255, 255, 0.35);
+    --keybinding-border-color: rgba(255, 255, 255, 0.5);
+
+    --hover-bg-color: rgba(255, 255, 255, 0.15);
+    --highlight-bg-color: rgba(255, 255, 255, 0.25);
+
+    --error-color: rgb(255, 80, 80);
+    --warning-color: rgb(255, 220, 0);
+    --success-color: rgb(0, 240, 100);
+
+    --button-grey-bg: rgba(255, 255, 255, 0.1);
+    --button-grey-hover-bg: rgba(255, 255, 255, 0.2);
+    --button-grey-border-color: rgba(255, 255, 255, 0.4);
+    --button-green-bg: rgb(0, 200, 80);
+    --button-red-bg: rgb(255, 60, 60);
+    --button-yellow-bg: rgb(255, 200, 0);
+
+    --scrollbar-thumb-color: rgba(255, 255, 255, 0.3);
+    --scrollbar-thumb-hover-color: rgba(255, 255, 255, 0.6);
+
+    --term-background: #000000;
+    --term-foreground: #ffffff;
+    --term-black: #000000;
+    --term-red: #ff5555;
+    --term-green: #55ff55;
+    --term-yellow: #ffff55;
+    --term-blue: #5555ff;
+    --term-magenta: #ff55ff;
+    --term-cyan: #55ffff;
+    --term-white: #ffffff;
+    --term-bright-black: #555555;
+    --term-bright-red: #ff8888;
+    --term-bright-green: #88ff88;
+    --term-bright-yellow: #ffff88;
+    --term-bright-blue: #8888ff;
+    --term-bright-magenta: #ff88ff;
+    --term-bright-cyan: #88ffff;
+    --term-bright-white: #ffffff;
+
+    // Tailwind @theme token sync — keeps utility classes (text-foreground, bg-accent-400, etc.) in theme
+    --color-background: var(--main-bg-color);
+    --color-foreground: var(--main-text-color);
+    --color-primary: var(--main-text-color);
+    --color-muted-foreground: var(--secondary-text-color);
+    --color-secondary: var(--secondary-text-color);
+    --color-muted: var(--grey-text-color);
+    --color-accent-400: var(--accent-color);
+    --color-error: var(--error-color);
+    --color-warning: var(--warning-color);
+    --color-success: var(--success-color);
+    --color-panel: var(--panel-bg-color);
+    --color-hover: var(--hover-bg-color);
+    --color-border: var(--border-color);
+    --color-modalbg: var(--modal-bg-color);
+}
