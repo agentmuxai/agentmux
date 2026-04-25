@@ -153,9 +153,11 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 };
             }),
         );
-        // Send the decision to the sidecar so it can write y/n to the
-        // subprocess's stdin (PR-3a). Rules persistence + memory store
-        // come in PR-3b. Spec: SPEC_DECISION_PROMPT_2026_04_24.md §4.3.
+        // Send the decision to the sidecar so it can record + audit
+        // it (PR-3a). Actual delivery to the agent CLI — rules
+        // persistence (path 1) or interactive subprocess stdin (path
+        // 2) — is deferred to PR-3b/PR-4 per
+        // SPEC_DECISION_PROMPT_2026_04_24.md §9.1.
         void RpcApi.ToolDecisionCommand(TabRpcClient, {
             blockid: model.blockId,
             request_id: decision.request_id,
