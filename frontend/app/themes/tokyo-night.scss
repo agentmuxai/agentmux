@@ -1,0 +1,59 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+//
+// Tokyo Night — deep blue-purple city aesthetic
+
+[data-theme="tokyo-night"] {
+    --main-bg-color: #1a1b2e;
+    --panel-bg-color: rgba(22, 23, 40, 0.6);
+    --block-bg-color: rgba(14, 15, 26, 0.7);
+    --block-bg-solid-color: #0e0f1a;
+    --modal-bg-color: #1f2035;
+
+    --main-text-color: #c0caf5;
+    --secondary-text-color: #9aa5ce;
+    --grey-text-color: #565f89;
+
+    --accent-color: #7aa2f7;
+    --link-color: #73daca;
+
+    --border-color: rgba(122, 162, 247, 0.18);
+    --form-element-border-color: rgba(122, 162, 247, 0.15);
+    --keybinding-border-color: rgba(122, 162, 247, 0.28);
+
+    --hover-bg-color: rgba(122, 162, 247, 0.07);
+    --highlight-bg-color: rgba(122, 162, 247, 0.14);
+
+    --error-color: #f7768e;
+    --warning-color: #e0af68;
+    --success-color: #9ece6a;
+
+    --button-grey-bg: rgba(255, 255, 255, 0.04);
+    --button-grey-hover-bg: rgba(122, 162, 247, 0.09);
+    --button-grey-border-color: rgba(122, 162, 247, 0.18);
+    --button-green-bg: #9ece6a;
+    --button-red-bg: #f7768e;
+    --button-yellow-bg: #e0af68;
+
+    --scrollbar-thumb-color: rgba(122, 162, 247, 0.18);
+    --scrollbar-thumb-hover-color: rgba(122, 162, 247, 0.4);
+
+    --term-background: #1a1b2e;
+    --term-foreground: #c0caf5;
+    --term-black: #15161e;
+    --term-red: #f7768e;
+    --term-green: #9ece6a;
+    --term-yellow: #e0af68;
+    --term-blue: #7aa2f7;
+    --term-magenta: #bb9af7;
+    --term-cyan: #7dcfff;
+    --term-white: #a9b1d6;
+    --term-bright-black: #414868;
+    --term-bright-red: #f7768e;
+    --term-bright-green: #9ece6a;
+    --term-bright-yellow: #e0af68;
+    --term-bright-blue: #7aa2f7;
+    --term-bright-magenta: #bb9af7;
+    --term-bright-cyan: #7dcfff;
+    --term-bright-white: #c0caf5;
+}

@@ -1,0 +1,52 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+//
+// Midnight — deep navy dark, electric blue accent
+
+[data-theme="midnight"] {
+    --main-bg-color: rgb(10, 12, 22);
+    --panel-bg-color: rgba(8, 10, 20, 0.6);
+    --block-bg-color: rgba(4, 6, 14, 0.7);
+    --block-bg-solid-color: rgb(4, 6, 14);
+    --modal-bg-color: rgb(14, 18, 32);
+
+    --main-text-color: #e8eaf6;
+    --secondary-text-color: rgb(160, 170, 200);
+    --grey-text-color: #5a6070;
+
+    --accent-color: rgb(100, 160, 255);
+    --link-color: #7ab4ff;
+
+    --border-color: rgba(100, 140, 255, 0.18);
+    --form-element-border-color: rgba(100, 140, 255, 0.15);
+    --keybinding-border-color: rgba(100, 140, 255, 0.25);
+
+    --hover-bg-color: rgba(100, 160, 255, 0.08);
+    --highlight-bg-color: rgba(100, 160, 255, 0.16);
+
+    --button-grey-bg: rgba(100, 160, 255, 0.06);
+    --button-grey-hover-bg: rgba(100, 160, 255, 0.12);
+    --button-grey-border-color: rgba(100, 140, 255, 0.18);
+
+    --scrollbar-thumb-color: rgba(100, 160, 255, 0.18);
+    --scrollbar-thumb-hover-color: rgba(100, 160, 255, 0.4);
+
+    --term-background: #060810;
+    --term-foreground: #c8d0e8;
+    --term-black: #0a0c16;
+    --term-red: #e06c75;
+    --term-green: #7ab4ff;
+    --term-yellow: #e5c07b;
+    --term-blue: #528bff;
+    --term-magenta: #c678dd;
+    --term-cyan: #56b6c2;
+    --term-white: #c8d0e8;
+    --term-bright-black: #3a4060;
+    --term-bright-red: #ef6b73;
+    --term-bright-green: #98c8ff;
+    --term-bright-yellow: #f0c97a;
+    --term-bright-blue: #7ab4ff;
+    --term-bright-magenta: #d898f0;
+    --term-bright-cyan: #7ee8f0;
+    --term-bright-white: #e8eaf6;
+}

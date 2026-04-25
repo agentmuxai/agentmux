@@ -1,0 +1,59 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+//
+// Catppuccin Mocha — soft pastel dark, warm mauve accent
+
+[data-theme="catppuccin"] {
+    --main-bg-color: #1e1e2e;
+    --panel-bg-color: rgba(24, 24, 37, 0.6);
+    --block-bg-color: rgba(17, 17, 27, 0.7);
+    --block-bg-solid-color: #11111b;
+    --modal-bg-color: #24273a;
+
+    --main-text-color: #cdd6f4;
+    --secondary-text-color: #bac2de;
+    --grey-text-color: #585b70;
+
+    --accent-color: #cba6f7;
+    --link-color: #89dceb;
+
+    --border-color: rgba(203, 166, 247, 0.18);
+    --form-element-border-color: rgba(203, 166, 247, 0.15);
+    --keybinding-border-color: rgba(203, 166, 247, 0.28);
+
+    --hover-bg-color: rgba(203, 166, 247, 0.07);
+    --highlight-bg-color: rgba(203, 166, 247, 0.14);
+
+    --error-color: #f38ba8;
+    --warning-color: #fab387;
+    --success-color: #a6e3a1;
+
+    --button-grey-bg: rgba(255, 255, 255, 0.04);
+    --button-grey-hover-bg: rgba(203, 166, 247, 0.09);
+    --button-grey-border-color: rgba(203, 166, 247, 0.18);
+    --button-green-bg: #a6e3a1;
+    --button-red-bg: #f38ba8;
+    --button-yellow-bg: #f9e2af;
+
+    --scrollbar-thumb-color: rgba(203, 166, 247, 0.18);
+    --scrollbar-thumb-hover-color: rgba(203, 166, 247, 0.4);
+
+    --term-background: #1e1e2e;
+    --term-foreground: #cdd6f4;
+    --term-black: #45475a;
+    --term-red: #f38ba8;
+    --term-green: #a6e3a1;
+    --term-yellow: #f9e2af;
+    --term-blue: #89b4fa;
+    --term-magenta: #f5c2e7;
+    --term-cyan: #94e2d5;
+    --term-white: #bac2de;
+    --term-bright-black: #585b70;
+    --term-bright-red: #f38ba8;
+    --term-bright-green: #a6e3a1;
+    --term-bright-yellow: #f9e2af;
+    --term-bright-blue: #89b4fa;
+    --term-bright-magenta: #f5c2e7;
+    --term-bright-cyan: #94e2d5;
+    --term-bright-white: #a6adc8;
+}
