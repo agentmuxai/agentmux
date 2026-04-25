@@ -119,26 +119,19 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
     // if the pane closes mid-login.
     const [getDocument, setDocument] = agentAtoms().documentAtom;
 
-    // Pending decision queue — every ToolNode whose `status === "pending_approval"`,
-    // oldest first, minus any whose request the user has deferred. The
-    // decision panel renders the head; clicking Allow / Deny clears
-    // the node from the queue (transitions status). Defer adds the
-    // request_id to the deferred set so the panel hides without
-    // resolving — a later pending node (or the same one if its
-    // request_id changes) brings the panel back. The actual
+    // Pending decision queue — every ToolNode whose
+    // `status === "pending_approval"`, oldest first. The decision
+    // panel renders the head; Allow / Deny clears the node by
+    // transitioning its status. Defer is HANDLED INSIDE THE PANEL
+    // (it minimizes locally) — per
+    // docs/specs/SPEC_DECISION_PROMPT_DESIGN_2026_04_25.md §7,
+    // the parent must NOT filter pending. The actual
     // `tool:decision` IPC + sidecar stdin write lands in PR-3.
-    // Spec: docs/specs/SPEC_DECISION_PROMPT_2026_04_24.md §5.
-    const [deferredIds, setDeferredIds] = createSignal<Set<string>>(new Set());
-
     const pendingDecisions = (): import("./types").ToolNode[] => {
         const docs = getDocument();
-        const deferred = deferredIds();
         const out: import("./types").ToolNode[] = [];
         for (const n of docs) {
-            if (n.type !== "tool" || n.status !== "pending_approval") continue;
-            const reqId = n.pendingPermission?.request_id;
-            if (reqId && deferred.has(reqId)) continue;
-            out.push(n);
+            if (n.type === "tool" && n.status === "pending_approval") out.push(n);
         }
         return out;
     };
@@ -588,20 +581,10 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 pending={pendingDecisions}
                 onDecide={handleDecide}
                 onDefer={() => {
-                    // Defer keeps the ToolNode in pending_approval but
-                    // hides the panel by adding the head's request_id
-                    // to the deferred set. A new pending request brings
-                    // the panel back. Codex P2 on PR #556 — previously
-                    // `onDefer` was unset.
-                    const head = pendingDecisions()[0];
-                    const reqId = head?.pendingPermission?.request_id;
-                    if (!reqId) return;
-                    setDeferredIds((prev) => {
-                        const next = new Set(prev);
-                        next.add(reqId);
-                        return next;
-                    });
-                    log("agent", "Decision deferred");
+                    // Logging only — the panel itself manages the
+                    // minimized state (per doc §7 + §4.3) so the
+                    // prompt remains reachable.
+                    log("agent", "Decision minimized");
                 }}
             />
 

@@ -30,6 +30,49 @@
     }
 }
 
+// Minimized variant — shown after Defer / Esc. Compact, single-row
+// affordance that keeps the prompt reachable. Click expands. Per
+// SPEC_DECISION_PROMPT_DESIGN §4.3.
+.agent-decision-panel-minimized {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    margin: 0 var(--space-1-5);
+    padding: var(--space-1) var(--space-3);
+    background: color-mix(in srgb, var(--warning-color) 6%, var(--main-bg-color));
+    border: 1px solid color-mix(in srgb, var(--warning-color) 40%, transparent);
+    border-radius: 4px;
+    color: var(--warning-color);
+    font-family: inherit;
+    font-size: 11px;
+    cursor: pointer;
+    text-align: left;
+    transition: background 80ms ease, border-color 80ms ease;
+    flex-shrink: 0;
+
+    &:hover {
+        background: color-mix(in srgb, var(--warning-color) 12%, var(--main-bg-color));
+        border-color: var(--warning-color);
+    }
+
+    &--high-risk {
+        background: color-mix(in srgb, var(--error-color) 8%, var(--main-bg-color));
+        border-color: color-mix(in srgb, var(--error-color) 50%, transparent);
+        color: var(--error-color);
+
+        &:hover {
+            background: color-mix(in srgb, var(--error-color) 14%, var(--main-bg-color));
+            border-color: var(--error-color);
+        }
+    }
+}
+
+.agent-decision-panel-minimized-cta {
+    margin-left: auto;
+    color: var(--secondary-text-color);
+    font-size: 10px;
+}
+
 @keyframes agent-decision-panel-armed {
     0%   { background: color-mix(in srgb, var(--accent-color) 30%, var(--main-bg-color)); }
     100% { background: color-mix(in srgb, var(--error-color) 10%, var(--main-bg-color)); }

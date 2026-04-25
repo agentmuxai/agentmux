@@ -69,10 +69,22 @@ const DecisionPanelClip = (p: { getEl: Accessor<HTMLElement | null | undefined> 
 };
 
 export const AgentDecisionPanel = (props: AgentDecisionPanelProps): JSX.Element => {
-    let rootRef: HTMLDivElement | undefined;
+    // Holds either the expanded panel div or the minimized button
+    // depending on which branch is mounted; widened to HTMLElement
+    // so both ref assignments type-check.
+    let rootRef: HTMLElement | undefined;
 
     const head = createMemo<ToolNode | null>(() => props.pending()[0] ?? null);
     const queueDepth = () => props.pending().length;
+
+    // Minimized state — Defer / Esc collapses the panel into a
+    // compact "Decision pending" bar instead of removing it from
+    // the UI. Codex P1 round-4: previously the parent maintained a
+    // deferredIds set that it never cleared, leaving deferred
+    // prompts permanently unreachable. Single per-request reset
+    // effect below clears this and every other transient signal
+    // when the head changes — see SPEC_DECISION_PROMPT_DESIGN §2.
+    const [minimized, setMinimized] = createSignal(false);
 
     const request = (): PermissionRequestEvent | null => head()?.pendingPermission ?? null;
     const risk = (): "low" | "medium" | "high" => request()?.risk ?? "medium";
@@ -86,6 +98,11 @@ export const AgentDecisionPanel = (props: AgentDecisionPanelProps): JSX.Element 
     const [highRiskArmed, setHighRiskArmed] = createSignal(false);
     let highRiskTimer: number | null = null;
 
+    // Visible validation message when Send-denial is pressed without
+    // the required feedback. Cleared on next keystroke in the textarea
+    // (and on per-request reset below).
+    const [denyError, setDenyError] = createSignal<string | null>(null);
+
     const armHighRisk = () => {
         setHighRiskArmed(true);
         if (highRiskTimer != null) window.clearTimeout(highRiskTimer);
@@ -94,6 +111,29 @@ export const AgentDecisionPanel = (props: AgentDecisionPanelProps): JSX.Element 
             highRiskTimer = null;
         }, 500);
     };
+
+    // SINGLE per-request reset for every transient panel signal. Per
+    // SPEC_DECISION_PROMPT_DESIGN §2 invariant: when the head request
+    // changes (defer advances queue, deny resolves, new prompt
+    // arrives), every per-prompt UI flag must clear so we never
+    // accidentally inherit state from the previous request — most
+    // importantly the high-risk armed flag (otherwise arming prompt
+    // A and advancing to B within 500ms auto-commits B).
+    createEffect(() => {
+        const id = request()?.request_id ?? null;
+        // touch id so the effect re-runs on every change
+        void id;
+        setMinimized(false);
+        setScope("once");
+        setDenyMode(false);
+        setFeedback("");
+        setDenyError(null);
+        setHighRiskArmed(false);
+        if (highRiskTimer != null) {
+            window.clearTimeout(highRiskTimer);
+            highRiskTimer = null;
+        }
+    });
 
     const dispatchAllow = (e?: KeyboardEvent | MouseEvent) => {
         const r = request();
@@ -116,12 +156,6 @@ export const AgentDecisionPanel = (props: AgentDecisionPanelProps): JSX.Element 
             highRiskTimer = null;
         }
     };
-
-    // Visible validation message when Send-denial is pressed without
-    // the required feedback. Cleared on next keystroke in the textarea.
-    // Reagent P1: previously the deny silently no-op'd, leaving the user
-    // stuck with no indication why nothing happened.
-    const [denyError, setDenyError] = createSignal<string | null>(null);
 
     const dispatchDeny = () => {
         const r = request();
@@ -168,15 +202,15 @@ export const AgentDecisionPanel = (props: AgentDecisionPanelProps): JSX.Element 
         const inFeedback = inPanel && target?.tagName === "TEXTAREA";
 
         if (e.key === "Escape") {
-            // Esc defers ONLY when focus is non-editable or in the
+            // Esc minimizes ONLY when focus is non-editable or in the
             // panel itself. Reagent P1 round-3: Esc in the composer
             // textarea (or any editable in the pane) needs to keep its
             // normal meaning — dismiss autocomplete, cancel slash
-            // picker, etc. Symmetric with the Enter / scope-letter
-            // guards below.
+            // picker, etc.
             if (!editable || inPanel) {
                 e.preventDefault();
                 e.stopPropagation();
+                setMinimized(true);
                 props.onDefer?.();
             }
             return;
@@ -250,8 +284,29 @@ export const AgentDecisionPanel = (props: AgentDecisionPanelProps): JSX.Element 
 
     return (
         <Show when={request()}>
+            <Show
+                when={!minimized()}
+                fallback={
+                    <button
+                        type="button"
+                        ref={(el) => { rootRef = el; }}
+                        class="agent-decision-panel-minimized"
+                        classList={{ "agent-decision-panel-minimized--high-risk": risk() === "high" }}
+                        onClick={() => setMinimized(false)}
+                        aria-label="Re-open decision prompt"
+                    >
+                        <DecisionPanelClip getEl={() => rootRef} />
+                        <span class="agent-decision-panel-icon" aria-hidden="true">⚠</span>
+                        <span>
+                            Decision pending — {request()!.tool}
+                            <Show when={queueDepth() > 1}> ({queueDepth()} total)</Show>
+                        </span>
+                        <span class="agent-decision-panel-minimized-cta">click to decide</span>
+                    </button>
+                }
+            >
             <div
-                ref={rootRef}
+                ref={(el) => { rootRef = el; }}
                 class="agent-decision-panel"
                 classList={{
                     "agent-decision-panel--high-risk": risk() === "high",
@@ -395,6 +450,7 @@ export const AgentDecisionPanel = (props: AgentDecisionPanelProps): JSX.Element 
                     </Show>
                 </div>
             </div>
+            </Show>
         </Show>
     );
 };
