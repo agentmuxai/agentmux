@@ -137,10 +137,11 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
     };
 
     const handleDecide = (decision: import("./components/AgentDecisionPanel").DecisionOutcome) => {
-        // Local-only resolution for v1 PR-2. The IPC call to the sidecar
-        // (which writes y/n to the subprocess's stdin and registers any
-        // session/project/global rule) is added in PR-3; for now this
-        // just clears the pending state so the UI flow can be exercised.
+        // Optimistic UI update — flip the ToolNode out of
+        // pending_approval immediately so the panel disappears (or
+        // advances to the next pending request). The backend write
+        // happens in parallel; if it fails we log but don't try to
+        // roll back the visual transition.
         setDocument((prev) =>
             prev.map((n) => {
                 if (n.type !== "tool" || n.status !== "pending_approval") return n;
@@ -152,6 +153,18 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 };
             }),
         );
+        // Send the decision to the sidecar so it can write y/n to the
+        // subprocess's stdin (PR-3a). Rules persistence + memory store
+        // come in PR-3b. Spec: SPEC_DECISION_PROMPT_2026_04_24.md §4.3.
+        void RpcApi.ToolDecisionCommand(TabRpcClient, {
+            blockid: model.blockId,
+            request_id: decision.request_id,
+            outcome: decision.outcome,
+            scope: decision.scope,
+            feedback: decision.feedback,
+        }).catch((err: unknown) => {
+            log("error", `tool:decision failed: ${String(err)}`);
+        });
     };
     const status = useAgentControllerStatus({
         blockId: model.blockId,

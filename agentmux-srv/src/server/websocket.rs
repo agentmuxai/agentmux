@@ -17,12 +17,14 @@ use crate::backend::blockcontroller;
 use crate::backend::rpc::engine::WshRpcEngine;
 use crate::backend::rpc_types::{
     CommandBlockInputData, CommandControllerResyncData, CommandEventReadHistoryData,
-    CommandGetMetaData, CommandSetMetaData, RpcMessage, COMMAND_CONTROLLER_INPUT,
+    CommandGetMetaData, CommandSetMetaData, CommandToolDecisionData,
+    RpcMessage, COMMAND_CONTROLLER_INPUT,
     COMMAND_CONTROLLER_RESYNC, COMMAND_EVENT_READ_HISTORY, COMMAND_EVENT_SUB, COMMAND_EVENT_UNSUB,
     COMMAND_EVENT_UNSUB_ALL, COMMAND_GET_FULL_CONFIG, COMMAND_GET_META,
     COMMAND_GET_AI_RATE_LIMIT, COMMAND_ROUTE_ANNOUNCE, COMMAND_ROUTE_UNANNOUNCE,
     COMMAND_SET_META, COMMAND_SET_CONFIG, COMMAND_APP_INFO,
-    COMMAND_SUBPROCESS_SPAWN, COMMAND_AGENT_INPUT, COMMAND_AGENT_STOP, COMMAND_WRITE_AGENT_CONFIG,
+    COMMAND_SUBPROCESS_SPAWN, COMMAND_AGENT_INPUT, COMMAND_AGENT_STOP, COMMAND_TOOL_DECISION,
+    COMMAND_WRITE_AGENT_CONFIG,
     CommandSubprocessSpawnData, CommandAgentInputData, CommandAgentStopData, CommandWriteAgentConfigData,
 };
 use crate::backend::obj::{Block, TermSize, WaveObjUpdate, wave_obj_to_value};
@@ -648,6 +650,43 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                 let cmd: CommandBlockInputData = serde_json::from_value(data)
                     .map_err(|e| format!("controllerinput: {e}"))?;
                 let input = parse_block_input(&cmd)?;
+                blockcontroller::send_input(&cmd.blockid, input)?;
+                Ok(None)
+            })
+        }),
+    );
+
+    // tooldecision → reply to a per-tool-call permission gate. Writes
+    // y\n / n\n to the subprocess's stdin so the agent CLI receives
+    // the y/n it was waiting for. v1 PR-3a: stdin write only — rules
+    // persistence (PR-3b) and feedback relay (later) are layered on
+    // top without changing this handler. Spec:
+    // docs/specs/SPEC_DECISION_PROMPT_2026_04_24.md §4.3.
+    engine.register_handler(
+        COMMAND_TOOL_DECISION,
+        Box::new(|data, _ctx| {
+            Box::pin(async move {
+                let cmd: CommandToolDecisionData = serde_json::from_value(data)
+                    .map_err(|e| format!("tooldecision: {e}"))?;
+                let stdin_payload: &[u8] = match cmd.outcome.as_str() {
+                    "allow" => b"y\n",
+                    "deny" => b"n\n",
+                    other => {
+                        return Err(format!(
+                            "tooldecision: invalid outcome '{}' (expected 'allow' or 'deny')",
+                            other
+                        ));
+                    }
+                };
+                tracing::info!(
+                    block_id = %cmd.blockid,
+                    request_id = %cmd.request_id,
+                    outcome = %cmd.outcome,
+                    scope = %cmd.scope,
+                    has_feedback = cmd.feedback.is_some(),
+                    "[tooldecision] writing y/n to subprocess stdin"
+                );
+                let input = blockcontroller::BlockInputUnion::data(stdin_payload.to_vec());
                 blockcontroller::send_input(&cmd.blockid, input)?;
                 Ok(None)
             })

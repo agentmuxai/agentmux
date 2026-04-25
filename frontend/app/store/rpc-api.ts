@@ -82,6 +82,13 @@ class RpcApiType {
         return client.rpcCall("controllerinput", data, opts);
     }
 
+    // command "tooldecision" [call]
+    // Reply to a per-tool-call permission gate. Backend writes y\n / n\n
+    // to the subprocess stdin. See SPEC_DECISION_PROMPT_2026_04_24.md §4.3.
+    ToolDecisionCommand(client: RpcClient, data: CommandToolDecisionData, opts?: RpcOpts): Promise<void> {
+        return client.rpcCall("tooldecision", data, opts);
+    }
+
     // command "controllerresync" [call]
     ControllerResyncCommand(client: RpcClient, data: CommandControllerResyncData, opts?: RpcOpts): Promise<void> {
         return client.rpcCall("controllerresync", data, opts);

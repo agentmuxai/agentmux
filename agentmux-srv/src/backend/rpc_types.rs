@@ -149,6 +149,13 @@ pub const COMMAND_CONTROLLER_RESTART: &str = "controllerrestart";
 pub const COMMAND_CONTROLLER_STOP: &str = "controllerstop";
 pub const COMMAND_CONTROLLER_RESYNC: &str = "controllerresync";
 
+/// Per-tool-call permission decision RPC. Frontend sends after the
+/// user clicks Allow / Deny in `AgentDecisionPanel`. The handler
+/// writes `y\n` / `n\n` to the subprocess's stdin so the agent CLI
+/// receives the y/n it was waiting for. Spec:
+/// docs/specs/SPEC_DECISION_PROMPT_2026_04_24.md §4.3.
+pub const COMMAND_TOOL_DECISION: &str = "tooldecision";
+
 // Subprocess agent commands
 pub const COMMAND_SUBPROCESS_SPAWN: &str = "subprocessspawn";
 pub const COMMAND_AGENT_INPUT: &str = "agentinput";
@@ -475,6 +482,30 @@ pub struct CommandBlockInputData {
     pub signame: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub termsize: Option<serde_json::Value>,
+}
+
+/// Data for `tooldecision` — frontend's reply to a per-tool-call
+/// permission gate. Backend translates `outcome` to a y/n write on
+/// the subprocess's stdin. `request_id` and `feedback` are carried
+/// through for audit logging + future feedback-relay paths but are
+/// not consumed by the v1 stdin-write path. Spec:
+/// docs/specs/SPEC_DECISION_PROMPT_2026_04_24.md §4.3.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct CommandToolDecisionData {
+    pub blockid: String,
+    /// Opaque id matched against a `PermissionRequestEvent`. Echoed
+    /// in the audit log; not needed for the stdin write itself.
+    pub request_id: String,
+    /// "allow" or "deny". Anything else returns an error.
+    pub outcome: String,
+    /// "once" / "session" / "project" / "global". Captured so the
+    /// rules-persistence layer (PR-3b) can write a matching rule
+    /// without re-asking the user.
+    pub scope: String,
+    /// User-typed denial reason. Optional. Future PR will relay
+    /// this verbatim into the agent's next prompt.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub feedback: Option<String>,
 }
 
 // ---- Subprocess agent command data types ----
