@@ -817,31 +817,24 @@ export function removeNotification(id: string) {
 // Tab management
 // ---------------------------------------------------------------------------
 
-/** Pick a palette color not already used by any tab in the workspace. */
-function pickTabColor(usedColors: (string | null | undefined)[]): string {
-    const palette = TAB_COLORS.map((c) => c.hex);
-    const available = palette.filter((hex) => !usedColors.includes(hex));
-    const pool = available.length > 0 ? available : palette;
-    return pool[Math.floor(Math.random() * pool.length)];
-}
-
-/** Collect the current tab:color values for all tabs in a workspace. */
-function getUsedTabColors(ws: Workspace): (string | null | undefined)[] {
-    const allIds = [...(ws.tabids ?? []), ...(ws.pinnedtabids ?? [])];
-    return allIds.map((id) => {
-        const tab = WOS.getObjectValue<Tab>(WOS.makeORef("tab", id));
-        return tab?.meta?.["tab:color"] as string | null | undefined;
-    });
-}
+/**
+ * Default color for newly-created tabs. Matches the "Blue" entry in
+ * TAB_COLORS and the startup-tab color applied by tabbar.tsx — every
+ * new tab now starts the same way as the first one. Users can change
+ * the colour per-tab via the right-click menu after creation.
+ */
+const DEFAULT_NEW_TAB_COLOR = "#3b82f6";
 
 export function createTab() {
     const ws = workspace();
     if (ws == null) return;
-    const color = pickTabColor(getUsedTabColors(ws));
     fireAndForget(async () => {
         try {
             const tabId = await WorkspaceService.CreateTab(ws.oid, "", true, false);
-            await ObjectService.UpdateObjectMeta(WOS.makeORef("tab", tabId), { "tab:color": color } as MetaType);
+            await ObjectService.UpdateObjectMeta(
+                WOS.makeORef("tab", tabId),
+                { "tab:color": DEFAULT_NEW_TAB_COLOR } as MetaType,
+            );
         } catch (e) {
             console.error("[createTab] failed:", e);
         }
