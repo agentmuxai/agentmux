@@ -20,12 +20,14 @@ import { CrossWindowDragMonitor } from "./drag/CrossWindowDragMonitor.platform";
 import { DragOverlay } from "./drag/DragOverlay";
 import { CenteredDiv } from "./element/quickelems";
 import { ZoomIndicator } from "./element/zoomindicator";
-import { setupDprTracking } from "./init/dpr";
+import { checkSeparatorParity, setupDprTracking } from "./init/dpr";
 import { NotificationBubbles } from "./notification/notificationbubbles";
 
 import "./app.scss";
 
 setupDprTracking();
+// Vite-evaluated build-time flag — no API/IPC dependency, safe at module load.
+if (import.meta.env.DEV) checkSeparatorParity();
 
 // tailwindsetup.css should come *after* app.scss (don't remove the newline above otherwise prettier will reorder these imports)
 import "../tailwindsetup.css";
