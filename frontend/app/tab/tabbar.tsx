@@ -200,6 +200,29 @@ function TabBar(props: TabBarProps): JSX.Element {
         onCleanup(cleanup);
     });
 
+    // Mouse-wheel hover over the strip → horizontal scroll. Ctrl+wheel
+    // is reserved for the app-wide zoom (see AppZoomHandler in app.tsx),
+    // so this only kicks in for unmodified scrolls. We forward whichever
+    // delta dominates: `deltaX` if a horizontal-aware mouse / touchpad is
+    // already producing it, otherwise `deltaY` so a normal vertical wheel
+    // still scrolls the strip horizontally — matches Chrome / Edge tab
+    // strip behaviour. preventDefault so the page doesn't try to scroll.
+    const handleStripWheel = (e: WheelEvent) => {
+        if (e.ctrlKey || e.metaKey) return;
+        const delta = e.deltaX !== 0 ? e.deltaX : e.deltaY;
+        if (delta === 0) return;
+        if (!tabBarScrollRef) return;
+        e.preventDefault();
+        tabBarScrollRef.scrollLeft += delta;
+    };
+
+    onMount(() => {
+        if (!tabBarScrollRef) return;
+        // `passive: false` is required so preventDefault works.
+        tabBarScrollRef.addEventListener("wheel", handleStripWheel, { passive: false });
+        onCleanup(() => tabBarScrollRef?.removeEventListener("wheel", handleStripWheel));
+    });
+
     if (!props.workspace) return null;
 
     const activeIndex = () => tabIds().indexOf(activeTabId());
