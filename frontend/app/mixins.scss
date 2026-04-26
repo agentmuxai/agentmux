@@ -178,10 +178,11 @@
     flex: 0 0 #{$slot};
     display: block;
     border-right: #{$line} solid $color;
-    // Negative right margin pulls subsequent content back so the
-    // border ends up at the slot's geometric center; positive left
-    // margin pushes the slot away from the previous tab by the same
-    // amount. Net effect: a centered line with no extra layout cost.
-    margin-right: calc((#{$line} - #{$slot}) / 2);
-    margin-left:  calc((#{$slot} - #{$line}) / 2);
+    // The slot is `border-box`, so the border occupies the rightmost
+    // `line` px of the slot. To recenter the border in the gap, pull
+    // the slot LEFT by half the leftover space (negative margin-left)
+    // and push the next sibling RIGHT by the same amount (positive
+    // margin-right). Net visual gap stays exactly `slot` px.
+    margin-left:  calc((#{$line} - #{$slot}) / 2);
+    margin-right: calc((#{$slot} - #{$line}) / 2);
 }

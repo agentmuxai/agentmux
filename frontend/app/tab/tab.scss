@@ -10,8 +10,8 @@
     // shortened a name — see user feedback during the
     // first-principles rewrite. With min-width gone, tabs collapse
     // to their actual content; the inter-tab spacing stays exactly
-    // 7px (the .tab-separator div, defined in tabbar.scss) no
-    // matter what.
+    // `--tab-separator-width` (the .tab-separator div, defined in
+    // tabbar.scss) no matter what.
     width: auto;
     min-width: 0;
     max-width: 200px;
