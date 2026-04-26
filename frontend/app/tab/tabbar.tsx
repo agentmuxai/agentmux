@@ -141,18 +141,16 @@ function TabBar(props: TabBarProps): JSX.Element {
             },
 
             onDrop: ({ source, location }) => {
-                // Reset the tear-off latch for the next drag. Done first so
-                // every code path below leaves us in a clean state.
-                const tornOff = tearOffFired;
+                // Reset the tear-off latch for the next drag.
+                // NOTE: while `requestTearOff()` is still a Phase 1 stub
+                // (logs only, no host hand-off), we MUST NOT short-circuit
+                // the in-window reorder path on the latch — a drag that
+                // briefly dipped past the strip's bottom and then came
+                // back to drop on a tab would otherwise lose its reorder.
+                // Once Phase 2 lands and the host actually takes over the
+                // drag, this onDrop will need an early-return when
+                // tearOffFired is true.
                 tearOffFired = false;
-
-                if (tornOff) {
-                    // Host has taken over — skip in-window reorder and
-                    // payload-clear, since the tab is no longer in this
-                    // window.
-                    setInsertionPoint(null);
-                    return;
-                }
 
                 const ip = insertionPoint();
                 const draggedTabId = source.data.tabId as string;
