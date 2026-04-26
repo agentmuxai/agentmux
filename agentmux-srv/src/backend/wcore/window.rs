@@ -84,7 +84,13 @@ pub fn create_window_full(
             // Create tab
             let mut tab = Tab {
                 oid: Uuid::new_v4().to_string(),
-                name: format!("T{}", ws.tabids.len() + ws.pinnedtabids.len() + 1),
+                // Plain "tabN" — same scheme used by `wcore/tab.rs:30`
+                // for tabs created via the user's "+" button. Earlier
+                // this used "T{N}" which was a stylistic mismatch.
+                // See SPEC_TAB_GAPS_AND_NAMING_2026_04_25 + the
+                // first-principles spec
+                // SPEC_TAB_BAR_FIRST_PRINCIPLES_2026_04_25.
+                name: format!("tab{}", ws.tabids.len() + ws.pinnedtabids.len() + 1),
                 layoutstate: layout.oid.clone(),
                 blockids: vec![],
                 meta: MetaMapType::new(),

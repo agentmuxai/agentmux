@@ -1,6 +1,8 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+@use "../mixins.scss";
+
 .tab-bar {
     display: flex;
     flex-direction: row;
@@ -20,9 +22,17 @@
         height: 100%;
         overflow-x: auto;
         overflow-y: hidden;
-        gap: 1px;
+        // No flex `gap` — the .tab-separator <div> elements rendered
+        // between tabs ARE the gap. Per
+        // SPEC_TAB_BAR_FIRST_PRINCIPLES_2026_04_25 §3.3 / §4.
         scrollbar-width: none; // Firefox
         position: relative; // needed for absolutely-positioned .tab children
+        // Promote into its own compositor layer so sub-pixel positions
+        // are preserved through `zoom: var(--zoomfactor)` on the
+        // ancestor .window-header. RETRO_SUBPIXEL_RENDERING_RESEARCH §4.3.
+        will-change: transform;
+        transform: translateZ(0);
+        backface-visibility: hidden;
 
         &::-webkit-scrollbar {
             display: none; // Chrome/Safari
@@ -36,6 +46,23 @@
             left: unset;
             transform: none;
             -webkit-app-region: no-drag;
+        }
+
+        // Constant inter-tab separator. Uses the v-separator mixin which
+        // emits `border-right` on the slot itself — borders participate
+        // in spec-defined pixel snapping (Brosset 2024) while a child
+        // <div> does not. Slot/line widths must share parity (both even)
+        // so the line centers on a device pixel. See
+        // RETRO_SUBPIXEL_RENDERING_RESEARCH_2026_04_26 §1.5 / §4.2.
+        .tab-separator {
+            @include mixins.v-separator(
+                var(--tab-separator-width),
+                var(--tab-separator-line),
+                var(--tab-separator-color)
+            );
+            align-self: center;
+            height: 18px;
+            pointer-events: none;
         }
     }
 

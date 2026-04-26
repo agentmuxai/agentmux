@@ -14,6 +14,24 @@
     --grey-text-color: #666;
     --main-bg-color: rgb(34, 34, 34);
     --border-color: rgba(255, 255, 255, 0.16);
+    // Tab separator — the small faded vertical bar that appears
+    // between every adjacent pair of tabs. Width is the full slot
+    // including breathing space; the bar itself is centered. Per
+    // SPEC_TAB_BAR_FIRST_PRINCIPLES_2026_04_25.
+    // Slot/line widths must share parity (both even or both odd) so
+    // the line centers on a device pixel — see RETRO_SUBPIXEL_RENDERING_RESEARCH_2026_04_26 §1.5.
+    --tab-separator-width: 8px;
+    --tab-separator-line: 2px;
+    --tab-separator-color: rgb(from var(--main-text-color) r g b / 0.35);
+
+    // ─── Pixel-snap primitives — RETRO_SUBPIXEL_RENDERING_RESEARCH_2026_04_26 §4.1 ───
+    // --dpr is updated by JS at startup and on resolution change
+    // (see frontend/app/init/dpr.ts). Default 1 so SCSS can compute
+    // before the bootstrap runs. --snap is "1 device pixel in CSS px";
+    // --snap-chrome is the same but inside the zoomed --window-header.
+    --dpr: 1;
+    --snap: calc(1px / var(--dpr));
+    --snap-chrome: calc(1px / (var(--dpr) * var(--zoomfactor, 1)));
     --base-font: normal 14px / normal "Inter", sans-serif;
     --fixed-font: normal 12px / normal "Hack", monospace;
     --accent-color: rgb(65, 159, 224);
