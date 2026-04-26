@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { fullConfigAtom, WOS } from "@/app/store/global";
+import { atoms, fullConfigAtom, WOS } from "@/app/store/global";
 import { ObjectService } from "@/app/store/services";
 import { getLayoutModelForTabById } from "@/layout/index";
 import {
@@ -103,15 +103,24 @@ export async function applyTabPreset(tabId: string, preset: PresetNode): Promise
     }
 
     try {
-        await applyNode(layoutModel, preset, /* parentBlockId */ null);
+        await applyNode(tabId, layoutModel, preset, /* parentBlockId */ null);
     } catch (e) {
         console.error("[tab-presets] preset apply failed", { tabId, error: String(e) });
     }
 }
 
+// ObjectService.CreateBlock is routed by uicontext.active_tab_id on the
+// server (see agentmux-srv/src/server/service.rs:88-95). Between awaits
+// the user could have clicked away to a different tab — abort cleanly
+// rather than silently land blocks in the wrong tab.
+function activeTabStillTargets(expectedTabId: string): boolean {
+    return atoms.activeTabId() === expectedTabId;
+}
+
 // Recursive walk. Returns the blockId of the FIRST leaf in the subtree —
 // callers use that as the split target for subsequent sibling subtrees.
 async function applyNode(
+    expectedTabId: string,
     layoutModel: any,
     node: PresetNode,
     /** Block to split off when inserting THIS node, or null for the
@@ -124,7 +133,7 @@ async function applyNode(
     if (isLeaf(node)) {
         const blockDef = resolveBlockDef(node.widget);
         if (!blockDef) throw new Error(`unknown widget: ${node.widget}`);
-        return await createBlockOnModel(layoutModel, blockDef, splitTargetId, parentSplit);
+        return await createBlockOnModel(expectedTabId, layoutModel, blockDef, splitTargetId, parentSplit);
     }
 
     // Non-leaf: insert each child in order. The first child takes the
@@ -135,7 +144,7 @@ async function applyNode(
         const child = node.children[i];
         const target = i === 0 ? splitTargetId : firstId;
         const dir = i === 0 ? parentSplit : node.split;
-        const id = await applyNode(layoutModel, child, target, dir);
+        const id = await applyNode(expectedTabId, layoutModel, child, target, dir);
         if (firstId === null) firstId = id;
     }
     return firstId!;
@@ -145,11 +154,18 @@ async function applyNode(
 // that one targets the active tab via getLayoutModelForStaticTab, which
 // would race against the new-tab activation).
 async function createBlockOnModel(
+    expectedTabId: string,
     layoutModel: any,
     blockDef: BlockDef,
     splitTargetId: string | null,
     splitDir: "horizontal" | "vertical" | null,
 ): Promise<string> {
+    // Guard: ObjectService.CreateBlock routes via uicontext.active_tab_id
+    // server-side. If the user switched tabs since we started, abort
+    // rather than dropping the new block into the wrong tab.
+    if (!activeTabStillTargets(expectedTabId)) {
+        throw new Error("active tab changed during preset apply — aborting");
+    }
     const rtOpts: RuntimeOpts = { termsize: { rows: 25, cols: 80 } };
     const blockId = await ObjectService.CreateBlock(blockDef, rtOpts);
 
