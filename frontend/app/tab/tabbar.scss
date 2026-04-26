@@ -97,8 +97,10 @@
         display: flex;
         align-items: flex-end;
         height: 100%;
-        // padding-left/right are driven by --tab-gap-before/after via JS inline style
-        transition: padding-left 100ms ease-out, padding-right 100ms ease-out, opacity 0.15s ease;
+        // Drag-driven padding has been removed (constant separators now own
+        // inter-tab spacing). Transition kept for the opacity change on
+        // .tab-dragging only — the padding terms are no-ops in current usage.
+        transition: opacity 0.15s ease;
 
         // Pane dragged over a tab — highlight with accent border
         &.tile-drop-hover {
@@ -113,7 +115,7 @@
         // Tab being dragged — reduce opacity
         &.tab-dragging {
             opacity: 0.35;
-            transition: padding-left 100ms ease-out, padding-right 100ms ease-out, opacity 0.1s ease;
+            transition: opacity 0.1s ease;
         }
 
         // Landing bounce on the dropped tab
