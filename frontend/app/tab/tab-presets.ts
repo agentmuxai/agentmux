@@ -113,6 +113,17 @@ export async function applyTabPreset(tabId: string, preset: PresetNode): Promise
 // server (see agentmux-srv/src/server/service.rs:88-95). Between awaits
 // the user could have clicked away to a different tab — abort cleanly
 // rather than silently land blocks in the wrong tab.
+//
+// CAVEAT (TOCTOU): the check sits one statement before the actual
+// `await CreateBlock` call, so a tab switch in the *sub-microsecond*
+// gap between check and invoke isn't caught — but realistically a
+// human can't click in that window. The realistic gap (the 50-200ms
+// network round-trip BETWEEN successive CreateBlock calls) IS caught
+// by re-checking at the start of every `createBlockOnModel` invocation.
+//
+// A complete fix requires the backend `CreateBlock` to accept an
+// explicit `tab_id` arg that overrides `uicontext.active_tab_id`.
+// Tracked as a follow-up to this PR.
 function activeTabStillTargets(expectedTabId: string): boolean {
     return atoms.activeTabId() === expectedTabId;
 }

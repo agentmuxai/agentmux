@@ -133,10 +133,12 @@ function TabBar(props: TabBarProps): JSX.Element {
                     tearOffFired = true;
                     const draggedTabId = source.data.tabId as string;
                     requestTearOff(draggedTabId, input.clientX, input.clientY);
-                    setInsertionPoint(null);
-                    return;
+                    // FUTURE Phase 2: return here once requestTearOff
+                    // actually hands off to the host. For now (stub only),
+                    // fall through so insertionPoint keeps tracking — a
+                    // drag that dips past the threshold and returns to the
+                    // bar still gets the reorder gap.
                 }
-                if (tearOffFired) return;
                 setInsertionPoint(computeInsertionPoint(input.clientX));
             },
 
