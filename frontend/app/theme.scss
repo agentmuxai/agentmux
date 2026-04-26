@@ -20,8 +20,8 @@
     // SPEC_TAB_BAR_FIRST_PRINCIPLES_2026_04_25.
     // Slot/line widths must share parity (both even or both odd) so
     // the line centers on a device pixel — see RETRO_SUBPIXEL_RENDERING_RESEARCH_2026_04_26 §1.5.
-    --tab-separator-width: 8px;
-    --tab-separator-line: 2px;
+    --tab-separator-width: 4px;
+    --tab-separator-line: 0px;
     --tab-separator-color: rgb(from var(--main-text-color) r g b / 0.35);
 
     // ─── Pixel-snap primitives — RETRO_SUBPIXEL_RENDERING_RESEARCH_2026_04_26 §4.1 ───
