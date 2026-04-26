@@ -31,9 +31,19 @@ interface TabBarProps {
 }
 
 
+// Pixels past the tab strip's bottom edge before a drag becomes a
+// tear-off (Chrome uses a similar small threshold). 24 px is enough
+// to filter out brief excursions while the user is still hunting for
+// the drop position; small enough that the tear feels intentional.
+// See docs/specs/SPEC_TAB_TEAR_OFF_SIZE_PRESERVATION_2026_04_26 §4.1.
+const TEAR_PAST_PX = 24;
+
 function TabBar(props: TabBarProps): JSX.Element {
     const activeTabId = atoms.activeTabId;
     let tabBarScrollRef!: HTMLDivElement;
+    // Latches once per drag — the tear-off handshake should only run a
+    // single time even if the user keeps moving past the threshold.
+    let tearOffFired = false;
 
     // Pin feature removed — merge any legacy pinnedtabids into the regular list
     // so existing workspaces don't lose tabs. A one-time UpdateTabIds (below)
@@ -116,11 +126,34 @@ function TabBar(props: TabBarProps): JSX.Element {
             canMonitor: ({ source }) => source.data.type === tabItemType,
 
             // Always compute insertion point from cursor position — drives the gap animation on all tabs
-            onDrag: ({ location }) => {
-                setInsertionPoint(computeInsertionPoint(location.current.input.clientX));
+            onDrag: ({ source, location }) => {
+                const input = location.current.input;
+                const rect = tabBarScrollRef?.getBoundingClientRect();
+                if (rect && !tearOffFired && input.clientY > rect.bottom + TEAR_PAST_PX) {
+                    tearOffFired = true;
+                    const draggedTabId = source.data.tabId as string;
+                    requestTearOff(draggedTabId, input.clientX, input.clientY);
+                    setInsertionPoint(null);
+                    return;
+                }
+                if (tearOffFired) return;
+                setInsertionPoint(computeInsertionPoint(input.clientX));
             },
 
             onDrop: ({ source, location }) => {
+                // Reset the tear-off latch for the next drag. Done first so
+                // every code path below leaves us in a clean state.
+                const tornOff = tearOffFired;
+                tearOffFired = false;
+
+                if (tornOff) {
+                    // Host has taken over — skip in-window reorder and
+                    // payload-clear, since the tab is no longer in this
+                    // window.
+                    setInsertionPoint(null);
+                    return;
+                }
+
                 const ip = insertionPoint();
                 const draggedTabId = source.data.tabId as string;
 
@@ -212,6 +245,23 @@ function TabBar(props: TabBarProps): JSX.Element {
             <div class="tab-bar-fill" data-drag-region="true" />
         </div>
     );
+}
+
+/**
+ * Phase 1 stub — fires once per drag when the cursor crosses the tear
+ * threshold. Logs only; subsequent phases will:
+ *   - capture a TabSnapshot for width preservation (Phase 3)
+ *   - call host.tearOffTab(...) to spawn a destination window and
+ *     enter the Win32 SC_MOVE loop (Phase 2)
+ *   - install WH_MOUSE_LL for cross-window merge detection (Phase 4)
+ * See docs/specs/SPEC_TAB_TEAR_OFF_SIZE_PRESERVATION_2026_04_26.
+ */
+function requestTearOff(tabId: string, cursorX: number, cursorY: number): void {
+    Logger.info("dnd", "tab tear-off threshold crossed (Phase 1 stub)", {
+        tabId,
+        cursorX,
+        cursorY,
+    });
 }
 
 /**
