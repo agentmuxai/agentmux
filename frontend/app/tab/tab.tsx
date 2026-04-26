@@ -202,13 +202,16 @@ function Tab(props: TabProps): JSX.Element {
         }
     });
 
-    createEffect(() => {
-        if (tabRef && props.isNew) {
-            const initialWidth = `${(props.tabWidth / 3) * 2}px`;
-            tabRef.style.setProperty("--initial-tab-width", initialWidth);
-            tabRef.style.setProperty("--final-tab-width", `${props.tabWidth}px`);
-        }
-    });
+    // The width-animation effect that used to live here wrote
+    // `--initial-tab-width` / `--final-tab-width` CSS vars from
+    // `props.tabWidth`, which has always been 0 (dead code). The
+    // companion `expand-width-and-fade-in` keyframe in tab.scss
+    // ran with `forwards`, pinning every new tab's width to 0 px
+    // (clamped up to `min-width: 60px`) for its entire lifetime.
+    // That was the source of the "tabs don't resize when renamed"
+    // bug. The new-tab fade is now opacity-only; tabs size to
+    // their content via flex layout. See the analysis at
+    // docs/retros/RETRO_TAB_GAPS_ARCHITECTURE_ANALYSIS_2026_04_25.md.
 
     const handleMouseDownOnClose = (event: MouseEvent) => {
         event.stopPropagation();
@@ -267,7 +270,24 @@ function Tab(props: TabProps): JSX.Element {
                         onMouseDown={handleMouseDownOnClose}
                         title="Close Tab"
                     >
-                        <i class="fa fa-solid fa-xmark" />
+                        {/* VS Code's "close" codicon, inlined as SVG so we
+                            don't pull in the codicons font. Path verbatim
+                            from microsoft/vscode-codicons (close.svg) —
+                            the same glyph VS Code uses for tab-close. */}
+                        <svg
+                            width="14"
+                            height="14"
+                            viewBox="0 0 16 16"
+                            fill="currentColor"
+                            xmlns="http://www.w3.org/2000/svg"
+                            aria-hidden="true"
+                        >
+                            <path
+                                fill-rule="evenodd"
+                                clip-rule="evenodd"
+                                d="M8 8.707l3.646 3.647.708-.707L8.707 8l3.647-3.646-.707-.708L8 7.293 4.354 3.646l-.707.708L7.293 8l-3.646 3.646.707.708L8 8.707z"
+                            />
+                        </svg>
                     </Button>
                 </div>
             </div>

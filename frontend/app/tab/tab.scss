@@ -3,9 +3,18 @@
 
 .tab {
     position: absolute;
+    // Content-sized tabs (AgentMux's style). Width follows the tab
+    // name's natural width, clamped only on the upper end. The old
+    // 60px min-width forced short-named tabs to retain padding ON
+    // THE INSIDE that visually read as "growing gap" when the user
+    // shortened a name — see user feedback during the
+    // first-principles rewrite. With min-width gone, tabs collapse
+    // to their actual content; the inter-tab spacing stays exactly
+    // `--tab-separator-width` (the .tab-separator div, defined in
+    // tabbar.scss) no matter what.
     width: auto;
+    min-width: 0;
     max-width: 200px;
-    min-width: 60px;
     height: 100%;
     padding: 0 0 0 0;
     box-sizing: border-box;
@@ -16,21 +25,15 @@
     align-items: center;
     justify-content: center;
 
-    // Vertical bar between adjacent tabs (replaces the old .pinned-tab-spacer
-    // that used to sit only between pinned and regular). Weight matches that
-    // spacer — 1 px × 18 px bottom-aligned — so every tab boundary reads the
-    // same. First tab hides its own via :first-child; active + next-sibling
-    // also hide theirs so the active tab reads as a connected block.
-    &::after {
-        content: "";
-        position: absolute;
-        left: 0;
-        bottom: 4px;
-        width: 1px;
-        height: 18px;
-        background: var(--border-color);
-        pointer-events: none;
-    }
+    // Inter-tab separator moved out of the tab as a real DOM
+    // sibling element (.tab-separator in tabbar.scss). The previous
+    // pseudo-element approach put a 1px bar at left:0 of every
+    // non-first tab and required hide-rules for active/hover/drag
+    // states to "feel right" — but those hide-rules were what made
+    // gaps look inconsistent depending on which tab was active.
+    // Real DOM element + identical CSS in every position guarantees
+    // identical inter-tab spacing forever.
+    // Per SPEC_TAB_BAR_FIRST_PRINCIPLES_2026_04_25 §3.2.
 
     .tab-inner {
         position: relative;
@@ -68,15 +71,20 @@
             color: var(--main-text-color);
         }
 
-        & + .tab::after,
-        &::after {
-            content: none;
-        }
+        // Bars on the active tab + its right neighbour used to be
+        // hidden so the active tab "felt connected" to the next one.
+        // The side effect was that gaps adjacent to the active tab
+        // looked visually tighter than gaps elsewhere — the user
+        // perceived this as "gaps drift when I rename or resize."
+        // Keeping every gap's bar visible normalises spacing across
+        // the entire bar; the active tab is still distinguished by
+        // its highlighted .tab-inner background + top accent stripe.
+        // Per SPEC_TAB_GAPS_AND_NAMING_2026_04_25 §4.
     }
 
-    &:first-child::after {
-        content: none;
-    }
+    // (Removed: .tab:first-child::after { content: none } — redundant
+    //  now that the separator is a real DOM element rendered by
+    //  tabbar.tsx, which already skips the separator before index 0.)
 
     .name {
         user-select: none;
@@ -145,10 +153,10 @@
 // Only apply hover effects when not in nohover mode. This prevents the previously-hovered tab from remaining hovered while a tab view is not mounted.
 body:not(.nohover) .tab:hover,
 body:not(.nohover) .tab.dragging {
-    & + .tab::after,
-    &::after {
-        content: none;
-    }
+    // Separator bars stay visible on hover/drag — hiding them
+    // produced the inconsistent-gap symptom the user reported
+    // (mousing around erased bars near the cursor). Per
+    // SPEC_TAB_GAPS_AND_NAMING_2026_04_25.
 
     .tab-inner {
         background: rgb(from var(--main-text-color) r g b / 0.1);
@@ -168,24 +176,33 @@ body:not(.nohover) .tab.active:hover {
     }
 }
 
-// When in nohover mode, always show the close button on the active tab. This prevents the close button of the active tab from flickering when nohover is toggled.
-body.nohover .tab.active .close {
+// Active tab always shows the close button — both in nohover mode
+// and in normal hover mode. Per user feedback during the
+// first-principles tab rewrite: a selected tab is the one the user
+// is most likely to want to close, so the affordance should be
+// always present rather than appearing only on hover.
+.tab.active .close {
     visibility: visible;
 }
 
-@keyframes expand-width-and-fade-in {
-    from {
-        width: var(--initial-tab-width);
-        opacity: 0;
-    }
-    to {
-        width: var(--final-tab-width);
-        opacity: 1;
-    }
+// New-tab fade-in. Width animation removed: previously this
+// keyframe set `width: var(--final-tab-width)` and ran with
+// `forwards`, which pinned every tab's width to the CSS variable
+// permanently after the animation. The variable was always set to
+// `0px` (the upstream `tabWidth` prop is dead code that always
+// passes 0), so combined with `min-width: 60px` every tab snapped
+// to 60 px and refused to grow when renamed. This was the actual
+// "tabs retain original width on rename" bug — see the analysis at
+// docs/retros/RETRO_TAB_GAPS_ARCHITECTURE_ANALYSIS_2026_04_25.md.
+// Now: simple opacity fade-in only; width follows content via the
+// flex layout's `width: auto` + min/max-width constraints.
+@keyframes new-tab-fade-in {
+    from { opacity: 0; }
+    to   { opacity: 1; }
 }
 
 .tab.new-tab {
-    animation: expand-width-and-fade-in 0.1s forwards;
+    animation: new-tab-fade-in 0.1s forwards;
 }
 
 // Colored active tab — white accent bar for contrast on any color
