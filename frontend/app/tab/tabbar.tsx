@@ -5,7 +5,7 @@ import { atoms, createTab, setActiveTab } from "@/store/global";
 import { fireAndForget } from "@/util/util";
 import { useWindowDrag } from "@/app/hook/useWindowDrag.platform";
 import { monitorForElements } from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
-import { For, onCleanup, onMount } from "solid-js";
+import { For, onCleanup, onMount, Show } from "solid-js";
 import type { JSX } from "solid-js";
 import { ObjectService, WorkspaceService } from "../store/services";
 import { makeORef, getObjectValue } from "../store/wos";
@@ -116,18 +116,31 @@ function TabBar(props: TabBarProps): JSX.Element {
             },
 
             onDrop: ({ source, location }) => {
-                // Only clear cross-window payload when there's a real in-window drop target.
-                // monitorForElements.onDrop fires for ALL drags (including out-of-window),
-                // so check dropTargets to distinguish a valid drop from a drag that ended
-                // outside the window (where CrossWindowDragMonitor should handle it instead).
-                if (location.current.dropTargets.length > 0) {
+                const ip = insertionPoint();
+                const draggedTabId = source.data.tabId as string;
+                const hasInsertionPoint = ip != null && draggedTabId != null;
+
+                // Clear the cross-window payload whenever the in-window
+                // drop succeeded (insertion-point-driven reorder ran). The
+                // earlier check `dropTargets.length > 0` was always false
+                // because tab DnD does not register pragmatic-dnd drop
+                // targets — meaning the payload was NEVER cleared, and
+                // CrossWindowDragMonitor's dragend handler treated every
+                // in-window drop as a candidate for tear-off (resulting
+                // in spurious new-window creation when the host's
+                // window-at-cursor lookup didn't return the source).
+                // Now: a successful insertion-point drop clears the
+                // payload so cross-window dragend short-circuits. Drops
+                // without an insertion point (e.g. drag canceled or ended
+                // off the bar) leave the payload alone so cross-window
+                // tear-off can still handle them. The original
+                // `dropTargets.length > 0` clear is kept as a redundant
+                // safety net.
+                if (hasInsertionPoint || location.current.dropTargets.length > 0) {
                     setCurrentDragPayload(null);
                 }
 
-                const ip = insertionPoint();
-                const draggedTabId = source.data.tabId as string;
-
-                if (ip && draggedTabId) {
+                if (hasInsertionPoint) {
                     const tabs = tabIds();
                     const wsId = props.workspace?.oid;
 
@@ -163,19 +176,30 @@ function TabBar(props: TabBarProps): JSX.Element {
             <div class="tab-bar-scroll" data-drag-region="false">
                 <For each={tabIds()}>
                     {(tabId, i) => (
-                        <DroppableTab
-                            tabId={tabId}
-                            workspaceId={props.workspace.oid}
-                            activeTabId={activeTabId()}
-                            isActive={tabId === activeTabId()}
-                            isFirst={i() === 0}
-                            isBeforeActive={i() === activeIndex() - 1}
-                            allTabCount={tabIds().length}
-                            tabIndex={i()}
-                            tabIds={tabIds()}
-                            onSelect={() => handleSelect(tabId)}
-                            onClose={() => handleClose(tabId)}
-                        />
+                        <>
+                            {/* Real DOM separator between adjacent tabs (skipped
+                                before index 0). Constant width + identical CSS
+                                in every position guarantees uniform inter-tab
+                                spacing, regardless of which tab is active /
+                                hovered / dragged. Per
+                                SPEC_TAB_BAR_FIRST_PRINCIPLES_2026_04_25 §3.4. */}
+                            <Show when={i() > 0}>
+                                <div class="tab-separator" aria-hidden="true" />
+                            </Show>
+                            <DroppableTab
+                                tabId={tabId}
+                                workspaceId={props.workspace.oid}
+                                activeTabId={activeTabId()}
+                                isActive={tabId === activeTabId()}
+                                isFirst={i() === 0}
+                                isBeforeActive={i() === activeIndex() - 1}
+                                allTabCount={tabIds().length}
+                                tabIndex={i()}
+                                tabIds={tabIds()}
+                                onSelect={() => handleSelect(tabId)}
+                                onClose={() => handleClose(tabId)}
+                            />
+                        </>
                     )}
                 </For>
             </div>

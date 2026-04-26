@@ -142,3 +142,46 @@
     white-space: nowrap;
     border: 0;
 }
+
+// ─── Pixel-snap primitives — RETRO_SUBPIXEL_RENDERING_RESEARCH_2026_04_26 §4 ─────
+// Use these whenever a dimension must land cleanly on a device pixel
+// (hairlines, dividers, separator slots, focus rings). For ordinary
+// padding/margin/gap, keep using the --space-* tokens.
+
+/// Snap a value to the nearest device pixel using CSS `round()`.
+/// Strategy: down (default — never overflow), up, or nearest.
+/// Caveat (per MDN): for already-known integer values, custom
+/// properties are simpler — reserve `snap()` for `calc()`-derived widths.
+@function snap($value, $strategy: down) {
+    @return round(#{$strategy}, #{$value}, var(--snap));
+}
+
+/// Same as snap() but for dimensions inside the zoomed chrome
+/// (anything under `.window-header` or `.status-bar`). Snapping there
+/// must account for both DPR and --zoomfactor.
+@function snap-chrome($value, $strategy: down) {
+    @return round(#{$strategy}, #{$value}, var(--snap-chrome));
+}
+
+/// Set inline-size and/or block-size snapped to a device pixel.
+@mixin snap-size($w: null, $h: null) {
+    @if $w { inline-size: snap($w); }
+    @if $h { block-size:  snap($h); }
+}
+
+/// Vertical separator primitive. Renders a centered line inside a
+/// fixed-width slot using `border-right` on the slot itself — borders
+/// participate in spec-defined pixel snapping (Patrick Brosset 2024)
+/// while a child <div> does not. Slot/line widths MUST share parity
+/// (both even or both odd) so the line centers on a device pixel.
+@mixin v-separator($slot, $line, $color) {
+    flex: 0 0 #{$slot};
+    display: block;
+    border-right: #{$line} solid $color;
+    // Negative right margin pulls subsequent content back so the
+    // border ends up at the slot's geometric center; positive left
+    // margin pushes the slot away from the previous tab by the same
+    // amount. Net effect: a centered line with no extra layout cost.
+    margin-right: calc((#{$line} - #{$slot}) / 2);
+    margin-left:  calc((#{$slot} - #{$line}) / 2);
+}

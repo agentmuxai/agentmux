@@ -20,9 +20,12 @@ import { CrossWindowDragMonitor } from "./drag/CrossWindowDragMonitor.platform";
 import { DragOverlay } from "./drag/DragOverlay";
 import { CenteredDiv } from "./element/quickelems";
 import { ZoomIndicator } from "./element/zoomindicator";
+import { setupDprTracking } from "./init/dpr";
 import { NotificationBubbles } from "./notification/notificationbubbles";
 
 import "./app.scss";
+
+setupDprTracking();
 
 // tailwindsetup.css should come *after* app.scss (don't remove the newline above otherwise prettier will reorder these imports)
 import "../tailwindsetup.css";
