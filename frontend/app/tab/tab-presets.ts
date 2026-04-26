@@ -175,10 +175,21 @@ async function createBlockOnModel(
     // server-side. If the user switched tabs since we started, abort
     // rather than dropping the new block into the wrong tab.
     if (!activeTabStillTargets(expectedTabId)) {
-        throw new Error("active tab changed during preset apply — aborting");
+        throw new Error("active tab changed before block creation — aborting");
     }
     const rtOpts: RuntimeOpts = { termsize: { rows: 25, cols: 80 } };
     const blockId = await ObjectService.CreateBlock(blockDef, rtOpts);
+    // Post-await re-check: the await yields to the event loop, so a
+    // user click on another tab could have landed before the RPC's
+    // uicontext was serialised. If that happened, the block was
+    // created in the wrong tab — try to delete it and abort. Best-
+    // effort cleanup; worst case the orphan block lingers until tab
+    // close. The full structural fix is a tab_id arg on the backend
+    // CreateBlock RPC; tracked as a follow-up.
+    if (!activeTabStillTargets(expectedTabId)) {
+        await ObjectService.DeleteBlock(blockId).catch(() => {});
+        throw new Error("active tab changed during block creation — aborting");
+    }
 
     if (splitTargetId === null) {
         const action: LayoutTreeInsertNodeAction = {
