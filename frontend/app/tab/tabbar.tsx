@@ -268,6 +268,20 @@ function TabBar(props: TabBarProps): JSX.Element {
                 unsub();
             }
         };
+        // Coordinate-space helper. `payload.cursorX/Y` come from
+        // Win32's WH_MOUSE_LL hook in PHYSICAL pixels (Windows
+        // reports per-monitor coords for DPI-aware processes, which
+        // CEF is). `window.screenX/Y` and `getBoundingClientRect()`
+        // return CSS / LOGICAL pixels. Subtract directly and you're
+        // off by a factor of devicePixelRatio at DPR ≠ 1.0 — the
+        // strip hit-test would never trigger on HiDPI. Convert
+        // physical → CSS by dividing by DPR before subtracting.
+        // (gemini PR #567 HIGH; same fix applies to Phase 4 merge
+        // handler below — both shared the bug.)
+        const physicalToClientX = (px: number) =>
+            px / (window.devicePixelRatio || 1) - window.screenX;
+        const physicalToClientY = (py: number) =>
+            py / (window.devicePixelRatio || 1) - window.screenY;
         fireAndForget(async () => {
             const { listenEvent } = await import("@/app/platform/ipc");
             if (!mounted) return;
@@ -285,8 +299,8 @@ function TabBar(props: TabBarProps): JSX.Element {
                             setInsertionPoint(null);
                             return;
                         }
-                        const clientX = payload.cursorX - window.screenX;
-                        const clientY = payload.cursorY - window.screenY;
+                        const clientX = physicalToClientX(payload.cursorX);
+                        const clientY = physicalToClientY(payload.cursorY);
                         if (clientY < stripRect.top || clientY > stripRect.bottom) {
                             setInsertionPoint(null);
                             return;
@@ -325,8 +339,8 @@ function TabBar(props: TabBarProps): JSX.Element {
                             // window's body would silently relocate
                             // the tab. (codex PR #565 P1)
                             const stripRect = tabBarScrollRef?.getBoundingClientRect();
-                            const clientX = payload.cursorX - window.screenX;
-                            const clientY = payload.cursorY - window.screenY;
+                            const clientX = physicalToClientX(payload.cursorX);
+                            const clientY = physicalToClientY(payload.cursorY);
                             if (
                                 !stripRect ||
                                 clientY < stripRect.top ||
@@ -418,7 +432,7 @@ function TabBar(props: TabBarProps): JSX.Element {
                                 && payload.cursorY != null
                             ) {
                                 const stripRect = tabBarScrollRef?.getBoundingClientRect();
-                                const clientY = payload.cursorY - window.screenY;
+                                const clientY = physicalToClientY(payload.cursorY);
                                 if (
                                     !stripRect
                                     || clientY < stripRect.top
