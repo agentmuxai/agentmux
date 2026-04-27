@@ -158,13 +158,15 @@ pub fn on_pool_window_destroyed(state: &Arc<AppState>, label: &str) {
     if !label.starts_with("window-pool-") {
         return;
     }
-    // If this window made it into the pool queue, drop it.
-    {
+    // Single lock: drop the dead label + check whether we need to
+    // refill, all in one critical section.
+    let needs_refill = {
         let mut pool = state.window_pool.lock();
         pool.retain(|l| l != label);
-    }
-    // Whether it made it or not, release the in-flight semaphore so
-    // a future spawn can proceed. Then top up.
+        pool.len() < POOL_TARGET_SIZE
+    };
+    // Whether the window made it into the pool or not, release the
+    // in-flight semaphore so a future spawn can proceed.
     state
         .window_pool_respawn_in_flight
         .store(false, Ordering::Release);
@@ -173,7 +175,7 @@ pub fn on_pool_window_destroyed(state: &Arc<AppState>, label: &str) {
         label = %label,
         "[pool] pool window destroyed before promote — releasing semaphore + refilling"
     );
-    if state.window_pool.lock().len() < POOL_TARGET_SIZE {
+    if needs_refill {
         spawn_pool_window(state);
     }
 }
