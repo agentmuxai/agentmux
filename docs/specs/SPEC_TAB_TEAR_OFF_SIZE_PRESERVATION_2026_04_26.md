@@ -35,11 +35,15 @@ Read every section through that lens:
 - **No "fallback to the existing dragend tear-off."** The current
   HTML5-dragend pipeline (`[dnd:cef] start_cross_drag` →
   `tear_off_tab` → `open_window_at_position` at end of drag) is
-  the path this spec **replaces**. Once Phase 2 lands, the new
-  Chrome-faithful flow is the *only* code path on Win32; the old
-  dragend path is removed (or left only for the genuinely
-  unreachable Wayland case in §7). No A/B switch, no settings
-  toggle.
+  the path this spec **replaces**. The old path is *deleted only
+  once the new flow has full feature parity* — meaning Phases
+  2 + 4 + 5 (handshake + merge + cancel) are landed and pass
+  validation. Removing it earlier would regress merge / cancel
+  behaviour. After parity: the new Chrome-faithful flow is the
+  *only* code path on Win32 (and macOS / Linux/X11); no A/B
+  switch, no settings toggle. Wayland keeps the dragend fallback
+  because Wayland forbids the global cursor tracking the new
+  flow needs (§7).
 - **No "best-effort Linux."** macOS and Linux must reach
   perceptual parity with Win32 by ship time. Wayland's loss of
   global cursor tracking is the one acknowledged limitation
@@ -471,9 +475,13 @@ user can drag again to merge if desired.
 
 E1. **Drag started on tab, never crosses threshold.** Just an
     in-bar reorder; nothing new happens.
-E2. **User holds Esc during move-loop.** Windows cancels the
-    move. Hook sees no `WM_LBUTTONUP`; we time out after 5s of
-    no movement and treat as no-op.
+E2. **User holds Esc during move-loop.** ESC triggers
+    cancel-back (per §6 Phase 5 + §9): the dragged window is
+    destroyed and the tab is reinserted at its original index in
+    the source workspace. Windows cancels the move loop on ESC
+    and emits `WM_EXITSIZEMOVE` instead of `WM_LBUTTONUP`; the
+    hook treats either as the move-loop terminator and routes
+    ESC to the cancel-back path.
 E3. **Source window closed mid-drag.** State stored host-side
     survives renderer death; cancel-back path becomes "no-op,
     leave the dragged window standalone."
@@ -501,13 +509,20 @@ threshold is a P1 fix before merge.
       exactly once.
 - [x] Re-enter the strip — no further fires.
 
-**Phase 2 (handshake + SC_MOVE)**
+**Phase 2 (handshake + SC_MOVE) — internal milestone, not a
+user-facing release.** This phase verifies the SC_MOVE plumbing
+in isolation against the cold path. The first-paint flash and
+warm-pool requirements from §0 are *deferred to Phase 6*; Phase
+2's exit gate is structural correctness, not perceived
+performance. Phase 6's bundle is what ships to users — no
+intermediate release after Phase 2.
+
 - [ ] Tear past threshold → new window spawns at cursor with the
-      tab's content visible. **First-paint flash: 0 ms** (cold
-      path acceptable for this phase only; warm path replaces
-      it in Phase 6).
+      tab's content visible. (Cold-path flash of ~150-300 ms
+      is expected here and is *not* an acceptance failure.)
 - [ ] `tear_off.handshake_ms` p99 ≤ 8 ms over a 100-tear-off
-      sample on the test rig.
+      sample on the test rig (the 8 ms budget is the §0 hard
+      requirement and applies from Phase 2 onward).
 - [ ] Window follows cursor 1:1 with no perceptible lag (Windows
       SC_MOVE handles this natively; we verify no input-delay
       regressions).
