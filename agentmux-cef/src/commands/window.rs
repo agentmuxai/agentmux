@@ -352,10 +352,26 @@ pub fn is_main_window(args: &serde_json::Value) -> serde_json::Value {
     serde_json::json!(label == "main")
 }
 
-/// List all open window labels.
+/// List all open window labels, excluding unpromoted pool windows.
+/// Pool windows are pre-warmed tear-off scratch windows kept hidden
+/// from the user (WS_EX_TOOLWINDOW, no taskbar entry). Including them
+/// in `list_windows` inflates the frontend's InstancePanel row count
+/// with phantom entries the user can't see or focus.
+///
+/// Use `state.unpromoted_pool_labels` (NOT `state.window_pool`) as the
+/// "is unpromoted pool" oracle — the pool queue is only populated
+/// after the renderer-ready handshake (~100 ms after spawn), so it
+/// would miss freshly-spawned pool windows during the gap.
+/// `unpromoted_pool_labels` is populated synchronously in
+/// `spawn_pool_window` and removed in `promote_pool_window` /
+/// `on_pool_window_destroyed`.
 pub fn list_windows(state: &Arc<AppState>) -> serde_json::Value {
+    let pool_labels = state.unpromoted_pool_labels.lock().clone();
     let browsers = state.browsers.lock();
-    let labels: Vec<&String> = browsers.keys().collect();
+    let labels: Vec<&String> = browsers
+        .keys()
+        .filter(|l| !pool_labels.contains(*l))
+        .collect();
     serde_json::json!(labels)
 }
 
