@@ -133,21 +133,98 @@ pub fn spawn_pool_window(state: &Arc<AppState>) {
 }
 
 /// Called from on_after_created when a pool window's browser is
-/// registered. Logs only — the actual queue insertion happens via
-/// `mark_pool_window_renderer_ready` once the frontend reports its
-/// `pool:promote` listener is installed. Without that gate we'd
-/// race emit_event_to_window against the renderer's listener
-/// install, dropping the promote signal and stranding the window
-/// in pool mode.
-pub fn register_pool_window(_state: &Arc<AppState>, label: &str) {
+/// registered. Logs + applies WS_EX_TOOLWINDOW so the off-screen
+/// pool window doesn't show up in the taskbar / Alt+Tab. The
+/// promote path (`promote_pool_window`) clears it again so the
+/// torn-off window IS taskbar-visible.
+///
+/// Queue insertion still waits for `mark_pool_window_renderer_ready`
+/// (frontend-side handshake) — without that gate emit_event_to_window
+/// could race the renderer's listener install and drop the promote
+/// signal.
+pub fn register_pool_window(state: &Arc<AppState>, label: &str) {
     if !label.starts_with("window-pool-") {
         return;
+    }
+    #[cfg(target_os = "windows")]
+    {
+        // Look up the HWND under a short browsers lock; release
+        // before any Win32 FFI. The HWND should exist by the time
+        // on_after_created fires; if it doesn't, log and bail —
+        // the pool entry is harmless until promote re-checks.
+        use cef::{ImplBrowser, ImplBrowserHost};
+        let raw_hwnd: Option<*mut std::ffi::c_void> = {
+            let browsers = state.browsers.lock();
+            browsers.get(label).and_then(|browser| {
+                browser.host().and_then(|host| {
+                    let h = host.window_handle();
+                    if h.0.is_null() {
+                        None
+                    } else {
+                        Some(h.0 as *mut std::ffi::c_void)
+                    }
+                })
+            })
+        };
+        if let Some(hwnd) = raw_hwnd {
+            set_taskbar_hidden(hwnd, true);
+        } else {
+            tracing::warn!(
+                target: "dnd:tearoff:pool",
+                label = %label,
+                "[pool] HWND not yet available at register time — taskbar hide skipped"
+            );
+        }
     }
     tracing::debug!(
         target: "dnd:tearoff:pool",
         label = %label,
         "[pool] browser registered, awaiting renderer-ready signal"
     );
+}
+
+/// Toggle WS_EX_TOOLWINDOW on a window's extended style so it
+/// appears (or doesn't) in the taskbar / Alt+Tab. We use this so
+/// pre-warmed pool windows stay invisible to the user, then
+/// re-enter the taskbar when promoted to a real torn-off window.
+///
+/// Per Win32 docs, changing the ex-style after creation only
+/// updates the taskbar reliably if the window is hidden + reshown.
+/// We do that hide/show cycle here with SWP_FRAMECHANGED so
+/// the change takes effect even if SW_HIDE was already implicit.
+#[cfg(target_os = "windows")]
+fn set_taskbar_hidden(hwnd: *mut std::ffi::c_void, hidden: bool) {
+    unsafe {
+        use windows_sys::Win32::UI::WindowsAndMessaging::{
+            GetWindowLongPtrW, SetWindowLongPtrW, SetWindowPos, ShowWindow,
+            GWL_EXSTYLE, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
+            SWP_NOZORDER, SW_HIDE, SW_SHOWNA, WS_EX_APPWINDOW, WS_EX_TOOLWINDOW,
+        };
+        let mut ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+        if hidden {
+            ex |= WS_EX_TOOLWINDOW as isize;
+            ex &= !(WS_EX_APPWINDOW as isize);
+        } else {
+            ex &= !(WS_EX_TOOLWINDOW as isize);
+            ex |= WS_EX_APPWINDOW as isize;
+        }
+        // Hide → write style → show forces the shell to re-evaluate
+        // the taskbar entry. Without the hide/show pair Windows often
+        // keeps the original taskbar state on style change.
+        let _ = ShowWindow(hwnd, SW_HIDE);
+        SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex);
+        let _ = SetWindowPos(
+            hwnd,
+            std::ptr::null_mut(),
+            0, 0, 0, 0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED,
+        );
+        // Don't re-show pool windows — they should stay hidden until
+        // promote. Re-show only when transitioning OUT of toolwindow.
+        if !hidden {
+            let _ = ShowWindow(hwnd, SW_SHOWNA);
+        }
+    }
 }
 
 /// Called when a pool window is destroyed before it ever became
@@ -335,6 +412,12 @@ pub fn promote_pool_window(
     // grabbed from a secondary.
     let pos_x = screen_x - POOL_WIDTH / 2;
     let pos_y = screen_y - TITLE_BAR_OFFSET_PX;
+
+    // Take the window out of WS_EX_TOOLWINDOW so the promoted window
+    // appears in the taskbar / Alt+Tab like any other AgentMux
+    // instance. Must run BEFORE the position/show below; otherwise
+    // the taskbar entry won't appear until the next style refresh.
+    set_taskbar_hidden(raw_hwnd, false);
 
     // Reposition + raise to top + show. SWP_NOZORDER is intentionally
     // *not* set — for tear-off we need the new window at the top of
