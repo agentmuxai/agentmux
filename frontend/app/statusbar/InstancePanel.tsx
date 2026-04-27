@@ -15,7 +15,7 @@
  * Per-window token totals deferred until token-usage is per-window.
  */
 
-import { atoms, getApi, openWindowLabelsAtom, windowInstanceNumAtom } from "@/store/global";
+import { getApi, openWindowLabelsAtom } from "@/store/global";
 import { usePaneOverlay } from "@/app/platform/pane-overlay";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
 import { createMemo, createSignal, For, Show, type JSX } from "solid-js";
@@ -47,7 +47,6 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
     });
 
     const labels = openWindowLabelsAtom;
-    const myInstanceNum = windowInstanceNumAtom;
     const [myLabel, setMyLabel] = createSignal<string | null>(null);
     getApi().getWindowLabel().then((l) => setMyLabel(l)).catch(() => setMyLabel(null));
 
