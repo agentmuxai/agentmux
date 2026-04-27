@@ -116,20 +116,55 @@ pub fn start_tear_off_tracking(
             unsafe {
                 use windows_sys::Win32::UI::WindowsAndMessaging::{
                     DispatchMessageW, GetMessageW, SetWindowsHookExW,
-                    TranslateMessage, UnhookWindowsHookEx, MSG, WH_MOUSE_LL,
+                    TranslateMessage, UnhookWindowsHookEx, MSG,
+                    WH_KEYBOARD_LL, WH_MOUSE_LL,
                 };
 
-                let hook = SetWindowsHookExW(
+                // hMod: pass our own module handle (defensive — the
+                // OS accepts NULL for WH_MOUSE_LL/WH_KEYBOARD_LL but
+                // the contract technically requires the module
+                // containing the hook proc).
+                let h_module = windows_sys::Win32::System::LibraryLoader::GetModuleHandleW(
+                    std::ptr::null(),
+                );
+
+                let mouse_hook = SetWindowsHookExW(
                     WH_MOUSE_LL,
                     Some(low_level_mouse_proc),
-                    std::ptr::null_mut(),
+                    h_module,
                     0,
                 );
-                if hook.is_null() {
+                if mouse_hook.is_null() {
                     let err = windows_sys::Win32::Foundation::GetLastError();
                     HOOK_CTX.with(|cell| *cell.borrow_mut() = None);
                     let _ = ready_tx.send(Err(format!(
-                        "SetWindowsHookExW failed: GetLastError={}",
+                        "SetWindowsHookExW(WH_MOUSE_LL) failed: GetLastError={}",
+                        err
+                    )));
+                    return;
+                }
+
+                // ESC during the SC_MOVE modal loop cancels the move
+                // but Windows sends no WM_LBUTTONUP — without a
+                // keyboard hook the mouse hook would survive forever
+                // (and worse, the next unrelated WM_LBUTTONUP anywhere
+                // on the desktop would fire handle_button_up with
+                // stale tear-off context, silently merging the wrong
+                // tab into the wrong window). The keyboard hook
+                // catches VK_ESCAPE and treats it as a standalone
+                // finalisation. (reagent PR #565 P1)
+                let kb_hook = SetWindowsHookExW(
+                    WH_KEYBOARD_LL,
+                    Some(low_level_keyboard_proc),
+                    h_module,
+                    0,
+                );
+                if kb_hook.is_null() {
+                    let err = windows_sys::Win32::Foundation::GetLastError();
+                    UnhookWindowsHookEx(mouse_hook);
+                    HOOK_CTX.with(|cell| *cell.borrow_mut() = None);
+                    let _ = ready_tx.send(Err(format!(
+                        "SetWindowsHookExW(WH_KEYBOARD_LL) failed: GetLastError={}",
                         err
                     )));
                     return;
@@ -139,11 +174,12 @@ pub fn start_tear_off_tracking(
 
                 tracing::info!(
                     target: "dnd:tearoff",
-                    "[dnd:tearoff] hook installed, entering message loop"
+                    "[dnd:tearoff] hooks installed (mouse + keyboard), entering message loop"
                 );
 
-                // Standard GetMessage pump. The loop exits when the
-                // hook callback posts WM_QUIT after WM_LBUTTONUP.
+                // Standard GetMessage pump. The loop exits when a
+                // hook callback posts WM_QUIT after WM_LBUTTONUP or
+                // VK_ESCAPE.
                 let mut msg: MSG = std::mem::zeroed();
                 loop {
                     let r = GetMessageW(&mut msg, std::ptr::null_mut(), 0, 0);
@@ -154,12 +190,13 @@ pub fn start_tear_off_tracking(
                     DispatchMessageW(&msg);
                 }
 
-                UnhookWindowsHookEx(hook);
+                UnhookWindowsHookEx(kb_hook);
+                UnhookWindowsHookEx(mouse_hook);
                 HOOK_CTX.with(|cell| *cell.borrow_mut() = None);
 
                 tracing::info!(
                     target: "dnd:tearoff",
-                    "[dnd:tearoff] hook uninstalled, thread exiting"
+                    "[dnd:tearoff] hooks uninstalled, thread exiting"
                 );
             }
         })
@@ -184,6 +221,56 @@ pub fn start_tear_off_tracking(
     _dest_ws_id: String,
 ) -> Result<(), String> {
     Ok(())
+}
+
+#[cfg(target_os = "windows")]
+unsafe extern "system" fn low_level_keyboard_proc(
+    n_code: i32,
+    w_param: windows_sys::Win32::Foundation::WPARAM,
+    l_param: windows_sys::Win32::Foundation::LPARAM,
+) -> windows_sys::Win32::Foundation::LRESULT {
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::VK_ESCAPE;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        CallNextHookEx, KBDLLHOOKSTRUCT, PostQuitMessage, WM_KEYDOWN, WM_SYSKEYDOWN,
+    };
+
+    if n_code < 0 {
+        return CallNextHookEx(std::ptr::null_mut(), n_code, w_param, l_param);
+    }
+
+    let msg_id = w_param as u32;
+    if msg_id == WM_KEYDOWN || msg_id == WM_SYSKEYDOWN {
+        let kb = &*(l_param as *const KBDLLHOOKSTRUCT);
+        if kb.vkCode == VK_ESCAPE as u32 {
+            // Treat as a standalone finalisation — the dragged
+            // window stays where the user had it. Phase 5 will
+            // upgrade this to a cancel-back when the spec lands
+            // the original-index restoration.
+            HOOK_CTX.with(|cell| {
+                let ctx_ref = cell.borrow();
+                if let Some(ctx) = ctx_ref.as_ref() {
+                    tracing::info!(
+                        target: "dnd:tearoff",
+                        tab_id = %ctx.tab_id,
+                        "[dnd:tearoff] ESC pressed — standalone finalize"
+                    );
+                    crate::events::emit_event_to_window(
+                        &ctx.state,
+                        &ctx.source_label,
+                        "tearoff:standalone",
+                        &serde_json::json!({
+                            "tabId": ctx.tab_id,
+                            "draggedWindowLabel": ctx.dragged_label,
+                            "reason": "esc",
+                        }),
+                    );
+                }
+            });
+            PostQuitMessage(0);
+        }
+    }
+
+    CallNextHookEx(std::ptr::null_mut(), n_code, w_param, l_param)
 }
 
 #[cfg(target_os = "windows")]
@@ -229,26 +316,40 @@ fn handle_mouse_move(cursor_x: i32, cursor_y: i32) {
             return;
         };
 
-        let candidate = candidate_label_under_cursor(ctx, cursor_x, cursor_y);
-        let mut current = ctx.current_target.borrow_mut();
-        if *current == candidate {
-            return; // no change
-        }
+        // Single browsers-lock acquisition: detect candidate AND
+        // pre-clone the browser handles for prev/next targets in
+        // one critical section. Lock held only here, never spanning
+        // emit_event calls below.
+        let (candidate, prev_browser, next_browser, candidate_changed) = {
+            use cef::Browser;
+            let browsers = ctx.state.browsers.lock();
+            let candidate = candidate_label_under_cursor_locked(ctx, &browsers, cursor_x, cursor_y);
+            let prev_label = ctx.current_target.borrow().clone();
+            let candidate_changed = prev_label != candidate;
+            let prev_browser: Option<Browser> = if candidate_changed {
+                prev_label.as_ref().and_then(|l| browsers.get(l).cloned())
+            } else {
+                None
+            };
+            let next_browser: Option<Browser> = candidate
+                .as_ref()
+                .and_then(|l| browsers.get(l).cloned());
+            (candidate, prev_browser, next_browser, candidate_changed)
+        };
 
-        // Hover left the previous candidate.
-        if let Some(prev) = current.as_ref() {
-            crate::events::emit_event_to_window(
-                &ctx.state,
-                prev,
-                "tearoff:hover-cleared",
-                &serde_json::json!({}),
-            );
+        // Lock released — emit events without re-locking.
+        if let Some(b) = prev_browser.as_ref() {
+            crate::events::emit_event(b, "tearoff:hover-cleared", &serde_json::json!({}));
         }
-        // Hover entered the new candidate.
-        if let Some(next) = candidate.as_ref() {
-            crate::events::emit_event_to_window(
-                &ctx.state,
-                next,
+        // Always emit hover-changed when over a candidate, not just on
+        // candidate-change. The destination's insertion indicator
+        // tracks the cursor X within the strip — without per-move
+        // updates the indicator would lock to wherever the cursor
+        // entered and never slide as the user traverses the strip.
+        // (reagent PR #565 P1)
+        if let Some(b) = next_browser.as_ref() {
+            crate::events::emit_event(
+                b,
                 "tearoff:hover-changed",
                 &serde_json::json!({
                     "cursorX": cursor_x,
@@ -257,7 +358,9 @@ fn handle_mouse_move(cursor_x: i32, cursor_y: i32) {
                 }),
             );
         }
-        *current = candidate;
+        if candidate_changed {
+            *ctx.current_target.borrow_mut() = candidate;
+        }
     });
 }
 
@@ -269,7 +372,10 @@ fn handle_button_up(cursor_x: i32, cursor_y: i32) {
             return;
         };
 
-        let candidate = candidate_label_under_cursor(ctx, cursor_x, cursor_y);
+        let candidate = {
+            let browsers = ctx.state.browsers.lock();
+            candidate_label_under_cursor_locked(ctx, &browsers, cursor_x, cursor_y)
+        };
 
         tracing::info!(
             target: "dnd:tearoff",
@@ -322,11 +428,17 @@ fn handle_button_up(cursor_x: i32, cursor_y: i32) {
 }
 
 /// Find the AgentMux window label whose top-level HWND contains the
-/// cursor position. Returns None if the cursor is over the desktop or
-/// a non-AgentMux window. Excludes the dragged window itself
-/// (landing on the dragged window's strip would be a no-op merge).
+/// cursor position. Excludes the dragged window itself (landing on
+/// the dragged window's strip would be a no-op merge). Takes the
+/// browsers lock guard from the caller so we don't re-acquire on
+/// the WM_MOUSEMOVE hot path.
 #[cfg(target_os = "windows")]
-fn candidate_label_under_cursor(ctx: &HookContext, x: i32, y: i32) -> Option<String> {
+fn candidate_label_under_cursor_locked(
+    ctx: &HookContext,
+    browsers: &std::collections::HashMap<String, cef::Browser>,
+    x: i32,
+    y: i32,
+) -> Option<String> {
     use windows_sys::Win32::Foundation::POINT;
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         GetAncestor, WindowFromPoint, GA_ROOT,
@@ -340,18 +452,10 @@ fn candidate_label_under_cursor(ctx: &HookContext, x: i32, y: i32) -> Option<Str
     let root = unsafe { GetAncestor(hwnd, GA_ROOT) };
     let root = if root.is_null() { hwnd } else { root };
 
-    // Reverse-lookup label by walking state.browsers. The map is
-    // small (typically 1-3 entries during a tear-off) so linear scan
-    // is fine — and we hold the mutex only for the duration of the
-    // walk, never spanning emit_event calls.
-    let browsers = ctx.state.browsers.lock();
     for (label, browser) in browsers.iter() {
-        // Skip the dragged window itself.
         if label == &ctx.dragged_label {
             continue;
         }
-        // Only consider top-level instance windows; pane child
-        // browsers etc. don't have tab strips.
         if !is_instance_label(label) {
             continue;
         }

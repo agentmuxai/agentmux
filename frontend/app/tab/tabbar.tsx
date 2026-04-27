@@ -248,27 +248,56 @@ function TabBar(props: TabBarProps): JSX.Element {
     //    releases over no AgentMux window. Currently informational only;
     //    Phase 5 will use this to update cancel-back UI state.
     onMount(() => {
+        // `mounted` flag protects against the race where the component
+        // unmounts (e.g. tab change, HMR) while the dynamic import or
+        // listenEvent calls are still in flight. Without this, listeners
+        // registered after onCleanup ran would leak forever — they're
+        // not in `unsubs` yet when onCleanup fires, so the cleanup pass
+        // misses them. (gemini PR #565 HIGH)
+        let mounted = true;
         let unsubs: Array<() => void> = [];
+        const trackOrDispose = (unsub: () => void) => {
+            if (mounted) {
+                unsubs.push(unsub);
+            } else {
+                unsub();
+            }
+        };
         fireAndForget(async () => {
             const { listenEvent } = await import("@/app/platform/ipc");
+            if (!mounted) return;
 
-            unsubs.push(
+            trackOrDispose(
                 await listenEvent<{ cursorX: number; cursorY: number }>(
                     "tearoff:hover-changed",
                     (payload) => {
+                        // Host emits hover-changed when cursor is over
+                        // ANY part of this window's HWND; check Y against
+                        // the strip rect so dropping on the content area
+                        // doesn't trigger a merge. (codex PR #565 P1)
+                        const stripRect = tabBarScrollRef?.getBoundingClientRect();
+                        if (!stripRect) {
+                            setInsertionPoint(null);
+                            return;
+                        }
                         const clientX = payload.cursorX - window.screenX;
+                        const clientY = payload.cursorY - window.screenY;
+                        if (clientY < stripRect.top || clientY > stripRect.bottom) {
+                            setInsertionPoint(null);
+                            return;
+                        }
                         setInsertionPoint(computeInsertionPoint(clientX));
                     },
                 ),
             );
 
-            unsubs.push(
+            trackOrDispose(
                 await listenEvent("tearoff:hover-cleared", () => {
                     setInsertionPoint(null);
                 }),
             );
 
-            unsubs.push(
+            trackOrDispose(
                 await listenEvent<{
                     tabId: string;
                     fromWsId: string;
@@ -284,7 +313,24 @@ function TabBar(props: TabBarProps): JSX.Element {
                                 Logger.warn("dnd", "tearoff:merge — no own workspace, skipping", payload);
                                 return;
                             }
+                            // Strip-area hit test: only merge when the
+                            // cursor is actually over the tab strip,
+                            // not the content area below. Otherwise an
+                            // accidental release while passing over a
+                            // window's body would silently relocate
+                            // the tab. (codex PR #565 P1)
+                            const stripRect = tabBarScrollRef?.getBoundingClientRect();
                             const clientX = payload.cursorX - window.screenX;
+                            const clientY = payload.cursorY - window.screenY;
+                            if (
+                                !stripRect ||
+                                clientY < stripRect.top ||
+                                clientY > stripRect.bottom
+                            ) {
+                                Logger.info("dnd", "tearoff:merge — cursor not over strip, leaving as standalone", payload);
+                                setInsertionPoint(null);
+                                return;
+                            }
                             const ip = computeInsertionPoint(clientX);
                             const tabs = tabIds();
                             // Convert insertion point to numeric index. The
@@ -325,13 +371,14 @@ function TabBar(props: TabBarProps): JSX.Element {
                 }),
             );
 
-            unsubs.push(
+            trackOrDispose(
                 await listenEvent("tearoff:standalone", (payload) => {
                     Logger.info("dnd", "tearoff:standalone", payload);
                 }),
             );
         });
         onCleanup(() => {
+            mounted = false;
             for (const u of unsubs) u();
             unsubs = [];
         });
