@@ -103,7 +103,7 @@ fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType {
             // wrong-tab routing hard to diagnose. Missing/null/empty
             // is fine: treat as "no override" and use uicontext.
             let explicit_tab_id: Option<String> = match service::get_optional_arg::<String>(args, 2) {
-                Ok(opt) => opt.filter(|s| !s.trim().is_empty()),
+                Ok(opt) => opt.map(|s| s.trim().to_string()).filter(|s| !s.is_empty()),
                 Err(e) => return WebReturnType::error(format!("invalid tabId arg: {}", e)),
             };
             let tab_id = match explicit_tab_id {
