@@ -282,18 +282,24 @@ pub fn promote_pool_window(
         }
     };
 
-    // Reposition + show via Win32. No lock held during these calls.
-    // Don't clamp coords with .max(0) — Windows' virtual screen
-    // space is signed (secondary monitors to the left of / above
-    // the primary one are negative-coord) and clamping would push
-    // tear-offs onto the primary monitor when the user grabbed
-    // from a secondary.
+    // Compute position outside the unsafe block — these are pure
+    // arithmetic, no FFI needed. Don't clamp with .max(0): Windows'
+    // virtual screen space is signed (secondary monitors to the left
+    // of or above the primary have negative coords), and clamping
+    // would push tear-offs onto the primary monitor when the user
+    // grabbed from a secondary.
+    let pos_x = screen_x - POOL_WIDTH / 2;
+    let pos_y = screen_y - TITLE_BAR_OFFSET_PX;
+
+    // Reposition + raise to top + show. SWP_NOZORDER is intentionally
+    // *not* set — for tear-off we need the new window at the top of
+    // the Z-order so the subsequent SC_MOVE handshake routes the
+    // mouse-capture correctly. With SWP_NOZORDER set, HWND_TOP would
+    // be silently ignored.
     unsafe {
         use windows_sys::Win32::UI::WindowsAndMessaging::{
-            SetWindowPos, ShowWindow, HWND_TOP, SWP_NOZORDER, SW_SHOW,
+            SetWindowPos, ShowWindow, HWND_TOP, SW_SHOW,
         };
-        let pos_x = screen_x - POOL_WIDTH / 2;
-        let pos_y = screen_y - TITLE_BAR_OFFSET_PX;
         SetWindowPos(
             raw_hwnd,
             HWND_TOP,
@@ -301,7 +307,7 @@ pub fn promote_pool_window(
             pos_y,
             POOL_WIDTH,
             POOL_HEIGHT,
-            SWP_NOZORDER,
+            0, // no flags — apply move + size + Z-order all
         );
         let _ = ShowWindow(raw_hwnd, SW_SHOW);
     }
