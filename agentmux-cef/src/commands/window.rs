@@ -62,6 +62,45 @@ pub fn close_window(state: &Arc<AppState>) -> Result<serde_json::Value, String> 
     Ok(serde_json::Value::Null)
 }
 
+/// Close a specific window by label. Used by the tear-off Phase 4
+/// merge path: after the candidate window pulls the dragged tab into
+/// its own workspace via MoveTabToWorkspace, the dragged window is
+/// empty and should be destroyed. Posts WM_CLOSE on Win32; uses the
+/// existing UI-thread close task on other platforms.
+pub fn close_window_by_label(
+    state: &Arc<AppState>,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let label = args
+        .get("label")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "missing label".to_string())?
+        .to_string();
+
+    #[cfg(target_os = "windows")]
+    unsafe {
+        use cef::{ImplBrowser, ImplBrowserHost};
+        use windows_sys::Win32::UI::WindowsAndMessaging::{PostMessageW, WM_CLOSE};
+        let browsers = state.browsers.lock();
+        if let Some(browser) = browsers.get(&label) {
+            if let Some(host) = browser.host() {
+                let hwnd = host.window_handle();
+                if !hwnd.0.is_null() {
+                    PostMessageW(hwnd.0 as *mut std::ffi::c_void, WM_CLOSE, 0, 0);
+                    return Ok(serde_json::Value::Null);
+                }
+            }
+        }
+        return Err(format!("no top-level HWND for label {}", label));
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        crate::ui_tasks::post_close_window(state, &label);
+        Ok(serde_json::Value::Null)
+    }
+}
+
 /// Minimize the window.
 pub fn minimize_window(state: &Arc<AppState>) -> Result<serde_json::Value, String> {
     #[cfg(target_os = "windows")]
