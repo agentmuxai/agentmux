@@ -278,6 +278,7 @@ unsafe extern "system" fn low_level_keyboard_proc(
                         &serde_json::json!({
                             "tabId": ctx.tab_id,
                             "fromWsId": ctx.dest_ws_id,
+                            "originalSourceWsId": ctx.source_ws_id,
                             "draggedWindowLabel": ctx.dragged_label,
                             "originalIndex": ctx.original_tab_index,
                             "reason": "esc",
@@ -434,6 +435,7 @@ fn handle_button_up(cursor_x: i32, cursor_y: i32) {
                     &serde_json::json!({
                         "tabId": ctx.tab_id,
                         "fromWsId": ctx.dest_ws_id,
+                        "originalSourceWsId": ctx.source_ws_id,
                         "draggedWindowLabel": ctx.dragged_label,
                         "originalIndex": ctx.original_tab_index,
                         "cursorX": cursor_x,

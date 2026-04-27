@@ -308,12 +308,19 @@ pub fn restore_torn_off_tab(
         return Ok(());
     }
 
-    // Verify tab exists.
+    // Validate everything we're going to touch BEFORE mutating any of
+    // it. If `dest_ws_id` is stale (e.g. user closed the original
+    // window while the SC_MOVE loop was running, or sent a malformed
+    // request), `must_get::<Workspace>(dest_ws_id)` fails here and
+    // the source workspace is untouched — no orphaned tab.
+    // (codex PR #567 P1 / gemini HIGH)
     let _tab = store.must_get::<Tab>(tab_id)?;
-
-    // Remove tab from source workspace. No last-tab guard: a tear-off
-    // workspace's only tab IS the one being restored.
     let mut source_ws = store.must_get::<Workspace>(source_ws_id)?;
+    let mut dest_ws = store.must_get::<Workspace>(dest_ws_id)?;
+
+    // Compute source-side mutations in memory only (don't persist yet).
+    // No last-tab guard: a tear-off workspace's only tab IS the one
+    // being restored, and we'll delete the empty workspace below.
     source_ws.tabids.retain(|id| id != tab_id);
     source_ws.pinnedtabids.retain(|id| id != tab_id);
     let source_now_empty =
@@ -327,23 +334,33 @@ pub fn restore_torn_off_tab(
             .unwrap_or_default();
         source_ws.activetabid = new_active;
     }
-    store.update(&mut source_ws)?;
 
-    // Add tab to destination workspace at requested index.
-    let mut dest_ws = store.must_get::<Workspace>(dest_ws_id)?;
+    // De-dup in destination before insert. A retried frontend request
+    // could otherwise produce duplicate tab IDs in the workspace's
+    // `tabids` array. (gemini PR #567 MEDIUM)
+    dest_ws.tabids.retain(|id| id != tab_id);
+    dest_ws.pinnedtabids.retain(|id| id != tab_id);
     let idx = insert_index.unwrap_or(dest_ws.tabids.len());
     let insert_at = idx.min(dest_ws.tabids.len());
     dest_ws.tabids.insert(insert_at, tab_id.to_string());
     dest_ws.activetabid = tab_id.to_string();
+
+    // Persist destination FIRST. If this fails, source is still
+    // untouched and the tab keeps its tear-off home. If it succeeds
+    // the tab now lives in two workspaces' tabids — that's transient
+    // and resolves on the next persist below. Workspace records are
+    // single writers so no other actor can observe the intermediate
+    // state. (gemini PR #567 HIGH)
     store.update(&mut dest_ws)?;
 
-    // Delete the now-empty source workspace so the dragged window's
-    // close (which the frontend issues immediately after) doesn't
-    // attempt a redundant cascade. The tab record itself stays — it
-    // belongs to the destination workspace now.
+    // Now persist (or delete) source. If `source_now_empty`, skip the
+    // update entirely and go straight to delete — saves a write +
+    // avoids redundant Workspace update events to frontends.
     if source_now_empty {
         tracing::info!(source_ws = %source_ws_id, "[dnd] deleting empty tear-off workspace");
         store.delete::<Workspace>(source_ws_id)?;
+    } else {
+        store.update(&mut source_ws)?;
     }
 
     tracing::info!(

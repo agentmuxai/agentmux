@@ -415,6 +415,7 @@ function TabBar(props: TabBarProps): JSX.Element {
                 await listenEvent<{
                     tabId: string;
                     fromWsId: string;
+                    originalSourceWsId: string;
                     draggedWindowLabel: string;
                     originalIndex: number;
                     cursorX?: number;
@@ -427,9 +428,14 @@ function TabBar(props: TabBarProps): JSX.Element {
                             // tearoff:hover-changed updates while the cursor
                             // was still on the strip. (codex PR #567 P3)
                             setInsertionPoint(null);
-                            const ownWsId = props.workspace?.oid;
-                            if (!ownWsId) {
-                                Logger.warn("dnd", "tearoff:cancel-back — no own workspace, skipping", payload);
+                            // Restore into the workspace the tab was torn
+                            // from, NOT this window's currently-active
+                            // workspace. If the user switched workspaces
+                            // mid-drag, ownWsId would put the tab in the
+                            // wrong place. (codex PR #567 round-5 P2)
+                            const restoreWsId = payload.originalSourceWsId;
+                            if (!restoreWsId) {
+                                Logger.warn("dnd", "tearoff:cancel-back — no original source workspace, skipping", payload);
                                 return;
                             }
                             // Strip-area hit test (drop-on-source path
@@ -465,7 +471,7 @@ function TabBar(props: TabBarProps): JSX.Element {
                             await WorkspaceService.RestoreTornOffTab(
                                 payload.tabId,
                                 payload.fromWsId,
-                                ownWsId,
+                                restoreWsId,
                                 payload.originalIndex,
                             );
                             await getApi().closeWindowByLabel(payload.draggedWindowLabel);
