@@ -576,6 +576,12 @@ export function buildCefApi(): AppApi {
         openWindowAtPosition: async (screenX: number, screenY: number, workspaceId?: string) => {
             return await invokeCommand<string>("open_window_at_position", { screenX, screenY, workspaceId: workspaceId ?? "" });
         },
+        tearOffSCMoveHandshake: async (args) => {
+            return await invokeCommand<{ handshakeMs: number; totalMs: number }>(
+                "tear_off_sc_move_handshake",
+                args,
+            );
+        },
 
         // --- Drag cursor & helpers ---
         setDragCursor: async () => {

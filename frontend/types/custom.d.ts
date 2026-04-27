@@ -175,6 +175,16 @@ declare global {
         ) => Promise<void>;
         cancelCrossDrag: (dragId: string) => Promise<void>;
         openWindowAtPosition: (screenX: number, screenY: number, workspaceId?: string) => Promise<string>;
+        /** Tear-off Phase 2 Win32 SC_MOVE handshake. Call AFTER
+         *  TearOffTab + openWindowAtPosition; this hands cursor capture
+         *  to the new window so it follows the mouse like a Chrome
+         *  torn-off tab. See SPEC_TAB_TEAR_OFF_SIZE_PRESERVATION §4.2. */
+        tearOffSCMoveHandshake: (args: {
+            sourceWindowLabel: string;
+            destWindowLabel: string;
+            cursorX: number;
+            cursorY: number;
+        }) => Promise<{ handshakeMs: number; totalMs: number }>;
         setDragCursor: () => Promise<void>;
         restoreDragCursor: () => Promise<void>;
         releaseDragCapture: () => Promise<void>;

@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { atoms, createTab, setActiveTab } from "@/store/global";
+import { atoms, createTab, getApi, setActiveTab } from "@/store/global";
 import { fireAndForget } from "@/util/util";
 import { useWindowDrag } from "@/app/hook/useWindowDrag.platform";
 import { monitorForElements } from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
@@ -132,12 +132,25 @@ function TabBar(props: TabBarProps): JSX.Element {
                 if (rect && !tearOffFired && input.clientY > rect.bottom + TEAR_PAST_PX) {
                     tearOffFired = true;
                     const draggedTabId = source.data.tabId as string;
-                    requestTearOff(draggedTabId, input.clientX, input.clientY);
-                    // FUTURE Phase 2: return here once requestTearOff
-                    // actually hands off to the host. For now (stub only),
-                    // fall through so insertionPoint keeps tracking — a
-                    // drag that dips past the threshold and returns to the
-                    // bar still gets the reorder gap.
+                    const wsId = props.workspace?.oid;
+                    if (wsId) {
+                        // Phase 2: real tear-off (sidecar TearOffTab +
+                        // host openWindowAtPosition + Win32 SC_MOVE).
+                        // Fire-and-forget — the user is mid-drag and the
+                        // host's SC_MOVE handshake will take over the
+                        // cursor synchronously from Windows' point of view.
+                        // (See requestTearOff below.)
+                        fireAndForget(() =>
+                            requestTearOff(draggedTabId, wsId, input.clientX, input.clientY),
+                        );
+                    }
+                    // Continue updating insertionPoint below — until the
+                    // host's SC_MOVE handshake completes (~150-300ms cold
+                    // path), the user's mouse is still over our window
+                    // and pragmatic-dnd is still firing onDrag. The
+                    // tearOffFired latch ensures requestTearOff doesn't
+                    // re-fire; the gap-tracking is harmless during the
+                    // brief overlap.
                 }
                 setInsertionPoint(computeInsertionPoint(input.clientX));
             },
@@ -271,20 +284,71 @@ function TabBar(props: TabBarProps): JSX.Element {
 }
 
 /**
- * Phase 1 stub — fires once per drag when the cursor crosses the tear
- * threshold. Logs only; subsequent phases will:
- *   - capture a TabSnapshot for width preservation (Phase 3)
- *   - call host.tearOffTab(...) to spawn a destination window and
- *     enter the Win32 SC_MOVE loop (Phase 2)
- *   - install WH_MOUSE_LL for cross-window merge detection (Phase 4)
+ * Phase 2 — orchestrates the Chrome-faithful tear-off when the cursor
+ * crosses the strip's bottom edge. Three steps, all from the source
+ * window's renderer:
+ *
+ *   1. Move the tab data to a brand-new workspace (sidecar).
+ *   2. Spawn a new agentmux-cef window pointed at that workspace
+ *      (host).
+ *   3. Hand cursor capture over to the new window via Win32 SC_MOVE
+ *      (host) so it follows the mouse like a Chrome torn-off tab.
+ *
+ * Phase 2 acceptance is structural: the SC_MOVE plumbing fires and
+ * the window follows the cursor. The cold-path first-paint flash
+ * (~150-300ms while the new window registers + paints) is expected
+ * and is not an acceptance failure — Phase 6's pre-warmed pool
+ * brings it to 0 ms. The ≤ 8 ms handshake budget from the spec §0
+ * is measured by the host and emitted as `handshakeMs` on this
+ * call's result.
+ *
+ * Subsequent phases:
+ *   - Phase 3: capture a TabSnapshot for width preservation
+ *   - Phase 4: WH_MOUSE_LL hook for cross-window merge detection
+ *   - Phase 5: cancel-back-to-source on drop over origin strip
+ *   - Phase 6: pre-warmed window pool (eliminates first-paint flash)
+ *
  * See docs/specs/SPEC_TAB_TEAR_OFF_SIZE_PRESERVATION_2026_04_26.
  */
-function requestTearOff(tabId: string, cursorX: number, cursorY: number): void {
-    Logger.info("dnd", "tab tear-off threshold crossed (Phase 1 stub)", {
-        tabId,
-        cursorX,
-        cursorY,
-    });
+async function requestTearOff(
+    tabId: string,
+    workspaceId: string,
+    cursorX: number,
+    cursorY: number,
+): Promise<void> {
+    const t0 = performance.now();
+    try {
+        const sourceWindowLabel = await getApi().getWindowLabel();
+        // Step 1 — sidecar transfers the tab into a new workspace.
+        // Returns the new workspace's ID.
+        const newWsId = await WorkspaceService.TearOffTab(tabId, workspaceId);
+        // Step 2 — host spawns the destination window pointed at the
+        // new workspace. Returns the new window's label.
+        const destWindowLabel = await getApi().openWindowAtPosition(
+            cursorX,
+            cursorY,
+            newWsId,
+        );
+        // Step 3 — Win32 SC_MOVE handshake. Host waits for the new
+        // window's HWND to register, then transfers cursor capture
+        // and posts WM_SYSCOMMAND/SC_MOVE so Windows enters its
+        // built-in modal move-loop. Until mouseup, the new window
+        // follows the cursor at full opacity, no ghost.
+        const result = await getApi().tearOffSCMoveHandshake({
+            sourceWindowLabel,
+            destWindowLabel,
+            cursorX,
+            cursorY,
+        });
+        Logger.info("dnd", "tab tear-off complete", {
+            tabId,
+            destWindowLabel,
+            handshakeMs: result.handshakeMs,
+            totalMs: performance.now() - t0,
+        });
+    } catch (e) {
+        Logger.error("dnd", "tab tear-off failed", { tabId, error: String(e) });
+    }
 }
 
 /**
