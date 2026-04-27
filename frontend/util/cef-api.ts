@@ -426,6 +426,9 @@ export function buildCefApi(): AppApi {
                 "list_window_instances",
             );
         },
+        getDoubleClickTime: async () => {
+            return await invokeCommand<number>("get_double_click_time");
+        },
         focusWindow: async (label: string) => {
             await invokeCommand("focus_window", { label });
         },

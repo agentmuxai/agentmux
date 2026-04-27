@@ -276,6 +276,7 @@ async fn route_command(
         }
         "list_windows" => Ok(commands::window::list_windows(state)),
         "list_window_instances" => Ok(commands::window::list_window_instances(state)),
+        "get_double_click_time" => Ok(commands::window::get_double_click_time()),
         "focus_window" => commands::window::focus_window(state, args),
         "close_window_by_label" => commands::window::close_window_by_label(state, args),
 
