@@ -9,6 +9,7 @@ pub mod window;
 pub mod backend;
 pub mod providers;
 pub mod drag;
+pub mod tear_off_hook;
 pub mod clipboard;
 pub mod stubs;
 pub mod palette;

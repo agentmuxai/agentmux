@@ -184,7 +184,19 @@ declare global {
             destWindowLabel: string;
             cursorX: number;
             cursorY: number;
+            /** Phase 4 — drives the WH_MOUSE_LL hook for cross-window
+             *  merge detection. When all three are non-empty, the host
+             *  arms the hook before posting SC_MOVE; on mouseup the
+             *  candidate window receives `tearoff:merge` (or the source
+             *  receives `tearoff:standalone` if no candidate). */
+            tabId?: string;
+            sourceWsId?: string;
+            destWsId?: string;
         }) => Promise<{ handshakeMs: number; totalMs: number }>;
+        /** Close a specific AgentMux window by label. Used by Phase 4
+         *  merge to clean up the dragged window after its tab is moved
+         *  into the destination workspace. */
+        closeWindowByLabel: (label: string) => Promise<void>;
         setDragCursor: () => Promise<void>;
         restoreDragCursor: () => Promise<void>;
         releaseDragCapture: () => Promise<void>;

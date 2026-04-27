@@ -582,6 +582,9 @@ export function buildCefApi(): AppApi {
                 args,
             );
         },
+        closeWindowByLabel: async (label: string) => {
+            await invokeCommand("close_window_by_label", { label });
+        },
 
         // --- Drag cursor & helpers ---
         setDragCursor: async () => {
