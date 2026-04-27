@@ -175,6 +175,11 @@ declare global {
         ) => Promise<void>;
         cancelCrossDrag: (dragId: string) => Promise<void>;
         openWindowAtPosition: (screenX: number, screenY: number, workspaceId?: string) => Promise<string>;
+        /** Phase 6 — promote a pre-warmed pool window for tear-off.
+         *  Returns the destination window label on success. Throws if
+         *  the pool is empty (caller should fall back to
+         *  openWindowAtPosition for the cold path). */
+        tearOffPoolPromote: (workspaceId: string, screenX: number, screenY: number) => Promise<string>;
         /** Tear-off Phase 2 Win32 SC_MOVE handshake. Call AFTER
          *  TearOffTab + openWindowAtPosition; this hands cursor capture
          *  to the new window so it follows the mouse like a Chrome

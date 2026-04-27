@@ -191,6 +191,17 @@ impl AgentMuxHandler {
         }
 
         self.browser_list.push(browser);
+
+        // Tear-off Phase 6 — pre-warmed window pool.
+        // - When the "main" window registers, kick off the initial pool spawn.
+        // - When a "window-pool-*" window registers, log only — actual
+        //   queue insertion waits for the frontend's renderer-ready IPC
+        //   so emit_event_to_window doesn't race the listener install.
+        if label == "main" {
+            crate::commands::window_pool::init_pool(&self.state);
+        } else if label.starts_with("window-pool-") {
+            crate::commands::window_pool::register_pool_window(&self.state, &label);
+        }
     }
 
     fn do_close(&mut self, _browser: Option<&mut Browser>) -> bool {
@@ -281,6 +292,13 @@ impl AgentMuxHandler {
         if let Some(ref lbl) = label {
             if lbl.starts_with("browser-pane-") {
                 crate::pane::callbacks::on_before_close_pane(&self.state, lbl);
+            }
+            // Pool-window cleanup — release the respawn semaphore +
+            // drop the label from the queue if the window died before
+            // promote (renderer crash, OS-level close). Without this
+            // the pool would never refill.
+            if lbl.starts_with("window-pool-") {
+                crate::commands::window_pool::on_pool_window_destroyed(&self.state, lbl);
             }
         }
 

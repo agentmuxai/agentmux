@@ -217,6 +217,19 @@ pub struct AppState {
     /// the correct label rather than a freshly-generated UUID.
     pub pending_window_labels: Mutex<VecDeque<String>>,
 
+    /// Tear-off Phase 6 — pre-warmed pool of hidden CEF windows ready for
+    /// instant promotion on tear-off. Each entry is a label of a window
+    /// that's already painted, has its renderer connected, and is sitting
+    /// in pool-mode (`?pool=1` URL flag) waiting to be assigned a workspace.
+    /// On tear-off: pop a label, reposition + show + emit `pool:promote`.
+    /// Cold-path (open_window_at_position) remains as defence-in-depth.
+    /// See SPEC_TAB_TEAR_OFF_SIZE_PRESERVATION_2026_04_26 §4.5.
+    pub window_pool: Mutex<VecDeque<String>>,
+    /// Single in-flight respawn semaphore — prevents pool refill from
+    /// stacking spawns when the user does back-to-back tear-offs faster
+    /// than CEF can create windows.
+    pub window_pool_respawn_in_flight: std::sync::atomic::AtomicBool,
+
     /// Version-specific data directory (e.g. ai.agentmux.cef.v0-32-111/)
     pub version_data_dir: Mutex<Option<String>>,
 
@@ -279,6 +292,8 @@ impl Default for AppState {
             browsers: Mutex::new(HashMap::new()),
             window_meta: Mutex::new(HashMap::new()),
             pending_window_labels: Mutex::new(VecDeque::new()),
+            window_pool: Mutex::new(VecDeque::new()),
+            window_pool_respawn_in_flight: std::sync::atomic::AtomicBool::new(false),
             version_data_dir: Mutex::new(None),
             version_config_dir: Mutex::new(None),
             user_home_dir: Mutex::new(None),
