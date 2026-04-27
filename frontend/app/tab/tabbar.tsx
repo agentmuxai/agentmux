@@ -135,18 +135,23 @@ function TabBar(props: TabBarProps): JSX.Element {
                     const wsId = props.workspace?.oid;
                     if (wsId) {
                         // Phase 5: capture the original tab index BEFORE
-                        // TearOffTab moves the tab out. Used by cancel-back
-                        // (ESC or drop-on-source) to restore at the
-                        // original position. Index against workspace.tabids
-                        // ONLY — `tabIds()` prepends legacy pinnedtabids
-                        // for display, but MoveTabToWorkspace applies its
-                        // index against tabids alone. Mixing would shift
-                        // by pinned count during the async pin-migration
-                        // window. (codex PR #567 P2)
-                        const originalTabIndex = Math.max(
-                            0,
-                            (props.workspace?.tabids ?? []).indexOf(draggedTabId),
-                        );
+                        // TearOffTab moves the tab out, in the BACKEND's
+                        // reference frame (workspace.tabids — what
+                        // MoveTabToWorkspace's insertion index targets).
+                        //
+                        // Display is `tabIds()` = pinnedtabids + tabids;
+                        // backend is tabids only. Subtract pinnedCount
+                        // from the displayed index so:
+                        //   - regular tab in displayed-position N (with
+                        //     M pinned ahead of it) → backend index N-M
+                        //   - legacy pinned tab pre-migration → clamps
+                        //     to 0 (best-effort; full migration folds
+                        //     pinnedtabids into tabids[0..M] anyway, so
+                        //     index 0 is in the right neighbourhood).
+                        const ws = props.workspace;
+                        const pinnedCount = (ws?.pinnedtabids ?? []).length;
+                        const displayedIdx = tabIds().indexOf(draggedTabId);
+                        const originalTabIndex = Math.max(0, displayedIdx - pinnedCount);
                         // openWindowAtPosition + SC_MOVE expect SCREEN
                         // coordinates, but `input.clientX/Y` are
                         // viewport-relative. Convert via window.screenX/Y
