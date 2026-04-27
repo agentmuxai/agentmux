@@ -134,19 +134,10 @@ function TabBar(props: TabBarProps): JSX.Element {
                     const draggedTabId = source.data.tabId as string;
                     const wsId = props.workspace?.oid;
                     if (wsId) {
-                        // Clear the cross-window drag payload IMMEDIATELY
-                        // so CrossWindowDragMonitor's dragend handler
-                        // doesn't also run the legacy dragend tear-off
-                        // pipeline against the same gesture. Without
-                        // this, both paths fire TearOffTab on the same
-                        // tab — the second one fails (tab already moved)
-                        // and emits noisy errors.
-                        setCurrentDragPayload(null);
                         // openWindowAtPosition + SC_MOVE expect SCREEN
                         // coordinates, but `input.clientX/Y` are
                         // viewport-relative. Convert via window.screenX/Y
-                        // (works across multi-monitor setups; getBoundingClientRect
-                        // would only handle within-window offsets).
+                        // (works across multi-monitor setups).
                         const screenX = window.screenX + input.clientX;
                         const screenY = window.screenY + input.clientY;
                         // Phase 2: real tear-off (sidecar TearOffTab +
@@ -154,7 +145,14 @@ function TabBar(props: TabBarProps): JSX.Element {
                         // Fire-and-forget — the user is mid-drag and the
                         // host's SC_MOVE handshake will take over the
                         // cursor synchronously from Windows' point of view.
-                        // (See requestTearOff below.)
+                        //
+                        // The cross-window drag payload is cleared INSIDE
+                        // requestTearOff after the SC_MOVE handshake
+                        // returns successfully — clearing it here would
+                        // strand the legacy dragend fallback if any step
+                        // (TearOffTab, openWindowAtPosition, handshake)
+                        // failed mid-flight, leaving the gesture as a
+                        // silent no-op.
                         fireAndForget(() =>
                             requestTearOff(draggedTabId, wsId, screenX, screenY),
                         );
@@ -358,6 +356,13 @@ async function requestTearOff(
             cursorX,
             cursorY,
         });
+        // Handshake succeeded — Windows now owns the move loop. Clear
+        // the cross-window drag payload so the legacy dragend pipeline
+        // (CrossWindowDragMonitor) doesn't double-process this gesture
+        // when its dragend fires. Cleared HERE rather than in onDrag so
+        // a failure mid-pipeline (TearOffTab, openWindowAtPosition, or
+        // the handshake itself) leaves the legacy fallback intact.
+        setCurrentDragPayload(null);
         Logger.info("dnd", "tab tear-off complete", {
             tabId,
             destWindowLabel,
