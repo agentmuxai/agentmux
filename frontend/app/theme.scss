@@ -14,12 +14,14 @@
     --grey-text-color: #666;
     --main-bg-color: rgb(34, 34, 34);
     --border-color: rgba(255, 255, 255, 0.16);
-    // Tab separator — the small faded vertical bar that appears
-    // between every adjacent pair of tabs. Width is the full slot
-    // including breathing space; the bar itself is centered. Per
-    // SPEC_TAB_BAR_FIRST_PRINCIPLES_2026_04_25.
-    // Slot/line widths must share parity (both even or both odd) so
-    // the line centers on a device pixel — see RETRO_SUBPIXEL_RENDERING_RESEARCH_2026_04_26 §1.5.
+    // Tab separator — the constant gap between adjacent tabs. The
+    // optional centered line is currently set to 0px (no visible
+    // bar; pure 4px whitespace), but the v-separator mixin still
+    // honours the parity rule if it's ever bumped to a non-zero
+    // value: slot/line widths MUST share parity (both even or both
+    // odd) so the line centers on a device pixel. See
+    // SPEC_TAB_BAR_FIRST_PRINCIPLES_2026_04_25 +
+    // RETRO_SUBPIXEL_RENDERING_RESEARCH_2026_04_26 §1.5.
     --tab-separator-width: 4px;
     --tab-separator-line: 0px;
     --tab-separator-color: rgb(from var(--main-text-color) r g b / 0.35);

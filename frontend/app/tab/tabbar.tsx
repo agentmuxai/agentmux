@@ -31,9 +31,19 @@ interface TabBarProps {
 }
 
 
+// Pixels past the tab strip's bottom edge before a drag becomes a
+// tear-off (Chrome uses a similar small threshold). 24 px is enough
+// to filter out brief excursions while the user is still hunting for
+// the drop position; small enough that the tear feels intentional.
+// See docs/specs/SPEC_TAB_TEAR_OFF_SIZE_PRESERVATION_2026_04_26 §4.1.
+const TEAR_PAST_PX = 24;
+
 function TabBar(props: TabBarProps): JSX.Element {
     const activeTabId = atoms.activeTabId;
     let tabBarScrollRef!: HTMLDivElement;
+    // Latches once per drag — the tear-off handshake should only run a
+    // single time even if the user keeps moving past the threshold.
+    let tearOffFired = false;
 
     // Pin feature removed — merge any legacy pinnedtabids into the regular list
     // so existing workspaces don't lose tabs. A one-time UpdateTabIds (below)
@@ -116,11 +126,34 @@ function TabBar(props: TabBarProps): JSX.Element {
             canMonitor: ({ source }) => source.data.type === tabItemType,
 
             // Always compute insertion point from cursor position — drives the gap animation on all tabs
-            onDrag: ({ location }) => {
-                setInsertionPoint(computeInsertionPoint(location.current.input.clientX));
+            onDrag: ({ source, location }) => {
+                const input = location.current.input;
+                const rect = tabBarScrollRef?.getBoundingClientRect();
+                if (rect && !tearOffFired && input.clientY > rect.bottom + TEAR_PAST_PX) {
+                    tearOffFired = true;
+                    const draggedTabId = source.data.tabId as string;
+                    requestTearOff(draggedTabId, input.clientX, input.clientY);
+                    // FUTURE Phase 2: return here once requestTearOff
+                    // actually hands off to the host. For now (stub only),
+                    // fall through so insertionPoint keeps tracking — a
+                    // drag that dips past the threshold and returns to the
+                    // bar still gets the reorder gap.
+                }
+                setInsertionPoint(computeInsertionPoint(input.clientX));
             },
 
             onDrop: ({ source, location }) => {
+                // Reset the tear-off latch for the next drag.
+                // NOTE: while `requestTearOff()` is still a Phase 1 stub
+                // (logs only, no host hand-off), we MUST NOT short-circuit
+                // the in-window reorder path on the latch — a drag that
+                // briefly dipped past the strip's bottom and then came
+                // back to drop on a tab would otherwise lose its reorder.
+                // Once Phase 2 lands and the host actually takes over the
+                // drag, this onDrop will need an early-return when
+                // tearOffFired is true.
+                tearOffFired = false;
+
                 const ip = insertionPoint();
                 const draggedTabId = source.data.tabId as string;
 
@@ -169,6 +202,29 @@ function TabBar(props: TabBarProps): JSX.Element {
         onCleanup(cleanup);
     });
 
+    // Mouse-wheel hover over the strip → horizontal scroll. Ctrl+wheel
+    // is reserved for the app-wide zoom (see AppZoomHandler in app.tsx),
+    // so this only kicks in for unmodified scrolls. We forward whichever
+    // delta dominates: `deltaX` if a horizontal-aware mouse / touchpad is
+    // already producing it, otherwise `deltaY` so a normal vertical wheel
+    // still scrolls the strip horizontally — matches Chrome / Edge tab
+    // strip behaviour. preventDefault so the page doesn't try to scroll.
+    const handleStripWheel = (e: WheelEvent) => {
+        if (e.ctrlKey || e.metaKey) return;
+        const delta = e.deltaX !== 0 ? e.deltaX : e.deltaY;
+        if (delta === 0) return;
+        if (!tabBarScrollRef) return;
+        e.preventDefault();
+        tabBarScrollRef.scrollLeft += delta;
+    };
+
+    onMount(() => {
+        if (!tabBarScrollRef) return;
+        // `passive: false` is required so preventDefault works.
+        tabBarScrollRef.addEventListener("wheel", handleStripWheel, { passive: false });
+        onCleanup(() => tabBarScrollRef?.removeEventListener("wheel", handleStripWheel));
+    });
+
     if (!props.workspace) return null;
 
     const activeIndex = () => tabIds().indexOf(activeTabId());
@@ -212,6 +268,23 @@ function TabBar(props: TabBarProps): JSX.Element {
             <div class="tab-bar-fill" data-drag-region="true" />
         </div>
     );
+}
+
+/**
+ * Phase 1 stub — fires once per drag when the cursor crosses the tear
+ * threshold. Logs only; subsequent phases will:
+ *   - capture a TabSnapshot for width preservation (Phase 3)
+ *   - call host.tearOffTab(...) to spawn a destination window and
+ *     enter the Win32 SC_MOVE loop (Phase 2)
+ *   - install WH_MOUSE_LL for cross-window merge detection (Phase 4)
+ * See docs/specs/SPEC_TAB_TEAR_OFF_SIZE_PRESERVATION_2026_04_26.
+ */
+function requestTearOff(tabId: string, cursorX: number, cursorY: number): void {
+    Logger.info("dnd", "tab tear-off threshold crossed (Phase 1 stub)", {
+        tabId,
+        cursorX,
+        cursorY,
+    });
 }
 
 /**
