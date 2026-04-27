@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { atoms, fullConfigAtom, WOS } from "@/app/store/global";
+import { fullConfigAtom, WOS } from "@/app/store/global";
 import { ObjectService } from "@/app/store/services";
 import { getLayoutModelForTabById } from "@/layout/index";
 import {
@@ -109,24 +109,11 @@ export async function applyTabPreset(tabId: string, preset: PresetNode): Promise
     }
 }
 
-// ObjectService.CreateBlock is routed by uicontext.active_tab_id on the
-// server (see agentmux-srv/src/server/service.rs:88-95). Between awaits
-// the user could have clicked away to a different tab — abort cleanly
-// rather than silently land blocks in the wrong tab.
-//
-// CAVEAT (TOCTOU): the check sits one statement before the actual
-// `await CreateBlock` call, so a tab switch in the *sub-microsecond*
-// gap between check and invoke isn't caught — but realistically a
-// human can't click in that window. The realistic gap (the 50-200ms
-// network round-trip BETWEEN successive CreateBlock calls) IS caught
-// by re-checking at the start of every `createBlockOnModel` invocation.
-//
-// A complete fix requires the backend `CreateBlock` to accept an
-// explicit `tab_id` arg that overrides `uicontext.active_tab_id`.
-// Tracked as a follow-up to this PR.
-function activeTabStillTargets(expectedTabId: string): boolean {
-    return atoms.activeTabId() === expectedTabId;
-}
+// CreateBlock now takes an explicit `tabId` arg that overrides the
+// server-side uicontext.active_tab_id routing — closes the TOCTOU
+// race where the user could click away to another tab between the
+// frontend check and the server-side handler. See backend
+// agentmux-srv/src/server/service.rs `("object", "CreateBlock")`.
 
 // Recursive walk. Returns the blockId of the FIRST leaf in the subtree —
 // callers use that as the split target for subsequent sibling subtrees.
@@ -161,9 +148,10 @@ async function applyNode(
     return firstId!;
 }
 
-// Create a block via the layout model (NOT via the global createBlock —
-// that one targets the active tab via getLayoutModelForStaticTab, which
-// would race against the new-tab activation).
+// Create a block on the explicit target tab. We pass `expectedTabId`
+// to ObjectService.CreateBlock so the server routes it correctly
+// regardless of which tab is currently active (the user can click
+// freely during preset application without scrambling the layout).
 async function createBlockOnModel(
     expectedTabId: string,
     layoutModel: any,
@@ -171,25 +159,8 @@ async function createBlockOnModel(
     splitTargetId: string | null,
     splitDir: "horizontal" | "vertical" | null,
 ): Promise<string> {
-    // Guard: ObjectService.CreateBlock routes via uicontext.active_tab_id
-    // server-side. If the user switched tabs since we started, abort
-    // rather than dropping the new block into the wrong tab.
-    if (!activeTabStillTargets(expectedTabId)) {
-        throw new Error("active tab changed before block creation — aborting");
-    }
     const rtOpts: RuntimeOpts = { termsize: { rows: 25, cols: 80 } };
-    const blockId = await ObjectService.CreateBlock(blockDef, rtOpts);
-    // Post-await re-check: the await yields to the event loop, so a
-    // user click on another tab could have landed before the RPC's
-    // uicontext was serialised. If that happened, the block was
-    // created in the wrong tab — try to delete it and abort. Best-
-    // effort cleanup; worst case the orphan block lingers until tab
-    // close. The full structural fix is a tab_id arg on the backend
-    // CreateBlock RPC; tracked as a follow-up.
-    if (!activeTabStillTargets(expectedTabId)) {
-        await ObjectService.DeleteBlock(blockId).catch(() => {});
-        throw new Error("active tab changed during block creation — aborting");
-    }
+    const blockId = await ObjectService.CreateBlock(blockDef, rtOpts, expectedTabId);
 
     if (splitTargetId === null) {
         const action: LayoutTreeInsertNodeAction = {
