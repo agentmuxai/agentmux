@@ -150,6 +150,34 @@ pub fn register_pool_window(_state: &Arc<AppState>, label: &str) {
     );
 }
 
+/// Called when a pool window is destroyed before it ever became
+/// renderer-ready (renderer crash mid-init, user closed at OS level,
+/// etc.). Without this clearing path the respawn semaphore would
+/// stay locked forever and the pool would never refill.
+pub fn on_pool_window_destroyed(state: &Arc<AppState>, label: &str) {
+    if !label.starts_with("window-pool-") {
+        return;
+    }
+    // If this window made it into the pool queue, drop it.
+    {
+        let mut pool = state.window_pool.lock();
+        pool.retain(|l| l != label);
+    }
+    // Whether it made it or not, release the in-flight semaphore so
+    // a future spawn can proceed. Then top up.
+    state
+        .window_pool_respawn_in_flight
+        .store(false, Ordering::Release);
+    tracing::warn!(
+        target: "dnd:tearoff:pool",
+        label = %label,
+        "[pool] pool window destroyed before promote — releasing semaphore + refilling"
+    );
+    if state.window_pool.lock().len() < POOL_TARGET_SIZE {
+        spawn_pool_window(state);
+    }
+}
+
 /// Called from the `pool_window_ready` IPC handler — fired by the
 /// frontend's awaitPoolPromote AFTER its `pool:promote` listener
 /// is installed. NOW it's safe to enqueue this window for
@@ -158,13 +186,15 @@ pub fn mark_pool_window_renderer_ready(state: &Arc<AppState>, label: &str) {
     if !label.starts_with("window-pool-") {
         return;
     }
-    // Single lock acquisition for both push_back and len. Avoids the
-    // window where another thread could push between our two locks
-    // and skew pool_size, plus saves one mutex round-trip on the hot
-    // post-creation path.
+    // Single lock acquisition for both push_back and len. Idempotent
+    // against duplicate frontend signals — if the same label is
+    // signalled ready twice (re-mount, hot reload), the second push
+    // would create a duplicate entry that promote could double-pop.
     let pool_size = {
         let mut pool = state.window_pool.lock();
-        pool.push_back(label.to_string());
+        if !pool.iter().any(|l| l == label) {
+            pool.push_back(label.to_string());
+        }
         pool.len()
     };
     state
@@ -187,16 +217,29 @@ pub fn mark_pool_window_renderer_ready(state: &Arc<AppState>, label: &str) {
 /// Initialize the pool after primary-window first paint. Spawns
 /// `POOL_TARGET_SIZE` windows. Called once per app run from
 /// `on_after_created` for the "main" label.
+///
+/// Windows-only: promote_pool_window is a no-op on non-Windows
+/// platforms (Phase 7 will add equivalents). Spawning hidden pool
+/// windows that can never be consumed would just waste renderer
+/// processes, so we skip the whole init off-Win32.
 pub fn init_pool(state: &Arc<AppState>) {
-    let current = state.window_pool.lock().len();
-    if current >= POOL_TARGET_SIZE {
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = state;
         return;
     }
-    // First spawn — the rest are kicked off chain-style by
-    // register_pool_window when each new pool window registers.
-    // This sequencing keeps spawns serialised (one CEF window at
-    // a time) and avoids spawn pressure spikes at startup.
-    spawn_pool_window(state);
+    #[cfg(target_os = "windows")]
+    {
+        let current = state.window_pool.lock().len();
+        if current >= POOL_TARGET_SIZE {
+            return;
+        }
+        // First spawn — the rest are kicked off chain-style by
+        // register_pool_window when each new pool window registers.
+        // This sequencing keeps spawns serialised (one CEF window at
+        // a time) and avoids spawn pressure spikes at startup.
+        spawn_pool_window(state);
+    }
 }
 
 /// Promote a pool window for tear-off. Pops a label, sends a
@@ -300,7 +343,7 @@ pub fn promote_pool_window(
         use windows_sys::Win32::UI::WindowsAndMessaging::{
             SetWindowPos, ShowWindow, HWND_TOP, SW_SHOW,
         };
-        SetWindowPos(
+        let pos_ok = SetWindowPos(
             raw_hwnd,
             HWND_TOP,
             pos_x,
@@ -309,6 +352,18 @@ pub fn promote_pool_window(
             POOL_HEIGHT,
             0, // no flags — apply move + size + Z-order all
         );
+        if pos_ok == 0 {
+            // Non-fatal: the SC_MOVE handshake will still try to
+            // run, but the user may see a misplaced window. Log
+            // for diagnostics so we can detect a pattern.
+            let err = windows_sys::Win32::Foundation::GetLastError();
+            tracing::error!(
+                target: "dnd:tearoff:pool",
+                label = %label,
+                last_err = %err,
+                "[pool] SetWindowPos failed"
+            );
+        }
         let _ = ShowWindow(raw_hwnd, SW_SHOW);
     }
 
@@ -319,7 +374,7 @@ pub fn promote_pool_window(
     // _number would fall back to 1 for the new window and other
     // windows would keep a stale count, throwing off the InstancePanel
     // and any other consumer of windowCountAtom.
-    {
+    let count = {
         let mut reg = state.window_instance_registry.lock();
         let num = reg.register(&label);
         tracing::info!(
@@ -328,8 +383,8 @@ pub fn promote_pool_window(
             instance = %num,
             "[pool] promoted window registered as instance"
         );
-    }
-    let count = state.window_instance_registry.lock().count();
+        reg.count()
+    };
     crate::events::emit_event_all_windows(
         state,
         "window-instances-changed",

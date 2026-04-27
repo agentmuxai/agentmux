@@ -293,6 +293,13 @@ impl AgentMuxHandler {
             if lbl.starts_with("browser-pane-") {
                 crate::pane::callbacks::on_before_close_pane(&self.state, lbl);
             }
+            // Pool-window cleanup — release the respawn semaphore +
+            // drop the label from the queue if the window died before
+            // promote (renderer crash, OS-level close). Without this
+            // the pool would never refill.
+            if lbl.starts_with("window-pool-") {
+                crate::commands::window_pool::on_pool_window_destroyed(&self.state, lbl);
+            }
         }
 
         // Unregister from instance registry; retrieve backend window ID for cleanup.
