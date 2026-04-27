@@ -72,6 +72,11 @@ struct HookContext {
     /// AgentMux window or the desktop. Used to emit hover-clear events
     /// when the cursor leaves a candidate.
     current_target: RefCell<Option<String>>,
+    /// Set true the moment a finalisation event has been emitted
+    /// (cancel-back via ESC, merge, or standalone). Subsequent hook
+    /// callbacks bail without emitting — without this guard, a
+    /// post-ESC mouseup would fire a second redundant event.
+    finalized: RefCell<bool>,
 }
 
 #[cfg(target_os = "windows")]
@@ -116,6 +121,7 @@ pub fn start_tear_off_tracking(
                 dest_ws_id,
                 original_tab_index,
                 current_target: RefCell::new(None),
+                finalized: RefCell::new(false),
             };
             HOOK_CTX.with(|cell| *cell.borrow_mut() = Some(ctx));
 
@@ -255,6 +261,10 @@ unsafe extern "system" fn low_level_keyboard_proc(
             HOOK_CTX.with(|cell| {
                 let ctx_ref = cell.borrow();
                 if let Some(ctx) = ctx_ref.as_ref() {
+                    if *ctx.finalized.borrow() {
+                        return;
+                    }
+                    *ctx.finalized.borrow_mut() = true;
                     tracing::info!(
                         target: "dnd:tearoff",
                         tab_id = %ctx.tab_id,
@@ -380,6 +390,12 @@ fn handle_button_up(cursor_x: i32, cursor_y: i32) {
         let Some(ctx) = ctx_ref.as_ref() else {
             return;
         };
+        // If a previous handler already finalized (e.g. ESC fired and
+        // posted WM_QUIT, but this mouseup arrived first), bail.
+        if *ctx.finalized.borrow() {
+            return;
+        }
+        *ctx.finalized.borrow_mut() = true;
 
         let candidate = {
             let browsers = ctx.state.browsers.lock();
@@ -397,15 +413,19 @@ fn handle_button_up(cursor_x: i32, cursor_y: i32) {
 
         match &candidate {
             Some(target_label) if target_label == &ctx.source_label => {
-                // Phase 5 cancel-back: drop on the source window's own
-                // strip. Restore the tab at its original index — not
-                // wherever the cursor happens to land — so the user
-                // gets back the exact pre-tear state.
+                // Phase 5 cancel-back path. The cursor is over the
+                // source window — but candidate_label_under_cursor only
+                // identifies the top-level HWND, not which sub-region
+                // (strip vs content vs sidebar). The frontend's
+                // cancel-back handler does the same strip hit-test
+                // the merge handler does, and falls through to
+                // standalone behaviour if the cursor isn't on the
+                // strip. We pass cursorY so the frontend can decide.
                 tracing::info!(
                     target: "dnd:tearoff",
                     tab_id = %ctx.tab_id,
                     original_index = %ctx.original_tab_index,
-                    "[dnd:tearoff] drop on source strip — cancel-back"
+                    "[dnd:tearoff] drop on source window — cancel-back candidate"
                 );
                 crate::events::emit_event_to_window(
                     &ctx.state,
@@ -416,6 +436,8 @@ fn handle_button_up(cursor_x: i32, cursor_y: i32) {
                         "fromWsId": ctx.dest_ws_id,
                         "draggedWindowLabel": ctx.dragged_label,
                         "originalIndex": ctx.original_tab_index,
+                        "cursorX": cursor_x,
+                        "cursorY": cursor_y,
                         "reason": "drop-on-source",
                     }),
                 );

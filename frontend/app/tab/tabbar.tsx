@@ -386,6 +386,8 @@ function TabBar(props: TabBarProps): JSX.Element {
                     fromWsId: string;
                     draggedWindowLabel: string;
                     originalIndex: number;
+                    cursorX?: number;
+                    cursorY?: number;
                     reason: string;
                 }>("tearoff:cancel-back", (payload) => {
                     fireAndForget(async () => {
@@ -394,6 +396,30 @@ function TabBar(props: TabBarProps): JSX.Element {
                             if (!ownWsId) {
                                 Logger.warn("dnd", "tearoff:cancel-back — no own workspace, skipping", payload);
                                 return;
+                            }
+                            // Strip-area hit test (drop-on-source path
+                            // only — ESC has no cursor coords). Mirrors
+                            // the merge handler's check: the host emits
+                            // cancel-back whenever the cursor's over
+                            // any part of the source window's HWND, but
+                            // we only restore if the cursor was
+                            // actually on the tab strip. Otherwise fall
+                            // through to standalone (do nothing — the
+                            // dragged window stays where it landed).
+                            if (payload.reason === "drop-on-source"
+                                && payload.cursorX != null
+                                && payload.cursorY != null
+                            ) {
+                                const stripRect = tabBarScrollRef?.getBoundingClientRect();
+                                const clientY = payload.cursorY - window.screenY;
+                                if (
+                                    !stripRect
+                                    || clientY < stripRect.top
+                                    || clientY > stripRect.bottom
+                                ) {
+                                    Logger.info("dnd", "tearoff:cancel-back — cursor over source body, leaving as standalone", payload);
+                                    return;
+                                }
                             }
                             await WorkspaceService.MoveTabToWorkspace(
                                 payload.tabId,
