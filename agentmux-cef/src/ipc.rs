@@ -259,6 +259,7 @@ async fn route_command(
         "release_drag_capture" => commands::drag::release_drag_capture(state),
         "set_js_drag_active" => commands::drag::set_js_drag_active(args),
         "open_window_at_position" => commands::drag::open_window_at_position(state, args),
+        "tear_off_sc_move_handshake" => commands::drag::tear_off_sc_move_handshake(state, args),
         "list_windows" => Ok(commands::window::list_windows(state)),
         "focus_window" => commands::window::focus_window(state, args),
 
