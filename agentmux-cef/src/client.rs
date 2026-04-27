@@ -194,11 +194,12 @@ impl AgentMuxHandler {
 
         // Tear-off Phase 6 — pre-warmed window pool.
         // - When the "main" window registers, kick off the initial pool spawn.
-        // - When a "pool-*" window registers, mark it ready in the pool queue
-        //   and (chain-style) spawn the next one if we're below TARGET_SIZE.
+        // - When a "window-pool-*" window registers, log only — actual
+        //   queue insertion waits for the frontend's renderer-ready IPC
+        //   so emit_event_to_window doesn't race the listener install.
         if label == "main" {
             crate::commands::window_pool::init_pool(&self.state);
-        } else if label.starts_with("pool-") {
+        } else if label.starts_with("window-pool-") {
             crate::commands::window_pool::register_pool_window(&self.state, &label);
         }
     }

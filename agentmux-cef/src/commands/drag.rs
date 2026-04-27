@@ -265,6 +265,23 @@ pub fn release_drag_capture(state: &Arc<AppState>) -> Result<serde_json::Value, 
     Ok(serde_json::Value::Null)
 }
 
+/// Phase 6 — frontend signal that a pool window's renderer is
+/// ready to receive `pool:promote`. Called from awaitPoolPromote
+/// AFTER the listener is installed. Only after this signal does
+/// the window enter the pool queue (otherwise emit_event_to_window
+/// would race the listener install and lose promote events).
+pub fn pool_window_ready(
+    state: &Arc<AppState>,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let label = args
+        .get("label")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "missing label".to_string())?;
+    super::window_pool::mark_pool_window_renderer_ready(state, label);
+    Ok(serde_json::Value::Null)
+}
+
 /// Phase 6 — promote a pre-warmed pool window for tear-off.
 /// Returns the promoted window's label, or an error string if the
 /// pool was empty (caller should fall back to open_window_at_position).
