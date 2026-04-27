@@ -1,0 +1,164 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// InstancePanel — popover anchored to the version chip.
+// Spec: SPEC_VERSION_INSTANCE_PANEL_2026_04_25.md.
+
+.instance-panel {
+    background: var(--main-bg-color);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md, 6px);
+    box-shadow: var(--shadow-modal, 0 24px 48px rgba(0, 0, 0, 0.45));
+    padding: var(--space-2);
+    color: var(--main-text-color);
+    font-size: 12px;
+    user-select: none;
+    z-index: var(--z-popover, 8500);
+}
+
+.instance-panel-header {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-0-5);
+}
+
+.instance-panel-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1-5);
+    line-height: 1.4;
+}
+
+.instance-panel-row-meta {
+    .instance-panel-label {
+        flex: 0 0 64px;
+        color: var(--secondary-text-color);
+        font-size: 11px;
+    }
+    .instance-panel-value {
+        flex: 1 1 auto;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+}
+
+.instance-panel-mono {
+    font-family: var(--font-mono, "Hack", monospace);
+    font-size: 11px;
+}
+
+.instance-panel-copy {
+    flex: 0 0 auto;
+    background: transparent;
+    border: 1px solid transparent;
+    color: var(--secondary-text-color);
+    cursor: pointer;
+    padding: 2px 4px;
+    border-radius: 3px;
+    font-size: 12px;
+    line-height: 1;
+
+    &:hover {
+        border-color: var(--border-color);
+        color: var(--main-text-color);
+    }
+}
+
+.instance-panel-divider {
+    height: 1px;
+    background: var(--border-color);
+    margin: var(--space-2) calc(var(--space-2) * -1);
+}
+
+.instance-panel-section-title {
+    font-size: 11px;
+    color: var(--secondary-text-color);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-bottom: var(--space-1);
+}
+
+.instance-panel-window-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1-5);
+    width: 100%;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    padding: var(--space-1) var(--space-1-5);
+    color: var(--main-text-color);
+    font-size: 12px;
+    text-align: left;
+    cursor: pointer;
+    line-height: 1.3;
+
+    &:hover:not(:disabled) {
+        background: var(--hover-bg-color);
+        border-color: var(--border-color);
+    }
+    &:disabled {
+        cursor: default;
+    }
+
+    .instance-panel-window-dot {
+        flex: 0 0 auto;
+        color: var(--accent-color);
+        font-size: 10px;
+        width: 10px;
+        text-align: center;
+    }
+    .instance-panel-window-name {
+        flex: 1 1 auto;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+    .instance-panel-window-badge {
+        flex: 0 0 auto;
+        font-size: 10px;
+        padding: 1px 6px;
+        border-radius: 999px;
+        background: var(--accent-color);
+        color: var(--button-text-color);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+    }
+}
+
+.instance-panel-window-row-current {
+    background: rgb(from var(--accent-color) r g b / 0.08);
+}
+
+.instance-panel-footer {
+    display: flex;
+    gap: var(--space-1-5);
+    margin-top: var(--space-1);
+}
+
+.instance-panel-btn {
+    flex: 1 1 auto;
+    background: transparent;
+    border: 1px solid var(--border-color);
+    color: var(--main-text-color);
+    padding: var(--space-1) var(--space-2);
+    border-radius: 4px;
+    font-size: 12px;
+    cursor: pointer;
+
+    &:hover {
+        background: var(--hover-bg-color);
+    }
+}
+
+.instance-panel-btn-primary {
+    background: var(--accent-color);
+    border-color: var(--accent-color);
+    color: var(--button-text-color);
+    font-weight: 600;
+
+    &:hover {
+        filter: brightness(1.1);
+    }
+}
