@@ -134,6 +134,21 @@ function TabBar(props: TabBarProps): JSX.Element {
                     const draggedTabId = source.data.tabId as string;
                     const wsId = props.workspace?.oid;
                     if (wsId) {
+                        // Clear the cross-window drag payload IMMEDIATELY
+                        // so CrossWindowDragMonitor's dragend handler
+                        // doesn't also run the legacy dragend tear-off
+                        // pipeline against the same gesture. Without
+                        // this, both paths fire TearOffTab on the same
+                        // tab — the second one fails (tab already moved)
+                        // and emits noisy errors.
+                        setCurrentDragPayload(null);
+                        // openWindowAtPosition + SC_MOVE expect SCREEN
+                        // coordinates, but `input.clientX/Y` are
+                        // viewport-relative. Convert via window.screenX/Y
+                        // (works across multi-monitor setups; getBoundingClientRect
+                        // would only handle within-window offsets).
+                        const screenX = window.screenX + input.clientX;
+                        const screenY = window.screenY + input.clientY;
                         // Phase 2: real tear-off (sidecar TearOffTab +
                         // host openWindowAtPosition + Win32 SC_MOVE).
                         // Fire-and-forget — the user is mid-drag and the
@@ -141,7 +156,7 @@ function TabBar(props: TabBarProps): JSX.Element {
                         // cursor synchronously from Windows' point of view.
                         // (See requestTearOff below.)
                         fireAndForget(() =>
-                            requestTearOff(draggedTabId, wsId, input.clientX, input.clientY),
+                            requestTearOff(draggedTabId, wsId, screenX, screenY),
                         );
                     }
                     // Continue updating insertionPoint below — until the
@@ -157,14 +172,17 @@ function TabBar(props: TabBarProps): JSX.Element {
 
             onDrop: ({ source, location }) => {
                 // Reset the tear-off latch for the next drag.
-                // NOTE: while `requestTearOff()` is still a Phase 1 stub
-                // (logs only, no host hand-off), we MUST NOT short-circuit
-                // the in-window reorder path on the latch — a drag that
-                // briefly dipped past the strip's bottom and then came
-                // back to drop on a tab would otherwise lose its reorder.
-                // Once Phase 2 lands and the host actually takes over the
-                // drag, this onDrop will need an early-return when
-                // tearOffFired is true.
+                // NOTE: even though Phase 2's requestTearOff now does a
+                // real handshake and the SC_MOVE takes over the cursor,
+                // pragmatic-dnd's onDrop still fires for the original
+                // gesture. We don't short-circuit here because a drag
+                // that briefly dipped past the strip's bottom and then
+                // came back to drop on a tab should still reorder
+                // (Chrome treats the threshold as commit-on-cross, but
+                // requestTearOff already snapshotted via a fire-and-
+                // forget, so the data path is settled by the time onDrop
+                // runs). Once Phase 5 (cancel-back) ships, this gate
+                // tightens further.
                 tearOffFired = false;
 
                 const ip = insertionPoint();
