@@ -134,6 +134,12 @@ function TabBar(props: TabBarProps): JSX.Element {
                     const draggedTabId = source.data.tabId as string;
                     const wsId = props.workspace?.oid;
                     if (wsId) {
+                        // Phase 5: capture the original tab index BEFORE
+                        // TearOffTab moves the tab out. Used by cancel-back
+                        // (ESC or drop-on-source) to restore at the
+                        // original position. Defaults to current array
+                        // position; -1 → 0 if not found (defensive).
+                        const originalTabIndex = Math.max(0, tabIds().indexOf(draggedTabId));
                         // openWindowAtPosition + SC_MOVE expect SCREEN
                         // coordinates, but `input.clientX/Y` are
                         // viewport-relative. Convert via window.screenX/Y
@@ -145,16 +151,8 @@ function TabBar(props: TabBarProps): JSX.Element {
                         // Fire-and-forget — the user is mid-drag and the
                         // host's SC_MOVE handshake will take over the
                         // cursor synchronously from Windows' point of view.
-                        //
-                        // The cross-window drag payload is cleared INSIDE
-                        // requestTearOff after the SC_MOVE handshake
-                        // returns successfully — clearing it here would
-                        // strand the legacy dragend fallback if any step
-                        // (TearOffTab, openWindowAtPosition, handshake)
-                        // failed mid-flight, leaving the gesture as a
-                        // silent no-op.
                         fireAndForget(() =>
-                            requestTearOff(draggedTabId, wsId, screenX, screenY),
+                            requestTearOff(draggedTabId, wsId, screenX, screenY, originalTabIndex),
                         );
                     }
                     // Continue updating insertionPoint below — until the
@@ -376,6 +374,48 @@ function TabBar(props: TabBarProps): JSX.Element {
                     Logger.info("dnd", "tearoff:standalone", payload);
                 }),
             );
+
+            // Phase 5 — cancel-back. Source window receives this on
+            // either ESC during the SC_MOVE loop or drop-on-source-
+            // strip. Move the tab back from the dragged window's
+            // workspace into ours at its original index, then close
+            // the dragged window.
+            trackOrDispose(
+                await listenEvent<{
+                    tabId: string;
+                    fromWsId: string;
+                    draggedWindowLabel: string;
+                    originalIndex: number;
+                    reason: string;
+                }>("tearoff:cancel-back", (payload) => {
+                    fireAndForget(async () => {
+                        try {
+                            const ownWsId = props.workspace?.oid;
+                            if (!ownWsId) {
+                                Logger.warn("dnd", "tearoff:cancel-back — no own workspace, skipping", payload);
+                                return;
+                            }
+                            await WorkspaceService.MoveTabToWorkspace(
+                                payload.tabId,
+                                payload.fromWsId,
+                                ownWsId,
+                                payload.originalIndex,
+                            );
+                            await getApi().closeWindowByLabel(payload.draggedWindowLabel);
+                            Logger.info("dnd", "tearoff:cancel-back complete", {
+                                tabId: payload.tabId,
+                                originalIndex: payload.originalIndex,
+                                reason: payload.reason,
+                            });
+                        } catch (e) {
+                            Logger.error("dnd", "tearoff:cancel-back failed", {
+                                error: String(e),
+                                payload,
+                            });
+                        }
+                    });
+                }),
+            );
         });
         onCleanup(() => {
             mounted = false;
@@ -484,6 +524,7 @@ async function requestTearOff(
     workspaceId: string,
     cursorX: number,
     cursorY: number,
+    originalTabIndex: number,
 ): Promise<void> {
     const t0 = performance.now();
     try {
@@ -527,6 +568,9 @@ async function requestTearOff(
             tabId,
             sourceWsId: workspaceId,
             destWsId: newWsId,
+            // Phase 5 — original tab index so ESC / drop-on-source
+            // can restore at the right position rather than the end.
+            originalTabIndex,
         });
         // Handshake succeeded — Windows now owns the move loop. Clear
         // the cross-window drag payload so the legacy dragend pipeline

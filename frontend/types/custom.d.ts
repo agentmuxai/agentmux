@@ -197,6 +197,10 @@ declare global {
             tabId?: string;
             sourceWsId?: string;
             destWsId?: string;
+            /** Phase 5 — tab's index in the source workspace at
+             *  tear-off time. Used by cancel-back (ESC or drop on
+             *  source strip) to restore at the original position. */
+            originalTabIndex?: number;
         }) => Promise<{ handshakeMs: number; totalMs: number }>;
         /** Close a specific AgentMux window by label. Used by Phase 4
          *  merge to clean up the dragged window after its tab is moved

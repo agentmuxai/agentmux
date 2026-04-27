@@ -62,8 +62,12 @@ struct HookContext {
     /// `MoveTabToWorkspace` from a different window context if needed.
     source_ws_id: String,
     /// Destination workspace ID (the new workspace TearOffTab created).
-    /// Used by the source-side cancel-back path in Phase 5.
+    /// Cancel-back uses this as the `fromWsId` when restoring.
     dest_ws_id: String,
+    /// Phase 5 — tab's original index in the source workspace at the
+    /// moment of tear-off. Used by cancel-back (ESC or drop on source
+    /// strip) to reinsert the tab where it was, not at the end.
+    original_tab_index: usize,
     /// Last-known candidate target label, or None when over a non-
     /// AgentMux window or the desktop. Used to emit hover-clear events
     /// when the cursor leaves a candidate.
@@ -90,6 +94,7 @@ pub fn start_tear_off_tracking(
     tab_id: String,
     source_ws_id: String,
     dest_ws_id: String,
+    original_tab_index: usize,
 ) -> Result<(), String> {
     use std::sync::mpsc;
 
@@ -109,6 +114,7 @@ pub fn start_tear_off_tracking(
                 tab_id,
                 source_ws_id,
                 dest_ws_id,
+                original_tab_index,
                 current_target: RefCell::new(None),
             };
             HOOK_CTX.with(|cell| *cell.borrow_mut() = Some(ctx));
@@ -219,6 +225,7 @@ pub fn start_tear_off_tracking(
     _tab_id: String,
     _source_ws_id: String,
     _dest_ws_id: String,
+    _original_tab_index: usize,
 ) -> Result<(), String> {
     Ok(())
 }
@@ -242,25 +249,27 @@ unsafe extern "system" fn low_level_keyboard_proc(
     if msg_id == WM_KEYDOWN || msg_id == WM_SYSKEYDOWN {
         let kb = &*(l_param as *const KBDLLHOOKSTRUCT);
         if kb.vkCode == VK_ESCAPE as u32 {
-            // Treat as a standalone finalisation — the dragged
-            // window stays where the user had it. Phase 5 will
-            // upgrade this to a cancel-back when the spec lands
-            // the original-index restoration.
+            // Phase 5: ESC = cancel-back. The dragged window is
+            // destroyed and the tab reinserts at its original index
+            // in the source workspace.
             HOOK_CTX.with(|cell| {
                 let ctx_ref = cell.borrow();
                 if let Some(ctx) = ctx_ref.as_ref() {
                     tracing::info!(
                         target: "dnd:tearoff",
                         tab_id = %ctx.tab_id,
-                        "[dnd:tearoff] ESC pressed — standalone finalize"
+                        original_index = %ctx.original_tab_index,
+                        "[dnd:tearoff] ESC pressed — cancel-back to source"
                     );
                     crate::events::emit_event_to_window(
                         &ctx.state,
                         &ctx.source_label,
-                        "tearoff:standalone",
+                        "tearoff:cancel-back",
                         &serde_json::json!({
                             "tabId": ctx.tab_id,
+                            "fromWsId": ctx.dest_ws_id,
                             "draggedWindowLabel": ctx.dragged_label,
+                            "originalIndex": ctx.original_tab_index,
                             "reason": "esc",
                         }),
                     );
@@ -387,6 +396,30 @@ fn handle_button_up(cursor_x: i32, cursor_y: i32) {
         );
 
         match &candidate {
+            Some(target_label) if target_label == &ctx.source_label => {
+                // Phase 5 cancel-back: drop on the source window's own
+                // strip. Restore the tab at its original index — not
+                // wherever the cursor happens to land — so the user
+                // gets back the exact pre-tear state.
+                tracing::info!(
+                    target: "dnd:tearoff",
+                    tab_id = %ctx.tab_id,
+                    original_index = %ctx.original_tab_index,
+                    "[dnd:tearoff] drop on source strip — cancel-back"
+                );
+                crate::events::emit_event_to_window(
+                    &ctx.state,
+                    &ctx.source_label,
+                    "tearoff:cancel-back",
+                    &serde_json::json!({
+                        "tabId": ctx.tab_id,
+                        "fromWsId": ctx.dest_ws_id,
+                        "draggedWindowLabel": ctx.dragged_label,
+                        "originalIndex": ctx.original_tab_index,
+                        "reason": "drop-on-source",
+                    }),
+                );
+            }
             Some(target_label) => {
                 // Merge path. Tell the candidate's renderer to pull the
                 // tab in from `dest_ws_id` (the temporary workspace the
@@ -411,8 +444,8 @@ fn handle_button_up(cursor_x: i32, cursor_y: i32) {
             None => {
                 // Standalone path. The dragged window simply stays
                 // where the user released. Inform the source renderer
-                // (Phase 5 will use this to update any cancel-back UI
-                // state on the source side).
+                // (informational only — no UI state to update on the
+                // source side; the tab is already gone).
                 crate::events::emit_event_to_window(
                     &ctx.state,
                     &ctx.source_label,
