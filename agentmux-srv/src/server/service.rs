@@ -757,6 +757,65 @@ fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType {
                 Err(e) => WebReturnType::error(e.to_string()),
             }
         }
+        ("workspace", "RestoreTornOffTab") => {
+            let tab_id: String = match service::get_arg(args, 0) {
+                Ok(v) => v,
+                Err(e) => return WebReturnType::error(e),
+            };
+            let source_ws_id: String = match service::get_arg(args, 1) {
+                Ok(v) => v,
+                Err(e) => return WebReturnType::error(e),
+            };
+            let dest_ws_id: String = match service::get_arg(args, 2) {
+                Ok(v) => v,
+                Err(e) => return WebReturnType::error(e),
+            };
+            let insert_index: Option<usize> = service::get_arg(args, 3).ok();
+            // arg 4 is `wasPinned: bool`. Default false — older clients
+            // and the merge path (which always restores into the target's
+            // tabids regardless of source pin status) don't need to pass
+            // it. Pinned-status preservation is a cancel-back-only feature.
+            let was_pinned: bool = service::get_arg(args, 4).unwrap_or(false);
+            tracing::info!(tab_id = %tab_id, source_ws = %source_ws_id, dest_ws = %dest_ws_id, insert_index = ?insert_index, was_pinned = %was_pinned, "[dnd:svc] RestoreTornOffTab");
+            match wcore::restore_torn_off_tab(store, &tab_id, &source_ws_id, &dest_ws_id, insert_index, was_pinned) {
+                Ok(()) => {
+                    let mut updates = Vec::new();
+                    // Source workspace: emit a delete update if we deleted
+                    // it; otherwise an update with current state. Frontends
+                    // listening on the dragged window's workspace can react
+                    // to either.
+                    match store.get::<Workspace>(&source_ws_id) {
+                        Ok(Some(src_ws)) => {
+                            updates.push(WaveObjUpdate {
+                                updatetype: "update".into(),
+                                otype: OTYPE_WORKSPACE.to_string(),
+                                oid: source_ws_id.clone(),
+                                obj: Some(wave_obj_to_value(&src_ws)),
+                            });
+                        }
+                        Ok(None) => {
+                            updates.push(WaveObjUpdate {
+                                updatetype: "delete".into(),
+                                otype: OTYPE_WORKSPACE.to_string(),
+                                oid: source_ws_id.clone(),
+                                obj: None,
+                            });
+                        }
+                        Err(_) => {}
+                    }
+                    if let Ok(dst_ws) = store.must_get::<Workspace>(&dest_ws_id) {
+                        updates.push(WaveObjUpdate {
+                            updatetype: "update".into(),
+                            otype: OTYPE_WORKSPACE.to_string(),
+                            oid: dest_ws_id.clone(),
+                            obj: Some(wave_obj_to_value(&dst_ws)),
+                        });
+                    }
+                    WebReturnType::success_with_updates(updates)
+                }
+                Err(e) => WebReturnType::error(e.to_string()),
+            }
+        }
         ("workspace", "TearOffBlock") => {
             let block_id: String = match service::get_arg(args, 0) {
                 Ok(v) => v,

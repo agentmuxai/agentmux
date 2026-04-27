@@ -465,6 +465,22 @@ pub fn tear_off_sc_move_handshake(
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .to_string();
+    // Phase 5 — original tab index for cancel-back (ESC or drop on
+    // source strip). Defaults to 0 if missing — cancel-back will
+    // reinsert at start, which is best-effort if the caller didn't
+    // provide the real index.
+    let original_tab_index = args
+        .get("originalTabIndex")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0) as usize;
+    // Phase 5 — was the tab pinned in its source workspace?
+    // Threaded into HookContext so the cancel-back payload can tell
+    // the backend to restore into pinnedtabids vs tabids. Defaults
+    // to false (regular tab). (gemini PR #567 round-6 MEDIUM)
+    let was_pinned = args
+        .get("wasPinned")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
 
     // Win32-only path. The HWND poll, ReleaseCapture, and the SC_MOVE
     // post all live inside the cfg block — on macOS / Linux the
@@ -496,6 +512,8 @@ pub fn tear_off_sc_move_handshake(
                 tab_id.clone(),
                 source_ws_id.clone(),
                 dest_ws_id.clone(),
+                original_tab_index,
+                was_pinned,
             )?;
         }
 
