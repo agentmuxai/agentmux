@@ -47,7 +47,12 @@ export const ClientService = new ClientServiceType();
 // objectservice.ObjectService (object)
 class ObjectServiceType {
     // @returns blockId (and object updates)
-    CreateBlock(blockDef: BlockDef, rtOpts: RuntimeOpts): Promise<string> {
+    // `tabId` (optional) overrides uicontext.active_tab_id on the
+    // server. Use it when the caller knows the target tab independent
+    // of the current active-tab atom — e.g. tab-presets applying a
+    // layout to a freshly-created tab without racing against the user
+    // switching tabs mid-flow.
+    CreateBlock(blockDef: BlockDef, rtOpts: RuntimeOpts, tabId?: string): Promise<string> {
         return WOS.callBackendService("object", "CreateBlock", Array.from(arguments))
     }
 

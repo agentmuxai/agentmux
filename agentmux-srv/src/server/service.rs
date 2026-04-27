@@ -85,17 +85,37 @@ fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType {
             WebReturnType::success(serde_json::json!(results))
         }
         ("object", "CreateBlock") => {
-            let tab_id = match call
-                .uicontext
-                .as_ref()
-                .map(|ctx| ctx.active_tab_id.clone())
-            {
-                Some(id) if !id.is_empty() => id,
-                _ => return WebReturnType::error("missing uicontext.activetabid"),
-            };
             let block_def: BlockDef = match service::get_arg(args, 0) {
                 Ok(v) => v,
                 Err(e) => return WebReturnType::error(e),
+            };
+            // Optional explicit tab_id at args[2] (args[1] is rtOpts).
+            // When present, overrides uicontext.active_tab_id — lets
+            // callers like applyTabPreset (frontend) target a specific
+            // tab without depending on which tab happens to be active
+            // when the RPC's uicontext is serialised. Eliminates the
+            // TOCTOU race where the user can switch tabs between the
+            // call site and the server-side handler.
+            //
+            // A *malformed* args[2] (e.g. non-string from a stale SDK)
+            // returns an error — silently falling back to uicontext
+            // would defeat the explicit-targeting contract and make
+            // wrong-tab routing hard to diagnose. Missing/null/empty
+            // is fine: treat as "no override" and use uicontext.
+            let explicit_tab_id: Option<String> = match service::get_optional_arg::<String>(args, 2) {
+                Ok(opt) => opt.map(|s| s.trim().to_string()).filter(|s| !s.is_empty()),
+                Err(e) => return WebReturnType::error(format!("invalid tabId arg: {}", e)),
+            };
+            let tab_id = match explicit_tab_id {
+                Some(id) => id,
+                None => match call
+                    .uicontext
+                    .as_ref()
+                    .map(|ctx| ctx.active_tab_id.clone())
+                {
+                    Some(id) if !id.is_empty() => id,
+                    _ => return WebReturnType::error("missing uicontext.activetabid"),
+                },
             };
             match wcore::create_block(store, &tab_id, block_def.meta) {
                 Ok(block) => {
