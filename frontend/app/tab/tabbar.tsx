@@ -491,13 +491,26 @@ async function requestTearOff(
         // Step 1 — sidecar transfers the tab into a new workspace.
         // Returns the new workspace's ID.
         const newWsId = await WorkspaceService.TearOffTab(tabId, workspaceId);
-        // Step 2 — host spawns the destination window pointed at the
-        // new workspace. Returns the new window's label.
-        const destWindowLabel = await getApi().openWindowAtPosition(
-            cursorX,
-            cursorY,
-            newWsId,
-        );
+        // Step 2 — get the destination window. Phase 6 prefers the
+        // pre-warmed pool (0 ms first-paint flash). On pool exhaustion
+        // we fall back to the cold-path openWindowAtPosition (~150-300 ms
+        // flash). Per spec §0 this fallback should never fire in
+        // practice; if it does we'll see WARN logs and tear_off.pool_
+        // exhausted increments and can investigate the underlying race.
+        let destWindowLabel: string;
+        try {
+            destWindowLabel = await getApi().tearOffPoolPromote(newWsId, cursorX, cursorY);
+            Logger.info("dnd", "tear-off used warm pool", { destWindowLabel });
+        } catch (poolErr) {
+            Logger.warn("dnd", "tear-off pool exhausted, falling back to cold path", {
+                error: String(poolErr),
+            });
+            destWindowLabel = await getApi().openWindowAtPosition(
+                cursorX,
+                cursorY,
+                newWsId,
+            );
+        }
         // Step 3 — Win32 SC_MOVE handshake. Host waits for the new
         // window's HWND to register, then transfers cursor capture
         // and posts WM_SYSCOMMAND/SC_MOVE so Windows enters its

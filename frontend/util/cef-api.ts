@@ -576,6 +576,9 @@ export function buildCefApi(): AppApi {
         openWindowAtPosition: async (screenX: number, screenY: number, workspaceId?: string) => {
             return await invokeCommand<string>("open_window_at_position", { screenX, screenY, workspaceId: workspaceId ?? "" });
         },
+        tearOffPoolPromote: async (workspaceId: string, screenX: number, screenY: number) => {
+            return await invokeCommand<string>("tear_off_pool_promote", { workspaceId, screenX, screenY });
+        },
         tearOffSCMoveHandshake: async (args) => {
             return await invokeCommand<{ handshakeMs: number; totalMs: number }>(
                 "tear_off_sc_move_handshake",
