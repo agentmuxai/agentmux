@@ -131,6 +131,12 @@ export const [windowInstanceNumAtom, setWindowInstanceNumAtom] = createSignal(0)
 export const [windowCountAtom, setWindowCountAtom] = createSignal(1);
 export const [lanInstancesAtom, setLanInstancesAtom] = createSignal<LanInstance[]>([]);
 
+// List of all open AgentMux window labels in this process. Updated by
+// app-init's window-instances-changed listener whenever a window opens
+// or closes. Consumed by the version-click instance panel.
+// See SPEC_VERSION_INSTANCE_PANEL_2026_04_25.md.
+export const [openWindowLabelsAtom, setOpenWindowLabelsAtom] = createSignal<string[]>([]);
+
 // ---------------------------------------------------------------------------
 // GlobalAtomsType-compatible export (used in wos.ts callBackendService)
 // ---------------------------------------------------------------------------
