@@ -274,6 +274,7 @@ async fn route_command(
         }
         "list_windows" => Ok(commands::window::list_windows(state)),
         "focus_window" => commands::window::focus_window(state, args),
+        "close_window_by_label" => commands::window::close_window_by_label(state, args),
 
         // ---- Clipboard (CEF can't use navigator.clipboard without permission policy) ----
         "read_clipboard" => commands::clipboard::read_clipboard(),

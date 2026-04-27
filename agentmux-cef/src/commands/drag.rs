@@ -391,6 +391,26 @@ pub fn tear_off_sc_move_handshake(
         .and_then(|v| v.as_f64())
         .ok_or_else(|| "missing or invalid cursorY".to_string())? as i32;
 
+    // Phase 4 args — drive the WH_MOUSE_LL hook + finalize event.
+    // Optional in case a future call site doesn't need merge detection;
+    // if any are missing/empty, we skip the hook install and the
+    // dragged window simply ends as a standalone after mouseup.
+    let tab_id = args
+        .get("tabId")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let source_ws_id = args
+        .get("sourceWsId")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let dest_ws_id = args
+        .get("destWsId")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+
     // Win32-only path. The HWND poll, ReleaseCapture, and the SC_MOVE
     // post all live inside the cfg block — on macOS / Linux the
     // function returns Ok(null) immediately (Phase 7 adds platform
@@ -407,6 +427,22 @@ pub fn tear_off_sc_move_handshake(
         // this to <16 ms.
         let dest_hwnd = wait_for_browser_hwnd(state, &dest_label, std::time::Duration::from_millis(2000))
             .ok_or_else(|| format!("dest window not registered within 2s: {}", dest_label))?;
+
+        // Phase 4 — install the WH_MOUSE_LL hook on a dedicated thread
+        // BEFORE PostMessageW(SC_MOVE) so the hook is armed when the
+        // user starts moving. Otherwise the first cursor positions of
+        // the move-loop would be missed. Skip if any merge-related
+        // arg is empty (Phase 2 callers).
+        if !tab_id.is_empty() && !source_ws_id.is_empty() && !dest_ws_id.is_empty() {
+            crate::commands::tear_off_hook::start_tear_off_tracking(
+                state.clone(),
+                source_label.clone(),
+                dest_label.clone(),
+                tab_id.clone(),
+                source_ws_id.clone(),
+                dest_ws_id.clone(),
+            )?;
+        }
 
         let t_handshake = std::time::Instant::now();
 

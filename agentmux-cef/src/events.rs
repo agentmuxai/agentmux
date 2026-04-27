@@ -55,3 +55,29 @@ pub fn emit_event_all_windows(state: &crate::state::AppState, event: &str, paylo
         emit_event(browser, event, payload);
     }
 }
+
+/// Emit an event to a specific browser window by label.
+/// Used by the tear-off Phase 4 hook to push merge-candidate
+/// changes to the destination renderer.
+pub fn emit_event_to_window(
+    state: &crate::state::AppState,
+    label: &str,
+    event: &str,
+    payload: &serde_json::Value,
+) -> bool {
+    let browsers = state.browsers.lock();
+    match browsers.get(label) {
+        Some(browser) => {
+            emit_event(browser, event, payload);
+            true
+        }
+        None => {
+            tracing::warn!(
+                "Cannot emit event '{}' to label '{}': no such browser",
+                event,
+                label
+            );
+            false
+        }
+    }
+}
