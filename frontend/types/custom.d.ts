@@ -199,8 +199,15 @@ declare global {
             destWsId?: string;
             /** Phase 5 — tab's index in the source workspace at
              *  tear-off time. Used by cancel-back (ESC or drop on
-             *  source strip) to restore at the original position. */
+             *  source strip) to restore at the original position.
+             *  When `wasPinned` is true, this is the index inside
+             *  `pinnedtabids`; otherwise inside `tabids`. */
             originalTabIndex?: number;
+            /** Phase 5 — was the tab pinned in its source workspace?
+             *  Threaded through to the cancel-back payload so the
+             *  backend can restore into pinnedtabids vs tabids and
+             *  preserve pinned status. */
+            wasPinned?: boolean;
         }) => Promise<{ handshakeMs: number; totalMs: number }>;
         /** Close a specific AgentMux window by label. Used by Phase 4
          *  merge to clean up the dragged window after its tab is moved
