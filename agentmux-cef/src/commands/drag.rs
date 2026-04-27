@@ -265,6 +265,44 @@ pub fn release_drag_capture(state: &Arc<AppState>) -> Result<serde_json::Value, 
     Ok(serde_json::Value::Null)
 }
 
+/// Phase 6 — promote a pre-warmed pool window for tear-off.
+/// Returns the promoted window's label, or an error string if the
+/// pool was empty (caller should fall back to open_window_at_position).
+/// Args: { workspaceId, screenX, screenY }.
+pub fn tear_off_pool_promote(
+    state: &Arc<AppState>,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let workspace_id = args
+        .get("workspaceId")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "missing workspaceId".to_string())?;
+    let screen_x = args
+        .get("screenX")
+        .and_then(|v| v.as_f64())
+        .ok_or_else(|| "missing screenX".to_string())? as i32;
+    let screen_y = args
+        .get("screenY")
+        .and_then(|v| v.as_f64())
+        .ok_or_else(|| "missing screenY".to_string())? as i32;
+
+    match super::window_pool::promote_pool_window(state, workspace_id, screen_x, screen_y) {
+        Some(label) => Ok(serde_json::json!(label)),
+        None => {
+            // Per spec §0 the cold path is defence-in-depth, not an
+            // expected branch. Surface as an error so the frontend
+            // falls back deliberately and we can monitor `tear_off
+            // .pool_exhausted` events.
+            tracing::warn!(
+                target: "dnd:tearoff:pool",
+                workspace_id = %workspace_id,
+                "[pool] pool exhausted on tear-off — frontend will cold-path"
+            );
+            Err("pool_exhausted".to_string())
+        }
+    }
+}
+
 /// Open a new window at a specific screen position (tear-off).
 /// Creates a new CEF browser window positioned so the cursor lands in the title bar.
 pub fn open_window_at_position(state: &Arc<AppState>, args: &serde_json::Value) -> Result<serde_json::Value, String> {

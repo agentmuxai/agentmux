@@ -191,6 +191,16 @@ impl AgentMuxHandler {
         }
 
         self.browser_list.push(browser);
+
+        // Tear-off Phase 6 — pre-warmed window pool.
+        // - When the "main" window registers, kick off the initial pool spawn.
+        // - When a "pool-*" window registers, mark it ready in the pool queue
+        //   and (chain-style) spawn the next one if we're below TARGET_SIZE.
+        if label == "main" {
+            crate::commands::window_pool::init_pool(&self.state);
+        } else if label.starts_with("pool-") {
+            crate::commands::window_pool::register_pool_window(&self.state, &label);
+        }
     }
 
     fn do_close(&mut self, _browser: Option<&mut Browser>) -> bool {
