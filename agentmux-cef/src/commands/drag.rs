@@ -381,45 +381,69 @@ pub fn tear_off_sc_move_handshake(
     let cursor_x = args.get("cursorX").and_then(|v| v.as_f64()).unwrap_or(0.0) as i32;
     let cursor_y = args.get("cursorY").and_then(|v| v.as_f64()).unwrap_or(0.0) as i32;
 
-    // Wait for the destination browser's HWND to be available — the
-    // window-create posts to the CEF UI thread asynchronously and the
-    // browser is registered in state.browsers via on_after_created.
-    // Poll with the mutex released between checks. 2s deadline is
-    // generous; cold-path window creation typically completes in
-    // 150-300 ms. Phase 6 (warm pool) drops this to <16 ms.
-    let dest_hwnd = wait_for_browser_hwnd(state, &dest_label, std::time::Duration::from_millis(2000))
-        .ok_or_else(|| format!("dest window not registered within 2s: {}", dest_label))?;
-
-    let t_handshake = std::time::Instant::now();
-
+    // Win32-only path. The HWND poll, ReleaseCapture, and the SC_MOVE
+    // post all live inside the cfg block — on macOS / Linux the
+    // function returns Ok(null) immediately (Phase 7 adds platform
+    // equivalents). Without this gate the 2s HWND-poll would run on
+    // every platform with no benefit.
     #[cfg(target_os = "windows")]
-    unsafe {
-        use windows_sys::Win32::UI::Input::KeyboardAndMouse::{ReleaseCapture, SetCapture};
-        use windows_sys::Win32::UI::WindowsAndMessaging::{
-            PostMessageW, SetForegroundWindow, HTCAPTION, SC_MOVE, WM_SYSCOMMAND,
-        };
+    let handshake_ms: f64 = {
+        // Wait for the destination browser's HWND to be available —
+        // the window-create posts to the CEF UI thread asynchronously
+        // and the browser is registered in state.browsers via
+        // on_after_created. Poll with the mutex released between
+        // checks. 2s deadline is generous; cold-path window creation
+        // typically completes in 150-300 ms. Phase 6 (warm pool) drops
+        // this to <16 ms.
+        let dest_hwnd = wait_for_browser_hwnd(state, &dest_label, std::time::Duration::from_millis(2000))
+            .ok_or_else(|| format!("dest window not registered within 2s: {}", dest_label))?;
 
-        // Drop whatever capture this thread may hold (defensive — the
-        // OLE drag capture lives on the source webview's thread, but
-        // our IPC thread might still own something).
-        ReleaseCapture();
+        let t_handshake = std::time::Instant::now();
 
-        // Bring the destination forward and grab capture so SC_MOVE
-        // routes to it. The HCAPTION lparam packs the cursor's screen
-        // coords as Windows expects: low-word = x, high-word = y.
-        SetForegroundWindow(dest_hwnd);
-        SetCapture(dest_hwnd);
+        unsafe {
+            use windows_sys::Win32::UI::Input::KeyboardAndMouse::ReleaseCapture;
+            use windows_sys::Win32::UI::WindowsAndMessaging::{
+                PostMessageW, SetForegroundWindow, HTCAPTION, SC_MOVE, WM_SYSCOMMAND,
+            };
 
-        let lparam = ((cursor_y as i32 as u32) << 16) | (cursor_x as i32 as u32 & 0xFFFF);
-        PostMessageW(
-            dest_hwnd,
-            WM_SYSCOMMAND,
-            (SC_MOVE as usize) | (HTCAPTION as usize),
-            lparam as isize,
-        );
-    }
+            // Drop whatever capture this thread may hold (defensive —
+            // ReleaseCapture only affects the calling thread's
+            // capture, so this is a no-op for OLE-owned capture on
+            // the source webview's thread; harmless either way).
+            ReleaseCapture();
 
-    let handshake_ms = t_handshake.elapsed().as_micros() as f64 / 1000.0;
+            // Bring the destination forward. Windows grabs capture
+            // automatically when entering the SC_MOVE modal loop, so
+            // we don't call SetCapture explicitly here — it would
+            // fail anyway since `dest_hwnd` doesn't belong to this
+            // thread (Win32 SetCapture requires same-thread ownership).
+            // If empirically SC_MOVE turns out to need the capture
+            // pre-set, we'll post a UI-thread task to do it; for now
+            // the simpler path matches Chrome's observed behaviour.
+            SetForegroundWindow(dest_hwnd);
+
+            let lparam = ((cursor_y as i32 as u32) << 16) | (cursor_x as i32 as u32 & 0xFFFF);
+            PostMessageW(
+                dest_hwnd,
+                WM_SYSCOMMAND,
+                (SC_MOVE as usize) | (HTCAPTION as usize),
+                lparam as isize,
+            );
+        }
+
+        t_handshake.elapsed().as_micros() as f64 / 1000.0
+    };
+
+    #[cfg(not(target_os = "windows"))]
+    let handshake_ms: f64 = {
+        // Phase 7 adds macOS (NSWindow performWindowDragWithEvent) +
+        // Linux (_NET_WM_MOVERESIZE / xdg_toplevel.move) equivalents.
+        // For now the non-Windows path is a no-op so the IPC contract
+        // exists and the rest of the pipeline can be cross-platform.
+        let _ = (state, &dest_label);
+        0.0
+    };
+
     let total_ms = t_start.elapsed().as_micros() as f64 / 1000.0;
 
     tracing::info!(

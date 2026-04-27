@@ -259,7 +259,19 @@ async fn route_command(
         "release_drag_capture" => commands::drag::release_drag_capture(state),
         "set_js_drag_active" => commands::drag::set_js_drag_active(args),
         "open_window_at_position" => commands::drag::open_window_at_position(state, args),
-        "tear_off_sc_move_handshake" => commands::drag::tear_off_sc_move_handshake(state, args),
+        "tear_off_sc_move_handshake" => {
+            // Wrap in spawn_blocking — the handler polls state.browsers
+            // for up to 2s waiting for the destination window's HWND to
+            // register (cold path, gone after Phase 6 warm pool). Without
+            // this wrap it would block a Tokio worker.
+            let state_clone = state.clone();
+            let args_clone = args.clone();
+            tokio::task::spawn_blocking(move || {
+                commands::drag::tear_off_sc_move_handshake(&state_clone, &args_clone)
+            })
+            .await
+            .map_err(|e| format!("tear_off_sc_move_handshake join error: {}", e))?
+        }
         "list_windows" => Ok(commands::window::list_windows(state)),
         "focus_window" => commands::window::focus_window(state, args),
 
