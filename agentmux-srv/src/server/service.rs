@@ -96,10 +96,16 @@ fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType {
             // when the RPC's uicontext is serialised. Eliminates the
             // TOCTOU race where the user can switch tabs between the
             // call site and the server-side handler.
-            let explicit_tab_id: Option<String> = service::get_optional_arg::<String>(args, 2)
-                .ok()
-                .flatten()
-                .filter(|s| !s.is_empty());
+            //
+            // A *malformed* args[2] (e.g. non-string from a stale SDK)
+            // returns an error — silently falling back to uicontext
+            // would defeat the explicit-targeting contract and make
+            // wrong-tab routing hard to diagnose. Missing/null/empty
+            // is fine: treat as "no override" and use uicontext.
+            let explicit_tab_id: Option<String> = match service::get_optional_arg::<String>(args, 2) {
+                Ok(opt) => opt.filter(|s| !s.is_empty()),
+                Err(e) => return WebReturnType::error(format!("invalid tabId arg: {}", e)),
+            };
             let tab_id = match explicit_tab_id {
                 Some(id) => id,
                 None => match call
