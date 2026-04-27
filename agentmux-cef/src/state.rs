@@ -225,6 +225,16 @@ pub struct AppState {
     /// Cold-path (open_window_at_position) remains as defence-in-depth.
     /// See SPEC_TAB_TEAR_OFF_SIZE_PRESERVATION_2026_04_26 §4.5.
     pub window_pool: Mutex<VecDeque<String>>,
+    /// Labels of pool windows that have been spawned but NOT yet
+    /// promoted. Populated synchronously in `spawn_pool_window` so
+    /// callers (list_windows, app-exit decision) can identify pool
+    /// windows BEFORE the renderer-ready handshake fires and
+    /// `window_pool` gets populated. Removed on promote, on
+    /// destroy-before-promote, and during pool teardown.
+    /// Without this, list_windows reports unpromoted pool windows
+    /// as user-visible instances during the ~100ms gap between
+    /// spawn and renderer-ready.
+    pub unpromoted_pool_labels: Mutex<std::collections::HashSet<String>>,
     /// Single in-flight respawn semaphore — prevents pool refill from
     /// stacking spawns when the user does back-to-back tear-offs faster
     /// than CEF can create windows.
@@ -293,6 +303,7 @@ impl Default for AppState {
             window_meta: Mutex::new(HashMap::new()),
             pending_window_labels: Mutex::new(VecDeque::new()),
             window_pool: Mutex::new(VecDeque::new()),
+            unpromoted_pool_labels: Mutex::new(std::collections::HashSet::new()),
             window_pool_respawn_in_flight: std::sync::atomic::AtomicBool::new(false),
             version_data_dir: Mutex::new(None),
             version_config_dir: Mutex::new(None),

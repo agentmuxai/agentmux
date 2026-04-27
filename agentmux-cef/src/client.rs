@@ -353,26 +353,23 @@ impl AgentMuxHandler {
         dlog(&format!("browser_list after remove: {}", self.browser_list.len()));
 
         // App-exit decision: count remaining USER-FACING browsers.
-        // Pool windows (`window-pool-*` labels still in `state.window_pool`)
-        // are pre-warmed scratch windows hidden from the user via
-        // WS_EX_TOOLWINDOW — they have no taskbar entry, can't be
-        // closed by the user, and would otherwise keep the app alive
-        // forever after the last visible window closes. Browser-pane
-        // child HWNDs (`browser-pane-*`) are sub-views of a parent
-        // window, not standalone instances, so they don't count
-        // either.
+        // Unpromoted pool windows are pre-warmed scratch windows
+        // hidden from the user via WS_EX_TOOLWINDOW — they have no
+        // taskbar entry, can't be closed by the user, and would
+        // otherwise keep the app alive forever after the last
+        // visible window closes. Browser-pane child HWNDs
+        // (`browser-pane-*`) are sub-views of a parent window, not
+        // standalone instances, so they don't count either.
         //
-        // Promoted pool windows ARE counted: they're popped off
-        // `state.window_pool` at promote time, so the pool_labels
-        // set excludes them.
+        // Use `unpromoted_pool_labels` (populated at spawn time)
+        // rather than `window_pool` (populated only after the
+        // renderer-ready handshake) so this filter is correct
+        // even during the spawn → ready gap.
+        //
+        // Promoted pool windows ARE counted: they're removed from
+        // `unpromoted_pool_labels` at promote time.
         let user_browser_count = {
-            let pool_labels: std::collections::HashSet<String> = self
-                .state
-                .window_pool
-                .lock()
-                .iter()
-                .cloned()
-                .collect();
+            let pool_labels = self.state.unpromoted_pool_labels.lock().clone();
             let browsers = self.state.browsers.lock();
             browsers
                 .iter()

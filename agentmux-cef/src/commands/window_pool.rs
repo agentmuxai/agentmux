@@ -72,9 +72,20 @@ pub fn spawn_pool_window(state: &Arc<AppState>) {
     // Use the `window-pool-` prefix so existing `is_instance_label`
     // checks (tear_off_hook.rs, app-init.ts) pass naturally — they
     // accept anything starting with `window-`. After promotion the
-    // label stays the same; "is in window_pool queue" is the
-    // authoritative pool-vs-promoted distinction.
+    // label stays the same; `unpromoted_pool_labels` is the
+    // authoritative pool-vs-promoted distinction (cleared on
+    // promote — `window_pool` is populated only after the
+    // renderer-ready handshake, so it's not reliable as the
+    // distinguisher during the ~100ms spawn → ready gap).
     let label = format!("window-pool-{}", window_id.simple());
+
+    // Mark this label as an unpromoted pool window NOW — before any
+    // CEF work — so list_windows / app-exit can filter it out the
+    // moment on_after_created adds it to state.browsers.
+    state
+        .unpromoted_pool_labels
+        .lock()
+        .insert(label.clone());
 
     let ipc_port = *state.ipc_port.lock();
     let ipc_token = &state.ipc_token;
@@ -235,6 +246,11 @@ pub fn on_pool_window_destroyed(state: &Arc<AppState>, label: &str) {
     if !label.starts_with("window-pool-") {
         return;
     }
+    // Drop the label from both the queue and the intent set so
+    // list_windows / app-exit don't keep treating a dead label as
+    // pool. Independent of whether the window made it into the
+    // queue (renderer crash before ready signal) or not.
+    state.unpromoted_pool_labels.lock().remove(label);
     // Single lock: drop the dead label + check whether we need to
     // refill, all in one critical section.
     let needs_refill = {
@@ -337,6 +353,10 @@ pub fn promote_pool_window(
     screen_y: i32,
 ) -> Option<String> {
     let label = state.window_pool.lock().pop_front()?;
+
+    // The label is no longer "unpromoted" — drop it from the intent
+    // set so list_windows starts treating this as a real instance.
+    state.unpromoted_pool_labels.lock().remove(&label);
 
     tracing::info!(
         target: "dnd:tearoff:pool",
