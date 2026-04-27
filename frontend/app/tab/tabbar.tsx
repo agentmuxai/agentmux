@@ -137,9 +137,16 @@ function TabBar(props: TabBarProps): JSX.Element {
                         // Phase 5: capture the original tab index BEFORE
                         // TearOffTab moves the tab out. Used by cancel-back
                         // (ESC or drop-on-source) to restore at the
-                        // original position. Defaults to current array
-                        // position; -1 → 0 if not found (defensive).
-                        const originalTabIndex = Math.max(0, tabIds().indexOf(draggedTabId));
+                        // original position. Index against workspace.tabids
+                        // ONLY — `tabIds()` prepends legacy pinnedtabids
+                        // for display, but MoveTabToWorkspace applies its
+                        // index against tabids alone. Mixing would shift
+                        // by pinned count during the async pin-migration
+                        // window. (codex PR #567 P2)
+                        const originalTabIndex = Math.max(
+                            0,
+                            (props.workspace?.tabids ?? []).indexOf(draggedTabId),
+                        );
                         // openWindowAtPosition + SC_MOVE expect SCREEN
                         // coordinates, but `input.clientX/Y` are
                         // viewport-relative. Convert via window.screenX/Y
