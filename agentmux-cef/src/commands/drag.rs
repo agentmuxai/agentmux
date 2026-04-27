@@ -433,12 +433,24 @@ pub fn tear_off_sc_move_handshake(
             SetForegroundWindow(dest_hwnd);
 
             let lparam = ((cursor_y as i32 as u32) << 16) | (cursor_x as i32 as u32 & 0xFFFF);
-            PostMessageW(
+            // PostMessageW returns BOOL — 0 means the post failed (e.g.
+            // dest HWND went invalid between wait_for_browser_hwnd and
+            // here, or the message queue rejected the post). Return an
+            // error so the frontend doesn't silently treat tear-off as
+            // complete; the UI can fall back / log.
+            let post_ok = PostMessageW(
                 dest_hwnd,
                 WM_SYSCOMMAND,
                 (SC_MOVE as usize) | (HTCAPTION as usize),
                 lparam as isize,
             );
+            if post_ok == 0 {
+                let last_err = windows_sys::Win32::Foundation::GetLastError();
+                return Err(format!(
+                    "PostMessageW(SC_MOVE) failed: GetLastError={}",
+                    last_err
+                ));
+            }
         }
 
         t_handshake.elapsed().as_micros() as f64 / 1000.0
