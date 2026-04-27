@@ -179,7 +179,15 @@ pub fn get_method_meta(service: &str, method: &str) -> Option<MethodMeta> {
         }),
         ("object", "CreateBlock") => Some(MethodMeta {
             desc: Some("create a new block".into()),
-            arg_names: vec!["uiContext".into(), "blockDef".into(), "rtOpts".into()],
+            // Optional `tabId` (args[2]) overrides uicontext.active_tab_id —
+            // see SPEC_VERSION_INSTANCE_PANEL_2026_04_25 follow-up + the
+            // tab-presets TOCTOU note in frontend/app/tab/tab-presets.ts.
+            arg_names: vec![
+                "uiContext".into(),
+                "blockDef".into(),
+                "rtOpts".into(),
+                "tabId".into(),
+            ],
             return_desc: Some("blockId".into()),
         }),
         ("object", "DeleteBlock") => Some(MethodMeta {
