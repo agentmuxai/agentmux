@@ -44,6 +44,10 @@ const POOL_OFFSCREEN_X: i32 = -32000;
 const POOL_OFFSCREEN_Y: i32 = -32000;
 const POOL_WIDTH: i32 = 1200;
 const POOL_HEIGHT: i32 = 800;
+/// Pixels above the cursor where the title bar sits — matches
+/// open_window_at_position so the cursor lands near the top-center
+/// of the title bar after promotion.
+const TITLE_BAR_OFFSET_PX: i32 = 16;
 
 /// Spawn a single pool window. Called at startup (N times) and
 /// after each promote (1 refill). Idempotent against the
@@ -69,7 +73,7 @@ pub fn spawn_pool_window(state: &Arc<AppState>) {
     // checks (tear_off_hook.rs, app-init.ts) pass naturally — they
     // accept anything starting with `window-`. After promotion the
     // label stays the same; "is in window_pool queue" is the
-    // authoritative pool-vs-promoted distinction. (codex PR #566 P1)
+    // authoritative pool-vs-promoted distinction.
     let label = format!("window-pool-{}", window_id.simple());
 
     let ipc_port = *state.ipc_port.lock();
@@ -149,7 +153,7 @@ pub fn register_pool_window(_state: &Arc<AppState>, label: &str) {
 /// Called from the `pool_window_ready` IPC handler — fired by the
 /// frontend's awaitPoolPromote AFTER its `pool:promote` listener
 /// is installed. NOW it's safe to enqueue this window for
-/// promotion. (codex PR #566 P1 — listener race)
+/// promotion.
 pub fn mark_pool_window_renderer_ready(state: &Arc<AppState>, label: &str) {
     if !label.starts_with("window-pool-") {
         return;
@@ -157,7 +161,7 @@ pub fn mark_pool_window_renderer_ready(state: &Arc<AppState>, label: &str) {
     // Single lock acquisition for both push_back and len. Avoids the
     // window where another thread could push between our two locks
     // and skew pool_size, plus saves one mutex round-trip on the hot
-    // post-creation path. (gemini PR #566 MEDIUM)
+    // post-creation path.
     let pool_size = {
         let mut pool = state.window_pool.lock();
         pool.push_back(label.to_string());
@@ -223,36 +227,56 @@ pub fn promote_pool_window(
 
     // Resolve the HWND under a SHORT lock — drop the browsers mutex
     // before any Win32 call so we don't hold a global state lock
-    // across FFI into the OS UI subsystem (gemini PR #566 HIGH).
+    // across FFI into the OS UI subsystem.
+    //
+    // Each None-returning step is a state-inconsistency bug, not an
+    // expected failure — log per-step at ERROR so an operator can
+    // tell which invariant broke.
     use cef::{ImplBrowser, ImplBrowserHost};
     let raw_hwnd: Option<*mut std::ffi::c_void> = {
         let browsers = state.browsers.lock();
-        browsers.get(&label).and_then(|browser| {
-            browser.host().and_then(|host| {
-                let h = host.window_handle();
-                if h.0.is_null() {
+        match browsers.get(&label) {
+            None => {
+                tracing::error!(
+                    target: "dnd:tearoff:pool",
+                    label = %label,
+                    "[pool] promoted label not in browsers map (state inconsistency)"
+                );
+                None
+            }
+            Some(browser) => match browser.host() {
+                None => {
+                    tracing::error!(
+                        target: "dnd:tearoff:pool",
+                        label = %label,
+                        "[pool] browser has no host (state inconsistency)"
+                    );
                     None
-                } else {
-                    Some(h.0 as *mut std::ffi::c_void)
                 }
-            })
-        })
+                Some(host) => {
+                    let h = host.window_handle();
+                    if h.0.is_null() {
+                        tracing::error!(
+                            target: "dnd:tearoff:pool",
+                            label = %label,
+                            "[pool] host window handle is null (state inconsistency)"
+                        );
+                        None
+                    } else {
+                        Some(h.0 as *mut std::ffi::c_void)
+                    }
+                }
+            },
+        }
     };
 
-    // Pool-slot leak guard (reagent PR #566 P1): if HWND lookup
-    // fails after we've already popped the label, the popped slot
-    // is gone from the pool with no replacement. Restore capacity
-    // by triggering a refill spawn before returning None — the
-    // orphaned window (if any) is best-effort logged but otherwise
-    // abandoned to GC.
+    // Pool-slot leak guard: if HWND
+    // lookup fails after we've already popped the label, capacity
+    // permanently shrinks unless we refill. The orphan window (if
+    // any) is logged above and abandoned.
     let raw_hwnd = match raw_hwnd {
         Some(h) => h,
         None => {
-            tracing::warn!(
-                target: "dnd:tearoff:pool",
-                label = %label,
-                "[pool] promoted window has no HWND — refilling and aborting"
-            );
             spawn_pool_window(state);
             return None;
         }
@@ -263,13 +287,13 @@ pub fn promote_pool_window(
     // space is signed (secondary monitors to the left of / above
     // the primary one are negative-coord) and clamping would push
     // tear-offs onto the primary monitor when the user grabbed
-    // from a secondary. (gemini PR #566 HIGH)
+    // from a secondary.
     unsafe {
         use windows_sys::Win32::UI::WindowsAndMessaging::{
             SetWindowPos, ShowWindow, HWND_TOP, SWP_NOZORDER, SW_SHOW,
         };
         let pos_x = screen_x - POOL_WIDTH / 2;
-        let pos_y = screen_y - 16;
+        let pos_y = screen_y - TITLE_BAR_OFFSET_PX;
         SetWindowPos(
             raw_hwnd,
             HWND_TOP,
@@ -281,6 +305,30 @@ pub fn promote_pool_window(
         );
         let _ = ShowWindow(raw_hwnd, SW_SHOW);
     }
+
+    // Register the promoted window in the instance registry +
+    // broadcast the count change. Cold-path open_window_at_position
+    // does this same step (drag.rs:~390); without it warm-path
+    // tear-offs would bypass instance tracking entirely — get_instance
+    // _number would fall back to 1 for the new window and other
+    // windows would keep a stale count, throwing off the InstancePanel
+    // and any other consumer of windowCountAtom.
+    {
+        let mut reg = state.window_instance_registry.lock();
+        let num = reg.register(&label);
+        tracing::info!(
+            target: "dnd:tearoff:pool",
+            label = %label,
+            instance = %num,
+            "[pool] promoted window registered as instance"
+        );
+    }
+    let count = state.window_instance_registry.lock().count();
+    crate::events::emit_event_all_windows(
+        state,
+        "window-instances-changed",
+        &serde_json::json!(count),
+    );
 
     // Now tell the pool window's renderer to bootstrap the workspace.
     crate::events::emit_event_to_window(
