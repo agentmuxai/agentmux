@@ -29,6 +29,7 @@ import {
     setWindowInstanceNumAtom,
     setWindowCountAtom,
     setOpenWindowLabelsAtom,
+    setOpenWindowEntriesAtom,
     setReinitVersion,
     setUpdaterStatusAtom,
     setUpdaterVersionAtom,
@@ -104,8 +105,25 @@ async function initInstanceTracking(): Promise<void> {
     let lastLabelsKey = "";
     const refreshLabels = async (waitForChange = false, retriesLeft = 6): Promise<void> => {
         try {
-            const all = await getApi().listWindows();
-            const labels = sortInstanceLabels((Array.isArray(all) ? all : []).filter(isInstanceLabel));
+            // listWindowInstances gives us [{label, windowId}] in one
+            // RPC; we sort/filter on label and keep windowId aligned.
+            // Falls back to listWindows if the new RPC isn't supported
+            // (older host build) so the panel still works partially.
+            let entries: Array<{ label: string; windowId: string | null }>;
+            try {
+                const all = await getApi().listWindowInstances();
+                entries = Array.isArray(all) ? all : [];
+            } catch {
+                const all = await getApi().listWindows();
+                entries = (Array.isArray(all) ? all : []).map((label) => ({ label, windowId: null }));
+            }
+            const filtered = entries.filter((e) => isInstanceLabel(e.label));
+            filtered.sort((a, b) => {
+                if (a.label === "main") return -1;
+                if (b.label === "main") return 1;
+                return a.label.localeCompare(b.label);
+            });
+            const labels = filtered.map((e) => e.label);
             const key = labels.join("|");
             if (waitForChange && key === lastLabelsKey && retriesLeft > 0) {
                 setTimeout(() => refreshLabels(true, retriesLeft - 1), 50);
@@ -113,8 +131,10 @@ async function initInstanceTracking(): Promise<void> {
             }
             lastLabelsKey = key;
             setOpenWindowLabelsAtom(labels);
+            setOpenWindowEntriesAtom(filtered);
         } catch {
             setOpenWindowLabelsAtom([]);
+            setOpenWindowEntriesAtom([]);
         }
     };
 

@@ -352,6 +352,34 @@ pub fn is_main_window(args: &serde_json::Value) -> serde_json::Value {
     serde_json::json!(label == "main")
 }
 
+/// List all open window instances with their backend window IDs.
+/// Same filtering as `list_windows` (excludes unpromoted pool windows
+/// and browser-pane child HWNDs), but returns `[{label, windowId}]`
+/// pairs so the frontend can resolve per-window backend objects
+/// (Window record → meta["window:displayname"], etc.) without an
+/// extra round-trip per row.
+///
+/// `windowId` is `None` for windows that haven't yet completed the
+/// `register_backend_window` round-trip — typically a freshly-spawned
+/// window before its frontend has finished init. Callers should
+/// fall back to label/index-based naming in that case.
+pub fn list_window_instances(state: &Arc<AppState>) -> serde_json::Value {
+    let pool_labels = state.unpromoted_pool_labels.lock().clone();
+    let window_id_map = state.window_id_map.lock();
+    let browsers = state.browsers.lock();
+    let entries: Vec<serde_json::Value> = browsers
+        .keys()
+        .filter(|l| !pool_labels.contains(*l) && !l.starts_with("browser-pane-"))
+        .map(|l| {
+            serde_json::json!({
+                "label": l,
+                "windowId": window_id_map.get(l),
+            })
+        })
+        .collect();
+    serde_json::json!(entries)
+}
+
 /// List all open window labels, excluding unpromoted pool windows.
 /// Pool windows are pre-warmed tear-off scratch windows kept hidden
 /// from the user (WS_EX_TOOLWINDOW, no taskbar entry). Including them

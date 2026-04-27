@@ -275,6 +275,7 @@ async fn route_command(
             .map_err(|e| format!("tear_off_sc_move_handshake join error: {}", e))?
         }
         "list_windows" => Ok(commands::window::list_windows(state)),
+        "list_window_instances" => Ok(commands::window::list_window_instances(state)),
         "focus_window" => commands::window::focus_window(state, args),
         "close_window_by_label" => commands::window::close_window_by_label(state, args),
 

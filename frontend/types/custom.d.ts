@@ -122,6 +122,12 @@ declare global {
         isMainWindow: () => Promise<boolean>;
         registerBackendWindow: (label: string, windowId: string) => void;
         listWindows: () => Promise<string[]>;
+        /** Like listWindows but returns `[{label, windowId}]` pairs.
+         *  `windowId` is null for windows that haven't yet completed
+         *  the registerBackendWindow round-trip. Used by InstancePanel
+         *  to look up per-window backend Window records (display name
+         *  in meta, workspace fallback, etc.) without an extra RPC. */
+        listWindowInstances: () => Promise<Array<{ label: string; windowId: string | null }>>;
         focusWindow: (label: string) => Promise<void>;
         getInstanceNumber: () => Promise<number>;
         getWindowCount: () => Promise<number>;

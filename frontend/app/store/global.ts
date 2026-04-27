@@ -137,6 +137,15 @@ export const [lanInstancesAtom, setLanInstancesAtom] = createSignal<LanInstance[
 // See SPEC_VERSION_INSTANCE_PANEL_2026_04_25.md.
 export const [openWindowLabelsAtom, setOpenWindowLabelsAtom] = createSignal<string[]>([]);
 
+// Same list, but each entry carries the backend window id alongside the
+// host label so the InstancePanel can resolve per-window Window records
+// (display name in meta, workspace name fallback) without an extra RPC.
+// `windowId` may be null for windows whose `registerBackendWindow`
+// round-trip hasn't fired yet (typical during the first ~100ms of a
+// new window). See SPEC_WINDOW_RENAME_2026_04_27.md.
+export type WindowEntry = { label: string; windowId: string | null };
+export const [openWindowEntriesAtom, setOpenWindowEntriesAtom] = createSignal<WindowEntry[]>([]);
+
 // ---------------------------------------------------------------------------
 // GlobalAtomsType-compatible export (used in wos.ts callBackendService)
 // ---------------------------------------------------------------------------
