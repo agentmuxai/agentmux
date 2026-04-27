@@ -20,7 +20,7 @@ import { usePaneOverlay } from "@/app/platform/pane-overlay";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
 import { ObjectService } from "@/store/services";
 import { getObjectValue, makeORef } from "@/store/wos";
-import { createMemo, createSignal, For, Show, type JSX } from "solid-js";
+import { createMemo, createSignal, For, onCleanup, Show, type JSX } from "solid-js";
 
 const DISPLAY_NAME_META_KEY = "window:displayname";
 const DISPLAY_NAME_MAX_LEN = 64;
@@ -67,7 +67,18 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
     // focus by row label so a click on row B while a focus is
     // pending for row A still treats B as a fresh single click.
     // (reagent / codex / gemini PR #569 P1)
-    const DBLCLICK_DELAY_MS = 230;
+    //
+    // Threshold queried from the OS (Win32 GetDoubleClickTime,
+    // user-configurable, default 500ms) so slow double-clickers
+    // are accommodated. Defaults to 500ms while the query is
+    // in flight, plus a 50ms buffer to absorb event-dispatch jitter.
+    // (codex PR #569 round-2 P2)
+    const [dblclickDelayMs, setDblclickDelayMs] = createSignal(550);
+    getApi()
+        .getDoubleClickTime()
+        .then((ms) => setDblclickDelayMs(Math.max(120, ms + 50)))
+        .catch(() => {/* keep default */});
+
     let pendingFocus: { label: string; timer: number } | null = null;
     const cancelPendingFocus = () => {
         if (pendingFocus) {
@@ -145,6 +156,24 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
             console.error("[InstancePanel] rename failed:", e);
         }
     };
+
+    // Commit any in-flight rename on panel unmount. The panel can be
+    // dismissed by StatusBar's outside-click handler before the input's
+    // onBlur fires, which would otherwise silently lose the typed
+    // value. fireAndForget — the panel is going away regardless and
+    // we don't block teardown on the RPC. (codex PR #569 round-2 P1)
+    onCleanup(() => {
+        const editing = editingLabel();
+        if (!editing) return;
+        const entry = entries().find((e) => e.label === editing);
+        if (!entry || !entry.windowId) return;
+        const trimmed = editValue().trim().slice(0, DISPLAY_NAME_MAX_LEN);
+        if (!trimmed) return;
+        ObjectService.UpdateObjectMeta(
+            makeORef("window", entry.windowId),
+            { [DISPLAY_NAME_META_KEY]: trimmed } as MetaType,
+        ).catch((e) => console.error("[InstancePanel] cleanup rename failed:", e));
+    });
 
     const handleOpenNewWindow = async () => {
         try {
@@ -240,7 +269,7 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
                                         timer: window.setTimeout(() => {
                                             pendingFocus = null;
                                             handleFocusWindow(label);
-                                        }, DBLCLICK_DELAY_MS),
+                                        }, dblclickDelayMs()),
                                     };
                                 }}
                                 onDblClick={(e) => {

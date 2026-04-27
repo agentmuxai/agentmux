@@ -352,6 +352,26 @@ pub fn is_main_window(args: &serde_json::Value) -> serde_json::Value {
     serde_json::json!(label == "main")
 }
 
+/// Return the OS double-click interval in milliseconds.
+/// On Windows: `GetDoubleClickTime()` — typically 500ms, user-configurable
+/// via Mouse settings. On non-Windows: hardcoded 500ms (the Win32 default,
+/// also a common cross-platform default; Phase 7 can refine per platform).
+///
+/// Used by the InstancePanel to defer single-click focus past the user's
+/// dblclick threshold so dblclick-to-rename works for everyone, not just
+/// users with the default-or-faster setting. Without this query, a fixed
+/// constant would make rename unreliable for slow double-clickers
+/// (codex PR #569 round-2 P2).
+pub fn get_double_click_time() -> serde_json::Value {
+    #[cfg(target_os = "windows")]
+    {
+        let ms = unsafe { windows_sys::Win32::UI::Input::KeyboardAndMouse::GetDoubleClickTime() };
+        return serde_json::json!(ms);
+    }
+    #[allow(unreachable_code)]
+    serde_json::json!(500u32)
+}
+
 /// List all open window instances with their backend window IDs.
 /// Same filtering as `list_windows` (excludes unpromoted pool windows
 /// and browser-pane child HWNDs), but returns `[{label, windowId}]`
