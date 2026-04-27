@@ -281,10 +281,12 @@ function TabBar(props: TabBarProps): JSX.Element {
         // physical → CSS by dividing by DPR before subtracting.
         // (gemini PR #567 HIGH; same fix applies to Phase 4 merge
         // handler below — both shared the bug.)
-        const physicalToClientX = (px: number) =>
-            px / (window.devicePixelRatio || 1) - window.screenX;
-        const physicalToClientY = (py: number) =>
-            py / (window.devicePixelRatio || 1) - window.screenY;
+        // Math.max(1, ...) defends against the (rare but possible) browser
+        // edge case where devicePixelRatio is 0 or negative; the falsy-||
+        // already covered undefined/NaN. (gemini PR #567 round-8 MEDIUM)
+        const dpr = () => Math.max(1, window.devicePixelRatio || 1);
+        const physicalToClientX = (px: number) => px / dpr() - window.screenX;
+        const physicalToClientY = (py: number) => py / dpr() - window.screenY;
         fireAndForget(async () => {
             const { listenEvent } = await import("@/app/platform/ipc");
             if (!mounted) return;

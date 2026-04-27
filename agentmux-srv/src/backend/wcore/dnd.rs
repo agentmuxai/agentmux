@@ -337,13 +337,19 @@ pub fn restore_torn_off_tab(
         let source_now_empty =
             source_ws.tabids.is_empty() && source_ws.pinnedtabids.is_empty();
         if source_ws.activetabid == tab_id {
-            let new_active = source_ws
+            // Only assign a new active tab if one actually exists.
+            // When source_now_empty, both lists are empty and we go
+            // straight to delete below — no need to write an empty
+            // activetabid into the persisted record. (gemini PR #567
+            // round-8 MEDIUM)
+            if let Some(new_active) = source_ws
                 .tabids
                 .first()
                 .or(source_ws.pinnedtabids.first())
                 .cloned()
-                .unwrap_or_default();
-            source_ws.activetabid = new_active;
+            {
+                source_ws.activetabid = new_active;
+            }
         }
 
         // De-dup in destination before insert. A retried frontend request
