@@ -389,20 +389,35 @@ export async function initApp() {
     if (hostApp) {
         getApi().sendLog("Starting host app initialization");
         try {
-            // Check if this is a new window or the main window
-            benchMark("isMainWindow-start");
-            const isMain = await getApi().isMainWindow();
-            getApi().sendLog(`Window type: ${isMain ? "main" : "new window"}`);
-
-            benchMark("isMainWindow-done");
-            if (isMain) {
-                // Main window with freshly spawned backend: standard initialization
-                await initHostWave();
-            } else {
-                // New window: create new backend window objects
-                const label = await getApi().getWindowLabel();
-                getApi().sendLog(`Initializing as new window: ${label}`);
+            // Tear-off Phase 6 — pool-mode short-circuit. If the URL
+            // carries `?pool=1`, this renderer was spawned by the
+            // host's pre-warmed window pool. Skip the standard
+            // workspace init and wait for `pool:promote` to arrive.
+            // On promote, the same initHostNewWindow flow runs against
+            // the workspace ID the promote event delivers (pushed into
+            // the URL by awaitPoolPromote).
+            const { isPoolMode, awaitPoolPromote } = await import("@/app/init/pool");
+            if (isPoolMode()) {
+                getApi().sendLog("[initApp] pool mode — deferring init until promote");
+                await awaitPoolPromote();
+                getApi().sendLog("[initApp] pool:promote received — bootstrapping workspace");
                 await initHostNewWindow();
+            } else {
+                // Check if this is a new window or the main window
+                benchMark("isMainWindow-start");
+                const isMain = await getApi().isMainWindow();
+                getApi().sendLog(`Window type: ${isMain ? "main" : "new window"}`);
+
+                benchMark("isMainWindow-done");
+                if (isMain) {
+                    // Main window with freshly spawned backend: standard initialization
+                    await initHostWave();
+                } else {
+                    // New window: create new backend window objects
+                    const label = await getApi().getWindowLabel();
+                    getApi().sendLog(`Initializing as new window: ${label}`);
+                    await initHostNewWindow();
+                }
             }
         } catch (error) {
             console.error("[initApp] Host initialization failed:", error);
