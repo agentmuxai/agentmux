@@ -28,6 +28,7 @@ import {
     windowInstanceNumAtom,
     setWindowInstanceNumAtom,
     setWindowCountAtom,
+    setOpenWindowLabelsAtom,
     setReinitVersion,
     setUpdaterStatusAtom,
     setUpdaterVersionAtom,
@@ -71,19 +72,32 @@ const RPC_TIMEOUT = 5_000; // 5 seconds for individual RPC calls
  * Called once per window after the wave UI is fully initialized.
  */
 async function initInstanceTracking(): Promise<void> {
+    const refreshLabels = async () => {
+        try {
+            const labels = await getApi().listWindows();
+            setOpenWindowLabelsAtom(Array.isArray(labels) ? labels : []);
+        } catch {
+            setOpenWindowLabelsAtom([]);
+        }
+    };
+
     try {
         const [instanceNum, windowCount] = await Promise.all([
             getApi().getInstanceNumber(),
             getApi().getWindowCount(),
+            refreshLabels(),
         ]);
         setWindowInstanceNumAtom(instanceNum);
         setWindowCountAtom(windowCount);
 
-        // Keep count in sync whenever any window opens or closes.
-        // Uses the platform-agnostic listen from AppApi.
+        // Keep count + label list in sync whenever any window opens or
+        // closes. The host emits this with the new count as payload (see
+        // agentmux-cef/src/commands/window.rs:514) but doesn't include
+        // the label list, so we re-fetch via listWindows() each time.
         await getApi().listen("window-instances-changed", (event: any) => {
             const payload = event?.payload ?? event;
             setWindowCountAtom(typeof payload === "number" ? payload : 0);
+            refreshLabels();
         });
     } catch (e) {
         console.warn("[initInstanceTracking] failed:", e);
