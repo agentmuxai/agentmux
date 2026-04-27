@@ -65,7 +65,12 @@ pub fn spawn_pool_window(state: &Arc<AppState>) {
     }
 
     let window_id = uuid::Uuid::new_v4();
-    let label = format!("pool-{}", window_id.simple());
+    // Use the `window-pool-` prefix so existing `is_instance_label`
+    // checks (tear_off_hook.rs, app-init.ts) pass naturally — they
+    // accept anything starting with `window-`. After promotion the
+    // label stays the same; "is in window_pool queue" is the
+    // authoritative pool-vs-promoted distinction. (codex PR #566 P1)
+    let label = format!("window-pool-{}", window_id.simple());
 
     let ipc_port = *state.ipc_port.lock();
     let ipc_token = &state.ipc_token;
@@ -124,9 +129,29 @@ pub fn spawn_pool_window(state: &Arc<AppState>) {
 }
 
 /// Called from on_after_created when a pool window's browser is
-/// registered. Marks the pool slot as available.
-pub fn register_pool_window(state: &Arc<AppState>, label: &str) {
-    if !label.starts_with("pool-") {
+/// registered. Logs only — the actual queue insertion happens via
+/// `mark_pool_window_renderer_ready` once the frontend reports its
+/// `pool:promote` listener is installed. Without that gate we'd
+/// race emit_event_to_window against the renderer's listener
+/// install, dropping the promote signal and stranding the window
+/// in pool mode.
+pub fn register_pool_window(_state: &Arc<AppState>, label: &str) {
+    if !label.starts_with("window-pool-") {
+        return;
+    }
+    tracing::debug!(
+        target: "dnd:tearoff:pool",
+        label = %label,
+        "[pool] browser registered, awaiting renderer-ready signal"
+    );
+}
+
+/// Called from the `pool_window_ready` IPC handler — fired by the
+/// frontend's awaitPoolPromote AFTER its `pool:promote` listener
+/// is installed. NOW it's safe to enqueue this window for
+/// promotion. (codex PR #566 P1 — listener race)
+pub fn mark_pool_window_renderer_ready(state: &Arc<AppState>, label: &str) {
+    if !label.starts_with("window-pool-") {
         return;
     }
     // Single lock acquisition for both push_back and len. Avoids the
@@ -146,7 +171,7 @@ pub fn register_pool_window(state: &Arc<AppState>, label: &str) {
         target: "dnd:tearoff:pool",
         label = %label,
         pool_size = %pool_size,
-        "[pool] pool window registered, ready"
+        "[pool] pool window renderer ready, enqueued"
     );
 
     // Top up to target if we're below.
