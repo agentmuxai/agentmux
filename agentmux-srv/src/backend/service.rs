@@ -179,8 +179,14 @@ pub fn get_method_meta(service: &str, method: &str) -> Option<MethodMeta> {
         }),
         ("object", "CreateBlock") => Some(MethodMeta {
             desc: Some("create a new block".into()),
-            // Optional `tabId` (args[2]) overrides uicontext.active_tab_id —
-            // see SPEC_VERSION_INSTANCE_PANEL_2026_04_25 follow-up + the
+            // arg_names is documented as if `uiContext` were args[0], but
+            // uiContext actually rides in the call envelope (call.uicontext),
+            // not in the args array. So the handler reads positions
+            // shifted left by 1: blockDef = args[0], rtOpts = args[1],
+            // tabId = args[2]. (Same shift convention as every other
+            // CreateBlock-style handler in this file.) tabId overrides
+            // uicontext.active_tab_id when present — see
+            // SPEC_VERSION_INSTANCE_PANEL_2026_04_25 follow-up + the
             // tab-presets TOCTOU note in frontend/app/tab/tab-presets.ts.
             arg_names: vec![
                 "uiContext".into(),
