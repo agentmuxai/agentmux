@@ -459,6 +459,19 @@ pub fn register_backend_window(state: &Arc<AppState>, args: &serde_json::Value) 
         let keys: Vec<String> = state.window_id_map.lock().keys().cloned().collect();
         crate::client::dlog(&format!("window_id_map now has keys: {:?}", keys));
         tracing::info!(label = %label, window_id = %window_id, "[window] registered backend window ID");
+        // Notify listeners that the label→windowId mapping changed.
+        // The InstancePanel needs `windowId` to look up the backend
+        // Window record (display name in meta, workspace fallback).
+        // Without this emit, sibling windows would never re-fetch
+        // listWindowInstances after a freshly-opened window's
+        // windowId becomes available, leaving its row's name
+        // unresolvable and rename disabled. (codex PR #569 P2)
+        let count = state.window_instance_registry.lock().count();
+        crate::events::emit_event_all_windows(
+            state,
+            "window-instances-changed",
+            &serde_json::json!(count),
+        );
     } else {
         tracing::warn!(label = %label, "[window] register_backend_window called with empty window_id — skipped");
     }

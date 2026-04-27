@@ -59,7 +59,22 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
     // survives entries() reordering. Single rename at a time.
     const [editingLabel, setEditingLabel] = createSignal<string | null>(null);
     const [editValue, setEditValue] = createSignal("");
-    let activeInputRef: HTMLInputElement | undefined;
+
+    // Defer single-click focus past the dblclick threshold so
+    // double-clicking a row enters rename mode WITHOUT first
+    // bringing the other window forward (which would close /
+    // hide this panel and abort the rename). Tracks the pending
+    // focus by row label so a click on row B while a focus is
+    // pending for row A still treats B as a fresh single click.
+    // (reagent / codex / gemini PR #569 P1)
+    const DBLCLICK_DELAY_MS = 230;
+    let pendingFocus: { label: string; timer: number } | null = null;
+    const cancelPendingFocus = () => {
+        if (pendingFocus) {
+            clearTimeout(pendingFocus.timer);
+            pendingFocus = null;
+        }
+    };
 
     const positioning = createMemo(() => {
         const r = props.anchorRect;
@@ -208,14 +223,45 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
                                         e.stopPropagation();
                                         return;
                                     }
-                                    handleFocusWindow(entry.label);
+                                    // If a focus was pending on THIS row, this is
+                                    // the second click of a dblclick — let dblClick
+                                    // handle it; cancel the pending focus.
+                                    if (pendingFocus && pendingFocus.label === entry.label) {
+                                        cancelPendingFocus();
+                                        return;
+                                    }
+                                    // Otherwise schedule a fresh focus past the
+                                    // dblclick threshold so a follow-up click can
+                                    // promote it to rename instead.
+                                    cancelPendingFocus();
+                                    const label = entry.label;
+                                    pendingFocus = {
+                                        label,
+                                        timer: window.setTimeout(() => {
+                                            pendingFocus = null;
+                                            handleFocusWindow(label);
+                                        }, DBLCLICK_DELAY_MS),
+                                    };
                                 }}
                                 onDblClick={(e) => {
                                     e.preventDefault();
                                     e.stopPropagation();
+                                    cancelPendingFocus();
                                     enterRename(entry, currentName());
                                 }}
-                                title={isCurrent() ? "This window — double-click to rename" : `Click to focus, double-click to rename`}
+                                onKeyDown={(e) => {
+                                    if (isEditing()) return; // input owns key handling
+                                    if (e.key === "Enter" || e.key === " ") {
+                                        e.preventDefault();
+                                        cancelPendingFocus();
+                                        handleFocusWindow(entry.label);
+                                    } else if (e.key === "F2") {
+                                        e.preventDefault();
+                                        cancelPendingFocus();
+                                        enterRename(entry, currentName());
+                                    }
+                                }}
+                                title={isCurrent() ? "This window — double-click to rename (F2)" : `Click to focus, double-click to rename (F2)`}
                                 role="button"
                                 tabIndex={0}
                             >
@@ -228,7 +274,6 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
                                 >
                                     <input
                                         ref={(el) => {
-                                            activeInputRef = el;
                                             if (el) {
                                                 queueMicrotask(() => {
                                                     el.focus();
