@@ -372,7 +372,12 @@ function TabBar(props: TabBarProps): JSX.Element {
                                 insertIdx = tabs.indexOf(ip.afterTabId);
                                 if (insertIdx < 0) insertIdx = tabs.length;
                             }
-                            await WorkspaceService.MoveTabToWorkspace(
+                            // Tear-off workspaces always carry exactly one
+                            // tab, so MoveTabToWorkspace's last-tab guard
+                            // would reject this. RestoreTornOffTab bypasses
+                            // that and deletes the now-empty source ws so
+                            // closeWindowByLabel below doesn't cascade.
+                            await WorkspaceService.RestoreTornOffTab(
                                 payload.tabId,
                                 payload.fromWsId,
                                 ownWsId,
@@ -418,6 +423,10 @@ function TabBar(props: TabBarProps): JSX.Element {
                 }>("tearoff:cancel-back", (payload) => {
                     fireAndForget(async () => {
                         try {
+                            // Drop any stale insertion gap left over from
+                            // tearoff:hover-changed updates while the cursor
+                            // was still on the strip. (codex PR #567 P3)
+                            setInsertionPoint(null);
                             const ownWsId = props.workspace?.oid;
                             if (!ownWsId) {
                                 Logger.warn("dnd", "tearoff:cancel-back — no own workspace, skipping", payload);
@@ -447,7 +456,13 @@ function TabBar(props: TabBarProps): JSX.Element {
                                     return;
                                 }
                             }
-                            await WorkspaceService.MoveTabToWorkspace(
+                            // Tear-off workspace has exactly one tab —
+                            // MoveTabToWorkspace would reject moving it
+                            // out. RestoreTornOffTab bypasses the last-tab
+                            // guard and deletes the empty source ws, so
+                            // the dragged window's close cascade has
+                            // nothing left to do. (codex PR #567 P1)
+                            await WorkspaceService.RestoreTornOffTab(
                                 payload.tabId,
                                 payload.fromWsId,
                                 ownWsId,

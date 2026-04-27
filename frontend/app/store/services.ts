@@ -207,6 +207,15 @@ class WorkspaceServiceType {
         return WOS.callBackendService("workspace", "MoveTabToWorkspace", Array.from(arguments))
     }
 
+    // Move the only tab out of a tear-off workspace and delete that workspace.
+    // Used for cancel-back (ESC / drop-on-source) and merge — both produce a
+    // single-tab source workspace that MoveTabToWorkspace would refuse to
+    // empty out. Returns object updates (source workspace deleted, dest
+    // workspace updated).
+    RestoreTornOffTab(tabId: string, sourceWsId: string, destWsId: string, insertIndex?: number): Promise<void> {
+        return WOS.callBackendService("workspace", "RestoreTornOffTab", Array.from(arguments))
+    }
+
     // Tear off a block into a new workspace
     // @returns new workspace id (and object updates)
     TearOffBlock(blockId: string, sourceTabId: string, sourceWsId: string, autoClose?: boolean): Promise<string> {

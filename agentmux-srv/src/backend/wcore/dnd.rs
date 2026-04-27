@@ -281,6 +281,80 @@ pub fn tear_off_block(
     store.must_get::<Workspace>(&new_ws.oid)
 }
 
+/// Move a tab back from a tear-off workspace into a destination workspace.
+/// Unlike `move_tab_to_workspace`, this skips the "last tab" guard because
+/// tear-off workspaces always contain exactly one tab — and after the move
+/// the source workspace has zero tabs and is deleted.
+///
+/// Used by Phase 5 cancel-back (ESC / drop-on-source) and by Phase 4 merge
+/// (drop on another window's strip). Both paths produce a single-tab source
+/// workspace whose only purpose is to carry the dragged tab.
+pub fn restore_torn_off_tab(
+    store: &WaveStore,
+    tab_id: &str,
+    source_ws_id: &str,
+    dest_ws_id: &str,
+    insert_index: Option<usize>,
+) -> Result<(), StoreError> {
+    tracing::info!(
+        tab_id = %tab_id,
+        source_ws = %source_ws_id,
+        dest_ws = %dest_ws_id,
+        insert_index = ?insert_index,
+        "[dnd] restore_torn_off_tab"
+    );
+    if source_ws_id == dest_ws_id {
+        tracing::debug!("[dnd] restore_torn_off_tab: same workspace, no-op");
+        return Ok(());
+    }
+
+    // Verify tab exists.
+    let _tab = store.must_get::<Tab>(tab_id)?;
+
+    // Remove tab from source workspace. No last-tab guard: a tear-off
+    // workspace's only tab IS the one being restored.
+    let mut source_ws = store.must_get::<Workspace>(source_ws_id)?;
+    source_ws.tabids.retain(|id| id != tab_id);
+    source_ws.pinnedtabids.retain(|id| id != tab_id);
+    let source_now_empty =
+        source_ws.tabids.is_empty() && source_ws.pinnedtabids.is_empty();
+    if source_ws.activetabid == tab_id {
+        let new_active = source_ws
+            .tabids
+            .first()
+            .or(source_ws.pinnedtabids.first())
+            .cloned()
+            .unwrap_or_default();
+        source_ws.activetabid = new_active;
+    }
+    store.update(&mut source_ws)?;
+
+    // Add tab to destination workspace at requested index.
+    let mut dest_ws = store.must_get::<Workspace>(dest_ws_id)?;
+    let idx = insert_index.unwrap_or(dest_ws.tabids.len());
+    let insert_at = idx.min(dest_ws.tabids.len());
+    dest_ws.tabids.insert(insert_at, tab_id.to_string());
+    dest_ws.activetabid = tab_id.to_string();
+    store.update(&mut dest_ws)?;
+
+    // Delete the now-empty source workspace so the dragged window's
+    // close (which the frontend issues immediately after) doesn't
+    // attempt a redundant cascade. The tab record itself stays — it
+    // belongs to the destination workspace now.
+    if source_now_empty {
+        tracing::info!(source_ws = %source_ws_id, "[dnd] deleting empty tear-off workspace");
+        store.delete::<Workspace>(source_ws_id)?;
+    }
+
+    tracing::info!(
+        tab_id = %tab_id,
+        dest_ws = %dest_ws_id,
+        insert_at = %insert_at,
+        "[dnd] restore_torn_off_tab complete"
+    );
+    Ok(())
+}
+
 /// Tear off a tab into a new workspace.
 /// Removes the tab from the source workspace and creates a new workspace
 /// containing just that tab. Returns the new workspace.
