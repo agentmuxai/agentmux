@@ -134,6 +134,22 @@ function TabBar(props: TabBarProps): JSX.Element {
                     const draggedTabId = source.data.tabId as string;
                     const wsId = props.workspace?.oid;
                     if (wsId) {
+                        // Phase 5: capture the original position so cancel-back
+                        // can restore in place. We need TWO things:
+                        //   * `wasPinned` — which list the tab lived in
+                        //   * `originalTabIndex` — its index inside THAT list
+                        // The backend restores into `pinnedtabids` if
+                        // wasPinned, else `tabids`. Using one combined
+                        // displayed-index won't do: the lists are persisted
+                        // separately. (gemini PR #567 round-6 MEDIUM)
+                        const ws = props.workspace;
+                        const pinnedIds = ws?.pinnedtabids ?? [];
+                        const tabIdsRaw = ws?.tabids ?? [];
+                        const pinnedIdx = pinnedIds.indexOf(draggedTabId);
+                        const wasPinned = pinnedIdx >= 0;
+                        const originalTabIndex = wasPinned
+                            ? pinnedIdx
+                            : Math.max(0, tabIdsRaw.indexOf(draggedTabId));
                         // openWindowAtPosition + SC_MOVE expect SCREEN
                         // coordinates, but `input.clientX/Y` are
                         // viewport-relative. Convert via window.screenX/Y
@@ -145,16 +161,8 @@ function TabBar(props: TabBarProps): JSX.Element {
                         // Fire-and-forget — the user is mid-drag and the
                         // host's SC_MOVE handshake will take over the
                         // cursor synchronously from Windows' point of view.
-                        //
-                        // The cross-window drag payload is cleared INSIDE
-                        // requestTearOff after the SC_MOVE handshake
-                        // returns successfully — clearing it here would
-                        // strand the legacy dragend fallback if any step
-                        // (TearOffTab, openWindowAtPosition, handshake)
-                        // failed mid-flight, leaving the gesture as a
-                        // silent no-op.
                         fireAndForget(() =>
-                            requestTearOff(draggedTabId, wsId, screenX, screenY),
+                            requestTearOff(draggedTabId, wsId, screenX, screenY, originalTabIndex, wasPinned),
                         );
                     }
                     // Continue updating insertionPoint below — until the
@@ -263,6 +271,22 @@ function TabBar(props: TabBarProps): JSX.Element {
                 unsub();
             }
         };
+        // Coordinate-space helper. `payload.cursorX/Y` come from
+        // Win32's WH_MOUSE_LL hook in PHYSICAL pixels (Windows
+        // reports per-monitor coords for DPI-aware processes, which
+        // CEF is). `window.screenX/Y` and `getBoundingClientRect()`
+        // return CSS / LOGICAL pixels. Subtract directly and you're
+        // off by a factor of devicePixelRatio at DPR ≠ 1.0 — the
+        // strip hit-test would never trigger on HiDPI. Convert
+        // physical → CSS by dividing by DPR before subtracting.
+        // (gemini PR #567 HIGH; same fix applies to Phase 4 merge
+        // handler below — both shared the bug.)
+        // Math.max(1, ...) defends against the (rare but possible) browser
+        // edge case where devicePixelRatio is 0 or negative; the falsy-||
+        // already covered undefined/NaN. (gemini PR #567 round-8 MEDIUM)
+        const dpr = () => Math.max(1, window.devicePixelRatio || 1);
+        const physicalToClientX = (px: number) => px / dpr() - window.screenX;
+        const physicalToClientY = (py: number) => py / dpr() - window.screenY;
         fireAndForget(async () => {
             const { listenEvent } = await import("@/app/platform/ipc");
             if (!mounted) return;
@@ -280,8 +304,8 @@ function TabBar(props: TabBarProps): JSX.Element {
                             setInsertionPoint(null);
                             return;
                         }
-                        const clientX = payload.cursorX - window.screenX;
-                        const clientY = payload.cursorY - window.screenY;
+                        const clientX = physicalToClientX(payload.cursorX);
+                        const clientY = physicalToClientY(payload.cursorY);
                         if (clientY < stripRect.top || clientY > stripRect.bottom) {
                             setInsertionPoint(null);
                             return;
@@ -320,8 +344,8 @@ function TabBar(props: TabBarProps): JSX.Element {
                             // window's body would silently relocate
                             // the tab. (codex PR #565 P1)
                             const stripRect = tabBarScrollRef?.getBoundingClientRect();
-                            const clientX = payload.cursorX - window.screenX;
-                            const clientY = payload.cursorY - window.screenY;
+                            const clientX = physicalToClientX(payload.cursorX);
+                            const clientY = physicalToClientY(payload.cursorY);
                             if (
                                 !stripRect ||
                                 clientY < stripRect.top ||
@@ -348,7 +372,12 @@ function TabBar(props: TabBarProps): JSX.Element {
                                 insertIdx = tabs.indexOf(ip.afterTabId);
                                 if (insertIdx < 0) insertIdx = tabs.length;
                             }
-                            await WorkspaceService.MoveTabToWorkspace(
+                            // Tear-off workspaces always carry exactly one
+                            // tab, so MoveTabToWorkspace's last-tab guard
+                            // would reject this. RestoreTornOffTab bypasses
+                            // that and deletes the now-empty source ws so
+                            // closeWindowByLabel below doesn't cascade.
+                            await WorkspaceService.RestoreTornOffTab(
                                 payload.tabId,
                                 payload.fromWsId,
                                 ownWsId,
@@ -374,6 +403,92 @@ function TabBar(props: TabBarProps): JSX.Element {
             trackOrDispose(
                 await listenEvent("tearoff:standalone", (payload) => {
                     Logger.info("dnd", "tearoff:standalone", payload);
+                }),
+            );
+
+            // Phase 5 — cancel-back. Source window receives this on
+            // either ESC during the SC_MOVE loop or drop-on-source-
+            // strip. Move the tab back from the dragged window's
+            // workspace into ours at its original index, then close
+            // the dragged window.
+            trackOrDispose(
+                await listenEvent<{
+                    tabId: string;
+                    fromWsId: string;
+                    originalSourceWsId: string;
+                    draggedWindowLabel: string;
+                    originalIndex: number;
+                    wasPinned: boolean;
+                    cursorX?: number;
+                    cursorY?: number;
+                    reason: string;
+                }>("tearoff:cancel-back", (payload) => {
+                    fireAndForget(async () => {
+                        try {
+                            // Drop any stale insertion gap left over from
+                            // tearoff:hover-changed updates while the cursor
+                            // was still on the strip. (codex PR #567 P3)
+                            setInsertionPoint(null);
+                            // Restore into the workspace the tab was torn
+                            // from, NOT this window's currently-active
+                            // workspace. If the user switched workspaces
+                            // mid-drag, ownWsId would put the tab in the
+                            // wrong place. (codex PR #567 round-5 P2)
+                            const restoreWsId = payload.originalSourceWsId;
+                            if (!restoreWsId) {
+                                Logger.warn("dnd", "tearoff:cancel-back — no original source workspace, skipping", payload);
+                                return;
+                            }
+                            // Strip-area hit test (drop-on-source path
+                            // only — ESC has no cursor coords). Mirrors
+                            // the merge handler's check: the host emits
+                            // cancel-back whenever the cursor's over
+                            // any part of the source window's HWND, but
+                            // we only restore if the cursor was
+                            // actually on the tab strip. Otherwise fall
+                            // through to standalone (do nothing — the
+                            // dragged window stays where it landed).
+                            if (payload.reason === "drop-on-source"
+                                && payload.cursorX != null
+                                && payload.cursorY != null
+                            ) {
+                                const stripRect = tabBarScrollRef?.getBoundingClientRect();
+                                const clientY = physicalToClientY(payload.cursorY);
+                                if (
+                                    !stripRect
+                                    || clientY < stripRect.top
+                                    || clientY > stripRect.bottom
+                                ) {
+                                    Logger.info("dnd", "tearoff:cancel-back — cursor over source body, leaving as standalone", payload);
+                                    return;
+                                }
+                            }
+                            // Tear-off workspace has exactly one tab —
+                            // MoveTabToWorkspace would reject moving it
+                            // out. RestoreTornOffTab bypasses the last-tab
+                            // guard and deletes the empty source ws, so
+                            // the dragged window's close cascade has
+                            // nothing left to do. (codex PR #567 P1)
+                            await WorkspaceService.RestoreTornOffTab(
+                                payload.tabId,
+                                payload.fromWsId,
+                                restoreWsId,
+                                payload.originalIndex,
+                                payload.wasPinned,
+                            );
+                            await getApi().closeWindowByLabel(payload.draggedWindowLabel);
+                            Logger.info("dnd", "tearoff:cancel-back complete", {
+                                tabId: payload.tabId,
+                                originalIndex: payload.originalIndex,
+                                reason: payload.reason,
+                            });
+                        } catch (e) {
+                            Logger.error("dnd", "tearoff:cancel-back failed", {
+                                error: String(e),
+                                payload,
+                            });
+                        }
+                    });
                 }),
             );
         });
@@ -484,6 +599,8 @@ async function requestTearOff(
     workspaceId: string,
     cursorX: number,
     cursorY: number,
+    originalTabIndex: number,
+    wasPinned: boolean,
 ): Promise<void> {
     const t0 = performance.now();
     try {
@@ -527,6 +644,12 @@ async function requestTearOff(
             tabId,
             sourceWsId: workspaceId,
             destWsId: newWsId,
+            // Phase 5 — original tab index so ESC / drop-on-source
+            // can restore at the right position rather than the end.
+            // wasPinned controls which list the index points into
+            // (pinnedtabids vs tabids).
+            originalTabIndex,
+            wasPinned,
         });
         // Handshake succeeded — Windows now owns the move loop. Clear
         // the cross-window drag payload so the legacy dragend pipeline

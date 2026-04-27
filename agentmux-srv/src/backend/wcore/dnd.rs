@@ -281,6 +281,124 @@ pub fn tear_off_block(
     store.must_get::<Workspace>(&new_ws.oid)
 }
 
+/// Move a tab back from a tear-off workspace into a destination workspace.
+/// Unlike `move_tab_to_workspace`, this skips the "last tab" guard because
+/// tear-off workspaces always contain exactly one tab — and after the move
+/// the source workspace has zero tabs and is deleted.
+///
+/// `was_pinned` controls which list in the destination receives the tab:
+/// true → `pinnedtabids` (preserves pinned status across cancel-back),
+/// false → `tabids`. Both paths de-dup before insert.
+///
+/// The whole operation runs inside a single SQLite transaction so frontend
+/// readers never observe a transient state where the tab lives in two
+/// workspaces' lists at once. (gemini PR #567 round-6 MEDIUM)
+///
+/// Used by Phase 5 cancel-back (ESC / drop-on-source) and by Phase 4 merge
+/// (drop on another window's strip). Both paths produce a single-tab source
+/// workspace whose only purpose is to carry the dragged tab.
+pub fn restore_torn_off_tab(
+    store: &WaveStore,
+    tab_id: &str,
+    source_ws_id: &str,
+    dest_ws_id: &str,
+    insert_index: Option<usize>,
+    was_pinned: bool,
+) -> Result<(), StoreError> {
+    tracing::info!(
+        tab_id = %tab_id,
+        source_ws = %source_ws_id,
+        dest_ws = %dest_ws_id,
+        insert_index = ?insert_index,
+        was_pinned = %was_pinned,
+        "[dnd] restore_torn_off_tab"
+    );
+    if source_ws_id == dest_ws_id {
+        tracing::debug!("[dnd] restore_torn_off_tab: same workspace, no-op");
+        return Ok(());
+    }
+
+    store.with_tx(|tx| {
+        // Validate everything we're going to touch BEFORE mutating any of
+        // it. If `dest_ws_id` is stale (e.g. user closed the original
+        // window while the SC_MOVE loop was running, or sent a malformed
+        // request), `must_get::<Workspace>(dest_ws_id)` fails here and
+        // the transaction rolls back without ever touching the source —
+        // no orphaned tab. (codex PR #567 P1 / gemini HIGH)
+        let _tab = tx.must_get::<Tab>(tab_id)?;
+        let mut source_ws = tx.must_get::<Workspace>(source_ws_id)?;
+        let mut dest_ws = tx.must_get::<Workspace>(dest_ws_id)?;
+
+        // Compute source-side mutations in memory only (don't persist yet).
+        // No last-tab guard: a tear-off workspace's only tab IS the one
+        // being restored, and we'll delete the empty workspace below.
+        source_ws.tabids.retain(|id| id != tab_id);
+        source_ws.pinnedtabids.retain(|id| id != tab_id);
+        let source_now_empty =
+            source_ws.tabids.is_empty() && source_ws.pinnedtabids.is_empty();
+        if source_ws.activetabid == tab_id {
+            // Only assign a new active tab if one actually exists.
+            // When source_now_empty, both lists are empty and we go
+            // straight to delete below — no need to write an empty
+            // activetabid into the persisted record. (gemini PR #567
+            // round-8 MEDIUM)
+            if let Some(new_active) = source_ws
+                .tabids
+                .first()
+                .or(source_ws.pinnedtabids.first())
+                .cloned()
+            {
+                source_ws.activetabid = new_active;
+            }
+        }
+
+        // De-dup in destination before insert. A retried frontend request
+        // could otherwise produce duplicate tab IDs in the workspace's
+        // `tabids` array. (gemini PR #567 MEDIUM)
+        dest_ws.tabids.retain(|id| id != tab_id);
+        dest_ws.pinnedtabids.retain(|id| id != tab_id);
+
+        // Choose pinnedtabids vs tabids based on the tab's original
+        // status. Without this, a pinned tab torn off and cancel-backed
+        // would silently come back as unpinned. (gemini PR #567 round-6
+        // MEDIUM @ tabbar.tsx:154 + dnd.rs:345)
+        let insert_at = if was_pinned {
+            let idx = insert_index.unwrap_or(dest_ws.pinnedtabids.len());
+            let insert_at = idx.min(dest_ws.pinnedtabids.len());
+            dest_ws.pinnedtabids.insert(insert_at, tab_id.to_string());
+            insert_at
+        } else {
+            let idx = insert_index.unwrap_or(dest_ws.tabids.len());
+            let insert_at = idx.min(dest_ws.tabids.len());
+            dest_ws.tabids.insert(insert_at, tab_id.to_string());
+            insert_at
+        };
+        dest_ws.activetabid = tab_id.to_string();
+
+        // Inside the transaction, persistence order doesn't matter for
+        // observers (they only see post-COMMIT state). Persist dest
+        // first anyway to keep the function flow obvious if the txn
+        // wrapper is ever removed. Skip source update entirely when
+        // it's becoming empty — go straight to delete.
+        tx.update(&mut dest_ws)?;
+        if source_now_empty {
+            tracing::info!(source_ws = %source_ws_id, "[dnd] deleting empty tear-off workspace");
+            tx.delete::<Workspace>(source_ws_id)?;
+        } else {
+            tx.update(&mut source_ws)?;
+        }
+
+        tracing::info!(
+            tab_id = %tab_id,
+            dest_ws = %dest_ws_id,
+            insert_at = %insert_at,
+            was_pinned = %was_pinned,
+            "[dnd] restore_torn_off_tab complete"
+        );
+        Ok(())
+    })
+}
+
 /// Tear off a tab into a new workspace.
 /// Removes the tab from the source workspace and creates a new workspace
 /// containing just that tab. Returns the new workspace.
