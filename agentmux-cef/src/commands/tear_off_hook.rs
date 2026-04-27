@@ -67,7 +67,14 @@ struct HookContext {
     /// Phase 5 — tab's original index in the source workspace at the
     /// moment of tear-off. Used by cancel-back (ESC or drop on source
     /// strip) to reinsert the tab where it was, not at the end.
+    /// Index is into `pinnedtabids` if `was_pinned`, else into `tabids`.
     original_tab_index: usize,
+    /// Phase 5 — true if the tab was pinned in its source workspace.
+    /// Threaded through to the cancel-back payload so the backend can
+    /// restore into `pinnedtabids` and preserve pinned status. Without
+    /// this, a pinned tab torn off + cancel-backed would silently
+    /// come back unpinned. (gemini PR #567 round-6 MEDIUM)
+    was_pinned: bool,
     /// Last-known candidate target label, or None when over a non-
     /// AgentMux window or the desktop. Used to emit hover-clear events
     /// when the cursor leaves a candidate.
@@ -100,6 +107,7 @@ pub fn start_tear_off_tracking(
     source_ws_id: String,
     dest_ws_id: String,
     original_tab_index: usize,
+    was_pinned: bool,
 ) -> Result<(), String> {
     use std::sync::mpsc;
 
@@ -120,6 +128,7 @@ pub fn start_tear_off_tracking(
                 source_ws_id,
                 dest_ws_id,
                 original_tab_index,
+                was_pinned,
                 current_target: RefCell::new(None),
                 finalized: RefCell::new(false),
             };
@@ -232,6 +241,7 @@ pub fn start_tear_off_tracking(
     _source_ws_id: String,
     _dest_ws_id: String,
     _original_tab_index: usize,
+    _was_pinned: bool,
 ) -> Result<(), String> {
     Ok(())
 }
@@ -281,6 +291,7 @@ unsafe extern "system" fn low_level_keyboard_proc(
                             "originalSourceWsId": ctx.source_ws_id,
                             "draggedWindowLabel": ctx.dragged_label,
                             "originalIndex": ctx.original_tab_index,
+                            "wasPinned": ctx.was_pinned,
                             "reason": "esc",
                         }),
                     );
@@ -438,6 +449,7 @@ fn handle_button_up(cursor_x: i32, cursor_y: i32) {
                         "originalSourceWsId": ctx.source_ws_id,
                         "draggedWindowLabel": ctx.dragged_label,
                         "originalIndex": ctx.original_tab_index,
+                        "wasPinned": ctx.was_pinned,
                         "cursorX": cursor_x,
                         "cursorY": cursor_y,
                         "reason": "drop-on-source",

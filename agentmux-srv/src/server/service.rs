@@ -771,8 +771,13 @@ fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType {
                 Err(e) => return WebReturnType::error(e),
             };
             let insert_index: Option<usize> = service::get_arg(args, 3).ok();
-            tracing::info!(tab_id = %tab_id, source_ws = %source_ws_id, dest_ws = %dest_ws_id, insert_index = ?insert_index, "[dnd:svc] RestoreTornOffTab");
-            match wcore::restore_torn_off_tab(store, &tab_id, &source_ws_id, &dest_ws_id, insert_index) {
+            // arg 4 is `wasPinned: bool`. Default false — older clients
+            // and the merge path (which always restores into the target's
+            // tabids regardless of source pin status) don't need to pass
+            // it. Pinned-status preservation is a cancel-back-only feature.
+            let was_pinned: bool = service::get_arg(args, 4).unwrap_or(false);
+            tracing::info!(tab_id = %tab_id, source_ws = %source_ws_id, dest_ws = %dest_ws_id, insert_index = ?insert_index, was_pinned = %was_pinned, "[dnd:svc] RestoreTornOffTab");
+            match wcore::restore_torn_off_tab(store, &tab_id, &source_ws_id, &dest_ws_id, insert_index, was_pinned) {
                 Ok(()) => {
                     let mut updates = Vec::new();
                     // Source workspace: emit a delete update if we deleted

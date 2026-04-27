@@ -134,24 +134,22 @@ function TabBar(props: TabBarProps): JSX.Element {
                     const draggedTabId = source.data.tabId as string;
                     const wsId = props.workspace?.oid;
                     if (wsId) {
-                        // Phase 5: capture the original tab index BEFORE
-                        // TearOffTab moves the tab out, in the BACKEND's
-                        // reference frame (workspace.tabids — what
-                        // MoveTabToWorkspace's insertion index targets).
-                        //
-                        // Display is `tabIds()` = pinnedtabids + tabids;
-                        // backend is tabids only. Subtract pinnedCount
-                        // from the displayed index so:
-                        //   - regular tab in displayed-position N (with
-                        //     M pinned ahead of it) → backend index N-M
-                        //   - legacy pinned tab pre-migration → clamps
-                        //     to 0 (best-effort; full migration folds
-                        //     pinnedtabids into tabids[0..M] anyway, so
-                        //     index 0 is in the right neighbourhood).
+                        // Phase 5: capture the original position so cancel-back
+                        // can restore in place. We need TWO things:
+                        //   * `wasPinned` — which list the tab lived in
+                        //   * `originalTabIndex` — its index inside THAT list
+                        // The backend restores into `pinnedtabids` if
+                        // wasPinned, else `tabids`. Using one combined
+                        // displayed-index won't do: the lists are persisted
+                        // separately. (gemini PR #567 round-6 MEDIUM)
                         const ws = props.workspace;
-                        const pinnedCount = (ws?.pinnedtabids ?? []).length;
-                        const displayedIdx = tabIds().indexOf(draggedTabId);
-                        const originalTabIndex = Math.max(0, displayedIdx - pinnedCount);
+                        const pinnedIds = ws?.pinnedtabids ?? [];
+                        const tabIdsRaw = ws?.tabids ?? [];
+                        const pinnedIdx = pinnedIds.indexOf(draggedTabId);
+                        const wasPinned = pinnedIdx >= 0;
+                        const originalTabIndex = wasPinned
+                            ? pinnedIdx
+                            : Math.max(0, tabIdsRaw.indexOf(draggedTabId));
                         // openWindowAtPosition + SC_MOVE expect SCREEN
                         // coordinates, but `input.clientX/Y` are
                         // viewport-relative. Convert via window.screenX/Y
@@ -164,7 +162,7 @@ function TabBar(props: TabBarProps): JSX.Element {
                         // host's SC_MOVE handshake will take over the
                         // cursor synchronously from Windows' point of view.
                         fireAndForget(() =>
-                            requestTearOff(draggedTabId, wsId, screenX, screenY, originalTabIndex),
+                            requestTearOff(draggedTabId, wsId, screenX, screenY, originalTabIndex, wasPinned),
                         );
                     }
                     // Continue updating insertionPoint below — until the
@@ -418,6 +416,7 @@ function TabBar(props: TabBarProps): JSX.Element {
                     originalSourceWsId: string;
                     draggedWindowLabel: string;
                     originalIndex: number;
+                    wasPinned: boolean;
                     cursorX?: number;
                     cursorY?: number;
                     reason: string;
@@ -473,6 +472,7 @@ function TabBar(props: TabBarProps): JSX.Element {
                                 payload.fromWsId,
                                 restoreWsId,
                                 payload.originalIndex,
+                                payload.wasPinned,
                             );
                             await getApi().closeWindowByLabel(payload.draggedWindowLabel);
                             Logger.info("dnd", "tearoff:cancel-back complete", {
@@ -598,6 +598,7 @@ async function requestTearOff(
     cursorX: number,
     cursorY: number,
     originalTabIndex: number,
+    wasPinned: boolean,
 ): Promise<void> {
     const t0 = performance.now();
     try {
@@ -643,7 +644,10 @@ async function requestTearOff(
             destWsId: newWsId,
             // Phase 5 — original tab index so ESC / drop-on-source
             // can restore at the right position rather than the end.
+            // wasPinned controls which list the index points into
+            // (pinnedtabids vs tabids).
             originalTabIndex,
+            wasPinned,
         });
         // Handshake succeeded — Windows now owns the move loop. Clear
         // the cross-window drag payload so the legacy dragend pipeline
