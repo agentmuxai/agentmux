@@ -72,10 +72,31 @@ const RPC_TIMEOUT = 5_000; // 5 seconds for individual RPC calls
  * Called once per window after the wave UI is fully initialized.
  */
 async function initInstanceTracking(): Promise<void> {
-    const refreshLabels = async () => {
+    // listWindows() returns ALL keys in state.browsers, which includes
+    // browser-pane child browsers (`browser-pane-*`) and other internal
+    // labels — not just top-level app windows. The instance panel only
+    // wants the labels it can sensibly focus, so filter here. Top-level
+    // window labels are either "main" or "window-<uuid>".
+    const isInstanceLabel = (l: string): boolean =>
+        l === "main" || /^window-/.test(l);
+
+    // The host emits `window-instances-changed` *before* the new browser
+    // is registered in state.browsers (the emit fires from window.rs:514
+    // while registration happens later via on_after_created in client.rs).
+    // listWindows() called immediately after the event can still return
+    // the OLD set. Retry up to a few times until the count matches the
+    // event payload, then settle.
+    const refreshLabels = async (expectedCount?: number, retriesLeft = 4): Promise<void> => {
         try {
-            const labels = await getApi().listWindows();
-            setOpenWindowLabelsAtom(Array.isArray(labels) ? labels : []);
+            const all = await getApi().listWindows();
+            const labels = (Array.isArray(all) ? all : []).filter(isInstanceLabel);
+            if (expectedCount != null && labels.length !== expectedCount && retriesLeft > 0) {
+                // Race: event arrived before registration completed.
+                // Back off and try again.
+                setTimeout(() => refreshLabels(expectedCount, retriesLeft - 1), 50);
+                return;
+            }
+            setOpenWindowLabelsAtom(labels);
         } catch {
             setOpenWindowLabelsAtom([]);
         }
@@ -91,13 +112,13 @@ async function initInstanceTracking(): Promise<void> {
         setWindowCountAtom(windowCount);
 
         // Keep count + label list in sync whenever any window opens or
-        // closes. The host emits this with the new count as payload (see
-        // agentmux-cef/src/commands/window.rs:514) but doesn't include
-        // the label list, so we re-fetch via listWindows() each time.
+        // closes. Pass the count from the event payload so refreshLabels
+        // can retry through the registration race (see comment above).
         await getApi().listen("window-instances-changed", (event: any) => {
             const payload = event?.payload ?? event;
-            setWindowCountAtom(typeof payload === "number" ? payload : 0);
-            refreshLabels();
+            const count = typeof payload === "number" ? payload : 0;
+            setWindowCountAtom(count);
+            refreshLabels(count);
         });
     } catch (e) {
         console.warn("[initInstanceTracking] failed:", e);
