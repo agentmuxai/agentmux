@@ -231,6 +231,112 @@ function TabBar(props: TabBarProps): JSX.Element {
         onCleanup(cleanup);
     });
 
+    // Phase 4 — listen for the host's tear-off events. Each AgentMux
+    // window subscribes; the host targets the right window via
+    // emit_event_to_window so other windows see nothing.
+    //
+    //  tearoff:hover-changed — cursor entered this window's strip area
+    //    while another window's tab is mid-tear-off. Show the standard
+    //    insertion-point indicator so the user can see where the merge
+    //    will land.
+    //  tearoff:hover-cleared — cursor left this window's strip. Drop
+    //    the indicator.
+    //  tearoff:merge — mouseup over this window. Pull the dragged
+    //    tab into our workspace at the cursor's X position, then close
+    //    the (now empty) dragged window.
+    //  tearoff:standalone — emitted to the source window when the user
+    //    releases over no AgentMux window. Currently informational only;
+    //    Phase 5 will use this to update cancel-back UI state.
+    onMount(() => {
+        let unsubs: Array<() => void> = [];
+        fireAndForget(async () => {
+            const { listenEvent } = await import("@/app/platform/ipc");
+
+            unsubs.push(
+                await listenEvent<{ cursorX: number; cursorY: number }>(
+                    "tearoff:hover-changed",
+                    (payload) => {
+                        const clientX = payload.cursorX - window.screenX;
+                        setInsertionPoint(computeInsertionPoint(clientX));
+                    },
+                ),
+            );
+
+            unsubs.push(
+                await listenEvent("tearoff:hover-cleared", () => {
+                    setInsertionPoint(null);
+                }),
+            );
+
+            unsubs.push(
+                await listenEvent<{
+                    tabId: string;
+                    fromWsId: string;
+                    draggedWindowLabel: string;
+                    cursorX: number;
+                    cursorY: number;
+                }>("tearoff:merge", (payload) => {
+                    setInsertionPoint(null);
+                    fireAndForget(async () => {
+                        try {
+                            const ownWsId = props.workspace?.oid;
+                            if (!ownWsId) {
+                                Logger.warn("dnd", "tearoff:merge — no own workspace, skipping", payload);
+                                return;
+                            }
+                            const clientX = payload.cursorX - window.screenX;
+                            const ip = computeInsertionPoint(clientX);
+                            const tabs = tabIds();
+                            // Convert insertion point to numeric index. The
+                            // dragged tab isn't in `tabs` (different workspace),
+                            // so no removal-shift adjustment needed (unlike
+                            // executeReorder above).
+                            let insertIdx: number;
+                            if (!ip) {
+                                insertIdx = tabs.length;
+                            } else if (ip.beforeTabId === null) {
+                                insertIdx = 0;
+                            } else if (ip.afterTabId === null) {
+                                insertIdx = tabs.length;
+                            } else {
+                                insertIdx = tabs.indexOf(ip.afterTabId);
+                                if (insertIdx < 0) insertIdx = tabs.length;
+                            }
+                            await WorkspaceService.MoveTabToWorkspace(
+                                payload.tabId,
+                                payload.fromWsId,
+                                ownWsId,
+                                insertIdx,
+                            );
+                            await getApi().closeWindowByLabel(payload.draggedWindowLabel);
+                            Logger.info("dnd", "tearoff:merge complete", {
+                                tabId: payload.tabId,
+                                fromWsId: payload.fromWsId,
+                                ownWsId,
+                                insertIdx,
+                            });
+                        } catch (e) {
+                            Logger.error("dnd", "tearoff:merge failed", {
+                                error: String(e),
+                                payload,
+                            });
+                        }
+                    });
+                }),
+            );
+
+            unsubs.push(
+                await listenEvent("tearoff:standalone", (payload) => {
+                    Logger.info("dnd", "tearoff:standalone", payload);
+                }),
+            );
+        });
+        onCleanup(() => {
+            for (const u of unsubs) u();
+            unsubs = [];
+        });
+    });
+
     // Mouse-wheel hover over the strip → horizontal scroll. Ctrl+wheel
     // is reserved for the app-wide zoom (see AppZoomHandler in app.tsx),
     // so this only kicks in for unmodified scrolls. We forward whichever
@@ -355,6 +461,12 @@ async function requestTearOff(
             destWindowLabel,
             cursorX,
             cursorY,
+            // Phase 4 — fields the host hook needs to drive the merge
+            // event on mouseup. Without these the hook is skipped and
+            // the dragged window simply ends as a standalone.
+            tabId,
+            sourceWsId: workspaceId,
+            destWsId: newWsId,
         });
         // Handshake succeeded — Windows now owns the move loop. Clear
         // the cross-window drag payload so the legacy dragend pipeline
