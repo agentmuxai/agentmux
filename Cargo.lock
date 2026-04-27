@@ -10,7 +10,7 @@ checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
 name = "agentmux-cef"
-version = "0.33.429"
+version = "0.33.435"
 dependencies = [
  "agentmux-common",
  "axum 0.8.9",
@@ -37,7 +37,7 @@ dependencies = [
 
 [[package]]
 name = "agentmux-common"
-version = "0.33.429"
+version = "0.33.435"
 dependencies = [
  "tokio",
  "tracing",
@@ -45,7 +45,7 @@ dependencies = [
 
 [[package]]
 name = "agentmux-launcher"
-version = "0.33.429"
+version = "0.33.435"
 dependencies = [
  "windows-sys 0.59.0",
  "winres",
@@ -53,7 +53,7 @@ dependencies = [
 
 [[package]]
 name = "agentmux-srv"
-version = "0.33.429"
+version = "0.33.435"
 dependencies = [
  "agentmux-common",
  "async-stream",
@@ -1326,9 +1326,9 @@ dependencies = [
 
 [[package]]
 name = "idna_adapter"
-version = "1.2.1"
+version = "1.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3acae9609540aa318d1bc588455225fb2085b9ed0c4f6bd0d9d5bcd86f1a0344"
+checksum = "cb68373c0d6620ef8105e855e7745e18b0d00d3bdb07fb532e434244cdb9a714"
 dependencies = [
  "icu_normalizer",
  "icu_properties",

@@ -80,16 +80,12 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
         clipboardWriteText(`${label}: ${value}`);
     };
 
-    // Display label: "main" → "Window 1", "window-<uuid>" → use the
-    // hex prefix as a stable short name. The host doesn't track human-
-    // readable per-window names today; the user sees the index +
-    // short-id which is enough to disambiguate.
-    const displayLabel = (label: string, idx: number): string => {
-        if (label === "main") return "Window 1";
-        const m = /^window-([0-9a-f]{8})/i.exec(label);
-        if (m) return `Window ${idx + 1} · ${m[1]}`;
-        return `Window ${idx + 1}`;
-    };
+    // Display label: just "Window N" using the row index. Main is
+    // pinned at index 0 → "Window 1". Hex suffixes were dropped — a
+    // user-renameable display name lands in a follow-up per
+    // docs/specs/SPEC_WINDOW_RENAME_2026_04_27.md.
+    const displayLabel = (_label: string, idx: number): string =>
+        `Window ${idx + 1}`;
 
     return (
         <div
