@@ -80,22 +80,38 @@ async function initInstanceTracking(): Promise<void> {
     const isInstanceLabel = (l: string): boolean =>
         l === "main" || /^window-/.test(l);
 
+    // Stable ordering: "main" pinned first, others alphabetical. Without
+    // this the panel rows can shuffle between refreshes (state.browsers
+    // is a Rust HashMap with non-deterministic iteration), and two
+    // windows could both display as "Window 1" because InstancePanel
+    // uses the array index for naming and special-cases "main".
+    const sortInstanceLabels = (labels: string[]): string[] =>
+        [...labels].sort((a, b) => {
+            if (a === "main") return -1;
+            if (b === "main") return 1;
+            return a.localeCompare(b);
+        });
+
     // The host emits `window-instances-changed` *before* the new browser
     // is registered in state.browsers (the emit fires from window.rs:514
     // while registration happens later via on_after_created in client.rs).
-    // listWindows() called immediately after the event can still return
-    // the OLD set. Retry up to a few times until the count matches the
-    // event payload, then settle.
-    const refreshLabels = async (expectedCount?: number, retriesLeft = 4): Promise<void> => {
+    // The previous fix compared count against the event payload, but the
+    // event count comes from window_instance_registry (different data
+    // structure than state.browsers) so a count match is not reliable.
+    // Robust fix: poll until the listWindows() result actually CHANGES
+    // from the previously-seen set. Up to 6×50ms (~300ms total) covers
+    // the empirical CEF on_after_created delay with margin.
+    let lastLabelsKey = "";
+    const refreshLabels = async (waitForChange = false, retriesLeft = 6): Promise<void> => {
         try {
             const all = await getApi().listWindows();
-            const labels = (Array.isArray(all) ? all : []).filter(isInstanceLabel);
-            if (expectedCount != null && labels.length !== expectedCount && retriesLeft > 0) {
-                // Race: event arrived before registration completed.
-                // Back off and try again.
-                setTimeout(() => refreshLabels(expectedCount, retriesLeft - 1), 50);
+            const labels = sortInstanceLabels((Array.isArray(all) ? all : []).filter(isInstanceLabel));
+            const key = labels.join("|");
+            if (waitForChange && key === lastLabelsKey && retriesLeft > 0) {
+                setTimeout(() => refreshLabels(true, retriesLeft - 1), 50);
                 return;
             }
+            lastLabelsKey = key;
             setOpenWindowLabelsAtom(labels);
         } catch {
             setOpenWindowLabelsAtom([]);
@@ -112,13 +128,14 @@ async function initInstanceTracking(): Promise<void> {
         setWindowCountAtom(windowCount);
 
         // Keep count + label list in sync whenever any window opens or
-        // closes. Pass the count from the event payload so refreshLabels
-        // can retry through the registration race (see comment above).
+        // closes. Pass `waitForChange=true` so refreshLabels polls until
+        // listWindows() reports a different label set than last time —
+        // robust against the event-vs-registration race documented above.
         await getApi().listen("window-instances-changed", (event: any) => {
             const payload = event?.payload ?? event;
             const count = typeof payload === "number" ? payload : 0;
             setWindowCountAtom(count);
-            refreshLabels(count);
+            refreshLabels(true);
         });
     } catch (e) {
         console.warn("[initInstanceTracking] failed:", e);
