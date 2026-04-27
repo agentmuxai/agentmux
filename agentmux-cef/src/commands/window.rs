@@ -352,10 +352,25 @@ pub fn is_main_window(args: &serde_json::Value) -> serde_json::Value {
     serde_json::json!(label == "main")
 }
 
-/// List all open window labels.
+/// List all open window labels, excluding unpromoted pool windows.
+/// Pool windows are pre-warmed tear-off scratch windows kept hidden
+/// from the user (WS_EX_TOOLWINDOW, no taskbar entry). Including them
+/// in `list_windows` inflates the frontend's InstancePanel row count
+/// with phantom entries the user can't see or focus.
+///
+/// `state.window_pool` is the authoritative "is this label still
+/// unpromoted" check — promote_pool_window pops the label off this
+/// queue, so promoted tear-off windows pass through here normally.
 pub fn list_windows(state: &Arc<AppState>) -> serde_json::Value {
+    let pool_labels: std::collections::HashSet<String> = {
+        let pool = state.window_pool.lock();
+        pool.iter().cloned().collect()
+    };
     let browsers = state.browsers.lock();
-    let labels: Vec<&String> = browsers.keys().collect();
+    let labels: Vec<&String> = browsers
+        .keys()
+        .filter(|l| !pool_labels.contains(*l))
+        .collect();
     serde_json::json!(labels)
 }
 

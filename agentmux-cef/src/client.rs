@@ -352,10 +352,44 @@ impl AgentMuxHandler {
 
         dlog(&format!("browser_list after remove: {}", self.browser_list.len()));
 
-        if self.browser_list.is_empty() && !self.is_pane {
-            dlog("last window — calling quit_message_loop");
-            // Last window — quit the message loop.
-            // The Job Object kills agentmux-srv which kills all shell processes.
+        // App-exit decision: count remaining USER-FACING browsers.
+        // Pool windows (`window-pool-*` labels still in `state.window_pool`)
+        // are pre-warmed scratch windows hidden from the user via
+        // WS_EX_TOOLWINDOW — they have no taskbar entry, can't be
+        // closed by the user, and would otherwise keep the app alive
+        // forever after the last visible window closes. Browser-pane
+        // child HWNDs (`browser-pane-*`) are sub-views of a parent
+        // window, not standalone instances, so they don't count
+        // either.
+        //
+        // Promoted pool windows ARE counted: they're popped off
+        // `state.window_pool` at promote time, so the pool_labels
+        // set excludes them.
+        let user_browser_count = {
+            let pool_labels: std::collections::HashSet<String> = self
+                .state
+                .window_pool
+                .lock()
+                .iter()
+                .cloned()
+                .collect();
+            let browsers = self.state.browsers.lock();
+            browsers
+                .iter()
+                .filter(|(label, _)| {
+                    !pool_labels.contains(*label) && !label.starts_with("browser-pane-")
+                })
+                .count()
+        };
+
+        if user_browser_count == 0 && !self.is_pane {
+            dlog(&format!(
+                "last user-facing window closed (browser_list.len()={}) — calling quit_message_loop",
+                self.browser_list.len()
+            ));
+            // Last user-facing window — quit the message loop.
+            // The Job Object kills agentmux-srv which kills all shell processes,
+            // and CEF tears down any remaining pool windows during shutdown.
             // Only the MAIN client's handler should trigger app exit — pane
             // clients own only their own pane browser and their list emptying
             // just means the user closed the pane, not the whole app.
