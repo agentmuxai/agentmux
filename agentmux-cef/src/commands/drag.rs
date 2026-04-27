@@ -342,3 +342,160 @@ pub fn set_js_drag_active(_args: &serde_json::Value) -> Result<serde_json::Value
     // No-op on Windows/macOS. Linux would need an atomic flag.
     Ok(serde_json::Value::Null)
 }
+
+/// Tear-off Phase 2 — the Win32 SC_MOVE handshake.
+///
+/// Called from `requestTearOff` in tabbar.tsx AFTER the frontend has
+/// already (a) called WorkspaceService.TearOffTab to move the tab into
+/// a new workspace, and (b) called open_window_at_position to spawn
+/// the destination window. This handler waits for the destination
+/// window's HWND to register, then issues the Win32 SC_MOVE so the
+/// new window enters the OS modal move-loop and follows the cursor
+/// at full opacity (no ghost) until mouseup.
+///
+/// Per spec §0 the cold-path version (no warm pool) accepts a
+/// ~150-300 ms first-paint flash for Phase 2 verification only;
+/// Phase 6 replaces that with a pre-warmed pool to hit the 0 ms
+/// target. The ≤ 8 ms handshake budget from §0 applies from this
+/// phase onward and is measured by `tear_off.handshake_ms` —
+/// excluded from the budget is only the registration-wait, which
+/// goes away with the warm pool.
+///
+/// See docs/specs/SPEC_TAB_TEAR_OFF_SIZE_PRESERVATION_2026_04_26.
+pub fn tear_off_sc_move_handshake(
+    state: &Arc<AppState>,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let t_start = std::time::Instant::now();
+
+    let source_label = args
+        .get("sourceWindowLabel")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "missing sourceWindowLabel".to_string())?
+        .to_string();
+    let dest_label = args
+        .get("destWindowLabel")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "missing destWindowLabel".to_string())?
+        .to_string();
+    // Error on missing/malformed coords rather than defaulting to (0,0):
+    // a silent default would put the new window at screen origin with no
+    // diagnostic, looking like a feature bug when it's actually a wire
+    // contract bug.
+    let cursor_x = args
+        .get("cursorX")
+        .and_then(|v| v.as_f64())
+        .ok_or_else(|| "missing or invalid cursorX".to_string())? as i32;
+    let cursor_y = args
+        .get("cursorY")
+        .and_then(|v| v.as_f64())
+        .ok_or_else(|| "missing or invalid cursorY".to_string())? as i32;
+
+    // Win32-only path. The HWND poll, ReleaseCapture, and the SC_MOVE
+    // post all live inside the cfg block — on macOS / Linux the
+    // function returns Ok(null) immediately (Phase 7 adds platform
+    // equivalents). Without this gate the 2s HWND-poll would run on
+    // every platform with no benefit.
+    #[cfg(target_os = "windows")]
+    let handshake_ms: f64 = {
+        // Wait for the destination browser's HWND to be available —
+        // the window-create posts to the CEF UI thread asynchronously
+        // and the browser is registered in state.browsers via
+        // on_after_created. Poll with the mutex released between
+        // checks. 2s deadline is generous; cold-path window creation
+        // typically completes in 150-300 ms. Phase 6 (warm pool) drops
+        // this to <16 ms.
+        let dest_hwnd = wait_for_browser_hwnd(state, &dest_label, std::time::Duration::from_millis(2000))
+            .ok_or_else(|| format!("dest window not registered within 2s: {}", dest_label))?;
+
+        let t_handshake = std::time::Instant::now();
+
+        unsafe {
+            use windows_sys::Win32::UI::Input::KeyboardAndMouse::ReleaseCapture;
+            use windows_sys::Win32::UI::WindowsAndMessaging::{
+                PostMessageW, SetForegroundWindow, HTCAPTION, SC_MOVE, WM_SYSCOMMAND,
+            };
+
+            // Drop whatever capture this thread may hold (defensive —
+            // ReleaseCapture only affects the calling thread's
+            // capture, so this is a no-op for OLE-owned capture on
+            // the source webview's thread; harmless either way).
+            ReleaseCapture();
+
+            // Bring the destination forward. Windows grabs capture
+            // automatically when entering the SC_MOVE modal loop, so
+            // we don't call SetCapture explicitly here — it would
+            // fail anyway since `dest_hwnd` doesn't belong to this
+            // thread (Win32 SetCapture requires same-thread ownership).
+            // If empirically SC_MOVE turns out to need the capture
+            // pre-set, we'll post a UI-thread task to do it; for now
+            // the simpler path matches Chrome's observed behaviour.
+            SetForegroundWindow(dest_hwnd);
+
+            let lparam = ((cursor_y as i32 as u32) << 16) | (cursor_x as i32 as u32 & 0xFFFF);
+            PostMessageW(
+                dest_hwnd,
+                WM_SYSCOMMAND,
+                (SC_MOVE as usize) | (HTCAPTION as usize),
+                lparam as isize,
+            );
+        }
+
+        t_handshake.elapsed().as_micros() as f64 / 1000.0
+    };
+
+    #[cfg(not(target_os = "windows"))]
+    let handshake_ms: f64 = {
+        // Phase 7 adds macOS (NSWindow performWindowDragWithEvent) +
+        // Linux (_NET_WM_MOVERESIZE / xdg_toplevel.move) equivalents.
+        // For now the non-Windows path is a no-op so the IPC contract
+        // exists and the rest of the pipeline can be cross-platform.
+        let _ = (state, &dest_label);
+        0.0
+    };
+
+    let total_ms = t_start.elapsed().as_micros() as f64 / 1000.0;
+
+    tracing::info!(
+        target: "dnd:tearoff",
+        source = %source_label,
+        dest = %dest_label,
+        cursor_x = %cursor_x,
+        cursor_y = %cursor_y,
+        handshake_ms = %handshake_ms,
+        total_ms = %total_ms,
+        "[dnd:tearoff] SC_MOVE handshake complete"
+    );
+
+    Ok(serde_json::json!({
+        "handshakeMs": handshake_ms,
+        "totalMs": total_ms,
+    }))
+}
+
+/// Poll state.browsers for `label` until its host's HWND is non-null
+/// or the deadline elapses. Returns the HWND as a raw pointer.
+/// Releases the browsers mutex between polls so on_after_created can
+/// register on the UI thread.
+fn wait_for_browser_hwnd(
+    state: &Arc<AppState>,
+    label: &str,
+    timeout: std::time::Duration,
+) -> Option<*mut std::ffi::c_void> {
+    let deadline = std::time::Instant::now() + timeout;
+    while std::time::Instant::now() < deadline {
+        {
+            let browsers = state.browsers.lock();
+            if let Some(browser) = browsers.get(label) {
+                if let Some(host) = browser.host() {
+                    let h = host.window_handle();
+                    if !h.0.is_null() {
+                        return Some(h.0 as *mut std::ffi::c_void);
+                    }
+                }
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    None
+}
