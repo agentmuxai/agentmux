@@ -378,8 +378,18 @@ pub fn tear_off_sc_move_handshake(
         .and_then(|v| v.as_str())
         .ok_or_else(|| "missing destWindowLabel".to_string())?
         .to_string();
-    let cursor_x = args.get("cursorX").and_then(|v| v.as_f64()).unwrap_or(0.0) as i32;
-    let cursor_y = args.get("cursorY").and_then(|v| v.as_f64()).unwrap_or(0.0) as i32;
+    // Error on missing/malformed coords rather than defaulting to (0,0):
+    // a silent default would put the new window at screen origin with no
+    // diagnostic, looking like a feature bug when it's actually a wire
+    // contract bug.
+    let cursor_x = args
+        .get("cursorX")
+        .and_then(|v| v.as_f64())
+        .ok_or_else(|| "missing or invalid cursorX".to_string())? as i32;
+    let cursor_y = args
+        .get("cursorY")
+        .and_then(|v| v.as_f64())
+        .ok_or_else(|| "missing or invalid cursorY".to_string())? as i32;
 
     // Win32-only path. The HWND poll, ReleaseCapture, and the SC_MOVE
     // post all live inside the cfg block — on macOS / Linux the
