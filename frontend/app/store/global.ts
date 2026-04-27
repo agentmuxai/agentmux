@@ -835,6 +835,13 @@ export function createTab() {
                 WOS.makeORef("tab", tabId),
                 { "tab:color": DEFAULT_NEW_TAB_COLOR } as MetaType,
             );
+            // Default-layout preset (agent + sysinfo + swarm). Lives in
+            // a single central module so any future tab-creation path
+            // (duplicate, tear-off destination, startup-tab backfill)
+            // can reuse the same panes layout. See
+            // frontend/app/tab/tab-presets.ts.
+            const { applyTabPreset, DEFAULT_TAB_PRESET } = await import("@/app/tab/tab-presets");
+            await applyTabPreset(tabId, DEFAULT_TAB_PRESET);
         } catch (e) {
             console.error("[createTab] failed:", e);
         }
