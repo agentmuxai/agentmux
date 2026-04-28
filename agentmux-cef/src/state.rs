@@ -93,11 +93,13 @@ pub struct WindowMeta {
 /// taskbar-hide branch + as the payload for `ReportWindowOpened`.
 ///
 /// Replaces the previous `pending_window_labels: VecDeque<String>`
-/// queue + parallel `window_meta` writes that used to act as the
-/// kind/parent channel. Combining them eliminates the race
-/// between popping the label (synchronous handoff) and looking up
-/// the kind from `window_meta` (post-step-d, host wouldn't have
-/// written it locally).
+/// queue + parallel caller-side `window_meta` writes that used to
+/// act as the kind/parent channel. Collapsing them into a single
+/// tuple eliminates the parallel-write race; on_after_created
+/// performs the single canonical `window_meta.insert` from the
+/// popped entry (kept as a synchronous host-side cache for
+/// open_subwindow's parent liveness check + cascade-close
+/// enumeration in `task dev` mode where launcher IPC is absent).
 #[derive(Clone, Debug)]
 pub struct PendingWindowCreation {
     pub label: String,
@@ -211,9 +213,11 @@ pub struct AppState {
     /// before `post_create_window`; popped by
     /// `client.rs::on_after_created`. Each entry carries the label
     /// AND the kind/parent so on_after_created can apply the
-    /// Subwindow taskbar-hide and emit `ReportWindowOpened`
-    /// without consulting `window_meta` (which is no longer
-    /// host-mutated post-step-d).
+    /// Subwindow taskbar-hide, emit `ReportWindowOpened`, and
+    /// populate the synchronous `window_meta` cache from a single
+    /// canonical site — replacing the pre-step-d parallel-channel
+    /// pattern (separate `window_meta.insert` from each caller +
+    /// label-only `pending_window_labels` queue).
     pub pending_window_creations: Mutex<VecDeque<PendingWindowCreation>>,
 
     /// Tear-off Phase 6 — pre-warmed pool of hidden CEF windows ready for
