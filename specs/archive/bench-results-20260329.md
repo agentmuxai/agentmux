@@ -1,5 +1,6 @@
 # Benchmark Results: Tauri vs CEF
 
+**Status:** ARCHIVED (historical record)
 **Date:** 2026-03-29 20:27 PDT
 **Machine:** Area54 — Windows 10 Pro x64 (22H2, 19045)
 **Tauri build:** v0.32.106 portable (WebView2 / Edge Chromium)

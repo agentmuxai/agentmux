@@ -1,7 +1,7 @@
 # Pane Context Menu — Spec (v2)
 
 **Version:** 2.0
-**Status:** Draft (v1 implemented splits + Open in VSCode on header only)
+**Status:** SHIPPED
 **Updated:** 2026-03-01
 **Author:** AgentA
 

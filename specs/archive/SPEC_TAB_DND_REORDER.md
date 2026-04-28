@@ -1,6 +1,7 @@
 # Spec: Tab Drag-and-Drop Reordering
 
 **Date:** 2026-03-20
+**Status:** SHIPPED
 **Goal:** Drag tabs horizontally along the tab bar to reorder them within the same window.
 
 ---
