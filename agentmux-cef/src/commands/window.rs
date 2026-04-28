@@ -494,11 +494,12 @@ pub fn register_backend_window(state: &Arc<AppState>, args: &serde_json::Value) 
     tracing::info!(label = %label, window_id = %window_id, "[window] register_backend_window received");
     crate::client::dlog(&format!("register_backend_window: label={} window_id={}", label, window_id));
     if !window_id.is_empty() {
-        state.window_id_map.lock().insert(label.to_string(), window_id.to_string());
-        let keys: Vec<String> = state.window_id_map.lock().keys().cloned().collect();
-        crate::client::dlog(&format!("window_id_map now has keys: {:?}", keys));
+        // Phase B.5 (window_id_map step d) — host no longer mutates
+        // `window_id_map` locally. The launcher's
+        // `state.backend_window_ids` (B.5 step a) is sole authority;
+        // we just send the report and the shadow update populates
+        // the host-side projection.
         tracing::info!(label = %label, window_id = %window_id, "[window] registered backend window ID");
-        // Phase B.5 (window_id_map step b) — mirror to launcher.
         crate::launcher_ipc::report_backend_window_id_registered(
             label.to_string(),
             window_id.to_string(),
