@@ -352,6 +352,56 @@ pub fn is_main_window(args: &serde_json::Value) -> serde_json::Value {
     serde_json::json!(label == "main")
 }
 
+/// Return the OS double-click interval in milliseconds.
+/// On Windows: `GetDoubleClickTime()` — typically 500ms, user-configurable
+/// via Mouse settings. On non-Windows: hardcoded 500ms (the Win32 default,
+/// also a common cross-platform default; Phase 7 can refine per platform).
+///
+/// Used by the InstancePanel to defer single-click focus past the user's
+/// dblclick threshold so dblclick-to-rename works for everyone, not just
+/// users with the default-or-faster setting. Without this query, a fixed
+/// constant would make rename unreliable for slow double-clickers
+/// (codex PR #569 round-2 P2).
+pub fn get_double_click_time() -> serde_json::Value {
+    #[cfg(target_os = "windows")]
+    {
+        let ms = unsafe { windows_sys::Win32::UI::Input::KeyboardAndMouse::GetDoubleClickTime() };
+        serde_json::json!(ms)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        serde_json::json!(500u32)
+    }
+}
+
+/// List all open window instances with their backend window IDs.
+/// Same filtering as `list_windows` (excludes unpromoted pool windows
+/// and browser-pane child HWNDs), but returns `[{label, windowId}]`
+/// pairs so the frontend can resolve per-window backend objects
+/// (Window record → meta["window:displayname"], etc.) without an
+/// extra round-trip per row.
+///
+/// `windowId` is `None` for windows that haven't yet completed the
+/// `register_backend_window` round-trip — typically a freshly-spawned
+/// window before its frontend has finished init. Callers should
+/// fall back to label/index-based naming in that case.
+pub fn list_window_instances(state: &Arc<AppState>) -> serde_json::Value {
+    let pool_labels = state.unpromoted_pool_labels.lock().clone();
+    let window_id_map = state.window_id_map.lock();
+    let browsers = state.browsers.lock();
+    let entries: Vec<serde_json::Value> = browsers
+        .keys()
+        .filter(|l| !pool_labels.contains(*l) && !l.starts_with("browser-pane-"))
+        .map(|l| {
+            serde_json::json!({
+                "label": l,
+                "windowId": window_id_map.get(l),
+            })
+        })
+        .collect();
+    serde_json::json!(entries)
+}
+
 /// List all open window labels, excluding unpromoted pool windows.
 /// Pool windows are pre-warmed tear-off scratch windows kept hidden
 /// from the user (WS_EX_TOOLWINDOW, no taskbar entry). Including them
@@ -431,6 +481,19 @@ pub fn register_backend_window(state: &Arc<AppState>, args: &serde_json::Value) 
         let keys: Vec<String> = state.window_id_map.lock().keys().cloned().collect();
         crate::client::dlog(&format!("window_id_map now has keys: {:?}", keys));
         tracing::info!(label = %label, window_id = %window_id, "[window] registered backend window ID");
+        // Notify listeners that the label→windowId mapping changed.
+        // The InstancePanel needs `windowId` to look up the backend
+        // Window record (display name in meta, workspace fallback).
+        // Without this emit, sibling windows would never re-fetch
+        // listWindowInstances after a freshly-opened window's
+        // windowId becomes available, leaving its row's name
+        // unresolvable and rename disabled. (codex PR #569 P2)
+        let count = state.window_instance_registry.lock().count();
+        crate::events::emit_event_all_windows(
+            state,
+            "window-instances-changed",
+            &serde_json::json!(count),
+        );
     } else {
         tracing::warn!(label = %label, "[window] register_backend_window called with empty window_id — skipped");
     }

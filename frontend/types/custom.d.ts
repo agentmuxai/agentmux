@@ -122,6 +122,19 @@ declare global {
         isMainWindow: () => Promise<boolean>;
         registerBackendWindow: (label: string, windowId: string) => void;
         listWindows: () => Promise<string[]>;
+        /** Like listWindows but returns `[{label, windowId}]` pairs.
+         *  `windowId` is null for windows that haven't yet completed
+         *  the registerBackendWindow round-trip. Used by InstancePanel
+         *  to look up per-window backend Window records (display name
+         *  in meta, workspace fallback, etc.) without an extra RPC. */
+        listWindowInstances: () => Promise<Array<{ label: string; windowId: string | null }>>;
+        /** OS-reported double-click interval in milliseconds. Used by
+         *  InstancePanel to defer single-click focus past the user's
+         *  configured threshold so double-click-to-rename works for
+         *  slow double-clickers (Win32 GetDoubleClickTime, default
+         *  500ms, user-configurable). Falls back to 500ms on non-
+         *  Windows. */
+        getDoubleClickTime: () => Promise<number>;
         focusWindow: (label: string) => Promise<void>;
         getInstanceNumber: () => Promise<number>;
         getWindowCount: () => Promise<number>;

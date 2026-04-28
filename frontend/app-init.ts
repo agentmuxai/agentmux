@@ -29,6 +29,7 @@ import {
     setWindowInstanceNumAtom,
     setWindowCountAtom,
     setOpenWindowLabelsAtom,
+    setOpenWindowEntriesAtom,
     setReinitVersion,
     setUpdaterStatusAtom,
     setUpdaterVersionAtom,
@@ -80,41 +81,60 @@ async function initInstanceTracking(): Promise<void> {
     const isInstanceLabel = (l: string): boolean =>
         l === "main" || /^window-/.test(l);
 
-    // Stable ordering: "main" pinned first, others alphabetical. Without
-    // this the panel rows can shuffle between refreshes (state.browsers
-    // is a Rust HashMap with non-deterministic iteration), and two
-    // windows could both display as "Window 1" because InstancePanel
-    // uses the array index for naming and special-cases "main".
-    const sortInstanceLabels = (labels: string[]): string[] =>
-        [...labels].sort((a, b) => {
-            if (a === "main") return -1;
-            if (b === "main") return 1;
-            return a.localeCompare(b);
-        });
-
     // The host emits `window-instances-changed` *before* the new browser
     // is registered in state.browsers (the emit fires from window.rs:514
     // while registration happens later via on_after_created in client.rs).
     // The previous fix compared count against the event payload, but the
     // event count comes from window_instance_registry (different data
     // structure than state.browsers) so a count match is not reliable.
-    // Robust fix: poll until the listWindows() result actually CHANGES
-    // from the previously-seen set. Up to 6×50ms (~300ms total) covers
-    // the empirical CEF on_after_created delay with margin.
-    let lastLabelsKey = "";
+    // Robust fix: poll until the listWindowInstances() result actually
+    // CHANGES from the previously-seen set. The change key includes
+    // windowId so a `null → real` transition (when registerBackendWindow
+    // arrives later) also unblocks the wait, otherwise a freshly-opened
+    // window would appear with windowId=null and never get re-fetched
+    // until another open/close event happens — leaving the InstancePanel
+    // unable to resolve its name or rename it. (codex PR #569 P2)
+    // Up to 6×50ms (~300ms total) covers the empirical CEF
+    // on_after_created delay with margin.
+    let lastEntriesKey = "";
     const refreshLabels = async (waitForChange = false, retriesLeft = 6): Promise<void> => {
         try {
-            const all = await getApi().listWindows();
-            const labels = sortInstanceLabels((Array.isArray(all) ? all : []).filter(isInstanceLabel));
-            const key = labels.join("|");
-            if (waitForChange && key === lastLabelsKey && retriesLeft > 0) {
+            // listWindowInstances gives us [{label, windowId}] in one
+            // RPC; we sort/filter on label and keep windowId aligned.
+            // Falls back to listWindows if the new RPC isn't supported
+            // (older host build) so the panel still works partially.
+            let entries: Array<{ label: string; windowId: string | null }>;
+            try {
+                const all = await getApi().listWindowInstances();
+                entries = Array.isArray(all) ? all : [];
+            } catch {
+                const all = await getApi().listWindows();
+                entries = (Array.isArray(all) ? all : []).map((label) => ({ label, windowId: null }));
+            }
+            const filtered = entries.filter((e) => isInstanceLabel(e.label));
+            // Stable ordering: "main" pinned first, others alphabetical
+            // by label. Without this, panel rows can shuffle between
+            // refreshes (state.browsers is a Rust HashMap with
+            // non-deterministic iteration), and two windows could both
+            // display as "Window 1" because InstancePanel uses the
+            // array index for naming and special-cases "main".
+            filtered.sort((a, b) => {
+                if (a.label === "main") return -1;
+                if (b.label === "main") return 1;
+                return a.label.localeCompare(b.label);
+            });
+            const labels = filtered.map((e) => e.label);
+            const key = filtered.map((e) => `${e.label}@${e.windowId ?? ""}`).join("|");
+            if (waitForChange && key === lastEntriesKey && retriesLeft > 0) {
                 setTimeout(() => refreshLabels(true, retriesLeft - 1), 50);
                 return;
             }
-            lastLabelsKey = key;
+            lastEntriesKey = key;
             setOpenWindowLabelsAtom(labels);
+            setOpenWindowEntriesAtom(filtered);
         } catch {
             setOpenWindowLabelsAtom([]);
+            setOpenWindowEntriesAtom([]);
         }
     };
 
