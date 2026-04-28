@@ -454,12 +454,9 @@ pub fn focus_window(state: &Arc<AppState>, args: &serde_json::Value) -> Result<s
 
 /// Get the instance number for the current window.
 ///
-/// Phase B.5c — switched from direct `window_instance_registry.lock()`
-/// access to `state.instance_num()`, which prefers the
-/// launcher-authoritative `shadow_instance_registry` and falls back
-/// to host's local registry only for the brief race window where
-/// host has registered locally but the launcher's
-/// `WindowInstanceAssigned` event hasn't returned yet.
+/// Reads from `state.instance_num()` which queries the launcher-fed
+/// `shadow_instance_registry` (B.5e — sole source of truth post-migration).
+/// Brief race window for early lookups: see `app-init.ts` retry logic.
 pub fn get_instance_number(state: &Arc<AppState>, args: &serde_json::Value) -> serde_json::Value {
     let label = args
         .get("label")
