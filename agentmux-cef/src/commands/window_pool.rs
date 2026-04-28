@@ -87,6 +87,11 @@ pub fn spawn_pool_window(state: &Arc<AppState>) {
         .lock()
         .insert(label.clone());
 
+    // Phase B.4 follow-up — mirror the pool inventory in the launcher.
+    // Symmetric with the destroy/promote hooks below; a missing
+    // launcher pipe makes this a no-op.
+    crate::launcher_ipc::report_pool_window_added(label.clone());
+
     let ipc_port = *state.ipc_port.lock();
     let ipc_token = &state.ipc_token;
     let base_url = super::window::resolve_frontend_base_url(ipc_port);
@@ -251,6 +256,11 @@ pub fn on_pool_window_destroyed(state: &Arc<AppState>, label: &str) {
     // pool. Independent of whether the window made it into the
     // queue (renderer crash before ready signal) or not.
     state.unpromoted_pool_labels.lock().remove(label);
+
+    // Phase B.4 follow-up — pool inventory shrunk. Idempotent in
+    // the launcher reducer so calling this for a label the launcher
+    // never saw (post-promote close path) is safe.
+    crate::launcher_ipc::report_pool_window_removed(label.to_string());
     // Single lock: drop the dead label + check whether we need to
     // refill, all in one critical section.
     let needs_refill = {
@@ -357,6 +367,18 @@ pub fn promote_pool_window(
     // The label is no longer "unpromoted" — drop it from the intent
     // set so list_windows starts treating this as a real instance.
     state.unpromoted_pool_labels.lock().remove(&label);
+
+    // Phase B.4 follow-up — atomic pool→windows transition in the
+    // launcher mirror. Removing from pool first, then opening as
+    // FullInstance preserves the invariant that a label is in
+    // exactly one of `state.pool` / `state.windows` at any moment
+    // (modulo the one-event window between the two reports).
+    crate::launcher_ipc::report_pool_window_removed(label.clone());
+    crate::launcher_ipc::report_window_opened(
+        label.clone(),
+        agentmux_common::ipc::WindowKind::FullInstance,
+        None,
+    );
 
     tracing::info!(
         target: "dnd:tearoff:pool",

@@ -329,10 +329,15 @@ impl AgentMuxHandler {
             if lbl.starts_with("window-pool-") {
                 crate::commands::window_pool::on_pool_window_destroyed(&self.state, lbl);
             }
-            // Phase B.4 — mirror the close to the launcher. Symmetric
-            // with the open-report in on_after_created: only top-level
-            // user-visible windows. No-op if launcher IPC absent.
-            if !lbl.starts_with("browser-pane-") && !lbl.starts_with("window-pool-") {
+            // Phase B.4 — mirror the close to the launcher. Skip
+            // browser-pane child HWNDs only. Pool labels are NOT
+            // skipped here: a promoted pool window keeps its
+            // `window-pool-*` label and needs its close reflected;
+            // pre-promote destroys harmlessly hit the launcher's
+            // idempotent unknown-label path. Pool inventory updates
+            // travel via `ReportPoolWindowRemoved` from
+            // `on_pool_window_destroyed` and `promote_pool_window`.
+            if !lbl.starts_with("browser-pane-") {
                 crate::launcher_ipc::report_window_closed(lbl.clone());
             }
         }
