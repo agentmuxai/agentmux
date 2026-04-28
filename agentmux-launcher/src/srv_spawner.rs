@@ -154,14 +154,25 @@ pub async fn spawn_srv(
     // Skip job assignment if launcher's job creation failed (J0 is
     // null) — that's the degraded mode logged by main.rs. Srv still
     // runs but won't be reaped on launcher death.
+    //
+    // Both error paths must explicitly start_kill the suspended
+    // child before returning. We set kill_on_drop(false) (J0 normally
+    // handles cleanup), so dropping the Child wouldn't terminate the
+    // suspended srv — it would orphan as a permanent zombie holding
+    // resources and the data dir lockfile, blocking subsequent
+    // launches. (codex P1 @ srv_spawner.rs:161, PR #571 round-3.)
     #[cfg(target_os = "windows")]
     {
         if !job_handle.is_null() {
-            assign_pid_to_job(pid, job_handle)
-                .map_err(SrvSpawnError::JobAssignFailed)?;
+            if let Err(e) = assign_pid_to_job(pid, job_handle) {
+                let _ = child.start_kill();
+                return Err(SrvSpawnError::JobAssignFailed(e));
+            }
         }
-        crate::resume_main_thread(pid)
-            .map_err(SrvSpawnError::ResumeFailed)?;
+        if let Err(e) = crate::resume_main_thread(pid) {
+            let _ = child.start_kill();
+            return Err(SrvSpawnError::ResumeFailed(e));
+        }
     }
 
     let started_at = chrono::Utc::now().to_rfc3339();
