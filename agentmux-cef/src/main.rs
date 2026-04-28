@@ -29,6 +29,7 @@ mod commands;
 mod dev_authfile;
 mod events;
 mod ipc;
+mod launcher_ipc;
 mod memory_heartbeat;
 mod pane;
 mod sidecar;
@@ -222,6 +223,14 @@ fn main() {
     *app_state.ipc_port.lock() = ipc_port;
 
     tracing::info!("IPC server started on port {}", ipc_port);
+
+    // Phase B.2: connect to launcher's named-pipe IPC (if launcher
+    // is in the loop) so the launcher can route Commands and Events
+    // through us. The handle is held in main scope for the host's
+    // lifetime — dropping it closes the pipe (logged by launcher).
+    // Failure to connect is non-fatal in B.2 (host can still run);
+    // B.5+ will tighten when the host depends on IPC for state.
+    let _launcher_ipc = runtime.block_on(launcher_ipc::connect_to_launcher());
 
     // Phase B.1: if launcher already spawned srv (the normal portable
     // / installed path post-PR-#570 + B.1), populate state from the

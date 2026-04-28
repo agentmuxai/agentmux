@@ -1,9 +1,15 @@
 [package]
 name = "agentmux-common"
-version = "0.33.448"
+version = "0.33.450"
 edition = "2021"
 description = "Shared utilities for AgentMux crates"
 
 [dependencies]
 tokio = { version = "1", features = ["process"] }
 tracing = "0.1"
+# Phase B.2: shared IPC protocol types (Command/Event) between
+# launcher (server) and host (client). One source of truth so the
+# wire format can't drift between the two binaries on a version-
+# skew release. JSON over newline-delimited frames.
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

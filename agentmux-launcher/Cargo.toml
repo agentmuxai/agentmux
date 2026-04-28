@@ -1,6 +1,6 @@
 [package]
 name = "agentmux-launcher"
-version = "0.33.448"
+version = "0.33.450"
 description = "AgentMux Launcher — tiny exe that sets DLL path then spawns the CEF host"
 authors = ["AgentMux Corp"]
 edition = "2021"
@@ -22,6 +22,8 @@ tokio = { version = "1", features = [
     "io-util",
     "time",
     "sync",
+    # Phase B.2: tokio::net::windows::named_pipe lives in this feature.
+    "net",
 ] }
 # Platform-default data_dir / config_dir resolution. Host already
 # uses this; launcher must compute the SAME paths so both processes
@@ -34,6 +36,12 @@ chrono = { version = "0.4", default-features = false, features = ["clock"] }
 # both srv (env var) and host (env var). Same generation method the
 # host uses today (uuid::Uuid::new_v4) so the format is identical.
 uuid = { version = "1", features = ["v4"] }
+# Phase B.2: typed Command / Event protocol over named pipes. The
+# wire types live in agentmux-common::ipc so launcher (server) and
+# host (client) share one definition; serde_json is the format.
+agentmux-common = { path = "../agentmux-common" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-sys = { version = "0.59", features = [
