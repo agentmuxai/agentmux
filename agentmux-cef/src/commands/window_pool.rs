@@ -476,17 +476,17 @@ pub fn promote_pool_window(
     // producing persistent windows-drift against the launcher mirror
     // (which correctly never received a `WindowOpened` for it).
     //
-    // Fix: trigger graceful close on the orphan. CEF's `on_before_close`
-    // will fire and run the standard cleanup path (drops from
-    // `state.browsers` + `window_meta`, fires `report_window_closed`
-    // — silent no-op in the launcher reducer for an unknown label).
-    // If host or browser handles are already gone, fall through to a
-    // direct `state.browsers` removal so our tracking doesn't lie.
+    // `cleanup_failed_promote_orphan` is responsible for ALL recovery
+    // including pool refill — see its contract. We deliberately do NOT
+    // call `spawn_pool_window` here since the cleanup helper either
+    // (a) issues `close_browser` → `on_before_close` → `on_pool_window_destroyed`
+    // already triggers refill, or (b) does direct cleanup + refill
+    // itself. Calling refill from both paths produces double refill.
+    // (codex P1 PR #582 round-1.)
     let raw_hwnd = match raw_hwnd {
         Some(h) => h,
         None => {
             cleanup_failed_promote_orphan(state, &label);
-            spawn_pool_window(state);
             return None;
         }
     };
@@ -605,14 +605,27 @@ pub fn promote_pool_window(
 /// drift. (Caught by B.4b drift detection during B.5c smoke test on
 /// v0.33.461.)
 ///
-/// Strategy: prefer graceful close via CEF's `close_browser` so the
-/// standard `on_before_close` cleanup path runs (drops from
-/// `state.browsers` + `window_meta`, sends `report_window_closed`
-/// which the launcher silently no-ops on the unknown label).
-/// Fall back to direct `state.browsers` removal if browser/host
-/// handles are already gone — the launcher mirror is unaffected
-/// either way; this is purely about keeping host's tracking
-/// consistent.
+/// Contract: this fn is responsible for ALL recovery including pool
+/// refill. The caller MUST NOT call `spawn_pool_window` itself —
+/// double refill would overshoot `POOL_TARGET_SIZE` and waste
+/// renderer capacity. (codex P1 PR #582 round-1.)
+///
+/// Two paths:
+///
+/// * **Graceful path** (browser+host alive in CEF): issue
+///   `close_browser(1)` and let CEF's `on_before_close` fire. That
+///   path runs the standard cleanup chain — drops from
+///   `state.browsers` + `window_meta`, calls
+///   `on_pool_window_destroyed` (which itself triggers refill via
+///   `spawn_pool_window` when pool size is below target), and
+///   triggers `compute_and_report_host_counts` from `client.rs`.
+/// * **Direct path** (browser or host already gone): `on_before_close`
+///   won't fire so we do its job inline — drop from browsers +
+///   window_meta, send `report_window_closed` (silent no-op in
+///   launcher reducer for an unknown label), spawn the refill
+///   ourselves, and emit a drift count snapshot so the orphan's
+///   removal is observable on the same tick. (reagent P2 PR #582
+///   round-1 — original direct path skipped the snapshot.)
 #[cfg(target_os = "windows")]
 fn cleanup_failed_promote_orphan(state: &Arc<AppState>, label: &str) {
     use cef::{ImplBrowser, ImplBrowserHost};
@@ -628,22 +641,25 @@ fn cleanup_failed_promote_orphan(state: &Arc<AppState>, label: &str) {
             tracing::info!(
                 target: "dnd:tearoff:pool",
                 label = %label,
-                "[pool] orphan close_browser issued — on_before_close will run cleanup"
+                "[pool] orphan close_browser issued — on_before_close will run cleanup + refill"
             );
             return;
         }
     }
-    // Browser or host already gone — clean up directly. on_before_close
-    // won't fire for this label, so do its job here: drop from browsers,
-    // window_meta, and notify the launcher (no-op if label was never
-    // reported as opened, which it wasn't on this failure path).
+    // Browser or host already gone — do `on_before_close`'s job
+    // inline since CEF won't fire it for this label.
     state.browsers.lock().remove(label);
     state.window_meta.lock().remove(label);
     crate::launcher_ipc::report_window_closed(label.to_string());
+    // Refill (graceful path gets this via on_pool_window_destroyed).
+    spawn_pool_window(state);
+    // Emit a count snapshot now so the orphan's removal is
+    // observable in the launcher's drift stream on the same tick.
+    crate::launcher_ipc::compute_and_report_host_counts(state);
     tracing::warn!(
         target: "dnd:tearoff:pool",
         label = %label,
-        "[pool] orphan browser already gone — cleaned host state directly"
+        "[pool] orphan browser already gone — cleaned host state directly + refilled"
     );
 }
 
