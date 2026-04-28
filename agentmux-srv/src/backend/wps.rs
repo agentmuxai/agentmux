@@ -38,10 +38,6 @@ pub const EVENT_USER_INPUT: &str = "userinput";
 pub const EVENT_AGENT_MESSAGE_ACCEPTED: &str = "agent-message-accepted";
 #[allow(dead_code)]
 pub const EVENT_ROUTE_GONE: &str = "route:gone";
-#[allow(dead_code)]
-pub const EVENT_WORKSPACE_UPDATE: &str = "workspace:update";
-#[allow(dead_code)]
-pub const EVENT_WAVE_AI_RATE_LIMIT: &str = "waveai:ratelimit";
 pub const EVENT_BLOCK_STATS: &str = "blockstats";
 pub const EVENT_AGENT_HEALTH: &str = "agenthealth";
 

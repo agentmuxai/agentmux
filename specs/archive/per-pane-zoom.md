@@ -1,7 +1,7 @@
 # Per-Pane Terminal Zoom Specification - AgentMux
 
 **Version:** 1.0
-**Status:** Draft
+**Status:** SHIPPED
 **Target Release:** 0.28.0
 **Created:** 2026-02-15
 **Author:** AgentX

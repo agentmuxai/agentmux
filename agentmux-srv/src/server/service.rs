@@ -382,9 +382,7 @@ fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType {
         // ---- WorkspaceService ----
         ("workspace", "CreateWorkspace") => {
             let name: String = service::get_arg(args, 0).unwrap_or_default();
-            let icon: String = service::get_arg(args, 1).unwrap_or_default();
-            let color: String = service::get_arg(args, 2).unwrap_or_default();
-            match wcore::create_workspace(store, &name, &icon, &color) {
+            match wcore::create_workspace(store, &name) {
                 Ok(ws) => WebReturnType::success(serde_json::to_value(&ws).unwrap_or_default()),
                 Err(e) => WebReturnType::error(e.to_string()),
             }
@@ -520,30 +518,16 @@ fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType {
                 Err(e) => WebReturnType::error(e.to_string()),
             }
         }
-        ("workspace", "GetColors") => {
-            WebReturnType::success(json!(wcore::WORKSPACE_COLORS))
-        }
-        ("workspace", "GetIcons") => {
-            WebReturnType::success(json!(wcore::WORKSPACE_ICONS))
-        }
         ("workspace", "UpdateWorkspace") => {
             let ws_id: String = match service::get_arg(args, 0) {
                 Ok(v) => v,
                 Err(e) => return WebReturnType::error(e),
             };
             let name: Option<String> = service::get_optional_arg(args, 1).unwrap_or(None);
-            let icon: Option<String> = service::get_optional_arg(args, 2).unwrap_or(None);
-            let color: Option<String> = service::get_optional_arg(args, 3).unwrap_or(None);
             match store.must_get::<Workspace>(&ws_id) {
                 Ok(mut ws) => {
                     if let Some(n) = name {
                         ws.name = n;
-                    }
-                    if let Some(i) = icon {
-                        ws.icon = i;
-                    }
-                    if let Some(c) = color {
-                        ws.color = c;
                     }
                     match store.update(&mut ws) {
                         Ok(_) => WebReturnType::success_empty(),

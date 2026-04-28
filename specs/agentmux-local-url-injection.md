@@ -63,7 +63,7 @@ When `AGENTMUX_LOCAL_URL` is set, the client routes all `inject_terminal` calls 
 
 `main.rs` sets `AGENTMUX_LOCAL_URL` as a process-level env var immediately after binding the web listener. Child processes (PTY shells) inherit the parent process's environment, so every pane automatically gets the correct URL. `shell.rs` re-injects it explicitly via `c.env(...)` to ensure it survives any env filtering in portable-pty.
 
-**`main.rs`** — after binding `web_listener`, before `WAVESRV-ESTART`:
+**`main.rs`** — after binding `web_listener`, before `AGENTMUXSRV-ESTART`:
 
 ```rust
 let web_addr = web_listener.local_addr().unwrap();
