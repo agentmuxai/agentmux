@@ -511,9 +511,9 @@ async fn main() {
         process_tracker,
     };
 
-    // 6. Emit WAVESRV-ESTART on stderr (exact format from cmd/server/main-server.go:617)
+    // 6. Emit AGENTMUXSRV-ESTART on stderr (exact format from cmd/server/main-server.go:617)
     eprintln!(
-        "WAVESRV-ESTART ws:{} web:{} version:{} buildtime:{} instance:{}",
+        "AGENTMUXSRV-ESTART ws:{} web:{} version:{} buildtime:{} instance:{}",
         ws_addr, web_addr, version, build_time, config.instance_id
     );
 

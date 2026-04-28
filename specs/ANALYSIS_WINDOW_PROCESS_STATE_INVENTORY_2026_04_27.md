@@ -77,7 +77,7 @@ spec, not here.
 │    child.kill() sidecar (fire-and-forget) → shutdown() CEF →      │
 │    delete port file → exit                                         │
 └────────────────┬────────────────────────────────────────────────────┘
-                 │ spawn (blocking on WAVESRV-ESTART)
+                 │ spawn (blocking on AGENTMUXSRV-ESTART)
                  │
 ┌────────────────▼────────────────────────────────────────────────────┐
 │ SIDECAR (agentmux-srv) — BACKEND SERVICE                           │
@@ -140,7 +140,7 @@ spec, not here.
 1. Launcher starts; spawns host, waits.
 2. Host initializes CEF, creates `AppState`.
 3. Host checks port file → none found (first run).
-4. Host spawns sidecar (blocks until WAVESRV-ESTART).
+4. Host spawns sidecar (blocks until AGENTMUXSRV-ESTART).
 5. Host starts IPC server, writes port file (`port:token`).
 6. Host creates "main" browser → `on_after_created` fires.
 7. `on_after_created`: registers "main", calls `init_pool()` → spawns 2 pool windows at offscreen coords with `?pool=1` flags.

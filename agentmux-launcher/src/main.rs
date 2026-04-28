@@ -178,7 +178,7 @@ async fn run_windows(
     log(&format!("IPC server started on {}", pipe_path));
 
     // 3. Spawn srv first. Host needs srv's endpoints to skip its own
-    // spawn_backend path. Srv signals readiness via WAVESRV-ESTART on
+    // spawn_backend path. Srv signals readiness via AGENTMUXSRV-ESTART on
     // stderr; the spawner returns once we see that line (or after a
     // 30s timeout).
     let (srv_result, mut srv_child) = match srv_spawner::spawn_srv(

@@ -46,7 +46,7 @@ pub fn use_launcher_endpoints(
             "launcher set AGENTMUX_BACKEND_WS but it was empty — \
              refusing to fall back to spawn_backend (would create a \
              duplicate srv against the same data dir). This is a \
-             launcher bug; check the WAVESRV-ESTART parse path in \
+             launcher bug; check the AGENTMUXSRV-ESTART parse path in \
              agentmux-launcher/src/srv_spawner.rs::parse_estart."
                 .to_string(),
         ));
@@ -92,7 +92,7 @@ pub fn use_launcher_endpoints(
 }
 
 /// Spawn the agentmux-srv backend sidecar and wait for it to signal
-/// readiness via a `WAVESRV-ESTART` line on stderr (30s timeout).
+/// readiness via a `AGENTMUXSRV-ESTART` line on stderr (30s timeout).
 pub async fn spawn_backend(state: &Arc<AppState>) -> Result<BackendSpawnResult, String> {
     tracing::info!("spawn_backend() called");
 
@@ -298,7 +298,7 @@ pub async fn spawn_backend(state: &Arc<AppState>) -> Result<BackendSpawnResult, 
         for line in reader.lines() {
             match line {
                 Ok(l) => {
-                    if l.starts_with("WAVESRV-ESTART") {
+                    if l.starts_with("AGENTMUXSRV-ESTART") {
                         let result = parse_estart(&l);
                         tracing::info!(
                             "Backend started: ws={} web={} version={} instance={}",
@@ -309,7 +309,7 @@ pub async fn spawn_backend(state: &Arc<AppState>) -> Result<BackendSpawnResult, 
                         );
                         estart_received = true;
                         let _ = tx.blocking_send(result);
-                    } else if let Some(event_data) = l.strip_prefix("WAVESRV-EVENT:") {
+                    } else if let Some(event_data) = l.strip_prefix("AGENTMUXSRV-EVENT:") {
                         tracing::debug!("Backend event: {}", event_data);
                         // Forward events to the frontend
                         if let Ok(payload) = serde_json::from_str::<serde_json::Value>(event_data)
@@ -469,7 +469,7 @@ fn resolve_backend_binary(
     ))
 }
 
-/// Parse the key=value fields out of a `WAVESRV-ESTART` line.
+/// Parse the key=value fields out of a `AGENTMUXSRV-ESTART` line.
 fn parse_estart(line: &str) -> BackendSpawnResult {
     let parts: Vec<&str> = line.split_whitespace().collect();
     let get = |prefix: &str| -> String {
