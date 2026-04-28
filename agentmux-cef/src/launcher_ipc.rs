@@ -266,68 +266,16 @@ fn apply_event_to_shadow(state: &std::sync::Arc<crate::state::AppState>, event: 
             );
         }
         Event::BackendWindowIdRegistered { label, window_id, .. } => {
-            // Phase B.5 (window_id_map step b) — shadow projection
-            // + drift compare. Host's `window_id_map` is still
-            // authoritative through step c; we log when the two
-            // disagree so the soak period before cutover surfaces
-            // any reporting bugs. Race-tolerant: host's
-            // `register_backend_window` mutation may not have run
-            // yet, so a "missing in host" case is benign and skipped.
-            let host_id = state
-                .window_id_map
-                .lock()
-                .get(label)
-                .cloned();
-            if let Some(host_id) = host_id {
-                if &host_id != window_id {
-                    tracing::warn!(
-                        target: "launcher-ipc:drift",
-                        label = %label,
-                        launcher_id = %window_id,
-                        host_id = %host_id,
-                        "[launcher-ipc] backend_window_id drift: host and launcher disagree"
-                    );
-                }
-            }
+            // Phase B.5 (window_id_map step e) — host's
+            // `window_id_map` was deleted; the drift compare is
+            // gone with it. Shadow is sole source of truth.
             state
                 .shadow_backend_window_ids
                 .lock()
                 .insert(label.clone(), window_id.clone());
         }
-        Event::BackendWindowIdUnregistered { label, window_id, .. } => {
-            // Phase B.5 (window_id_map step b) — symmetric drift
-            // check on release. Two cases:
-            // * host has a different ID for this label → split-brain
-            //   on the original registration, log WARN.
-            // * host has the same ID → either host hasn't run its
-            //   own `remove()` yet (race) or never will (bug).
-            //   Log INFO; sustained presence indicates a bug
-            //   (mirrors the B.5b/c WindowInstanceReleased pattern
-            //   that survived only briefly because we deleted the
-            //   compare in B.5e).
-            let host_id = state
-                .window_id_map
-                .lock()
-                .get(label)
-                .cloned();
-            if let Some(host_id) = host_id {
-                if &host_id != window_id {
-                    tracing::warn!(
-                        target: "launcher-ipc:drift",
-                        label = %label,
-                        launcher_released_id = %window_id,
-                        host_id = %host_id,
-                        "[launcher-ipc] backend_window_id release-side split-brain"
-                    );
-                } else {
-                    tracing::info!(
-                        target: "launcher-ipc:drift",
-                        label = %label,
-                        window_id = %window_id,
-                        "[launcher-ipc] backend_window_id release-side: host still has matching entry — race or unregister bug"
-                    );
-                }
-            }
+        Event::BackendWindowIdUnregistered { label, .. } => {
+            // Phase B.5 (window_id_map step e) — drift compare gone.
             state.shadow_backend_window_ids.lock().remove(label);
         }
         Event::WindowInstanceReleased { label, .. } => {

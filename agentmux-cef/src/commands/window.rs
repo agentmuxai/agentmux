@@ -394,14 +394,10 @@ pub fn list_window_instances(state: &Arc<AppState>) -> serde_json::Value {
         .cloned()
         .collect();
     drop(browsers);
-    // Phase B.5 (window_id_map step c) — read backend window IDs
-    // via `state.backend_window_id()`, which prefers the
-    // launcher-fed `shadow_backend_window_ids` (the source of
-    // truth post-B.5a-equivalent for this map) and falls back to
-    // host's `window_id_map` only for the race window between the
-    // frontend's `register_backend_window` and the launcher's
-    // reply event arriving back. We resolve labels OUTSIDE the
-    // browsers lock to avoid nesting (browsers + shadow).
+    // Read backend window IDs via `state.backend_window_id()`,
+    // which queries the launcher-fed `shadow_backend_window_ids`
+    // (sole source of truth post-B.5e). Resolve labels OUTSIDE
+    // the browsers lock to avoid nesting (browsers + shadow).
     let entries: Vec<serde_json::Value> = labels
         .iter()
         .map(|l| {
