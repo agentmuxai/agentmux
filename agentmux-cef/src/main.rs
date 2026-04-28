@@ -169,7 +169,6 @@ fn main() {
         (cef_dir, log_dir)
     };
     std::fs::create_dir_all(&data_dir).ok();
-    let port_file = data_dir.join("ipc-port");
 
     // Initialize dual-output tracing: rolling log file + stderr.
     // The log file guard must live for the entire process to ensure flushing.
@@ -183,34 +182,19 @@ fn main() {
         "Initializing CEF browser process"
     );
 
-    // If port file exists and we can connect, another instance is running.
-    // Send it a "new window" request and exit.
-    if port_file.exists() {
-        if let Ok(contents) = std::fs::read_to_string(&port_file) {
-            let parts: Vec<&str> = contents.trim().splitn(2, ':').collect();
-            if parts.len() == 2 {
-                let addr: Result<std::net::SocketAddr, _> = format!("127.0.0.1:{}", parts[0]).parse();
-                if let Ok(addr) = addr {
-                if let Ok(mut stream) = std::net::TcpStream::connect_timeout(
-                    &addr,
-                    std::time::Duration::from_secs(2),
-                ) {
-                    use std::io::Write;
-                    let body = r#"{"cmd":"open_new_window"}"#;
-                    let req = format!(
-                        "POST /ipc HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nAuthorization: Bearer {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-                        parts[1], body.len(), body
-                    );
-                    let _ = stream.write_all(req.as_bytes());
-                    tracing::info!("Sent new-window request to existing instance");
-                    std::process::exit(0);
-                }
-                // Connection failed — stale port file, continue with fresh launch
-                tracing::info!("Stale port file (connection refused), launching fresh");
-            }
-            } // addr parse
-        }
-    }
+    // Phase B.6: legacy `<data-dir>/ipc-port` probe removed. Single-
+    // instance enforcement now lives in the launcher's named-pipe
+    // bind (`first_pipe_instance(true)`) which rejects a second
+    // launcher BEFORE the host is even spawned. The old probe had a
+    // known stale-state defect (gap #8 in
+    // specs/ANALYSIS_WINDOW_PROCESS_STATE_INVENTORY_2026_04_27.md):
+    // a hard crash left the file behind and the next launch
+    // connected to a dead IPC server, sent open_new_window, and
+    // exited 0 with no window opened. The launcher's pipe handle is
+    // owned by the OS; on launcher death the pipe is reaped, so
+    // there is no stale-state path. Best-effort cleanup of any
+    // leftover file from a pre-B.6 install.
+    let _ = std::fs::remove_file(data_dir.join("ipc-port"));
 
     // Create shared application state.
     let app_state = Arc::new(state::AppState::default());
@@ -390,12 +374,11 @@ fn main() {
     // Provides forensic data if the process later crashes from OOM / VA exhaustion.
     memory_heartbeat::start();
 
-    // Write port + token to file AFTER CEF init so a second instance
-    // only connects when we're ready to handle new-window requests.
-    let _ = std::fs::write(
-        &port_file,
-        format!("{}:{}", ipc_port, app_state.ipc_token),
-    );
+    // Phase B.6: no `ipc-port` file write — the launcher's named pipe
+    // is the single-instance signal (see comment at the probe-removal
+    // site above). The IPC HTTP server still runs locally for the
+    // host's own command surface; it just no longer publishes its
+    // port for cross-process discovery.
 
     // Run the CEF message loop. This blocks until quit_message_loop() is called
     // (triggered when all browser windows are closed in client.rs).
@@ -417,9 +400,6 @@ fn main() {
 
     // Drop the tokio runtime after CEF shutdown.
     drop(runtime);
-
-    // Clean up port file so stale data doesn't confuse future launches.
-    let _ = std::fs::remove_file(&port_file);
 
     tracing::info!("AgentMux host shutdown complete");
 }

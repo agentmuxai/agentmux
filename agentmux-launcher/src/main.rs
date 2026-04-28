@@ -161,14 +161,53 @@ async fn run_windows(
     // for the rest of run_windows so the task isn't cancelled mid-
     // accept. Server owns the namespace `\\.\pipe\agentmux-{hash}\
     // command` per data dir, so multi-instance launchers (different
-    // data dirs) get distinct pipes; a second launcher pointing at
-    // the SAME data dir would collide on `first_pipe_instance(true)`
-    // and surface as a clean error — Phase B.6 turns that collision
-    // into the single-instance enforcement signal.
+    // data dirs) get distinct pipes.
+    //
+    // Phase B.6: the bind itself is the single-instance signal.
+    // `bind_first_pipe_instance` synchronously reserves the pipe;
+    // a second launcher pointing at the same data dir gets
+    // ERROR_ACCESS_DENIED. We surface that to the user as
+    // "AgentMux is already running for this data directory" and
+    // exit cleanly BEFORE spawning srv/host (otherwise the second
+    // host would briefly contend on the CEF cache lockfile).
     let dir_hash = hash::data_dir_hash16(&paths.data_dir);
     let pipe_path = ipc::pipe_name(&dir_hash);
+    let first_pipe = match ipc::server::bind_first_pipe_instance(&pipe_path) {
+        Ok(p) => p,
+        Err(e) => {
+            // ERROR_ACCESS_DENIED (5) means another launcher already
+            // owns this pipe — i.e., another AgentMux is running for
+            // this data dir. Anything else is unexpected (namespace
+            // misconfig, security descriptor failure) and we still
+            // refuse to start, but with a different message so support
+            // can tell them apart from a log line.
+            const ERROR_ACCESS_DENIED: i32 = 5;
+            let already_running = e.raw_os_error() == Some(ERROR_ACCESS_DENIED);
+            let title = "AgentMux";
+            let body = if already_running {
+                format!(
+                    "AgentMux is already running for this data directory.\n\nData dir: {}\n\nFocus the existing window, or close it before launching again.",
+                    paths.data_dir.display()
+                )
+            } else {
+                format!(
+                    "AgentMux failed to start: could not bind IPC pipe.\n\nPipe: {}\nError: {}\n\nIf the problem persists, check the launcher log.",
+                    pipe_path, e
+                )
+            };
+            log(&format!(
+                "FATAL: pipe bind failed (already_running={}): {} pipe={}",
+                already_running, e, pipe_path
+            ));
+            show_fatal_dialog(title, &body);
+            // Exit code 2 distinguishes the single-instance refusal from
+            // generic launch failures (code 1).
+            std::process::exit(2);
+        }
+    };
     let _ipc_handle = ipc::run_ipc_server(
         pipe_path.clone(),
+        first_pipe,
         ipc::server::ServerCtx {
             launcher_pid: std::process::id(),
             launcher_version: env!("CARGO_PKG_VERSION").to_string(),
@@ -500,6 +539,40 @@ pub(crate) fn resume_main_thread(pid: u32) -> Result<(), String> {
         }
         Ok(())
     }
+}
+
+/// Show a modal error dialog before the launcher exits. Used by the
+/// Phase B.6 single-instance check so a user double-clicking the app
+/// while it is already running sees a clear message — without this,
+/// the launcher exit is silent (it has the `windows` subsystem in
+/// release, so eprintln! goes nowhere).
+#[cfg(target_os = "windows")]
+fn show_fatal_dialog(title: &str, body: &str) {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        MessageBoxW, MB_ICONWARNING, MB_OK, MB_SETFOREGROUND, MB_TOPMOST,
+    };
+    let title_w: Vec<u16> = std::ffi::OsStr::new(title)
+        .encode_wide()
+        .chain(Some(0))
+        .collect();
+    let body_w: Vec<u16> = std::ffi::OsStr::new(body)
+        .encode_wide()
+        .chain(Some(0))
+        .collect();
+    unsafe {
+        MessageBoxW(
+            std::ptr::null_mut(),
+            body_w.as_ptr(),
+            title_w.as_ptr(),
+            MB_OK | MB_ICONWARNING | MB_SETFOREGROUND | MB_TOPMOST,
+        );
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn show_fatal_dialog(_title: &str, body: &str) {
+    eprintln!("{}", body);
 }
 
 /// Find the CEF host binary in the runtime directory.
