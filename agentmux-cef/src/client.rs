@@ -100,45 +100,53 @@ impl AgentMuxHandler {
         let browser = browser.cloned().expect("Browser is None");
         tracing::info!("Browser created (total: {})", self.browser_list.len() + 1);
 
-        // Register browser in the multi-window map.
-        // First browser is "main"; additional browsers get labels from their URL params.
-        let label = {
-            let mut browsers = self.state.browsers.lock();
-            let label = if browsers.is_empty() {
-                "main".to_string()
-            } else {
-                // Pop the label that was queued by open_new_window / open_window_at_position
-                // before posting to the UI thread.  The URL is not yet loaded when
-                // on_after_created fires, so reading it here always returns empty string.
-                let lbl = self.state.pending_window_labels.lock().pop_front()
-                    .unwrap_or_else(|| format!("window-{}", uuid::Uuid::new_v4()));
-                dlog(&format!("on_after_created: popped label={}", lbl));
-                lbl
-            };
-            tracing::info!("Registered browser: label={} (total: {})", label, browsers.len() + 1);
-            dlog(&format!("on_after_created: registered label={} total={}", label, browsers.len() + 1));
-            browsers.insert(label.clone(), browser.clone());
-            label
-        };
-
-        // Ensure WindowMeta exists for this browser so downstream code (taskbar
-        // treatment here, cascade-close below) can classify it. If the creator
-        // didn't pre-register a meta (legacy callers, or the very first "main"
-        // window), default to FullInstance. Browser panes use `browser-pane-*`
-        // labels which are intentionally absent from window_meta — they're
-        // child HWNDs, not top-level windows, and skipping the taskbar logic
-        // below for them is correct.
-        let is_top_level_window = !label.starts_with("browser-pane-");
-        if is_top_level_window {
-            let mut metas = self.state.window_meta.lock();
-            metas.entry(label.clone()).or_insert_with(|| {
-                crate::state::WindowMeta {
-                    label: label.clone(),
+        // Phase B.5 (window_meta step d) — pop the pre-create
+        // handoff entry. Pre-step-d this was a label-only queue +
+        // separate `window_meta.insert` from the caller; now it's
+        // a single `PendingWindowCreation` carrying label + kind +
+        // parent_instance_id, eliminating the parallel-write race
+        // between caller and on_after_created.
+        //
+        // First-browser shortcut: "main" never has a pre-create
+        // handoff (host startup spawns it directly), so we
+        // synthesize a FullInstance entry. Subsequent windows pop
+        // their entry; if the queue is empty (legacy paths /
+        // unexpected races) fall back to a generated UUID label
+        // with FullInstance defaults.
+        let pending = if self.state.browsers.lock().is_empty() {
+            crate::state::PendingWindowCreation {
+                label: "main".to_string(),
+                kind: WindowKind::FullInstance,
+                parent_instance_id: None,
+            }
+        } else {
+            self.state.pending_window_creations.lock().pop_front().unwrap_or_else(|| {
+                let lbl = format!("window-{}", uuid::Uuid::new_v4());
+                tracing::warn!(label = %lbl, "[on_after_created] no pending creation entry — defaulting to FullInstance");
+                crate::state::PendingWindowCreation {
+                    label: lbl,
                     kind: WindowKind::FullInstance,
                     parent_instance_id: None,
                 }
-            });
+            })
+        };
+        let label = pending.label.clone();
+        let pending_kind = pending.kind;
+        let pending_parent = pending.parent_instance_id.clone();
+
+        {
+            let mut browsers = self.state.browsers.lock();
+            tracing::info!("Registered browser: label={} (total: {})", label, browsers.len() + 1);
+            dlog(&format!("on_after_created: registered label={} total={}", label, browsers.len() + 1));
+            browsers.insert(label.clone(), browser.clone());
         }
+
+        let is_top_level_window = !label.starts_with("browser-pane-");
+        // Note: host's `window_meta` is no longer mutated by
+        // on_after_created post-step-d. Cascade-close enumeration
+        // and the taskbar-hide check below read kind via the
+        // pending entry (taskbar) or the launcher-fed shadow
+        // (cascade-close).
 
         // No DwmExtendFrameIntoClientArea — it causes the white flash.
         // CEF Views handles frameless + resize via its delegate.
@@ -175,15 +183,10 @@ impl AgentMuxHandler {
                 // Subwindow? Hide from taskbar. Full instances and browser-pane
                 // child HWNDs skip this branch.
                 if is_top_level_window {
-                    // Phase B.5 (window_meta step c) — read via
-                    // shadow-first helper. Brief race window for
-                    // newly-created windows where shadow doesn't
-                    // have the entry yet; falls back to host's
-                    // `window_meta` (still authoritative through
-                    // step d) which has the pre-create handoff
-                    // entry.
-                    let kind = self.state.window_meta(&label).map(|m| m.kind);
-                    if kind == Some(WindowKind::Subwindow) {
+                    // Phase B.5 (window_meta step d) — read kind from
+                    // the pending entry we just popped. No
+                    // window_meta lookup, no race window.
+                    if pending_kind == WindowKind::Subwindow {
                         unsafe { skip_taskbar(hwnd); }
                     }
                 }
@@ -203,27 +206,14 @@ impl AgentMuxHandler {
         // pool->user transition gets its own report in a follow-up).
         // No-op if launcher IPC isn't connected (`task dev` mode).
         if is_top_level_window && !label.starts_with("window-pool-") {
-            let (wire_kind, parent_label) = {
-                let metas = self.state.window_meta.lock();
-                metas
-                    .get(&label)
-                    .map(|m| {
-                        let k = match m.kind {
-                            WindowKind::FullInstance => {
-                                agentmux_common::ipc::WindowKind::FullInstance
-                            }
-                            WindowKind::Subwindow => {
-                                agentmux_common::ipc::WindowKind::Subwindow
-                            }
-                        };
-                        (k, m.parent_instance_id.clone())
-                    })
-                    .unwrap_or((
-                        agentmux_common::ipc::WindowKind::FullInstance,
-                        None,
-                    ))
+            // Phase B.5 (window_meta step d) — kind/parent come
+            // from the pending entry we popped at the top of this
+            // fn, not a window_meta lookup.
+            let wire_kind = match pending_kind {
+                WindowKind::FullInstance => agentmux_common::ipc::WindowKind::FullInstance,
+                WindowKind::Subwindow => agentmux_common::ipc::WindowKind::Subwindow,
             };
-            crate::launcher_ipc::report_window_opened(label.clone(), wire_kind, parent_label);
+            crate::launcher_ipc::report_window_opened(label.clone(), wire_kind, pending_parent.clone());
             // Phase B.4 follow-up — drift check after the open.
             crate::launcher_ipc::compute_and_report_host_counts(&self.state);
         }
@@ -374,20 +364,13 @@ impl AgentMuxHandler {
         // cascade-close every Subwindow whose parent_instance_id points to it.
         // See `docs/specs/SPEC_MULTIWINDOW_TASKBAR_GROUPING.md` §2.3.
         //
-        // Phase B.5 (window_meta step c) — read closing meta via
-        // shadow-first helper, then enumerate children via
-        // `state.subwindow_children_of`. The local `remove` is
-        // still done for now (step d retires it) so the host's
-        // mutation surface stays consistent with the rest of B.5
-        // step c.
+        // Phase B.5 (window_meta step d) — read closing meta via
+        // shadow-first helper; enumerate children via
+        // `state.subwindow_children_of`. Local `window_meta`
+        // mutation removed in this step.
         let closing_meta = label
             .as_deref()
             .and_then(|lbl| self.state.window_meta(lbl));
-        // Drop the host-side entry to keep the eager-mutation
-        // contract through step d.
-        if let Some(lbl) = label.as_deref() {
-            self.state.window_meta.lock().remove(lbl);
-        }
         if let Some(meta) = &closing_meta {
             if meta.kind == WindowKind::FullInstance {
                 let child_labels = self.state.subwindow_children_of(&meta.label);

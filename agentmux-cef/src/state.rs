@@ -85,6 +85,26 @@ pub struct WindowMeta {
     pub parent_instance_id: Option<String>,
 }
 
+/// Phase B.5 (window_meta step d) — pre-create handoff. Caller
+/// (`drag.rs::tear_off`, `commands/window.rs::open_new_window`,
+/// `window_pool.rs::spawn_pool_window`, `pane/creation.rs`) pushes
+/// one entry per window CEF is about to create; `client.rs::on_after_created`
+/// pops the head entry and uses `kind` for the Subwindow
+/// taskbar-hide branch + as the payload for `ReportWindowOpened`.
+///
+/// Replaces the previous `pending_window_labels: VecDeque<String>`
+/// queue + parallel `window_meta` writes that used to act as the
+/// kind/parent channel. Combining them eliminates the race
+/// between popping the label (synchronous handoff) and looking up
+/// the kind from `window_meta` (post-step-d, host wouldn't have
+/// written it locally).
+#[derive(Clone, Debug)]
+pub struct PendingWindowCreation {
+    pub label: String,
+    pub kind: WindowKind,
+    pub parent_instance_id: Option<String>,
+}
+
 /// Shared application state for the CEF host.
 ///
 /// Unlike the Tauri version, this uses `Arc<AppState>` directly instead of
@@ -184,11 +204,17 @@ pub struct AppState {
     /// from the taskbar and so on_before_close can cascade sub-window closure.
     pub window_meta: Mutex<HashMap<String, WindowMeta>>,
 
-    /// FIFO queue of labels for windows that are about to be created.
-    /// Pushed in `open_new_window` / `open_window_at_position` before
-    /// `post_create_window`; popped in `on_after_created` so the browser gets
-    /// the correct label rather than a freshly-generated UUID.
-    pub pending_window_labels: Mutex<VecDeque<String>>,
+    /// Phase B.5 (window_meta step d) — FIFO queue of pre-create
+    /// handoff entries. Pushed by callers
+    /// (`drag.rs::tear_off`, `commands/window.rs::open_new_window`,
+    /// `window_pool.rs::spawn_pool_window`, `pane/creation.rs`)
+    /// before `post_create_window`; popped by
+    /// `client.rs::on_after_created`. Each entry carries the label
+    /// AND the kind/parent so on_after_created can apply the
+    /// Subwindow taskbar-hide and emit `ReportWindowOpened`
+    /// without consulting `window_meta` (which is no longer
+    /// host-mutated post-step-d).
+    pub pending_window_creations: Mutex<VecDeque<PendingWindowCreation>>,
 
     /// Tear-off Phase 6 — pre-warmed pool of hidden CEF windows ready for
     /// instant promotion on tear-off. Each entry is a label of a window
@@ -283,7 +309,7 @@ impl Default for AppState {
             ipc_token: uuid::Uuid::new_v4().to_string(),
             browsers: Mutex::new(HashMap::new()),
             window_meta: Mutex::new(HashMap::new()),
-            pending_window_labels: Mutex::new(VecDeque::new()),
+            pending_window_creations: Mutex::new(VecDeque::new()),
             window_pool: Mutex::new(VecDeque::new()),
             unpromoted_pool_labels: Mutex::new(std::collections::HashSet::new()),
             window_pool_respawn_in_flight: std::sync::atomic::AtomicBool::new(false),
