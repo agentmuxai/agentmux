@@ -10,18 +10,11 @@ use crate::backend::storage::wstore::WaveStore;
 use crate::backend::storage::StoreError;
 use crate::backend::obj::*;
 
-/// Create a new workspace with name, icon, and color.
-pub fn create_workspace(
-    store: &WaveStore,
-    name: &str,
-    icon: &str,
-    color: &str,
-) -> Result<Workspace, StoreError> {
+/// Create a new workspace with the given name.
+pub fn create_workspace(store: &WaveStore, name: &str) -> Result<Workspace, StoreError> {
     let mut ws = Workspace {
         oid: Uuid::new_v4().to_string(),
         name: name.to_string(),
-        icon: icon.to_string(),
-        color: color.to_string(),
         tabids: vec![],
         pinnedtabids: vec![],
         activetabid: String::new(),
@@ -51,7 +44,7 @@ pub fn get_workspace(store: &WaveStore, ws_id: &str) -> Result<Workspace, StoreE
 }
 
 /// List all workspaces as WorkspaceListEntry (matching Go's behavior).
-/// Go returns [{workspaceid, windowid}] — filters out workspaces without name/icon/color.
+/// Returns [{workspaceid, windowid}] — filters out unnamed workspaces.
 pub fn list_workspaces(store: &WaveStore) -> Result<Vec<WorkspaceListEntry>, StoreError> {
     let workspaces = store.get_all::<Workspace>()?;
     let windows = store.get_all::<Window>()?;
@@ -64,8 +57,7 @@ pub fn list_workspaces(store: &WaveStore) -> Result<Vec<WorkspaceListEntry>, Sto
 
     let mut entries = Vec::new();
     for ws in &workspaces {
-        // Go skips workspaces missing name, icon, or color
-        if ws.name.is_empty() || ws.icon.is_empty() || ws.color.is_empty() {
+        if ws.name.is_empty() {
             continue;
         }
         entries.push(WorkspaceListEntry {

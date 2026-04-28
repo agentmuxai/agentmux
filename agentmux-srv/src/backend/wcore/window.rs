@@ -9,7 +9,7 @@ use crate::backend::storage::wstore::WaveStore;
 use crate::backend::storage::StoreError;
 use crate::backend::obj::*;
 
-use super::{get_client, WORKSPACE_COLORS, WORKSPACE_ICONS};
+use super::get_client;
 use super::tab::create_tab;
 use super::workspace::create_workspace;
 
@@ -20,7 +20,7 @@ pub fn create_window(
     workspace_id: &str,
 ) -> Result<Window, StoreError> {
     let ws_id = if workspace_id.is_empty() {
-        let ws = create_workspace(store, "", "", "")?;
+        let ws = create_workspace(store, "")?;
         let _tab = create_tab(store, &ws.oid)?;
         ws.oid
     } else {
@@ -58,8 +58,6 @@ pub fn create_window_full(
             let mut ws = Workspace {
                 oid: Uuid::new_v4().to_string(),
                 name: String::new(),
-                icon: String::new(),
-                color: String::new(),
                 tabids: vec![],
                 pinnedtabids: vec![],
                 activetabid: String::new(),
@@ -200,7 +198,7 @@ pub(super) fn check_and_fix_window(store: &WaveStore, window_id: &str) -> Result
         Some(ws) => ws,
         None => {
             // Workspace missing — create a new one
-            let ws = create_workspace(store, "", WORKSPACE_ICONS[0], WORKSPACE_COLORS[0])?;
+            let ws = create_workspace(store, "")?;
             let mut window = window;
             window.workspaceid = ws.oid.clone();
             store.update(&mut window)?;
