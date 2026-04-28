@@ -100,6 +100,20 @@ pub struct State {
     /// from `pool` to `windows`. On pre-promote destroy: only
     /// `ReportPoolWindowRemoved`.
     pub pool: HashSet<String>,
+    /// Phase B.5 — authoritative window instance registry. Maps
+    /// label → sequential instance number (1 for "main", 2 for the
+    /// second window opened, etc.). Numbers are never reused within
+    /// a launcher run — when a window closes the entry is removed
+    /// but `next_instance_num` keeps advancing. Replaces the host's
+    /// `agentmux-cef::state::WindowInstanceRegistry` (host still
+    /// maintains its own copy in B.5a; B.5b retires it). Updated by
+    /// the same reducer paths that mutate `windows`.
+    pub instance_registry: HashMap<String, u32>,
+    /// Next instance number to assign. Starts at 2 — "main" is
+    /// pre-seeded with 1 in `Default` (matching host's
+    /// `WindowInstanceRegistry::new` behavior so a synthetic main
+    /// open wouldn't collide).
+    pub next_instance_num: u32,
     /// Monotonic counter for `Event.version`. Bumped by `bump_version()`.
     pub event_version: u64,
     /// Monotonic counter for client_id (returned in Registered events).
@@ -113,6 +127,12 @@ impl Default for State {
             processes: HashMap::new(),
             windows: HashMap::new(),
             pool: HashSet::new(),
+            instance_registry: {
+                let mut m = HashMap::new();
+                m.insert("main".to_string(), 1);
+                m
+            },
+            next_instance_num: 2,
             event_version: 0,
             next_client_id: 1,
         }
