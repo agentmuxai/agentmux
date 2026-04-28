@@ -104,9 +104,10 @@ pub struct State {
     /// label → sequential instance number (1 for "main", 2 for the
     /// second window opened, etc.). Numbers are never reused within
     /// a launcher run — when a window closes the entry is removed
-    /// but `next_instance_num` keeps advancing. Replaces the host's
-    /// `agentmux-cef::state::WindowInstanceRegistry` (host still
-    /// maintains its own copy in B.5a; B.5b retires it). Updated by
+    /// but `next_instance_num` keeps advancing. Sole source of truth
+    /// post-B.5e (host's `WindowInstanceRegistry` was deleted in
+    /// PR #584); host holds a passive shadow projection in
+    /// `agentmux-cef::AppState.shadow_instance_registry`. Updated by
     /// the same reducer paths that mutate `windows`.
     pub instance_registry: HashMap<String, u32>,
     /// Next instance number to assign. Starts at 2 — "main" is
@@ -114,6 +115,15 @@ pub struct State {
     /// `WindowInstanceRegistry::new` behavior so a synthetic main
     /// open wouldn't collide).
     pub next_instance_num: u32,
+    /// Phase B.5 (window_id_map step a) — authoritative
+    /// label → backend window ID map. Mirrors host's existing
+    /// `agentmux-cef::AppState.window_id_map`. Populated by
+    /// `Command::ReportBackendWindowIdRegistered` (sent from host
+    /// when the frontend calls `register_backend_window` IPC
+    /// after init); drained by `ReportBackendWindowIdUnregistered`
+    /// on close. Will become host-side authoritative through the
+    /// standard a→b→c→d→e ratchet.
+    pub backend_window_ids: HashMap<String, String>,
     /// Monotonic counter for `Event.version`. Bumped by `bump_version()`.
     pub event_version: u64,
     /// Monotonic counter for client_id (returned in Registered events).
@@ -133,6 +143,7 @@ impl Default for State {
                 m
             },
             next_instance_num: 2,
+            backend_window_ids: HashMap::new(),
             event_version: 0,
             next_client_id: 1,
         }

@@ -348,12 +348,12 @@ impl AgentMuxHandler {
             }
         }
 
-        // Phase B.5d — host no longer mutates `window_instance_registry`.
-        // The launcher's `state.instance_registry` (B.5a) is now the
-        // sole authority; close-side updates flow via
-        // `Event::WindowInstanceReleased` → `apply_event_to_shadow`.
-        // We still clean up `window_id_map` here (B.5 hasn't migrated
-        // that map yet — it's the next target).
+        // Phase B.5e — host's `WindowInstanceRegistry` is gone; the
+        // launcher's `state.instance_registry` is sole authority,
+        // close-side updates flow via `Event::WindowInstanceReleased`
+        // → `apply_event_to_shadow`. We still clean up
+        // `window_id_map` here (B.5 hasn't migrated that map yet —
+        // it's the current target).
         let backend_window_id = label.as_deref().and_then(|lbl| {
             let wid = self.state.window_id_map.lock().remove(lbl);
             dlog(&format!("window_id_map.remove({:?}) => {:?}", lbl, wid));
