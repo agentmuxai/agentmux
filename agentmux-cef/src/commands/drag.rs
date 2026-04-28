@@ -386,7 +386,7 @@ pub fn open_window_at_position(state: &Arc<AppState>, args: &serde_json::Value) 
     }
 
     // Notify all windows
-    let count = state.window_instance_registry.lock().count();
+    let count = state.instance_count();
     events::emit_event_all_windows(state, "window-instances-changed", &serde_json::json!(count));
 
     Ok(serde_json::json!(label))

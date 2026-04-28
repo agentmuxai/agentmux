@@ -166,11 +166,13 @@ pub struct AppState {
 
     /// Phase B.5b — shadow registry fed by the launcher's
     /// `WindowInstanceAssigned` / `WindowInstanceReleased` events.
-    /// Maintained in parallel to `window_instance_registry` (which
-    /// remains authoritative for now); on every launcher event the
-    /// reader task compares the two and logs drift. B.5c will swap
-    /// the roles — launcher becomes authoritative, this map becomes
-    /// the read path, and `window_instance_registry` is retired.
+    /// Phase B.5c — now the PRIMARY read path via
+    /// `Self::instance_num` / `Self::instance_count`. Host's
+    /// `window_instance_registry` is kept as a fallback for the
+    /// race window between host's local `register()` and the
+    /// launcher's reply event arriving back. B.5d will remove
+    /// host's local register/unregister calls; B.5e removes the
+    /// fallback entirely.
     pub shadow_instance_registry: Mutex<HashMap<String, u32>>,
 
     /// Cancellation channel for an in-progress CLI login process
@@ -308,5 +310,63 @@ impl Default for AppState {
             browser_api: crate::browser_api::BrowserApiState::new(),
             debug_port: Mutex::new(0),
         }
+    }
+}
+
+impl AppState {
+    /// Phase B.5c — authoritative instance-number lookup. Prefers
+    /// the launcher-fed `shadow_instance_registry` (the source of
+    /// truth post-B.5a); falls back to host's local
+    /// `window_instance_registry` for the race window where host
+    /// has just `register()`'d a label but the launcher's
+    /// `WindowInstanceAssigned` event hasn't returned yet. Logs
+    /// every fallback at DEBUG so we can quantify the race
+    /// frequency before B.5e removes the fallback entirely.
+    pub fn instance_num(&self, label: &str) -> Option<u32> {
+        if let Some(num) = self.shadow_instance_registry.lock().get(label).copied() {
+            return Some(num);
+        }
+        let fallback = self.window_instance_registry.lock().get(label);
+        if let Some(num) = fallback {
+            tracing::debug!(
+                target: "launcher-ipc:fallback",
+                label = %label,
+                num = %num,
+                "[instance_num] shadow miss — falling back to host's window_instance_registry (B.5c transitional)"
+            );
+            return Some(num);
+        }
+        None
+    }
+
+    /// Phase B.5c — authoritative instance count. Same prefer-shadow
+    /// fallback semantics as `instance_num`: returns the shadow's
+    /// count when it agrees with host's authoritative
+    /// `WindowInstanceRegistry`; falls back to host's count
+    /// otherwise. Used by frontend event emits
+    /// ("window-instances-changed").
+    ///
+    /// The fallback is essential during the transition: every read
+    /// site is called RIGHT AFTER a host mutation
+    /// (`register()`/`unregister()`) but BEFORE the launcher's
+    /// reply event has returned. Without falling back, the emitted
+    /// count is off by one on every open (shadow not yet populated)
+    /// and every close (shadow not yet drained), and no re-emission
+    /// fires when the shadow catches up — leaving stale counts in
+    /// the InstancePanel until the next user action. (reagent P1
+    /// PR #581 round-1.)
+    pub fn instance_count(&self) -> usize {
+        let shadow_count = self.shadow_instance_registry.lock().len();
+        let host_count = self.window_instance_registry.lock().count();
+        if shadow_count == host_count {
+            return shadow_count;
+        }
+        tracing::debug!(
+            target: "launcher-ipc:fallback",
+            shadow = %shadow_count,
+            host = %host_count,
+            "[instance_count] shadow vs host disagreement — falling back to host count (eager-mutation source)"
+        );
+        host_count
     }
 }
