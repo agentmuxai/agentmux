@@ -1,6 +1,6 @@
-# Phase B roadmap (canonical, post-#594)
+# Phase B roadmap (canonical, post-#595)
 
-**Status:** Active reference. Updated 2026-04-28 after PR #594 (B.5 finish — scaffolding-role audit) merged. B.5 is complete; B.6 (single-instance mutex) is in flight.
+**Status:** Active reference. Updated 2026-04-28 after PR #595 (B.6 — single-instance mutex) merged. B.5 + B.6 complete; B.7 (frontend cutover) is next.
 **Author:** AgentA.
 **Read first if resuming Phase B work**, then `b5-migration-architecture-2026-04-28.md` and `multi-reducer-proposal-2026-04-28.md`.
 
@@ -35,8 +35,10 @@ Pre-Phase-B  ──► host owns 13 HashMaps  ◄── started here
               Phase F with explicit scaffolding comments in code.
                         │
                         ▼
-              ◄── HERE. B.6 in flight: single-instance mutex.
-              B.6  ──  per-data-dir mutex single-instance (named pipe already covers it)
+              ✓ B.6 — per-data-dir mutex single-instance (#595)
+                        │
+                        ▼
+              ◄── HERE. B.7 next: frontend cutover.
               B.7  ──  frontend cutover (delete polling)
               B.8  ──  Phase B exit (delete obsolete defensive code,
                        add property tests, --diag tool, CI smoke)
@@ -67,9 +69,10 @@ See `b5-migration-architecture-2026-04-28.md` for why `browsers` and pool maps c
 
 - Scaffolding-role comments added to `state.browsers`, `window_pool`, `unpromoted_pool_labels`, and `compute_and_report_host_counts` so future agents see why these fields don't follow the standard ratchet and where they head in Phase F.
 
-### B.6 — single-instance mutex (in flight)
+### B.6 — single-instance mutex (done — PR #595)
 
-- The named-pipe `first_pipe_instance(true)` already rejects a second launcher binding the same pipe. Just need to surface a clear error when launch fails ("AgentMux is already running, PID N") and delete any old port-file probe.
+- Launcher synchronously binds `first_pipe_instance(true)` BEFORE spawning srv/host; on `ERROR_ACCESS_DENIED` shows a Win32 MessageBox ("AgentMux is already running for this data directory…") and exits 2.
+- Legacy `<data-dir>/ipc-port` probe + write removed from the host (gap #8 stale-state defect retired).
 
 ### B.7 — frontend cutover (2-3 PRs)
 
@@ -109,6 +112,7 @@ See `b5-migration-architecture-2026-04-28.md` for why `browsers` and pool maps c
 | `browsers` + pool maps deferred to Phase F | 2026-04-28 | FFI handles + sync lifecycle scaffolding can't migrate via standard ratchet |
 | Multi-reducer is the long-term architecture | 2026-04-28 | Cleaner than "scaffolding outside the model"; deferred to Phase E + F to validate the pattern incrementally |
 | `docs/retro/*.md` files are local-only | 2026-04-28 | No review churn; future agents read them via `MEMORY.md` pointer |
+| Single-instance lives in launcher pipe bind, not host port-file | B.6 (#595) | Pipe handle is OS-owned → no stale-state path; ERROR_ACCESS_DENIED is the canonical second-instance signal; user-facing MessageBox replaces silent exit |
 
 ## How to update this doc
 

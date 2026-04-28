@@ -258,12 +258,17 @@ fn apply_event_to_shadow(state: &std::sync::Arc<crate::state::AppState>, event: 
             // race between the synchronous emit at the mutation site
             // (which carries the pre-event count) and the launcher's
             // `WindowInstanceAssigned` arrival here.
-            let count = state.shadow_instance_registry.lock().len();
-            crate::events::emit_event_all_windows(
-                state,
-                "window-instances-changed",
-                &serde_json::json!(count),
-            );
+            //
+            // Phase B.7.1 — payload now carries the resolved
+            // `entries` array (label + windowId pairs from launcher
+            // shadows), letting the frontend update its atoms
+            // directly without a follow-up `list_window_instances`
+            // RPC and without the retry-on-stale polling that
+            // existed only because the synchronous emit fired
+            // before state.browsers settled. Sync emits still
+            // ship count-only payloads; the frontend keeps the
+            // legacy refresh path as a fallback for those.
+            emit_window_instances_changed_with_entries(state);
         }
         Event::WindowOpened { label, kind, parent_label, .. } => {
             // Phase B.5 (window_meta step b) — shadow projection
@@ -329,19 +334,60 @@ fn apply_event_to_shadow(state: &std::sync::Arc<crate::state::AppState>, event: 
             // Phase B.5e — host's `WindowInstanceRegistry` was
             // deleted; the drift compare is gone with it.
             state.shadow_instance_registry.lock().remove(label);
-            // Phase B.5d — re-emit `window-instances-changed` so the
-            // frontend catches up after the brief race between the
-            // synchronous emit at the close site and the launcher's
-            // `WindowInstanceReleased` arrival here.
-            let count = state.shadow_instance_registry.lock().len();
-            crate::events::emit_event_all_windows(
-                state,
-                "window-instances-changed",
-                &serde_json::json!(count),
-            );
+            // Phase B.5d / B.7.1 — re-emit with the resolved
+            // entries array (see WindowInstanceAssigned arm above
+            // for rationale).
+            emit_window_instances_changed_with_entries(state);
         }
         _ => {}
     }
+}
+
+/// Phase B.7.1 — emit `window-instances-changed` with a resolved
+/// `entries` array so the frontend can update its atoms directly,
+/// bypassing both the `list_window_instances` RPC round-trip and
+/// the historical retry-on-stale polling in `app-init.ts`.
+///
+/// Called from the launcher-driven re-emit sites (post-shadow
+/// update) where the `shadow_instance_registry` and
+/// `shadow_backend_window_ids` projections are guaranteed to
+/// reflect the launcher's view. Pool windows and `browser-pane-*`
+/// labels are filtered out here so the payload matches the
+/// `list_window_instances` shape the frontend already understands.
+///
+/// Sync emit sites (window.rs / drag.rs / window_pool.rs / client.rs)
+/// continue to ship count-only payloads in this PR — they fire
+/// before host state has settled and don't have access to the
+/// launcher's resolved view. B.7.2 retires them in favor of the
+/// launcher-driven path.
+fn emit_window_instances_changed_with_entries(state: &std::sync::Arc<crate::state::AppState>) {
+    let labels: Vec<String> = {
+        let pool_labels = state.unpromoted_pool_labels.lock();
+        let registry = state.shadow_instance_registry.lock();
+        registry
+            .keys()
+            .filter(|l| !pool_labels.contains(*l) && !l.starts_with("browser-pane-"))
+            .cloned()
+            .collect()
+    };
+    let entries: Vec<serde_json::Value> = labels
+        .iter()
+        .map(|l| {
+            serde_json::json!({
+                "label": l,
+                "windowId": state.backend_window_id(l),
+            })
+        })
+        .collect();
+    let count = entries.len();
+    crate::events::emit_event_all_windows(
+        state,
+        "window-instances-changed",
+        &serde_json::json!({
+            "count": count,
+            "entries": entries,
+        }),
+    );
 }
 
 /// Phase B.4 — sync API: report a window open to the launcher's
