@@ -18,6 +18,79 @@ pub struct BackendSpawnResult {
     pub instance_id: String,
 }
 
+/// Phase B.1: when the launcher has already spawned srv (env var
+/// `AGENTMUX_BACKEND_WS` is set), populate `state` from the env vars
+/// the launcher passed and return Ok — no need to spawn srv ourselves.
+///
+/// Returns `Ok(BackendSpawnResult)` mirroring the shape of
+/// `spawn_backend` so the caller in main.rs is symmetric. Returns
+/// `Err` only if env vars are present but malformed; if they're
+/// absent the caller should fall through to `spawn_backend` (the
+/// `task dev` path where the launcher isn't in the loop).
+pub fn use_launcher_endpoints(
+    state: &Arc<AppState>,
+) -> Option<Result<BackendSpawnResult, String>> {
+    // The env var being absent means "host is running standalone";
+    // fall through to spawn_backend. The env var being PRESENT but
+    // empty means the launcher set it (we're in launcher-managed
+    // mode) but with a malformed value — likely an ESTART parse
+    // mismatch in the launcher. Treat that as Err, NOT as
+    // "fall back to spawn_backend" — the latter would spawn a
+    // SECOND srv against the same data dir while the launcher's
+    // already-running srv keeps going, corrupting state. Better to
+    // fail fast and surface the launcher bug. (codex P2 @
+    // sidecar.rs:35, PR #571 round-4.)
+    let ws = std::env::var("AGENTMUX_BACKEND_WS").ok()?;
+    if ws.is_empty() {
+        return Some(Err(
+            "launcher set AGENTMUX_BACKEND_WS but it was empty — \
+             refusing to fall back to spawn_backend (would create a \
+             duplicate srv against the same data dir). This is a \
+             launcher bug; check the WAVESRV-ESTART parse path in \
+             agentmux-launcher/src/srv_spawner.rs::parse_estart."
+                .to_string(),
+        ));
+    }
+    // From here on we KNOW the launcher provided env; missing fields
+    // mean a launcher bug, so emit Err rather than fall through to
+    // the dev-mode spawn (which would fight the launcher's srv).
+    let try_get = |key: &str| -> Result<String, String> {
+        std::env::var(key).map_err(|_| format!("launcher set AGENTMUX_BACKEND_WS but not {}", key))
+    };
+    let result = (|| -> Result<BackendSpawnResult, String> {
+        let web = try_get("AGENTMUX_BACKEND_WEB")?;
+        let pid_str = try_get("AGENTMUX_BACKEND_PID")?;
+        let pid: u32 = pid_str
+            .parse()
+            .map_err(|_| format!("AGENTMUX_BACKEND_PID not a u32: {}", pid_str))?;
+        let auth_key = try_get("AGENTMUX_AUTH_KEY")?;
+        let instance_id = try_get("AGENTMUX_INSTANCE_ID")?;
+        let data_dir = try_get("AGENTMUX_DATA_DIR")?;
+        let config_dir = try_get("AGENTMUX_CONFIG_DIR")?;
+        let user_home_dir = try_get("AGENTMUX_USER_HOME_DIR")?;
+
+        // Populate AppState in the same shape `spawn_backend` would.
+        // Notably we do NOT take ownership of a Child handle (launcher
+        // owns it) and we do NOT create a Job Object (launcher's J0
+        // already covers srv via assignment, not inheritance).
+        *state.auth_key.lock() = auth_key;
+        *state.backend_pid.lock() = Some(pid);
+        *state.backend_started_at.lock() = Some(chrono::Utc::now().to_rfc3339());
+        *state.version_data_dir.lock() = Some(data_dir);
+        *state.version_config_dir.lock() = Some(config_dir);
+        *state.user_home_dir.lock() = Some(user_home_dir);
+
+        let version = env!("CARGO_PKG_VERSION").to_string();
+        Ok(BackendSpawnResult {
+            ws_endpoint: ws,
+            web_endpoint: web,
+            version,
+            instance_id,
+        })
+    })();
+    Some(result)
+}
+
 /// Spawn the agentmux-srv backend sidecar and wait for it to signal
 /// readiness via a `WAVESRV-ESTART` line on stderr (30s timeout).
 pub async fn spawn_backend(state: &Arc<AppState>) -> Result<BackendSpawnResult, String> {
@@ -177,26 +250,23 @@ pub async fn spawn_backend(state: &Arc<AppState>) -> Result<BackendSpawnResult, 
     *state.backend_pid.lock() = Some(child_pid);
     *state.backend_started_at.lock() = Some(chrono::Utc::now().to_rfc3339());
 
-    // 8. Windows: Job Object (KILL_ON_JOB_CLOSE)
-    #[cfg(target_os = "windows")]
-    {
-        match create_job_object_for_child(child_pid) {
-            Ok(job_handle) => {
-                tracing::info!(
-                    "Created Job Object for backend (pid={}), KILL_ON_JOB_CLOSE active",
-                    child_pid
-                );
-                *state.job_handle.lock() =
-                    Some(crate::state::JobHandle::new(job_handle));
-            }
-            Err(e) => {
-                tracing::error!(
-                    "Failed to create Job Object for backend: {}. Backend may orphan on crash.",
-                    e
-                );
-            }
-        }
-    }
+    // (Phase B.1: removed host-owned Job Object J1 on srv. The
+    // launcher's J0 covers srv via direct AssignProcessToJobObject.
+    //
+    // Why not "defense-in-depth": the spec originally suggested
+    // keeping host's J1 as a backstop, but on inspection it would
+    // ACTIVELY defeat B.1's goal. KILL_ON_JOB_CLOSE on J1 fires
+    // when the host process exits — taking srv with it. After B.1,
+    // we want srv to survive host crashes (so the launcher can
+    // restart the host without losing srv state). The two reapers
+    // are mutually exclusive given that goal: launcher's J0 wants
+    // srv to live; host's J1 wants srv to die. We picked J0.
+    //
+    // The `task dev` fallback path (host runs without launcher)
+    // still loses kernel-level reaping for srv on host crash.
+    // That's an accepted regression for dev-mode-only — production
+    // (portable / installed) is unaffected. Phase 7 may add a
+    // separate Job Object for the dev path.)
 
     // 9. Parse stderr for ESTART (30s timeout)
     let stderr = child.stderr.take().expect("Failed to get stderr");
@@ -419,55 +489,7 @@ fn parse_estart(line: &str) -> BackendSpawnResult {
     }
 }
 
-/// Create a Windows Job Object and assign the child process to it.
-#[cfg(target_os = "windows")]
-fn create_job_object_for_child(pid: u32) -> Result<*mut std::ffi::c_void, String> {
-    use windows_sys::Win32::Foundation::CloseHandle;
-    use windows_sys::Win32::System::JobObjects::*;
-    use windows_sys::Win32::System::Threading::*;
-
-    // CreateJobObjectW is not exported by windows-sys 0.59's JobObjects feature,
-    // so we link to kernel32.dll directly.
-    #[link(name = "kernel32")]
-    extern "system" {
-        fn CreateJobObjectW(
-            lpjobattributes: *const std::ffi::c_void,
-            lpname: *const u16,
-        ) -> *mut std::ffi::c_void;
-    }
-
-    unsafe {
-        let job = CreateJobObjectW(std::ptr::null(), std::ptr::null());
-        if job.is_null() {
-            return Err("Failed to create job object".into());
-        }
-
-        let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
-        info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-        let ok = SetInformationJobObject(
-            job,
-            JobObjectExtendedLimitInformation,
-            &info as *const _ as *const std::ffi::c_void,
-            std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
-        );
-        if ok == 0 {
-            CloseHandle(job);
-            return Err("Failed to set job object info".into());
-        }
-
-        let process = OpenProcess(PROCESS_SET_QUOTA | PROCESS_TERMINATE, 0, pid);
-        if process.is_null() {
-            CloseHandle(job);
-            return Err(format!("Failed to open process {}", pid));
-        }
-
-        let ok = AssignProcessToJobObject(job, process);
-        CloseHandle(process);
-        if ok == 0 {
-            CloseHandle(job);
-            return Err("Failed to assign process to job object".into());
-        }
-
-        Ok(job)
-    }
-}
+// Phase B.1: removed `create_job_object_for_child`. Host no longer
+// owns a Job Object; launcher's J0 (in agentmux-launcher/src/main.rs)
+// covers srv via direct AssignProcessToJobObject. The same windows-sys
+// FFI pattern lives in the launcher now.

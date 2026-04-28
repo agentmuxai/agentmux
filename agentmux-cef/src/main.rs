@@ -223,12 +223,42 @@ fn main() {
 
     tracing::info!("IPC server started on port {}", ipc_port);
 
-    // Spawn the backend sidecar SYNCHRONOUSLY — block until it signals ready
-    // (WAVESRV-ESTART) before creating the browser window. This eliminates the
-    // race condition where CEF loads the frontend before the backend is available,
-    // which causes a "raw browser" appearance on slow machines or first launch.
+    // Phase B.1: if launcher already spawned srv (the normal portable
+    // / installed path post-PR-#570 + B.1), populate state from the
+    // env vars launcher set — no need to re-spawn srv. Falls back to
+    // spawn_backend() ONLY when env vars are absent (`task dev` mode
+    // where the host runs without the launcher).
+    //
+    // Spawn the backend sidecar SYNCHRONOUSLY — block until it
+    // signals ready (WAVESRV-ESTART) before creating the browser
+    // window. This eliminates the race condition where CEF loads the
+    // frontend before the backend is available, which causes a "raw
+    // browser" appearance on slow machines or first launch.
     let backend_ready = runtime.block_on(async {
-        match sidecar::spawn_backend(&app_state).await {
+        let launcher_provided = sidecar::use_launcher_endpoints(&app_state);
+        let result = match launcher_provided {
+            Some(Ok(r)) => {
+                tracing::info!(
+                    "Using launcher-provided backend endpoints: ws={} web={} pid={}",
+                    r.ws_endpoint,
+                    r.web_endpoint,
+                    r.instance_id
+                );
+                Ok(r)
+            }
+            Some(Err(e)) => {
+                tracing::error!(
+                    "Launcher set AGENTMUX_BACKEND_WS but env was malformed: {} — refusing to fall back to spawn_backend (would fight launcher's srv)",
+                    e
+                );
+                Err(e)
+            }
+            None => {
+                tracing::info!("No launcher-provided backend env (dev mode) — spawning srv ourselves");
+                sidecar::spawn_backend(&app_state).await
+            }
+        };
+        match result {
             Ok(result) => {
                 {
                     let mut endpoints = app_state.backend_endpoints.lock();
@@ -243,7 +273,7 @@ fn main() {
                 true
             }
             Err(e) => {
-                tracing::error!("Failed to spawn backend: {}", e);
+                tracing::error!("Failed to set up backend: {}", e);
                 false
             }
         }
