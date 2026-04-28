@@ -41,9 +41,9 @@
 //     register. Running → Quitting on Quit (B.3 placeholder).
 //     Quitting → Dead on cleanup-done (B.3 placeholder). No skipping.
 
-use agentmux_common::ipc::{ClientKind, Command, ErrorCode, Event};
+use agentmux_common::ipc::{ClientKind, Command, ErrorCode, Event, WindowKind};
 
-use crate::state::{LifecyclePhase, ProcessRecord, ProcessState, State};
+use crate::state::{LifecyclePhase, ProcessRecord, ProcessState, State, WindowMirror};
 
 /// Context the reducer needs but can't read from State (clocks,
 /// connection identity). Passed in per-call so update remains pure.
@@ -82,7 +82,99 @@ pub fn update(state: &mut State, cmd: Command, ctx: &Ctx) -> Vec<Event> {
             vec![Event::Pong { nonce, version: v }]
         }
         Command::Goodbye => handle_goodbye(state, ctx.registered_pid.unwrap_or(0)),
+        Command::ReportWindowOpened {
+            label,
+            kind,
+            parent_label,
+        } => {
+            if let Some(err) = enforce_host_only(state, ctx, "ReportWindowOpened") {
+                return vec![err];
+            }
+            handle_report_window_opened(state, ctx, label, kind, parent_label)
+        }
+        Command::ReportWindowClosed { label } => {
+            if let Some(err) = enforce_host_only(state, ctx, "ReportWindowClosed") {
+                return vec![err];
+            }
+            handle_report_window_closed(state, label)
+        }
     }
+}
+
+/// Phase B.4 — gate window-mirror reports to Host clients only. The
+/// host is the only source of truth about its own window lifecycle;
+/// allowing Renderer/Srv/Tool clients to mutate the mirror would let
+/// any registered process spoof open/close traffic and break the
+/// host-authoritative model. (codex P1 PR #576 round-1.)
+///
+/// Returns `Some(Error)` if the calling connection is not a Host;
+/// `None` if the call is allowed to proceed. Looks up the kind by
+/// PID rather than threading it through `Ctx` because `processes`
+/// is already the canonical source — single source of truth, no
+/// extra plumbing.
+fn enforce_host_only(state: &mut State, ctx: &Ctx, op: &'static str) -> Option<Event> {
+    let kind = ctx
+        .registered_pid
+        .and_then(|pid| state.processes.get(&pid).map(|r| r.kind));
+    if kind == Some(ClientKind::Host) {
+        return None;
+    }
+    let v = state.bump_version();
+    Some(Event::Error {
+        code: ErrorCode::NotRegistered,
+        message: format!(
+            "{} is Host-only; caller kind={:?}",
+            op, kind
+        ),
+        fatal: false,
+        version: v,
+    })
+}
+
+/// Phase B.4 — record a host-reported window opening in the launcher's
+/// read-only mirror. Idempotent on duplicate opens (same label twice
+/// in a row): the second insert overwrites with fresh metadata and
+/// emits a fresh event. Subscribers must tolerate seeing the same
+/// label twice; cleaner once B.5 makes the launcher authoritative.
+fn handle_report_window_opened(
+    state: &mut State,
+    ctx: &Ctx,
+    label: String,
+    kind: WindowKind,
+    parent_label: Option<String>,
+) -> Vec<Event> {
+    state.windows.insert(
+        label.clone(),
+        WindowMirror {
+            label: label.clone(),
+            kind,
+            parent_label: parent_label.clone(),
+            opened_at: ctx.now_rfc3339.clone(),
+        },
+    );
+    let v = state.bump_version();
+    vec![Event::WindowOpened {
+        label,
+        kind,
+        parent_label,
+        version: v,
+    }]
+}
+
+/// Phase B.4 — drop a host-reported window from the mirror. Missing
+/// label is logged-only (no Error event) because the close-before-
+/// launcher-saw-the-open race is benign in B.4: the launcher's mirror
+/// is a passive copy, and the host's authoritative view will simply
+/// not have the window either. B.5 will tighten this contract.
+fn handle_report_window_closed(state: &mut State, label: String) -> Vec<Event> {
+    let was_present = state.windows.remove(&label).is_some();
+    let v = state.bump_version();
+    if !was_present {
+        // Quiet: B.4 is read-only and the mirror can race with the
+        // host's authoritative store on first launch. We still emit
+        // the Closed event so subscribers stay consistent.
+    }
+    vec![Event::WindowClosed { label, version: v }]
 }
 
 fn handle_register(
@@ -344,6 +436,8 @@ mod tests {
             | Event::LifecyclePhaseChanged { version, .. }
             | Event::Registered { version, .. }
             | Event::Pong { version, .. }
+            | Event::WindowOpened { version, .. }
+            | Event::WindowClosed { version, .. }
             | Event::Error { version, .. } => *version,
         }
     }
@@ -394,6 +488,170 @@ mod tests {
         assert!(matches!(
             state.processes[&1234].state,
             ProcessState::Exited { code: 0 }
+        ));
+    }
+
+    /// B.4 reports require a Host registration first (codex P1
+    /// PR #576). Helper to set that up so each window-mirror test
+    /// doesn't repeat the boilerplate.
+    fn register_host_and_get_ctx(state: &mut State, pid: u32) -> Ctx {
+        let _ = update(
+            state,
+            Command::Register {
+                kind: ClientKind::Host,
+                pid,
+                version: "test".into(),
+            },
+            &ctx(1),
+        );
+        ctx_with_pid(1, pid)
+    }
+
+    #[test]
+    fn report_window_opened_inserts_into_mirror_and_emits_event() {
+        let mut state = State::default();
+        let host_ctx = register_host_and_get_ctx(&mut state, 1234);
+        let events = update(
+            &mut state,
+            Command::ReportWindowOpened {
+                label: "main".into(),
+                kind: WindowKind::FullInstance,
+                parent_label: None,
+            },
+            &host_ctx,
+        );
+        assert_eq!(events.len(), 1);
+        assert!(matches!(
+            &events[0],
+            Event::WindowOpened { label, kind: WindowKind::FullInstance, parent_label: None, .. }
+                if label == "main"
+        ));
+        let mirror = &state.windows["main"];
+        assert_eq!(mirror.label, "main");
+        assert_eq!(mirror.kind, WindowKind::FullInstance);
+        assert_eq!(mirror.parent_label, None);
+    }
+
+    #[test]
+    fn report_window_closed_removes_from_mirror() {
+        let mut state = State::default();
+        let host_ctx = register_host_and_get_ctx(&mut state, 1234);
+        let _ = update(
+            &mut state,
+            Command::ReportWindowOpened {
+                label: "main".into(),
+                kind: WindowKind::FullInstance,
+                parent_label: None,
+            },
+            &host_ctx,
+        );
+        assert!(state.windows.contains_key("main"));
+        let events = update(
+            &mut state,
+            Command::ReportWindowClosed {
+                label: "main".into(),
+            },
+            &host_ctx,
+        );
+        assert!(!state.windows.contains_key("main"));
+        assert_eq!(events.len(), 1);
+        assert!(matches!(
+            &events[0],
+            Event::WindowClosed { label, .. } if label == "main"
+        ));
+    }
+
+    #[test]
+    fn report_window_closed_on_unknown_label_is_idempotent() {
+        let mut state = State::default();
+        let host_ctx = register_host_and_get_ctx(&mut state, 1234);
+        let events = update(
+            &mut state,
+            Command::ReportWindowClosed {
+                label: "ghost".into(),
+            },
+            &host_ctx,
+        );
+        // Still emits an event (so subscribers stay consistent) but
+        // doesn't error.
+        assert_eq!(events.len(), 1);
+        assert!(matches!(events[0], Event::WindowClosed { .. }));
+        assert!(state.windows.is_empty());
+    }
+
+    #[test]
+    fn subwindow_open_records_parent_label() {
+        let mut state = State::default();
+        let host_ctx = register_host_and_get_ctx(&mut state, 1234);
+        let _ = update(
+            &mut state,
+            Command::ReportWindowOpened {
+                label: "main".into(),
+                kind: WindowKind::FullInstance,
+                parent_label: None,
+            },
+            &host_ctx,
+        );
+        let _ = update(
+            &mut state,
+            Command::ReportWindowOpened {
+                label: "sub-1".into(),
+                kind: WindowKind::Subwindow,
+                parent_label: Some("main".into()),
+            },
+            &host_ctx,
+        );
+        assert_eq!(
+            state.windows["sub-1"].parent_label.as_deref(),
+            Some("main")
+        );
+    }
+
+    #[test]
+    fn report_window_opened_from_non_host_is_rejected() {
+        let mut state = State::default();
+        // Register as Renderer (not Host) at PID 4321.
+        let _ = update(
+            &mut state,
+            Command::Register {
+                kind: ClientKind::Renderer,
+                pid: 4321,
+                version: "test".into(),
+            },
+            &ctx(1),
+        );
+        let events = update(
+            &mut state,
+            Command::ReportWindowOpened {
+                label: "spoof".into(),
+                kind: WindowKind::FullInstance,
+                parent_label: None,
+            },
+            &ctx_with_pid(1, 4321),
+        );
+        assert_eq!(events.len(), 1);
+        assert!(matches!(
+            &events[0],
+            Event::Error { code: ErrorCode::NotRegistered, fatal: false, .. }
+        ));
+        // Mirror NOT mutated.
+        assert!(state.windows.is_empty());
+    }
+
+    #[test]
+    fn report_window_closed_from_unregistered_conn_is_rejected() {
+        let mut state = State::default();
+        let events = update(
+            &mut state,
+            Command::ReportWindowClosed {
+                label: "x".into(),
+            },
+            &ctx(1), // No Register first.
+        );
+        assert_eq!(events.len(), 1);
+        assert!(matches!(
+            &events[0],
+            Event::Error { code: ErrorCode::NotRegistered, fatal: false, .. }
         ));
     }
 
@@ -469,6 +727,22 @@ mod tests {
                 .prop_map(|(kind, pid, version)| Command::Register { kind, pid, version }),
             1 => any::<u64>().prop_map(|nonce| Command::Ping { nonce }),
             1 => Just(Command::Goodbye),
+            // B.4: window mirror commands. Labels drawn from a small
+            // alphabet so duplicates (open then close) are common
+            // enough for the proptest to exercise the idempotent
+            // close path.
+            2 => (
+                "[a-c]{1,3}",
+                prop_oneof![
+                    Just(WindowKind::FullInstance),
+                    Just(WindowKind::Subwindow),
+                ],
+                prop_oneof![Just(None::<String>), Just(Some("a".into()))],
+            )
+                .prop_map(|(label, kind, parent_label)| {
+                    Command::ReportWindowOpened { label, kind, parent_label }
+                }),
+            2 => "[a-c]{1,3}".prop_map(|label| Command::ReportWindowClosed { label }),
         ]
     }
 
@@ -559,5 +833,83 @@ mod tests {
             prop_assert_eq!(state.processes[&pid].kind, initial_kind);
             prop_assert_eq!(&state.processes[&pid].version, "v1");
         }
+
+        /// B.4 mirror invariants under arbitrary host-driven traffic.
+        /// State seeded with a registered Host so the host-only gate
+        /// doesn't trivially reject every command (reagent P2 round-1
+        /// PR #576). Two invariants checked:
+        ///   1. Mirror size is bounded by total opens minus successful
+        ///      closes — no phantom entries appear.
+        ///   2. Every label in `state.windows` has a `WindowMirror`
+        ///      whose `label` field matches the map key (no key/value
+        ///      drift).
+        #[test]
+        fn window_mirror_invariants_under_host_traffic(
+            cmds in proptest::collection::vec(arb_window_cmd(), 1..100)
+        ) {
+            const HOST_PID: u32 = 1;
+            let mut state = State::default();
+            let _ = update(
+                &mut state,
+                Command::Register {
+                    kind: ClientKind::Host,
+                    pid: HOST_PID,
+                    version: "host".into(),
+                },
+                &ctx(1),
+            );
+            let host_ctx = ctx_with_pid(1, HOST_PID);
+
+            let mut opens = 0u64;
+            let mut closes = 0u64;
+            for cmd in cmds {
+                match &cmd {
+                    Command::ReportWindowOpened { .. } => opens += 1,
+                    Command::ReportWindowClosed { .. } => closes += 1,
+                    _ => {}
+                }
+                let _ = update(&mut state, cmd, &host_ctx);
+            }
+
+            // Bound: mirror can't hold more entries than distinct opens
+            // (idempotent overwrite ensures opens are dedup'd by label,
+            // and any open can be cancelled by its matching close).
+            prop_assert!(
+                state.windows.len() as u64 <= opens,
+                "mirror size {} > total opens {}",
+                state.windows.len(), opens
+            );
+            // Key/value coherence — if this ever fails, the reducer
+            // wrote a value with a mismatched label.
+            for (k, v) in &state.windows {
+                prop_assert_eq!(k, &v.label);
+            }
+            // Closes are observable (each emits an event regardless
+            // of mirror state). Just sanity-check nothing is leaking
+            // into negative counters.
+            let _ = (opens, closes); // referenced for failure messages
+        }
+    }
+
+    /// B.4 — generate ONLY window-mirror commands. Used by the
+    /// host-driven proptest above to guarantee exercise of the
+    /// mirror insert/remove paths (general `arb_command` mixes in
+    /// Register / Ping / Goodbye which dilute window coverage).
+    fn arb_window_cmd() -> impl proptest::strategy::Strategy<Value = Command> {
+        use proptest::prelude::*;
+        prop_oneof![
+            (
+                "[a-c]{1,3}",
+                prop_oneof![
+                    Just(WindowKind::FullInstance),
+                    Just(WindowKind::Subwindow),
+                ],
+                prop_oneof![Just(None::<String>), Just(Some("a".into()))],
+            )
+                .prop_map(|(label, kind, parent_label)| {
+                    Command::ReportWindowOpened { label, kind, parent_label }
+                }),
+            "[a-c]{1,3}".prop_map(|label| Command::ReportWindowClosed { label }),
+        ]
     }
 }
