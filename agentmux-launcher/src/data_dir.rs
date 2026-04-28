@@ -27,9 +27,16 @@ use std::path::{Path, PathBuf};
 /// the launcher itself.
 #[derive(Debug, Clone)]
 pub struct DataPaths {
-    /// CEF cache + srv DB live here.
-    /// Portable: `<portable-root>/data/cef/`.
+    /// Backend data dir — srv reads/writes its DB here (under
+    /// `data_dir/db/`) and gets it as `--wavedata`.
+    /// Portable: `<portable-root>/data/`.
     /// Installed: `%LOCALAPPDATA%/ai.agentmux.cef.v{ver}/`.
+    ///
+    /// NOT the CEF cache dir — that's a separate path computed in the
+    /// host's main.rs (`<portable-root>/data/cef/` for portable). The
+    /// two coincide in installed mode but diverge in portable. Don't
+    /// conflate them — doing so silently moves srv DB on upgrade.
+    /// (reagent / codex P1 + P2 on PR #571 round-1.)
     pub data_dir: PathBuf,
     /// Per-instance config + settings.
     /// Portable: `<portable-root>/data/config/`.
