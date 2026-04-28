@@ -23,7 +23,9 @@
 mod data_dir;
 mod hash;
 mod ipc;
+mod reducer;
 mod srv_spawner;
+mod state;
 
 #[tokio::main]
 async fn main() {
@@ -170,6 +172,7 @@ async fn run_windows(
         ipc::server::ServerCtx {
             launcher_pid: std::process::id(),
             launcher_version: env!("CARGO_PKG_VERSION").to_string(),
+            state: tokio::sync::Mutex::new(state::State::default()),
         },
     );
     log(&format!("IPC server started on {}", pipe_path));
