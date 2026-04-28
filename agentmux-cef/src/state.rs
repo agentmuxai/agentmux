@@ -80,33 +80,10 @@ impl WindowInstanceRegistry {
     }
 }
 
-/// Wrapper for a Windows HANDLE that is Send + Sync.
-/// Windows HANDLEs are safe to use from any thread.
-#[cfg(target_os = "windows")]
-pub struct JobHandle(*mut std::ffi::c_void);
-
-#[cfg(target_os = "windows")]
-unsafe impl Send for JobHandle {}
-#[cfg(target_os = "windows")]
-unsafe impl Sync for JobHandle {}
-
-#[cfg(target_os = "windows")]
-impl JobHandle {
-    pub fn new(handle: *mut std::ffi::c_void) -> Self {
-        Self(handle)
-    }
-}
-
-#[cfg(target_os = "windows")]
-impl Drop for JobHandle {
-    fn drop(&mut self) {
-        if !self.0.is_null() {
-            unsafe {
-                windows_sys::Win32::Foundation::CloseHandle(self.0);
-            }
-        }
-    }
-}
+// Phase B.1: removed `JobHandle` wrapper. Host no longer owns a Job
+// Object on srv; the launcher's J0 covers srv directly via
+// AssignProcessToJobObject. The same RAII pattern lives in
+// agentmux-launcher/src/main.rs::JobHandle.
 
 /// Backend (agentmux-srv) connection endpoints.
 #[derive(Default, Clone, serde::Serialize)]
@@ -275,9 +252,8 @@ pub struct AppState {
     /// pane targets. See `docs/specs/SPEC_BROWSER_DOM_API.md` §6.
     pub debug_port: Mutex<u16>,
 
-    /// Windows Job Object handle -- keeps backend alive until frontend exits
-    #[cfg(target_os = "windows")]
-    pub job_handle: Mutex<Option<JobHandle>>,
+    // Phase B.1 removed `job_handle` (was Windows-only). Launcher
+    // owns J0 wrapping srv now; host no longer needs its own job.
 }
 
 impl Default for AppState {
@@ -312,8 +288,6 @@ impl Default for AppState {
             browser_panes: crate::browser_panes::BrowserPaneManager::new(),
             browser_api: crate::browser_api::BrowserApiState::new(),
             debug_port: Mutex::new(0),
-            #[cfg(target_os = "windows")]
-            job_handle: Mutex::new(None),
         }
     }
 }
