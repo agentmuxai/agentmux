@@ -141,6 +141,23 @@ pub enum Command {
     ReportHostPoolCount {
         count: u32,
     },
+    /// Phase B.5 (window_id_map step a) — host reports the
+    /// frontend's `register_backend_window` call: a window's label
+    /// → backend window ID (a srv-side UUID the frontend resolves
+    /// via `WOS.makeORef`). The launcher mirrors it for the same
+    /// reasons it mirrors `instance_registry`: host's authoritative
+    /// copy will be retired through the a→b→c→d→e ratchet.
+    ReportBackendWindowIdRegistered {
+        label: String,
+        window_id: String,
+    },
+    /// Phase B.5 (window_id_map step a) — host reports a window
+    /// closing, so the launcher should drop the label→window_id
+    /// mapping. Sent from the same close path that emits
+    /// `ReportWindowClosed`.
+    ReportBackendWindowIdUnregistered {
+        label: String,
+    },
 }
 
 /// Wire-side enum for `WindowKind`. Mirrors `agentmux-cef::state::WindowKind`
@@ -244,6 +261,22 @@ pub enum Event {
     },
     PoolWindowRemoved {
         label: String,
+        version: u64,
+    },
+    /// Phase B.5 (window_id_map step a) — launcher recorded the
+    /// label → backend window ID mapping. Subscribers (host's
+    /// shadow, eventually srv-side consumers) update their
+    /// projections.
+    BackendWindowIdRegistered {
+        label: String,
+        window_id: String,
+        version: u64,
+    },
+    /// Phase B.5 (window_id_map step a) — launcher dropped the
+    /// label → backend window ID mapping (window closed).
+    BackendWindowIdUnregistered {
+        label: String,
+        window_id: String,
         version: u64,
     },
     /// Phase B.5 — sequential instance number assigned to a window
