@@ -30,6 +30,10 @@ dirs = "5"
 # RFC3339 timestamps for backend_started_at logs, kept stable for
 # log-format compatibility with the host's existing format.
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
+# UUID v4 for the shared auth key launcher generates and gives to
+# both srv (env var) and host (env var). Same generation method the
+# host uses today (uuid::Uuid::new_v4) so the format is identical.
+uuid = { version = "1", features = ["v4"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-sys = { version = "0.59", features = [

@@ -15,6 +15,7 @@
 )]
 
 mod data_dir;
+mod srv_spawner;
 
 fn main() {
     let exe_path = std::env::current_exe().expect("cannot resolve exe path");
