@@ -22,7 +22,7 @@
 //   * Event log ring buffer (B.4 — added when events first start
 //     accumulating beyond handshake replies)
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use agentmux_common::ipc::{ClientKind, WindowKind};
 pub use agentmux_common::ipc::LifecyclePhase;
@@ -92,6 +92,14 @@ pub struct State {
     /// `ReportWindow*` commands. B.5 inverts the dependency: host
     /// queries this map instead of maintaining its own.
     pub windows: HashMap<String, WindowMirror>,
+    /// Phase B.4 follow-up — pre-warmed pool inventory. Tracked
+    /// separately from `windows` because pool entries are not
+    /// user-visible until promote. On promote the host emits
+    /// `ReportPoolWindowRemoved` + `ReportWindowOpened` so the same
+    /// label transitions atomically (from launcher's perspective)
+    /// from `pool` to `windows`. On pre-promote destroy: only
+    /// `ReportPoolWindowRemoved`.
+    pub pool: HashSet<String>,
     /// Monotonic counter for `Event.version`. Bumped by `bump_version()`.
     pub event_version: u64,
     /// Monotonic counter for client_id (returned in Registered events).
@@ -104,6 +112,7 @@ impl Default for State {
             lifecycle: LifecyclePhase::Starting,
             processes: HashMap::new(),
             windows: HashMap::new(),
+            pool: HashSet::new(),
             event_version: 0,
             next_client_id: 1,
         }

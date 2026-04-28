@@ -98,7 +98,45 @@ pub fn update(state: &mut State, cmd: Command, ctx: &Ctx) -> Vec<Event> {
             }
             handle_report_window_closed(state, label)
         }
+        Command::ReportPoolWindowAdded { label } => {
+            if let Some(err) = enforce_host_only(state, ctx, "ReportPoolWindowAdded") {
+                return vec![err];
+            }
+            handle_report_pool_window_added(state, label)
+        }
+        Command::ReportPoolWindowRemoved { label } => {
+            if let Some(err) = enforce_host_only(state, ctx, "ReportPoolWindowRemoved") {
+                return vec![err];
+            }
+            handle_report_pool_window_removed(state, label)
+        }
     }
+}
+
+/// Phase B.4 follow-up — record pool inventory growth. Idempotent
+/// on duplicate labels (HashSet semantics) but the event still fires
+/// so subscribers can track add-attempts even if redundant.
+fn handle_report_pool_window_added(state: &mut State, label: String) -> Vec<Event> {
+    state.pool.insert(label.clone());
+    let v = state.bump_version();
+    vec![Event::PoolWindowAdded { label, version: v }]
+}
+
+/// Phase B.4 follow-up — record pool inventory shrink (promote or
+/// destroy). Strictly paired with `ReportPoolWindowAdded`: an
+/// unknown-label remove is a silent no-op so subscribers can rely
+/// on add/remove pairing in the broadcast stream. Same gate as
+/// `handle_report_window_closed`. (reagent P2 PR #577 round-3 —
+/// the original "idempotent" comment referenced behavior that was
+/// already removed for `ReportWindowClosed`; pool semantics now
+/// match.)
+fn handle_report_pool_window_removed(state: &mut State, label: String) -> Vec<Event> {
+    let was_present = state.pool.remove(&label);
+    if !was_present {
+        return vec![];
+    }
+    let v = state.bump_version();
+    vec![Event::PoolWindowRemoved { label, version: v }]
 }
 
 /// Phase B.4 — gate window-mirror reports to Host clients only. The
@@ -161,19 +199,23 @@ fn handle_report_window_opened(
     }]
 }
 
-/// Phase B.4 — drop a host-reported window from the mirror. Missing
-/// label is logged-only (no Error event) because the close-before-
-/// launcher-saw-the-open race is benign in B.4: the launcher's mirror
-/// is a passive copy, and the host's authoritative view will simply
-/// not have the window either. B.5 will tighten this contract.
+/// Phase B.4 — drop a host-reported window from the mirror. Returns
+/// `Event::WindowClosed` only when the label was actually in the
+/// mirror; an unknown-label close is a silent no-op (codex P2 PR
+/// #577 round-2). Without this gate, a `ReportWindowClosed` for a
+/// label the launcher never saw (e.g. a pool window that was popped
+/// from the queue but failed HWND validation in
+/// `promote_pool_window` — the orphan window's eventual
+/// `on_before_close` reaches us without a matching open) would
+/// emit an unpaired `WindowClosed` broadcast and break subscribers
+/// that assume open/close pairing.
 fn handle_report_window_closed(state: &mut State, label: String) -> Vec<Event> {
     let was_present = state.windows.remove(&label).is_some();
-    let v = state.bump_version();
     if !was_present {
-        // Quiet: B.4 is read-only and the mirror can race with the
-        // host's authoritative store on first launch. We still emit
-        // the Closed event so subscribers stay consistent.
+        // Silent: only emit when the close pairs with a known open.
+        return vec![];
     }
+    let v = state.bump_version();
     vec![Event::WindowClosed { label, version: v }]
 }
 
@@ -438,6 +480,8 @@ mod tests {
             | Event::Pong { version, .. }
             | Event::WindowOpened { version, .. }
             | Event::WindowClosed { version, .. }
+            | Event::PoolWindowAdded { version, .. }
+            | Event::PoolWindowRemoved { version, .. }
             | Event::Error { version, .. } => *version,
         }
     }
@@ -562,7 +606,7 @@ mod tests {
     }
 
     #[test]
-    fn report_window_closed_on_unknown_label_is_idempotent() {
+    fn report_window_closed_on_unknown_label_is_silent_no_op() {
         let mut state = State::default();
         let host_ctx = register_host_and_get_ctx(&mut state, 1234);
         let events = update(
@@ -572,10 +616,10 @@ mod tests {
             },
             &host_ctx,
         );
-        // Still emits an event (so subscribers stay consistent) but
-        // doesn't error.
-        assert_eq!(events.len(), 1);
-        assert!(matches!(events[0], Event::WindowClosed { .. }));
+        // Codex P2 PR #577 round-2: NO broadcast for unknown labels.
+        // Pairs strictly with WindowOpened so subscribers can rely on
+        // open/close pairing.
+        assert_eq!(events.len(), 0);
         assert!(state.windows.is_empty());
     }
 
@@ -605,6 +649,117 @@ mod tests {
             state.windows["sub-1"].parent_label.as_deref(),
             Some("main")
         );
+    }
+
+    #[test]
+    fn report_pool_window_add_and_remove_round_trip() {
+        let mut state = State::default();
+        let host_ctx = register_host_and_get_ctx(&mut state, 1234);
+        let events = update(
+            &mut state,
+            Command::ReportPoolWindowAdded {
+                label: "window-pool-abc".into(),
+            },
+            &host_ctx,
+        );
+        assert_eq!(events.len(), 1);
+        assert!(matches!(
+            &events[0],
+            Event::PoolWindowAdded { label, .. } if label == "window-pool-abc"
+        ));
+        assert!(state.pool.contains("window-pool-abc"));
+
+        let events = update(
+            &mut state,
+            Command::ReportPoolWindowRemoved {
+                label: "window-pool-abc".into(),
+            },
+            &host_ctx,
+        );
+        assert_eq!(events.len(), 1);
+        assert!(matches!(
+            &events[0],
+            Event::PoolWindowRemoved { label, .. } if label == "window-pool-abc"
+        ));
+        assert!(!state.pool.contains("window-pool-abc"));
+    }
+
+    #[test]
+    fn pool_and_window_mirrors_are_independent() {
+        // The host transitions a pool window to a real window via
+        // (PoolRemoved, WindowOpened). Verify the launcher can hold
+        // both maps without collision and an entry can be in pool
+        // OR windows but not both.
+        let mut state = State::default();
+        let host_ctx = register_host_and_get_ctx(&mut state, 1234);
+        let _ = update(
+            &mut state,
+            Command::ReportPoolWindowAdded {
+                label: "window-pool-xyz".into(),
+            },
+            &host_ctx,
+        );
+        let _ = update(
+            &mut state,
+            Command::ReportPoolWindowRemoved {
+                label: "window-pool-xyz".into(),
+            },
+            &host_ctx,
+        );
+        let _ = update(
+            &mut state,
+            Command::ReportWindowOpened {
+                label: "window-pool-xyz".into(),
+                kind: WindowKind::FullInstance,
+                parent_label: None,
+            },
+            &host_ctx,
+        );
+        assert!(!state.pool.contains("window-pool-xyz"));
+        assert!(state.windows.contains_key("window-pool-xyz"));
+    }
+
+    #[test]
+    fn report_pool_window_removed_on_unknown_label_is_silent_no_op() {
+        let mut state = State::default();
+        let host_ctx = register_host_and_get_ctx(&mut state, 1234);
+        let events = update(
+            &mut state,
+            Command::ReportPoolWindowRemoved {
+                label: "ghost-pool".into(),
+            },
+            &host_ctx,
+        );
+        // Strict pairing — pool remove only emits an event when the
+        // label was in the pool. (reagent P2 PR #577 round-3.)
+        assert_eq!(events.len(), 0);
+        assert!(state.pool.is_empty());
+    }
+
+    #[test]
+    fn pool_commands_from_non_host_are_rejected() {
+        let mut state = State::default();
+        let _ = update(
+            &mut state,
+            Command::Register {
+                kind: ClientKind::Tool,
+                pid: 9999,
+                version: "test".into(),
+            },
+            &ctx(1),
+        );
+        let events = update(
+            &mut state,
+            Command::ReportPoolWindowAdded {
+                label: "spoof-pool".into(),
+            },
+            &ctx_with_pid(1, 9999),
+        );
+        assert!(matches!(
+            &events[0],
+            Event::Error { code: ErrorCode::NotRegistered, .. }
+        ));
+        assert!(state.pool.is_empty());
     }
 
     #[test]

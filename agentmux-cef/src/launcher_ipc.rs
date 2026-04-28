@@ -263,3 +263,30 @@ pub fn report_window_closed(label: String) {
         tracing::warn!("[launcher-ipc] report_window_closed: channel closed ({})", e);
     }
 }
+
+/// Phase B.4 follow-up — sync API: report a pool window being added
+/// to the warm pool inventory. Called from `spawn_pool_window` on
+/// the UI thread. No-op when launcher pipe is absent.
+pub fn report_pool_window_added(label: String) {
+    let Some(tx) = COMMAND_TX.get() else {
+        return;
+    };
+    let cmd = Command::ReportPoolWindowAdded { label };
+    if let Err(e) = tx.send(cmd) {
+        tracing::warn!("[launcher-ipc] report_pool_window_added: channel closed ({})", e);
+    }
+}
+
+/// Phase B.4 follow-up — sync API: report a pool window leaving the
+/// pool (promote, destroy). On promote callers should also call
+/// `report_window_opened` so the label transitions atomically (from
+/// the launcher's perspective) from `pool` to `windows`.
+pub fn report_pool_window_removed(label: String) {
+    let Some(tx) = COMMAND_TX.get() else {
+        return;
+    };
+    let cmd = Command::ReportPoolWindowRemoved { label };
+    if let Err(e) = tx.send(cmd) {
+        tracing::warn!("[launcher-ipc] report_pool_window_removed: channel closed ({})", e);
+    }
+}
