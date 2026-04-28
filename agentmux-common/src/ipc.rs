@@ -105,9 +105,21 @@ pub enum Command {
     /// its mirror counts and emits `Event::DriftDetected` per
     /// disagreeing dimension. Sent in a separate command (rather
     /// than embedded in each Report*) so the existing wire shapes
-    /// stay unchanged. Frequency: one per window-level transition
-    /// — host is single-threaded for these events so the order
-    /// with the preceding Report* is deterministic.
+    /// stay unchanged.
+    ///
+    /// Known limitation (B.4 observe-only): emissions originate
+    /// from multiple execution contexts (CEF UI thread for
+    /// `on_after_created`/`on_before_close`, IPC handler thread
+    /// for `promote_pool_window`). Cross-thread interleaving in
+    /// the outbound channel can produce a snapshot whose counts
+    /// were taken at a moment that doesn't match the channel
+    /// order seen by the reducer, occasionally emitting a
+    /// transient false `DriftDetected`. Acceptable for B.4
+    /// (drift is diagnostic — false positives are ephemeral and
+    /// self-correct on the next stable state). B.5 will tighten
+    /// with a transition-ID protocol once the launcher is
+    /// authoritative. (codex P2 PR #578 round-4 — accepted as
+    /// known limitation.)
     ReportHostCounts {
         /// User-visible top-level windows in the host's
         /// authoritative store (`browsers` minus browser-pane
