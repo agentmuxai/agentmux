@@ -186,13 +186,12 @@ pub async fn connect_to_launcher(
         }
     });
 
-    // Spawn a read-loop task. Logs every event and (B.5b) feeds the
-    // instance-number shadow registry from the launcher's
-    // authoritative `WindowInstanceAssigned` / `WindowInstanceReleased`
-    // stream. The shadow runs in parallel to the host's existing
-    // `WindowInstanceRegistry`; on each event we compare the two and
-    // log drift. B.5c will swap roles — launcher becomes
-    // authoritative, this shadow becomes the read path.
+    // Spawn a read-loop task. Logs every event and feeds the host's
+    // shadow projections (`shadow_instance_registry` for now;
+    // `shadow_*` for other migrated maps in subsequent B.5 sub-PRs)
+    // from the launcher's authoritative event stream. Host has no
+    // local `WindowInstanceRegistry` post-B.5e — the shadow IS the
+    // read path.
     let state_for_reader = std::sync::Arc::clone(&state);
     let reader_task = tokio::spawn(async move {
         let reader = BufReader::new(read_half);
@@ -238,32 +237,18 @@ pub async fn connect_to_launcher(
     None
 }
 
-/// Phase B.5b — apply launcher events that affect the shadow
-/// instance registry. Compares the launcher's authoritative
-/// assignment to the host's existing `WindowInstanceRegistry` and
-/// logs drift. Other event types are no-ops here (they're already
-/// logged at the call site).
+/// Phase B.5e — apply launcher events to host's shadow projections.
+/// Currently handles instance-number events; future B.5 sub-PRs will
+/// add more shadow handlers as additional host maps migrate. Other
+/// event types are no-ops here (they're already logged at the call
+/// site).
 fn apply_event_to_shadow(state: &std::sync::Arc<crate::state::AppState>, event: &Event) {
     match event {
         Event::WindowInstanceAssigned { label, num, .. } => {
-            // Phase B.5b drift compare: kept for B.5d transition —
-            // host's `window_instance_registry` is now seed-only
-            // ({"main": 1}, never mutated), so this only fires on
-            // "main" (where it should agree). For non-main labels
-            // host_num will always be None and the compare skips.
-            // Removed entirely in B.5e along with the host field.
-            let host_num = state.window_instance_registry.lock().get(label);
-            if let Some(host_num) = host_num {
-                if host_num != *num {
-                    tracing::warn!(
-                        target: "launcher-ipc:drift",
-                        label = %label,
-                        launcher_num = %num,
-                        host_num = %host_num,
-                        "[launcher-ipc] instance# drift: host and launcher disagree"
-                    );
-                }
-            }
+            // Phase B.5e — host's `WindowInstanceRegistry` was
+            // deleted. The drift compare that used to live here
+            // (B.5b/c/d) is gone; the launcher is the sole
+            // authority and the shadow is the host's projection.
             state
                 .shadow_instance_registry
                 .lock()
@@ -280,37 +265,9 @@ fn apply_event_to_shadow(state: &std::sync::Arc<crate::state::AppState>, event: 
                 &serde_json::json!(count),
             );
         }
-        Event::WindowInstanceReleased { label, num, .. } => {
-            // Drift check kept for B.5d transition — host's
-            // `window_instance_registry` is now seed-only
-            // ({"main": 1}, never mutated since B.5d retired the
-            // four `register()`/`unregister()` call sites). The
-            // only label that can land in the host fallback range
-            // is "main" → 1, which the launcher pre-seeds with the
-            // same value, so this compare effectively never fires
-            // post-B.5d. Removed entirely in B.5e along with the
-            // host field. Original race-vs-bug rationale lived
-            // here pre-B.5d; see git history for codex P2 PR #580
-            // round-2 context.
-            let host_num = state.window_instance_registry.lock().get(label);
-            if let Some(host_num) = host_num {
-                if host_num != *num {
-                    tracing::warn!(
-                        target: "launcher-ipc:drift",
-                        label = %label,
-                        launcher_released_num = %num,
-                        host_num = %host_num,
-                        "[launcher-ipc] release-side instance# split-brain: host has a different number than the launcher released"
-                    );
-                } else {
-                    tracing::info!(
-                        target: "launcher-ipc:drift",
-                        label = %label,
-                        num = %num,
-                        "[launcher-ipc] release-side: host still has matching entry after launcher Released — race or unregister bug; sustained presence indicates bug"
-                    );
-                }
-            }
+        Event::WindowInstanceReleased { label, .. } => {
+            // Phase B.5e — host's `WindowInstanceRegistry` was
+            // deleted; the drift compare is gone with it.
             state.shadow_instance_registry.lock().remove(label);
             // Phase B.5d — re-emit `window-instances-changed` so the
             // frontend catches up after the brief race between the
