@@ -47,11 +47,35 @@ pub struct ServerCtx {
     pub state: Mutex<State>,
 }
 
+/// Bind the first named-pipe instance synchronously.
+///
+/// Phase B.6: the bind is the single-instance signal. Splitting it
+/// out of `run_ipc_server` lets the caller (main.rs) detect a
+/// collision BEFORE spawning srv/host and surface a user-visible
+/// error ("AgentMux is already running"). `ServerOptions::create`
+/// requires a Tokio runtime context for IOCP registration, so this
+/// must be called from inside `#[tokio::main]` (or any task on the
+/// runtime) — not from a plain sync entrypoint.
+///
+/// On Windows, a second launcher hitting the same pipe gets
+/// `ERROR_ACCESS_DENIED` (raw OS error 5); other errors mean the
+/// pipe namespace itself is misconfigured.
+#[cfg(target_os = "windows")]
+pub fn bind_first_pipe_instance(pipe_name: &str) -> std::io::Result<NamedPipeServer> {
+    ServerOptions::new()
+        .first_pipe_instance(true)
+        .create(pipe_name)
+}
+
 /// Run the named-pipe IPC server until cancelled (or task panics).
 ///
 /// Returns a JoinHandle the caller (main.rs) holds for the life of
 /// the launcher. The server keeps accepting until the launcher's
 /// Tokio runtime shuts down.
+///
+/// The first pipe instance is passed in pre-bound by the caller (see
+/// `bind_first_pipe_instance`) so a collision can be surfaced
+/// synchronously before any children are spawned (Phase B.6).
 ///
 /// Each accepted connection becomes a new tokio task running
 /// `handle_connection`. The accept loop creates a fresh
@@ -61,29 +85,13 @@ pub struct ServerCtx {
 #[cfg(target_os = "windows")]
 pub fn run_ipc_server(
     pipe_name: String,
+    first: NamedPipeServer,
     ctx: ServerCtx,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let ctx = Arc::new(ctx);
         crate::log(&format!("[ipc] server starting on {}", pipe_name));
 
-        // First server instance — `first_pipe_instance(true)` rejects
-        // a second launcher trying to bind the same pipe (Phase B.6's
-        // single-instance check rides on this). For B.2 we use it
-        // defensively to surface name-collision bugs early.
-        let first = match ServerOptions::new()
-            .first_pipe_instance(true)
-            .create(&pipe_name)
-        {
-            Ok(s) => s,
-            Err(e) => {
-                crate::log(&format!(
-                    "[ipc] FATAL: bind failed for {}: {} (another launcher running for this data dir?)",
-                    pipe_name, e
-                ));
-                return;
-            }
-        };
         let mut current = first;
 
         loop {
