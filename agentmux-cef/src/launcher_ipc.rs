@@ -265,6 +265,53 @@ fn apply_event_to_shadow(state: &std::sync::Arc<crate::state::AppState>, event: 
                 &serde_json::json!(count),
             );
         }
+        Event::WindowOpened { label, kind, parent_label, .. } => {
+            // Phase B.5 (window_meta step b) — shadow projection
+            // + drift compare. Map the wire `WindowKind` back to
+            // host's `crate::state::WindowKind` (one-to-one).
+            let host_kind = match kind {
+                agentmux_common::ipc::WindowKind::FullInstance => crate::state::WindowKind::FullInstance,
+                agentmux_common::ipc::WindowKind::Subwindow => crate::state::WindowKind::Subwindow,
+            };
+            let shadow_meta = crate::state::WindowMeta {
+                label: label.clone(),
+                kind: host_kind,
+                parent_instance_id: parent_label.clone(),
+            };
+            // Drift compare to host's authoritative `window_meta`.
+            // Race-tolerant: host's local insert (in
+            // `on_after_created`) may not have run yet if the
+            // launcher event raced ahead. Skip in that case.
+            let host_meta = state.window_meta.lock().get(label).cloned();
+            if let Some(host_meta) = host_meta {
+                if host_meta.kind != shadow_meta.kind
+                    || host_meta.parent_instance_id != shadow_meta.parent_instance_id
+                {
+                    tracing::warn!(
+                        target: "launcher-ipc:drift",
+                        label = %label,
+                        launcher_kind = ?shadow_meta.kind,
+                        launcher_parent = ?shadow_meta.parent_instance_id,
+                        host_kind = ?host_meta.kind,
+                        host_parent = ?host_meta.parent_instance_id,
+                        "[launcher-ipc] window_meta drift: host and launcher disagree"
+                    );
+                }
+            }
+            state
+                .shadow_window_meta
+                .lock()
+                .insert(label.clone(), shadow_meta);
+        }
+        Event::WindowClosed { label, .. } => {
+            // Phase B.5 (window_meta step b) — symmetric drop.
+            // Drift compare on close is omitted: the launcher's
+            // strict-pairing semantic (PR #577 round-2) means we
+            // only see this event when the open was paired, so a
+            // host-side missing entry would have surfaced at
+            // open time.
+            state.shadow_window_meta.lock().remove(label);
+        }
         Event::BackendWindowIdRegistered { label, window_id, .. } => {
             // Phase B.5 (window_id_map step e) — host's
             // `window_id_map` was deleted; the drift compare is
