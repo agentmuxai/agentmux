@@ -198,12 +198,28 @@ pub struct AppState {
 
     /// CEF Browser handles keyed by window label (multi-window support).
     /// "main" is the primary window; tear-off windows get "window-{UUID}" labels.
+    ///
+    /// **Phase B / multi-reducer status**: this map is intentionally NOT
+    /// migrated to launcher under the standard B.5 a→b→c→d→e ratchet because
+    /// `cef::Browser` is an FFI handle to a Chromium browser object in this
+    /// process — it can't serialize over IPC and must stay co-located with
+    /// the CEF runtime. The KEY-SET role (label set queries) is already
+    /// covered by the launcher's `state.windows` mirror (B.4) +
+    /// `shadow_window_meta`. This field will be retired into a host-side
+    /// reducer in Phase F (see `docs/retro/multi-reducer-proposal-2026-04-28.md`).
     pub browsers: Mutex<HashMap<String, Browser>>,
 
-    /// Per-window metadata (kind, parent linkage). Maintained in parallel with
-    /// `browsers` — any `browsers.insert()` for a real window must also record
-    /// a `WindowMeta` here so on_after_created knows whether to hide the HWND
-    /// from the taskbar and so on_before_close can cascade sub-window closure.
+    /// Per-window metadata (kind, parent linkage).
+    ///
+    /// **Phase B status**: synchronous host-side cache mirroring the
+    /// launcher's `state.windows` mirror. Single canonical mutation site:
+    /// inserted in `client.rs::on_after_created` from the popped
+    /// `PendingWindowCreation` entry, removed in `on_before_close`.
+    /// Required for synchronous lookups that can't tolerate the launcher
+    /// round-trip lag (`open_subwindow` parent-liveness check; cascade-close
+    /// child enumeration). See `docs/retro/migration-pattern.md` for the
+    /// sync-cache exception and `b5-migration-architecture-2026-04-28.md`
+    /// for why step e ≠ delete here.
     pub window_meta: Mutex<HashMap<String, WindowMeta>>,
 
     /// Phase B.5 (window_meta step d) — FIFO queue of pre-create
@@ -227,6 +243,15 @@ pub struct AppState {
     /// On tear-off: pop a label, reposition + show + emit `pool:promote`.
     /// Cold-path (open_window_at_position) remains as defence-in-depth.
     /// See SPEC_TAB_TEAR_OFF_SIZE_PRESERVATION_2026_04_26 §4.5.
+    ///
+    /// **Phase B / multi-reducer status**: this map is intentionally NOT
+    /// migrated to launcher under the B.5 ratchet — pool decisions need
+    /// synchronous host-local state (e.g., `window_pool.len() <
+    /// POOL_TARGET_SIZE` for refill triggers) that can't tolerate the
+    /// launcher round-trip lag. The launcher's `state.pool: HashSet<String>`
+    /// (B.4) mirrors the conceptual inventory for cross-process queries.
+    /// Will become host-reducer state in Phase F (see
+    /// `docs/retro/multi-reducer-proposal-2026-04-28.md`).
     pub window_pool: Mutex<VecDeque<String>>,
     /// Labels of pool windows that have been spawned but NOT yet
     /// promoted. Populated synchronously in `spawn_pool_window` so
@@ -237,10 +262,16 @@ pub struct AppState {
     /// Without this, list_windows reports unpromoted pool windows
     /// as user-visible instances during the ~100ms gap between
     /// spawn and renderer-ready.
+    ///
+    /// **Phase B / multi-reducer status**: same as `window_pool` —
+    /// host-only synchronous lifecycle scaffolding; not migrated under B.5
+    /// ratchet. Phase F (host reducer) will retire it.
     pub unpromoted_pool_labels: Mutex<std::collections::HashSet<String>>,
     /// Single in-flight respawn semaphore — prevents pool refill from
     /// stacking spawns when the user does back-to-back tear-offs faster
     /// than CEF can create windows.
+    ///
+    /// **Phase B status**: host-only sync primitive; not migrate-able.
     pub window_pool_respawn_in_flight: std::sync::atomic::AtomicBool,
 
     /// Version-specific data directory (e.g. ai.agentmux.cef.v0-32-111/)
