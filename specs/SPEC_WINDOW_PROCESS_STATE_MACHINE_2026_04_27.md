@@ -5,9 +5,16 @@
 **Status:** Draft for review
 **Repo:** `agentmuxai/agentmux` @ `main` (current `0.33.435`)
 **Related (read first):**
-- `agentmux/specs/SPEC_BACKEND_LIFECYCLE.md`
-- `agentmux/specs/process-lifecycle-v2.md`
-- `agentmux/specs/instance-indicator.md`
+- `specs/ANALYSIS_WINDOW_PROCESS_STATE_INVENTORY_2026_04_27.md` —
+  exhaustive map of every state-tracking site in the current code,
+  with file:line citations. The "what exists today" companion to
+  this spec.
+- `specs/ANALYSIS_MULTI_PROCESS_BEST_PRACTICES_2026_04_27.md` —
+  prior-art research (Chromium, Electron, VS Code, Tauri, Windows
+  Job Objects) that the recommendations below draw from.
+- `specs/SPEC_BACKEND_LIFECYCLE.md`
+- `specs/process-lifecycle-v2.md`
+- `specs/instance-indicator.md`
 - Recent merged PRs #562–#568 (tab tear-off + warm pool fixes)
 
 This spec describes a single coherent state machine that owns the truth about
