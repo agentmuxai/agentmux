@@ -30,9 +30,26 @@ pub struct BackendSpawnResult {
 pub fn use_launcher_endpoints(
     state: &Arc<AppState>,
 ) -> Option<Result<BackendSpawnResult, String>> {
+    // The env var being absent means "host is running standalone";
+    // fall through to spawn_backend. The env var being PRESENT but
+    // empty means the launcher set it (we're in launcher-managed
+    // mode) but with a malformed value — likely an ESTART parse
+    // mismatch in the launcher. Treat that as Err, NOT as
+    // "fall back to spawn_backend" — the latter would spawn a
+    // SECOND srv against the same data dir while the launcher's
+    // already-running srv keeps going, corrupting state. Better to
+    // fail fast and surface the launcher bug. (codex P2 @
+    // sidecar.rs:35, PR #571 round-4.)
     let ws = std::env::var("AGENTMUX_BACKEND_WS").ok()?;
     if ws.is_empty() {
-        return None;
+        return Some(Err(
+            "launcher set AGENTMUX_BACKEND_WS but it was empty — \
+             refusing to fall back to spawn_backend (would create a \
+             duplicate srv against the same data dir). This is a \
+             launcher bug; check the WAVESRV-ESTART parse path in \
+             agentmux-launcher/src/srv_spawner.rs::parse_estart."
+                .to_string(),
+        ));
     }
     // From here on we KNOW the launcher provided env; missing fields
     // mean a launcher bug, so emit Err rather than fall through to
