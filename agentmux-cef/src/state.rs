@@ -329,4 +329,64 @@ impl AppState {
     pub fn backend_window_id(&self, label: &str) -> Option<String> {
         self.shadow_backend_window_ids.lock().get(label).cloned()
     }
+
+    /// Phase B.5 (window_meta step c) — authoritative WindowMeta
+    /// lookup. Prefers the launcher-fed `shadow_window_meta`; falls
+    /// back to host's local `window_meta` for the race window
+    /// where host has just inserted the pre-create handoff but
+    /// the launcher's `WindowOpened` event hasn't returned yet.
+    /// Same prefer-shadow pattern as `instance_num` and
+    /// `backend_window_id`.
+    pub fn window_meta(&self, label: &str) -> Option<WindowMeta> {
+        if let Some(meta) = self.shadow_window_meta.lock().get(label).cloned() {
+            return Some(meta);
+        }
+        let fallback = self.window_meta.lock().get(label).cloned();
+        if fallback.is_some() {
+            tracing::debug!(
+                target: "launcher-ipc:fallback",
+                label = %label,
+                "[window_meta] shadow miss — falling back to host's window_meta (B.5c transitional)"
+            );
+        }
+        fallback
+    }
+
+    /// Phase B.5 (window_meta step c) — collect labels of Subwindows
+    /// whose `parent_instance_id` points to `parent_label`. Used by
+    /// `on_before_close`'s cascade-close logic.
+    ///
+    /// Returns the **union** of matches from `shadow_window_meta`
+    /// (the launcher-fed projection) and host's `window_meta` (the
+    /// eager pre-create handoff). The union covers a critical race:
+    /// a parent may already have one mirrored subwindow AND a newly
+    /// opened sibling whose `WindowOpened` event hasn't returned to
+    /// host yet. The newer sibling lives in host's `window_meta`
+    /// only; the mirrored one lives in shadow only (post-step-d
+    /// the shadow becomes the sole source). Cascade-close MUST
+    /// catch both — short-circuiting on shadow-non-empty would
+    /// leave the race-window sibling orphaned. (codex P1 PR #591
+    /// round-1.)
+    ///
+    /// Dedup is by label; if a label is in both, it's reported
+    /// once. Labels collected via a HashSet to dedup, returned as
+    /// a Vec.
+    pub fn subwindow_children_of(&self, parent_label: &str) -> Vec<String> {
+        let mut out: std::collections::HashSet<String> = std::collections::HashSet::new();
+        for m in self.shadow_window_meta.lock().values() {
+            if m.kind == WindowKind::Subwindow
+                && m.parent_instance_id.as_deref() == Some(parent_label)
+            {
+                out.insert(m.label.clone());
+            }
+        }
+        for m in self.window_meta.lock().values() {
+            if m.kind == WindowKind::Subwindow
+                && m.parent_instance_id.as_deref() == Some(parent_label)
+            {
+                out.insert(m.label.clone());
+            }
+        }
+        out.into_iter().collect()
+    }
 }
