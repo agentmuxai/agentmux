@@ -325,10 +325,25 @@ fn apply_event_to_shadow(state: &std::sync::Arc<crate::state::AppState>, event: 
                 .shadow_backend_window_ids
                 .lock()
                 .insert(label.clone(), window_id.clone());
+            // Phase B.7.2 — windowId becoming available is the
+            // second half of an open: the entries array's windowId
+            // for `label` transitions from `null` to a real GUID
+            // here. Re-emit so the InstancePanel can resolve the
+            // backend Window record (display name, workspace) for
+            // a freshly-opened window without waiting for another
+            // unrelated event to fire. This was the codex PR #569
+            // P2 race that the now-removed `lastEntriesKey`
+            // polling existed to paper over.
+            emit_window_instances_changed_with_entries(state);
         }
         Event::BackendWindowIdUnregistered { label, .. } => {
             // Phase B.5 (window_id_map step e) — drift compare gone.
             state.shadow_backend_window_ids.lock().remove(label);
+            // Phase B.7.2 — symmetric re-emit so `windowId`
+            // becoming `null` (e.g. backend window record removed
+            // before the launcher's WindowClosed event arrives)
+            // surfaces in the InstancePanel immediately.
+            emit_window_instances_changed_with_entries(state);
         }
         Event::WindowInstanceReleased { label, .. } => {
             // Phase B.5e — host's `WindowInstanceRegistry` was

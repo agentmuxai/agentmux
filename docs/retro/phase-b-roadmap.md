@@ -38,7 +38,10 @@ Pre-Phase-B  ──► host owns 13 HashMaps  ◄── started here
               ✓ B.6 — per-data-dir mutex single-instance (#595)
                         │
                         ▼
-              ◄── HERE. B.7 next: frontend cutover.
+              ✓ B.7.1 — entries-bearing window-instances-changed (#596)
+                        │
+                        ▼
+              ◄── HERE. B.7.2 in flight: windowId-reemit.
               B.7  ──  frontend cutover (delete polling)
               B.8  ──  Phase B exit (delete obsolete defensive code,
                        add property tests, --diag tool, CI smoke)
