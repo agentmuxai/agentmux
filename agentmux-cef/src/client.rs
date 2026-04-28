@@ -217,6 +217,8 @@ impl AgentMuxHandler {
                     ))
             };
             crate::launcher_ipc::report_window_opened(label.clone(), wire_kind, parent_label);
+            // Phase B.4 follow-up — drift check after the open.
+            crate::launcher_ipc::compute_and_report_host_counts(&self.state);
         }
 
         self.browser_list.push(browser);
@@ -341,6 +343,8 @@ impl AgentMuxHandler {
             // `on_pool_window_destroyed` and `promote_pool_window`.
             if !lbl.starts_with("browser-pane-") {
                 crate::launcher_ipc::report_window_closed(lbl.clone());
+                // Phase B.4 follow-up — drift check after the close.
+                crate::launcher_ipc::compute_and_report_host_counts(&self.state);
             }
         }
 

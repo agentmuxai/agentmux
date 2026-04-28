@@ -87,10 +87,27 @@ pub fn spawn_pool_window(state: &Arc<AppState>) {
         .lock()
         .insert(label.clone());
 
-    // Phase B.4 follow-up — mirror the pool inventory in the launcher.
-    // Symmetric with the destroy/promote hooks below; a missing
-    // launcher pipe makes this a no-op.
+    // Phase B.4 follow-up — mirror the pool inventory in the launcher
+    // and check pool drift. We use the pool-only variant
+    // (`report_host_pool_count`) rather than the full
+    // `report_host_counts` because `spawn_pool_window` is invoked
+    // from the refill chain inside `on_pool_window_destroyed`, which
+    // runs during `on_before_close` BEFORE the matching
+    // `ReportWindowClosed` is sent for the closing window. A
+    // full-counts snapshot at this moment would see browsers
+    // shrunk (closing window already removed) but the launcher
+    // mirror still holding it (close not yet reported), producing
+    // transient false windows-drift on every normal
+    // promoted-window close that triggers a refill. Pool count IS
+    // stable at this moment (the new label was just added), so
+    // checking pool alone preserves the "check every transition"
+    // guarantee for the dimension that actually changed. (codex
+    // P2 PR #578 rounds 2 + 3.)
     crate::launcher_ipc::report_pool_window_added(label.clone());
+    {
+        let pool_count = state.unpromoted_pool_labels.lock().len() as u32;
+        crate::launcher_ipc::report_host_pool_count(pool_count);
+    }
 
     let ipc_port = *state.ipc_port.lock();
     let ipc_token = &state.ipc_token;
@@ -255,12 +272,27 @@ pub fn on_pool_window_destroyed(state: &Arc<AppState>, label: &str) {
     // list_windows / app-exit don't keep treating a dead label as
     // pool. Independent of whether the window made it into the
     // queue (renderer crash before ready signal) or not.
-    state.unpromoted_pool_labels.lock().remove(label);
+    //
+    // `was_unpromoted` distinguishes pre-promote death (this fn
+    // owns the launcher mirror update) from post-promote close
+    // (the on_before_close window-close path owns the update).
+    // Without this gate, post-promote closes would fire
+    // `ReportHostCounts` here (browsers already shrunk, mirror
+    // hasn't seen the matching `ReportWindowClosed` yet), causing
+    // a guaranteed transient windows-drift alert on every normal
+    // promoted-window close. (codex P2 PR #578 round-1.)
+    let was_unpromoted = state.unpromoted_pool_labels.lock().remove(label);
 
-    // Phase B.4 follow-up — pool inventory shrunk. Idempotent in
-    // the launcher reducer so calling this for a label the launcher
-    // never saw (post-promote close path) is safe.
-    crate::launcher_ipc::report_pool_window_removed(label.to_string());
+    if was_unpromoted {
+        // Pre-promote death: this path owns the launcher mirror
+        // update for the pool inventory + count snapshot.
+        crate::launcher_ipc::report_pool_window_removed(label.to_string());
+        crate::launcher_ipc::compute_and_report_host_counts(state);
+    }
+    // Post-promote: skip the reports here. on_before_close's
+    // window-close branch will fire `ReportWindowClosed` +
+    // `ReportHostCounts` once the host's mutation is complete,
+    // matching the launcher's mirror after that report applies.
     // Single lock: drop the dead label + check whether we need to
     // refill, all in one critical section.
     let needs_refill = {
@@ -452,6 +484,9 @@ pub fn promote_pool_window(
         agentmux_common::ipc::WindowKind::FullInstance,
         None,
     );
+    // Phase B.4 follow-up — drift check after the atomic
+    // pool→windows transition.
+    crate::launcher_ipc::compute_and_report_host_counts(state);
 
     // Compute position outside the unsafe block — these are pure
     // arithmetic, no FFI needed. Don't clamp with .max(0): Windows'
