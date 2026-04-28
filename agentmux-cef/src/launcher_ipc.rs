@@ -25,9 +25,16 @@ use tokio::sync::Mutex;
 use tokio::net::windows::named_pipe::{ClientOptions, NamedPipeClient};
 
 /// Handle the host holds for its lifetime so the launcher's IPC
-/// pipe stays open. The wrapped `NamedPipeClient` is kept alive by
-/// holding it inside the writer Mutex; dropping this handle closes
-/// the connection (which the launcher logs as a disconnect).
+/// pipe stays open. Dropping it closes the connection (launcher
+/// logs as a disconnect).
+///
+/// Cross-platform shape: the Windows variant carries the actual
+/// pipe writer + reader-task handles; the non-Windows variant is
+/// a unit-struct stub so `connect_to_launcher` keeps a uniform
+/// `Option<LauncherIpcHandle>` return type. Phase 7's cross-
+/// platform IPC (Unix domain sockets) will fill the non-Windows
+/// shape later. (reagent / codex P1 PR #573 round-1.)
+#[cfg(target_os = "windows")]
 pub struct LauncherIpcHandle {
     /// Held purely as a keepalive; B.3+ will replace with a real
     /// command-sender that uses this writer.
@@ -38,6 +45,9 @@ pub struct LauncherIpcHandle {
     #[allow(dead_code)]
     reader_task: tokio::task::JoinHandle<()>,
 }
+
+#[cfg(not(target_os = "windows"))]
+pub struct LauncherIpcHandle;
 
 /// If `AGENTMUX_LAUNCHER_PIPE` is set, connect, Register as Host,
 /// and return a handle the caller (host main.rs) holds for the

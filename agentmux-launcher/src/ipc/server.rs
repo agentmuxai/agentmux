@@ -98,9 +98,25 @@ pub fn run_ipc_server(
 
         loop {
             // Wait for a client to connect to the existing instance.
+            // On error: log + recreate the instance + retry. Without
+            // the explicit `continue`, the failed (un-connected) pipe
+            // instance below would be moved into `accepted` and
+            // spawned in a handler that immediately fails to read,
+            // wasting a per-connection task slot. (reagent P1 + codex
+            // P1 PR #573 round-1.)
             if let Err(e) = current.connect().await {
-                crate::log(&format!("[ipc] connect failed: {}", e));
-                // Keep looping — recreating the server below.
+                crate::log(&format!("[ipc] connect failed: {} — recreating instance", e));
+                current = match ServerOptions::new().create(&pipe_name) {
+                    Ok(s) => s,
+                    Err(create_err) => {
+                        crate::log(&format!(
+                            "[ipc] FATAL: failed to recreate pipe after connect error: {} (server stopping)",
+                            create_err
+                        ));
+                        return;
+                    }
+                };
+                continue;
             }
 
             // Hand the accepted instance to a handler task, then
@@ -249,6 +265,27 @@ async fn handle_connection(stream: NamedPipeServer, ctx: Arc<ServerCtx>) {
                 .await;
             }
             Command::Goodbye => {
+                // Enforce the same Register-first invariant as Ping:
+                // Goodbye before Register lets a misbehaving client
+                // silently bypass the handshake contract. Reply with
+                // NotRegistered so handshake bugs are visible, then
+                // close. (codex P2 PR #573 round-1.)
+                if registered_kind.is_none() {
+                    let _ = send_event(
+                        &writer,
+                        Event::Error {
+                            code: ErrorCode::NotRegistered,
+                            message: "Goodbye before Register".into(),
+                            fatal: true,
+                            version: next_event_version(),
+                        },
+                    )
+                    .await;
+                    crate::log(
+                        "[ipc] goodbye from unregistered client — closing with error",
+                    );
+                    return;
+                }
                 crate::log(&format!(
                     "[ipc] goodbye from client_id={:?} kind={:?}",
                     client_id, registered_kind
