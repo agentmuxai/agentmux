@@ -463,13 +463,29 @@ pub fn promote_pool_window(
         }
     };
 
-    // Pool-slot leak guard: if HWND
-    // lookup fails after we've already popped the label, capacity
-    // permanently shrinks unless we refill. The orphan window (if
-    // any) is logged above and abandoned.
+    // Pool-slot leak guard: if HWND lookup fails after we've already
+    // popped the label, capacity permanently shrinks unless we refill.
+    //
+    // Orphan cleanup (B.5c smoke test caught this): the popped label is
+    // still in `state.browsers` but is no longer in `unpromoted_pool_labels`
+    // (we removed it at the top of this fn) and never became a real
+    // user-visible window (`report_window_opened` is gated on the
+    // post-validation success path). Without explicit cleanup the
+    // host's `compute_and_report_host_counts` filter
+    // (`browsers - panes - unpromoted`) counts the orphan as a window,
+    // producing persistent windows-drift against the launcher mirror
+    // (which correctly never received a `WindowOpened` for it).
+    //
+    // Fix: trigger graceful close on the orphan. CEF's `on_before_close`
+    // will fire and run the standard cleanup path (drops from
+    // `state.browsers` + `window_meta`, fires `report_window_closed`
+    // — silent no-op in the launcher reducer for an unknown label).
+    // If host or browser handles are already gone, fall through to a
+    // direct `state.browsers` removal so our tracking doesn't lie.
     let raw_hwnd = match raw_hwnd {
         Some(h) => h,
         None => {
+            cleanup_failed_promote_orphan(state, &label);
             spawn_pool_window(state);
             return None;
         }
@@ -577,6 +593,58 @@ pub fn promote_pool_window(
     spawn_pool_window(state);
 
     Some(label)
+}
+
+/// Phase B.5c follow-up — clean up an orphan pool window left behind
+/// when `promote_pool_window`'s HWND validation fails. Without this,
+/// the popped label sits in `state.browsers` but is no longer in
+/// `unpromoted_pool_labels` (promote removed it) and never became a
+/// real user window (no `WindowOpened` was reported). Host's
+/// `compute_and_report_host_counts` then counts it as a window, while
+/// the launcher mirror correctly does not — persistent off-by-one
+/// drift. (Caught by B.4b drift detection during B.5c smoke test on
+/// v0.33.461.)
+///
+/// Strategy: prefer graceful close via CEF's `close_browser` so the
+/// standard `on_before_close` cleanup path runs (drops from
+/// `state.browsers` + `window_meta`, sends `report_window_closed`
+/// which the launcher silently no-ops on the unknown label).
+/// Fall back to direct `state.browsers` removal if browser/host
+/// handles are already gone — the launcher mirror is unaffected
+/// either way; this is purely about keeping host's tracking
+/// consistent.
+#[cfg(target_os = "windows")]
+fn cleanup_failed_promote_orphan(state: &Arc<AppState>, label: &str) {
+    use cef::{ImplBrowser, ImplBrowserHost};
+    let mut browser_clone = {
+        let browsers = state.browsers.lock();
+        browsers.get(label).cloned()
+    };
+    if let Some(ref mut browser) = browser_clone {
+        if let Some(host) = browser.host() {
+            // force_close = 1: don't run beforeunload, we know
+            // this window never reached a useful state.
+            host.close_browser(1);
+            tracing::info!(
+                target: "dnd:tearoff:pool",
+                label = %label,
+                "[pool] orphan close_browser issued — on_before_close will run cleanup"
+            );
+            return;
+        }
+    }
+    // Browser or host already gone — clean up directly. on_before_close
+    // won't fire for this label, so do its job here: drop from browsers,
+    // window_meta, and notify the launcher (no-op if label was never
+    // reported as opened, which it wasn't on this failure path).
+    state.browsers.lock().remove(label);
+    state.window_meta.lock().remove(label);
+    crate::launcher_ipc::report_window_closed(label.to_string());
+    tracing::warn!(
+        target: "dnd:tearoff:pool",
+        label = %label,
+        "[pool] orphan browser already gone — cleaned host state directly"
+    );
 }
 
 #[cfg(not(target_os = "windows"))]
