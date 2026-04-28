@@ -120,22 +120,16 @@ pub fn spawn_pool_window(state: &Arc<AppState>) {
         base_url, separator, ipc_port, ipc_token, label
     );
 
-    // Mark as full instance — the window will graduate to a
-    // tear-off destination, which is just another instance window
-    // from the user's perspective.
-    state.window_meta.lock().insert(
-        label.clone(),
-        WindowMeta {
+    // Phase B.5 (window_meta step d) — combined pre-create handoff.
+    // Pool windows graduate to tear-off destinations, which are
+    // FullInstance from the user's perspective.
+    state.pending_window_creations.lock().push_back(
+        crate::state::PendingWindowCreation {
             label: label.clone(),
             kind: WindowKind::FullInstance,
             parent_instance_id: None,
         },
     );
-
-    state
-        .pending_window_labels
-        .lock()
-        .push_back(label.clone());
 
     tracing::info!(
         target: "dnd:tearoff:pool",

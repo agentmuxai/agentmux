@@ -573,8 +573,24 @@ pub fn open_subwindow(
     state: &Arc<AppState>,
     parent_instance_id: String,
 ) -> Result<serde_json::Value, String> {
-    // Reject if the parent isn't a known FullInstance — prevents orphan
-    // sub-windows and enforces the lifecycle rule in the spec.
+    // Reject if the parent isn't a known live FullInstance — prevents
+    // orphan sub-windows and enforces the lifecycle rule in the spec.
+    //
+    // Phase B.5 (window_meta step d, refined twice):
+    // * Round-1 fix used `state.window_meta()` (shadow-first), which
+    //   covered the task-dev-mode regression but allowed a NEW orphan
+    //   bug: shadow lags on close, so during the gap between host's
+    //   sync `on_before_close` removal and the launcher's async
+    //   `WindowClosed` event arrival, this check could still see a
+    //   already-closing parent. (codex P2 PR #592 round-2.)
+    // * Refined: read host_meta DIRECTLY for this liveness check.
+    //   Host_meta is synchronously written in on_after_created and
+    //   removed in on_before_close (per the round-2 step-d
+    //   refinement keeping host_meta as a sync cache), so it
+    //   correctly reflects "is the parent currently open" without
+    //   shadow's async lag. Works in `task dev` mode too (host_meta
+    //   populated by on_after_created regardless of launcher
+    //   presence).
     let parent_ok = state
         .window_meta
         .lock()
@@ -613,33 +629,19 @@ fn open_window_with_kind(
 
     tracing::info!(label = %label, kind = ?kind, parent = ?parent_instance_id, "[window] open window");
 
-    // Record WindowMeta BEFORE the browser is created so on_after_created can
-    // read it and apply the right taskbar treatment.
-    state.window_meta.lock().insert(
-        label.clone(),
-        crate::state::WindowMeta {
+    // Phase B.5 (window_meta step d) — push the pre-create handoff
+    // (label + kind + parent). Replaces the previous parallel
+    // `window_meta.insert` + `pending_window_labels.push` pair.
+    let (pos_x, pos_y) = get_offset_position();
+    let (win_w, win_h) = get_secondary_window_size(pos_x, pos_y);
+
+    state.pending_window_creations.lock().push_back(
+        crate::state::PendingWindowCreation {
             label: label.clone(),
             kind,
             parent_instance_id,
         },
     );
-
-    // Phase B.5d — host no longer assigns instance numbers locally.
-    // The launcher assigns from `ReportWindowOpened` (sent by the
-    // host's `on_after_created` callback) and the shadow update
-    // emits `window-instances-changed`. Brief race: the new window's
-    // frontend may query `get_instance_number` before the launcher's
-    // `WindowInstanceAssigned` event has returned, getting a None →
-    // `unwrap_or(1)` fallback. Frontend's existing
-    // `app-init.ts::refreshLabels(true, retriesLeft)` retry loop
-    // catches up within a few hundred ms. B.7 will replace polling
-    // with direct event subscription, eliminating the race entirely.
-    let (pos_x, pos_y) = get_offset_position();
-    let (win_w, win_h) = get_secondary_window_size(pos_x, pos_y);
-
-    // Push label before posting — on_after_created pops it to register the
-    // browser under the same label that's baked into the window URL.
-    state.pending_window_labels.lock().push_back(label.clone());
 
     // Post to CEF UI thread — window_create_top_level must run there.
     // true = frameless: secondary app windows use the same custom title bar as main.
