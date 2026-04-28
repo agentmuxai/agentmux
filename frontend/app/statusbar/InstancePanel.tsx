@@ -134,7 +134,18 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
         setEditValue("");
     };
 
-    const commitRename = async (entry: WindowEntry) => {
+    // Single shared persistence path used by both commitRename
+    // (Enter / blur) and the onCleanup unmount-flush. Keeps the
+    // trim + cap + RPC + error-log shape consistent. (gemini
+    // PR #569 round-3 MEDIUM @ L176)
+    const performRename = (windowId: string, name: string) => {
+        ObjectService.UpdateObjectMeta(
+            makeORef("window", windowId),
+            { [DISPLAY_NAME_META_KEY]: name } as MetaType,
+        ).catch((e) => console.error("[InstancePanel] rename failed:", e));
+    };
+
+    const commitRename = (entry: WindowEntry) => {
         const editing = editingLabel();
         if (editing !== entry.label) return; // stale
         if (!entry.windowId) {
@@ -143,36 +154,30 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
         }
         const trimmed = editValue().trim().slice(0, DISPLAY_NAME_MAX_LEN);
         // Empty after trim → silent revert per spec §2.2.2.
-        const next = editingLabel();
         setEditingLabel(null);
         setEditValue("");
-        if (!trimmed || next !== entry.label) return;
-        try {
-            await ObjectService.UpdateObjectMeta(
-                makeORef("window", entry.windowId),
-                { [DISPLAY_NAME_META_KEY]: trimmed } as MetaType,
-            );
-        } catch (e) {
-            console.error("[InstancePanel] rename failed:", e);
-        }
+        if (!trimmed) return;
+        performRename(entry.windowId, trimmed);
     };
 
-    // Commit any in-flight rename on panel unmount. The panel can be
-    // dismissed by StatusBar's outside-click handler before the input's
-    // onBlur fires, which would otherwise silently lose the typed
-    // value. fireAndForget — the panel is going away regardless and
-    // we don't block teardown on the RPC. (codex PR #569 round-2 P1)
+    // Panel-unmount cleanup:
+    //   1. Cancel any pending focus timer so it doesn't fire after
+    //      the panel is gone (focus call would still hit a real
+    //      window, but it's a wasted call + a small leak).
+    //      (gemini PR #569 round-3 MEDIUM @ L77)
+    //   2. Flush any in-flight rename. StatusBar's outside-click
+    //      dismiss can unmount the input before its onBlur fires,
+    //      which would otherwise silently lose the typed value.
+    //      (codex PR #569 round-2 P1)
     onCleanup(() => {
+        cancelPendingFocus();
         const editing = editingLabel();
         if (!editing) return;
         const entry = entries().find((e) => e.label === editing);
         if (!entry || !entry.windowId) return;
         const trimmed = editValue().trim().slice(0, DISPLAY_NAME_MAX_LEN);
         if (!trimmed) return;
-        ObjectService.UpdateObjectMeta(
-            makeORef("window", entry.windowId),
-            { [DISPLAY_NAME_META_KEY]: trimmed } as MetaType,
-        ).catch((e) => console.error("[InstancePanel] cleanup rename failed:", e));
+        performRename(entry.windowId, trimmed);
     });
 
     const handleOpenNewWindow = async () => {

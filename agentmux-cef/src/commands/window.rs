@@ -366,10 +366,12 @@ pub fn get_double_click_time() -> serde_json::Value {
     #[cfg(target_os = "windows")]
     {
         let ms = unsafe { windows_sys::Win32::UI::Input::KeyboardAndMouse::GetDoubleClickTime() };
-        return serde_json::json!(ms);
+        serde_json::json!(ms)
     }
-    #[allow(unreachable_code)]
-    serde_json::json!(500u32)
+    #[cfg(not(target_os = "windows"))]
+    {
+        serde_json::json!(500u32)
+    }
 }
 
 /// List all open window instances with their backend window IDs.
