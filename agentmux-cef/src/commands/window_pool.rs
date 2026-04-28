@@ -543,7 +543,10 @@ pub fn promote_pool_window(
     // _number would fall back to 1 for the new window and other
     // windows would keep a stale count, throwing off the InstancePanel
     // and any other consumer of windowCountAtom.
-    let count = {
+    // Phase B.5c — keep host's local register() (B.5d will remove
+    // it once read-path validation has run on real workloads), but
+    // read the count via the launcher-authoritative path.
+    {
         let mut reg = state.window_instance_registry.lock();
         let num = reg.register(&label);
         tracing::info!(
@@ -552,8 +555,8 @@ pub fn promote_pool_window(
             instance = %num,
             "[pool] promoted window registered as instance"
         );
-        reg.count()
-    };
+    }
+    let count = state.instance_count();
     crate::events::emit_event_all_windows(
         state,
         "window-instances-changed",
