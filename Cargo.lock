@@ -10,7 +10,7 @@ checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
 name = "agentmux-cef"
-version = "0.33.471"
+version = "0.33.472"
 dependencies = [
  "agentmux-common",
  "axum 0.8.9",
@@ -37,7 +37,7 @@ dependencies = [
 
 [[package]]
 name = "agentmux-common"
-version = "0.33.471"
+version = "0.33.472"
 dependencies = [
  "serde",
  "serde_json",
@@ -47,7 +47,7 @@ dependencies = [
 
 [[package]]
 name = "agentmux-launcher"
-version = "0.33.471"
+version = "0.33.472"
 dependencies = [
  "agentmux-common",
  "chrono",
@@ -63,7 +63,7 @@ dependencies = [
 
 [[package]]
 name = "agentmux-srv"
-version = "0.33.471"
+version = "0.33.472"
 dependencies = [
  "agentmux-common",
  "async-stream",
@@ -2399,9 +2399,9 @@ dependencies = [
 
 [[package]]
 name = "rustls"
-version = "0.23.39"
+version = "0.23.40"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7c2c118cb077cca2822033836dfb1b975355dfb784b5e8da48f7b6c5db74e60e"
+checksum = "ef86cd5876211988985292b91c96a8f2d298df24e75989a43a3c73f2d4d8168b"
 dependencies = [
  "log",
  "once_cell",
