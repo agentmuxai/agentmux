@@ -421,6 +421,14 @@ export function buildCefApi(): AppApi {
         listWindows: async () => {
             return await invokeCommand<string[]>("list_windows");
         },
+        listWindowInstances: async () => {
+            return await invokeCommand<Array<{ label: string; windowId: string | null }>>(
+                "list_window_instances",
+            );
+        },
+        getDoubleClickTime: async () => {
+            return await invokeCommand<number>("get_double_click_time");
+        },
         focusWindow: async (label: string) => {
             await invokeCommand("focus_window", { label });
         },

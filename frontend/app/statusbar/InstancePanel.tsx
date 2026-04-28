@@ -15,10 +15,15 @@
  * Per-window token totals deferred until token-usage is per-window.
  */
 
-import { getApi, openWindowLabelsAtom } from "@/store/global";
+import { getApi, openWindowEntriesAtom, type WindowEntry } from "@/store/global";
 import { usePaneOverlay } from "@/app/platform/pane-overlay";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
-import { createMemo, createSignal, For, Show, type JSX } from "solid-js";
+import { ObjectService } from "@/store/services";
+import { getObjectValue, makeORef } from "@/store/wos";
+import { createMemo, createSignal, For, onCleanup, Show, type JSX } from "solid-js";
+
+const DISPLAY_NAME_META_KEY = "window:displayname";
+const DISPLAY_NAME_MAX_LEN = 64;
 
 interface InstancePanelProps {
     anchorRect: DOMRect | null;
@@ -46,9 +51,41 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
         };
     });
 
-    const labels = openWindowLabelsAtom;
+    const entries = openWindowEntriesAtom;
     const [myLabel, setMyLabel] = createSignal<string | null>(null);
     getApi().getWindowLabel().then((l) => setMyLabel(l)).catch(() => setMyLabel(null));
+
+    // Rename mode state — keyed by host label so the row's identity
+    // survives entries() reordering. Single rename at a time.
+    const [editingLabel, setEditingLabel] = createSignal<string | null>(null);
+    const [editValue, setEditValue] = createSignal("");
+
+    // Defer single-click focus past the dblclick threshold so
+    // double-clicking a row enters rename mode WITHOUT first
+    // bringing the other window forward (which would close /
+    // hide this panel and abort the rename). Tracks the pending
+    // focus by row label so a click on row B while a focus is
+    // pending for row A still treats B as a fresh single click.
+    // (reagent / codex / gemini PR #569 P1)
+    //
+    // Threshold queried from the OS (Win32 GetDoubleClickTime,
+    // user-configurable, default 500ms) so slow double-clickers
+    // are accommodated. Defaults to 500ms while the query is
+    // in flight, plus a 50ms buffer to absorb event-dispatch jitter.
+    // (codex PR #569 round-2 P2)
+    const [dblclickDelayMs, setDblclickDelayMs] = createSignal(550);
+    getApi()
+        .getDoubleClickTime()
+        .then((ms) => setDblclickDelayMs(Math.max(120, ms + 50)))
+        .catch(() => {/* keep default */});
+
+    let pendingFocus: { label: string; timer: number } | null = null;
+    const cancelPendingFocus = () => {
+        if (pendingFocus) {
+            clearTimeout(pendingFocus.timer);
+            pendingFocus = null;
+        }
+    };
 
     const positioning = createMemo(() => {
         const r = props.anchorRect;
@@ -67,6 +104,82 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
         }
     };
 
+    // Resolve a row's display name in priority order:
+    //   1. user-set name in Window meta (`window:displayname`)
+    //   2. workspace.name (when the user has named the workspace)
+    //   3. index-based fallback "Window N"
+    // Returns the resolved string for rendering. Reactive via Wave's
+    // object subscriptions because getObjectValue reads through atoms.
+    const resolveName = (entry: WindowEntry, idx: number): string => {
+        if (entry.windowId) {
+            const win = getObjectValue<WaveWindow>(makeORef("window", entry.windowId));
+            const userName = (win?.meta?.[DISPLAY_NAME_META_KEY] as string | undefined)?.trim();
+            if (userName) return userName;
+            if (win?.workspaceid) {
+                const ws = getObjectValue<Workspace>(makeORef("workspace", win.workspaceid));
+                if (ws?.name?.trim()) return ws.name.trim();
+            }
+        }
+        return `Window ${idx + 1}`;
+    };
+
+    const enterRename = (entry: WindowEntry, currentName: string) => {
+        if (!entry.windowId) return; // can't rename a window without a backend record yet
+        setEditingLabel(entry.label);
+        setEditValue(currentName);
+    };
+
+    const cancelRename = () => {
+        setEditingLabel(null);
+        setEditValue("");
+    };
+
+    // Single shared persistence path used by both commitRename
+    // (Enter / blur) and the onCleanup unmount-flush. Keeps the
+    // trim + cap + RPC + error-log shape consistent. (gemini
+    // PR #569 round-3 MEDIUM @ L176)
+    const performRename = (windowId: string, name: string) => {
+        ObjectService.UpdateObjectMeta(
+            makeORef("window", windowId),
+            { [DISPLAY_NAME_META_KEY]: name } as MetaType,
+        ).catch((e) => console.error("[InstancePanel] rename failed:", e));
+    };
+
+    const commitRename = (entry: WindowEntry) => {
+        const editing = editingLabel();
+        if (editing !== entry.label) return; // stale
+        if (!entry.windowId) {
+            cancelRename();
+            return;
+        }
+        const trimmed = editValue().trim().slice(0, DISPLAY_NAME_MAX_LEN);
+        // Empty after trim → silent revert per spec §2.2.2.
+        setEditingLabel(null);
+        setEditValue("");
+        if (!trimmed) return;
+        performRename(entry.windowId, trimmed);
+    };
+
+    // Panel-unmount cleanup:
+    //   1. Cancel any pending focus timer so it doesn't fire after
+    //      the panel is gone (focus call would still hit a real
+    //      window, but it's a wasted call + a small leak).
+    //      (gemini PR #569 round-3 MEDIUM @ L77)
+    //   2. Flush any in-flight rename. StatusBar's outside-click
+    //      dismiss can unmount the input before its onBlur fires,
+    //      which would otherwise silently lose the typed value.
+    //      (codex PR #569 round-2 P1)
+    onCleanup(() => {
+        cancelPendingFocus();
+        const editing = editingLabel();
+        if (!editing) return;
+        const entry = entries().find((e) => e.label === editing);
+        if (!entry || !entry.windowId) return;
+        const trimmed = editValue().trim().slice(0, DISPLAY_NAME_MAX_LEN);
+        if (!trimmed) return;
+        performRename(entry.windowId, trimmed);
+    });
+
     const handleOpenNewWindow = async () => {
         try {
             await getApi().openNewWindow();
@@ -80,12 +193,6 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
         clipboardWriteText(`${label}: ${value}`);
     };
 
-    // Display label: just "Window N" using the row index. Main is
-    // pinned at index 0 → "Window 1". Hex suffixes were dropped — a
-    // user-renameable display name lands in a follow-up per
-    // docs/specs/SPEC_WINDOW_RENAME_2026_04_27.md.
-    const displayLabel = (_label: string, idx: number): string =>
-        `Window ${idx + 1}`;
 
     return (
         <div
@@ -131,26 +238,107 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
             <div class="instance-panel-divider" />
             <div class="instance-panel-section">
                 <div class="instance-panel-section-title">
-                    This process — {labels().length} window{labels().length !== 1 ? "s" : ""}
+                    This process — {entries().length} window{entries().length !== 1 ? "s" : ""}
                 </div>
-                <For each={labels()}>
-                    {(label, i) => {
-                        const isCurrent = () => label === myLabel();
+                <For each={entries()}>
+                    {(entry, i) => {
+                        const isCurrent = () => entry.label === myLabel();
+                        const isEditing = () => editingLabel() === entry.label;
+                        const currentName = () => resolveName(entry, i());
                         return (
-                            <button
-                                type="button"
+                            <div
                                 class="instance-panel-window-row"
-                                classList={{ "instance-panel-window-row-current": isCurrent() }}
-                                onClick={() => handleFocusWindow(label)}
-                                disabled={isCurrent()}
-                                title={isCurrent() ? "This window" : `Focus ${label}`}
+                                classList={{
+                                    "instance-panel-window-row-current": isCurrent(),
+                                    "instance-panel-window-row-editing": isEditing(),
+                                }}
+                                onClick={(e) => {
+                                    if (isEditing()) {
+                                        e.stopPropagation();
+                                        return;
+                                    }
+                                    // If a focus was pending on THIS row, this is
+                                    // the second click of a dblclick — let dblClick
+                                    // handle it; cancel the pending focus.
+                                    if (pendingFocus && pendingFocus.label === entry.label) {
+                                        cancelPendingFocus();
+                                        return;
+                                    }
+                                    // Otherwise schedule a fresh focus past the
+                                    // dblclick threshold so a follow-up click can
+                                    // promote it to rename instead.
+                                    cancelPendingFocus();
+                                    const label = entry.label;
+                                    pendingFocus = {
+                                        label,
+                                        timer: window.setTimeout(() => {
+                                            pendingFocus = null;
+                                            handleFocusWindow(label);
+                                        }, dblclickDelayMs()),
+                                    };
+                                }}
+                                onDblClick={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    cancelPendingFocus();
+                                    enterRename(entry, currentName());
+                                }}
+                                onKeyDown={(e) => {
+                                    if (isEditing()) return; // input owns key handling
+                                    if (e.key === "Enter" || e.key === " ") {
+                                        e.preventDefault();
+                                        cancelPendingFocus();
+                                        handleFocusWindow(entry.label);
+                                    } else if (e.key === "F2") {
+                                        e.preventDefault();
+                                        cancelPendingFocus();
+                                        enterRename(entry, currentName());
+                                    }
+                                }}
+                                title={isCurrent() ? "This window — double-click to rename (F2)" : `Click to focus, double-click to rename (F2)`}
+                                role="button"
+                                tabIndex={0}
                             >
                                 <span class="instance-panel-window-dot">{isCurrent() ? "●" : "○"}</span>
-                                <span class="instance-panel-window-name">{displayLabel(label, i())}</span>
-                                <Show when={isCurrent()}>
+                                <Show
+                                    when={isEditing()}
+                                    fallback={
+                                        <span class="instance-panel-window-name">{currentName()}</span>
+                                    }
+                                >
+                                    <input
+                                        ref={(el) => {
+                                            if (el) {
+                                                queueMicrotask(() => {
+                                                    el.focus();
+                                                    el.select();
+                                                });
+                                            }
+                                        }}
+                                        class="instance-panel-window-name-input"
+                                        value={editValue()}
+                                        maxLength={DISPLAY_NAME_MAX_LEN}
+                                        onInput={(e) => setEditValue(e.currentTarget.value)}
+                                        onKeyDown={(e) => {
+                                            // Stop global key handlers from firing while editing.
+                                            e.stopPropagation();
+                                            if (e.key === "Enter") {
+                                                e.preventDefault();
+                                                commitRename(entry);
+                                            } else if (e.key === "Escape") {
+                                                e.preventDefault();
+                                                cancelRename();
+                                            }
+                                        }}
+                                        onBlur={() => commitRename(entry)}
+                                        onClick={(e) => e.stopPropagation()}
+                                        onDblClick={(e) => e.stopPropagation()}
+                                    />
+                                </Show>
+                                <Show when={isCurrent() && !isEditing()}>
                                     <span class="instance-panel-window-badge">this</span>
                                 </Show>
-                            </button>
+                            </div>
                         );
                     }}
                 </For>
