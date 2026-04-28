@@ -613,14 +613,16 @@ fn open_window_with_kind(
         },
     );
 
-    // Register instance number BEFORE creating the browser, so the new window's
-    // frontend can query its instance number immediately on load.
-    {
-        let mut reg = state.window_instance_registry.lock();
-        let num = reg.register(&label);
-        tracing::info!(label = %label, instance = %num, "[window] new window registered");
-    }
-
+    // Phase B.5d — host no longer assigns instance numbers locally.
+    // The launcher assigns from `ReportWindowOpened` (sent by the
+    // host's `on_after_created` callback) and the shadow update
+    // emits `window-instances-changed`. Brief race: the new window's
+    // frontend may query `get_instance_number` before the launcher's
+    // `WindowInstanceAssigned` event has returned, getting a None →
+    // `unwrap_or(1)` fallback. Frontend's existing
+    // `app-init.ts::refreshLabels(true, retriesLeft)` retry loop
+    // catches up within a few hundred ms. B.7 will replace polling
+    // with direct event subscription, eliminating the race entirely.
     let (pos_x, pos_y) = get_offset_position();
     let (win_w, win_h) = get_secondary_window_size(pos_x, pos_y);
 

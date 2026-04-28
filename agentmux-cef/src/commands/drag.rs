@@ -378,14 +378,12 @@ pub fn open_window_at_position(state: &Arc<AppState>, args: &serde_json::Value) 
         true,
     );
 
-    // Register instance number
-    {
-        let mut reg = state.window_instance_registry.lock();
-        let num = reg.register(&label);
-        tracing::info!(label = %label, instance = %num, "[dnd:cef] tear-off window registered");
-    }
-
-    // Notify all windows
+    // Phase B.5d — host no longer registers locally. The launcher
+    // assigns the instance number from `ReportWindowOpened`
+    // (triggered by on_after_created) and the shadow update emits
+    // a fresh `window-instances-changed` once it lands. The early
+    // emit below carries the pre-mutation count; frontend updates
+    // it again ~ms later when the shadow event arrives.
     let count = state.instance_count();
     events::emit_event_all_windows(state, "window-instances-changed", &serde_json::json!(count));
 

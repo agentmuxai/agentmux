@@ -552,26 +552,13 @@ pub fn promote_pool_window(
         let _ = ShowWindow(raw_hwnd, SW_SHOW);
     }
 
-    // Register the promoted window in the instance registry +
-    // broadcast the count change. Cold-path open_window_at_position
-    // does this same step (drag.rs:~390); without it warm-path
-    // tear-offs would bypass instance tracking entirely — get_instance
-    // _number would fall back to 1 for the new window and other
-    // windows would keep a stale count, throwing off the InstancePanel
-    // and any other consumer of windowCountAtom.
-    // Phase B.5c — keep host's local register() (B.5d will remove
-    // it once read-path validation has run on real workloads), but
-    // read the count via the launcher-authoritative path.
-    {
-        let mut reg = state.window_instance_registry.lock();
-        let num = reg.register(&label);
-        tracing::info!(
-            target: "dnd:tearoff:pool",
-            label = %label,
-            instance = %num,
-            "[pool] promoted window registered as instance"
-        );
-    }
+    // Phase B.5d — host no longer registers locally on pool promote.
+    // The launcher assigns the instance number from
+    // `ReportWindowOpened` (sent immediately above this line in the
+    // promote path) and the shadow update emits a fresh
+    // `window-instances-changed` once it lands. The synchronous emit
+    // below carries the pre-mutation count; the shadow's later emit
+    // catches up.
     let count = state.instance_count();
     crate::events::emit_event_all_windows(
         state,
