@@ -81,38 +81,32 @@ async function initInstanceTracking(): Promise<void> {
     const isInstanceLabel = (l: string): boolean =>
         l === "main" || /^window-/.test(l);
 
-    // Phase B.7.1 — `window-instances-changed` payloads from the
-    // launcher-driven re-emit (`launcher_ipc.rs::apply_event_to_shadow`)
-    // now carry a resolved `{ count, entries: [{label, windowId}] }`
-    // shape. The frontend uses those directly — no `list_window_instances`
-    // RPC, no retry-on-stale polling. The polling existed solely
-    // because the synchronous emit at the mutation site fired before
-    // state.browsers had settled; the launcher-driven re-emit fires
-    // AFTER shadow projections + state.browsers are both populated.
+    // Phase B.7.1 — two payload shapes coexist during the cutover:
     //
-    // Sync emits (window.rs / drag.rs / etc.) still ship count-only
-    // payloads. For those we keep the legacy refresh-via-RPC path
-    // as a fallback so the InstancePanel doesn't go stale during
-    // `task dev` (no launcher in the loop) or before the launcher
-    // event round-trip lands. B.7.2 will retire the sync emits.
-    const refreshLabelsViaRpc = async (): Promise<void> => {
-        try {
-            let entries: Array<{ label: string; windowId: string | null }>;
-            try {
-                const all = await getApi().listWindowInstances();
-                entries = Array.isArray(all) ? all : [];
-            } catch {
-                const all = await getApi().listWindows();
-                entries = (Array.isArray(all) ? all : []).map((label) => ({ label, windowId: null }));
-            }
-            applyEntries(entries);
-        } catch {
-            setOpenWindowLabelsAtom([]);
-            setOpenWindowEntriesAtom([]);
-        }
-    };
+    //   1. Launcher-driven re-emit (`launcher_ipc.rs::apply_event_to_shadow`)
+    //      ships `{ count, entries: [{label, windowId}] }`. The
+    //      shadows + state.browsers are both populated by the time
+    //      this fires, so a single application is authoritative —
+    //      no RPC, no polling. This is the path B.7 is migrating
+    //      everything to.
+    //
+    //   2. Sync emits at the mutation sites (window.rs / drag.rs /
+    //      window_pool.rs / client.rs) still ship count-only
+    //      payloads. They fire BEFORE state.browsers settles, so a
+    //      single RPC read would see stale data. This is also the
+    //      sole path during `task dev` (no launcher in the loop),
+    //      so we can't retire it yet — keep the historic 6×50ms
+    //      retry-on-stale polling here. (codex PR #569 P2 +
+    //      reagent #596 P1.) B.7.2 retires the sync emits.
+    //
+    // The retry compares `entries-key` (label@windowId, joined) to
+    // detect a real change, including the `null → real` windowId
+    // transition that fires after the frontend's
+    // `register_backend_window` round-trip. Up to 6×50ms ≈ 300ms
+    // covers the empirical CEF on_after_created delay with margin.
+    let lastEntriesKey = "";
 
-    const applyEntries = (entries: Array<{ label: string; windowId: string | null }>): void => {
+    const applyEntries = (entries: Array<{ label: string; windowId: string | null }>): string => {
         const filtered = entries.filter((e) => isInstanceLabel(e.label));
         // Stable ordering: "main" pinned first, others alphabetical
         // by label. Without this, panel rows can shuffle between
@@ -127,6 +121,37 @@ async function initInstanceTracking(): Promise<void> {
         });
         setOpenWindowLabelsAtom(filtered.map((e) => e.label));
         setOpenWindowEntriesAtom(filtered);
+        return filtered.map((e) => `${e.label}@${e.windowId ?? ""}`).join("|");
+    };
+
+    const refreshLabelsViaRpc = async (waitForChange = false, retriesLeft = 6): Promise<void> => {
+        try {
+            let entries: Array<{ label: string; windowId: string | null }>;
+            try {
+                const all = await getApi().listWindowInstances();
+                entries = Array.isArray(all) ? all : [];
+            } catch {
+                const all = await getApi().listWindows();
+                entries = (Array.isArray(all) ? all : []).map((label) => ({ label, windowId: null }));
+            }
+            const filtered = entries.filter((e) => isInstanceLabel(e.label));
+            filtered.sort((a, b) => {
+                if (a.label === "main") return -1;
+                if (b.label === "main") return 1;
+                return a.label.localeCompare(b.label);
+            });
+            const key = filtered.map((e) => `${e.label}@${e.windowId ?? ""}`).join("|");
+            if (waitForChange && key === lastEntriesKey && retriesLeft > 0) {
+                setTimeout(() => refreshLabelsViaRpc(true, retriesLeft - 1), 50);
+                return;
+            }
+            lastEntriesKey = key;
+            setOpenWindowLabelsAtom(filtered.map((e) => e.label));
+            setOpenWindowEntriesAtom(filtered);
+        } catch {
+            setOpenWindowLabelsAtom([]);
+            setOpenWindowEntriesAtom([]);
+        }
     };
 
     try {
@@ -140,21 +165,16 @@ async function initInstanceTracking(): Promise<void> {
 
         await getApi().listen("window-instances-changed", (event: any) => {
             const payload = event?.payload ?? event;
-            // Two payload shapes coexist during the B.7 cutover:
-            //   - Sync emits: `count` (number).
-            //   - Launcher-driven re-emit: `{ count, entries }`.
-            // Prefer the structured payload when available; otherwise
-            // fall back to the RPC refresh path.
             if (payload && typeof payload === "object" && Array.isArray(payload.entries)) {
                 if (typeof payload.count === "number") {
                     setWindowCountAtom(payload.count);
                 }
-                applyEntries(payload.entries);
+                lastEntriesKey = applyEntries(payload.entries);
                 return;
             }
             const count = typeof payload === "number" ? payload : 0;
             setWindowCountAtom(count);
-            refreshLabelsViaRpc();
+            refreshLabelsViaRpc(true);
         });
     } catch (e) {
         console.warn("[initInstanceTracking] failed:", e);
