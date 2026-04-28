@@ -91,10 +91,10 @@ pub struct WindowMeta {
 /// `tauri::State<AppState>`. The sidecar child is `std::process::Child` instead
 /// of `tauri_plugin_shell::process::CommandChild`.
 pub struct AppState {
-    /// Maps window label (e.g. "main", "window-{uuid}") to the backend window ID.
-    /// Populated when the frontend calls `register_backend_window` during init.
-    /// Used by `on_before_close` to notify the backend to clean up.
-    pub window_id_map: Mutex<HashMap<String, String>>,
+    // Phase B.5 (window_id_map step e) — `window_id_map` field
+    // deleted. Authoritative copy lives in the launcher's
+    // `state.backend_window_ids`. Host's projection is in
+    // `shadow_backend_window_ids` (below).
 
     /// Auth key for backend communication
     pub auth_key: Mutex<String>,
@@ -244,7 +244,6 @@ pub struct AppState {
 impl Default for AppState {
     fn default() -> Self {
         Self {
-            window_id_map: Mutex::new(HashMap::new()),
             auth_key: Mutex::new(uuid::Uuid::new_v4().to_string()),
             backend_endpoints: Mutex::new(BackendEndpoints::default()),
             sidecar_child: Mutex::new(None),
@@ -311,26 +310,11 @@ impl AppState {
         self.shadow_instance_registry.lock().len()
     }
 
-    /// Phase B.5 (window_id_map step c) — authoritative
-    /// label→backend_window_id lookup. Prefers the launcher-fed
-    /// `shadow_backend_window_ids`; falls back to host's local
-    /// `window_id_map` for the race window where host has just
-    /// `insert`ed the mapping but the launcher's
-    /// `BackendWindowIdRegistered` event hasn't returned yet.
-    /// Same prefer-shadow pattern as `instance_num`.
+    /// Phase B.5 (window_id_map step e) — authoritative
+    /// label→backend_window_id lookup. Reads from the
+    /// launcher-fed `shadow_backend_window_ids`. Sole source of
+    /// truth post-step-e (host's `window_id_map` was deleted).
     pub fn backend_window_id(&self, label: &str) -> Option<String> {
-        if let Some(id) = self.shadow_backend_window_ids.lock().get(label).cloned() {
-            return Some(id);
-        }
-        let fallback = self.window_id_map.lock().get(label).cloned();
-        if let Some(ref id) = fallback {
-            tracing::debug!(
-                target: "launcher-ipc:fallback",
-                label = %label,
-                window_id = %id,
-                "[backend_window_id] shadow miss — falling back to host's window_id_map (B.5c transitional)"
-            );
-        }
-        fallback
+        self.shadow_backend_window_ids.lock().get(label).cloned()
     }
 }
