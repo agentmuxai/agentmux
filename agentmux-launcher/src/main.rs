@@ -197,18 +197,38 @@ async fn run_windows(
                         log("forwarded open_new_window to existing instance — exiting 0");
                         std::process::exit(0);
                     }
-                    Err(reason) => {
-                        log(&format!(
-                            "forward failed: {} — exiting silently to avoid surprise dialog",
-                            reason
-                        ));
-                        // Silent exit: the existing instance is alive
-                        // (pipe is held), but its forwarding hint is
-                        // unreadable / the HTTP server isn't ready
-                        // yet. A modal would be more annoying than
-                        // helpful for a transient race; the user can
-                        // double-click again.
+                    Err(ForwardError::Transient(reason)) => {
+                        // Transient race: the host is alive (pipe is
+                        // held by the first launcher) but its
+                        // forwarding hint isn't readable yet —
+                        // typically because the host is mid-CEF-init
+                        // and hasn't written `<data-dir>/ipc-port`
+                        // yet. Silent exit so the user isn't punished
+                        // for double-clicking quickly.
+                        log(&format!("forward transient: {} — exiting 0 silently", reason));
                         std::process::exit(0);
+                    }
+                    Err(ForwardError::Fatal(reason)) => {
+                        // Fatal forward failure: the port file IS
+                        // readable, so the host got far enough to
+                        // publish it, but the HTTP path is dead
+                        // (connect refused, write failed). Could be
+                        // a hung host, a port collision, or
+                        // ERROR_ACCESS_DENIED that wasn't really
+                        // "another instance" (namespace conflict).
+                        // Surface the dialog so the user sees that
+                        // something is genuinely broken rather than
+                        // a silent no-op. (codex P2 PR #598.)
+                        log(&format!("forward fatal: {} — surfacing dialog", reason));
+                        show_fatal_dialog(
+                            "AgentMux",
+                            &format!(
+                                "AgentMux appears to already be running but isn't responding.\n\nData dir: {}\nReason: {}\n\nClose any leftover AgentMux processes and try again. If the problem persists, check the launcher log.",
+                                paths.data_dir.display(),
+                                reason
+                            ),
+                        );
+                        std::process::exit(2);
                     }
                 }
             }
@@ -570,27 +590,44 @@ pub(crate) fn resume_main_thread(pid: u32) -> Result<(), String> {
 /// launcher binary should stay tiny (~325 KB) and the protocol is
 /// fixed, so a hand-rolled request is the right tool.
 ///
-/// Returns `Ok(())` only when the bytes were written to the socket.
-/// We don't parse the response — `open_new_window` is fire-and-
-/// forget and the host writes no useful body. Any failure (file
-/// missing, parse error, connect refused) returns `Err(reason)`;
-/// the caller exits 0 silently to avoid spamming a dialog on
-/// transient races (host mid-startup, etc.).
-fn forward_open_new_window(data_dir: &std::path::Path) -> Result<(), String> {
+/// Failure classification (codex P2 PR #598):
+/// - `Transient` — port file missing / unreadable / malformed.
+///   The host is alive (pipe held) but mid-startup; caller exits
+///   0 silently so the user isn't punished for double-clicking
+///   quickly.
+/// - `Fatal` — port file is readable, but the HTTP path failed
+///   (connect refused, write failed, timeout). Either a hung
+///   host or a non-running-instance source of
+///   `ERROR_ACCESS_DENIED` (namespace conflict, security
+///   descriptor failure). Caller surfaces the dialog so the user
+///   sees a real problem rather than a silent no-op.
+enum ForwardError {
+    Transient(String),
+    Fatal(String),
+}
+
+fn forward_open_new_window(data_dir: &std::path::Path) -> Result<(), ForwardError> {
     let port_file = data_dir.join("ipc-port");
-    let contents = std::fs::read_to_string(&port_file)
-        .map_err(|e| format!("read {}: {}", port_file.display(), e))?;
+    let contents = std::fs::read_to_string(&port_file).map_err(|e| {
+        ForwardError::Transient(format!("read {}: {}", port_file.display(), e))
+    })?;
     let trimmed = contents.trim();
-    let (port_str, token) = trimmed
-        .split_once(':')
-        .ok_or_else(|| format!("malformed port file (expected port:token): {}", trimmed))?;
+    let (port_str, token) = trimmed.split_once(':').ok_or_else(|| {
+        ForwardError::Transient(format!(
+            "malformed port file (expected port:token): {}",
+            trimmed
+        ))
+    })?;
     let port: u16 = port_str
         .parse()
-        .map_err(|e| format!("invalid port {:?}: {}", port_str, e))?;
+        .map_err(|e| ForwardError::Transient(format!("invalid port {:?}: {}", port_str, e)))?;
 
+    // From here on the file was readable: any failure is a fatal
+    // forward (the host got far enough to publish but isn't
+    // serving the IPC port).
     let addr: std::net::SocketAddr = ([127, 0, 0, 1], port).into();
     let mut stream = std::net::TcpStream::connect_timeout(&addr, std::time::Duration::from_secs(2))
-        .map_err(|e| format!("connect 127.0.0.1:{}: {}", port, e))?;
+        .map_err(|e| ForwardError::Fatal(format!("connect 127.0.0.1:{}: {}", port, e)))?;
     stream
         .set_write_timeout(Some(std::time::Duration::from_secs(2)))
         .ok();
@@ -605,7 +642,7 @@ fn forward_open_new_window(data_dir: &std::path::Path) -> Result<(), String> {
     use std::io::Write;
     stream
         .write_all(req.as_bytes())
-        .map_err(|e| format!("write request: {}", e))?;
+        .map_err(|e| ForwardError::Fatal(format!("write request: {}", e)))?;
     Ok(())
 }
 
