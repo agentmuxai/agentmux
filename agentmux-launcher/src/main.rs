@@ -55,19 +55,59 @@ fn main() {
 
     #[cfg(target_os = "windows")]
     {
-        let status = std::process::Command::new(&real_exe)
-            .args(&args)
-            .status();
+        // Spawn the host and capture the Child handle. We use spawn()+wait()
+        // (instead of status()) so we can grab the host's PID and assign it
+        // to a Job Object before it has a chance to spawn its own children
+        // (the agentmux-srv sidecar and CEF render-process workers).
+        let child = std::process::Command::new(&real_exe).args(&args).spawn();
 
-        match status {
-            Ok(s) => {
-                let code = s.code().unwrap_or(1);
-                log(&format!("CEF host exited with code {}", code));
-                std::process::exit(code);
-            }
+        let mut child = match child {
+            Ok(c) => c,
             Err(e) => {
                 log(&format!("FATAL: failed to spawn CEF host: {}", e));
                 eprintln!("Failed to launch AgentMux: {}", e);
+                std::process::exit(1);
+            }
+        };
+
+        let host_pid = child.id();
+        log(&format!("spawned CEF host pid={}", host_pid));
+
+        // Create a Job Object with KILL_ON_JOB_CLOSE and assign the host to
+        // it. CEF render-process workers and the srv sidecar that the host
+        // spawns will inherit the job. When this launcher process exits —
+        // for any reason, including being killed via Task Manager — the OS
+        // closes the job handle and the entire process tree is reaped.
+        //
+        // If creation/assignment fails, log and continue: pre-Job-Object
+        // behavior is the fallback, no functional regression.
+        let job = match create_job_object_for_child(host_pid) {
+            Ok(handle) => {
+                log(&format!(
+                    "Job Object assigned to pid={}, KILL_ON_JOB_CLOSE active",
+                    host_pid
+                ));
+                Some(JobHandle(handle))
+            }
+            Err(e) => {
+                log(&format!(
+                    "WARN: Job Object setup failed: {} (process-tree cleanup degraded)",
+                    e
+                ));
+                None
+            }
+        };
+
+        match child.wait() {
+            Ok(s) => {
+                let code = s.code().unwrap_or(1);
+                log(&format!("CEF host exited with code {}", code));
+                drop(job); // close job handle; host already exited so KILL_ON_JOB_CLOSE is a no-op
+                std::process::exit(code);
+            }
+            Err(e) => {
+                log(&format!("FATAL: wait failed: {}", e));
+                drop(job);
                 std::process::exit(1);
             }
         }
@@ -110,6 +150,83 @@ fn dirs_fallback_home() -> std::path::PathBuf {
         .or_else(|_| std::env::var("HOME"))
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|_| std::path::PathBuf::from("."))
+}
+
+/// Owns a Windows Job Object handle. CloseHandle on drop. The job's
+/// `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` flag means closing the last handle
+/// terminates every assigned process — which is what we want as a backstop
+/// if this launcher dies abruptly.
+#[cfg(target_os = "windows")]
+struct JobHandle(*mut std::ffi::c_void);
+
+#[cfg(target_os = "windows")]
+unsafe impl Send for JobHandle {}
+
+#[cfg(target_os = "windows")]
+impl Drop for JobHandle {
+    fn drop(&mut self) {
+        if !self.0.is_null() {
+            unsafe {
+                windows_sys::Win32::Foundation::CloseHandle(self.0);
+            }
+        }
+    }
+}
+
+/// Create a Job Object with `KILL_ON_JOB_CLOSE` and assign the given PID.
+/// Mirrors `agentmux-cef::sidecar::create_job_object_for_child`; lifted to
+/// the launcher so the entire host process tree (host + srv + CEF render
+/// children) is wrapped one level higher.
+#[cfg(target_os = "windows")]
+fn create_job_object_for_child(pid: u32) -> Result<*mut std::ffi::c_void, String> {
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::JobObjects::*;
+    use windows_sys::Win32::System::Threading::*;
+
+    // CreateJobObjectW is not exported by windows-sys 0.59's JobObjects
+    // feature, so we link to kernel32.dll directly.
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn CreateJobObjectW(
+            lpjobattributes: *const std::ffi::c_void,
+            lpname: *const u16,
+        ) -> *mut std::ffi::c_void;
+    }
+
+    unsafe {
+        let job = CreateJobObjectW(std::ptr::null(), std::ptr::null());
+        if job.is_null() {
+            return Err("Failed to create job object".into());
+        }
+
+        let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
+        info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        let ok = SetInformationJobObject(
+            job,
+            JobObjectExtendedLimitInformation,
+            &info as *const _ as *const std::ffi::c_void,
+            std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+        );
+        if ok == 0 {
+            CloseHandle(job);
+            return Err("Failed to set job object info".into());
+        }
+
+        let process = OpenProcess(PROCESS_SET_QUOTA | PROCESS_TERMINATE, 0, pid);
+        if process.is_null() {
+            CloseHandle(job);
+            return Err(format!("Failed to open process {}", pid));
+        }
+
+        let ok = AssignProcessToJobObject(job, process);
+        CloseHandle(process);
+        if ok == 0 {
+            CloseHandle(job);
+            return Err("Failed to assign process to job object".into());
+        }
+
+        Ok(job)
+    }
 }
 
 /// Find the CEF host binary in the runtime directory.
