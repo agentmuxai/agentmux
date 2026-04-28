@@ -90,16 +90,25 @@ impl State {
     /// Bump and return the new event version. Always called inside
     /// the reducer when constructing an Event so version numbers
     /// stay strictly monotonic.
+    ///
+    /// Strict (non-wrapping) add: Phase D's GetSnapshot resync
+    /// protocol relies on monotonicity (`event.version >
+    /// snapshot.version`), and a wrap to 0 would silently break
+    /// that contract. u64 at one event/ns would take 584 years to
+    /// overflow — never going to happen in practice; if it ever
+    /// does, the panic is the right failure mode.
+    /// (gemini MEDIUM PR #574 round-1.)
     pub fn bump_version(&mut self) -> u64 {
-        self.event_version = self.event_version.wrapping_add(1);
+        self.event_version += 1;
         self.event_version
     }
 
     /// Bump and return the next client_id. Client IDs are stable
-    /// per launcher run; not persisted across restart.
+    /// per launcher run; not persisted across restart. Same strict-
+    /// add reasoning as bump_version.
     pub fn alloc_client_id(&mut self) -> u64 {
         let id = self.next_client_id;
-        self.next_client_id = self.next_client_id.wrapping_add(1);
+        self.next_client_id += 1;
         id
     }
 }

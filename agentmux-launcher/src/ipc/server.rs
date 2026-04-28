@@ -213,11 +213,18 @@ async fn handle_connection(stream: NamedPipeServer, ctx: Arc<ServerCtx>) {
         };
 
         // Per-connection invariants: enforce here so reducer doesn't
-        // need to know about connection identity.
+        // need to know about connection identity. Honor the `fatal`
+        // bit — Ping-before-Register is non-fatal (clients can
+        // recover by sending Register next), Goodbye-before-Register
+        // is fatal (can't recover from a closed-by-them connection).
+        // (reagent P1 + codex P1 PR #574 round-1.)
         if let Some(reply) = enforce_register_first(&cmd, &registered_kind, &ctx).await {
+            let close = matches!(&reply, Event::Error { fatal: true, .. });
             let _ = send_event(&writer, reply).await;
-            // Goodbye-before-Register and similar are fatal — close.
-            return;
+            if close {
+                return;
+            }
+            continue;
         }
         if let Command::Register { .. } = &cmd {
             if registered_kind.is_some() {
@@ -248,12 +255,17 @@ async fn handle_connection(stream: NamedPipeServer, ctx: Arc<ServerCtx>) {
             None
         };
 
-        // Dispatch through the reducer. Mutex held briefly.
+        // Dispatch through the reducer. Mutex held briefly — compute
+        // the timestamp BEFORE acquiring so syscalls + string
+        // formatting don't show up in lock-hold time. (gemini
+        // MEDIUM @ server.rs:259, PR #574 round-1.)
+        let now_rfc3339 = chrono::Utc::now().to_rfc3339();
         let events = {
             let mut state = ctx.state.lock().await;
             let rctx = reducer::Ctx {
-                now_rfc3339: chrono::Utc::now().to_rfc3339(),
+                now_rfc3339,
                 conn_id,
+                registered_pid,
             };
             reducer::update(&mut state, cmd.clone(), &rctx)
         };
