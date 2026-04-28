@@ -24,7 +24,7 @@
 
 use std::collections::HashMap;
 
-use agentmux_common::ipc::ClientKind;
+use agentmux_common::ipc::{ClientKind, WindowKind};
 pub use agentmux_common::ipc::LifecyclePhase;
 
 /// Lifecycle of a single process the launcher knows about. The
@@ -60,6 +60,23 @@ pub struct ProcessRecord {
     pub version: String,
 }
 
+/// Phase B.4 read-only mirror of one host-owned window. The launcher
+/// learns about windows via `Command::ReportWindowOpened`; the host
+/// remains authoritative until B.5 flips the direction. `opened_at`
+/// is the launcher's clock at the time the report arrived (RFC3339)
+/// — useful for correlating launcher logs with host logs across
+/// version skew.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WindowMirror {
+    pub label: String,
+    pub kind: WindowKind,
+    /// Set only for `Subwindow`; identifies the FullInstance that
+    /// owns this window so the eventual cascade-close logic (B.5)
+    /// has the parent linkage.
+    pub parent_label: Option<String>,
+    pub opened_at: String,
+}
+
 /// Top-level launcher state. Single Arc<Mutex<State>> owned by the
 /// IPC server; passed into `update(state, cmd, conn)` for every
 /// incoming command.
@@ -69,6 +86,12 @@ pub struct State {
     /// Keyed by PID. Multiple records per PID would be a bug — the
     /// reducer enforces unique-pid on insert.
     pub processes: HashMap<u32, ProcessRecord>,
+    /// Read-only window mirror (Phase B.4). Keyed by label. Source of
+    /// truth still lives in `agentmux-cef::AppState.browsers` /
+    /// `window_meta`; this is a passive copy fed by host
+    /// `ReportWindow*` commands. B.5 inverts the dependency: host
+    /// queries this map instead of maintaining its own.
+    pub windows: HashMap<String, WindowMirror>,
     /// Monotonic counter for `Event.version`. Bumped by `bump_version()`.
     pub event_version: u64,
     /// Monotonic counter for client_id (returned in Registered events).
@@ -80,6 +103,7 @@ impl Default for State {
         Self {
             lifecycle: LifecyclePhase::Starting,
             processes: HashMap::new(),
+            windows: HashMap::new(),
             event_version: 0,
             next_client_id: 1,
         }

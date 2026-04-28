@@ -190,6 +190,35 @@ impl AgentMuxHandler {
             crate::pane::callbacks::on_after_created_pane(&self.state, &browser);
         }
 
+        // Phase B.4 — report top-level windows to the launcher's
+        // read-only state mirror. Skips browser-pane child HWNDs and
+        // pool windows (they're not user-visible until promoted; the
+        // pool->user transition gets its own report in a follow-up).
+        // No-op if launcher IPC isn't connected (`task dev` mode).
+        if is_top_level_window && !label.starts_with("window-pool-") {
+            let (wire_kind, parent_label) = {
+                let metas = self.state.window_meta.lock();
+                metas
+                    .get(&label)
+                    .map(|m| {
+                        let k = match m.kind {
+                            WindowKind::FullInstance => {
+                                agentmux_common::ipc::WindowKind::FullInstance
+                            }
+                            WindowKind::Subwindow => {
+                                agentmux_common::ipc::WindowKind::Subwindow
+                            }
+                        };
+                        (k, m.parent_instance_id.clone())
+                    })
+                    .unwrap_or((
+                        agentmux_common::ipc::WindowKind::FullInstance,
+                        None,
+                    ))
+            };
+            crate::launcher_ipc::report_window_opened(label.clone(), wire_kind, parent_label);
+        }
+
         self.browser_list.push(browser);
 
         // Tear-off Phase 6 — pre-warmed window pool.
@@ -299,6 +328,12 @@ impl AgentMuxHandler {
             // the pool would never refill.
             if lbl.starts_with("window-pool-") {
                 crate::commands::window_pool::on_pool_window_destroyed(&self.state, lbl);
+            }
+            // Phase B.4 — mirror the close to the launcher. Symmetric
+            // with the open-report in on_after_created: only top-level
+            // user-visible windows. No-op if launcher IPC absent.
+            if !lbl.starts_with("browser-pane-") && !lbl.starts_with("window-pool-") {
+                crate::launcher_ipc::report_window_closed(lbl.clone());
             }
         }
 

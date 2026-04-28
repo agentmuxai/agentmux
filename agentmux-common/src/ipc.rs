@@ -63,6 +63,41 @@ pub enum Command {
     /// In B.3+ this becomes `Quit { reason }` with shutdown semantics;
     /// for B.2 it's just a polite goodbye.
     Goodbye,
+    /// Phase B.4: host reports that a real window has been created
+    /// (CEF `on_after_created` fired). Launcher records it in its
+    /// read-only mirror and broadcasts `Event::WindowOpened` to other
+    /// subscribers. Pool windows do NOT report via this command —
+    /// they get their own `ReportPool*` commands in a follow-up so
+    /// the mirror can distinguish user-visible windows from pool
+    /// inventory.
+    ReportWindowOpened {
+        /// Stable label assigned by the host (e.g. "main", "window-{uuid}").
+        label: String,
+        kind: WindowKind,
+        /// For `Subwindow` only: label of the `FullInstance` parent.
+        /// `None` for `FullInstance`.
+        parent_label: Option<String>,
+    },
+    /// Phase B.4: host reports a window is closing (`on_before_close`).
+    /// Launcher removes from mirror, broadcasts `Event::WindowClosed`.
+    /// Idempotent: a missing label is logged but not an error (covers
+    /// the close-before-launcher-saw-the-open race).
+    ReportWindowClosed {
+        label: String,
+    },
+}
+
+/// Wire-side enum for `WindowKind`. Mirrors `agentmux-cef::state::WindowKind`
+/// — kept here so the launcher can deserialize without depending on the
+/// host crate. The host serializes its own type via `serde(rename_all =
+/// "snake_case")` so the JSON shape matches exactly.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WindowKind {
+    /// Independent AgentMux window. Appears in the Windows taskbar.
+    FullInstance,
+    /// Hidden from the taskbar; closes when its parent FullInstance closes.
+    Subwindow,
 }
 
 /// Events flow launcher → client. Versioned per spec §5.2 — every
@@ -123,6 +158,25 @@ pub enum Event {
     LifecyclePhaseChanged {
         from: LifecyclePhase,
         to: LifecyclePhase,
+        version: u64,
+    },
+    /// Phase B.4: a window joined the launcher's mirror. Emitted in
+    /// response to `Command::ReportWindowOpened` from the host. Other
+    /// subscribers (Tool clients, eventually srv) receive this to
+    /// keep their own views consistent.
+    WindowOpened {
+        label: String,
+        kind: WindowKind,
+        parent_label: Option<String>,
+        version: u64,
+    },
+    /// Phase B.4: a window left the launcher's mirror. Emitted on
+    /// `Command::ReportWindowClosed`. Cascades for FullInstance
+    /// closures are NOT modeled here yet (B.5 tightens) — for now
+    /// the host emits one ReportWindowClosed per window even on
+    /// cascade closes, so subscribers see the same N events.
+    WindowClosed {
+        label: String,
         version: u64,
     },
 }
