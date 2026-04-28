@@ -339,34 +339,22 @@ impl AppState {
         None
     }
 
-    /// Phase B.5c — authoritative instance count. Same prefer-shadow
-    /// fallback semantics as `instance_num`: returns the shadow's
-    /// count when it agrees with host's authoritative
-    /// `WindowInstanceRegistry`; falls back to host's count
-    /// otherwise. Used by frontend event emits
-    /// ("window-instances-changed").
+    /// Phase B.5d — authoritative instance count. Returns the
+    /// shadow's count directly. The B.5c-era host fallback was
+    /// removed because host no longer mutates
+    /// `window_instance_registry` (B.5d retired the four
+    /// `register()`/`unregister()` call sites), so host's count
+    /// is permanently stuck at the seed value (1) and would give
+    /// stale answers if used as fallback.
     ///
-    /// The fallback is essential during the transition: every read
-    /// site is called RIGHT AFTER a host mutation
-    /// (`register()`/`unregister()`) but BEFORE the launcher's
-    /// reply event has returned. Without falling back, the emitted
-    /// count is off by one on every open (shadow not yet populated)
-    /// and every close (shadow not yet drained), and no re-emission
-    /// fires when the shadow catches up — leaving stale counts in
-    /// the InstancePanel until the next user action. (reagent P1
-    /// PR #581 round-1.)
+    /// The synchronous emit at mutation sites still fires (it sees
+    /// the pre-launcher-event count, briefly off by one) but a
+    /// subsequent `window-instances-changed` emit fires from
+    /// `apply_event_to_shadow` once the launcher's
+    /// `WindowInstanceAssigned`/`Released` event arrives
+    /// (~ms later), bringing the InstancePanel back to the correct
+    /// count.
     pub fn instance_count(&self) -> usize {
-        let shadow_count = self.shadow_instance_registry.lock().len();
-        let host_count = self.window_instance_registry.lock().count();
-        if shadow_count == host_count {
-            return shadow_count;
-        }
-        tracing::debug!(
-            target: "launcher-ipc:fallback",
-            shadow = %shadow_count,
-            host = %host_count,
-            "[instance_count] shadow vs host disagreement — falling back to host count (eager-mutation source)"
-        );
-        host_count
+        self.shadow_instance_registry.lock().len()
     }
 }
