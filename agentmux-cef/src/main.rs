@@ -239,7 +239,7 @@ fn main() {
     // where the host runs without the launcher).
     //
     // Spawn the backend sidecar SYNCHRONOUSLY — block until it
-    // signals ready (WAVESRV-ESTART) before creating the browser
+    // signals ready (AGENTMUXSRV-ESTART) before creating the browser
     // window. This eliminates the race condition where CEF loads the
     // frontend before the backend is available, which causes a "raw
     // browser" appearance on slow machines or first launch.

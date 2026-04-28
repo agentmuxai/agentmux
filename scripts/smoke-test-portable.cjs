@@ -100,7 +100,7 @@ function diskChecks() {
     push("libGLESv2.dll", fs.existsSync(path.join(runtimeDir, "libGLESv2.dll")));
 }
 
-// ─── Spawn srv, parse WAVESRV-ESTART, return ws port ─────────────────────
+// ─── Spawn srv, parse AGENTMUXSRV-ESTART, return ws port ─────────────────────
 
 function spawnSrv() {
     return new Promise((resolve, reject) => {
@@ -123,12 +123,12 @@ function spawnSrv() {
         let wsPort = null;
         let stderrBuf = "";
         const timer = setTimeout(() => {
-            reject(new Error("WAVESRV-ESTART timeout after 15s"));
+            reject(new Error("AGENTMUXSRV-ESTART timeout after 15s"));
         }, 15000);
 
         proc.stderr.on("data", (chunk) => {
             stderrBuf += chunk.toString();
-            const match = stderrBuf.match(/WAVESRV-ESTART ws:127\.0\.0\.1:(\d+)/);
+            const match = stderrBuf.match(/AGENTMUXSRV-ESTART ws:127\.0\.0\.1:(\d+)/);
             if (match && wsPort === null) {
                 wsPort = parseInt(match[1], 10);
                 clearTimeout(timer);

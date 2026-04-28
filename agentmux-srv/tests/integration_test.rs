@@ -24,7 +24,7 @@ fn spawn_backend() -> (std::process::Child, String, String, String) {
 
     for line in reader.lines() {
         let line = line.expect("failed to read stderr");
-        if line.contains("WAVESRV-ESTART") {
+        if line.contains("AGENTMUXSRV-ESTART") {
             let parts: Vec<&str> = line.split_whitespace().collect();
             for part in &parts {
                 if let Some(addr) = part.strip_prefix("ws:") {
