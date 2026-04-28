@@ -348,10 +348,6 @@ pub struct Workspace {
     pub version: i64,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub name: String,
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub icon: String,
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub color: String,
     #[serde(default)]
     pub tabids: Vec<String>,
     #[serde(default)]
