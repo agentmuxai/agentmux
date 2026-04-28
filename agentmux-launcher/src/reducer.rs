@@ -57,6 +57,13 @@ pub struct Ctx {
     /// just used for log correlation; B.4+ will use it to route
     /// per-connection replies.
     pub conn_id: u64,
+    /// PID the connection has Registered under, if any. The server
+    /// tracks this server-side and passes it on every command after
+    /// the initial Register so the reducer can mark the right
+    /// process Exited on Goodbye. None for the very first command
+    /// on a connection (which MUST be Register, enforced server-
+    /// side). (codex P1 + gemini HIGH PR #574 round-1.)
+    pub registered_pid: Option<u32>,
 }
 
 /// Apply one Command to State, returning the resulting Events. State
@@ -74,17 +81,8 @@ pub fn update(state: &mut State, cmd: Command, ctx: &Ctx) -> Vec<Event> {
             let v = state.bump_version();
             vec![Event::Pong { nonce, version: v }]
         }
-        Command::Goodbye => handle_goodbye(state, /*pid=*/ ctx_pid_or_zero(ctx)),
+        Command::Goodbye => handle_goodbye(state, ctx.registered_pid.unwrap_or(0)),
     }
-}
-
-/// Helper used until the IPC server passes the registered pid
-/// alongside the connection. For B.3 we don't have that wiring yet
-/// (server still tracks Registered separately); placeholder returns
-/// 0 which the reducer treats as "no pid known". B.4 will pipe the
-/// connection's registered pid in via the Ctx.
-fn ctx_pid_or_zero(_ctx: &Ctx) -> u32 {
-    0
 }
 
 fn handle_register(
@@ -96,20 +94,31 @@ fn handle_register(
 ) -> Vec<Event> {
     let mut out = Vec::with_capacity(3);
 
-    // Cross-connection invariant: PIDs must be unique. If the same
-    // PID Registers twice (different connections from same process,
-    // or stale entry never cleaned up), reject the second so we
-    // don't end up with two ProcessRecords pointing at the same OS
-    // process.
-    if state.processes.contains_key(&pid) {
-        let v = state.bump_version();
-        out.push(Event::Error {
-            code: ErrorCode::AlreadyRegistered,
-            message: format!("pid {} already in process registry", pid),
-            fatal: true,
-            version: v,
-        });
-        return out;
+    // Cross-connection invariant: only ONE live ProcessRecord per
+    // PID. We DO allow re-registration if the existing record is
+    // Exited — the OS recycles PIDs over a long-running launcher,
+    // so a new process can legitimately end up with a PID that was
+    // previously held by a process that has cleanly Goodbye'd.
+    // Without this carve-out, the process map would accumulate dead
+    // records and the launcher would reject increasingly many real
+    // registrations. (gemini MEDIUM PR #574 round-1.)
+    let existing_state = state.processes.get(&pid).map(|r| r.state);
+    if let Some(existing_state) = existing_state {
+        if !matches!(existing_state, ProcessState::Exited { .. }) {
+            let v = state.bump_version();
+            out.push(Event::Error {
+                code: ErrorCode::AlreadyRegistered,
+                message: format!(
+                    "pid {} already in process registry (state={:?})",
+                    pid, existing_state
+                ),
+                fatal: true,
+                version: v,
+            });
+            return out;
+        }
+        // Else: fall through. The insert below replaces the Exited
+        // record with the new live one — same entry, fresh state.
     }
 
     let record = ProcessRecord {
@@ -192,6 +201,15 @@ mod tests {
         Ctx {
             now_rfc3339: "2026-04-28T00:00:00Z".to_string(),
             conn_id,
+            registered_pid: None,
+        }
+    }
+
+    fn ctx_with_pid(conn_id: u64, pid: u32) -> Ctx {
+        Ctx {
+            now_rfc3339: "2026-04-28T00:00:00Z".to_string(),
+            conn_id,
+            registered_pid: Some(pid),
         }
     }
 
@@ -349,6 +367,78 @@ mod tests {
         for w in versions.windows(2) {
             assert!(w[1] > w[0], "versions not monotonic: {:?}", versions);
         }
+    }
+
+    #[test]
+    fn goodbye_marks_registered_pid_as_exited() {
+        let mut state = State::default();
+        let _ = update(
+            &mut state,
+            Command::Register {
+                kind: ClientKind::Host,
+                pid: 1234,
+                version: "0.33.451".into(),
+            },
+            &ctx(1),
+        );
+        assert!(matches!(
+            state.processes[&1234].state,
+            ProcessState::Running
+        ));
+        let events = update(&mut state, Command::Goodbye, &ctx_with_pid(1, 1234));
+        assert_eq!(events.len(), 1);
+        assert!(matches!(
+            events[0],
+            Event::ProcessExited { pid: 1234, code: 0, .. }
+        ));
+        assert!(matches!(
+            state.processes[&1234].state,
+            ProcessState::Exited { code: 0 }
+        ));
+    }
+
+    #[test]
+    fn register_replaces_exited_record_for_recycled_pid() {
+        let mut state = State::default();
+        // First process registers + cleanly exits
+        let _ = update(
+            &mut state,
+            Command::Register {
+                kind: ClientKind::Host,
+                pid: 1234,
+                version: "first".into(),
+            },
+            &ctx(1),
+        );
+        let _ = update(&mut state, Command::Goodbye, &ctx_with_pid(1, 1234));
+        assert!(matches!(
+            state.processes[&1234].state,
+            ProcessState::Exited { .. }
+        ));
+
+        // OS recycles PID 1234 to a new process which Registers
+        let events = update(
+            &mut state,
+            Command::Register {
+                kind: ClientKind::Renderer,
+                pid: 1234,
+                version: "second".into(),
+            },
+            &ctx(2),
+        );
+        // Should NOT emit AlreadyRegistered — record replaced.
+        assert!(!events
+            .iter()
+            .any(|e| matches!(e, Event::Error {
+                code: ErrorCode::AlreadyRegistered,
+                ..
+            })));
+        assert!(matches!(
+            state.processes[&1234].state,
+            ProcessState::Running
+        ));
+        assert_eq!(state.processes[&1234].kind, ClientKind::Renderer);
+        assert_eq!(state.processes[&1234].version, "second");
     }
 
     // ===== Property-based tests =====
