@@ -234,12 +234,24 @@ pub async fn spawn_srv(
         // by the wait-task in main; nothing else to do here.
     });
 
-    let result = tokio::time::timeout(std::time::Duration::from_secs(30), rx.recv())
-        .await
-        .map_err(|_| SrvSpawnError::EstartTimeout)?
-        .ok_or(SrvSpawnError::EstartChannelClosed)?;
-
-    Ok((result, child))
+    // Wait for ESTART. Both error paths must explicitly start_kill
+    // the child before returning — same kill_on_drop(false) leak
+    // class as the assign/resume failures above. Without this, the
+    // 30s timeout in degraded mode (J0 absent) would leak a fully-
+    // running srv that keeps the data dir lockfile, blocking the
+    // next launch. (codex P2 @ srv_spawner.rs:240, PR #571 round-4.)
+    let recv = tokio::time::timeout(std::time::Duration::from_secs(30), rx.recv()).await;
+    match recv {
+        Err(_) => {
+            let _ = child.start_kill();
+            Err(SrvSpawnError::EstartTimeout)
+        }
+        Ok(None) => {
+            let _ = child.start_kill();
+            Err(SrvSpawnError::EstartChannelClosed)
+        }
+        Ok(Some(result)) => Ok((result, child)),
+    }
 }
 
 /// Resolve the agentmux-srv binary path from the LAUNCHER's vantage
