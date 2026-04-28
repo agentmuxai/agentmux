@@ -272,21 +272,22 @@ fn apply_event_to_shadow(state: &std::sync::Arc<crate::state::AppState>, event: 
         Event::WindowInstanceReleased { label, num, .. } => {
             // Symmetric drift check: launcher just released the
             // label, so host's authoritative registry SHOULD also
-            // not contain it. If host still has it, that's a
-            // host-side unregister bug (wrong label removed, or
-            // never removed) — log so we can catch it before
-            // B.5c cutover. (codex P2 PR #580 round-1.)
+            // not contain it. Two cases produce different signals:
             //
-            // Race-tolerant: host's local `unregister()` may not
-            // have run yet (the launcher might emit Released
-            // before the host's own close-path code reaches the
-            // unregister call). We log only the SUSTAINED case —
-            // see the next sentence — so transient ordering doesn't
-            // produce noise. Specifically: if host still has a
-            // DIFFERENT number for this label than the launcher
-            // released, that's actual drift (split-brain on the
-            // assignment); if host has the same number, we treat
-            // it as the benign "host hasn't unregistered yet" race.
+            // * host_num != launcher_num → split-brain on the
+            //   original assignment. Always a bug.
+            // * host_num == launcher_num → either (a) benign race
+            //   (host's local `unregister()` hasn't run yet — the
+            //   launcher's Released event raced ahead of the host's
+            //   own close-path code), OR (b) host-side unregister
+            //   bug (entry never removed). We can't distinguish at
+            //   the moment of this event, so we log it at INFO to
+            //   surface it without flooding WARN. The race resolves
+            //   on the host's next register/unregister cycle; a
+            //   true bug will sustain across events. (codex P2
+            //   PR #580 round-2 — original round-1 fix suppressed
+            //   the same-num case entirely, which silenced real
+            //   unregister bugs forever.)
             let host_num = state.window_instance_registry.lock().get(label);
             if let Some(host_num) = host_num {
                 if host_num != *num {
@@ -295,7 +296,14 @@ fn apply_event_to_shadow(state: &std::sync::Arc<crate::state::AppState>, event: 
                         label = %label,
                         launcher_released_num = %num,
                         host_num = %host_num,
-                        "[launcher-ipc] release-side instance# drift: host has a different number than the launcher released"
+                        "[launcher-ipc] release-side instance# split-brain: host has a different number than the launcher released"
+                    );
+                } else {
+                    tracing::info!(
+                        target: "launcher-ipc:drift",
+                        label = %label,
+                        num = %num,
+                        "[launcher-ipc] release-side: host still has matching entry after launcher Released — race or unregister bug; sustained presence indicates bug"
                     );
                 }
             }
