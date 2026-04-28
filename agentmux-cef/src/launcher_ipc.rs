@@ -290,3 +290,72 @@ pub fn report_pool_window_removed(label: String) {
         tracing::warn!("[launcher-ipc] report_pool_window_removed: channel closed ({})", e);
     }
 }
+
+/// Phase B.4 follow-up — sync API: report the host's current
+/// authoritative counts so the launcher reducer can compare against
+/// its mirror and emit `Event::DriftDetected` on mismatch. Callers
+/// invoke this AFTER each window-level transition so the launcher
+/// gets a fresh snapshot to compare against its just-applied
+/// transition.
+pub fn report_host_counts(windows: u32, pool: u32) {
+    let Some(tx) = COMMAND_TX.get() else {
+        return;
+    };
+    let cmd = Command::ReportHostCounts { windows, pool };
+    if let Err(e) = tx.send(cmd) {
+        tracing::warn!("[launcher-ipc] report_host_counts: channel closed ({})", e);
+    }
+}
+
+/// Phase B.4 follow-up — sync API: report the host's pool count
+/// only. Used by `spawn_pool_window` where the windows dimension
+/// is mid-flight relative to the launcher mirror (refill happens
+/// during a close path that hasn't sent `ReportWindowClosed` yet);
+/// snapshotting only the pool dimension preserves the
+/// check-every-transition guarantee without producing false
+/// windows-drift. (codex P2 PR #578 round-3.)
+pub fn report_host_pool_count(count: u32) {
+    let Some(tx) = COMMAND_TX.get() else {
+        return;
+    };
+    let cmd = Command::ReportHostPoolCount { count };
+    if let Err(e) = tx.send(cmd) {
+        tracing::warn!("[launcher-ipc] report_host_pool_count: channel closed ({})", e);
+    }
+}
+
+/// Phase B.4 follow-up — compute the host's authoritative counts
+/// from `AppState` and report them. Callers invoke this AFTER
+/// each window/pool transition.
+///
+/// Atomic snapshot: holds both `unpromoted_pool_labels` and
+/// `browsers` simultaneously so the reported `(windows, pool)`
+/// pair is from one consistent state. Without this, a concurrent
+/// mutation between the two lock acquisitions (CEF lifecycle on
+/// the UI thread vs. IPC handler in `commands/drag.rs`) could
+/// produce a mismatched snapshot and trigger a spurious
+/// `Event::DriftDetected`. (codex P2 PR #578 round-1.)
+///
+/// Lock order: `unpromoted_pool_labels` first, then `browsers`.
+/// Matches the existing snapshot pattern in
+/// `client.rs::on_before_close` (line ~418) and is the only place
+/// in the codebase that holds both locks simultaneously, so no
+/// other path can race in the reverse order.
+///
+/// Counts (matching the launcher's mirror semantics):
+/// * `windows` — top-level user-visible windows in `browsers`,
+///   excluding `browser-pane-*` child HWNDs and any label still
+///   in `unpromoted_pool_labels`.
+/// * `pool` — pre-promote pool labels (`unpromoted_pool_labels.len()`).
+pub fn compute_and_report_host_counts(state: &std::sync::Arc<crate::state::AppState>) {
+    let unpromoted = state.unpromoted_pool_labels.lock();
+    let browsers = state.browsers.lock();
+    let pool = unpromoted.len() as u32;
+    let windows = browsers
+        .keys()
+        .filter(|k| !k.starts_with("browser-pane-") && !unpromoted.contains(*k))
+        .count() as u32;
+    drop(browsers);
+    drop(unpromoted);
+    report_host_counts(windows, pool);
+}

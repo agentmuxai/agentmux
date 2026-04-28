@@ -99,6 +99,48 @@ pub enum Command {
     ReportPoolWindowRemoved {
         label: String,
     },
+    /// Phase B.4 follow-up — drift detection (full snapshot). Host
+    /// sends its own post-mutation counts after each window-level
+    /// transition; the launcher reducer compares both dimensions to
+    /// its mirror counts and emits `Event::DriftDetected` per
+    /// disagreeing dimension. Sent in a separate command (rather
+    /// than embedded in each Report*) so the existing wire shapes
+    /// stay unchanged.
+    ///
+    /// Known limitation (B.4 observe-only): emissions originate
+    /// from multiple execution contexts (CEF UI thread for
+    /// `on_after_created`/`on_before_close`, IPC handler thread
+    /// for `promote_pool_window`). Cross-thread interleaving in
+    /// the outbound channel can produce a snapshot whose counts
+    /// were taken at a moment that doesn't match the channel
+    /// order seen by the reducer, occasionally emitting a
+    /// transient false `DriftDetected`. Acceptable for B.4
+    /// (drift is diagnostic — false positives are ephemeral and
+    /// self-correct on the next stable state). B.5 will tighten
+    /// with a transition-ID protocol once the launcher is
+    /// authoritative. (codex P2 PR #578 round-4 — accepted as
+    /// known limitation.)
+    ReportHostCounts {
+        /// User-visible top-level windows in the host's
+        /// authoritative store (`browsers` minus browser-pane
+        /// children minus unpromoted pool labels).
+        windows: u32,
+        /// Pre-promote pool inventory size.
+        pool: u32,
+    },
+    /// Phase B.4 follow-up — pool-dimension-only drift check. Used
+    /// by `spawn_pool_window` (pool transitions) where snapshotting
+    /// the windows dimension would produce transient false drift:
+    /// pool refill is triggered DURING `on_before_close` BEFORE the
+    /// matching `ReportWindowClosed` lands, so the host's window
+    /// count is mid-flight relative to the launcher mirror. Pool
+    /// count IS stable at that moment (the new pool label was just
+    /// added), so checking pool alone preserves the "check every
+    /// transition" guarantee for the dimension that actually
+    /// changed. (codex P2 PR #578 round-3.)
+    ReportHostPoolCount {
+        count: u32,
+    },
 }
 
 /// Wire-side enum for `WindowKind`. Mirrors `agentmux-cef::state::WindowKind`
@@ -204,6 +246,18 @@ pub enum Event {
         label: String,
         version: u64,
     },
+    /// Phase B.4 follow-up — emitted when the launcher's mirror
+    /// disagrees with the host's reported counts. Logged at WARN
+    /// level so operators see drift immediately. Drift in B.4 is
+    /// a CONTRACT BUG (the host should report every state change);
+    /// B.5 will turn drift into a hard failure once the mirror is
+    /// authoritative.
+    DriftDetected {
+        kind: DriftKind,
+        host_count: u32,
+        mirror_count: u32,
+        version: u64,
+    },
 }
 
 /// Coarse-grained launcher state. Spec §4: Starting → Running →
@@ -224,6 +278,16 @@ pub enum LifecyclePhase {
     Quitting,
     /// Cleanup done; launcher about to exit. Transient.
     Dead,
+}
+
+/// Phase B.4 follow-up — which mirror diverged. Tagged so subscribers
+/// can route alerts (windows-drift might page; pool-drift is more
+/// ephemeral since the pool turns over fast).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DriftKind {
+    Windows,
+    Pool,
 }
 
 /// Discriminant for `Event::Error` — keeps clients structured against
