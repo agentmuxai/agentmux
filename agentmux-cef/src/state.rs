@@ -38,47 +38,12 @@ pub struct DragSession {
     pub started_at: u64,
 }
 
-/// Tracks a stable sequential instance number for each open window.
-/// Main window is always 1. Additional windows get 2, 3, ... in creation order.
-/// Numbers are never reused within a session.
-pub struct WindowInstanceRegistry {
-    instances: HashMap<String, u32>,
-    next_num: u32,
-}
-
-impl WindowInstanceRegistry {
-    pub fn new() -> Self {
-        let mut instances = HashMap::new();
-        instances.insert("main".to_string(), 1);
-        Self {
-            instances,
-            next_num: 2,
-        }
-    }
-
-    /// Assign the next instance number to a new window label.
-    pub fn register(&mut self, label: &str) -> u32 {
-        let num = self.next_num;
-        self.instances.insert(label.to_string(), num);
-        self.next_num += 1;
-        num
-    }
-
-    /// Remove a window from the registry when it closes.
-    pub fn unregister(&mut self, label: &str) {
-        self.instances.remove(label);
-    }
-
-    /// Look up the instance number for a window label.
-    pub fn get(&self, label: &str) -> Option<u32> {
-        self.instances.get(label).copied()
-    }
-
-    /// Total number of currently open windows.
-    pub fn count(&self) -> usize {
-        self.instances.len()
-    }
-}
+// Phase B.5e — `WindowInstanceRegistry` struct deleted. Sequential
+// instance numbers are now owned by the launcher's reducer
+// (`agentmux-launcher::state::State.instance_registry`). Host's
+// projection lives in `AppState.shadow_instance_registry`, fed by
+// `Event::WindowInstanceAssigned` / `WindowInstanceReleased`. See
+// docs/retro/migration-pattern.md for the a→b→c→d→e ratchet.
 
 // Phase B.1: removed `JobHandle` wrapper. Host no longer owns a Job
 // Object on srv; the launcher's J0 covers srv directly via
@@ -161,18 +126,16 @@ pub struct AppState {
     /// Window initialization status ("ready" or "wave-ready")
     pub window_init_status: Mutex<String>,
 
-    /// Sequential instance numbers for each open window
-    pub window_instance_registry: Mutex<WindowInstanceRegistry>,
-
-    /// Phase B.5b — shadow registry fed by the launcher's
-    /// `WindowInstanceAssigned` / `WindowInstanceReleased` events.
-    /// Phase B.5c — now the PRIMARY read path via
-    /// `Self::instance_num` / `Self::instance_count`. Host's
-    /// `window_instance_registry` is kept as a fallback for the
-    /// race window between host's local `register()` and the
-    /// launcher's reply event arriving back. B.5d will remove
-    /// host's local register/unregister calls; B.5e removes the
-    /// fallback entirely.
+    /// Phase B.5e — host's projection of the launcher's
+    /// authoritative `state.instance_registry`. Fed by
+    /// `Event::WindowInstanceAssigned` /
+    /// `Event::WindowInstanceReleased` via
+    /// `launcher_ipc::apply_event_to_shadow`. Host code never
+    /// mutates this directly — reads only. Pre-seeded with
+    /// `{"main": 1}` to mirror the launcher's pre-seed (avoids a
+    /// spurious first-event mismatch during startup before the
+    /// `WindowInstanceAssigned { label: "main", num: 1 }` event
+    /// arrives).
     pub shadow_instance_registry: Mutex<HashMap<String, u32>>,
 
     /// Cancellation channel for an in-progress CLI login process
@@ -281,7 +244,6 @@ impl Default for AppState {
             window_id: Mutex::new(None),
             active_tab_id: Mutex::new(None),
             window_init_status: Mutex::new(String::new()),
-            window_instance_registry: Mutex::new(WindowInstanceRegistry::new()),
             shadow_instance_registry: Mutex::new({
                 // Pre-seed with main=1 to mirror the launcher's
                 // pre-seeded `instance_registry` (B.5a). Without
@@ -314,50 +276,25 @@ impl Default for AppState {
 }
 
 impl AppState {
-    /// Phase B.5d — authoritative instance-number lookup. Reads
-    /// from the launcher-fed `shadow_instance_registry`. Falls
-    /// back to host's `window_instance_registry`, which post-B.5d
-    /// is seed-only (contains just `{"main": 1}` — the four
-    /// `register()`/`unregister()` call sites were retired in
-    /// B.5d). The fallback is therefore harmless (only resolves
-    /// "main" → 1, which matches the launcher's pre-seed) but
-    /// vestigial; B.5e removes it along with the host field.
-    /// `launcher-ipc:fallback` DEBUG events should rarely fire
-    /// post-B.5d — only on early `get_instance_number("main")`
-    /// queries that race the launcher's first
-    /// `WindowInstanceAssigned` event.
+    /// Phase B.5e — authoritative instance-number lookup. Reads
+    /// the launcher-fed `shadow_instance_registry`, which is the
+    /// sole source of truth post-B.5e (host's
+    /// `WindowInstanceRegistry` was deleted). The shadow is
+    /// pre-seeded with `{"main": 1}` so the very first lookup
+    /// during startup resolves before the launcher's first
+    /// `WindowInstanceAssigned` event arrives.
     pub fn instance_num(&self, label: &str) -> Option<u32> {
-        if let Some(num) = self.shadow_instance_registry.lock().get(label).copied() {
-            return Some(num);
-        }
-        let fallback = self.window_instance_registry.lock().get(label);
-        if let Some(num) = fallback {
-            tracing::debug!(
-                target: "launcher-ipc:fallback",
-                label = %label,
-                num = %num,
-                "[instance_num] shadow miss — falling back to host's window_instance_registry (B.5c transitional)"
-            );
-            return Some(num);
-        }
-        None
+        self.shadow_instance_registry.lock().get(label).copied()
     }
 
-    /// Phase B.5d — authoritative instance count. Returns the
-    /// shadow's count directly. The B.5c-era host fallback was
-    /// removed because host no longer mutates
-    /// `window_instance_registry` (B.5d retired the four
-    /// `register()`/`unregister()` call sites), so host's count
-    /// is permanently stuck at the seed value (1) and would give
-    /// stale answers if used as fallback.
+    /// Phase B.5e — authoritative instance count. Returns the
+    /// shadow's length (sole source of truth post-B.5e).
     ///
-    /// The synchronous emit at mutation sites still fires (it sees
-    /// the pre-launcher-event count, briefly off by one) but a
-    /// subsequent `window-instances-changed` emit fires from
-    /// `apply_event_to_shadow` once the launcher's
-    /// `WindowInstanceAssigned`/`Released` event arrives
-    /// (~ms later), bringing the InstancePanel back to the correct
-    /// count.
+    /// Synchronous emits at mutation sites still fire (carrying
+    /// the pre-launcher-event count, briefly off by one); a
+    /// subsequent `window-instances-changed` re-emit from
+    /// `apply_event_to_shadow` brings the InstancePanel current
+    /// once the launcher event arrives.
     pub fn instance_count(&self) -> usize {
         self.shadow_instance_registry.lock().len()
     }
