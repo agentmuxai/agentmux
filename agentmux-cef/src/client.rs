@@ -175,7 +175,14 @@ impl AgentMuxHandler {
                 // Subwindow? Hide from taskbar. Full instances and browser-pane
                 // child HWNDs skip this branch.
                 if is_top_level_window {
-                    let kind = self.state.window_meta.lock().get(&label).map(|m| m.kind);
+                    // Phase B.5 (window_meta step c) — read via
+                    // shadow-first helper. Brief race window for
+                    // newly-created windows where shadow doesn't
+                    // have the entry yet; falls back to host's
+                    // `window_meta` (still authoritative through
+                    // step d) which has the pre-create handoff
+                    // entry.
+                    let kind = self.state.window_meta(&label).map(|m| m.kind);
                     if kind == Some(WindowKind::Subwindow) {
                         unsafe { skip_taskbar(hwnd); }
                     }
@@ -366,22 +373,24 @@ impl AgentMuxHandler {
         // Pull and remove the closing window's meta; if it's a FullInstance,
         // cascade-close every Subwindow whose parent_instance_id points to it.
         // See `docs/specs/SPEC_MULTIWINDOW_TASKBAR_GROUPING.md` §2.3.
+        //
+        // Phase B.5 (window_meta step c) — read closing meta via
+        // shadow-first helper, then enumerate children via
+        // `state.subwindow_children_of`. The local `remove` is
+        // still done for now (step d retires it) so the host's
+        // mutation surface stays consistent with the rest of B.5
+        // step c.
         let closing_meta = label
             .as_deref()
-            .and_then(|lbl| self.state.window_meta.lock().remove(lbl));
+            .and_then(|lbl| self.state.window_meta(lbl));
+        // Drop the host-side entry to keep the eager-mutation
+        // contract through step d.
+        if let Some(lbl) = label.as_deref() {
+            self.state.window_meta.lock().remove(lbl);
+        }
         if let Some(meta) = &closing_meta {
             if meta.kind == WindowKind::FullInstance {
-                let child_labels: Vec<String> = self
-                    .state
-                    .window_meta
-                    .lock()
-                    .values()
-                    .filter(|m| {
-                        m.kind == WindowKind::Subwindow
-                            && m.parent_instance_id.as_deref() == Some(&meta.label)
-                    })
-                    .map(|m| m.label.clone())
-                    .collect();
+                let child_labels = self.state.subwindow_children_of(&meta.label);
                 for child_label in child_labels {
                     if let Some(mut child) = self.state.browsers.lock().get(&child_label).cloned() {
                         if let Some(host) = child.host() {
