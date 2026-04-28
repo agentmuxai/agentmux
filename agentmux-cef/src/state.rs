@@ -314,14 +314,18 @@ impl Default for AppState {
 }
 
 impl AppState {
-    /// Phase B.5c — authoritative instance-number lookup. Prefers
-    /// the launcher-fed `shadow_instance_registry` (the source of
-    /// truth post-B.5a); falls back to host's local
-    /// `window_instance_registry` for the race window where host
-    /// has just `register()`'d a label but the launcher's
-    /// `WindowInstanceAssigned` event hasn't returned yet. Logs
-    /// every fallback at DEBUG so we can quantify the race
-    /// frequency before B.5e removes the fallback entirely.
+    /// Phase B.5d — authoritative instance-number lookup. Reads
+    /// from the launcher-fed `shadow_instance_registry`. Falls
+    /// back to host's `window_instance_registry`, which post-B.5d
+    /// is seed-only (contains just `{"main": 1}` — the four
+    /// `register()`/`unregister()` call sites were retired in
+    /// B.5d). The fallback is therefore harmless (only resolves
+    /// "main" → 1, which matches the launcher's pre-seed) but
+    /// vestigial; B.5e removes it along with the host field.
+    /// `launcher-ipc:fallback` DEBUG events should rarely fire
+    /// post-B.5d — only on early `get_instance_number("main")`
+    /// queries that race the launcher's first
+    /// `WindowInstanceAssigned` event.
     pub fn instance_num(&self, label: &str) -> Option<u32> {
         if let Some(num) = self.shadow_instance_registry.lock().get(label).copied() {
             return Some(num);
