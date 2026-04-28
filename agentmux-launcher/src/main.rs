@@ -169,6 +169,19 @@ async fn run_windows(
         }
     };
 
+    // CRITICAL: tokio::process::Child::wait() proactively drops
+    // self.stdin before waiting (tokio source comment: "Ensure stdin
+    // is closed so the child can't read from it any more"). agentmux-
+    // srv has a parent-watch loop on its own stdin — when stdin reads
+    // 0 bytes (EOF from a closed write end), it interprets that as
+    // "parent died" and shuts itself down. tokio's wait() would
+    // trigger that within milliseconds, causing srv to exit before
+    // the host even mounts its first browser. Move srv's stdin out
+    // of the Child into a launcher-scope binding so tokio can't see
+    // it (its take() returns None) and the pipe stays open for the
+    // launcher's lifetime. (Smoke test on v0.33.447 caught this.)
+    let _srv_stdin_keepalive = srv_child.stdin.take();
+
     // 4. Spawn host SUSPENDED with srv endpoints in env vars. Host
     // honors AGENTMUX_BACKEND_WS et al. and skips its own spawn_backend.
     // Same CREATE_SUSPENDED → assign-to-job → resume race-fix pattern
