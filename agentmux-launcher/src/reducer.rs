@@ -191,19 +191,23 @@ fn handle_report_window_opened(
     }]
 }
 
-/// Phase B.4 — drop a host-reported window from the mirror. Missing
-/// label is logged-only (no Error event) because the close-before-
-/// launcher-saw-the-open race is benign in B.4: the launcher's mirror
-/// is a passive copy, and the host's authoritative view will simply
-/// not have the window either. B.5 will tighten this contract.
+/// Phase B.4 — drop a host-reported window from the mirror. Returns
+/// `Event::WindowClosed` only when the label was actually in the
+/// mirror; an unknown-label close is a silent no-op (codex P2 PR
+/// #577 round-2). Without this gate, a `ReportWindowClosed` for a
+/// label the launcher never saw (e.g. a pool window that was popped
+/// from the queue but failed HWND validation in
+/// `promote_pool_window` — the orphan window's eventual
+/// `on_before_close` reaches us without a matching open) would
+/// emit an unpaired `WindowClosed` broadcast and break subscribers
+/// that assume open/close pairing.
 fn handle_report_window_closed(state: &mut State, label: String) -> Vec<Event> {
     let was_present = state.windows.remove(&label).is_some();
-    let v = state.bump_version();
     if !was_present {
-        // Quiet: B.4 is read-only and the mirror can race with the
-        // host's authoritative store on first launch. We still emit
-        // the Closed event so subscribers stay consistent.
+        // Silent: only emit when the close pairs with a known open.
+        return vec![];
     }
+    let v = state.bump_version();
     vec![Event::WindowClosed { label, version: v }]
 }
 
@@ -594,7 +598,7 @@ mod tests {
     }
 
     #[test]
-    fn report_window_closed_on_unknown_label_is_idempotent() {
+    fn report_window_closed_on_unknown_label_is_silent_no_op() {
         let mut state = State::default();
         let host_ctx = register_host_and_get_ctx(&mut state, 1234);
         let events = update(
@@ -604,10 +608,10 @@ mod tests {
             },
             &host_ctx,
         );
-        // Still emits an event (so subscribers stay consistent) but
-        // doesn't error.
-        assert_eq!(events.len(), 1);
-        assert!(matches!(events[0], Event::WindowClosed { .. }));
+        // Codex P2 PR #577 round-2: NO broadcast for unknown labels.
+        // Pairs strictly with WindowOpened so subscribers can rely on
+        // open/close pairing.
+        assert_eq!(events.len(), 0);
         assert!(state.windows.is_empty());
     }
 

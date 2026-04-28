@@ -319,17 +319,6 @@ impl AgentMuxHandler {
         // Pane-specific on_before_close work (drain lifecycle entry) lives
         // in `crate::pane::callbacks` after Phase 4.
         if let Some(ref lbl) = label {
-            // Snapshot pool-promotion state BEFORE pool callbacks
-            // mutate it so the close-report decision below uses the
-            // pre-callback membership. (codex P2 PR #577 round-1 —
-            // a `window-pool-*` label still in `unpromoted_pool_labels`
-            // means it crashed before promote and never got a
-            // matching `ReportWindowOpened`; emitting `WindowClosed`
-            // for it would break subscribers that assume open/close
-            // pairing.)
-            let was_unpromoted_pool = lbl.starts_with("window-pool-")
-                && self.state.unpromoted_pool_labels.lock().contains(lbl);
-
             if lbl.starts_with("browser-pane-") {
                 crate::pane::callbacks::on_before_close_pane(&self.state, lbl);
             }
@@ -340,14 +329,17 @@ impl AgentMuxHandler {
             if lbl.starts_with("window-pool-") {
                 crate::commands::window_pool::on_pool_window_destroyed(&self.state, lbl);
             }
-            // Phase B.4 — mirror the close to the launcher. Skip:
-            //   * browser-pane child HWNDs (never reported as open).
-            //   * unpromoted pool windows (pool inventory only —
-            //     close goes via ReportPoolWindowRemoved from
-            //     on_pool_window_destroyed). Promoted pool windows
-            //     retain `window-pool-*` labels and DO need close
-            //     reported here; the snapshot above gates correctly.
-            if !lbl.starts_with("browser-pane-") && !was_unpromoted_pool {
+            // Phase B.4 — mirror the close to the launcher. Skip
+            // browser-pane child HWNDs (never reported as open).
+            // For everything else, send unconditionally: the launcher
+            // reducer silently no-ops on unknown labels (codex P2
+            // PR #577 round-2 made `WindowClosed` strictly paired
+            // with `WindowOpened`), so pre-promote pool deaths and
+            // post-pop / pre-validation orphans are filtered there
+            // — no host-side guard needed. Pool inventory updates
+            // travel via `ReportPoolWindowRemoved` from
+            // `on_pool_window_destroyed` and `promote_pool_window`.
+            if !lbl.starts_with("browser-pane-") {
                 crate::launcher_ipc::report_window_closed(lbl.clone());
             }
         }
