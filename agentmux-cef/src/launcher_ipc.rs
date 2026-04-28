@@ -72,7 +72,9 @@ pub struct LauncherIpcHandle;
 /// Phase B.5+ will tighten this when the host actually depends on
 /// IPC for state.
 #[cfg(target_os = "windows")]
-pub async fn connect_to_launcher() -> Option<LauncherIpcHandle> {
+pub async fn connect_to_launcher(
+    state: std::sync::Arc<crate::state::AppState>,
+) -> Option<LauncherIpcHandle> {
     let pipe_path = match std::env::var("AGENTMUX_LAUNCHER_PIPE") {
         Ok(p) if !p.is_empty() => p,
         _ => {
@@ -184,8 +186,14 @@ pub async fn connect_to_launcher() -> Option<LauncherIpcHandle> {
         }
     });
 
-    // Spawn a read-loop task. For B.2 it just logs every Event the
-    // server sends; B.3+ will dispatch them into host state.
+    // Spawn a read-loop task. Logs every event and (B.5b) feeds the
+    // instance-number shadow registry from the launcher's
+    // authoritative `WindowInstanceAssigned` / `WindowInstanceReleased`
+    // stream. The shadow runs in parallel to the host's existing
+    // `WindowInstanceRegistry`; on each event we compare the two and
+    // log drift. B.5c will swap roles — launcher becomes
+    // authoritative, this shadow becomes the read path.
+    let state_for_reader = std::sync::Arc::clone(&state);
     let reader_task = tokio::spawn(async move {
         let reader = BufReader::new(read_half);
         let mut lines = reader.lines();
@@ -195,6 +203,7 @@ pub async fn connect_to_launcher() -> Option<LauncherIpcHandle> {
                 Ok(Some(line)) => match serde_json::from_str::<Event>(&line) {
                     Ok(event) => {
                         tracing::info!("[launcher-ipc] received event: {:?}", event);
+                        apply_event_to_shadow(&state_for_reader, &event);
                     }
                     Err(e) => {
                         tracing::warn!(
@@ -223,8 +232,85 @@ pub async fn connect_to_launcher() -> Option<LauncherIpcHandle> {
 }
 
 #[cfg(not(target_os = "windows"))]
-pub async fn connect_to_launcher() -> Option<LauncherIpcHandle> {
+pub async fn connect_to_launcher(
+    _state: std::sync::Arc<crate::state::AppState>,
+) -> Option<LauncherIpcHandle> {
     None
+}
+
+/// Phase B.5b — apply launcher events that affect the shadow
+/// instance registry. Compares the launcher's authoritative
+/// assignment to the host's existing `WindowInstanceRegistry` and
+/// logs drift. Other event types are no-ops here (they're already
+/// logged at the call site).
+fn apply_event_to_shadow(state: &std::sync::Arc<crate::state::AppState>, event: &Event) {
+    match event {
+        Event::WindowInstanceAssigned { label, num, .. } => {
+            // Compare to host's authoritative registry FIRST so we
+            // see drift even if the shadow update would otherwise
+            // mask it. Host's registry might not contain the label
+            // yet (race: launcher emits before host's local
+            // `register()` runs); skip the compare in that case
+            // rather than log a noisy "missing" message.
+            let host_num = state.window_instance_registry.lock().get(label);
+            if let Some(host_num) = host_num {
+                if host_num != *num {
+                    tracing::warn!(
+                        target: "launcher-ipc:drift",
+                        label = %label,
+                        launcher_num = %num,
+                        host_num = %host_num,
+                        "[launcher-ipc] instance# drift: host and launcher disagree"
+                    );
+                }
+            }
+            state
+                .shadow_instance_registry
+                .lock()
+                .insert(label.clone(), *num);
+        }
+        Event::WindowInstanceReleased { label, num, .. } => {
+            // Symmetric drift check: launcher just released the
+            // label, so host's authoritative registry SHOULD also
+            // not contain it. Two cases produce different signals:
+            //
+            // * host_num != launcher_num → split-brain on the
+            //   original assignment. Always a bug.
+            // * host_num == launcher_num → either (a) benign race
+            //   (host's local `unregister()` hasn't run yet — the
+            //   launcher's Released event raced ahead of the host's
+            //   own close-path code), OR (b) host-side unregister
+            //   bug (entry never removed). We can't distinguish at
+            //   the moment of this event, so we log it at INFO to
+            //   surface it without flooding WARN. The race resolves
+            //   on the host's next register/unregister cycle; a
+            //   true bug will sustain across events. (codex P2
+            //   PR #580 round-2 — original round-1 fix suppressed
+            //   the same-num case entirely, which silenced real
+            //   unregister bugs forever.)
+            let host_num = state.window_instance_registry.lock().get(label);
+            if let Some(host_num) = host_num {
+                if host_num != *num {
+                    tracing::warn!(
+                        target: "launcher-ipc:drift",
+                        label = %label,
+                        launcher_released_num = %num,
+                        host_num = %host_num,
+                        "[launcher-ipc] release-side instance# split-brain: host has a different number than the launcher released"
+                    );
+                } else {
+                    tracing::info!(
+                        target: "launcher-ipc:drift",
+                        label = %label,
+                        num = %num,
+                        "[launcher-ipc] release-side: host still has matching entry after launcher Released — race or unregister bug; sustained presence indicates bug"
+                    );
+                }
+            }
+            state.shadow_instance_registry.lock().remove(label);
+        }
+        _ => {}
+    }
 }
 
 /// Phase B.4 — sync API: report a window open to the launcher's
