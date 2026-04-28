@@ -164,6 +164,15 @@ pub struct AppState {
     /// Sequential instance numbers for each open window
     pub window_instance_registry: Mutex<WindowInstanceRegistry>,
 
+    /// Phase B.5b — shadow registry fed by the launcher's
+    /// `WindowInstanceAssigned` / `WindowInstanceReleased` events.
+    /// Maintained in parallel to `window_instance_registry` (which
+    /// remains authoritative for now); on every launcher event the
+    /// reader task compares the two and logs drift. B.5c will swap
+    /// the roles — launcher becomes authoritative, this map becomes
+    /// the read path, and `window_instance_registry` is retired.
+    pub shadow_instance_registry: Mutex<HashMap<String, u32>>,
+
     /// Cancellation channel for an in-progress CLI login process
     pub cli_login_cancel: Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
 
@@ -271,6 +280,16 @@ impl Default for AppState {
             active_tab_id: Mutex::new(None),
             window_init_status: Mutex::new(String::new()),
             window_instance_registry: Mutex::new(WindowInstanceRegistry::new()),
+            shadow_instance_registry: Mutex::new({
+                // Pre-seed with main=1 to mirror the launcher's
+                // pre-seeded `instance_registry` (B.5a). Without
+                // this, the very first drift compare would log a
+                // spurious mismatch for "main" before any event
+                // arrives.
+                let mut m = HashMap::new();
+                m.insert("main".to_string(), 1);
+                m
+            }),
             cli_login_cancel: Mutex::new(None),
             cli_login_stdin: Mutex::new(None),
             ipc_port: Mutex::new(0),
