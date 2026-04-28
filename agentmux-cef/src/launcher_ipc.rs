@@ -309,9 +309,21 @@ pub fn report_host_counts(windows: u32, pool: u32) {
 
 /// Phase B.4 follow-up — compute the host's authoritative counts
 /// from `AppState` and report them. Callers invoke this AFTER
-/// each window/pool transition. Cheap: snapshots
-/// `unpromoted_pool_labels` (small set, typically <10 entries) so
-/// the two source maps don't have to be locked simultaneously.
+/// each window/pool transition.
+///
+/// Atomic snapshot: holds both `unpromoted_pool_labels` and
+/// `browsers` simultaneously so the reported `(windows, pool)`
+/// pair is from one consistent state. Without this, a concurrent
+/// mutation between the two lock acquisitions (CEF lifecycle on
+/// the UI thread vs. IPC handler in `commands/drag.rs`) could
+/// produce a mismatched snapshot and trigger a spurious
+/// `Event::DriftDetected`. (codex P2 PR #578 round-1.)
+///
+/// Lock order: `unpromoted_pool_labels` first, then `browsers`.
+/// Matches the existing snapshot pattern in
+/// `client.rs::on_before_close` (line ~418) and is the only place
+/// in the codebase that holds both locks simultaneously, so no
+/// other path can race in the reverse order.
 ///
 /// Counts (matching the launcher's mirror semantics):
 /// * `windows` — top-level user-visible windows in `browsers`,
@@ -319,14 +331,14 @@ pub fn report_host_counts(windows: u32, pool: u32) {
 ///   in `unpromoted_pool_labels`.
 /// * `pool` — pre-promote pool labels (`unpromoted_pool_labels.len()`).
 pub fn compute_and_report_host_counts(state: &std::sync::Arc<crate::state::AppState>) {
-    let unpromoted: std::collections::HashSet<String> =
-        state.unpromoted_pool_labels.lock().iter().cloned().collect();
-    let pool = unpromoted.len() as u32;
+    let unpromoted = state.unpromoted_pool_labels.lock();
     let browsers = state.browsers.lock();
+    let pool = unpromoted.len() as u32;
     let windows = browsers
         .keys()
         .filter(|k| !k.starts_with("browser-pane-") && !unpromoted.contains(*k))
         .count() as u32;
     drop(browsers);
+    drop(unpromoted);
     report_host_counts(windows, pool);
 }
