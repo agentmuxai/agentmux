@@ -368,17 +368,14 @@ pub fn promote_pool_window(
     // set so list_windows starts treating this as a real instance.
     state.unpromoted_pool_labels.lock().remove(&label);
 
-    // Phase B.4 follow-up — atomic pool→windows transition in the
-    // launcher mirror. Removing from pool first, then opening as
-    // FullInstance preserves the invariant that a label is in
-    // exactly one of `state.pool` / `state.windows` at any moment
-    // (modulo the one-event window between the two reports).
+    // Phase B.4 follow-up — pool inventory shrinks unconditionally on
+    // pop. The user-visible WindowOpened report is deferred until
+    // after HWND validation succeeds (codex P1 PR #577 round-1):
+    // emitting it before validation would record a `WindowOpened`
+    // for a label that may never become a real visible window in
+    // the failure path (HWND lookup returns None, function early-
+    // returns after refill), permanently desyncing the mirror.
     crate::launcher_ipc::report_pool_window_removed(label.clone());
-    crate::launcher_ipc::report_window_opened(
-        label.clone(),
-        agentmux_common::ipc::WindowKind::FullInstance,
-        None,
-    );
 
     tracing::info!(
         target: "dnd:tearoff:pool",
@@ -445,6 +442,16 @@ pub fn promote_pool_window(
             return None;
         }
     };
+
+    // HWND validated — the label IS becoming a real user-visible
+    // window. NOW report the open to the launcher mirror so a
+    // failure path above can't leave the mirror with a phantom
+    // entry. (codex P1 PR #577 round-1.)
+    crate::launcher_ipc::report_window_opened(
+        label.clone(),
+        agentmux_common::ipc::WindowKind::FullInstance,
+        None,
+    );
 
     // Compute position outside the unsafe block — these are pure
     // arithmetic, no FFI needed. Don't clamp with .max(0): Windows'
