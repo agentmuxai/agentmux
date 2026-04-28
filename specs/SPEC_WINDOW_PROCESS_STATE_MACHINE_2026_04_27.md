@@ -140,7 +140,9 @@ cleanup via Job Object and (b) survival across host crashes.
      │                                                              
      ├──► SRV (agentmux-srv.exe)                                    
      │     Connects to launcher pipe (NEW).                         
-     │     Reports started/ready/heartbeat as facts.                
+     │     Reports started/ready as facts. No heartbeat — death     
+     │     is detected via pipe-EOF (kernel guarantees on process   
+     │     exit) and child.wait() exit code.                        
      │     Receives Quit command; ack with done.                    
      │                                                              
      │     Already owns workspace/tab DB. No HWND knowledge.        
@@ -263,11 +265,29 @@ can stay (defense-in-depth) or be deleted once the launcher's job is
 proven in production.
 
 **Result:** the moment the launcher exits — for any reason, including
-hard kill — the OS cleans up the entire tree. **And:** if the host
-hangs (the current zombie scenario), the launcher can detect it
-(heartbeat timeout) and `CloseHandle(job)` to force-cleanup the entire
-tree, host included. The "zombie processes" class of bug is gone by
-construction.
+hard kill — the OS cleans up the entire tree.
+
+**On heartbeats:** the spec does NOT introduce a host→launcher heartbeat.
+Heartbeats exist when state across processes can drift; the whole point
+of the reducer + versioned events + GetSnapshot resync (§5) is that it
+can't drift. Liveness is detected from authoritative kernel signals:
+- Host process death → `child.wait()` returns and/or the launcher's pipe
+  to the host returns EOF. Both are kernel-guaranteed at process exit.
+- Host message-loop hang while the host process is alive → not a
+  liveness issue but a state issue. The reducer's window-all-closed
+  predicate (§6.3) excludes warm-pool windows so the host's
+  `quit_message_loop` fires correctly when the last visible window
+  closes. PR #568 already implemented this in
+  `agentmux-cef/src/client.rs::on_before_close`.
+- Forced shutdown still bounded → the explicit `Quit { reason }` IPC
+  (§5.2) carries a 3s ack timeout; on timeout the launcher
+  `CloseHandle(job)` and the OS reaps the tree. This is event-driven,
+  not periodic.
+
+The "zombie processes" class of bug goes away because (a) the host
+exits normally when it should, (b) when it doesn't, the explicit
+shutdown command's timeout backstops it, and (c) when the launcher
+itself dies, the kernel reaps everything via `KILL_ON_JOB_CLOSE`.
 
 ### 4.4 Single-instance enforcement
 
@@ -465,20 +485,33 @@ The redesign is intrusive but can land incrementally. Each phase is shippable.
 - **Move the existing Job Object up to the launcher.** The Win32 calls
   already live in `agentmux-cef/src/sidecar.rs:424`; lift them into
   `agentmux-launcher/src/main.rs`, assign both the host and the srv at
-  spawn time. Keep the host's srv-job in place as defense-in-depth for
-  the first release, then remove. **No user-visible behavior change**
-  for the happy path; provides the cleanup backstop the moment the host
-  hangs.
-- Add a heartbeat from host → launcher (≤1s); if missing for N seconds,
-  launcher `CloseHandle(job)` to force-cleanup the tree. This is the
-  fix for the *current* zombie scenario, where the host hangs because
-  pool windows keep CEF's message loop alive.
-- Replace port-file single-instance with named mutex + named pipe.
-- Add `LifecyclePhase` enum and a minimal reducer that owns it.
-- Synchronous `Quit { reason }` IPC to srv with ack + 3s timeout.
+  spawn time. Spawn each child with `CREATE_SUSPENDED`,
+  `AssignProcessToJobObject`, then `ResumeThread` so children created
+  during host startup can't escape the job (the standard Microsoft /
+  Raymond Chen pattern; codex/gemini correctly flagged the race in the
+  initial PR #570 implementation). Keep the host's srv-job in place as
+  defense-in-depth for the first release, then remove.
+- Replace port-file single-instance with **per-data-dir named mutex** +
+  named pipe. Mutex name `Local\AgentMux-{hash16(canonical_lower(data
+  _dir))}`; multi-instance support per `CLAUDE.md` is preserved by
+  scoping the mutex to data-dir, not globally. Mutex is kernel-released
+  on launcher death so stale-port-file recovery vanishes.
+- Defer `LifecyclePhase` enum and synchronous `Quit { reason }` IPC to
+  Phase B alongside the rest of the reducer surface. They are part of
+  the central architectural inversion (truth → launcher) and a
+  "minimal" Phase A version would be re-architected when Phase B
+  arrives. The existing host-side `quit_message_loop` (PR #568) keeps
+  the happy path working in the meantime.
 
-**User-visible win:** zombies and "taskbar without window" go away even
-before the rest of the redesign lands.
+**Explicitly NOT in Phase A**: any periodic heartbeat or polling
+timer between launcher and host. The state-machine architecture is
+the *replacement* for those mechanisms — see §4.3 "On heartbeats"
+above.
+
+**User-visible win:** zombies become recoverable (Task Manager kill of
+launcher → kernel reaps everything via `KILL_ON_JOB_CLOSE`); relaunch
+race ("taskbar but no window" from stale port file) goes away. Two
+focused PRs (Job Object + race fix; named mutex + handoff).
 
 ### Phase B — Window state machine (2–3 sprints)
 
