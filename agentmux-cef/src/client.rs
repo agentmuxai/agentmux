@@ -348,18 +348,17 @@ impl AgentMuxHandler {
             }
         }
 
-        // Phase B.5e — host's `WindowInstanceRegistry` is gone; the
-        // launcher's `state.instance_registry` is sole authority,
-        // close-side updates flow via `Event::WindowInstanceReleased`
-        // → `apply_event_to_shadow`. We still clean up
-        // `window_id_map` here (B.5 hasn't migrated that map yet —
-        // it's the current target).
+        // Phase B.5 (window_id_map step d) — host no longer mutates
+        // `window_id_map`. The launcher's `state.backend_window_ids`
+        // (B.5 step a) is the sole authority; we look up the wid
+        // via the shadow-first helper before notifying the launcher
+        // to drop it. The wid lookup at close time is safe even
+        // without the host fallback because the frontend's original
+        // `register_backend_window` ran long before close — shadow
+        // has been populated for the entire window lifetime.
         let backend_window_id = label.as_deref().and_then(|lbl| {
-            let wid = self.state.window_id_map.lock().remove(lbl);
-            dlog(&format!("window_id_map.remove({:?}) => {:?}", lbl, wid));
-            // Phase B.5 (window_id_map step b) — mirror the
-            // unregister to the launcher. Fires whether or not we
-            // actually had an entry; the reducer is idempotent.
+            let wid = self.state.backend_window_id(lbl);
+            dlog(&format!("backend_window_id({:?}) => {:?}", lbl, wid));
             crate::launcher_ipc::report_backend_window_id_unregistered(lbl.to_string());
             wid
         });
