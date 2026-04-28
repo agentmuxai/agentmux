@@ -18,6 +18,62 @@ pub struct BackendSpawnResult {
     pub instance_id: String,
 }
 
+/// Phase B.1: when the launcher has already spawned srv (env var
+/// `AGENTMUX_BACKEND_WS` is set), populate `state` from the env vars
+/// the launcher passed and return Ok — no need to spawn srv ourselves.
+///
+/// Returns `Ok(BackendSpawnResult)` mirroring the shape of
+/// `spawn_backend` so the caller in main.rs is symmetric. Returns
+/// `Err` only if env vars are present but malformed; if they're
+/// absent the caller should fall through to `spawn_backend` (the
+/// `task dev` path where the launcher isn't in the loop).
+pub fn use_launcher_endpoints(
+    state: &Arc<AppState>,
+) -> Option<Result<BackendSpawnResult, String>> {
+    let ws = std::env::var("AGENTMUX_BACKEND_WS").ok()?;
+    if ws.is_empty() {
+        return None;
+    }
+    // From here on we KNOW the launcher provided env; missing fields
+    // mean a launcher bug, so emit Err rather than fall through to
+    // the dev-mode spawn (which would fight the launcher's srv).
+    let try_get = |key: &str| -> Result<String, String> {
+        std::env::var(key).map_err(|_| format!("launcher set AGENTMUX_BACKEND_WS but not {}", key))
+    };
+    let result = (|| -> Result<BackendSpawnResult, String> {
+        let web = try_get("AGENTMUX_BACKEND_WEB")?;
+        let pid_str = try_get("AGENTMUX_BACKEND_PID")?;
+        let pid: u32 = pid_str
+            .parse()
+            .map_err(|_| format!("AGENTMUX_BACKEND_PID not a u32: {}", pid_str))?;
+        let auth_key = try_get("AGENTMUX_AUTH_KEY")?;
+        let instance_id = try_get("AGENTMUX_INSTANCE_ID")?;
+        let data_dir = try_get("AGENTMUX_DATA_DIR")?;
+        let config_dir = try_get("AGENTMUX_CONFIG_DIR")?;
+        let user_home_dir = try_get("AGENTMUX_USER_HOME_DIR")?;
+
+        // Populate AppState in the same shape `spawn_backend` would.
+        // Notably we do NOT take ownership of a Child handle (launcher
+        // owns it) and we do NOT create a Job Object (launcher's J0
+        // already covers srv via assignment, not inheritance).
+        *state.auth_key.lock() = auth_key;
+        *state.backend_pid.lock() = Some(pid);
+        *state.backend_started_at.lock() = Some(chrono::Utc::now().to_rfc3339());
+        *state.version_data_dir.lock() = Some(data_dir);
+        *state.version_config_dir.lock() = Some(config_dir);
+        *state.user_home_dir.lock() = Some(user_home_dir);
+
+        let version = env!("CARGO_PKG_VERSION").to_string();
+        Ok(BackendSpawnResult {
+            ws_endpoint: ws,
+            web_endpoint: web,
+            version,
+            instance_id,
+        })
+    })();
+    Some(result)
+}
+
 /// Spawn the agentmux-srv backend sidecar and wait for it to signal
 /// readiness via a `WAVESRV-ESTART` line on stderr (30s timeout).
 pub async fn spawn_backend(state: &Arc<AppState>) -> Result<BackendSpawnResult, String> {
