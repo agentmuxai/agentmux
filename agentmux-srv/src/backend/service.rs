@@ -282,9 +282,6 @@ pub fn get_method_meta(service: &str, method: &str) -> Option<MethodMeta> {
             arg_names: vec![
                 "ctx".into(),
                 "name".into(),
-                "icon".into(),
-                "color".into(),
-                "applyDefaults".into(),
             ],
             return_desc: Some("workspaceId".into()),
         }),
@@ -294,9 +291,6 @@ pub fn get_method_meta(service: &str, method: &str) -> Option<MethodMeta> {
                 "ctx".into(),
                 "workspaceId".into(),
                 "name".into(),
-                "icon".into(),
-                "color".into(),
-                "applyDefaults".into(),
             ],
             return_desc: None,
         }),
@@ -324,16 +318,6 @@ pub fn get_method_meta(service: &str, method: &str) -> Option<MethodMeta> {
                 "pinned".into(),
             ],
             return_desc: Some("tabId".into()),
-        }),
-        ("workspace", "GetColors") => Some(MethodMeta {
-            desc: Some("get workspace colors".into()),
-            arg_names: vec![],
-            return_desc: Some("colors".into()),
-        }),
-        ("workspace", "GetIcons") => Some(MethodMeta {
-            desc: Some("get workspace icons".into()),
-            arg_names: vec![],
-            return_desc: Some("icons".into()),
         }),
         ("workspace", "UpdateTabIds") => Some(MethodMeta {
             desc: Some("update tab ordering".into()),
