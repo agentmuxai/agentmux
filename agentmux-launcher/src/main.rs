@@ -55,11 +55,21 @@ fn main() {
 
     #[cfg(target_os = "windows")]
     {
-        // Spawn the host and capture the Child handle. We use spawn()+wait()
-        // (instead of status()) so we can grab the host's PID and assign it
-        // to a Job Object before it has a chance to spawn its own children
-        // (the agentmux-srv sidecar and CEF render-process workers).
-        let child = std::process::Command::new(&real_exe).args(&args).spawn();
+        use std::os::windows::process::CommandExt;
+        use windows_sys::Win32::System::Threading::CREATE_SUSPENDED;
+
+        // Spawn the host SUSPENDED so its main thread can't run — and
+        // therefore can't spawn the srv sidecar or CEF render-process
+        // children — before we've assigned it to the Job Object.
+        // Without CREATE_SUSPENDED there's a real race where the host
+        // forks children in the gap between Command::spawn and
+        // AssignProcessToJobObject; those children would escape the
+        // job's KILL_ON_JOB_CLOSE backstop. (Microsoft / Raymond Chen
+        // pattern; codex P2 + gemini HIGH on PR #570 round-1.)
+        let child = std::process::Command::new(&real_exe)
+            .args(&args)
+            .creation_flags(CREATE_SUSPENDED)
+            .spawn();
 
         let mut child = match child {
             Ok(c) => c,
@@ -71,16 +81,17 @@ fn main() {
         };
 
         let host_pid = child.id();
-        log(&format!("spawned CEF host pid={}", host_pid));
+        log(&format!("spawned CEF host pid={} (suspended)", host_pid));
 
-        // Create a Job Object with KILL_ON_JOB_CLOSE and assign the host to
-        // it. CEF render-process workers and the srv sidecar that the host
-        // spawns will inherit the job. When this launcher process exits —
-        // for any reason, including being killed via Task Manager — the OS
-        // closes the job handle and the entire process tree is reaped.
+        // Create a Job Object with KILL_ON_JOB_CLOSE and assign the
+        // suspended host to it. CEF render-process workers and the srv
+        // sidecar that the host will spawn AFTER resume inherit the job
+        // automatically. When this launcher process exits — for any
+        // reason, including hard-kill via Task Manager — the OS closes
+        // the job handle and the entire process tree is reaped.
         //
-        // If creation/assignment fails, log and continue: pre-Job-Object
-        // behavior is the fallback, no functional regression.
+        // If creation/assignment fails, log + still resume the host
+        // (degraded cleanup is better than a dead suspended host).
         let job = match create_job_object_for_child(host_pid) {
             Ok(handle) => {
                 log(&format!(
@@ -98,11 +109,36 @@ fn main() {
             }
         };
 
+        // Now resume the host. With CREATE_SUSPENDED only the main
+        // thread exists at this point, so we just need to find it via
+        // a Toolhelp32 thread snapshot and ResumeThread it. From here
+        // the host runs normally, but every child it spawns will
+        // inherit the job we just attached.
+        if let Err(e) = resume_main_thread(host_pid) {
+            log(&format!(
+                "FATAL: failed to resume host pid={}: {} — terminating",
+                host_pid, e
+            ));
+            // The host is currently suspended and will never run.
+            // Killing the launcher (via the dropped JobHandle below)
+            // also reaps the suspended host via KILL_ON_JOB_CLOSE.
+            drop(job);
+            std::process::exit(1);
+        }
+
         match child.wait() {
             Ok(s) => {
                 let code = s.code().unwrap_or(1);
                 log(&format!("CEF host exited with code {}", code));
-                drop(job); // close job handle; host already exited so KILL_ON_JOB_CLOSE is a no-op
+                // Drop the job handle. KILL_ON_JOB_CLOSE then reaps
+                // any child the host left behind (srv, CEF render
+                // workers) — it's the backstop for unclean host
+                // exits, not a no-op. On a clean host exit those
+                // children typically already exited via their own
+                // job/parent-watcher chains; this guarantees they
+                // don't survive even when those mechanisms didn't
+                // fire. (gemini PR #570 round-1 MEDIUM L105.)
+                drop(job);
                 std::process::exit(code);
             }
             Err(e) => {
@@ -157,7 +193,7 @@ fn dirs_fallback_home() -> std::path::PathBuf {
 /// terminates every assigned process — which is what we want as a backstop
 /// if this launcher dies abruptly.
 #[cfg(target_os = "windows")]
-struct JobHandle(*mut std::ffi::c_void);
+struct JobHandle(windows_sys::Win32::Foundation::HANDLE);
 
 #[cfg(target_os = "windows")]
 unsafe impl Send for JobHandle {}
@@ -178,20 +214,12 @@ impl Drop for JobHandle {
 /// the launcher so the entire host process tree (host + srv + CEF render
 /// children) is wrapped one level higher.
 #[cfg(target_os = "windows")]
-fn create_job_object_for_child(pid: u32) -> Result<*mut std::ffi::c_void, String> {
+fn create_job_object_for_child(
+    pid: u32,
+) -> Result<windows_sys::Win32::Foundation::HANDLE, String> {
     use windows_sys::Win32::Foundation::CloseHandle;
     use windows_sys::Win32::System::JobObjects::*;
     use windows_sys::Win32::System::Threading::*;
-
-    // CreateJobObjectW is not exported by windows-sys 0.59's JobObjects
-    // feature, so we link to kernel32.dll directly.
-    #[link(name = "kernel32")]
-    extern "system" {
-        fn CreateJobObjectW(
-            lpjobattributes: *const std::ffi::c_void,
-            lpname: *const u16,
-        ) -> *mut std::ffi::c_void;
-    }
 
     unsafe {
         let job = CreateJobObjectW(std::ptr::null(), std::ptr::null());
@@ -226,6 +254,72 @@ fn create_job_object_for_child(pid: u32) -> Result<*mut std::ffi::c_void, String
         }
 
         Ok(job)
+    }
+}
+
+/// Resume the (single) main thread of a CREATE_SUSPENDED process.
+///
+/// Walks a Toolhelp32 thread snapshot to find the one thread belonging
+/// to `pid` (a freshly-spawned suspended process has only its main
+/// thread), opens it with THREAD_SUSPEND_RESUME, and ResumeThread's it.
+///
+/// Errors come from snapshot creation, OpenThread, or ResumeThread
+/// returning `(DWORD)-1`. A `ResumeThread` return of 0 means the thread
+/// was already running (impossible if the process was just created
+/// suspended) — treated as success.
+#[cfg(target_os = "windows")]
+fn resume_main_thread(pid: u32) -> Result<(), String> {
+    use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
+    use windows_sys::Win32::System::Diagnostics::ToolHelp::{
+        CreateToolhelp32Snapshot, Thread32First, Thread32Next, TH32CS_SNAPTHREAD,
+        THREADENTRY32,
+    };
+    use windows_sys::Win32::System::Threading::{
+        OpenThread, ResumeThread, THREAD_SUSPEND_RESUME,
+    };
+
+    unsafe {
+        let snap = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+        if snap == INVALID_HANDLE_VALUE {
+            return Err("CreateToolhelp32Snapshot failed".into());
+        }
+
+        let mut entry: THREADENTRY32 = std::mem::zeroed();
+        entry.dwSize = std::mem::size_of::<THREADENTRY32>() as u32;
+
+        let mut found = false;
+        if Thread32First(snap, &mut entry) != 0 {
+            loop {
+                if entry.th32OwnerProcessID == pid {
+                    let thread = OpenThread(THREAD_SUSPEND_RESUME, 0, entry.th32ThreadID);
+                    if !thread.is_null() {
+                        let prev = ResumeThread(thread);
+                        CloseHandle(thread);
+                        if prev == u32::MAX {
+                            CloseHandle(snap);
+                            return Err(format!(
+                                "ResumeThread failed for tid={}",
+                                entry.th32ThreadID
+                            ));
+                        }
+                        found = true;
+                        break;
+                    }
+                }
+                // Reset dwSize before each Thread32Next per Win32 contract.
+                entry.dwSize = std::mem::size_of::<THREADENTRY32>() as u32;
+                if Thread32Next(snap, &mut entry) == 0 {
+                    break;
+                }
+            }
+        }
+
+        CloseHandle(snap);
+
+        if !found {
+            return Err(format!("no thread found for pid={}", pid));
+        }
+        Ok(())
     }
 }
 
