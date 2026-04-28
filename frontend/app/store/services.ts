@@ -150,16 +150,6 @@ class WorkspaceServiceType {
         return WOS.callBackendService("workspace", "DeleteWorkspace", Array.from(arguments))
     }
 
-    // @returns colors
-    GetColors(): Promise<string[]> {
-        return WOS.callBackendService("workspace", "GetColors", Array.from(arguments))
-    }
-
-    // @returns icons
-    GetIcons(): Promise<string[]> {
-        return WOS.callBackendService("workspace", "GetIcons", Array.from(arguments))
-    }
-
     // @returns workspace
     GetWorkspace(workspaceId: string): Promise<Workspace> {
         return WOS.callBackendService("workspace", "GetWorkspace", Array.from(arguments))
@@ -179,7 +169,7 @@ class WorkspaceServiceType {
     }
 
     // @returns object updates
-    UpdateWorkspace(workspaceId: string, name: string, icon: string, color: string, applyDefaults: boolean): Promise<void> {
+    UpdateWorkspace(workspaceId: string, name: string): Promise<void> {
         return WOS.callBackendService("workspace", "UpdateWorkspace", Array.from(arguments))
     }
 

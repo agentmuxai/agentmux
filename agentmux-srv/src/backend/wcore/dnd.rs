@@ -233,7 +233,7 @@ pub fn tear_off_block(
     store.update(&mut source_layout)?;
 
     // Create new workspace
-    let new_ws = create_workspace(store, "", "", "")?;
+    let new_ws = create_workspace(store, "")?;
     // create_tab adds a tab and sets it as active
     let new_tab = create_tab(store, &new_ws.oid)?;
 
@@ -436,8 +436,6 @@ pub fn tear_off_tab(
     let mut new_ws = Workspace {
         oid: Uuid::new_v4().to_string(),
         name: String::new(),
-        icon: String::new(),
-        color: String::new(),
         tabids: vec![tab_id.to_string()],
         pinnedtabids: vec![],
         activetabid: tab_id.to_string(),

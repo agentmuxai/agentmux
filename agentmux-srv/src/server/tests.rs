@@ -266,25 +266,3 @@ async fn reactive_poller_status() {
     assert!(json.is_object());
 }
 
-#[tokio::test]
-async fn workspace_colors_and_icons() {
-    let state = test_state();
-    let app = build_router(state);
-    let req = Request::builder()
-        .uri("/agentmux/service")
-        .method("POST")
-        .header("X-AuthKey", "test-secret-key")
-        .header("Content-Type", "application/json")
-        .body(Body::from(
-            r#"{"service":"workspace","method":"GetColors"}"#,
-        ))
-        .unwrap();
-    let resp = app.oneshot(req).await.unwrap();
-    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
-        .await
-        .unwrap();
-    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    assert!(json["success"].as_bool().unwrap());
-    assert!(json["data"].is_array());
-    assert!(json["data"].as_array().unwrap().len() > 0);
-}

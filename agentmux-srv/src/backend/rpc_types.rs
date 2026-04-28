@@ -195,7 +195,6 @@ pub const COMMAND_EVENT_READ_HISTORY: &str = "eventreadhistory";
 
 // Stream/test commands
 pub const COMMAND_STREAM_TEST: &str = "streamtest";
-pub const COMMAND_STREAM_WAVE_AI: &str = "streamwaveai";
 pub const COMMAND_STREAM_CPU_DATA: &str = "streamcpudata";
 pub const COMMAND_TEST: &str = "test";
 
@@ -253,11 +252,7 @@ pub const COMMAND_VDOM_URL_REQUEST: &str = "vdomurlrequest";
 
 // AI commands
 pub const COMMAND_AI_SEND_MESSAGE: &str = "aisendmessage";
-pub const COMMAND_AI_ENABLE_TELEMETRY: &str = "waveaienabletelemetry";
-pub const COMMAND_GET_AI_CHAT: &str = "getwaveaichat";
 pub const COMMAND_GET_AI_RATE_LIMIT: &str = "getwaveairatelimit";
-pub const COMMAND_AI_TOOL_APPROVE: &str = "waveaitoolapprove";
-pub const COMMAND_AI_ADD_CONTEXT: &str = "waveaiaddcontext";
 
 // Screenshot
 pub const COMMAND_CAPTURE_BLOCK_SCREENSHOT: &str = "captureblockscreenshot";

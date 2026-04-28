@@ -67,7 +67,7 @@ impl std::fmt::Display for SrvSpawnError {
             Self::SpawnFailed(s) => write!(f, "spawn failed: {}", s),
             Self::JobAssignFailed(s) => write!(f, "AssignProcessToJobObject failed: {}", s),
             Self::ResumeFailed(s) => write!(f, "ResumeThread failed: {}", s),
-            Self::EstartTimeout => write!(f, "timeout waiting for WAVESRV-ESTART (30s)"),
+            Self::EstartTimeout => write!(f, "timeout waiting for AGENTMUXSRV-ESTART (30s)"),
             Self::EstartChannelClosed => {
                 write!(f, "ESTART channel closed before srv signalled ready")
             }
@@ -83,7 +83,7 @@ impl std::fmt::Display for SrvSpawnError {
 /// data + config dirs and is propagated to srv via env vars.
 /// `job_handle` is the launcher's Job Object so srv joins the same
 /// kill-on-job-close contract as the host. Returns once srv prints
-/// `WAVESRV-ESTART` (or the 30s timeout fires).
+/// `AGENTMUXSRV-ESTART` (or the 30s timeout fires).
 ///
 /// Caller keeps the returned `Child` alive — drop closes srv's
 /// stdin and srv's existing PPID death-watcher takes over (already
@@ -125,8 +125,6 @@ pub async fn spawn_srv(
     .env("AGENTMUX_SETTINGS_DIR", paths.config_dir.to_string_lossy().to_string())
     .env("AGENTMUX_APP_PATH", &app_path_str)
     .env("AGENTMUX_DEV", if cfg!(debug_assertions) { "1" } else { "" })
-    .env("WCLOUD_ENDPOINT", "https://api.agentmux.ai/central")
-    .env("WCLOUD_WS_ENDPOINT", "wss://wsapi.agentmux.ai/")
     .stdin(Stdio::piped())
     .stdout(Stdio::piped())
     .stderr(Stdio::piped())
@@ -190,10 +188,10 @@ pub async fn spawn_srv(
         });
     }
 
-    // Parse stderr for WAVESRV-ESTART (the readiness signal). srv
-    // writes other diagnostic lines too (WAVESRV-EVENT:..., plain
+    // Parse stderr for AGENTMUXSRV-ESTART (the readiness signal). srv
+    // writes other diagnostic lines too (AGENTMUXSRV-EVENT:..., plain
     // text); for B.1 we just log them. Phase B sub-PR B.2 will
-    // forward WAVESRV-EVENT messages to subscribers via the IPC
+    // forward AGENTMUXSRV-EVENT messages to subscribers via the IPC
     // event stream.
     let stderr = child
         .stderr
@@ -207,7 +205,7 @@ pub async fn spawn_srv(
         let mut reader = BufReader::new(stderr).lines();
         let mut estart_sent = false;
         while let Ok(Some(line)) = reader.next_line().await {
-            if !estart_sent && line.starts_with("WAVESRV-ESTART") {
+            if !estart_sent && line.starts_with("AGENTMUXSRV-ESTART") {
                 let parsed = parse_estart(&line);
                 let result = SrvSpawnResult {
                     pid: pid_for_log,
@@ -223,7 +221,7 @@ pub async fn spawn_srv(
                 ));
                 let _ = tx.send(result).await;
                 estart_sent = true;
-            } else if line.starts_with("WAVESRV-EVENT:") {
+            } else if line.starts_with("AGENTMUXSRV-EVENT:") {
                 crate::log(&format!("[srv {} event] {}", pid_for_log, line));
                 // Phase B.2 will forward these to subscribers.
             } else {
@@ -311,7 +309,7 @@ fn resolve_srv_binary(launcher_exe_dir: &Path) -> Result<PathBuf, SrvSpawnError>
     )))
 }
 
-/// Parsed fields out of a `WAVESRV-ESTART` line. Same shape as the
+/// Parsed fields out of a `AGENTMUXSRV-ESTART` line. Same shape as the
 /// host's `parse_estart` (sidecar.rs:404-420).
 struct EstartFields {
     ws_endpoint: String,

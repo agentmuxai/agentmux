@@ -1,6 +1,6 @@
 # Spec: Chrome Zoom — Widget Labels Shift Left on Linux
 
-**Status:** Fixed
+**Status:** SHIPPED
 **Date:** 2026-03-19
 **Component:** `frontend/app/window/window-header.scss`, `frontend/app/store/zoom.ts`
 

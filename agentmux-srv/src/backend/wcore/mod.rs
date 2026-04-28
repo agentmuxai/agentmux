@@ -29,29 +29,6 @@ use super::storage::wstore::WaveStore;
 use super::storage::StoreError;
 use super::obj::*;
 
-// ---- Workspace defaults (match Go's WorkspaceColors/Icons) ----
-
-pub const WORKSPACE_COLORS: &[&str] = &[
-    "#58C142", "#00D1EC", "#FA2D01", "#FBB500", "#8B54FF", "#FF5E8E", "#2B80FF",
-];
-
-pub const WORKSPACE_ICONS: &[&str] = &[
-    "custom@wave-logo-solid",
-    "triangle",
-    "star",
-    "cube",
-    "gem",
-    "chess-knight",
-    "heart",
-    "plane",
-    "rocket",
-    "flask",
-    "bolt",
-    "music",
-    "globe",
-    "leaf",
-];
-
 // ---- Layout action types (match Go) ----
 
 pub const LAYOUT_ACTION_INSERT: &str = "insert";
@@ -105,12 +82,7 @@ pub fn ensure_initial_data(store: &WaveStore) -> Result<bool, StoreError> {
     store.update(&mut client)?;
 
     // Create starter workspace
-    let ws = create_workspace(
-        store,
-        "Starter workspace",
-        WORKSPACE_ICONS[0],
-        WORKSPACE_COLORS[0],
-    )?;
+    let ws = create_workspace(store, "Starter workspace")?;
 
     // Create window pointing to workspace
     let win = create_window(store, &ws.oid)?;
@@ -271,7 +243,7 @@ mod tests {
     #[test]
     fn test_create_and_delete_workspace() {
         let store = make_store();
-        let ws = create_workspace(&store, "Test WS", "star", "#FF0000").unwrap();
+        let ws = create_workspace(&store, "Test WS").unwrap();
         assert_eq!(ws.name, "Test WS");
 
         // Create tabs in workspace
@@ -293,7 +265,7 @@ mod tests {
     #[test]
     fn test_create_and_delete_tab() {
         let store = make_store();
-        let ws = create_workspace(&store, "WS", "star", "#000").unwrap();
+        let ws = create_workspace(&store, "WS").unwrap();
         let tab1 = create_tab(&store, &ws.oid).unwrap();
         let tab2 = create_tab(&store, &ws.oid).unwrap();
 
@@ -311,7 +283,7 @@ mod tests {
     #[test]
     fn test_set_active_tab() {
         let store = make_store();
-        let ws = create_workspace(&store, "WS", "star", "#000").unwrap();
+        let ws = create_workspace(&store, "WS").unwrap();
         let _tab1 = create_tab(&store, &ws.oid).unwrap();
         let tab2 = create_tab(&store, &ws.oid).unwrap();
 
@@ -327,7 +299,7 @@ mod tests {
     #[test]
     fn test_create_and_delete_block() {
         let store = make_store();
-        let ws = create_workspace(&store, "WS", "star", "#000").unwrap();
+        let ws = create_workspace(&store, "WS").unwrap();
         let tab = create_tab(&store, &ws.oid).unwrap();
 
         let mut meta = MetaMapType::new();
@@ -356,7 +328,7 @@ mod tests {
         let client = get_client(&store).unwrap();
         let initial_count = client.windowids.len();
 
-        let ws = create_workspace(&store, "WS2", "star", "#000").unwrap();
+        let ws = create_workspace(&store, "WS2").unwrap();
         let window = create_window(&store, &ws.oid).unwrap();
 
         // Add to client
@@ -375,7 +347,7 @@ mod tests {
         let store = make_store();
         ensure_initial_data(&store).unwrap();
 
-        let ws = create_workspace(&store, "WS2", "star", "#000").unwrap();
+        let ws = create_workspace(&store, "WS2").unwrap();
         let w2 = create_window(&store, &ws.oid).unwrap();
         let mut client = get_client(&store).unwrap();
         client.windowids.push(w2.oid.clone());
@@ -397,7 +369,7 @@ mod tests {
         let window = store.must_get::<Window>(window_id).unwrap();
         let old_ws = window.workspaceid.clone();
 
-        let new_ws = create_workspace(&store, "New WS", "star", "#000").unwrap();
+        let new_ws = create_workspace(&store, "New WS").unwrap();
         switch_workspace(&store, window_id, &new_ws.oid).unwrap();
 
         let window = store.must_get::<Window>(window_id).unwrap();
@@ -408,7 +380,7 @@ mod tests {
     #[test]
     fn test_resolve_block_id_prefix() {
         let store = make_store();
-        let ws = create_workspace(&store, "WS", "star", "#000").unwrap();
+        let ws = create_workspace(&store, "WS").unwrap();
         let tab = create_tab(&store, &ws.oid).unwrap();
 
         let meta = MetaMapType::new();
@@ -426,9 +398,9 @@ mod tests {
     #[test]
     fn test_list_workspaces() {
         let store = make_store();
-        create_workspace(&store, "WS1", "star", "#000").unwrap();
-        create_workspace(&store, "WS2", "star", "#111").unwrap();
-        create_workspace(&store, "WS3", "star", "#222").unwrap();
+        create_workspace(&store, "WS1").unwrap();
+        create_workspace(&store, "WS2").unwrap();
+        create_workspace(&store, "WS3").unwrap();
 
         let all = list_workspaces(&store).unwrap();
         assert_eq!(all.len(), 3);
@@ -463,7 +435,7 @@ mod tests {
     #[test]
     fn test_move_block_to_tab() {
         let store = make_store();
-        let ws = create_workspace(&store, "WS", "star", "#000").unwrap();
+        let ws = create_workspace(&store, "WS").unwrap();
         let tab1 = create_tab(&store, &ws.oid).unwrap();
         let tab2 = create_tab(&store, &ws.oid).unwrap();
 
@@ -493,7 +465,7 @@ mod tests {
     #[test]
     fn test_move_block_to_tab_auto_close() {
         let store = make_store();
-        let ws = create_workspace(&store, "WS", "star", "#000").unwrap();
+        let ws = create_workspace(&store, "WS").unwrap();
         let tab1 = create_tab(&store, &ws.oid).unwrap();
         let tab2 = create_tab(&store, &ws.oid).unwrap();
 
@@ -514,7 +486,7 @@ mod tests {
     #[test]
     fn test_move_block_same_tab_noop() {
         let store = make_store();
-        let ws = create_workspace(&store, "WS", "star", "#000").unwrap();
+        let ws = create_workspace(&store, "WS").unwrap();
         let tab = create_tab(&store, &ws.oid).unwrap();
         let block = create_block(&store, &tab.oid, MetaMapType::new()).unwrap();
 
@@ -528,7 +500,7 @@ mod tests {
     #[test]
     fn test_promote_block_to_tab() {
         let store = make_store();
-        let ws = create_workspace(&store, "WS", "star", "#000").unwrap();
+        let ws = create_workspace(&store, "WS").unwrap();
         let tab = create_tab(&store, &ws.oid).unwrap();
         let block = create_block(&store, &tab.oid, MetaMapType::new()).unwrap();
 
@@ -555,7 +527,7 @@ mod tests {
     #[test]
     fn test_reorder_tab() {
         let store = make_store();
-        let ws = create_workspace(&store, "WS", "star", "#000").unwrap();
+        let ws = create_workspace(&store, "WS").unwrap();
         let tab1 = create_tab(&store, &ws.oid).unwrap();
         let tab2 = create_tab(&store, &ws.oid).unwrap();
         let tab3 = create_tab(&store, &ws.oid).unwrap();
@@ -580,8 +552,8 @@ mod tests {
     #[test]
     fn test_move_tab_to_workspace() {
         let store = make_store();
-        let ws1 = create_workspace(&store, "WS1", "star", "#000").unwrap();
-        let ws2 = create_workspace(&store, "WS2", "moon", "#fff").unwrap();
+        let ws1 = create_workspace(&store, "WS1").unwrap();
+        let ws2 = create_workspace(&store, "WS2").unwrap();
         let tab1 = create_tab(&store, &ws1.oid).unwrap();
         let tab2 = create_tab(&store, &ws1.oid).unwrap();
         let tab3 = create_tab(&store, &ws2.oid).unwrap();
@@ -605,8 +577,8 @@ mod tests {
     #[test]
     fn test_move_tab_to_workspace_last_tab_blocked() {
         let store = make_store();
-        let ws1 = create_workspace(&store, "WS1", "star", "#000").unwrap();
-        let ws2 = create_workspace(&store, "WS2", "moon", "#fff").unwrap();
+        let ws1 = create_workspace(&store, "WS1").unwrap();
+        let ws2 = create_workspace(&store, "WS2").unwrap();
         let tab1 = create_tab(&store, &ws1.oid).unwrap();
         let _tab2 = create_tab(&store, &ws2.oid).unwrap();
 
@@ -618,7 +590,7 @@ mod tests {
     #[test]
     fn test_tear_off_block() {
         let store = make_store();
-        let ws = create_workspace(&store, "WS", "star", "#000").unwrap();
+        let ws = create_workspace(&store, "WS").unwrap();
         let tab = create_tab(&store, &ws.oid).unwrap();
         let block = create_block(&store, &tab.oid, MetaMapType::new()).unwrap();
         let block2 = create_block(&store, &tab.oid, MetaMapType::new()).unwrap();
@@ -645,7 +617,7 @@ mod tests {
     #[test]
     fn test_tear_off_tab() {
         let store = make_store();
-        let ws = create_workspace(&store, "WS", "star", "#000").unwrap();
+        let ws = create_workspace(&store, "WS").unwrap();
         let tab1 = create_tab(&store, &ws.oid).unwrap();
         let tab2 = create_tab(&store, &ws.oid).unwrap();
         set_active_tab(&store, &ws.oid, &tab1.oid).unwrap();
@@ -665,7 +637,7 @@ mod tests {
     #[test]
     fn test_tear_off_last_tab_blocked() {
         let store = make_store();
-        let ws = create_workspace(&store, "WS", "star", "#000").unwrap();
+        let ws = create_workspace(&store, "WS").unwrap();
         let tab1 = create_tab(&store, &ws.oid).unwrap();
 
         // Should fail — can't tear off the only tab

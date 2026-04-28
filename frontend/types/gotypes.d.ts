@@ -1623,8 +1623,6 @@ declare global {
     // waveobj.Workspace
     type Workspace = WaveObj & {
         name?: string;
-        icon?: string;
-        color?: string;
         tabids: string[];
         pinnedtabids: string[];
         activetabid: string;
