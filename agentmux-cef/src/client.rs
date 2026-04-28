@@ -439,7 +439,7 @@ impl AgentMuxHandler {
             quit_message_loop();
         } else {
             // Notify remaining windows of the new count.
-            let new_count = self.state.window_instance_registry.lock().count();
+            let new_count = self.state.instance_count();
             crate::events::emit_event_all_windows(
                 &self.state,
                 "window-instances-changed",

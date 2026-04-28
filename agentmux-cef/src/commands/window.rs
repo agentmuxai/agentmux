@@ -453,19 +453,27 @@ pub fn focus_window(state: &Arc<AppState>, args: &serde_json::Value) -> Result<s
 }
 
 /// Get the instance number for the current window.
+///
+/// Phase B.5c — switched from direct `window_instance_registry.lock()`
+/// access to `state.instance_num()`, which prefers the
+/// launcher-authoritative `shadow_instance_registry` and falls back
+/// to host's local registry only for the brief race window where
+/// host has registered locally but the launcher's
+/// `WindowInstanceAssigned` event hasn't returned yet.
 pub fn get_instance_number(state: &Arc<AppState>, args: &serde_json::Value) -> serde_json::Value {
     let label = args
         .get("label")
         .and_then(|v| v.as_str())
         .unwrap_or("main");
-    let reg = state.window_instance_registry.lock();
-    serde_json::json!(reg.get(label).unwrap_or(1))
+    serde_json::json!(state.instance_num(label).unwrap_or(1))
 }
 
 /// Get the total window count.
+///
+/// Phase B.5c — uses `state.instance_count()` which reads from the
+/// launcher-authoritative shadow.
 pub fn get_window_count(state: &Arc<AppState>) -> serde_json::Value {
-    let reg = state.window_instance_registry.lock();
-    serde_json::json!(reg.count())
+    serde_json::json!(state.instance_count())
 }
 
 /// Register the backend window ID for a window label.
@@ -488,7 +496,7 @@ pub fn register_backend_window(state: &Arc<AppState>, args: &serde_json::Value) 
         // listWindowInstances after a freshly-opened window's
         // windowId becomes available, leaving its row's name
         // unresolvable and rename disabled. (codex PR #569 P2)
-        let count = state.window_instance_registry.lock().count();
+        let count = state.instance_count();
         crate::events::emit_event_all_windows(
             state,
             "window-instances-changed",
@@ -628,7 +636,7 @@ fn open_window_with_kind(
     );
 
     // Notify all windows of the count change
-    let count = state.window_instance_registry.lock().count();
+    let count = state.instance_count();
     crate::events::emit_event_all_windows(state, "window-instances-changed", &serde_json::json!(count));
 
     Ok(serde_json::json!(label))
