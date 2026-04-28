@@ -387,15 +387,27 @@ pub fn get_double_click_time() -> serde_json::Value {
 /// fall back to label/index-based naming in that case.
 pub fn list_window_instances(state: &Arc<AppState>) -> serde_json::Value {
     let pool_labels = state.unpromoted_pool_labels.lock().clone();
-    let window_id_map = state.window_id_map.lock();
     let browsers = state.browsers.lock();
-    let entries: Vec<serde_json::Value> = browsers
+    let labels: Vec<String> = browsers
         .keys()
         .filter(|l| !pool_labels.contains(*l) && !l.starts_with("browser-pane-"))
+        .cloned()
+        .collect();
+    drop(browsers);
+    // Phase B.5 (window_id_map step c) — read backend window IDs
+    // via `state.backend_window_id()`, which prefers the
+    // launcher-fed `shadow_backend_window_ids` (the source of
+    // truth post-B.5a-equivalent for this map) and falls back to
+    // host's `window_id_map` only for the race window between the
+    // frontend's `register_backend_window` and the launcher's
+    // reply event arriving back. We resolve labels OUTSIDE the
+    // browsers lock to avoid nesting (browsers + shadow).
+    let entries: Vec<serde_json::Value> = labels
+        .iter()
         .map(|l| {
             serde_json::json!({
                 "label": l,
-                "windowId": window_id_map.get(l),
+                "windowId": state.backend_window_id(l),
             })
         })
         .collect();
