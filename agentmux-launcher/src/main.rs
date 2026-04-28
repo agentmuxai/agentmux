@@ -177,31 +177,50 @@ async fn run_windows(
         Err(e) => {
             // ERROR_ACCESS_DENIED (5) means another launcher already
             // owns this pipe — i.e., another AgentMux is running for
-            // this data dir. Anything else is unexpected (namespace
-            // misconfig, security descriptor failure) and we still
-            // refuse to start, but with a different message so support
-            // can tell them apart from a log line.
+            // this data dir. The user-facing behavior matches the
+            // status-bar version popup's "new window": forward an
+            // `open_new_window` IPC POST to the existing host and
+            // exit 0. The named-pipe bind is the AUTHORITATIVE
+            // single-instance signal; this HTTP call is just the
+            // forwarding hint. Other errors (namespace misconfig,
+            // security descriptor failure) genuinely fail — show
+            // the dialog and exit 2.
             const ERROR_ACCESS_DENIED: i32 = 5;
             let already_running = e.raw_os_error() == Some(ERROR_ACCESS_DENIED);
-            let title = "AgentMux";
-            let body = if already_running {
-                format!(
-                    "AgentMux is already running for this data directory.\n\nData dir: {}\n\nFocus the existing window, or close it before launching again.",
-                    paths.data_dir.display()
-                )
-            } else {
-                format!(
-                    "AgentMux failed to start: could not bind IPC pipe.\n\nPipe: {}\nError: {}\n\nIf the problem persists, check the launcher log.",
-                    pipe_path, e
-                )
-            };
             log(&format!(
-                "FATAL: pipe bind failed (already_running={}): {} pipe={}",
+                "pipe bind failed (already_running={}): {} pipe={}",
                 already_running, e, pipe_path
             ));
-            show_fatal_dialog(title, &body);
-            // Exit code 2 distinguishes the single-instance refusal from
-            // generic launch failures (code 1).
+            if already_running {
+                match forward_open_new_window(&paths.data_dir) {
+                    Ok(()) => {
+                        log("forwarded open_new_window to existing instance — exiting 0");
+                        std::process::exit(0);
+                    }
+                    Err(reason) => {
+                        log(&format!(
+                            "forward failed: {} — exiting silently to avoid surprise dialog",
+                            reason
+                        ));
+                        // Silent exit: the existing instance is alive
+                        // (pipe is held), but its forwarding hint is
+                        // unreadable / the HTTP server isn't ready
+                        // yet. A modal would be more annoying than
+                        // helpful for a transient race; the user can
+                        // double-click again.
+                        std::process::exit(0);
+                    }
+                }
+            }
+            // Genuine bind failure (not "already running"). Surface
+            // it loudly because it indicates a system-level problem.
+            show_fatal_dialog(
+                "AgentMux",
+                &format!(
+                    "AgentMux failed to start: could not bind IPC pipe.\n\nPipe: {}\nError: {}\n\nIf the problem persists, check the launcher log.",
+                    pipe_path, e
+                ),
+            );
             std::process::exit(2);
         }
     };
@@ -541,9 +560,58 @@ pub(crate) fn resume_main_thread(pid: u32) -> Result<(), String> {
     }
 }
 
-/// Show a modal error dialog before the launcher exits. Used by the
-/// Phase B.6 single-instance check so a user double-clicking the app
-/// while it is already running sees a clear message — without this,
+/// Phase B.6 (post-fix) — forward an `open_new_window` request to
+/// the already-running host and let this launcher exit 0.
+///
+/// The host writes `<data-dir>/ipc-port` after CEF init as
+/// `port:token`. We open a TCP connection to 127.0.0.1:port, send a
+/// minimal HTTP/1.1 POST to /ipc with the bearer token and a JSON
+/// body, and bail. We deliberately do NOT pull in reqwest: the
+/// launcher binary should stay tiny (~325 KB) and the protocol is
+/// fixed, so a hand-rolled request is the right tool.
+///
+/// Returns `Ok(())` only when the bytes were written to the socket.
+/// We don't parse the response — `open_new_window` is fire-and-
+/// forget and the host writes no useful body. Any failure (file
+/// missing, parse error, connect refused) returns `Err(reason)`;
+/// the caller exits 0 silently to avoid spamming a dialog on
+/// transient races (host mid-startup, etc.).
+fn forward_open_new_window(data_dir: &std::path::Path) -> Result<(), String> {
+    let port_file = data_dir.join("ipc-port");
+    let contents = std::fs::read_to_string(&port_file)
+        .map_err(|e| format!("read {}: {}", port_file.display(), e))?;
+    let trimmed = contents.trim();
+    let (port_str, token) = trimmed
+        .split_once(':')
+        .ok_or_else(|| format!("malformed port file (expected port:token): {}", trimmed))?;
+    let port: u16 = port_str
+        .parse()
+        .map_err(|e| format!("invalid port {:?}: {}", port_str, e))?;
+
+    let addr: std::net::SocketAddr = ([127, 0, 0, 1], port).into();
+    let mut stream = std::net::TcpStream::connect_timeout(&addr, std::time::Duration::from_secs(2))
+        .map_err(|e| format!("connect 127.0.0.1:{}: {}", port, e))?;
+    stream
+        .set_write_timeout(Some(std::time::Duration::from_secs(2)))
+        .ok();
+
+    let body = r#"{"cmd":"open_new_window"}"#;
+    let req = format!(
+        "POST /ipc HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nAuthorization: Bearer {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        token,
+        body.len(),
+        body
+    );
+    use std::io::Write;
+    stream
+        .write_all(req.as_bytes())
+        .map_err(|e| format!("write request: {}", e))?;
+    Ok(())
+}
+
+/// Show a modal error dialog before the launcher exits. Used for
+/// genuine bind failures (NOT the "already running" path — that
+/// silently forwards via `forward_open_new_window`). Without this,
 /// the launcher exit is silent (it has the `windows` subsystem in
 /// release, so eprintln! goes nowhere).
 #[cfg(target_os = "windows")]

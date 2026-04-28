@@ -72,10 +72,10 @@ See `b5-migration-architecture-2026-04-28.md` for why `browsers` and pool maps c
 
 - Scaffolding-role comments added to `state.browsers`, `window_pool`, `unpromoted_pool_labels`, and `compute_and_report_host_counts` so future agents see why these fields don't follow the standard ratchet and where they head in Phase F.
 
-### B.6 — single-instance mutex (done — PR #595)
+### B.6 — single-instance mutex (done — PR #595, fix in B.6.1)
 
-- Launcher synchronously binds `first_pipe_instance(true)` BEFORE spawning srv/host; on `ERROR_ACCESS_DENIED` shows a Win32 MessageBox ("AgentMux is already running for this data directory…") and exits 2.
-- Legacy `<data-dir>/ipc-port` probe + write removed from the host (gap #8 stale-state defect retired).
+- Launcher synchronously binds `first_pipe_instance(true)` BEFORE spawning srv/host. The pipe bind is the AUTHORITATIVE single-instance signal.
+- **B.6.1 fix**: on `ERROR_ACCESS_DENIED`, the second launcher reads `<data-dir>/ipc-port` (still written by the host post-CEF-init) and forwards an `open_new_window` HTTP POST to the existing instance, then exits 0. Mirrors the status-bar version popup's "new window" UX. The MessageBox path is reserved for genuine bind failures (namespace misconfig). Stale-state defect (gap #8) is bounded because pipe-bind happens first: a stale port file is irrelevant on the first-instance path (overwritten); on the second-instance path the live first instance wrote a fresh port:token, so forwarding lands.
 
 ### B.7 — frontend cutover (2-3 PRs)
 
