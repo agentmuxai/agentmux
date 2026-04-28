@@ -354,47 +354,39 @@ impl AppState {
 
     /// Phase B.5 (window_meta step c) — collect labels of Subwindows
     /// whose `parent_instance_id` points to `parent_label`. Used by
-    /// `on_before_close`'s cascade-close logic. Reads from the
-    /// shadow first; falls back to host's `window_meta` if shadow
-    /// is empty (early in startup, before any events have arrived).
+    /// `on_before_close`'s cascade-close logic.
+    ///
+    /// Returns the **union** of matches from `shadow_window_meta`
+    /// (the launcher-fed projection) and host's `window_meta` (the
+    /// eager pre-create handoff). The union covers a critical race:
+    /// a parent may already have one mirrored subwindow AND a newly
+    /// opened sibling whose `WindowOpened` event hasn't returned to
+    /// host yet. The newer sibling lives in host's `window_meta`
+    /// only; the mirrored one lives in shadow only (post-step-d
+    /// the shadow becomes the sole source). Cascade-close MUST
+    /// catch both — short-circuiting on shadow-non-empty would
+    /// leave the race-window sibling orphaned. (codex P1 PR #591
+    /// round-1.)
+    ///
+    /// Dedup is by label; if a label is in both, it's reported
+    /// once. Labels collected via a HashSet to dedup, returned as
+    /// a Vec.
     pub fn subwindow_children_of(&self, parent_label: &str) -> Vec<String> {
-        let from_shadow: Vec<String> = self
-            .shadow_window_meta
-            .lock()
-            .values()
-            .filter(|m| {
-                m.kind == WindowKind::Subwindow
-                    && m.parent_instance_id.as_deref() == Some(parent_label)
-            })
-            .map(|m| m.label.clone())
-            .collect();
-        if !from_shadow.is_empty() {
-            return from_shadow;
+        let mut out: std::collections::HashSet<String> = std::collections::HashSet::new();
+        for m in self.shadow_window_meta.lock().values() {
+            if m.kind == WindowKind::Subwindow
+                && m.parent_instance_id.as_deref() == Some(parent_label)
+            {
+                out.insert(m.label.clone());
+            }
         }
-        // Shadow had no matches — either there genuinely are no
-        // subwindow children, OR shadow hasn't been populated yet
-        // (race during early startup before any WindowOpened event
-        // has arrived). Fall back to host's window_meta to cover
-        // the latter; if shadow is correct (no children), this
-        // returns the same empty Vec.
-        let from_host: Vec<String> = self
-            .window_meta
-            .lock()
-            .values()
-            .filter(|m| {
-                m.kind == WindowKind::Subwindow
-                    && m.parent_instance_id.as_deref() == Some(parent_label)
-            })
-            .map(|m| m.label.clone())
-            .collect();
-        if !from_host.is_empty() {
-            tracing::debug!(
-                target: "launcher-ipc:fallback",
-                parent_label = %parent_label,
-                count = %from_host.len(),
-                "[subwindow_children_of] shadow miss — falling back to host's window_meta"
-            );
+        for m in self.window_meta.lock().values() {
+            if m.kind == WindowKind::Subwindow
+                && m.parent_instance_id.as_deref() == Some(parent_label)
+            {
+                out.insert(m.label.clone());
+            }
         }
-        from_host
+        out.into_iter().collect()
     }
 }
