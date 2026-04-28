@@ -123,10 +123,18 @@ fn handle_report_pool_window_added(state: &mut State, label: String) -> Vec<Even
 }
 
 /// Phase B.4 follow-up — record pool inventory shrink (promote or
-/// destroy). Idempotent on unknown labels for the same reason
-/// `ReportWindowClosed` is: the host might race the launcher.
+/// destroy). Strictly paired with `ReportPoolWindowAdded`: an
+/// unknown-label remove is a silent no-op so subscribers can rely
+/// on add/remove pairing in the broadcast stream. Same gate as
+/// `handle_report_window_closed`. (reagent P2 PR #577 round-3 —
+/// the original "idempotent" comment referenced behavior that was
+/// already removed for `ReportWindowClosed`; pool semantics now
+/// match.)
 fn handle_report_pool_window_removed(state: &mut State, label: String) -> Vec<Event> {
-    state.pool.remove(&label);
+    let was_present = state.pool.remove(&label);
+    if !was_present {
+        return vec![];
+    }
     let v = state.bump_version();
     vec![Event::PoolWindowRemoved { label, version: v }]
 }
@@ -709,6 +717,23 @@ mod tests {
         );
         assert!(!state.pool.contains("window-pool-xyz"));
         assert!(state.windows.contains_key("window-pool-xyz"));
+    }
+
+    #[test]
+    fn report_pool_window_removed_on_unknown_label_is_silent_no_op() {
+        let mut state = State::default();
+        let host_ctx = register_host_and_get_ctx(&mut state, 1234);
+        let events = update(
+            &mut state,
+            Command::ReportPoolWindowRemoved {
+                label: "ghost-pool".into(),
+            },
+            &host_ctx,
+        );
+        // Strict pairing — pool remove only emits an event when the
+        // label was in the pool. (reagent P2 PR #577 round-3.)
+        assert_eq!(events.len(), 0);
+        assert!(state.pool.is_empty());
     }
 
     #[test]
