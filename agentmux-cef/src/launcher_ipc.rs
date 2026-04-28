@@ -103,45 +103,15 @@ pub async fn connect_to_launcher() -> Option<LauncherIpcHandle> {
     let (read_half, write_half) = tokio::io::split(client);
     let writer = Arc::new(Mutex::new(write_half));
 
-    // Phase B.4 — wire up the outbound command channel. Sync callers
-    // push Commands; a dedicated drain task writes them as
-    // newline-delimited JSON. Ordered (preserves report order from
-    // the UI thread). Bounded? No — UnboundedSender so `try_send`
-    // can stay non-blocking on the UI thread; the drain task is
-    // fast (single async write) and the volume is one event per
-    // window create/close, not high-frequency.
-    let (tx, mut rx) = mpsc::unbounded_channel::<Command>();
-    if COMMAND_TX.set(tx).is_err() {
-        tracing::warn!("[launcher-ipc] COMMAND_TX already set — connect_to_launcher called twice");
-    }
-    let writer_for_drain = Arc::clone(&writer);
-    tokio::spawn(async move {
-        while let Some(cmd) = rx.recv().await {
-            let mut buf = match serde_json::to_vec(&cmd) {
-                Ok(b) => b,
-                Err(e) => {
-                    tracing::warn!("[launcher-ipc] failed to serialize {:?}: {}", cmd, e);
-                    continue;
-                }
-            };
-            buf.push(b'\n');
-            let mut w = writer_for_drain.lock().await;
-            if let Err(e) = w.write_all(&buf).await {
-                tracing::warn!(
-                    "[launcher-ipc] write failed for {:?}: {} — dropping further commands",
-                    cmd, e
-                );
-                return;
-            }
-            if let Err(e) = w.flush().await {
-                tracing::warn!("[launcher-ipc] flush failed: {}", e);
-                return;
-            }
-        }
-    });
-
-    // Send Register. Server enforces this is the first message; we
-    // satisfy the contract before any other traffic.
+    // Send Register FIRST. Server's `enforce_register_first` requires
+    // it as the very first message on the wire, and a fatal-close
+    // on violation would permanently disable the mirror (no
+    // reconnect path in B.4). The drain task that processes
+    // outbound commands gets spawned + the global sender published
+    // only AFTER this succeeds. (reagent P1 + codex P2 PR #576
+    // round-1 — race where a `report_window_*` call between
+    // `COMMAND_TX.set` and the Register flush could land first on
+    // the wire.)
     let register = Command::Register {
         kind: ClientKind::Host,
         pid: std::process::id(),
@@ -175,6 +145,44 @@ pub async fn connect_to_launcher() -> Option<LauncherIpcHandle> {
             return None;
         }
     }
+
+    // Phase B.4 — Register confirmed on the wire; safe to expose the
+    // outbound command channel. Sync callers push Commands; a
+    // dedicated drain task writes them as newline-delimited JSON.
+    // Ordered (preserves report order from the UI thread). Bounded?
+    // No — UnboundedSender so `try_send` can stay non-blocking on
+    // the UI thread; the drain task is fast (single async write)
+    // and the volume is one event per window create/close, not
+    // high-frequency.
+    let (tx, mut rx) = mpsc::unbounded_channel::<Command>();
+    if COMMAND_TX.set(tx).is_err() {
+        tracing::warn!("[launcher-ipc] COMMAND_TX already set — connect_to_launcher called twice");
+    }
+    let writer_for_drain = Arc::clone(&writer);
+    tokio::spawn(async move {
+        while let Some(cmd) = rx.recv().await {
+            let mut buf = match serde_json::to_vec(&cmd) {
+                Ok(b) => b,
+                Err(e) => {
+                    tracing::warn!("[launcher-ipc] failed to serialize {:?}: {}", cmd, e);
+                    continue;
+                }
+            };
+            buf.push(b'\n');
+            let mut w = writer_for_drain.lock().await;
+            if let Err(e) = w.write_all(&buf).await {
+                tracing::warn!(
+                    "[launcher-ipc] write failed for {:?}: {} — dropping further commands",
+                    cmd, e
+                );
+                return;
+            }
+            if let Err(e) = w.flush().await {
+                tracing::warn!("[launcher-ipc] flush failed: {}", e);
+                return;
+            }
+        }
+    });
 
     // Spawn a read-loop task. For B.2 it just logs every Event the
     // server sends; B.3+ will dispatch them into host state.

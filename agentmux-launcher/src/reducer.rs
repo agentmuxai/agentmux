@@ -86,9 +86,49 @@ pub fn update(state: &mut State, cmd: Command, ctx: &Ctx) -> Vec<Event> {
             label,
             kind,
             parent_label,
-        } => handle_report_window_opened(state, ctx, label, kind, parent_label),
-        Command::ReportWindowClosed { label } => handle_report_window_closed(state, label),
+        } => {
+            if let Some(err) = enforce_host_only(state, ctx, "ReportWindowOpened") {
+                return vec![err];
+            }
+            handle_report_window_opened(state, ctx, label, kind, parent_label)
+        }
+        Command::ReportWindowClosed { label } => {
+            if let Some(err) = enforce_host_only(state, ctx, "ReportWindowClosed") {
+                return vec![err];
+            }
+            handle_report_window_closed(state, label)
+        }
     }
+}
+
+/// Phase B.4 — gate window-mirror reports to Host clients only. The
+/// host is the only source of truth about its own window lifecycle;
+/// allowing Renderer/Srv/Tool clients to mutate the mirror would let
+/// any registered process spoof open/close traffic and break the
+/// host-authoritative model. (codex P1 PR #576 round-1.)
+///
+/// Returns `Some(Error)` if the calling connection is not a Host;
+/// `None` if the call is allowed to proceed. Looks up the kind by
+/// PID rather than threading it through `Ctx` because `processes`
+/// is already the canonical source — single source of truth, no
+/// extra plumbing.
+fn enforce_host_only(state: &mut State, ctx: &Ctx, op: &'static str) -> Option<Event> {
+    let kind = ctx
+        .registered_pid
+        .and_then(|pid| state.processes.get(&pid).map(|r| r.kind));
+    if kind == Some(ClientKind::Host) {
+        return None;
+    }
+    let v = state.bump_version();
+    Some(Event::Error {
+        code: ErrorCode::NotRegistered,
+        message: format!(
+            "{} is Host-only; caller kind={:?}",
+            op, kind
+        ),
+        fatal: false,
+        version: v,
+    })
 }
 
 /// Phase B.4 — record a host-reported window opening in the launcher's
@@ -451,9 +491,26 @@ mod tests {
         ));
     }
 
+    /// B.4 reports require a Host registration first (codex P1
+    /// PR #576). Helper to set that up so each window-mirror test
+    /// doesn't repeat the boilerplate.
+    fn register_host_and_get_ctx(state: &mut State, pid: u32) -> Ctx {
+        let _ = update(
+            state,
+            Command::Register {
+                kind: ClientKind::Host,
+                pid,
+                version: "test".into(),
+            },
+            &ctx(1),
+        );
+        ctx_with_pid(1, pid)
+    }
+
     #[test]
     fn report_window_opened_inserts_into_mirror_and_emits_event() {
         let mut state = State::default();
+        let host_ctx = register_host_and_get_ctx(&mut state, 1234);
         let events = update(
             &mut state,
             Command::ReportWindowOpened {
@@ -461,7 +518,7 @@ mod tests {
                 kind: WindowKind::FullInstance,
                 parent_label: None,
             },
-            &ctx(1),
+            &host_ctx,
         );
         assert_eq!(events.len(), 1);
         assert!(matches!(
@@ -478,6 +535,7 @@ mod tests {
     #[test]
     fn report_window_closed_removes_from_mirror() {
         let mut state = State::default();
+        let host_ctx = register_host_and_get_ctx(&mut state, 1234);
         let _ = update(
             &mut state,
             Command::ReportWindowOpened {
@@ -485,7 +543,7 @@ mod tests {
                 kind: WindowKind::FullInstance,
                 parent_label: None,
             },
-            &ctx(1),
+            &host_ctx,
         );
         assert!(state.windows.contains_key("main"));
         let events = update(
@@ -493,7 +551,7 @@ mod tests {
             Command::ReportWindowClosed {
                 label: "main".into(),
             },
-            &ctx(1),
+            &host_ctx,
         );
         assert!(!state.windows.contains_key("main"));
         assert_eq!(events.len(), 1);
@@ -506,12 +564,13 @@ mod tests {
     #[test]
     fn report_window_closed_on_unknown_label_is_idempotent() {
         let mut state = State::default();
+        let host_ctx = register_host_and_get_ctx(&mut state, 1234);
         let events = update(
             &mut state,
             Command::ReportWindowClosed {
                 label: "ghost".into(),
             },
-            &ctx(1),
+            &host_ctx,
         );
         // Still emits an event (so subscribers stay consistent) but
         // doesn't error.
@@ -523,6 +582,7 @@ mod tests {
     #[test]
     fn subwindow_open_records_parent_label() {
         let mut state = State::default();
+        let host_ctx = register_host_and_get_ctx(&mut state, 1234);
         let _ = update(
             &mut state,
             Command::ReportWindowOpened {
@@ -530,7 +590,7 @@ mod tests {
                 kind: WindowKind::FullInstance,
                 parent_label: None,
             },
-            &ctx(1),
+            &host_ctx,
         );
         let _ = update(
             &mut state,
@@ -539,12 +599,60 @@ mod tests {
                 kind: WindowKind::Subwindow,
                 parent_label: Some("main".into()),
             },
-            &ctx(1),
+            &host_ctx,
         );
         assert_eq!(
             state.windows["sub-1"].parent_label.as_deref(),
             Some("main")
         );
+    }
+
+    #[test]
+    fn report_window_opened_from_non_host_is_rejected() {
+        let mut state = State::default();
+        // Register as Renderer (not Host) at PID 4321.
+        let _ = update(
+            &mut state,
+            Command::Register {
+                kind: ClientKind::Renderer,
+                pid: 4321,
+                version: "test".into(),
+            },
+            &ctx(1),
+        );
+        let events = update(
+            &mut state,
+            Command::ReportWindowOpened {
+                label: "spoof".into(),
+                kind: WindowKind::FullInstance,
+                parent_label: None,
+            },
+            &ctx_with_pid(1, 4321),
+        );
+        assert_eq!(events.len(), 1);
+        assert!(matches!(
+            &events[0],
+            Event::Error { code: ErrorCode::NotRegistered, fatal: false, .. }
+        ));
+        // Mirror NOT mutated.
+        assert!(state.windows.is_empty());
+    }
+
+    #[test]
+    fn report_window_closed_from_unregistered_conn_is_rejected() {
+        let mut state = State::default();
+        let events = update(
+            &mut state,
+            Command::ReportWindowClosed {
+                label: "x".into(),
+            },
+            &ctx(1), // No Register first.
+        );
+        assert_eq!(events.len(), 1);
+        assert!(matches!(
+            &events[0],
+            Event::Error { code: ErrorCode::NotRegistered, fatal: false, .. }
+        ));
     }
 
     #[test]
