@@ -233,26 +233,23 @@ pub async fn spawn_backend(state: &Arc<AppState>) -> Result<BackendSpawnResult, 
     *state.backend_pid.lock() = Some(child_pid);
     *state.backend_started_at.lock() = Some(chrono::Utc::now().to_rfc3339());
 
-    // 8. Windows: Job Object (KILL_ON_JOB_CLOSE)
-    #[cfg(target_os = "windows")]
-    {
-        match create_job_object_for_child(child_pid) {
-            Ok(job_handle) => {
-                tracing::info!(
-                    "Created Job Object for backend (pid={}), KILL_ON_JOB_CLOSE active",
-                    child_pid
-                );
-                *state.job_handle.lock() =
-                    Some(crate::state::JobHandle::new(job_handle));
-            }
-            Err(e) => {
-                tracing::error!(
-                    "Failed to create Job Object for backend: {}. Backend may orphan on crash.",
-                    e
-                );
-            }
-        }
-    }
+    // (Phase B.1: removed host-owned Job Object J1 on srv. The
+    // launcher's J0 covers srv via direct AssignProcessToJobObject.
+    //
+    // Why not "defense-in-depth": the spec originally suggested
+    // keeping host's J1 as a backstop, but on inspection it would
+    // ACTIVELY defeat B.1's goal. KILL_ON_JOB_CLOSE on J1 fires
+    // when the host process exits — taking srv with it. After B.1,
+    // we want srv to survive host crashes (so the launcher can
+    // restart the host without losing srv state). The two reapers
+    // are mutually exclusive given that goal: launcher's J0 wants
+    // srv to live; host's J1 wants srv to die. We picked J0.
+    //
+    // The `task dev` fallback path (host runs without launcher)
+    // still loses kernel-level reaping for srv on host crash.
+    // That's an accepted regression for dev-mode-only — production
+    // (portable / installed) is unaffected. Phase 7 may add a
+    // separate Job Object for the dev path.)
 
     // 9. Parse stderr for ESTART (30s timeout)
     let stderr = child.stderr.take().expect("Failed to get stderr");
@@ -475,55 +472,7 @@ fn parse_estart(line: &str) -> BackendSpawnResult {
     }
 }
 
-/// Create a Windows Job Object and assign the child process to it.
-#[cfg(target_os = "windows")]
-fn create_job_object_for_child(pid: u32) -> Result<*mut std::ffi::c_void, String> {
-    use windows_sys::Win32::Foundation::CloseHandle;
-    use windows_sys::Win32::System::JobObjects::*;
-    use windows_sys::Win32::System::Threading::*;
-
-    // CreateJobObjectW is not exported by windows-sys 0.59's JobObjects feature,
-    // so we link to kernel32.dll directly.
-    #[link(name = "kernel32")]
-    extern "system" {
-        fn CreateJobObjectW(
-            lpjobattributes: *const std::ffi::c_void,
-            lpname: *const u16,
-        ) -> *mut std::ffi::c_void;
-    }
-
-    unsafe {
-        let job = CreateJobObjectW(std::ptr::null(), std::ptr::null());
-        if job.is_null() {
-            return Err("Failed to create job object".into());
-        }
-
-        let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
-        info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-        let ok = SetInformationJobObject(
-            job,
-            JobObjectExtendedLimitInformation,
-            &info as *const _ as *const std::ffi::c_void,
-            std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
-        );
-        if ok == 0 {
-            CloseHandle(job);
-            return Err("Failed to set job object info".into());
-        }
-
-        let process = OpenProcess(PROCESS_SET_QUOTA | PROCESS_TERMINATE, 0, pid);
-        if process.is_null() {
-            CloseHandle(job);
-            return Err(format!("Failed to open process {}", pid));
-        }
-
-        let ok = AssignProcessToJobObject(job, process);
-        CloseHandle(process);
-        if ok == 0 {
-            CloseHandle(job);
-            return Err("Failed to assign process to job object".into());
-        }
-
-        Ok(job)
-    }
-}
+// Phase B.1: removed `create_job_object_for_child`. Host no longer
+// owns a Job Object; launcher's J0 (in agentmux-launcher/src/main.rs)
+// covers srv via direct AssignProcessToJobObject. The same windows-sys
+// FFI pattern lives in the launcher now.
