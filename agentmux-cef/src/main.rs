@@ -230,7 +230,7 @@ fn main() {
     // lifetime — dropping it closes the pipe (logged by launcher).
     // Failure to connect is non-fatal in B.2 (host can still run);
     // B.5+ will tighten when the host depends on IPC for state.
-    let _launcher_ipc = runtime.block_on(launcher_ipc::connect_to_launcher());
+    let _launcher_ipc = runtime.block_on(launcher_ipc::connect_to_launcher(app_state.clone()));
 
     // Phase B.1: if launcher already spawned srv (the normal portable
     // / installed path post-PR-#570 + B.1), populate state from the
