@@ -47,6 +47,9 @@ dependencies = [
 name = "agentmux-launcher"
 version = "0.33.441"
 dependencies = [
+ "chrono",
+ "dirs",
+ "tokio",
  "windows-sys 0.59.0",
  "winres",
 ]
