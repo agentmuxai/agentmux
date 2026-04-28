@@ -16,13 +16,25 @@
 // before.
 
 use std::sync::Arc;
+use std::sync::OnceLock;
 
 use agentmux_common::ipc::{ClientKind, Command, Event};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::sync::Mutex;
+use tokio::sync::{mpsc, Mutex};
 
 #[cfg(target_os = "windows")]
 use tokio::net::windows::named_pipe::{ClientOptions, NamedPipeClient};
+
+/// Phase B.4 — global outbound command channel. Set once when the
+/// launcher pipe connects; sync callers (CEF lifecycle callbacks
+/// fire on the UI thread) post `Command`s without needing a
+/// tokio runtime handle. Drained by a task spawned in
+/// `connect_to_launcher` that writes to the pipe.
+///
+/// `None` semantics: launcher IPC isn't connected (e.g. `task dev`
+/// mode where launcher isn't in the loop). `report_window_*` calls
+/// are silently no-ops; the host runs as before.
+static COMMAND_TX: OnceLock<mpsc::UnboundedSender<Command>> = OnceLock::new();
 
 /// Handle the host holds for its lifetime so the launcher's IPC
 /// pipe stays open. Dropping it closes the connection (launcher
@@ -90,6 +102,43 @@ pub async fn connect_to_launcher() -> Option<LauncherIpcHandle> {
 
     let (read_half, write_half) = tokio::io::split(client);
     let writer = Arc::new(Mutex::new(write_half));
+
+    // Phase B.4 — wire up the outbound command channel. Sync callers
+    // push Commands; a dedicated drain task writes them as
+    // newline-delimited JSON. Ordered (preserves report order from
+    // the UI thread). Bounded? No — UnboundedSender so `try_send`
+    // can stay non-blocking on the UI thread; the drain task is
+    // fast (single async write) and the volume is one event per
+    // window create/close, not high-frequency.
+    let (tx, mut rx) = mpsc::unbounded_channel::<Command>();
+    if COMMAND_TX.set(tx).is_err() {
+        tracing::warn!("[launcher-ipc] COMMAND_TX already set — connect_to_launcher called twice");
+    }
+    let writer_for_drain = Arc::clone(&writer);
+    tokio::spawn(async move {
+        while let Some(cmd) = rx.recv().await {
+            let mut buf = match serde_json::to_vec(&cmd) {
+                Ok(b) => b,
+                Err(e) => {
+                    tracing::warn!("[launcher-ipc] failed to serialize {:?}: {}", cmd, e);
+                    continue;
+                }
+            };
+            buf.push(b'\n');
+            let mut w = writer_for_drain.lock().await;
+            if let Err(e) = w.write_all(&buf).await {
+                tracing::warn!(
+                    "[launcher-ipc] write failed for {:?}: {} — dropping further commands",
+                    cmd, e
+                );
+                return;
+            }
+            if let Err(e) = w.flush().await {
+                tracing::warn!("[launcher-ipc] flush failed: {}", e);
+                return;
+            }
+        }
+    });
 
     // Send Register. Server enforces this is the first message; we
     // satisfy the contract before any other traffic.
@@ -168,4 +217,41 @@ pub async fn connect_to_launcher() -> Option<LauncherIpcHandle> {
 #[cfg(not(target_os = "windows"))]
 pub async fn connect_to_launcher() -> Option<LauncherIpcHandle> {
     None
+}
+
+/// Phase B.4 — sync API: report a window open to the launcher's
+/// state mirror. Called from CEF lifecycle callbacks on the UI
+/// thread. No-op if the launcher pipe isn't connected (`task dev`
+/// mode); failures to enqueue (channel closed, drain task died)
+/// are logged but don't propagate — the host's authoritative state
+/// is unaffected, the mirror just falls behind. B.5 tightens.
+pub fn report_window_opened(
+    label: String,
+    kind: agentmux_common::ipc::WindowKind,
+    parent_label: Option<String>,
+) {
+    let Some(tx) = COMMAND_TX.get() else {
+        return; // launcher not in the loop
+    };
+    let cmd = Command::ReportWindowOpened {
+        label,
+        kind,
+        parent_label,
+    };
+    if let Err(e) = tx.send(cmd) {
+        tracing::warn!("[launcher-ipc] report_window_opened: channel closed ({})", e);
+    }
+}
+
+/// Phase B.4 — sync API: report a window close to the launcher's
+/// state mirror. Same no-op-if-disconnected semantics as
+/// `report_window_opened`.
+pub fn report_window_closed(label: String) {
+    let Some(tx) = COMMAND_TX.get() else {
+        return;
+    };
+    let cmd = Command::ReportWindowClosed { label };
+    if let Err(e) = tx.send(cmd) {
+        tracing::warn!("[launcher-ipc] report_window_closed: channel closed ({})", e);
+    }
 }

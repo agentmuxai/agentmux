@@ -324,6 +324,12 @@ async fn enforce_register_first(
         Command::Register { .. } => return None,
         Command::Ping { .. } => ("Ping before Register".to_string(), false),
         Command::Goodbye => ("Goodbye before Register".to_string(), true),
+        Command::ReportWindowOpened { .. } => {
+            ("ReportWindowOpened before Register".to_string(), true)
+        }
+        Command::ReportWindowClosed { .. } => {
+            ("ReportWindowClosed before Register".to_string(), true)
+        }
     };
     let mut state = ctx.state.lock().await;
     let v = state.bump_version();

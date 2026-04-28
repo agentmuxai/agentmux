@@ -41,9 +41,9 @@
 //     register. Running → Quitting on Quit (B.3 placeholder).
 //     Quitting → Dead on cleanup-done (B.3 placeholder). No skipping.
 
-use agentmux_common::ipc::{ClientKind, Command, ErrorCode, Event};
+use agentmux_common::ipc::{ClientKind, Command, ErrorCode, Event, WindowKind};
 
-use crate::state::{LifecyclePhase, ProcessRecord, ProcessState, State};
+use crate::state::{LifecyclePhase, ProcessRecord, ProcessState, State, WindowMirror};
 
 /// Context the reducer needs but can't read from State (clocks,
 /// connection identity). Passed in per-call so update remains pure.
@@ -82,7 +82,59 @@ pub fn update(state: &mut State, cmd: Command, ctx: &Ctx) -> Vec<Event> {
             vec![Event::Pong { nonce, version: v }]
         }
         Command::Goodbye => handle_goodbye(state, ctx.registered_pid.unwrap_or(0)),
+        Command::ReportWindowOpened {
+            label,
+            kind,
+            parent_label,
+        } => handle_report_window_opened(state, ctx, label, kind, parent_label),
+        Command::ReportWindowClosed { label } => handle_report_window_closed(state, label),
     }
+}
+
+/// Phase B.4 — record a host-reported window opening in the launcher's
+/// read-only mirror. Idempotent on duplicate opens (same label twice
+/// in a row): the second insert overwrites with fresh metadata and
+/// emits a fresh event. Subscribers must tolerate seeing the same
+/// label twice; cleaner once B.5 makes the launcher authoritative.
+fn handle_report_window_opened(
+    state: &mut State,
+    ctx: &Ctx,
+    label: String,
+    kind: WindowKind,
+    parent_label: Option<String>,
+) -> Vec<Event> {
+    state.windows.insert(
+        label.clone(),
+        WindowMirror {
+            label: label.clone(),
+            kind,
+            parent_label: parent_label.clone(),
+            opened_at: ctx.now_rfc3339.clone(),
+        },
+    );
+    let v = state.bump_version();
+    vec![Event::WindowOpened {
+        label,
+        kind,
+        parent_label,
+        version: v,
+    }]
+}
+
+/// Phase B.4 — drop a host-reported window from the mirror. Missing
+/// label is logged-only (no Error event) because the close-before-
+/// launcher-saw-the-open race is benign in B.4: the launcher's mirror
+/// is a passive copy, and the host's authoritative view will simply
+/// not have the window either. B.5 will tighten this contract.
+fn handle_report_window_closed(state: &mut State, label: String) -> Vec<Event> {
+    let was_present = state.windows.remove(&label).is_some();
+    let v = state.bump_version();
+    if !was_present {
+        // Quiet: B.4 is read-only and the mirror can race with the
+        // host's authoritative store on first launch. We still emit
+        // the Closed event so subscribers stay consistent.
+    }
+    vec![Event::WindowClosed { label, version: v }]
 }
 
 fn handle_register(
@@ -344,6 +396,8 @@ mod tests {
             | Event::LifecyclePhaseChanged { version, .. }
             | Event::Registered { version, .. }
             | Event::Pong { version, .. }
+            | Event::WindowOpened { version, .. }
+            | Event::WindowClosed { version, .. }
             | Event::Error { version, .. } => *version,
         }
     }
@@ -395,6 +449,102 @@ mod tests {
             state.processes[&1234].state,
             ProcessState::Exited { code: 0 }
         ));
+    }
+
+    #[test]
+    fn report_window_opened_inserts_into_mirror_and_emits_event() {
+        let mut state = State::default();
+        let events = update(
+            &mut state,
+            Command::ReportWindowOpened {
+                label: "main".into(),
+                kind: WindowKind::FullInstance,
+                parent_label: None,
+            },
+            &ctx(1),
+        );
+        assert_eq!(events.len(), 1);
+        assert!(matches!(
+            &events[0],
+            Event::WindowOpened { label, kind: WindowKind::FullInstance, parent_label: None, .. }
+                if label == "main"
+        ));
+        let mirror = &state.windows["main"];
+        assert_eq!(mirror.label, "main");
+        assert_eq!(mirror.kind, WindowKind::FullInstance);
+        assert_eq!(mirror.parent_label, None);
+    }
+
+    #[test]
+    fn report_window_closed_removes_from_mirror() {
+        let mut state = State::default();
+        let _ = update(
+            &mut state,
+            Command::ReportWindowOpened {
+                label: "main".into(),
+                kind: WindowKind::FullInstance,
+                parent_label: None,
+            },
+            &ctx(1),
+        );
+        assert!(state.windows.contains_key("main"));
+        let events = update(
+            &mut state,
+            Command::ReportWindowClosed {
+                label: "main".into(),
+            },
+            &ctx(1),
+        );
+        assert!(!state.windows.contains_key("main"));
+        assert_eq!(events.len(), 1);
+        assert!(matches!(
+            &events[0],
+            Event::WindowClosed { label, .. } if label == "main"
+        ));
+    }
+
+    #[test]
+    fn report_window_closed_on_unknown_label_is_idempotent() {
+        let mut state = State::default();
+        let events = update(
+            &mut state,
+            Command::ReportWindowClosed {
+                label: "ghost".into(),
+            },
+            &ctx(1),
+        );
+        // Still emits an event (so subscribers stay consistent) but
+        // doesn't error.
+        assert_eq!(events.len(), 1);
+        assert!(matches!(events[0], Event::WindowClosed { .. }));
+        assert!(state.windows.is_empty());
+    }
+
+    #[test]
+    fn subwindow_open_records_parent_label() {
+        let mut state = State::default();
+        let _ = update(
+            &mut state,
+            Command::ReportWindowOpened {
+                label: "main".into(),
+                kind: WindowKind::FullInstance,
+                parent_label: None,
+            },
+            &ctx(1),
+        );
+        let _ = update(
+            &mut state,
+            Command::ReportWindowOpened {
+                label: "sub-1".into(),
+                kind: WindowKind::Subwindow,
+                parent_label: Some("main".into()),
+            },
+            &ctx(1),
+        );
+        assert_eq!(
+            state.windows["sub-1"].parent_label.as_deref(),
+            Some("main")
+        );
     }
 
     #[test]
@@ -469,6 +619,22 @@ mod tests {
                 .prop_map(|(kind, pid, version)| Command::Register { kind, pid, version }),
             1 => any::<u64>().prop_map(|nonce| Command::Ping { nonce }),
             1 => Just(Command::Goodbye),
+            // B.4: window mirror commands. Labels drawn from a small
+            // alphabet so duplicates (open then close) are common
+            // enough for the proptest to exercise the idempotent
+            // close path.
+            2 => (
+                "[a-c]{1,3}",
+                prop_oneof![
+                    Just(WindowKind::FullInstance),
+                    Just(WindowKind::Subwindow),
+                ],
+                prop_oneof![Just(None::<String>), Just(Some("a".into()))],
+            )
+                .prop_map(|(label, kind, parent_label)| {
+                    Command::ReportWindowOpened { label, kind, parent_label }
+                }),
+            2 => "[a-c]{1,3}".prop_map(|label| Command::ReportWindowClosed { label }),
         ]
     }
 
