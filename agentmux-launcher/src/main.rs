@@ -14,6 +14,8 @@
     windows_subsystem = "windows"
 )]
 
+mod data_dir;
+
 fn main() {
     let exe_path = std::env::current_exe().expect("cannot resolve exe path");
     let exe_dir = exe_path.parent().expect("exe has no parent directory");
