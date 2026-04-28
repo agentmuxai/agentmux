@@ -573,15 +573,28 @@ pub fn open_subwindow(
     state: &Arc<AppState>,
     parent_instance_id: String,
 ) -> Result<serde_json::Value, String> {
-    // Reject if the parent isn't a known FullInstance — prevents orphan
-    // sub-windows and enforces the lifecycle rule in the spec.
+    // Reject if the parent isn't a known live FullInstance — prevents
+    // orphan sub-windows and enforces the lifecycle rule in the spec.
     //
-    // Phase B.5 (window_meta step d) — read via the shadow-first
-    // helper. Direct `window_meta.lock()` would always miss
-    // post-step-d (host map empty) and reject every legitimate
-    // subwindow open. (codex P1 PR #592 round-1.)
+    // Phase B.5 (window_meta step d, refined twice):
+    // * Round-1 fix used `state.window_meta()` (shadow-first), which
+    //   covered the task-dev-mode regression but allowed a NEW orphan
+    //   bug: shadow lags on close, so during the gap between host's
+    //   sync `on_before_close` removal and the launcher's async
+    //   `WindowClosed` event arrival, this check could still see a
+    //   already-closing parent. (codex P2 PR #592 round-2.)
+    // * Refined: read host_meta DIRECTLY for this liveness check.
+    //   Host_meta is synchronously written in on_after_created and
+    //   removed in on_before_close (per the round-2 step-d
+    //   refinement keeping host_meta as a sync cache), so it
+    //   correctly reflects "is the parent currently open" without
+    //   shadow's async lag. Works in `task dev` mode too (host_meta
+    //   populated by on_after_created regardless of launcher
+    //   presence).
     let parent_ok = state
-        .window_meta(&parent_instance_id)
+        .window_meta
+        .lock()
+        .get(&parent_instance_id)
         .map(|m| m.kind == crate::state::WindowKind::FullInstance)
         .unwrap_or(false);
     if !parent_ok {
