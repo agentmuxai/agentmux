@@ -310,4 +310,27 @@ impl AppState {
     pub fn instance_count(&self) -> usize {
         self.shadow_instance_registry.lock().len()
     }
+
+    /// Phase B.5 (window_id_map step c) — authoritative
+    /// label→backend_window_id lookup. Prefers the launcher-fed
+    /// `shadow_backend_window_ids`; falls back to host's local
+    /// `window_id_map` for the race window where host has just
+    /// `insert`ed the mapping but the launcher's
+    /// `BackendWindowIdRegistered` event hasn't returned yet.
+    /// Same prefer-shadow pattern as `instance_num`.
+    pub fn backend_window_id(&self, label: &str) -> Option<String> {
+        if let Some(id) = self.shadow_backend_window_ids.lock().get(label).cloned() {
+            return Some(id);
+        }
+        let fallback = self.window_id_map.lock().get(label).cloned();
+        if let Some(ref id) = fallback {
+            tracing::debug!(
+                target: "launcher-ipc:fallback",
+                label = %label,
+                window_id = %id,
+                "[backend_window_id] shadow miss — falling back to host's window_id_map (B.5c transitional)"
+            );
+        }
+        fallback
+    }
 }
