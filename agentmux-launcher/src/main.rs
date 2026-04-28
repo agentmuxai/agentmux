@@ -198,7 +198,15 @@ async fn run_windows(
         Err(e) => {
             log(&format!("FATAL: failed to spawn CEF host: {}", e));
             eprintln!("Failed to launch AgentMux: {}", e);
-            // srv is already running; let J0's drop reap it.
+            // Happy path: drop(job) → KILL_ON_JOB_CLOSE reaps srv.
+            // Degraded path (job is None, J0 absent): kill srv
+            // explicitly because kill_on_drop(false) means the Child
+            // drop wouldn't terminate it; otherwise srv orphans on
+            // launcher exit. (reagent P1 + codex P2 @ main.rs:201,
+            // PR #571 round-3.)
+            if job.is_none() {
+                let _ = srv_child.start_kill();
+            }
             drop(job);
             std::process::exit(1);
         }
@@ -232,12 +240,16 @@ async fn run_windows(
             "FATAL: failed to resume host pid={}: {} — terminating",
             host_pid, e
         ));
-        // Same defensive backstop as PR #570 round-2: if the job is
-        // None, drop is a no-op and the suspended host would be a
-        // permanent zombie. Explicit start_kill is the backstop.
+        // Always kill the suspended host: if J0 is held it'd reap
+        // anyway, but in degraded mode (job is None) the suspended
+        // host would be a permanent zombie. (PR #570 round-2 pattern.)
         let _ = host_child.start_kill();
-        // srv is alive; J0 (if held) reaps it on drop. Otherwise srv
-        // outlives us as an orphan (logged warning above).
+        // Same backstop for srv in degraded mode — J0 absent, kill_on
+        // _drop(false), so dropping the Child wouldn't terminate it.
+        // (reagent P1 @ main.rs:238, PR #571 round-3.)
+        if job.is_none() {
+            let _ = srv_child.start_kill();
+        }
         drop(job);
         std::process::exit(1);
     }
