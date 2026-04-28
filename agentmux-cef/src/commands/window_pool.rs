@@ -120,22 +120,16 @@ pub fn spawn_pool_window(state: &Arc<AppState>) {
         base_url, separator, ipc_port, ipc_token, label
     );
 
-    // Mark as full instance — the window will graduate to a
-    // tear-off destination, which is just another instance window
-    // from the user's perspective.
-    state.window_meta.lock().insert(
-        label.clone(),
-        WindowMeta {
+    // Phase B.5 (window_meta step d) — combined pre-create handoff.
+    // Pool windows graduate to tear-off destinations, which are
+    // FullInstance from the user's perspective.
+    state.pending_window_creations.lock().push_back(
+        crate::state::PendingWindowCreation {
             label: label.clone(),
             kind: WindowKind::FullInstance,
             parent_instance_id: None,
         },
     );
-
-    state
-        .pending_window_labels
-        .lock()
-        .push_back(label.clone());
 
     tracing::info!(
         target: "dnd:tearoff:pool",
@@ -634,9 +628,11 @@ fn cleanup_failed_promote_orphan(state: &Arc<AppState>, label: &str) {
         }
     }
     // Browser or host already gone — do `on_before_close`'s job
-    // inline since CEF won't fire it for this label.
+    // inline since CEF won't fire it for this label. Note:
+    // post-step-d host doesn't write `window_meta` so the
+    // previous `.remove(label)` here is gone — the launcher's
+    // shadow drops the entry on `WindowClosed` arrival.
     state.browsers.lock().remove(label);
-    state.window_meta.lock().remove(label);
     crate::launcher_ipc::report_window_closed(label.to_string());
     // Refill (graceful path gets this via on_pool_window_destroyed).
     spawn_pool_window(state);

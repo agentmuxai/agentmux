@@ -53,8 +53,17 @@ wrap_task! {
                 return;
             }
 
-            // Queue label for on_after_created registration (stored in state.browsers)
-            self.state.pending_window_labels.lock().push_back(self.label.clone());
+            // Phase B.5 (window_meta step d) — pre-create handoff.
+            // Browser panes are not top-level windows; the kind
+            // value here is irrelevant (on_after_created skips the
+            // taskbar/report-open logic for browser-pane-* labels).
+            self.state.pending_window_creations.lock().push_back(
+                crate::state::PendingWindowCreation {
+                    label: self.label.clone(),
+                    kind: crate::state::WindowKind::FullInstance,
+                    parent_instance_id: None,
+                },
+            );
 
             let handler = crate::client::AgentMuxHandler::new_with_pane(self.state.clone(), 0, true);
             let mut client = Some(crate::client::AgentMuxClient::new(handler, true));
