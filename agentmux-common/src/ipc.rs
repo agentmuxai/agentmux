@@ -68,7 +68,13 @@ pub enum Command {
 /// Events flow launcher → client. Versioned per spec §5.2 — every
 /// event carries a monotonic `version: u64` per launcher run, used
 /// by Phase D's resync protocol.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+///
+/// Phase B.3 introduces the first non-handshake events
+/// (ProcessSpawned, ProcessExited, LifecyclePhaseChanged) emitted
+/// by the launcher's reducer when commands transition state. B.4+
+/// adds the window-state events (WindowAdded, WindowStateChanged,
+/// WindowRemoved) per spec §5.2.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "event", rename_all = "snake_case")]
 pub enum Event {
     /// Reply to `Command::Register`. Acknowledges the client kind +
@@ -93,6 +99,52 @@ pub enum Event {
         fatal: bool,
         version: u64,
     },
+    /// A process joined the launcher's canonical registry. Emitted
+    /// when a client first Registers (B.3) and, in B.4+, when the
+    /// launcher itself spawns a child.
+    ProcessSpawned {
+        pid: u32,
+        kind: ClientKind,
+        client_version: String,
+        version: u64,
+    },
+    /// A process exited or disconnected gracefully. Emitted on
+    /// Goodbye (B.3) and, in B.4+, on detected child exit.
+    ProcessExited {
+        pid: u32,
+        /// Exit code. 0 = clean Goodbye; non-zero = OS-reported
+        /// exit code or synthetic value for crashes.
+        code: i32,
+        version: u64,
+    },
+    /// The launcher's lifecycle phase changed. Spec §4 defines the
+    /// valid transitions: Starting → Running → Quitting → Dead.
+    /// Emitted at most once per transition.
+    LifecyclePhaseChanged {
+        from: LifecyclePhase,
+        to: LifecyclePhase,
+        version: u64,
+    },
+}
+
+/// Coarse-grained launcher state. Spec §4: Starting → Running →
+/// Quitting → Dead, no other transitions allowed. The reducer in
+/// agentmux-launcher::reducer enforces this; a violation panics
+/// (Job Object reaps via OS).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum LifecyclePhase {
+    /// Initial state; launcher has not yet seen the host register.
+    Starting,
+    /// Host has registered and the canonical state is being
+    /// maintained. Steady state.
+    Running,
+    /// Quit { reason } received, ack outstanding to subscribers.
+    /// Phase B.3 keeps this state-shape only — the actual Quit
+    /// command lands in a later sub-PR.
+    Quitting,
+    /// Cleanup done; launcher about to exit. Transient.
+    Dead,
 }
 
 /// Discriminant for `Event::Error` — keeps clients structured against

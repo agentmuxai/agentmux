@@ -1,6 +1,6 @@
 [package]
 name = "agentmux-launcher"
-version = "0.33.450"
+version = "0.33.452"
 description = "AgentMux Launcher — tiny exe that sets DLL path then spawns the CEF host"
 authors = ["AgentMux Corp"]
 edition = "2021"
@@ -58,3 +58,10 @@ windows-sys = { version = "0.59", features = [
 
 [target.'cfg(target_os = "windows")'.build-dependencies]
 winres = "0.1"
+
+[dev-dependencies]
+# Phase B.3: property-based testing for the reducer. Generates
+# arbitrary command sequences and asserts the reducer's invariants
+# hold across all of them — catches edge cases unit tests miss.
+# Dev-only: zero impact on release binary size.
+proptest = "1"
