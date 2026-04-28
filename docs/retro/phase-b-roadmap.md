@@ -1,6 +1,6 @@
-# Phase B roadmap (canonical, post-#592)
+# Phase B roadmap (canonical, post-#594)
 
-**Status:** Active reference. Updated 2026-04-28 after PR #592 (window_meta step d) merged and the multi-reducer direction was accepted.
+**Status:** Active reference. Updated 2026-04-28 after PR #594 (B.5 finish — scaffolding-role audit) merged. B.5 is complete; B.6 (single-instance mutex) is in flight.
 **Author:** AgentA.
 **Read first if resuming Phase B work**, then `b5-migration-architecture-2026-04-28.md` and `multi-reducer-proposal-2026-04-28.md`.
 
@@ -27,15 +27,15 @@ Pre-Phase-B  ──► host owns 13 HashMaps  ◄── started here
                         │     ✓ window_instance_registry (#579-#584)
                         │     ✓ window_id_map (#585-#589)
                         │     ✓ window_meta (#590-#592, sync-cache refinement)
+                        │     ✓ B.5 finish — scaffolding-role audit (#594)
                         │     deferred: browsers, pool maps (Phase F — see
                         │       multi-reducer-proposal-2026-04-28.md)
                         ▼
-              ◄── HERE. 3 of 5 maps fully migrated; 2 deferred to Phase F.
+              B.5 complete. 3 of 5 maps fully migrated; 2 deferred to
+              Phase F with explicit scaffolding comments in code.
                         │
                         ▼
-              B.5 finish: small audit PR (~30-50 LoC) — switch any
-                          remaining label-set reads from `browsers.keys()`
-                          / pool maps to `state.windows` / `shadow_window_meta`.
+              ◄── HERE. B.6 in flight: single-instance mutex.
               B.6  ──  per-data-dir mutex single-instance (named pipe already covers it)
               B.7  ──  frontend cutover (delete polling)
               B.8  ──  Phase B exit (delete obsolete defensive code,
@@ -63,14 +63,13 @@ See `b5-migration-architecture-2026-04-28.md` for why `browsers` and pool maps c
 
 ## What's left for Phase B
 
-### B.5 finish (small)
+### B.5 finish (done — PR #594)
 
-- Single audit PR: switch any remaining `browsers.keys()` label-set reads to `state.windows` or `shadow_window_meta`. Same for pool-map iterations that are really asking "which labels exist in launcher's view." ~30-50 LoC.
-- Add a comment to `state.browsers` and the pool maps declaring them as scaffolding pending Phase F (host reducer).
+- Scaffolding-role comments added to `state.browsers`, `window_pool`, `unpromoted_pool_labels`, and `compute_and_report_host_counts` so future agents see why these fields don't follow the standard ratchet and where they head in Phase F.
 
-### B.6 — single-instance mutex (1 PR, ~80 LoC)
+### B.6 — single-instance mutex (in flight)
 
-- The named-pipe `first_pipe_instance(true)` already rejects a second launcher binding the same pipe. Just need to surface a clear error when launch fails ("AgentMux is already running, PID N") and delete any old port-file probe in srv.
+- The named-pipe `first_pipe_instance(true)` already rejects a second launcher binding the same pipe. Just need to surface a clear error when launch fails ("AgentMux is already running, PID N") and delete any old port-file probe.
 
 ### B.7 — frontend cutover (2-3 PRs)
 
