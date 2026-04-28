@@ -338,19 +338,33 @@ impl Default for AppState {
     }
 
     /// Phase B.5c — authoritative instance count. Same prefer-shadow
-    /// fallback semantics as `instance_num`. Used by frontend event
-    /// emits ("window-instances-changed").
+    /// fallback semantics as `instance_num`: returns the shadow's
+    /// count when it agrees with host's authoritative
+    /// `WindowInstanceRegistry`; falls back to host's count
+    /// otherwise. Used by frontend event emits
+    /// ("window-instances-changed").
+    ///
+    /// The fallback is essential during the transition: every read
+    /// site is called RIGHT AFTER a host mutation
+    /// (`register()`/`unregister()`) but BEFORE the launcher's
+    /// reply event has returned. Without falling back, the emitted
+    /// count is off by one on every open (shadow not yet populated)
+    /// and every close (shadow not yet drained), and no re-emission
+    /// fires when the shadow catches up — leaving stale counts in
+    /// the InstancePanel until the next user action. (reagent P1
+    /// PR #581 round-1.)
     pub fn instance_count(&self) -> usize {
         let shadow_count = self.shadow_instance_registry.lock().len();
         let host_count = self.window_instance_registry.lock().count();
-        if shadow_count != host_count {
-            tracing::debug!(
-                target: "launcher-ipc:fallback",
-                shadow = %shadow_count,
-                host = %host_count,
-                "[instance_count] shadow vs host disagreement — returning shadow"
-            );
+        if shadow_count == host_count {
+            return shadow_count;
         }
-        shadow_count
+        tracing::debug!(
+            target: "launcher-ipc:fallback",
+            shadow = %shadow_count,
+            host = %host_count,
+            "[instance_count] shadow vs host disagreement — falling back to host count (eager-mutation source)"
+        );
+        host_count
     }
 }
