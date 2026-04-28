@@ -246,6 +246,26 @@ pub enum Event {
         label: String,
         version: u64,
     },
+    /// Phase B.5 — sequential instance number assigned to a window
+    /// by the launcher's authoritative registry. Numbers start at 1
+    /// for "main" and increment for each subsequent open. Never
+    /// reused within a launcher run. The host caches these to
+    /// display window titles; B.5 step 2 will retire host's own
+    /// `WindowInstanceRegistry` in favor of this stream.
+    WindowInstanceAssigned {
+        label: String,
+        num: u32,
+        version: u64,
+    },
+    /// Phase B.5 — instance number released (window closed). The
+    /// launcher's authoritative registry drops the label; the slot
+    /// is NOT reused (numbers monotonic per spec invariant: stable
+    /// instance# across promotions / unregisters).
+    WindowInstanceReleased {
+        label: String,
+        num: u32,
+        version: u64,
+    },
     /// Phase B.4 follow-up — emitted when the launcher's mirror
     /// disagrees with the host's reported counts. Logged at WARN
     /// level so operators see drift immediately. Drift in B.4 is
