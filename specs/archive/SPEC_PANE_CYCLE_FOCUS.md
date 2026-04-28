@@ -3,7 +3,7 @@
 **Date:** 2026-03-05
 **Author:** Agent2
 **Branch:** agent2/tab-pane-cycling
-**Status:** Implemented
+**Status:** SHIPPED
 
 ---
 

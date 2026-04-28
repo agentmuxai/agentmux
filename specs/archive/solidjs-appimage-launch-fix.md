@@ -1,6 +1,6 @@
 # Spec: Port AppImage Launch Fixes to SolidJS
 
-**Status:** Required — app does not open on Linux AppImage
+**Status:** SHIPPED
 **Date:** 2026-03-14
 **Component:** `frontend/tauri-bootstrap.ts`, `frontend/wave.ts`, `frontend/app/store/contextmenu.ts`
 **Tracks:** Issues first fixed for React in PR #116, now regressed after SolidJS migration (PR #120)

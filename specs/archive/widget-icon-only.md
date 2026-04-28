@@ -1,6 +1,6 @@
 # Spec: Widget Icon-Only Mode
 
-**Status:** Implemented
+**Status:** SHIPPED
 **PR:** https://github.com/agentmuxai/agentmux/pull/69
 **Date:** 2026-03-07
 

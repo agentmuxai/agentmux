@@ -1,7 +1,7 @@
 # Spec: Tab DnD — Root Cause Analysis & Architecture
 
 **Date:** 2026-03-20
-**Status:** Diagnosis — not working on Windows
+**Status:** SHIPPED
 
 ---
 

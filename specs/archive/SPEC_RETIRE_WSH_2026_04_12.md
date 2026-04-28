@@ -1,6 +1,6 @@
 # Spec: Retire `agentmux-wsh`
 
-**Status:** Draft — investigation complete, implementation pending approval
+**Status:** SHIPPED
 **Date:** 2026-04-12
 **Author:** AgentA
 **Related:** `specs/SPEC_RETRO_FOLLOWUPS_2026_04_12.md` §4 (the earlier `deploy_wsh` no-op fix, now superseded by this spec)
