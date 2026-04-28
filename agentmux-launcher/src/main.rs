@@ -1,13 +1,19 @@
-// AgentMux Launcher — Sets DLL search path then spawns the real CEF binary.
+// AgentMux Launcher — Sets DLL search path then spawns srv + the CEF host.
 //
-// This tiny exe lives at the top of the portable directory. It:
-// 1. Adds runtime/ to the DLL search path (so libcef.dll is found)
-// 2. Spawns runtime/agentmux-<version>.exe with the same arguments
-// 3. Waits for it to exit and forwards the exit code
+// Phase B.1: launcher now spawns srv directly (sibling of host) so srv
+// survives host crashes. Both children are assigned to the launcher's
+// Job Object J0 with KILL_ON_JOB_CLOSE; killing the launcher reaps
+// the entire tree atomically via the OS.
 //
-// This is needed because libcef.dll is a load-time dependency of the CEF
-// host — the OS loader needs it before main() runs, so SetDllDirectoryW
-// in the CEF host's main() would be too late.
+// This was previously a tiny sync wrapper that just SetDllDirectoryW'd
+// runtime/ then spawned the CEF host. Phase B grew it into the
+// privileged owner per
+// specs/SPEC_WINDOW_PROCESS_STATE_MACHINE_2026_04_27.md.
+//
+// Process tree after B.1:
+//   launcher (J0)
+//     ├── srv     (assigned to J0; survives host crash)
+//     └── host    (assigned to J0; CEF render workers inherit J0)
 
 #![cfg_attr(
     all(not(debug_assertions), target_os = "windows"),
@@ -17,14 +23,22 @@
 mod data_dir;
 mod srv_spawner;
 
-fn main() {
+#[tokio::main]
+async fn main() {
     let exe_path = std::env::current_exe().expect("cannot resolve exe path");
     let exe_dir = exe_path.parent().expect("exe has no parent directory");
     let runtime_dir = exe_dir.join("runtime");
 
-    log(&format!("starting — exe={} runtime={}", exe_path.display(), runtime_dir.display()));
+    log(&format!(
+        "starting — exe={} runtime={}",
+        exe_path.display(),
+        runtime_dir.display()
+    ));
 
-    // Set DLL search path so libcef.dll (in runtime/) is found by the child process
+    // Set DLL search path so libcef.dll (in runtime/) is found by the
+    // CEF host's load-time linker. SetDllDirectoryW is process-local
+    // and inherited by child processes — both srv (which doesn't
+    // need libcef but harmless) and host (which absolutely does).
     #[cfg(target_os = "windows")]
     {
         use std::os::windows::ffi::OsStrExt;
@@ -39,12 +53,13 @@ fn main() {
     }
     log("SetDllDirectoryW done");
 
-    // Resolve the real CEF host binary in runtime/.
     let real_exe = find_cef_binary(&runtime_dir);
     log(&format!("resolved CEF binary: {}", real_exe.display()));
-
     if !real_exe.exists() {
-        log(&format!("FATAL: CEF binary not found at {}", real_exe.display()));
+        log(&format!(
+            "FATAL: CEF binary not found at {}",
+            real_exe.display()
+        ));
         eprintln!(
             "AgentMux runtime not found in: {}\nMake sure the runtime/ folder is intact.",
             runtime_dir.display()
@@ -52,120 +67,19 @@ fn main() {
         std::process::exit(1);
     }
 
-    // Forward all CLI arguments
     let args: Vec<String> = std::env::args().skip(1).collect();
-    log(&format!("spawning CEF host with {} args", args.len()));
+    log(&format!("forwarding {} CLI args to host", args.len()));
 
     #[cfg(target_os = "windows")]
     {
-        use std::os::windows::process::CommandExt;
-        use windows_sys::Win32::System::Threading::CREATE_SUSPENDED;
-
-        // Spawn the host SUSPENDED so its main thread can't run — and
-        // therefore can't spawn the srv sidecar or CEF render-process
-        // children — before we've assigned it to the Job Object.
-        // Without CREATE_SUSPENDED there's a real race where the host
-        // forks children in the gap between Command::spawn and
-        // AssignProcessToJobObject; those children would escape the
-        // job's KILL_ON_JOB_CLOSE backstop. (Microsoft / Raymond Chen
-        // pattern; codex P2 + gemini HIGH on PR #570 round-1.)
-        let child = std::process::Command::new(&real_exe)
-            .args(&args)
-            .creation_flags(CREATE_SUSPENDED)
-            .spawn();
-
-        let mut child = match child {
-            Ok(c) => c,
-            Err(e) => {
-                log(&format!("FATAL: failed to spawn CEF host: {}", e));
-                eprintln!("Failed to launch AgentMux: {}", e);
-                std::process::exit(1);
-            }
-        };
-
-        let host_pid = child.id();
-        log(&format!("spawned CEF host pid={} (suspended)", host_pid));
-
-        // Create a Job Object with KILL_ON_JOB_CLOSE and assign the
-        // suspended host to it. CEF render-process workers and the srv
-        // sidecar that the host will spawn AFTER resume inherit the job
-        // automatically. When this launcher process exits — for any
-        // reason, including hard-kill via Task Manager — the OS closes
-        // the job handle and the entire process tree is reaped.
-        //
-        // If creation/assignment fails, log + still resume the host
-        // (degraded cleanup is better than a dead suspended host).
-        let job = match create_job_object_for_child(host_pid) {
-            Ok(handle) => {
-                log(&format!(
-                    "Job Object assigned to pid={}, KILL_ON_JOB_CLOSE active",
-                    host_pid
-                ));
-                Some(JobHandle(handle))
-            }
-            Err(e) => {
-                log(&format!(
-                    "WARN: Job Object setup failed: {} (process-tree cleanup degraded)",
-                    e
-                ));
-                None
-            }
-        };
-
-        // Now resume the host. With CREATE_SUSPENDED only the main
-        // thread exists at this point, so we just need to find it via
-        // a Toolhelp32 thread snapshot and ResumeThread it. From here
-        // the host runs normally, but every child it spawns will
-        // inherit the job we just attached.
-        if let Err(e) = resume_main_thread(host_pid) {
-            log(&format!(
-                "FATAL: failed to resume host pid={}: {} — terminating",
-                host_pid, e
-            ));
-            // The host is currently suspended and will never run.
-            // If Job Object setup succeeded, dropping it reaps the
-            // tree via KILL_ON_JOB_CLOSE. If the job is None (creation
-            // failed earlier with the WARN log), drop is a no-op and
-            // the suspended host would survive as a permanent zombie
-            // holding resources and blocking subsequent launches —
-            // explicitly child.kill() it as a backstop.
-            // (reagent P1 + codex P2 + gemini MEDIUM, PR #570 round-2)
-            let _ = child.kill();
-            drop(job);
-            std::process::exit(1);
-        }
-
-        match child.wait() {
-            Ok(s) => {
-                let code = s.code().unwrap_or(1);
-                log(&format!("CEF host exited with code {}", code));
-                // Drop the job handle. KILL_ON_JOB_CLOSE then reaps
-                // any child the host left behind (srv, CEF render
-                // workers) — it's the backstop for unclean host
-                // exits, not a no-op. On a clean host exit those
-                // children typically already exited via their own
-                // job/parent-watcher chains; this guarantees they
-                // don't survive even when those mechanisms didn't
-                // fire. (gemini PR #570 round-1 MEDIUM L105.)
-                drop(job);
-                std::process::exit(code);
-            }
-            Err(e) => {
-                log(&format!("FATAL: wait failed: {}", e));
-                // Same backstop as the resume-failure path: if the job
-                // is None (creation failed), we must explicitly kill
-                // the host to avoid leaving an orphan running with no
-                // cleanup signal. (gemini MEDIUM @ L148, PR #570
-                // round-2.)
-                let _ = child.kill();
-                drop(job);
-                std::process::exit(1);
-            }
-        }
+        run_windows(exe_dir, &real_exe, &args).await;
     }
 
     #[cfg(not(target_os = "windows"))]
     {
+        // Phase 7 covers cross-platform parity. For now the legacy
+        // exec-into-host path is preserved on macOS/Linux. Phase B.1
+        // is Windows-only.
         log("exec into CEF host (Unix)");
         use std::os::unix::process::CommandExt;
         let err = std::process::Command::new(&real_exe).args(&args).exec();
@@ -175,9 +89,221 @@ fn main() {
     }
 }
 
+/// Windows main flow: resolve paths → create J0 → spawn srv → spawn
+/// host with srv endpoints in env → concurrent wait → cleanup.
+#[cfg(target_os = "windows")]
+async fn run_windows(
+    launcher_exe_dir: &std::path::Path,
+    real_exe: &std::path::Path,
+    args: &[String],
+) {
+    use windows_sys::Win32::System::Threading::CREATE_SUSPENDED;
+
+    let version = env!("CARGO_PKG_VERSION");
+    let is_dev = cfg!(debug_assertions);
+
+    // 1. Resolve data_dir / config_dir / user_home_dir. Both srv and
+    // host receive these via env so they don't recompute (and so they
+    // can't drift). Host's existing data_dir computation in sidecar.rs
+    // still runs as a fallback for `task dev` mode where the launcher
+    // is not in the loop.
+    let paths = match data_dir::resolve_paths(launcher_exe_dir, version, is_dev) {
+        Ok(p) => p,
+        Err(e) => {
+            log(&format!("FATAL: path resolution failed: {}", e));
+            eprintln!("Failed to resolve AgentMux data directories: {}", e);
+            std::process::exit(1);
+        }
+    };
+    log(&format!(
+        "paths resolved: data={} config={} user_home={} portable={}",
+        paths.data_dir.display(),
+        paths.config_dir.display(),
+        paths.user_home_dir.display(),
+        paths.portable_root.is_some(),
+    ));
+    if let Err(e) = data_dir::ensure_dirs(&paths) {
+        log(&format!("FATAL: failed to create data dirs: {}", e));
+        eprintln!("{}", e);
+        std::process::exit(1);
+    }
+
+    // 2. Create the launcher's Job Object J0 BEFORE any spawn. Both
+    // srv and host will be assigned to it (so they're siblings under
+    // a single OS-enforced cleanup contract). Failure here drops us
+    // into "degraded mode" — children spawn but won't be reaped on
+    // launcher death.
+    let job: Option<JobHandle> = match create_job_object() {
+        Ok(handle) => {
+            log("Job Object created (KILL_ON_JOB_CLOSE active)");
+            Some(JobHandle(handle))
+        }
+        Err(e) => {
+            log(&format!(
+                "WARN: Job Object setup failed: {} (process-tree cleanup degraded)",
+                e
+            ));
+            None
+        }
+    };
+    let job_handle: windows_sys::Win32::Foundation::HANDLE =
+        job.as_ref().map(|j| j.0).unwrap_or(std::ptr::null_mut());
+
+    // 3. Spawn srv first. Host needs srv's endpoints to skip its own
+    // spawn_backend path. Srv signals readiness via WAVESRV-ESTART on
+    // stderr; the spawner returns once we see that line (or after a
+    // 30s timeout).
+    let (srv_result, mut srv_child) = match srv_spawner::spawn_srv(
+        launcher_exe_dir,
+        &paths,
+        job_handle,
+    )
+    .await
+    {
+        Ok(pair) => pair,
+        Err(e) => {
+            log(&format!("FATAL: srv spawn failed: {}", e));
+            eprintln!("Failed to start backend: {}", e);
+            drop(job);
+            std::process::exit(1);
+        }
+    };
+
+    // 4. Spawn host SUSPENDED with srv endpoints in env vars. Host
+    // honors AGENTMUX_BACKEND_WS et al. and skips its own spawn_backend.
+    // Same CREATE_SUSPENDED → assign-to-job → resume race-fix pattern
+    // as PR #570 (codex P2 / gemini HIGH).
+    let mut host_cmd = tokio::process::Command::new(real_exe);
+    host_cmd
+        .args(args)
+        .env("AGENTMUX_BACKEND_WS", &srv_result.ws_endpoint)
+        .env("AGENTMUX_BACKEND_WEB", &srv_result.web_endpoint)
+        .env("AGENTMUX_BACKEND_PID", srv_result.pid.to_string())
+        .env("AGENTMUX_AUTH_KEY", &srv_result.auth_key)
+        .env("AGENTMUX_INSTANCE_ID", &srv_result.instance_id)
+        .env("AGENTMUX_DATA_DIR", paths.data_dir.to_string_lossy().to_string())
+        .env(
+            "AGENTMUX_CONFIG_DIR",
+            paths.config_dir.to_string_lossy().to_string(),
+        )
+        .env(
+            "AGENTMUX_USER_HOME_DIR",
+            paths.user_home_dir.to_string_lossy().to_string(),
+        )
+        .creation_flags(CREATE_SUSPENDED)
+        .kill_on_drop(false); // J0 handles cleanup; tokio's kill-on-drop would force-kill on every error path.
+
+    let mut host_child = match host_cmd.spawn() {
+        Ok(c) => c,
+        Err(e) => {
+            log(&format!("FATAL: failed to spawn CEF host: {}", e));
+            eprintln!("Failed to launch AgentMux: {}", e);
+            // srv is already running; let J0's drop reap it.
+            drop(job);
+            std::process::exit(1);
+        }
+    };
+    let host_pid = host_child.id().unwrap_or(0);
+    log(&format!("spawned CEF host pid={} (suspended)", host_pid));
+
+    // 5. Assign host to J0 BEFORE resuming. Without this, host could
+    // spawn renderer processes (CEF subprocess) before joining J0 —
+    // those renderers would escape KILL_ON_JOB_CLOSE.
+    if job.is_some() && host_pid != 0 {
+        if let Err(e) = srv_spawner::assign_pid_to_job(host_pid, job_handle) {
+            log(&format!(
+                "WARN: AssignProcessToJobObject(host) failed: {} — host children may escape job",
+                e
+            ));
+        } else {
+            log(&format!(
+                "Job Object assigned to host pid={}, KILL_ON_JOB_CLOSE active",
+                host_pid
+            ));
+        }
+    }
+
+    // 6. Resume host. With CREATE_SUSPENDED only the main thread
+    // exists at this point, so we just need to find it via a
+    // Toolhelp32 thread snapshot and ResumeThread it. From here the
+    // host runs normally; every CEF render child it spawns inherits J0.
+    if let Err(e) = resume_main_thread(host_pid) {
+        log(&format!(
+            "FATAL: failed to resume host pid={}: {} — terminating",
+            host_pid, e
+        ));
+        // Same defensive backstop as PR #570 round-2: if the job is
+        // None, drop is a no-op and the suspended host would be a
+        // permanent zombie. Explicit start_kill is the backstop.
+        let _ = host_child.start_kill();
+        // srv is alive; J0 (if held) reaps it on drop. Otherwise srv
+        // outlives us as an orphan (logged warning above).
+        drop(job);
+        std::process::exit(1);
+    }
+
+    // 7. Concurrent wait. Whichever child exits first triggers
+    // launcher shutdown. tokio::select cancels the other branch's
+    // wait future when one fires — both children's borrows are
+    // released after the macro returns.
+    //
+    // We don't manually kill the surviving child in the happy path:
+    // dropping `job` below triggers KILL_ON_JOB_CLOSE which reaps
+    // the entire J0 membership. The explicit start_kill is only the
+    // backstop for the degraded mode (job == None) where J0 doesn't
+    // exist to do the reaping. (PR #570 round-2 backstop pattern.)
+    log("entering host + srv concurrent wait");
+    let exit_code = tokio::select! {
+        host_status = host_child.wait() => {
+            match host_status {
+                Ok(s) => {
+                    let code = s.code().unwrap_or(1);
+                    log(&format!("CEF host exited with code {}", code));
+                    code
+                }
+                Err(e) => {
+                    log(&format!("FATAL: host wait failed: {}", e));
+                    1
+                }
+            }
+        }
+        srv_status = srv_child.wait() => {
+            match srv_status {
+                Ok(s) => {
+                    let code = s.code().unwrap_or(1);
+                    log(&format!(
+                        "srv exited UNEXPECTEDLY (host still running) with code {} — terminating launcher",
+                        code
+                    ));
+                    1
+                }
+                Err(e) => {
+                    log(&format!("FATAL: srv wait failed: {}", e));
+                    1
+                }
+            }
+        }
+    };
+
+    // 8. Cleanup. Happy path: drop(job) → KILL_ON_JOB_CLOSE reaps
+    // the surviving child + CEF renderers. Degraded path (job is
+    // None): explicit start_kill on both — neither will be reaped
+    // by the OS, so we have to terminate them ourselves to avoid
+    // orphans. (gemini PR #570 round-1 MEDIUM L105 / round-2 P1
+    // backstop pattern.)
+    if job.is_none() {
+        log("WARN: J0 absent — explicitly killing surviving children");
+        let _ = host_child.start_kill();
+        let _ = srv_child.start_kill();
+    }
+    drop(job);
+    log(&format!("launcher exiting with code {}", exit_code));
+    std::process::exit(exit_code);
+}
+
 /// Append a timestamped line to ~/.agentmux/logs/agentmux-launcher.log.
 /// Best-effort — silently no-ops if the log dir doesn't exist yet.
-fn log(msg: &str) {
+pub(crate) fn log(msg: &str) {
     let log_dir = dirs_fallback_home().join(".agentmux").join("logs");
     let _ = std::fs::create_dir_all(&log_dir);
     let path = log_dir.join("agentmux-launcher.log");
@@ -195,7 +321,10 @@ fn log(msg: &str) {
     }
 }
 
-/// Home dir without the `dirs` crate (keep launcher zero-dep beyond windows-sys).
+/// Home dir without depending on `dirs` for THIS specific lookup.
+/// Kept to avoid a dirs dep cycle from log() — log() is called from
+/// data_dir::resolve_paths via failure paths, and we want it to work
+/// even if `dirs` itself is mid-failure.
 fn dirs_fallback_home() -> std::path::PathBuf {
     std::env::var("USERPROFILE")
         .or_else(|_| std::env::var("HOME"))
@@ -224,24 +353,18 @@ impl Drop for JobHandle {
     }
 }
 
-/// Create a Job Object with `KILL_ON_JOB_CLOSE` and assign the given PID.
-/// Mirrors `agentmux-cef::sidecar::create_job_object_for_child`; lifted to
-/// the launcher so the entire host process tree (host + srv + CEF render
-/// children) is wrapped one level higher.
+/// Create a Job Object J0 with `KILL_ON_JOB_CLOSE`. Caller assigns
+/// processes to it via `srv_spawner::assign_pid_to_job(pid, job)`.
 #[cfg(target_os = "windows")]
-fn create_job_object_for_child(
-    pid: u32,
-) -> Result<windows_sys::Win32::Foundation::HANDLE, String> {
+fn create_job_object() -> Result<windows_sys::Win32::Foundation::HANDLE, String> {
     use windows_sys::Win32::Foundation::CloseHandle;
     use windows_sys::Win32::System::JobObjects::*;
-    use windows_sys::Win32::System::Threading::*;
 
     unsafe {
         let job = CreateJobObjectW(std::ptr::null(), std::ptr::null());
         if job.is_null() {
-            return Err("Failed to create job object".into());
+            return Err("CreateJobObjectW returned null".into());
         }
-
         let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
         info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
         let ok = SetInformationJobObject(
@@ -252,22 +375,8 @@ fn create_job_object_for_child(
         );
         if ok == 0 {
             CloseHandle(job);
-            return Err("Failed to set job object info".into());
+            return Err("SetInformationJobObject failed".into());
         }
-
-        let process = OpenProcess(PROCESS_SET_QUOTA | PROCESS_TERMINATE, 0, pid);
-        if process.is_null() {
-            CloseHandle(job);
-            return Err(format!("Failed to open process {}", pid));
-        }
-
-        let ok = AssignProcessToJobObject(job, process);
-        CloseHandle(process);
-        if ok == 0 {
-            CloseHandle(job);
-            return Err("Failed to assign process to job object".into());
-        }
-
         Ok(job)
     }
 }
@@ -283,7 +392,7 @@ fn create_job_object_for_child(
 /// was already running (impossible if the process was just created
 /// suspended) — treated as success.
 #[cfg(target_os = "windows")]
-fn resume_main_thread(pid: u32) -> Result<(), String> {
+pub(crate) fn resume_main_thread(pid: u32) -> Result<(), String> {
     use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
     use windows_sys::Win32::System::Diagnostics::ToolHelp::{
         CreateToolhelp32Snapshot, Thread32First, Thread32Next, TH32CS_SNAPTHREAD,
@@ -321,7 +430,6 @@ fn resume_main_thread(pid: u32) -> Result<(), String> {
                         break;
                     }
                 }
-                // Reset dwSize before each Thread32Next per Win32 contract.
                 entry.dwSize = std::mem::size_of::<THREADENTRY32>() as u32;
                 if Thread32Next(snap, &mut entry) == 0 {
                     break;
@@ -330,7 +438,6 @@ fn resume_main_thread(pid: u32) -> Result<(), String> {
         }
 
         CloseHandle(snap);
-
         if !found {
             return Err(format!("no thread found for pid={}", pid));
         }
@@ -345,22 +452,18 @@ fn resume_main_thread(pid: u32) -> Result<(), String> {
 fn find_cef_binary(runtime_dir: &std::path::Path) -> std::path::PathBuf {
     let ext = if cfg!(target_os = "windows") { ".exe" } else { "" };
 
-    // 1. Try exact versioned name matching this launcher's version (new naming)
     let versioned = format!("agentmux-{}{}", env!("CARGO_PKG_VERSION"), ext);
     let versioned_path = runtime_dir.join(&versioned);
     if versioned_path.exists() {
         return versioned_path;
     }
 
-    // 2. Scan for any agentmux-<version>.exe — handles minor version mismatch
-    //    between launcher and CEF host (new naming, no "cef" in artifact name)
     if let Ok(entries) = std::fs::read_dir(runtime_dir) {
         let prefix = "agentmux-";
         let cef_prefix = "agentmux-cef";
         for entry in entries.flatten() {
             let name = entry.file_name();
             let name = name.to_string_lossy();
-            // Match agentmux-<version>.exe but not agentmux-cef*.exe or agentmux-srv*.exe
             if name.starts_with(prefix)
                 && !name.starts_with(cef_prefix)
                 && !name.starts_with("agentmux-srv")
@@ -371,13 +474,11 @@ fn find_cef_binary(runtime_dir: &std::path::Path) -> std::path::PathBuf {
         }
     }
 
-    // 3. Backwards compat: old naming used agentmux-cef-<version>.exe
     let versioned_old = format!("agentmux-cef-{}{}", env!("CARGO_PKG_VERSION"), ext);
     let versioned_old_path = runtime_dir.join(&versioned_old);
     if versioned_old_path.exists() {
         return versioned_old_path;
     }
 
-    // 4. Fall back to plain name (dev mode)
     runtime_dir.join(format!("agentmux-cef{}", ext))
 }

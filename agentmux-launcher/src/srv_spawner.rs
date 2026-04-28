@@ -138,7 +138,6 @@ pub async fn spawn_srv(
     // the job — those resources would survive launcher death.
     #[cfg(target_os = "windows")]
     {
-        use std::os::windows::process::CommandExt;
         const CREATE_SUSPENDED: u32 = 0x00000004;
         const CREATE_NO_WINDOW: u32 = 0x08000000;
         cmd.creation_flags(CREATE_SUSPENDED | CREATE_NO_WINDOW);
@@ -152,10 +151,15 @@ pub async fn spawn_srv(
         .ok_or_else(|| SrvSpawnError::SpawnFailed("child has no PID".to_string()))?;
 
     // Windows: assign srv to launcher's job, then resume.
+    // Skip job assignment if launcher's job creation failed (J0 is
+    // null) — that's the degraded mode logged by main.rs. Srv still
+    // runs but won't be reaped on launcher death.
     #[cfg(target_os = "windows")]
     {
-        assign_to_job(pid, job_handle)
-            .map_err(SrvSpawnError::JobAssignFailed)?;
+        if !job_handle.is_null() {
+            assign_pid_to_job(pid, job_handle)
+                .map_err(SrvSpawnError::JobAssignFailed)?;
+        }
         crate::resume_main_thread(pid)
             .map_err(SrvSpawnError::ResumeFailed)?;
     }
@@ -308,11 +312,12 @@ fn parse_estart(line: &str) -> EstartFields {
     }
 }
 
-/// Assign a process to the launcher's Job Object J0. Matches the
-/// pattern in main.rs::create_job_object_for_child but separated
-/// because we already HAVE the job handle (don't create a new one).
+/// Assign a process to the launcher's Job Object J0. Used by
+/// `spawn_srv` for srv and exported for `main.rs` to use for the
+/// host. Separated from job creation because both children join
+/// the SAME job (only one J0 ever exists per launcher run).
 #[cfg(target_os = "windows")]
-fn assign_to_job(
+pub fn assign_pid_to_job(
     pid: u32,
     job: windows_sys::Win32::Foundation::HANDLE,
 ) -> Result<(), String> {
