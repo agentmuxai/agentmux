@@ -85,6 +85,20 @@ pub enum Command {
     ReportWindowClosed {
         label: String,
     },
+    /// Phase B.4 follow-up — host reports a pre-warmed pool window
+    /// being added (`spawn_pool_window`). Pool windows live in a
+    /// SEPARATE map from the user-visible window mirror; the host
+    /// transitions them out of the pool with `ReportPoolWindowRemoved`
+    /// + `ReportWindowOpened` on promote, or just
+    /// `ReportPoolWindowRemoved` on pre-promote destroy.
+    ReportPoolWindowAdded {
+        label: String,
+    },
+    /// Phase B.4 follow-up — host reports a pool window leaving the
+    /// pool (promote, destroy, or app exit).
+    ReportPoolWindowRemoved {
+        label: String,
+    },
 }
 
 /// Wire-side enum for `WindowKind`. Mirrors `agentmux-cef::state::WindowKind`
@@ -176,6 +190,17 @@ pub enum Event {
     /// the host emits one ReportWindowClosed per window even on
     /// cascade closes, so subscribers see the same N events.
     WindowClosed {
+        label: String,
+        version: u64,
+    },
+    /// Phase B.4 follow-up — pool inventory transitioned. Emitted in
+    /// response to `ReportPoolWindow{Added,Removed}`. Subscribers
+    /// (Tool clients) use this to track pool warmth without polling.
+    PoolWindowAdded {
+        label: String,
+        version: u64,
+    },
+    PoolWindowRemoved {
         label: String,
         version: u64,
     },
