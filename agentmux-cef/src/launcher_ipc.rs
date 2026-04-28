@@ -499,6 +499,16 @@ pub fn report_host_pool_count(count: u32) {
 ///   excluding `browser-pane-*` child HWNDs and any label still
 ///   in `unpromoted_pool_labels`.
 /// * `pool` — pre-promote pool labels (`unpromoted_pool_labels.len()`).
+///
+/// **Why this reads host's `browsers` and `unpromoted_pool_labels`
+/// directly (not the shadow):** this fn IS the source for the
+/// launcher's mirror — its output is what gets compared against
+/// `state.windows.len()` / `state.pool.len()` in the drift-detection
+/// path. Reading from the shadow would compare the shadow against
+/// itself (always agrees) and defeat the entire B.4 drift-detection
+/// design. Once the host reducer arrives in Phase F (see
+/// `docs/retro/multi-reducer-proposal-2026-04-28.md`), this becomes
+/// "report host's authoritative reducer-state to the launcher."
 pub fn compute_and_report_host_counts(state: &std::sync::Arc<crate::state::AppState>) {
     let unpromoted = state.unpromoted_pool_labels.lock();
     let browsers = state.browsers.lock();
