@@ -353,6 +353,9 @@ async fn enforce_register_first(
         Command::ReportHostCounts { .. } => {
             ("ReportHostCounts before Register".to_string(), true)
         }
+        Command::ReportHostPoolCount { .. } => {
+            ("ReportHostPoolCount before Register".to_string(), true)
+        }
     };
     let mut state = ctx.state.lock().await;
     let v = state.bump_version();

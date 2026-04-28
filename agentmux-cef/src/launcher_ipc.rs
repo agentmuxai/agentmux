@@ -294,7 +294,7 @@ pub fn report_pool_window_removed(label: String) {
 /// Phase B.4 follow-up — sync API: report the host's current
 /// authoritative counts so the launcher reducer can compare against
 /// its mirror and emit `Event::DriftDetected` on mismatch. Callers
-/// invoke this AFTER each window/pool transition so the launcher
+/// invoke this AFTER each window-level transition so the launcher
 /// gets a fresh snapshot to compare against its just-applied
 /// transition.
 pub fn report_host_counts(windows: u32, pool: u32) {
@@ -304,6 +304,23 @@ pub fn report_host_counts(windows: u32, pool: u32) {
     let cmd = Command::ReportHostCounts { windows, pool };
     if let Err(e) = tx.send(cmd) {
         tracing::warn!("[launcher-ipc] report_host_counts: channel closed ({})", e);
+    }
+}
+
+/// Phase B.4 follow-up — sync API: report the host's pool count
+/// only. Used by `spawn_pool_window` where the windows dimension
+/// is mid-flight relative to the launcher mirror (refill happens
+/// during a close path that hasn't sent `ReportWindowClosed` yet);
+/// snapshotting only the pool dimension preserves the
+/// check-every-transition guarantee without producing false
+/// windows-drift. (codex P2 PR #578 round-3.)
+pub fn report_host_pool_count(count: u32) {
+    let Some(tx) = COMMAND_TX.get() else {
+        return;
+    };
+    let cmd = Command::ReportHostPoolCount { count };
+    if let Err(e) = tx.send(cmd) {
+        tracing::warn!("[launcher-ipc] report_host_pool_count: channel closed ({})", e);
     }
 }
 

@@ -116,7 +116,31 @@ pub fn update(state: &mut State, cmd: Command, ctx: &Ctx) -> Vec<Event> {
             }
             handle_report_host_counts(state, windows, pool)
         }
+        Command::ReportHostPoolCount { count } => {
+            if let Some(err) = enforce_host_only(state, ctx, "ReportHostPoolCount") {
+                return vec![err];
+            }
+            handle_report_host_pool_count(state, count)
+        }
     }
+}
+
+/// Phase B.4 follow-up — pool-only drift check. Called from
+/// `spawn_pool_window` where the windows dimension is mid-flight
+/// (close path hasn't completed). Compares only the pool dimension;
+/// emits `DriftDetected { kind: Pool, ... }` on mismatch.
+fn handle_report_host_pool_count(state: &mut State, host_pool: u32) -> Vec<Event> {
+    let mirror_pool = state.pool.len() as u32;
+    if mirror_pool == host_pool {
+        return vec![];
+    }
+    let v = state.bump_version();
+    vec![Event::DriftDetected {
+        kind: DriftKind::Pool,
+        host_count: host_pool,
+        mirror_count: mirror_pool,
+        version: v,
+    }]
 }
 
 /// Phase B.4 follow-up — drift check. Compares host-reported counts
@@ -856,6 +880,71 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn report_host_pool_count_matching_emits_no_event() {
+        let mut state = State::default();
+        let host_ctx = register_host_and_get_ctx(&mut state, 1234);
+        let _ = update(
+            &mut state,
+            Command::ReportPoolWindowAdded {
+                label: "window-pool-x".into(),
+            },
+            &host_ctx,
+        );
+        let events = update(
+            &mut state,
+            Command::ReportHostPoolCount { count: 1 },
+            &host_ctx,
+        );
+        assert_eq!(events.len(), 0);
+    }
+
+    #[test]
+    fn report_host_pool_count_emits_drift_on_mismatch() {
+        let mut state = State::default();
+        let host_ctx = register_host_and_get_ctx(&mut state, 1234);
+        // Mirror pool=0; host claims 7 → drift.
+        let events = update(
+            &mut state,
+            Command::ReportHostPoolCount { count: 7 },
+            &host_ctx,
+        );
+        assert_eq!(events.len(), 1);
+        assert!(matches!(
+            &events[0],
+            Event::DriftDetected {
+                kind: DriftKind::Pool,
+                host_count: 7,
+                mirror_count: 0,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn report_host_pool_count_ignores_windows_dimension() {
+        let mut state = State::default();
+        let host_ctx = register_host_and_get_ctx(&mut state, 1234);
+        // Open a window so the windows dimension WOULD diverge if
+        // checked, but ReportHostPoolCount only inspects pool.
+        let _ = update(
+            &mut state,
+            Command::ReportWindowOpened {
+                label: "main".into(),
+                kind: WindowKind::FullInstance,
+                parent_label: None,
+            },
+            &host_ctx,
+        );
+        // Mirror windows=1, mirror pool=0. Host pool count matches.
+        let events = update(
+            &mut state,
+            Command::ReportHostPoolCount { count: 0 },
+            &host_ctx,
+        );
+        assert_eq!(events.len(), 0);
     }
 
     #[test]

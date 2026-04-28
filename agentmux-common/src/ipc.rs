@@ -99,14 +99,15 @@ pub enum Command {
     ReportPoolWindowRemoved {
         label: String,
     },
-    /// Phase B.4 follow-up — drift detection. Host sends its own
-    /// post-mutation counts after each window/pool transition; the
-    /// launcher reducer compares to its mirror counts and emits
-    /// `Event::DriftDetected` on mismatch. Sent in a separate
-    /// command (rather than embedded in each Report*) so the
-    /// existing wire shapes stay unchanged. Frequency: one per
-    /// transition — host is single-threaded for these events so
-    /// the order with the preceding Report* is deterministic.
+    /// Phase B.4 follow-up — drift detection (full snapshot). Host
+    /// sends its own post-mutation counts after each window-level
+    /// transition; the launcher reducer compares both dimensions to
+    /// its mirror counts and emits `Event::DriftDetected` per
+    /// disagreeing dimension. Sent in a separate command (rather
+    /// than embedded in each Report*) so the existing wire shapes
+    /// stay unchanged. Frequency: one per window-level transition
+    /// — host is single-threaded for these events so the order
+    /// with the preceding Report* is deterministic.
     ReportHostCounts {
         /// User-visible top-level windows in the host's
         /// authoritative store (`browsers` minus browser-pane
@@ -114,6 +115,19 @@ pub enum Command {
         windows: u32,
         /// Pre-promote pool inventory size.
         pool: u32,
+    },
+    /// Phase B.4 follow-up — pool-dimension-only drift check. Used
+    /// by `spawn_pool_window` (pool transitions) where snapshotting
+    /// the windows dimension would produce transient false drift:
+    /// pool refill is triggered DURING `on_before_close` BEFORE the
+    /// matching `ReportWindowClosed` lands, so the host's window
+    /// count is mid-flight relative to the launcher mirror. Pool
+    /// count IS stable at that moment (the new pool label was just
+    /// added), so checking pool alone preserves the "check every
+    /// transition" guarantee for the dimension that actually
+    /// changed. (codex P2 PR #578 round-3.)
+    ReportHostPoolCount {
+        count: u32,
     },
 }
 

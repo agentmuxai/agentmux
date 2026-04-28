@@ -87,24 +87,27 @@ pub fn spawn_pool_window(state: &Arc<AppState>) {
         .lock()
         .insert(label.clone());
 
-    // Phase B.4 follow-up — mirror the pool inventory in the launcher.
-    // Symmetric with the destroy/promote hooks below; a missing
-    // launcher pipe makes this a no-op.
-    //
-    // No host-count snapshot here. `spawn_pool_window` is invoked
+    // Phase B.4 follow-up — mirror the pool inventory in the launcher
+    // and check pool drift. We use the pool-only variant
+    // (`report_host_pool_count`) rather than the full
+    // `report_host_counts` because `spawn_pool_window` is invoked
     // from the refill chain inside `on_pool_window_destroyed`, which
-    // itself runs during `on_before_close` BEFORE the matching
+    // runs during `on_before_close` BEFORE the matching
     // `ReportWindowClosed` is sent for the closing window. A
-    // counts snapshot at this moment would see browsers shrunk
-    // (closing window already removed) but the launcher mirror
-    // still holding it (close not yet reported), producing
-    // transient `DriftDetected` on every normal promoted-window
-    // close that triggers a refill. The actual drift signal we
-    // care about (pool size changes) is captured by the surrounding
-    // `ReportPoolWindowAdded`; window-count drift is checked at
-    // window-level transitions in `client.rs`. (codex P2 PR #578
-    // round-2.)
+    // full-counts snapshot at this moment would see browsers
+    // shrunk (closing window already removed) but the launcher
+    // mirror still holding it (close not yet reported), producing
+    // transient false windows-drift on every normal
+    // promoted-window close that triggers a refill. Pool count IS
+    // stable at this moment (the new label was just added), so
+    // checking pool alone preserves the "check every transition"
+    // guarantee for the dimension that actually changed. (codex
+    // P2 PR #578 rounds 2 + 3.)
     crate::launcher_ipc::report_pool_window_added(label.clone());
+    {
+        let pool_count = state.unpromoted_pool_labels.lock().len() as u32;
+        crate::launcher_ipc::report_host_pool_count(pool_count);
+    }
 
     let ipc_port = *state.ipc_port.lock();
     let ipc_token = &state.ipc_token;
