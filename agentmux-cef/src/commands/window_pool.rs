@@ -628,11 +628,9 @@ fn cleanup_failed_promote_orphan(state: &Arc<AppState>, label: &str) {
         }
     }
     // Browser or host already gone — do `on_before_close`'s job
-    // inline since CEF won't fire it for this label. Note:
-    // post-step-d host doesn't write `window_meta` so the
-    // previous `.remove(label)` here is gone — the launcher's
-    // shadow drops the entry on `WindowClosed` arrival.
+    // inline since CEF won't fire it for this label.
     state.browsers.lock().remove(label);
+    state.window_meta.lock().remove(label);
     crate::launcher_ipc::report_window_closed(label.to_string());
     // Refill (graceful path gets this via on_pool_window_destroyed).
     spawn_pool_window(state);

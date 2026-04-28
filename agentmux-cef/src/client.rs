@@ -142,11 +142,39 @@ impl AgentMuxHandler {
         }
 
         let is_top_level_window = !label.starts_with("browser-pane-");
-        // Note: host's `window_meta` is no longer mutated by
-        // on_after_created post-step-d. Cascade-close enumeration
-        // and the taskbar-hide check below read kind via the
-        // pending entry (taskbar) or the launcher-fed shadow
-        // (cascade-close).
+
+        // Phase B.5 (window_meta step d, refined) — write host's
+        // local `window_meta` ONCE here, synchronously from the
+        // popped pending entry. This is no longer the authoritative
+        // state (the launcher's `state.windows` is); it's a
+        // host-internal cache that covers two scenarios where the
+        // launcher-fed shadow can't:
+        //
+        // 1. `task dev` mode — no launcher IPC at all, shadow stays
+        //    empty forever. open_subwindow's parent validation +
+        //    cascade-close need a synchronous local source.
+        // 2. Cascade-close race — child opens just before parent
+        //    closes; on_after_created→ReportWindowOpened→launcher
+        //    →WindowOpened→shadow round-trip hasn't completed by
+        //    the time parent's on_before_close runs. Without the
+        //    local write, `subwindow_children_of` would miss the
+        //    child and skip cascade close.
+        //
+        // The retired piece (step d's intent) is the
+        // **caller-side parallel write** — drag/window/window_pool
+        // no longer write meta themselves. Single canonical
+        // mutation site here. (codex P1 PR #592 round-2.)
+        if is_top_level_window {
+            let mut metas = self.state.window_meta.lock();
+            metas.insert(
+                label.clone(),
+                crate::state::WindowMeta {
+                    label: label.clone(),
+                    kind: pending_kind,
+                    parent_instance_id: pending_parent.clone(),
+                },
+            );
+        }
 
         // No DwmExtendFrameIntoClientArea — it causes the white flash.
         // CEF Views handles frameless + resize via its delegate.
@@ -364,13 +392,16 @@ impl AgentMuxHandler {
         // cascade-close every Subwindow whose parent_instance_id points to it.
         // See `docs/specs/SPEC_MULTIWINDOW_TASKBAR_GROUPING.md` §2.3.
         //
-        // Phase B.5 (window_meta step d) — read closing meta via
-        // shadow-first helper; enumerate children via
-        // `state.subwindow_children_of`. Local `window_meta`
-        // mutation removed in this step.
+        // Phase B.5 (window_meta step d, refined) — read closing
+        // meta via shadow-first helper, drop the host-side cache
+        // entry (single canonical mutation site for window_meta
+        // post-refinement: insert in on_after_created, remove here).
         let closing_meta = label
             .as_deref()
             .and_then(|lbl| self.state.window_meta(lbl));
+        if let Some(lbl) = label.as_deref() {
+            self.state.window_meta.lock().remove(lbl);
+        }
         if let Some(meta) = &closing_meta {
             if meta.kind == WindowKind::FullInstance {
                 let child_labels = self.state.subwindow_children_of(&meta.label);
