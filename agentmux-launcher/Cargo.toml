@@ -9,6 +9,28 @@ edition = "2021"
 name = "agentmux-launcher"
 path = "src/main.rs"
 
+[dependencies]
+# Phase B foundation: launcher gains a Tokio runtime so it can
+# manage srv + host concurrently and (in later sub-PRs) host the
+# named-pipe IPC server. Prior to Phase B the launcher was a tiny
+# sync DLL-path-fixup + spawner; now it's the privileged owner per
+# specs/SPEC_WINDOW_PROCESS_STATE_MACHINE_2026_04_27.md.
+tokio = { version = "1", features = [
+    "rt-multi-thread",
+    "macros",
+    "process",
+    "io-util",
+    "time",
+    "sync",
+] }
+# Platform-default data_dir / config_dir resolution. Host already
+# uses this; launcher must compute the SAME paths so both processes
+# agree on the data dir for CEF cache, srv DB, etc.
+dirs = "5"
+# RFC3339 timestamps for backend_started_at logs, kept stable for
+# log-format compatibility with the host's existing format.
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-sys = { version = "0.59", features = [
     "Win32_System_LibraryLoader",
