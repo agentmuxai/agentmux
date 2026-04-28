@@ -68,11 +68,24 @@ pub fn resolve_paths(
     };
 
     let (data_dir, config_dir) = if let Some(ref root) = portable_root {
-        // Portable: data_dir = <root>/data/cef ; config_dir = <root>/data/config.
-        // The "data" parent is shared with `data/logs` (launcher log already
-        // writes there in main.rs::log) and `data/db` (srv).
+        // Portable backend layout (must match
+        // `agentmux-cef/src/sidecar.rs:54-56` — that's the `task dev`
+        // fallback path, both branches must agree on where srv reads
+        // and writes its DB):
+        //   data_dir   = <root>/data           (srv DB at data/db)
+        //   config_dir = <root>/data/config
+        //   cef cache  = <root>/data/cef       (host-only, computed in
+        //                                       host main.rs from the
+        //                                       host's own portable
+        //                                       detection — NOT this
+        //                                       function's concern)
+        //
+        // Important: data_dir is NOT data/cef. Earlier B.1 draft
+        // had `base.join("cef")` here which would have moved srv DB
+        // to data/cef/db on upgrade — silent data loss for existing
+        // portable users. (reagent P1 + codex P1 on PR #571 round-1.)
         let base = root.join("data");
-        (base.join("cef"), base.join("config"))
+        (base.clone(), base.join("config"))
     } else {
         // Installed: version-isolated dirs in platform AppData.
         let dir_name = if is_dev {
