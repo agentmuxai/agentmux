@@ -120,8 +120,14 @@ fn main() {
                 host_pid, e
             ));
             // The host is currently suspended and will never run.
-            // Killing the launcher (via the dropped JobHandle below)
-            // also reaps the suspended host via KILL_ON_JOB_CLOSE.
+            // If Job Object setup succeeded, dropping it reaps the
+            // tree via KILL_ON_JOB_CLOSE. If the job is None (creation
+            // failed earlier with the WARN log), drop is a no-op and
+            // the suspended host would survive as a permanent zombie
+            // holding resources and blocking subsequent launches —
+            // explicitly child.kill() it as a backstop.
+            // (reagent P1 + codex P2 + gemini MEDIUM, PR #570 round-2)
+            let _ = child.kill();
             drop(job);
             std::process::exit(1);
         }
@@ -143,6 +149,12 @@ fn main() {
             }
             Err(e) => {
                 log(&format!("FATAL: wait failed: {}", e));
+                // Same backstop as the resume-failure path: if the job
+                // is None (creation failed), we must explicitly kill
+                // the host to avoid leaving an orphan running with no
+                // cleanup signal. (gemini MEDIUM @ L148, PR #570
+                // round-2.)
+                let _ = child.kill();
                 drop(job);
                 std::process::exit(1);
             }
