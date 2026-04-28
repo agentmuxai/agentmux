@@ -125,8 +125,6 @@ pub async fn spawn_srv(
     .env("AGENTMUX_SETTINGS_DIR", paths.config_dir.to_string_lossy().to_string())
     .env("AGENTMUX_APP_PATH", &app_path_str)
     .env("AGENTMUX_DEV", if cfg!(debug_assertions) { "1" } else { "" })
-    .env("WCLOUD_ENDPOINT", "https://api.agentmux.ai/central")
-    .env("WCLOUD_WS_ENDPOINT", "wss://wsapi.agentmux.ai/")
     .stdin(Stdio::piped())
     .stdout(Stdio::piped())
     .stderr(Stdio::piped())

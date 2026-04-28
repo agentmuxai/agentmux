@@ -227,8 +227,6 @@ pub async fn spawn_backend(state: &Arc<AppState>) -> Result<BackendSpawnResult, 
         "AGENTMUX_DEV",
         if cfg!(debug_assertions) { "1" } else { "" },
     )
-    .env("WCLOUD_ENDPOINT", "https://api.agentmux.ai/central")
-    .env("WCLOUD_WS_ENDPOINT", "wss://wsapi.agentmux.ai/")
     .stdin(std::process::Stdio::piped())
     .stdout(std::process::Stdio::piped())
     .stderr(std::process::Stdio::piped());

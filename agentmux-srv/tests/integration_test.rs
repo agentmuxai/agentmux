@@ -1,7 +1,7 @@
 use std::io::{BufRead, BufReader};
 use std::process::{Command, Stdio};
 
-/// Helper: spawn agentmux-srv as a subprocess and parse WAVESRV-ESTART.
+/// Helper: spawn agentmux-srv as a subprocess and parse AGENTMUXSRV-ESTART.
 /// Returns (child, web_addr, ws_addr, auth_key).
 fn spawn_backend() -> (std::process::Child, String, String, String) {
     let auth_key = "integration-test-key-12345";
@@ -9,7 +9,7 @@ fn spawn_backend() -> (std::process::Child, String, String, String) {
     let binary = env!("CARGO_BIN_EXE_agentmux-srv");
 
     let mut child = Command::new(binary)
-        .env("WAVETERM_AUTH_KEY", auth_key)
+        .env("AGENTMUX_AUTH_KEY", auth_key)
         .stdin(Stdio::piped())
         .stderr(Stdio::piped())
         .stdout(Stdio::null())
