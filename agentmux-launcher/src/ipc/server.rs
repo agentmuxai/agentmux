@@ -284,9 +284,23 @@ async fn handle_connection(stream: NamedPipeServer, ctx: Arc<ServerCtx>) {
 
         // Write events back over the same connection. Patch the
         // sentinel launcher_pid / launcher_version fields the reducer
-        // left blank.
+        // left blank. Drift events get a WARN-level log line so
+        // operators see mirror divergence in launcher logs without
+        // needing a subscriber to be wired up. (B.4 follow-up.)
         let goodbye = matches!(cmd, Command::Goodbye);
         for event in events {
+            if let Event::DriftDetected {
+                kind,
+                host_count,
+                mirror_count,
+                ..
+            } = &event
+            {
+                crate::log(&format!(
+                    "[ipc] DRIFT {:?}: host={} mirror={} (conn_id={})",
+                    kind, host_count, mirror_count, conn_id
+                ));
+            }
             let event = patch_launcher_identity(event, &ctx);
             if send_event(&writer, event).await.is_err() {
                 return;
@@ -335,6 +349,9 @@ async fn enforce_register_first(
         }
         Command::ReportPoolWindowRemoved { .. } => {
             ("ReportPoolWindowRemoved before Register".to_string(), true)
+        }
+        Command::ReportHostCounts { .. } => {
+            ("ReportHostCounts before Register".to_string(), true)
         }
     };
     let mut state = ctx.state.lock().await;

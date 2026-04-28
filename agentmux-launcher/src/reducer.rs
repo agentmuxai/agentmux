@@ -41,7 +41,7 @@
 //     register. Running → Quitting on Quit (B.3 placeholder).
 //     Quitting → Dead on cleanup-done (B.3 placeholder). No skipping.
 
-use agentmux_common::ipc::{ClientKind, Command, ErrorCode, Event, WindowKind};
+use agentmux_common::ipc::{ClientKind, Command, DriftKind, ErrorCode, Event, WindowKind};
 
 use crate::state::{LifecyclePhase, ProcessRecord, ProcessState, State, WindowMirror};
 
@@ -110,7 +110,46 @@ pub fn update(state: &mut State, cmd: Command, ctx: &Ctx) -> Vec<Event> {
             }
             handle_report_pool_window_removed(state, label)
         }
+        Command::ReportHostCounts { windows, pool } => {
+            if let Some(err) = enforce_host_only(state, ctx, "ReportHostCounts") {
+                return vec![err];
+            }
+            handle_report_host_counts(state, windows, pool)
+        }
     }
+}
+
+/// Phase B.4 follow-up — drift check. Compares host-reported counts
+/// to launcher mirror counts; emits `DriftDetected` for each
+/// disagreeing dimension. Returns `[]` when both counts match (the
+/// happy path; mirrors are in sync).
+///
+/// Two events possible (windows + pool) when both diverge in the
+/// same report — emitted in a stable order (windows first) so test
+/// assertions don't depend on HashSet iteration order.
+fn handle_report_host_counts(state: &mut State, host_windows: u32, host_pool: u32) -> Vec<Event> {
+    let mut out = Vec::new();
+    let mirror_windows = state.windows.len() as u32;
+    let mirror_pool = state.pool.len() as u32;
+    if mirror_windows != host_windows {
+        let v = state.bump_version();
+        out.push(Event::DriftDetected {
+            kind: DriftKind::Windows,
+            host_count: host_windows,
+            mirror_count: mirror_windows,
+            version: v,
+        });
+    }
+    if mirror_pool != host_pool {
+        let v = state.bump_version();
+        out.push(Event::DriftDetected {
+            kind: DriftKind::Pool,
+            host_count: host_pool,
+            mirror_count: mirror_pool,
+            version: v,
+        });
+    }
+    out
 }
 
 /// Phase B.4 follow-up — record pool inventory growth. Idempotent
@@ -482,6 +521,7 @@ mod tests {
             | Event::WindowClosed { version, .. }
             | Event::PoolWindowAdded { version, .. }
             | Event::PoolWindowRemoved { version, .. }
+            | Event::DriftDetected { version, .. }
             | Event::Error { version, .. } => *version,
         }
     }
@@ -734,6 +774,113 @@ mod tests {
         // label was in the pool. (reagent P2 PR #577 round-3.)
         assert_eq!(events.len(), 0);
         assert!(state.pool.is_empty());
+    }
+
+    #[test]
+    fn report_host_counts_matching_mirror_emits_no_event() {
+        let mut state = State::default();
+        let host_ctx = register_host_and_get_ctx(&mut state, 1234);
+        let _ = update(
+            &mut state,
+            Command::ReportWindowOpened {
+                label: "main".into(),
+                kind: WindowKind::FullInstance,
+                parent_label: None,
+            },
+            &host_ctx,
+        );
+        // Mirror has 1 window, 0 pool. Host reports the same.
+        let events = update(
+            &mut state,
+            Command::ReportHostCounts {
+                windows: 1,
+                pool: 0,
+            },
+            &host_ctx,
+        );
+        assert_eq!(events.len(), 0);
+    }
+
+    #[test]
+    fn report_host_counts_emits_drift_for_window_mismatch() {
+        let mut state = State::default();
+        let host_ctx = register_host_and_get_ctx(&mut state, 1234);
+        // Mirror has 0 windows; host claims 3 → drift.
+        let events = update(
+            &mut state,
+            Command::ReportHostCounts {
+                windows: 3,
+                pool: 0,
+            },
+            &host_ctx,
+        );
+        assert_eq!(events.len(), 1);
+        assert!(matches!(
+            &events[0],
+            Event::DriftDetected {
+                kind: DriftKind::Windows,
+                host_count: 3,
+                mirror_count: 0,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn report_host_counts_emits_drift_for_pool_mismatch() {
+        let mut state = State::default();
+        let host_ctx = register_host_and_get_ctx(&mut state, 1234);
+        let _ = update(
+            &mut state,
+            Command::ReportPoolWindowAdded {
+                label: "window-pool-a".into(),
+            },
+            &host_ctx,
+        );
+        // Mirror has 1 pool entry; host claims 5 → drift.
+        let events = update(
+            &mut state,
+            Command::ReportHostCounts {
+                windows: 0,
+                pool: 5,
+            },
+            &host_ctx,
+        );
+        assert_eq!(events.len(), 1);
+        assert!(matches!(
+            &events[0],
+            Event::DriftDetected {
+                kind: DriftKind::Pool,
+                host_count: 5,
+                mirror_count: 1,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn report_host_counts_emits_both_drifts_when_both_diverge() {
+        let mut state = State::default();
+        let host_ctx = register_host_and_get_ctx(&mut state, 1234);
+        let events = update(
+            &mut state,
+            Command::ReportHostCounts {
+                windows: 1,
+                pool: 1,
+            },
+            &host_ctx,
+        );
+        assert_eq!(events.len(), 2);
+        // Stable order: windows first, then pool. (Tested for predictability
+        // so subscribers + this assertion don't drift with HashMap iteration.)
+        assert!(matches!(
+            &events[0],
+            Event::DriftDetected { kind: DriftKind::Windows, .. }
+        ));
+        assert!(matches!(
+            &events[1],
+            Event::DriftDetected { kind: DriftKind::Pool, .. }
+        ));
     }
 
     #[test]

@@ -91,6 +91,7 @@ pub fn spawn_pool_window(state: &Arc<AppState>) {
     // Symmetric with the destroy/promote hooks below; a missing
     // launcher pipe makes this a no-op.
     crate::launcher_ipc::report_pool_window_added(label.clone());
+    crate::launcher_ipc::compute_and_report_host_counts(state);
 
     let ipc_port = *state.ipc_port.lock();
     let ipc_token = &state.ipc_token;
@@ -261,6 +262,7 @@ pub fn on_pool_window_destroyed(state: &Arc<AppState>, label: &str) {
     // the launcher reducer so calling this for a label the launcher
     // never saw (post-promote close path) is safe.
     crate::launcher_ipc::report_pool_window_removed(label.to_string());
+    crate::launcher_ipc::compute_and_report_host_counts(state);
     // Single lock: drop the dead label + check whether we need to
     // refill, all in one critical section.
     let needs_refill = {
@@ -452,6 +454,9 @@ pub fn promote_pool_window(
         agentmux_common::ipc::WindowKind::FullInstance,
         None,
     );
+    // Phase B.4 follow-up — drift check after the atomic
+    // pool→windows transition.
+    crate::launcher_ipc::compute_and_report_host_counts(state);
 
     // Compute position outside the unsafe block — these are pure
     // arithmetic, no FFI needed. Don't clamp with .max(0): Windows'

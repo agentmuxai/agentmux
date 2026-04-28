@@ -290,3 +290,43 @@ pub fn report_pool_window_removed(label: String) {
         tracing::warn!("[launcher-ipc] report_pool_window_removed: channel closed ({})", e);
     }
 }
+
+/// Phase B.4 follow-up — sync API: report the host's current
+/// authoritative counts so the launcher reducer can compare against
+/// its mirror and emit `Event::DriftDetected` on mismatch. Callers
+/// invoke this AFTER each window/pool transition so the launcher
+/// gets a fresh snapshot to compare against its just-applied
+/// transition.
+pub fn report_host_counts(windows: u32, pool: u32) {
+    let Some(tx) = COMMAND_TX.get() else {
+        return;
+    };
+    let cmd = Command::ReportHostCounts { windows, pool };
+    if let Err(e) = tx.send(cmd) {
+        tracing::warn!("[launcher-ipc] report_host_counts: channel closed ({})", e);
+    }
+}
+
+/// Phase B.4 follow-up — compute the host's authoritative counts
+/// from `AppState` and report them. Callers invoke this AFTER
+/// each window/pool transition. Cheap: snapshots
+/// `unpromoted_pool_labels` (small set, typically <10 entries) so
+/// the two source maps don't have to be locked simultaneously.
+///
+/// Counts (matching the launcher's mirror semantics):
+/// * `windows` — top-level user-visible windows in `browsers`,
+///   excluding `browser-pane-*` child HWNDs and any label still
+///   in `unpromoted_pool_labels`.
+/// * `pool` — pre-promote pool labels (`unpromoted_pool_labels.len()`).
+pub fn compute_and_report_host_counts(state: &std::sync::Arc<crate::state::AppState>) {
+    let unpromoted: std::collections::HashSet<String> =
+        state.unpromoted_pool_labels.lock().iter().cloned().collect();
+    let pool = unpromoted.len() as u32;
+    let browsers = state.browsers.lock();
+    let windows = browsers
+        .keys()
+        .filter(|k| !k.starts_with("browser-pane-") && !unpromoted.contains(*k))
+        .count() as u32;
+    drop(browsers);
+    report_host_counts(windows, pool);
+}

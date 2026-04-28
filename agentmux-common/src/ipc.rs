@@ -99,6 +99,22 @@ pub enum Command {
     ReportPoolWindowRemoved {
         label: String,
     },
+    /// Phase B.4 follow-up — drift detection. Host sends its own
+    /// post-mutation counts after each window/pool transition; the
+    /// launcher reducer compares to its mirror counts and emits
+    /// `Event::DriftDetected` on mismatch. Sent in a separate
+    /// command (rather than embedded in each Report*) so the
+    /// existing wire shapes stay unchanged. Frequency: one per
+    /// transition — host is single-threaded for these events so
+    /// the order with the preceding Report* is deterministic.
+    ReportHostCounts {
+        /// User-visible top-level windows in the host's
+        /// authoritative store (`browsers` minus browser-pane
+        /// children minus unpromoted pool labels).
+        windows: u32,
+        /// Pre-promote pool inventory size.
+        pool: u32,
+    },
 }
 
 /// Wire-side enum for `WindowKind`. Mirrors `agentmux-cef::state::WindowKind`
@@ -204,6 +220,18 @@ pub enum Event {
         label: String,
         version: u64,
     },
+    /// Phase B.4 follow-up — emitted when the launcher's mirror
+    /// disagrees with the host's reported counts. Logged at WARN
+    /// level so operators see drift immediately. Drift in B.4 is
+    /// a CONTRACT BUG (the host should report every state change);
+    /// B.5 will turn drift into a hard failure once the mirror is
+    /// authoritative.
+    DriftDetected {
+        kind: DriftKind,
+        host_count: u32,
+        mirror_count: u32,
+        version: u64,
+    },
 }
 
 /// Coarse-grained launcher state. Spec §4: Starting → Running →
@@ -224,6 +252,16 @@ pub enum LifecyclePhase {
     Quitting,
     /// Cleanup done; launcher about to exit. Transient.
     Dead,
+}
+
+/// Phase B.4 follow-up — which mirror diverged. Tagged so subscribers
+/// can route alerts (windows-drift might page; pool-drift is more
+/// ephemeral since the pool turns over fast).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DriftKind {
+    Windows,
+    Pool,
 }
 
 /// Discriminant for `Event::Error` — keeps clients structured against
