@@ -21,6 +21,8 @@
 )]
 
 mod data_dir;
+mod hash;
+mod ipc;
 mod srv_spawner;
 
 #[tokio::main]
@@ -149,6 +151,29 @@ async fn run_windows(
     let job_handle: windows_sys::Win32::Foundation::HANDLE =
         job.as_ref().map(|j| j.0).unwrap_or(std::ptr::null_mut());
 
+    // Phase B.2: start the named-pipe IPC server BEFORE spawning
+    // any children. Host connects to this pipe at startup using the
+    // AGENTMUX_LAUNCHER_PIPE env var the launcher passes below.
+    //
+    // The server runs in its own Tokio task; the JoinHandle is held
+    // for the rest of run_windows so the task isn't cancelled mid-
+    // accept. Server owns the namespace `\\.\pipe\agentmux-{hash}\
+    // command` per data dir, so multi-instance launchers (different
+    // data dirs) get distinct pipes; a second launcher pointing at
+    // the SAME data dir would collide on `first_pipe_instance(true)`
+    // and surface as a clean error — Phase B.6 turns that collision
+    // into the single-instance enforcement signal.
+    let dir_hash = hash::data_dir_hash16(&paths.data_dir);
+    let pipe_path = ipc::pipe_name(&dir_hash);
+    let _ipc_handle = ipc::run_ipc_server(
+        pipe_path.clone(),
+        ipc::server::ServerCtx {
+            launcher_pid: std::process::id(),
+            launcher_version: env!("CARGO_PKG_VERSION").to_string(),
+        },
+    );
+    log(&format!("IPC server started on {}", pipe_path));
+
     // 3. Spawn srv first. Host needs srv's endpoints to skip its own
     // spawn_backend path. Srv signals readiness via WAVESRV-ESTART on
     // stderr; the spawner returns once we see that line (or after a
@@ -203,6 +228,10 @@ async fn run_windows(
             "AGENTMUX_USER_HOME_DIR",
             paths.user_home_dir.to_string_lossy().to_string(),
         )
+        // Phase B.2: tell the host where to find our IPC pipe so it
+        // can connect and Register itself. Absent → host runs the
+        // pre-Phase-B path (no IPC connection; standalone state).
+        .env("AGENTMUX_LAUNCHER_PIPE", &pipe_path)
         .creation_flags(CREATE_SUSPENDED)
         .kill_on_drop(false); // J0 handles cleanup; tokio's kill-on-drop would force-kill on every error path.
 
