@@ -356,6 +356,18 @@ async fn enforce_register_first(
         Command::ReportHostPoolCount { .. } => {
             ("ReportHostPoolCount before Register".to_string(), true)
         }
+        Command::ReportBackendWindowIdRegistered { .. } => {
+            (
+                "ReportBackendWindowIdRegistered before Register".to_string(),
+                true,
+            )
+        }
+        Command::ReportBackendWindowIdUnregistered { .. } => {
+            (
+                "ReportBackendWindowIdUnregistered before Register".to_string(),
+                true,
+            )
+        }
     };
     let mut state = ctx.state.lock().await;
     let v = state.bump_version();

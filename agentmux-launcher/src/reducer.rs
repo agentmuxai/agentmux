@@ -122,7 +122,59 @@ pub fn update(state: &mut State, cmd: Command, ctx: &Ctx) -> Vec<Event> {
             }
             handle_report_host_pool_count(state, count)
         }
+        Command::ReportBackendWindowIdRegistered { label, window_id } => {
+            if let Some(err) = enforce_host_only(state, ctx, "ReportBackendWindowIdRegistered") {
+                return vec![err];
+            }
+            handle_report_backend_window_id_registered(state, label, window_id)
+        }
+        Command::ReportBackendWindowIdUnregistered { label } => {
+            if let Some(err) = enforce_host_only(state, ctx, "ReportBackendWindowIdUnregistered") {
+                return vec![err];
+            }
+            handle_report_backend_window_id_unregistered(state, label)
+        }
     }
+}
+
+/// Phase B.5 (window_id_map step a) — record the host-reported
+/// label → backend_window_id mapping. Idempotent on duplicate
+/// label (overwrites with the new ID and emits a fresh event so
+/// subscribers see the latest mapping).
+fn handle_report_backend_window_id_registered(
+    state: &mut State,
+    label: String,
+    window_id: String,
+) -> Vec<Event> {
+    state
+        .backend_window_ids
+        .insert(label.clone(), window_id.clone());
+    let v = state.bump_version();
+    vec![Event::BackendWindowIdRegistered {
+        label,
+        window_id,
+        version: v,
+    }]
+}
+
+/// Phase B.5 (window_id_map step a) — drop the host-reported label
+/// from the map. Strict pairing: emits `BackendWindowIdUnregistered`
+/// only when the label was present (mirrors `WindowClosed` and
+/// `PoolWindowRemoved` semantics — codex P2 PR #577 round-2).
+fn handle_report_backend_window_id_unregistered(
+    state: &mut State,
+    label: String,
+) -> Vec<Event> {
+    let removed = state.backend_window_ids.remove(&label);
+    let Some(window_id) = removed else {
+        return vec![];
+    };
+    let v = state.bump_version();
+    vec![Event::BackendWindowIdUnregistered {
+        label,
+        window_id,
+        version: v,
+    }]
 }
 
 /// Phase B.4 follow-up — pool-only drift check. Called from
@@ -584,6 +636,8 @@ mod tests {
             | Event::PoolWindowRemoved { version, .. }
             | Event::WindowInstanceAssigned { version, .. }
             | Event::WindowInstanceReleased { version, .. }
+            | Event::BackendWindowIdRegistered { version, .. }
+            | Event::BackendWindowIdUnregistered { version, .. }
             | Event::DriftDetected { version, .. }
             | Event::Error { version, .. } => *version,
         }
@@ -872,6 +926,86 @@ mod tests {
             Event::PoolWindowRemoved { label, .. } if label == "window-pool-abc"
         ));
         assert!(!state.pool.contains("window-pool-abc"));
+    }
+
+    #[test]
+    fn report_backend_window_id_round_trip() {
+        let mut state = State::default();
+        let host_ctx = register_host_and_get_ctx(&mut state, 1234);
+        let events = update(
+            &mut state,
+            Command::ReportBackendWindowIdRegistered {
+                label: "main".into(),
+                window_id: "wid-abc".into(),
+            },
+            &host_ctx,
+        );
+        assert_eq!(events.len(), 1);
+        assert!(matches!(
+            &events[0],
+            Event::BackendWindowIdRegistered { label, window_id, .. }
+                if label == "main" && window_id == "wid-abc"
+        ));
+        assert_eq!(state.backend_window_ids.get("main").map(|s| s.as_str()), Some("wid-abc"));
+
+        let events = update(
+            &mut state,
+            Command::ReportBackendWindowIdUnregistered {
+                label: "main".into(),
+            },
+            &host_ctx,
+        );
+        assert_eq!(events.len(), 1);
+        assert!(matches!(
+            &events[0],
+            Event::BackendWindowIdUnregistered { label, window_id, .. }
+                if label == "main" && window_id == "wid-abc"
+        ));
+        assert!(state.backend_window_ids.is_empty());
+    }
+
+    #[test]
+    fn report_backend_window_id_unregister_unknown_label_is_silent() {
+        let mut state = State::default();
+        let host_ctx = register_host_and_get_ctx(&mut state, 1234);
+        let events = update(
+            &mut state,
+            Command::ReportBackendWindowIdUnregistered {
+                label: "ghost".into(),
+            },
+            &host_ctx,
+        );
+        // Strict pairing — same as WindowClosed/PoolWindowRemoved.
+        assert_eq!(events.len(), 0);
+    }
+
+    #[test]
+    fn report_backend_window_id_overwrites_on_duplicate() {
+        // Frontend can re-register if it reloads — the launcher should
+        // accept the new ID and emit a fresh event so subscribers see
+        // the latest mapping.
+        let mut state = State::default();
+        let host_ctx = register_host_and_get_ctx(&mut state, 1234);
+        let _ = update(
+            &mut state,
+            Command::ReportBackendWindowIdRegistered {
+                label: "main".into(),
+                window_id: "wid-old".into(),
+            },
+            &host_ctx,
+        );
+        let _ = update(
+            &mut state,
+            Command::ReportBackendWindowIdRegistered {
+                label: "main".into(),
+                window_id: "wid-new".into(),
+            },
+            &host_ctx,
+        );
+        assert_eq!(
+            state.backend_window_ids.get("main").map(|s| s.as_str()),
+            Some("wid-new")
+        );
     }
 
     #[test]
