@@ -83,8 +83,26 @@ pub fn fe_log_structured(args: &serde_json::Value) -> serde_json::Value {
 }
 
 /// Restart the agentmux-srv backend sidecar.
+///
+/// Phase B.1: in launcher-managed runs (`AGENTMUX_BACKEND_PID` env
+/// is set by the launcher), the host does NOT own the srv child
+/// handle — `state.sidecar_child` stays None. Naively running the
+/// kill-then-spawn flow here would skip killing the launcher's srv
+/// (no handle to kill) and spawn a SECOND srv touching the same
+/// data dir, corrupting state. Refuse with a clear message until
+/// Phase B.2 wires a Quit command from host to launcher to do the
+/// restart cleanly. (codex P2 @ sidecar.rs:58, PR #571 round-3.)
 pub async fn restart_backend(state: Arc<AppState>) -> Result<serde_json::Value, String> {
     tracing::info!("[restart_backend] user-initiated restart");
+
+    if std::env::var("AGENTMUX_BACKEND_PID").is_ok() {
+        let msg = "backend lifecycle is owned by the launcher in this run \
+                   (AGENTMUX_BACKEND_PID set); host-initiated restart is \
+                   disabled until Phase B.2 wires the launcher RPC. \
+                   Restart the entire app to get a fresh srv.";
+        tracing::warn!("[restart_backend] refused: {}", msg);
+        return Err(msg.to_string());
+    }
 
     // Kill existing sidecar if still alive
     {
