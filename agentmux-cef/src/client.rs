@@ -348,9 +348,13 @@ impl AgentMuxHandler {
             }
         }
 
-        // Unregister from instance registry; retrieve backend window ID for cleanup.
+        // Phase B.5d — host no longer mutates `window_instance_registry`.
+        // The launcher's `state.instance_registry` (B.5a) is now the
+        // sole authority; close-side updates flow via
+        // `Event::WindowInstanceReleased` → `apply_event_to_shadow`.
+        // We still clean up `window_id_map` here (B.5 hasn't migrated
+        // that map yet — it's the next target).
         let backend_window_id = label.as_deref().and_then(|lbl| {
-            self.state.window_instance_registry.lock().unregister(lbl);
             let wid = self.state.window_id_map.lock().remove(lbl);
             dlog(&format!("window_id_map.remove({:?}) => {:?}", lbl, wid));
             wid

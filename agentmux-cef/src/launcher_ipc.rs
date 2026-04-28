@@ -246,12 +246,12 @@ pub async fn connect_to_launcher(
 fn apply_event_to_shadow(state: &std::sync::Arc<crate::state::AppState>, event: &Event) {
     match event {
         Event::WindowInstanceAssigned { label, num, .. } => {
-            // Compare to host's authoritative registry FIRST so we
-            // see drift even if the shadow update would otherwise
-            // mask it. Host's registry might not contain the label
-            // yet (race: launcher emits before host's local
-            // `register()` runs); skip the compare in that case
-            // rather than log a noisy "missing" message.
+            // Phase B.5b drift compare: kept for B.5d transition —
+            // host's `window_instance_registry` is now seed-only
+            // ({"main": 1}, never mutated), so this only fires on
+            // "main" (where it should agree). For non-main labels
+            // host_num will always be None and the compare skips.
+            // Removed entirely in B.5e along with the host field.
             let host_num = state.window_instance_registry.lock().get(label);
             if let Some(host_num) = host_num {
                 if host_num != *num {
@@ -268,6 +268,17 @@ fn apply_event_to_shadow(state: &std::sync::Arc<crate::state::AppState>, event: 
                 .shadow_instance_registry
                 .lock()
                 .insert(label.clone(), *num);
+            // Phase B.5d — re-emit `window-instances-changed` so the
+            // frontend's InstancePanel catches up after the brief
+            // race between the synchronous emit at the mutation site
+            // (which carries the pre-event count) and the launcher's
+            // `WindowInstanceAssigned` arrival here.
+            let count = state.shadow_instance_registry.lock().len();
+            crate::events::emit_event_all_windows(
+                state,
+                "window-instances-changed",
+                &serde_json::json!(count),
+            );
         }
         Event::WindowInstanceReleased { label, num, .. } => {
             // Symmetric drift check: launcher just released the
@@ -308,6 +319,16 @@ fn apply_event_to_shadow(state: &std::sync::Arc<crate::state::AppState>, event: 
                 }
             }
             state.shadow_instance_registry.lock().remove(label);
+            // Phase B.5d — re-emit `window-instances-changed` so the
+            // frontend catches up after the brief race between the
+            // synchronous emit at the close site and the launcher's
+            // `WindowInstanceReleased` arrival here.
+            let count = state.shadow_instance_registry.lock().len();
+            crate::events::emit_event_all_windows(
+                state,
+                "window-instances-changed",
+                &serde_json::json!(count),
+            );
         }
         _ => {}
     }
