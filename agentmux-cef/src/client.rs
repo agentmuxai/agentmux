@@ -357,6 +357,10 @@ impl AgentMuxHandler {
         let backend_window_id = label.as_deref().and_then(|lbl| {
             let wid = self.state.window_id_map.lock().remove(lbl);
             dlog(&format!("window_id_map.remove({:?}) => {:?}", lbl, wid));
+            // Phase B.5 (window_id_map step b) — mirror the
+            // unregister to the launcher. Fires whether or not we
+            // actually had an entry; the reducer is idempotent.
+            crate::launcher_ipc::report_backend_window_id_unregistered(lbl.to_string());
             wid
         });
 

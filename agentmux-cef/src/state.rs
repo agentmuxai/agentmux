@@ -138,6 +138,17 @@ pub struct AppState {
     /// arrives).
     pub shadow_instance_registry: Mutex<HashMap<String, u32>>,
 
+    /// Phase B.5 (window_id_map step b) — shadow projection of the
+    /// launcher's authoritative `state.backend_window_ids`. Fed by
+    /// `Event::BackendWindowIdRegistered` /
+    /// `Event::BackendWindowIdUnregistered` via
+    /// `apply_event_to_shadow`. Maintained in parallel to
+    /// `window_id_map` (which remains authoritative until step c
+    /// flips reads, step d drops mutations, step e deletes the
+    /// host field). On every event the reader compares the two
+    /// and logs drift via `target = "launcher-ipc:drift"`.
+    pub shadow_backend_window_ids: Mutex<HashMap<String, String>>,
+
     /// Cancellation channel for an in-progress CLI login process
     pub cli_login_cancel: Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
 
@@ -244,6 +255,7 @@ impl Default for AppState {
             window_id: Mutex::new(None),
             active_tab_id: Mutex::new(None),
             window_init_status: Mutex::new(String::new()),
+            shadow_backend_window_ids: Mutex::new(HashMap::new()),
             shadow_instance_registry: Mutex::new({
                 // Pre-seed with main=1 to mirror the launcher's
                 // pre-seeded `instance_registry` (B.5a). Without
