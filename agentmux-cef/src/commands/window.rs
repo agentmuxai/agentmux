@@ -575,10 +575,13 @@ pub fn open_subwindow(
 ) -> Result<serde_json::Value, String> {
     // Reject if the parent isn't a known FullInstance — prevents orphan
     // sub-windows and enforces the lifecycle rule in the spec.
+    //
+    // Phase B.5 (window_meta step d) — read via the shadow-first
+    // helper. Direct `window_meta.lock()` would always miss
+    // post-step-d (host map empty) and reject every legitimate
+    // subwindow open. (codex P1 PR #592 round-1.)
     let parent_ok = state
-        .window_meta
-        .lock()
-        .get(&parent_instance_id)
+        .window_meta(&parent_instance_id)
         .map(|m| m.kind == crate::state::WindowKind::FullInstance)
         .unwrap_or(false);
     if !parent_ok {
