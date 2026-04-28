@@ -486,6 +486,11 @@ pub fn register_backend_window(state: &Arc<AppState>, args: &serde_json::Value) 
         let keys: Vec<String> = state.window_id_map.lock().keys().cloned().collect();
         crate::client::dlog(&format!("window_id_map now has keys: {:?}", keys));
         tracing::info!(label = %label, window_id = %window_id, "[window] registered backend window ID");
+        // Phase B.5 (window_id_map step b) — mirror to launcher.
+        crate::launcher_ipc::report_backend_window_id_registered(
+            label.to_string(),
+            window_id.to_string(),
+        );
         // Notify listeners that the label→windowId mapping changed.
         // The InstancePanel needs `windowId` to look up the backend
         // Window record (display name in meta, workspace fallback).

@@ -265,6 +265,71 @@ fn apply_event_to_shadow(state: &std::sync::Arc<crate::state::AppState>, event: 
                 &serde_json::json!(count),
             );
         }
+        Event::BackendWindowIdRegistered { label, window_id, .. } => {
+            // Phase B.5 (window_id_map step b) — shadow projection
+            // + drift compare. Host's `window_id_map` is still
+            // authoritative through step c; we log when the two
+            // disagree so the soak period before cutover surfaces
+            // any reporting bugs. Race-tolerant: host's
+            // `register_backend_window` mutation may not have run
+            // yet, so a "missing in host" case is benign and skipped.
+            let host_id = state
+                .window_id_map
+                .lock()
+                .get(label)
+                .cloned();
+            if let Some(host_id) = host_id {
+                if &host_id != window_id {
+                    tracing::warn!(
+                        target: "launcher-ipc:drift",
+                        label = %label,
+                        launcher_id = %window_id,
+                        host_id = %host_id,
+                        "[launcher-ipc] backend_window_id drift: host and launcher disagree"
+                    );
+                }
+            }
+            state
+                .shadow_backend_window_ids
+                .lock()
+                .insert(label.clone(), window_id.clone());
+        }
+        Event::BackendWindowIdUnregistered { label, window_id, .. } => {
+            // Phase B.5 (window_id_map step b) — symmetric drift
+            // check on release. Two cases:
+            // * host has a different ID for this label → split-brain
+            //   on the original registration, log WARN.
+            // * host has the same ID → either host hasn't run its
+            //   own `remove()` yet (race) or never will (bug).
+            //   Log INFO; sustained presence indicates a bug
+            //   (mirrors the B.5b/c WindowInstanceReleased pattern
+            //   that survived only briefly because we deleted the
+            //   compare in B.5e).
+            let host_id = state
+                .window_id_map
+                .lock()
+                .get(label)
+                .cloned();
+            if let Some(host_id) = host_id {
+                if &host_id != window_id {
+                    tracing::warn!(
+                        target: "launcher-ipc:drift",
+                        label = %label,
+                        launcher_released_id = %window_id,
+                        host_id = %host_id,
+                        "[launcher-ipc] backend_window_id release-side split-brain"
+                    );
+                } else {
+                    tracing::info!(
+                        target: "launcher-ipc:drift",
+                        label = %label,
+                        window_id = %window_id,
+                        "[launcher-ipc] backend_window_id release-side: host still has matching entry — race or unregister bug"
+                    );
+                }
+            }
+            state.shadow_backend_window_ids.lock().remove(label);
+        }
         Event::WindowInstanceReleased { label, .. } => {
             // Phase B.5e — host's `WindowInstanceRegistry` was
             // deleted; the drift compare is gone with it.
@@ -361,6 +426,41 @@ pub fn report_host_counts(windows: u32, pool: u32) {
     let cmd = Command::ReportHostCounts { windows, pool };
     if let Err(e) = tx.send(cmd) {
         tracing::warn!("[launcher-ipc] report_host_counts: channel closed ({})", e);
+    }
+}
+
+/// Phase B.5 (window_id_map step b) — sync API: report the
+/// frontend's `register_backend_window` IPC to the launcher.
+/// Called from `commands/window.rs::register_backend_window`
+/// after the host's local `window_id_map` insert. No-op if the
+/// launcher pipe isn't connected.
+pub fn report_backend_window_id_registered(label: String, window_id: String) {
+    let Some(tx) = COMMAND_TX.get() else {
+        return;
+    };
+    let cmd = Command::ReportBackendWindowIdRegistered { label, window_id };
+    if let Err(e) = tx.send(cmd) {
+        tracing::warn!(
+            "[launcher-ipc] report_backend_window_id_registered: channel closed ({})",
+            e
+        );
+    }
+}
+
+/// Phase B.5 (window_id_map step b) — sync API: report a window's
+/// backend ID being dropped (close path). Called from
+/// `client.rs::on_before_close` after the host's local
+/// `window_id_map.remove`. No-op if launcher pipe absent.
+pub fn report_backend_window_id_unregistered(label: String) {
+    let Some(tx) = COMMAND_TX.get() else {
+        return;
+    };
+    let cmd = Command::ReportBackendWindowIdUnregistered { label };
+    if let Err(e) = tx.send(cmd) {
+        tracing::warn!(
+            "[launcher-ipc] report_backend_window_id_unregistered: channel closed ({})",
+            e
+        );
     }
 }
 
