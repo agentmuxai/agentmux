@@ -356,20 +356,17 @@ pub fn open_window_at_position(state: &Arc<AppState>, args: &serde_json::Value) 
         url.push_str(&format!("&workspaceId={}", workspace_id));
     }
 
-    // Tear-off windows are full AgentMux instances — record meta so
-    // on_after_created leaves them in the taskbar alongside main.
-    state.window_meta.lock().insert(
-        label.clone(),
-        crate::state::WindowMeta {
+    // Phase B.5 (window_meta step d) — push the pre-create
+    // handoff (label + kind + parent). Tear-offs are FullInstance
+    // with no parent. Replaces the previous parallel
+    // `window_meta.insert` + `pending_window_labels.push` pair.
+    state.pending_window_creations.lock().push_back(
+        crate::state::PendingWindowCreation {
             label: label.clone(),
             kind: crate::state::WindowKind::FullInstance,
             parent_instance_id: None,
         },
     );
-
-    // Push label before posting — on_after_created pops it to register
-    // the browser under the same label baked into the window URL.
-    state.pending_window_labels.lock().push_back(label.clone());
 
     // Post to CEF UI thread — window_create_top_level must run there.
     // true = frameless: tear-off windows use the same custom title bar as main.
