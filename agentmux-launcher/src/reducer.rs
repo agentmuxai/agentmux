@@ -237,6 +237,12 @@ fn enforce_host_only(state: &mut State, ctx: &Ctx, op: &'static str) -> Option<E
 /// in a row): the second insert overwrites with fresh metadata and
 /// emits a fresh event. Subscribers must tolerate seeing the same
 /// label twice; cleaner once B.5 makes the launcher authoritative.
+///
+/// Phase B.5: also assigns an authoritative instance number from
+/// `state.instance_registry` and emits `WindowInstanceAssigned`.
+/// "main" is pre-seeded with 1; other labels get the next value of
+/// `next_instance_num`. Re-opens of an existing label preserve the
+/// original number — instance numbers are stable per-label-per-run.
 fn handle_report_window_opened(
     state: &mut State,
     ctx: &Ctx,
@@ -253,13 +259,30 @@ fn handle_report_window_opened(
             opened_at: ctx.now_rfc3339.clone(),
         },
     );
+    let mut out = Vec::with_capacity(2);
     let v = state.bump_version();
-    vec![Event::WindowOpened {
-        label,
+    out.push(Event::WindowOpened {
+        label: label.clone(),
         kind,
         parent_label,
         version: v,
-    }]
+    });
+
+    // Assign instance number if this label isn't already in the
+    // registry. Re-opens of an existing label keep the original
+    // number — matches host's `WindowInstanceRegistry` semantics
+    // where a label is only registered once per session.
+    let num = if let Some(existing) = state.instance_registry.get(&label).copied() {
+        existing
+    } else {
+        let n = state.next_instance_num;
+        state.instance_registry.insert(label.clone(), n);
+        state.next_instance_num += 1;
+        n
+    };
+    let v = state.bump_version();
+    out.push(Event::WindowInstanceAssigned { label, num, version: v });
+    out
 }
 
 /// Phase B.4 — drop a host-reported window from the mirror. Returns
@@ -272,14 +295,28 @@ fn handle_report_window_opened(
 /// `on_before_close` reaches us without a matching open) would
 /// emit an unpaired `WindowClosed` broadcast and break subscribers
 /// that assume open/close pairing.
+///
+/// Phase B.5 — also drops the label from `instance_registry` and
+/// emits `WindowInstanceReleased` if a number was assigned.
+/// `next_instance_num` is NOT decremented — instance numbers are
+/// monotonic per-launcher-run.
 fn handle_report_window_closed(state: &mut State, label: String) -> Vec<Event> {
     let was_present = state.windows.remove(&label).is_some();
     if !was_present {
         // Silent: only emit when the close pairs with a known open.
         return vec![];
     }
+    let mut out = Vec::with_capacity(2);
     let v = state.bump_version();
-    vec![Event::WindowClosed { label, version: v }]
+    out.push(Event::WindowClosed {
+        label: label.clone(),
+        version: v,
+    });
+    if let Some(num) = state.instance_registry.remove(&label) {
+        let v = state.bump_version();
+        out.push(Event::WindowInstanceReleased { label, num, version: v });
+    }
+    out
 }
 
 fn handle_register(
@@ -545,6 +582,8 @@ mod tests {
             | Event::WindowClosed { version, .. }
             | Event::PoolWindowAdded { version, .. }
             | Event::PoolWindowRemoved { version, .. }
+            | Event::WindowInstanceAssigned { version, .. }
+            | Event::WindowInstanceReleased { version, .. }
             | Event::DriftDetected { version, .. }
             | Event::Error { version, .. } => *version,
         }
@@ -628,11 +667,16 @@ mod tests {
             },
             &host_ctx,
         );
-        assert_eq!(events.len(), 1);
+        // B.5 — open emits WindowOpened + WindowInstanceAssigned.
+        assert_eq!(events.len(), 2);
         assert!(matches!(
             &events[0],
             Event::WindowOpened { label, kind: WindowKind::FullInstance, parent_label: None, .. }
                 if label == "main"
+        ));
+        assert!(matches!(
+            &events[1],
+            Event::WindowInstanceAssigned { label, num: 1, .. } if label == "main"
         ));
         let mirror = &state.windows["main"];
         assert_eq!(mirror.label, "main");
@@ -662,11 +706,93 @@ mod tests {
             &host_ctx,
         );
         assert!(!state.windows.contains_key("main"));
-        assert_eq!(events.len(), 1);
+        // B.5 — close emits WindowClosed + WindowInstanceReleased.
+        assert_eq!(events.len(), 2);
         assert!(matches!(
             &events[0],
             Event::WindowClosed { label, .. } if label == "main"
         ));
+        assert!(matches!(
+            &events[1],
+            Event::WindowInstanceReleased { label, num: 1, .. } if label == "main"
+        ));
+    }
+
+    #[test]
+    fn instance_numbers_are_monotonic_per_launcher_run() {
+        let mut state = State::default();
+        let host_ctx = register_host_and_get_ctx(&mut state, 1234);
+        // main pre-seeded as 1 (already in instance_registry from Default).
+        // Open second window → gets 2.
+        let events = update(
+            &mut state,
+            Command::ReportWindowOpened {
+                label: "window-2".into(),
+                kind: WindowKind::FullInstance,
+                parent_label: None,
+            },
+            &host_ctx,
+        );
+        let assigned = events.iter().find_map(|e| match e {
+            Event::WindowInstanceAssigned { num, .. } => Some(*num),
+            _ => None,
+        });
+        assert_eq!(assigned, Some(2));
+
+        // Close it. Open a third window → gets 3 (NOT reused 2).
+        let _ = update(
+            &mut state,
+            Command::ReportWindowClosed {
+                label: "window-2".into(),
+            },
+            &host_ctx,
+        );
+        let events = update(
+            &mut state,
+            Command::ReportWindowOpened {
+                label: "window-3".into(),
+                kind: WindowKind::FullInstance,
+                parent_label: None,
+            },
+            &host_ctx,
+        );
+        let assigned = events.iter().find_map(|e| match e {
+            Event::WindowInstanceAssigned { num, .. } => Some(*num),
+            _ => None,
+        });
+        assert_eq!(assigned, Some(3), "instance numbers must not be reused");
+    }
+
+    #[test]
+    fn re_open_of_same_label_keeps_original_instance_number() {
+        let mut state = State::default();
+        let host_ctx = register_host_and_get_ctx(&mut state, 1234);
+        let _ = update(
+            &mut state,
+            Command::ReportWindowOpened {
+                label: "x".into(),
+                kind: WindowKind::FullInstance,
+                parent_label: None,
+            },
+            &host_ctx,
+        );
+        let first_num = state.instance_registry["x"];
+        // Re-open without close (B.4 idempotent overwrite path).
+        let events = update(
+            &mut state,
+            Command::ReportWindowOpened {
+                label: "x".into(),
+                kind: WindowKind::FullInstance,
+                parent_label: None,
+            },
+            &host_ctx,
+        );
+        let assigned = events.iter().find_map(|e| match e {
+            Event::WindowInstanceAssigned { num, .. } => Some(*num),
+            _ => None,
+        });
+        assert_eq!(assigned, Some(first_num));
+        assert_eq!(state.instance_registry["x"], first_num);
     }
 
     #[test]
