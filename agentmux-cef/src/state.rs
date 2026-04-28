@@ -311,7 +311,9 @@ impl Default for AppState {
             debug_port: Mutex::new(0),
         }
     }
+}
 
+impl AppState {
     /// Phase B.5c — authoritative instance-number lookup. Prefers
     /// the launcher-fed `shadow_instance_registry` (the source of
     /// truth post-B.5a); falls back to host's local
