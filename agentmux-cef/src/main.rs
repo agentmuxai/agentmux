@@ -185,17 +185,31 @@ fn main() {
     // Phase B.6 (post-fix): the named-pipe bind in the launcher is
     // the AUTHORITATIVE single-instance lock — a second launcher
     // hits ERROR_ACCESS_DENIED and never reaches the host. We still
-    // publish `<data-dir>/ipc-port` (port:token) so the second
-    // launcher can FORWARD an `open_new_window` request to the
-    // existing instance over HTTP and exit silently — the legacy
-    // forwarding UX users expect when double-clicking the exe twice.
-    // The pipe-bind-first ordering closes the stale-state defect
-    // (gap #8 in specs/ANALYSIS_WINDOW_PROCESS_STATE_INVENTORY_2026_04_27.md):
+    // publish `<launcher-shared-data-dir>/ipc-port` (port:token) so
+    // the second launcher can FORWARD an `open_new_window` request
+    // to the existing instance over HTTP and exit silently — the
+    // legacy forwarding UX users expect when double-clicking the
+    // exe twice. The pipe-bind-first ordering closes the stale-state
+    // defect (gap #8 in
+    // specs/ANALYSIS_WINDOW_PROCESS_STATE_INVENTORY_2026_04_27.md):
     // a stale ipc-port file from a hard crash is irrelevant on the
     // FIRST-instance path because pipe-bind succeeds and the file is
     // overwritten; on the SECOND-instance path the live first
     // instance wrote a fresh port:token, so forwarding lands.
-    let port_file = data_dir.join("ipc-port");
+    //
+    // CRITICAL: write the port file at the LAUNCHER-shared data dir
+    // (`AGENTMUX_DATA_DIR`, == `paths.data_dir` in the launcher), NOT
+    // the host-local CEF cache dir (`<portable>/data/cef/`). The two
+    // diverge in portable mode (cef cache is one level deeper) and
+    // the launcher's `forward_open_new_window` reads the launcher-
+    // shared path. Falls back to the cef cache dir only when the env
+    // is unset (`task dev` mode without launcher), where forwarding
+    // wouldn't be wired anyway.
+    let port_file_dir = std::env::var_os("AGENTMUX_DATA_DIR")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| data_dir.clone());
+    let _ = std::fs::create_dir_all(&port_file_dir);
+    let port_file = port_file_dir.join("ipc-port");
 
     // Create shared application state.
     let app_state = Arc::new(state::AppState::default());
