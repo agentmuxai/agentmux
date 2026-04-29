@@ -41,7 +41,7 @@
 //     register. Running → Quitting on Quit (B.3 placeholder).
 //     Quitting → Dead on cleanup-done (B.3 placeholder). No skipping.
 
-use agentmux_common::ipc::{ClientKind, Command, DriftKind, ErrorCode, Event, WindowKind};
+use agentmux_common::ipc::{ClientKind, Command, DriftKind, ErrorCode, Event, HwndDriftKind, WindowKind};
 
 use crate::state::{LifecyclePhase, ProcessRecord, ProcessState, State, WindowMirror};
 
@@ -448,7 +448,7 @@ fn handle_report_window_closed(state: &mut State, label: String) -> Vec<Event> {
         // Silent: only emit when the close pairs with a known open.
         return vec![];
     }
-    let mut out = Vec::with_capacity(2);
+    let mut out = Vec::with_capacity(4);
     let v = state.bump_version();
     out.push(Event::WindowClosed {
         label: label.clone(),
@@ -456,9 +456,45 @@ fn handle_report_window_closed(state: &mut State, label: String) -> Vec<Event> {
     });
     if let Some(num) = state.instance_registry.remove(&label) {
         let v = state.bump_version();
-        out.push(Event::WindowInstanceReleased { label, num, version: v });
+        out.push(Event::WindowInstanceReleased { label: label.clone(), num, version: v });
+    }
+
+    // Phase B.9.3 — OrphanInstance transition. The label we just
+    // removed was the LAST user-visible window (state.windows is
+    // now empty). If a Host is still registered as Running, its
+    // own close path won't quit_message_loop because the warm
+    // pool is keeping state.browsers non-empty. Emit drift +
+    // saga-style HostShouldQuit so the host can reap pool and
+    // quit cleanly. See B.9.3 in
+    // docs/retro/next-steps-2026-04-29.md.
+    if state.windows.is_empty() && host_is_running(state) {
+        let v_drift = state.bump_version();
+        out.push(Event::HwndDriftDetected {
+            kind: HwndDriftKind::OrphanInstance,
+            label: Some(label),
+            hwnd: None,
+            detail: "Last user-visible window closed; host still alive (likely holding warm pool)"
+                .to_string(),
+            severity: agentmux_common::ipc::Severity::Warn,
+            version: v_drift,
+        });
+        let v_quit = state.bump_version();
+        out.push(Event::HostShouldQuit { version: v_quit });
     }
     out
+}
+
+/// Phase B.9.3 — does state.processes contain a Host in the
+/// `Running` lifecycle? Used by the OrphanInstance transition
+/// check; without this guard, a stale Exited record would fire
+/// HostShouldQuit on every benign close. Tool-only sessions
+/// (`agentmux.exe --diag`) also correctly skip the saga because
+/// they never register a Host.
+fn host_is_running(state: &State) -> bool {
+    use crate::state::ProcessState;
+    state.processes.values().any(|r| {
+        r.kind == ClientKind::Host && matches!(r.state, ProcessState::Running)
+    })
 }
 
 fn handle_register(
@@ -733,6 +769,7 @@ mod tests {
             | Event::DriftDetected { version, .. }
             | Event::HwndDriftDetected { version, .. }
             | Event::CorrectiveWindowMove { version, .. }
+            | Event::HostShouldQuit { version, .. }
             | Event::Error { version, .. } => *version,
         }
     }
@@ -855,7 +892,10 @@ mod tests {
         );
         assert!(!state.windows.contains_key("main"));
         // B.5 — close emits WindowClosed + WindowInstanceReleased.
-        assert_eq!(events.len(), 2);
+        // B.9.3 — closing the last window with a Host registered
+        // also emits OrphanInstance drift + HostShouldQuit saga,
+        // so the total is 4 events on the last-window-close path.
+        assert_eq!(events.len(), 4);
         assert!(matches!(
             &events[0],
             Event::WindowClosed { label, .. } if label == "main"
@@ -864,6 +904,11 @@ mod tests {
             &events[1],
             Event::WindowInstanceReleased { label, num: 1, .. } if label == "main"
         ));
+        assert!(matches!(
+            &events[2],
+            Event::HwndDriftDetected { kind: HwndDriftKind::OrphanInstance, .. }
+        ));
+        assert!(matches!(&events[3], Event::HostShouldQuit { .. }));
     }
 
     #[test]
@@ -1931,6 +1976,122 @@ mod tests {
                 Event::HwndDriftDetected { kind: HwndDriftKind::HwndWithoutBrowser, .. }
             )),
             "different HWND for same label must fire drift, got {:?}", evs
+        );
+    }
+
+    #[test]
+    fn b9_3_orphan_instance_fires_when_last_window_closes_and_host_running() {
+        // The smoke-test scenario: open a window, close it; with a
+        // Host registered, the reducer should emit OrphanInstance
+        // drift + HostShouldQuit on the same dispatch tick.
+        let (mut state, c) = registered_host_state();
+        let _ = update(
+            &mut state,
+            Command::ReportWindowOpened {
+                label: "w1".into(),
+                kind: WindowKind::FullInstance,
+                parent_label: None,
+            },
+            &c,
+        );
+        // Sanity: window opened, no orphan signal yet.
+        let evs = update(
+            &mut state,
+            Command::ReportWindowClosed { label: "w1".into() },
+            &c,
+        );
+        assert!(
+            evs.iter()
+                .any(|e| matches!(e, Event::HwndDriftDetected { kind: HwndDriftKind::OrphanInstance, .. })),
+            "expected OrphanInstance drift on last-window-close, got {:?}", evs
+        );
+        assert!(
+            evs.iter().any(|e| matches!(e, Event::HostShouldQuit { .. })),
+            "expected HostShouldQuit saga on last-window-close, got {:?}", evs
+        );
+    }
+
+    #[test]
+    fn b9_3_orphan_instance_does_not_fire_on_non_terminal_close() {
+        // Closing one of N windows when N > 1 must NOT fire — the
+        // host has more user-visible windows alive, so it shouldn't
+        // quit. Predicate: state.windows still non-empty after
+        // remove → no signal.
+        let (mut state, c) = registered_host_state();
+        let _ = update(
+            &mut state,
+            Command::ReportWindowOpened {
+                label: "w1".into(),
+                kind: WindowKind::FullInstance,
+                parent_label: None,
+            },
+            &c,
+        );
+        let _ = update(
+            &mut state,
+            Command::ReportWindowOpened {
+                label: "w2".into(),
+                kind: WindowKind::FullInstance,
+                parent_label: None,
+            },
+            &c,
+        );
+        let evs = update(
+            &mut state,
+            Command::ReportWindowClosed { label: "w1".into() },
+            &c,
+        );
+        assert!(
+            !evs.iter()
+                .any(|e| matches!(e, Event::HwndDriftDetected { kind: HwndDriftKind::OrphanInstance, .. })),
+            "OrphanInstance must NOT fire while other windows are open, got {:?}", evs
+        );
+        assert!(
+            !evs.iter().any(|e| matches!(e, Event::HostShouldQuit { .. })),
+            "HostShouldQuit must NOT fire while other windows are open, got {:?}", evs
+        );
+    }
+
+    #[test]
+    fn b9_3_orphan_instance_does_not_fire_after_host_goodbye() {
+        // Realistic scenario for the no-Host predicate guard:
+        // Host registers, opens a window, then sends Goodbye
+        // (clean shutdown), which marks its ProcessRecord as
+        // Exited. A subsequent ReportWindowClosed arriving from
+        // the host's pipe (e.g. a queued event flushed during
+        // shutdown) MUST NOT fire HostShouldQuit — there's no
+        // Running Host left to quit.
+        let (mut state, c) = registered_host_state();
+        let _ = update(
+            &mut state,
+            Command::ReportWindowOpened {
+                label: "w1".into(),
+                kind: WindowKind::FullInstance,
+                parent_label: None,
+            },
+            &c,
+        );
+        // Host says Goodbye — record transitions to Exited.
+        let _ = update(&mut state, Command::Goodbye, &c);
+        // Force the close path to actually run by calling the
+        // private handler directly. (The public path's
+        // enforce_host_only would reject because the Host record
+        // is no longer Running, but that rejection happens
+        // BEFORE reaching the predicate; we want to prove the
+        // predicate itself is correct.)
+        let evs = handle_report_window_closed(&mut state, "w1".into());
+        assert!(
+            evs.iter().any(|e| matches!(e, Event::WindowClosed { .. })),
+            "WindowClosed should still emit, got {:?}", evs
+        );
+        assert!(
+            !evs.iter()
+                .any(|e| matches!(e, Event::HwndDriftDetected { kind: HwndDriftKind::OrphanInstance, .. })),
+            "OrphanInstance must NOT fire after host has Goodbye'd, got {:?}", evs
+        );
+        assert!(
+            !evs.iter().any(|e| matches!(e, Event::HostShouldQuit { .. })),
+            "HostShouldQuit must NOT fire after host has Goodbye'd, got {:?}", evs
         );
     }
 

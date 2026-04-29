@@ -53,6 +53,7 @@ fn app_state() -> &'static OnceLock<Arc<AppState>> {
     &S
 }
 
+
 /// Phase B.9.1 — handles to the installed hooks. Held in a
 /// `OnceLock<Mutex<Option<...>>>` so install_hooks is idempotent
 /// (no-op on second call) and uninstall can drop them on shutdown.
