@@ -506,6 +506,10 @@ async fn enforce_register_first(
                 true,
             )
         }
+        // Phase D.1 — GetSnapshot before Register is non-fatal: any
+        // sane diagnostic client can fix it by retrying with Register
+        // first. (Same Ping-before-Register precedent — soft error.)
+        Command::GetSnapshot => ("GetSnapshot before Register".to_string(), false),
     };
     let mut state = ctx.state.lock().await;
     let v = state.bump_version();

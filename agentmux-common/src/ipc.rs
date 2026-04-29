@@ -214,6 +214,16 @@ pub enum Command {
     ReportMonitorTopologyChanged {
         rects: Vec<Rect>,
     },
+    /// Phase D.1 — request a `Event::Snapshot` reply containing the
+    /// reducer's current canonical state. Used by `--diag wrr` for
+    /// state-now visibility, by the frontend reducer for mid-session
+    /// resync after disconnect, and by future Tool clients that need
+    /// to bootstrap without observing every prior event.
+    ///
+    /// Phase D.1 reply is a one-shot snapshot — no replay of
+    /// missed events. D.2 + D.3 add the persisted event log + the
+    /// `since: u64` parameter for delta replay.
+    GetSnapshot,
 }
 
 /// Phase B.9.1 — rectangle in Win32 screen coordinates (pixels).
@@ -437,6 +447,45 @@ pub enum Event {
     HostShouldQuit {
         version: u64,
     },
+    /// Phase D.1 — reply to `Command::GetSnapshot`. Carries the
+    /// reducer's current canonical state (the projections subscribers
+    /// most commonly need). The `version` field is the reducer's
+    /// `event_version` at the moment the snapshot was taken; events
+    /// the subscriber receives AFTER this snapshot have monotonically
+    /// greater version numbers, letting the subscriber apply them as
+    /// deltas without missing or duplicating updates.
+    ///
+    /// What's included: lifecycle, windows (label + kind + parent +
+    /// HWND-observation axis), pool labels, instance numbers,
+    /// backend window IDs, monitor topology. What's intentionally
+    /// excluded: `processes` (PID metadata is launcher-internal),
+    /// `pending_hwnds` (transient reconciliation state), event log
+    /// (Phase D.2 adds a separate snapshot-with-replay variant).
+    Snapshot {
+        version: u64,
+        lifecycle: LifecyclePhase,
+        windows: Vec<WindowSnapshot>,
+        pool: Vec<String>,
+        instance_registry: Vec<(String, u32)>,
+        backend_window_ids: Vec<(String, String)>,
+        monitors: Vec<Rect>,
+    },
+}
+
+/// Phase D.1 — serializable view of one window in the launcher
+/// reducer's canonical state. Maps 1:1 to the launcher's internal
+/// `WindowMirror` minus `opened_at` (which is launcher-local clock
+/// data not meaningful to subscribers).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct WindowSnapshot {
+    pub label: String,
+    pub kind: WindowKind,
+    pub parent_label: Option<String>,
+    pub hwnd: Option<u64>,
+    pub visible: bool,
+    pub iconic: bool,
+    pub last_rect: Option<Rect>,
+    pub foregrounded_since_open: bool,
 }
 
 /// Phase B.9.1 — six classes of CEF↔Win32 disagreement the reducer
