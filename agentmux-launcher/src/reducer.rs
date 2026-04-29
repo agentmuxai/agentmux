@@ -64,6 +64,13 @@ pub struct Ctx {
     /// on a connection (which MUST be Register, enforced server-
     /// side). (codex P1 + gemini HIGH PR #574 round-1.)
     pub registered_pid: Option<u32>,
+    /// Phase B.9.1 — monotonic milliseconds since some reference
+    /// epoch (the IPC server uses launcher start as the epoch).
+    /// Used by the WRR arm for per-window observability timestamps
+    /// (`last_foreground_at_ms`, `pending_hwnds[hwnd].arrived_at_ms`).
+    /// Distinct from `now_rfc3339` (wall clock) because operators
+    /// reading `--diag wrr` want age, not absolute time.
+    pub now_ms: u64,
 }
 
 /// Apply one Command to State, returning the resulting Events. State
@@ -133,6 +140,52 @@ pub fn update(state: &mut State, cmd: Command, ctx: &Ctx) -> Vec<Event> {
                 return vec![err];
             }
             handle_report_backend_window_id_unregistered(state, label)
+        }
+        // Phase B.9.1 (WRR) — Win32 reality events. Host-only
+        // because only the host installs the SetWinEventHook /
+        // wndproc wrapper. Same enforce-host pattern as the other
+        // observability reports.
+        Command::ReportHwndOpened { hwnd, class_name, title, label_hint } => {
+            if let Some(err) = enforce_host_only(state, ctx, "ReportHwndOpened") {
+                return vec![err];
+            }
+            crate::wrr::apply_hwnd_opened(state, hwnd, class_name, title, label_hint, ctx.now_ms)
+        }
+        Command::ReportHwndDestroyed { hwnd } => {
+            if let Some(err) = enforce_host_only(state, ctx, "ReportHwndDestroyed") {
+                return vec![err];
+            }
+            crate::wrr::apply_hwnd_destroyed(state, hwnd)
+        }
+        Command::ReportHwndVisibilityChanged { hwnd, visible } => {
+            if let Some(err) = enforce_host_only(state, ctx, "ReportHwndVisibilityChanged") {
+                return vec![err];
+            }
+            crate::wrr::apply_hwnd_visibility_changed(state, hwnd, visible)
+        }
+        Command::ReportHwndForegroundChanged { hwnd } => {
+            if let Some(err) = enforce_host_only(state, ctx, "ReportHwndForegroundChanged") {
+                return vec![err];
+            }
+            crate::wrr::apply_hwnd_foreground_changed(state, hwnd, ctx.now_ms)
+        }
+        Command::ReportHwndIconicChanged { hwnd, iconic } => {
+            if let Some(err) = enforce_host_only(state, ctx, "ReportHwndIconicChanged") {
+                return vec![err];
+            }
+            crate::wrr::apply_hwnd_iconic_changed(state, hwnd, iconic)
+        }
+        Command::ReportHwndPositionChanged { hwnd, rect } => {
+            if let Some(err) = enforce_host_only(state, ctx, "ReportHwndPositionChanged") {
+                return vec![err];
+            }
+            crate::wrr::apply_hwnd_position_changed(state, hwnd, rect)
+        }
+        Command::ReportMonitorTopologyChanged { rects } => {
+            if let Some(err) = enforce_host_only(state, ctx, "ReportMonitorTopologyChanged") {
+                return vec![err];
+            }
+            crate::wrr::apply_monitor_topology_changed(state, rects)
         }
     }
 }
@@ -302,6 +355,30 @@ fn handle_report_window_opened(
     kind: WindowKind,
     parent_label: Option<String>,
 ) -> Vec<Event> {
+    // Phase B.9.1 (WRR) — drain-on-WindowOpened fallback. The
+    // host's `EVENT_OBJECT_CREATE` callback fires before its CEF
+    // `OnAfterCreated` (which becomes this Command), so the
+    // matching `ReportHwndOpened` may have already been processed
+    // and stashed in `state.pending_hwnds` (with `label_hint=None`
+    // if the host couldn't determine it from
+    // `pending_window_creations`). Find the most recent pending
+    // HWND that arrived within the last 2 seconds and link it to
+    // the new mirror. The 2s window is generous compared to the
+    // typical < 50ms create→ReportWindowOpened gap, but bounded
+    // enough that a stale pending HWND from a prior open won't
+    // mis-link.
+    const PENDING_AGE_LIMIT_MS: u64 = 2_000;
+    let drained_hwnd: Option<u64> = state
+        .pending_hwnds
+        .iter()
+        .filter(|(_, p)| p.label_hint.is_none())
+        .filter(|(_, p)| ctx.now_ms.saturating_sub(p.arrived_at_ms) <= PENDING_AGE_LIMIT_MS)
+        .max_by_key(|(_, p)| p.arrived_at_ms)
+        .map(|(hwnd, _)| *hwnd);
+    if let Some(hwnd) = drained_hwnd {
+        state.pending_hwnds.remove(&hwnd);
+    }
+
     state.windows.insert(
         label.clone(),
         WindowMirror {
@@ -309,6 +386,19 @@ fn handle_report_window_opened(
             kind,
             parent_label: parent_label.clone(),
             opened_at: ctx.now_rfc3339.clone(),
+            // Phase B.9.1 — observability axis. `hwnd` is
+            // populated from the drained pending entry above
+            // (host's WRR hook fired before this Command landed)
+            // OR remains None until the host's
+            // `ReportHwndOpened` with matching `label_hint`
+            // arrives via `apply_hwnd_opened`. Either path
+            // converges on the same linked state.
+            hwnd: drained_hwnd,
+            visible: false,
+            iconic: false,
+            last_rect: None,
+            last_foreground_at_ms: None,
+            foregrounded_since_open: false,
         },
     );
     let mut out = Vec::with_capacity(2);
@@ -488,6 +578,7 @@ mod tests {
             now_rfc3339: "2026-04-28T00:00:00Z".to_string(),
             conn_id,
             registered_pid: None,
+            now_ms: 0,
         }
     }
 
@@ -496,6 +587,7 @@ mod tests {
             now_rfc3339: "2026-04-28T00:00:00Z".to_string(),
             conn_id,
             registered_pid: Some(pid),
+            now_ms: 0,
         }
     }
 
@@ -639,6 +731,8 @@ mod tests {
             | Event::BackendWindowIdRegistered { version, .. }
             | Event::BackendWindowIdUnregistered { version, .. }
             | Event::DriftDetected { version, .. }
+            | Event::HwndDriftDetected { version, .. }
+            | Event::CorrectiveWindowMove { version, .. }
             | Event::Error { version, .. } => *version,
         }
     }
@@ -1562,5 +1656,464 @@ mod tests {
                 }),
             "[a-c]{1,3}".prop_map(|label| Command::ReportWindowClosed { label }),
         ]
+    }
+
+    // -----------------------------------------------------------
+    // Phase B.9 (WRR) — reducer arm tests
+    // -----------------------------------------------------------
+
+    use agentmux_common::ipc::{HwndDriftKind, Rect};
+
+    /// Helper: drive the reducer through a host Register so
+    /// subsequent host-only WRR commands are accepted. Returns the
+    /// state ready to receive WRR commands.
+    fn registered_host_state() -> (State, Ctx) {
+        let mut state = State::default();
+        let _ = update(
+            &mut state,
+            Command::Register {
+                kind: ClientKind::Host,
+                pid: 1,
+                version: "test".into(),
+            },
+            &ctx(1),
+        );
+        (state, ctx_with_pid(1, 1))
+    }
+
+    #[test]
+    fn wrr_off_monitor_position_for_unseen_window_emits_drift_and_corrective() {
+        let (mut state, c) = registered_host_state();
+        // Set monitor topology: a single 1920x1080 monitor.
+        let _ = update(
+            &mut state,
+            Command::ReportMonitorTopologyChanged {
+                rects: vec![Rect { left: 0, top: 0, right: 1920, bottom: 1080 }],
+            },
+            &c,
+        );
+        // Open a window.
+        let _ = update(
+            &mut state,
+            Command::ReportWindowOpened {
+                label: "w1".into(),
+                kind: WindowKind::FullInstance,
+                parent_label: None,
+            },
+            &c,
+        );
+        // Link an HWND to it.
+        let _ = update(
+            &mut state,
+            Command::ReportHwndOpened {
+                hwnd: 0xAA,
+                class_name: "Chrome_WidgetWin_1".into(),
+                title: "w1".into(),
+                label_hint: Some("w1".into()),
+            },
+            &c,
+        );
+        // Position event: rect is fully off the monitor and NOT
+        // the Win32 hidden sentinel (so drift fires).
+        let evs = update(
+            &mut state,
+            Command::ReportHwndPositionChanged {
+                hwnd: 0xAA,
+                rect: Rect { left: -5000, top: -5000, right: -4000, bottom: -4000 },
+            },
+            &c,
+        );
+        // Expect both: drift + corrective move.
+        assert!(
+            evs.iter().any(|e| matches!(e, Event::HwndDriftDetected { kind: HwndDriftKind::OffMonitor, .. })),
+            "expected OffMonitor drift, got {:?}", evs
+        );
+        assert!(
+            evs.iter().any(|e| matches!(e, Event::CorrectiveWindowMove { hwnd: 0xAA, .. })),
+            "expected CorrectiveWindowMove, got {:?}", evs
+        );
+    }
+
+    #[test]
+    fn wrr_sentinel_position_suppresses_drift_but_emits_corrective() {
+        let (mut state, c) = registered_host_state();
+        let _ = update(
+            &mut state,
+            Command::ReportMonitorTopologyChanged {
+                rects: vec![Rect { left: 0, top: 0, right: 1920, bottom: 1080 }],
+            },
+            &c,
+        );
+        let _ = update(
+            &mut state,
+            Command::ReportWindowOpened {
+                label: "w1".into(),
+                kind: WindowKind::FullInstance,
+                parent_label: None,
+            },
+            &c,
+        );
+        let _ = update(
+            &mut state,
+            Command::ReportHwndOpened {
+                hwnd: 0xAA,
+                class_name: "Chrome_WidgetWin_1".into(),
+                title: "".into(),
+                label_hint: Some("w1".into()),
+            },
+            &c,
+        );
+        // Sentinel position — CEF Views' "hidden" parking spot.
+        let evs = update(
+            &mut state,
+            Command::ReportHwndPositionChanged {
+                hwnd: 0xAA,
+                rect: Rect { left: -31970, top: -31970, right: -31340, bottom: -30871 },
+            },
+            &c,
+        );
+        // Drift suppressed (sentinel is a known transient).
+        assert!(
+            !evs.iter().any(|e| matches!(e, Event::HwndDriftDetected { kind: HwndDriftKind::OffMonitor, .. })),
+            "sentinel position should NOT fire drift, got {:?}", evs
+        );
+        // Corrective fires regardless — we want to move it before
+        // the user notices the orphan taskbar entry.
+        assert!(
+            evs.iter().any(|e| matches!(e, Event::CorrectiveWindowMove { hwnd: 0xAA, .. })),
+            "sentinel position should fire CorrectiveWindowMove, got {:?}", evs
+        );
+    }
+
+    #[test]
+    fn wrr_off_monitor_after_user_foregrounded_does_not_correct() {
+        let (mut state, c) = registered_host_state();
+        let _ = update(
+            &mut state,
+            Command::ReportMonitorTopologyChanged {
+                rects: vec![Rect { left: 0, top: 0, right: 1920, bottom: 1080 }],
+            },
+            &c,
+        );
+        let _ = update(
+            &mut state,
+            Command::ReportWindowOpened {
+                label: "w1".into(),
+                kind: WindowKind::FullInstance,
+                parent_label: None,
+            },
+            &c,
+        );
+        let _ = update(
+            &mut state,
+            Command::ReportHwndOpened {
+                hwnd: 0xAA,
+                class_name: "Chrome_WidgetWin_1".into(),
+                title: "".into(),
+                label_hint: Some("w1".into()),
+            },
+            &c,
+        );
+        // Foreground event — user has interacted with this window.
+        let _ = update(
+            &mut state,
+            Command::ReportHwndForegroundChanged { hwnd: 0xAA },
+            &c,
+        );
+        // User then drags it off-monitor (legitimate state).
+        let evs = update(
+            &mut state,
+            Command::ReportHwndPositionChanged {
+                hwnd: 0xAA,
+                rect: Rect { left: -5000, top: -5000, right: -4000, bottom: -4000 },
+            },
+            &c,
+        );
+        // Drift fires — operator should still see it.
+        assert!(
+            evs.iter().any(|e| matches!(e, Event::HwndDriftDetected { kind: HwndDriftKind::OffMonitor, .. })),
+            "drift should fire even for user-touched windows, got {:?}", evs
+        );
+        // BUT no corrective — we trust the user.
+        assert!(
+            !evs.iter().any(|e| matches!(e, Event::CorrectiveWindowMove { .. })),
+            "corrective must NOT fire after user has foregrounded the window, got {:?}", evs
+        );
+    }
+
+    #[test]
+    fn wrr_duplicate_hwnd_open_for_same_label_is_idempotent() {
+        // codex #600 P2: ReportHwndOpened arrives twice (once from
+        // the WinEvent CREATE hook with label_hint=None, then again
+        // from CEF's on_after_created with label_hint=Some(label)).
+        // The second report carries the SAME hwnd that's now
+        // linked to the mirror. Should be a no-op, NOT drift.
+        let (mut state, c) = registered_host_state();
+        let _ = update(
+            &mut state,
+            Command::ReportWindowOpened {
+                label: "w1".into(),
+                kind: WindowKind::FullInstance,
+                parent_label: None,
+            },
+            &c,
+        );
+        // First link.
+        let evs1 = update(
+            &mut state,
+            Command::ReportHwndOpened {
+                hwnd: 0xAA,
+                class_name: "Chrome_WidgetWin_1".into(),
+                title: "".into(),
+                label_hint: Some("w1".into()),
+            },
+            &c,
+        );
+        assert!(
+            evs1.is_empty(),
+            "first ReportHwndOpened should silently link, got {:?}", evs1
+        );
+        // Duplicate: same label, same hwnd.
+        let evs2 = update(
+            &mut state,
+            Command::ReportHwndOpened {
+                hwnd: 0xAA,
+                class_name: "Chrome_WidgetWin_1".into(),
+                title: "".into(),
+                label_hint: Some("w1".into()),
+            },
+            &c,
+        );
+        assert!(
+            evs2.is_empty(),
+            "duplicate ReportHwndOpened with same hwnd must be no-op, got {:?}", evs2
+        );
+    }
+
+    #[test]
+    fn wrr_double_link_with_different_hwnd_for_same_label_emits_drift() {
+        // The non-duplicate path: a second ReportHwndOpened for
+        // the same label but a DIFFERENT HWND is genuine drift —
+        // host is reporting a related popup or there's a real bug.
+        let (mut state, c) = registered_host_state();
+        let _ = update(
+            &mut state,
+            Command::ReportWindowOpened {
+                label: "w1".into(),
+                kind: WindowKind::FullInstance,
+                parent_label: None,
+            },
+            &c,
+        );
+        let _ = update(
+            &mut state,
+            Command::ReportHwndOpened {
+                hwnd: 0xAA,
+                class_name: "Chrome_WidgetWin_1".into(),
+                title: "".into(),
+                label_hint: Some("w1".into()),
+            },
+            &c,
+        );
+        let evs = update(
+            &mut state,
+            Command::ReportHwndOpened {
+                hwnd: 0xBB,
+                class_name: "Chrome_WidgetWin_1".into(),
+                title: "".into(),
+                label_hint: Some("w1".into()),
+            },
+            &c,
+        );
+        assert!(
+            evs.iter().any(|e| matches!(
+                e,
+                Event::HwndDriftDetected { kind: HwndDriftKind::HwndWithoutBrowser, .. }
+            )),
+            "different HWND for same label must fire drift, got {:?}", evs
+        );
+    }
+
+    #[test]
+    fn wrr_orphan_destroy_runs_even_with_stale_pending_entry() {
+        // reagent #600 P1: the dual-source design (WinEvent CREATE
+        // hook with label_hint=None, then explicit on_after_created
+        // with label_hint=Some(label)) can leave a stale entry in
+        // `pending_hwnds` AFTER the mirror is linked. Pre-fix,
+        // `apply_hwnd_destroyed` early-returned on the stale
+        // pending entry and skipped the OrphanDestroy chain. Post-
+        // fix, the link drains pending and destroy runs the chain
+        // correctly. This test reproduces the exact race.
+        let (mut state, c) = registered_host_state();
+        let _ = update(
+            &mut state,
+            Command::ReportMonitorTopologyChanged {
+                rects: vec![Rect { left: 0, top: 0, right: 1920, bottom: 1080 }],
+            },
+            &c,
+        );
+        let _ = update(
+            &mut state,
+            Command::ReportWindowOpened {
+                label: "w1".into(),
+                kind: WindowKind::FullInstance,
+                parent_label: None,
+            },
+            &c,
+        );
+        // Step 1: WinEvent CREATE fires first with label_hint=None.
+        // No mirror match → stash in pending_hwnds.
+        let _ = update(
+            &mut state,
+            Command::ReportHwndOpened {
+                hwnd: 0xAA,
+                class_name: "Chrome_WidgetWin_1".into(),
+                title: "".into(),
+                label_hint: None,
+            },
+            &c,
+        );
+        assert!(state.pending_hwnds.contains_key(&0xAA), "pending entry expected after step 1");
+        // Step 2: on_after_created fires with label_hint=Some(w1).
+        // Should link the mirror AND drain the stale pending.
+        let _ = update(
+            &mut state,
+            Command::ReportHwndOpened {
+                hwnd: 0xAA,
+                class_name: "Chrome_WidgetWin_1".into(),
+                title: "".into(),
+                label_hint: Some("w1".into()),
+            },
+            &c,
+        );
+        assert!(
+            !state.pending_hwnds.contains_key(&0xAA),
+            "stale pending entry should be drained on link, but still present: {:?}",
+            state.pending_hwnds
+        );
+        // Step 3: renderer crash → ReportHwndDestroyed.
+        let evs = update(
+            &mut state,
+            Command::ReportHwndDestroyed { hwnd: 0xAA },
+            &c,
+        );
+        // Even with the (drained) pending entry history, the
+        // orphan-destroy chain must run.
+        assert!(
+            evs.iter()
+                .any(|e| matches!(e, Event::HwndDriftDetected { kind: HwndDriftKind::OrphanDestroy, .. })),
+            "OrphanDestroy must fire on renderer crash even after dual-source link, got {:?}",
+            evs
+        );
+        assert!(
+            evs.iter().any(|e| matches!(e, Event::WindowClosed { .. })),
+            "WindowClosed must fire so frontend prunes its atoms, got {:?}",
+            evs
+        );
+    }
+
+    #[test]
+    fn wrr_orphan_destroy_emits_window_closed_and_instance_released() {
+        // reagent #600 P1: a renderer crash that takes the HWND
+        // with it must produce the same shutdown events the normal
+        // close path would, otherwise the frontend keeps a stale
+        // window in its atoms after the crash.
+        let (mut state, c) = registered_host_state();
+        let _ = update(
+            &mut state,
+            Command::ReportMonitorTopologyChanged {
+                rects: vec![Rect { left: 0, top: 0, right: 1920, bottom: 1080 }],
+            },
+            &c,
+        );
+        let _ = update(
+            &mut state,
+            Command::ReportWindowOpened {
+                label: "w1".into(),
+                kind: WindowKind::FullInstance,
+                parent_label: None,
+            },
+            &c,
+        );
+        let _ = update(
+            &mut state,
+            Command::ReportHwndOpened {
+                hwnd: 0xAA,
+                class_name: "Chrome_WidgetWin_1".into(),
+                title: "".into(),
+                label_hint: Some("w1".into()),
+            },
+            &c,
+        );
+        // Renderer crashes — Win32 fires the destroy without CEF's
+        // close path running, so no ReportWindowClosed precedes it.
+        let evs = update(
+            &mut state,
+            Command::ReportHwndDestroyed { hwnd: 0xAA },
+            &c,
+        );
+
+        // All three: drift (operator alert) + WindowClosed
+        // (frontend prune) + WindowInstanceReleased (count drop).
+        assert!(
+            evs.iter()
+                .any(|e| matches!(e, Event::HwndDriftDetected { kind: HwndDriftKind::OrphanDestroy, .. })),
+            "expected OrphanDestroy drift, got {:?}", evs
+        );
+        assert!(
+            evs.iter().any(|e| matches!(
+                e,
+                Event::WindowClosed { label, .. } if label == "w1"
+            )),
+            "expected WindowClosed for w1, got {:?}", evs
+        );
+        assert!(
+            evs.iter().any(|e| matches!(
+                e,
+                Event::WindowInstanceReleased { label, .. } if label == "w1"
+            )),
+            "expected WindowInstanceReleased for w1, got {:?}", evs
+        );
+        // State pruned.
+        assert!(!state.windows.contains_key("w1"));
+        assert!(!state.instance_registry.contains_key("w1"));
+    }
+
+    #[test]
+    fn wrr_off_monitor_with_no_known_monitors_emits_neither() {
+        // No `ReportMonitorTopologyChanged` => state.monitors is
+        // empty => we don't know what "off-monitor" means yet.
+        let (mut state, c) = registered_host_state();
+        let _ = update(
+            &mut state,
+            Command::ReportWindowOpened {
+                label: "w1".into(),
+                kind: WindowKind::FullInstance,
+                parent_label: None,
+            },
+            &c,
+        );
+        let _ = update(
+            &mut state,
+            Command::ReportHwndOpened {
+                hwnd: 0xAA,
+                class_name: "Chrome_WidgetWin_1".into(),
+                title: "".into(),
+                label_hint: Some("w1".into()),
+            },
+            &c,
+        );
+        let evs = update(
+            &mut state,
+            Command::ReportHwndPositionChanged {
+                hwnd: 0xAA,
+                rect: Rect { left: -5000, top: -5000, right: -4000, bottom: -4000 },
+            },
+            &c,
+        );
+        assert!(
+            evs.is_empty(),
+            "no monitors known => no drift, no corrective; got {:?}", evs
+        );
     }
 }

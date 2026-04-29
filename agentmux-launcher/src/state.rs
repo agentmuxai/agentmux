@@ -24,7 +24,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use agentmux_common::ipc::{ClientKind, WindowKind};
+use agentmux_common::ipc::{ClientKind, Rect, WindowKind};
 pub use agentmux_common::ipc::LifecyclePhase;
 
 /// Lifecycle of a single process the launcher knows about. The
@@ -66,6 +66,17 @@ pub struct ProcessRecord {
 /// is the launcher's clock at the time the report arrived (RFC3339)
 /// — useful for correlating launcher logs with host logs across
 /// version skew.
+///
+/// Phase B.9.1 (WRR) — the observability axis (`hwnd`, `visible`,
+/// `iconic`, `last_rect`, `last_foreground_at_ms`,
+/// `foregrounded_since_open`) is populated by the host's Win32
+/// event hooks. Pre-B.9 these all sit at default values, which is
+/// fine: the WRR drift checks only fire when at least one of the
+/// `ReportHwnd*` Commands arrives, and they don't arrive in
+/// `task dev` mode (no launcher → no IPC) or installed mode until
+/// the host-side hooks land. Existing reducer paths
+/// (`ReportWindowOpened`, `ReportWindowClosed`, etc.) ignore these
+/// fields entirely.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WindowMirror {
     pub label: String,
@@ -75,6 +86,28 @@ pub struct WindowMirror {
     /// has the parent linkage.
     pub parent_label: Option<String>,
     pub opened_at: String,
+    /// Phase B.9.1 — Win32 HWND linked to this label by the WRR
+    /// reducer arm (via `ReportHwndOpened` with matching
+    /// `label_hint` or via the post-hoc reconciliation against
+    /// `pending_hwnds`). `None` until the host's
+    /// `ReportHwndOpened` for this label arrives.
+    pub hwnd: Option<u64>,
+    /// Phase B.9.1 — last-known `IsWindowVisible` state.
+    pub visible: bool,
+    /// Phase B.9.1 — last-known minimized state.
+    pub iconic: bool,
+    /// Phase B.9.1 — last-known window rect. `None` until the
+    /// first `ReportHwndPositionChanged` arrives for the linked
+    /// HWND.
+    pub last_rect: Option<Rect>,
+    /// Phase B.9.1 — milliseconds-since-launcher-start of the most
+    /// recent `ReportHwndForegroundChanged` for this label's HWND.
+    /// `None` if the window has never been foregrounded.
+    pub last_foreground_at_ms: Option<u64>,
+    /// Phase B.9.1 — has this label been foregrounded at any point
+    /// since its `ReportWindowOpened`? Used to fire `HiddenSinceOpen`
+    /// drift on the first hide event when this is still false.
+    pub foregrounded_since_open: bool,
 }
 
 /// Top-level launcher state. Single Arc<Mutex<State>> owned by the
@@ -128,6 +161,46 @@ pub struct State {
     pub event_version: u64,
     /// Monotonic counter for client_id (returned in Registered events).
     pub next_client_id: u64,
+    /// Phase B.9.1 (WRR) — current monitor topology, replaced
+    /// wholesale on `ReportMonitorTopologyChanged`. Empty by default
+    /// until the host's `wrr/wndproc.rs` reports the first
+    /// `WM_DISPLAYCHANGE`-equivalent (or its initial topology probe
+    /// at startup). `OffMonitor` drift is suppressed when this is
+    /// empty — we don't know enough to classify yet.
+    pub monitors: Vec<Rect>,
+    /// Phase B.9.1 — HWNDs the reducer has seen via `ReportHwndOpened`
+    /// but couldn't yet associate with a `WindowMirror`. Three
+    /// reasons an entry lives here transiently:
+    ///   1. The OS create event raced ahead of the host's
+    ///      `OnAfterCreated` → `ReportWindowOpened` chain.
+    ///   2. The host couldn't determine `label_hint` at create time.
+    ///   3. The HWND belongs to a pool window not yet promoted.
+    /// Drained on each `ReportWindowOpened` (we try to match a
+    /// pending HWND by `label_hint`/timing). Anything still here
+    /// after a follow-up event is classified as `HwndWithoutBrowser`.
+    pub pending_hwnds: HashMap<u64, PendingHwnd>,
+    /// Phase B.9.1 — milliseconds since launcher start, used as the
+    /// monotonic clock for WRR observability timestamps. Set to
+    /// `None` until `Ctx` injects the first now-value; the reducer
+    /// updates it on every dispatch. Distinct from `event_version`
+    /// (causality counter) because operators reading `--diag wrr`
+    /// want wall-clock-ish age, not event count.
+    pub launcher_start_ms: Option<u64>,
+}
+
+/// Phase B.9.1 — transient HWND record held until the reducer can
+/// link it to a `WindowMirror`. See `State::pending_hwnds`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingHwnd {
+    pub class_name: String,
+    pub title: String,
+    pub label_hint: Option<String>,
+    /// Milliseconds-since-launcher-start when the
+    /// `ReportHwndOpened` arrived. Used to age out pending entries
+    /// — if we still have it when a *different* event arrives that
+    /// should have caused reconciliation, classify as
+    /// `HwndWithoutBrowser`.
+    pub arrived_at_ms: u64,
 }
 
 impl Default for State {
@@ -146,6 +219,9 @@ impl Default for State {
             backend_window_ids: HashMap::new(),
             event_version: 0,
             next_client_id: 1,
+            monitors: Vec::new(),
+            pending_hwnds: HashMap::new(),
+            launcher_start_ms: None,
         }
     }
 }

@@ -268,12 +268,18 @@ async fn handle_connection(stream: NamedPipeServer, ctx: Arc<ServerCtx>) {
         // formatting don't show up in lock-hold time. (gemini
         // MEDIUM @ server.rs:259, PR #574 round-1.)
         let now_rfc3339 = chrono::Utc::now().to_rfc3339();
+        // Phase B.9.1 — monotonic ms since launcher start. Used by
+        // the WRR arm for per-window observability ages.
+        // `LAUNCHER_START_INSTANT` is a once-init `Instant`; the
+        // first request seeds it, subsequent ones read its delta.
+        let now_ms = launcher_start_ms();
         let events = {
             let mut state = ctx.state.lock().await;
             let rctx = reducer::Ctx {
                 now_rfc3339,
                 conn_id,
                 registered_pid,
+                now_ms,
             };
             reducer::update(&mut state, cmd.clone(), &rctx)
         };
@@ -309,6 +315,25 @@ async fn handle_connection(stream: NamedPipeServer, ctx: Arc<ServerCtx>) {
                     kind, host_count, mirror_count, conn_id
                 ));
             }
+            // Phase B.9.1 (WRR) — drift logged at the launcher level
+            // so operators see Win32 reality divergence in
+            // launcher.log regardless of subscriber wiring. Severity
+            // tag in the log line lets a future `--diag wrr` (B.9.2)
+            // grep precisely.
+            if let Event::HwndDriftDetected {
+                kind,
+                label,
+                hwnd,
+                detail,
+                severity,
+                ..
+            } = &event
+            {
+                crate::log(&format!(
+                    "[ipc] WRR-DRIFT [{:?}] {:?} label={:?} hwnd={:?}: {} (conn_id={})",
+                    severity, kind, label, hwnd, detail, conn_id
+                ));
+            }
             let event = patch_launcher_identity(event, &ctx);
             if send_event(&writer, event).await.is_err() {
                 return;
@@ -329,6 +354,18 @@ async fn handle_connection(stream: NamedPipeServer, ctx: Arc<ServerCtx>) {
 /// pre-Register failures so log lines can be correlated.
 static NEXT_CONN_ID: std::sync::atomic::AtomicU64 =
     std::sync::atomic::AtomicU64::new(1);
+
+/// Phase B.9.1 — milliseconds since the launcher's IPC server
+/// started (first call seeds the epoch). Used as the monotonic
+/// clock for WRR observability timestamps in `reducer::Ctx::now_ms`.
+/// Distinct from `chrono::Utc::now()` because the WRR arm wants
+/// elapsed time, not wall clock — and we don't want clock-skew
+/// jitter (NTP adjustment, DST) showing up as drift.
+fn launcher_start_ms() -> u64 {
+    static START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+    let start = START.get_or_init(std::time::Instant::now);
+    start.elapsed().as_millis() as u64
+}
 
 /// Enforce the "first message must be Register" invariant. Returns
 /// `Some(Event::Error)` if the command violates the contract; the
@@ -373,6 +410,40 @@ async fn enforce_register_first(
         Command::ReportBackendWindowIdUnregistered { .. } => {
             (
                 "ReportBackendWindowIdUnregistered before Register".to_string(),
+                true,
+            )
+        }
+        // Phase B.9.1 (WRR) — host-only Win32 reality reports.
+        Command::ReportHwndOpened { .. } => {
+            ("ReportHwndOpened before Register".to_string(), true)
+        }
+        Command::ReportHwndDestroyed { .. } => {
+            ("ReportHwndDestroyed before Register".to_string(), true)
+        }
+        Command::ReportHwndVisibilityChanged { .. } => {
+            (
+                "ReportHwndVisibilityChanged before Register".to_string(),
+                true,
+            )
+        }
+        Command::ReportHwndForegroundChanged { .. } => {
+            (
+                "ReportHwndForegroundChanged before Register".to_string(),
+                true,
+            )
+        }
+        Command::ReportHwndIconicChanged { .. } => {
+            ("ReportHwndIconicChanged before Register".to_string(), true)
+        }
+        Command::ReportHwndPositionChanged { .. } => {
+            (
+                "ReportHwndPositionChanged before Register".to_string(),
+                true,
+            )
+        }
+        Command::ReportMonitorTopologyChanged { .. } => {
+            (
+                "ReportMonitorTopologyChanged before Register".to_string(),
                 true,
             )
         }

@@ -39,9 +39,12 @@ Pre-Phase-B  ──► host owns 13 HashMaps  ◄── started here
                         │
                         ▼
               ✓ B.7.1 — entries-bearing window-instances-changed (#596)
-                        │
                         ▼
-              ◄── HERE. B.7.2 in flight: windowId-reemit.
+              ✓ B.7.2 — re-emit on BackendWindowId events (#597)
+                        ▼
+              ◄── HERE. B.9.1 in flight: WRR observation.
+                  (B.7.3 / B.8 deferred — B.9 jumped queue per
+                  user direction after stray-taskbar surface.)
               B.7  ──  frontend cutover (delete polling)
               B.8  ──  Phase B exit (delete obsolete defensive code,
                        add property tests, --diag tool, CI smoke)
@@ -72,10 +75,16 @@ See `b5-migration-architecture-2026-04-28.md` for why `browsers` and pool maps c
 
 - Scaffolding-role comments added to `state.browsers`, `window_pool`, `unpromoted_pool_labels`, and `compute_and_report_host_counts` so future agents see why these fields don't follow the standard ratchet and where they head in Phase F.
 
-### B.6 — single-instance mutex (done — PR #595, fix in B.6.1)
+### B.6 — single-instance mutex (done — PRs #595 + #598 + #599 + direct-to-main 2ffa63c5)
 
 - Launcher synchronously binds `first_pipe_instance(true)` BEFORE spawning srv/host. The pipe bind is the AUTHORITATIVE single-instance signal.
-- **B.6.1 fix**: on `ERROR_ACCESS_DENIED`, the second launcher reads `<data-dir>/ipc-port` (still written by the host post-CEF-init) and forwards an `open_new_window` HTTP POST to the existing instance, then exits 0. Mirrors the status-bar version popup's "new window" UX. The MessageBox path is reserved for genuine bind failures (namespace misconfig). Stale-state defect (gap #8) is bounded because pipe-bind happens first: a stale port file is irrelevant on the first-instance path (overwritten); on the second-instance path the live first instance wrote a fresh port:token, so forwarding lands.
+- On `ERROR_ACCESS_DENIED`, the second launcher reads `<launcher-shared-data-dir>/ipc-port` (written by the host post-CEF-init) and forwards an `open_new_window` HTTP POST to the existing instance, then exits 0. Mirrors the status-bar version popup's "new window" UX.
+- Three iterations to land it:
+  - **#598**: initial forward implementation; transient classification.
+  - **2ffa63c5** (direct-to-main, mistake — should have been a PR): port-file path was at the cef cache dir but launcher reads at the launcher-shared data dir.
+  - **#599**: read response after POST so the launcher's process exit doesn't tear down the TCP connection before axum's async handler runs.
+- The MessageBox path is reserved for genuine bind failures (namespace misconfig). Stale-state defect (gap #8) is bounded because pipe-bind happens first: a stale port file is irrelevant on the first-instance path (overwritten); on the second-instance path the live first instance wrote a fresh port:token, so forwarding lands.
+- Smoke verified on v0.33.482: second `agentmux.exe` launch yields one new window in the existing instance, no dialog. Launcher log + host log both confirm.
 
 ### B.7 — frontend cutover (2-3 PRs)
 

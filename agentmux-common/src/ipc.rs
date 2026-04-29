@@ -158,6 +158,73 @@ pub enum Command {
     ReportBackendWindowIdUnregistered {
         label: String,
     },
+    /// Phase B.9.1 (WRR — Window Reality Reconciliation) — host
+    /// reports a Win32 top-level window was created. Hooked off
+    /// `EVENT_OBJECT_CREATE` (objid=`OBJID_WINDOW`) via
+    /// `SetWinEventHook(WINEVENT_OUTOFCONTEXT)`. The host filters
+    /// CEF subprocess HWNDs (renderer, GPU, plugin) at the hook
+    /// callback so the launcher only sees plausible app windows.
+    /// `label_hint` is the host's best guess from
+    /// `pending_window_creations` if it can disambiguate; `None`
+    /// when the create event arrives before the host has linked
+    /// the HWND back to a label (caught up later by the reducer's
+    /// pending_hwnds).
+    ReportHwndOpened {
+        hwnd: u64,
+        class_name: String,
+        title: String,
+        label_hint: Option<String>,
+    },
+    /// Phase B.9.1 — host reports a Win32 top-level window was
+    /// destroyed. Hooked off `EVENT_OBJECT_DESTROY`.
+    ReportHwndDestroyed {
+        hwnd: u64,
+    },
+    /// Phase B.9.1 — `EVENT_OBJECT_SHOW` / `EVENT_OBJECT_HIDE`.
+    ReportHwndVisibilityChanged {
+        hwnd: u64,
+        visible: bool,
+    },
+    /// Phase B.9.1 — `EVENT_SYSTEM_FOREGROUND`. Tells the launcher
+    /// the user actually saw this window (not just opened it).
+    /// Used to distinguish "opened but never foregrounded" (drift)
+    /// from "opened and shown".
+    ReportHwndForegroundChanged {
+        hwnd: u64,
+    },
+    /// Phase B.9.1 — `EVENT_SYSTEM_MINIMIZESTART` /
+    /// `EVENT_SYSTEM_MINIMIZEEND`.
+    ReportHwndIconicChanged {
+        hwnd: u64,
+        iconic: bool,
+    },
+    /// Phase B.9.1 — `WM_WINDOWPOSCHANGED` from the host's wndproc
+    /// wrapper. The host coalesces bursts (50ms debounce per HWND)
+    /// before sending so the wire stays light during topology
+    /// changes. Reducer compares `rect` against `state.monitors` to
+    /// classify off-monitor drift.
+    ReportHwndPositionChanged {
+        hwnd: u64,
+        rect: Rect,
+    },
+    /// Phase B.9.1 — `WM_DISPLAYCHANGE`. Replaces the launcher's
+    /// `state.monitors` wholesale; reducer re-evaluates every
+    /// known window's last_rect against the new topology and
+    /// emits `OffMonitor` drift for any that newly fall off.
+    ReportMonitorTopologyChanged {
+        rects: Vec<Rect>,
+    },
+}
+
+/// Phase B.9.1 — rectangle in Win32 screen coordinates (pixels).
+/// Matches Windows' `RECT` semantics: `right` and `bottom` are one
+/// past the last included pixel, so `right - left == width`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Rect {
+    pub left: i32,
+    pub top: i32,
+    pub right: i32,
+    pub bottom: i32,
 }
 
 /// Wire-side enum for `WindowKind`. Mirrors `agentmux-cef::state::WindowKind`
@@ -311,6 +378,94 @@ pub enum Event {
         mirror_count: u32,
         version: u64,
     },
+    /// Phase B.9.1 (WRR) — emitted when the launcher's reducer
+    /// detects a divergence between CEF browser identity (tracked
+    /// in `state.windows` / `state.pool` via `ReportWindow*`) and
+    /// Win32 reality (newly tracked via `ReportHwnd*`). Each variant
+    /// of `kind` is emitted at the moment the OS event that
+    /// surfaces it is dispatched through the reducer — there is no
+    /// timer / heartbeat. See `docs/retro/wrr-design-2026-04-28.md`
+    /// for the full classification table.
+    HwndDriftDetected {
+        kind: HwndDriftKind,
+        /// Affected label, when known.
+        label: Option<String>,
+        /// Affected HWND, when known. `u64` to keep the wire format
+        /// stable across pointer-width differences.
+        hwnd: Option<u64>,
+        /// Human-readable description for the launcher log + `--diag`
+        /// output. Free-form; not parsed by any consumer.
+        detail: String,
+        severity: Severity,
+        version: u64,
+    },
+    /// Phase B.9.2 — pure-reducer self-heal. Emitted alongside an
+    /// `HwndDriftDetected` when the reducer is confident the bug
+    /// happened at OPEN TIME (not from later user action) and a
+    /// safe corrective rect is computable. The host's WRR
+    /// subscriber listens for this and applies `SetWindowPos` on
+    /// the UI thread. No timers — the trigger is the same OS
+    /// event tick that surfaced the bug, so the correction lands
+    /// before the user has time to notice the orphan window.
+    ///
+    /// Guard for emission (per the design, suppress over-correction):
+    /// - The window's `mirror.foregrounded_since_open == false`
+    ///   (we never auto-move a window the user has already
+    ///   touched).
+    /// - The reducer can compute a target rect from
+    ///   `state.monitors` (i.e., monitors are known).
+    CorrectiveWindowMove {
+        /// Win32 HWND to move.
+        hwnd: u64,
+        /// Reducer-computed target rect. Default policy:
+        /// primary-monitor-centered at default window size.
+        target_rect: Rect,
+        /// Why correction fired — surfaces in host log + audit.
+        reason: HwndDriftKind,
+        version: u64,
+    },
+}
+
+/// Phase B.9.1 — six classes of CEF↔Win32 disagreement the reducer
+/// can detect at event-dispatch time. See the WRR design doc for
+/// the per-kind triggering Command and reducer action.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HwndDriftKind {
+    /// `state.windows` has a label whose `hwnd` field never got
+    /// populated, AND a follow-up event arrived that should have
+    /// reconciled it. CEF says open, Win32 has no matching HWND.
+    BrowserWithoutHwnd,
+    /// HWND in the host's report doesn't map to any
+    /// `state.windows` / `state.pool` label. Win32 has it, CEF
+    /// didn't open it. The "stray taskbar" case.
+    HwndWithoutBrowser,
+    /// HWND for a known label was never SHOWN (no foreground
+    /// event) since open and a subsequent state transition has
+    /// elapsed. User can't see it.
+    HiddenSinceOpen,
+    /// Window rect doesn't intersect any monitor in
+    /// `state.monitors`. Off-screen orphan.
+    OffMonitor,
+    /// `ReportHwndDestroyed` arrived without a preceding
+    /// `ReportWindowClosed` for the matching label. Renderer
+    /// crashed, took the HWND with it.
+    OrphanDestroy,
+    /// `ReportWindowClosed` arrived, but subsequent OS events for
+    /// the HWND keep firing (it never went away on the Win32 side).
+    LingeringHwnd,
+}
+
+/// Phase B.9.1 — drift severity. Operator-tunable severity floor
+/// in `WrrConfig.severity_floor` controls which events get
+/// broadcast (ones below the floor are still logged at DEBUG so
+/// they show up in `--diag wrr` post-mortem).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, PartialOrd, Ord)]
+#[serde(rename_all = "lowercase")]
+pub enum Severity {
+    Info,
+    Warn,
+    Error,
 }
 
 /// Coarse-grained launcher state. Spec §4: Starting → Running →
