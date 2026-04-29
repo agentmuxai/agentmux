@@ -45,8 +45,8 @@ import { ContextMenuModel } from "@/app/store/contextmenu";
 import { isHostApp } from "@/app/init/host-detect";
 import { showStartupError } from "@/app/init/error-display";
 import { withTimeout } from "@/app/init/timeout";
-import { installLauncherEventBridge } from "@/util/launcher-events";
-import { startLauncherEventReducer } from "@/app/store/launcher-event-reducer";
+import { installLauncherEventBridge, launcherEventsActive } from "@/util/launcher-events";
+import { seedKnownEntriesFromSnapshot, startLauncherEventReducer } from "@/app/store/launcher-event-reducer";
 
 // Deferred — assigned inside initApp() after window.api is ready.
 // Do NOT call getApi() at module level: this file is statically imported by
@@ -83,23 +83,29 @@ async function initInstanceTracking(): Promise<void> {
     const isInstanceLabel = (l: string): boolean =>
         l === "main" || /^window-/.test(l);
 
-    // Phase B.7.1 — two payload shapes coexist during the cutover:
+    // Phase B.7.3.2 — typed launcher events are authoritative once
+    // they start flowing (`launcherEventsActive()` flips on the first
+    // event). The reducer in `launcher-event-reducer.ts` mutates the
+    // InstancePanel atoms from the typed stream.
     //
-    //   1. Launcher-driven re-emit (`launcher_ipc.rs::apply_event_to_shadow`)
-    //      ships `{ count, entries: [{label, windowId}] }`. The
-    //      shadows + state.browsers are both populated by the time
-    //      this fires, so a single application is authoritative —
-    //      no RPC, no polling. This is the path B.7 is migrating
-    //      everything to.
+    // Two paths coexist as fallback during B.7.3.2:
+    //
+    //   1. Launcher-driven bespoke `window-instances-changed` re-emit
+    //      (`launcher_ipc.rs::apply_event_to_shadow`) ships
+    //      `{ count, entries: [{label, windowId}] }` — same data the
+    //      typed events derive from, but as a snapshot per event.
+    //      Used here ONLY when typed events haven't been seen yet
+    //      (covers the brief window between renderer-init and the
+    //      first typed event arriving).
     //
     //   2. Sync emits at the mutation sites (window.rs / drag.rs /
     //      window_pool.rs / client.rs) still ship count-only
     //      payloads. They fire BEFORE state.browsers settles, so a
-    //      single RPC read would see stale data. This is also the
-    //      sole path during `task dev` (no launcher in the loop),
-    //      so we can't retire it yet — keep the historic 6×50ms
-    //      retry-on-stale polling here. (codex PR #569 P2 +
-    //      reagent #596 P1.) B.7.2 retires the sync emits.
+    //      single RPC read would see stale data. Also the sole
+    //      path during `task dev` (no launcher in the loop), so we
+    //      can't retire it yet — the 6×50ms retry-on-stale polling
+    //      stays as the no-launcher path. (codex PR #569 P2 +
+    //      reagent #596 P1.) B.7.3.3 retires the sync emits.
     //
     // The retry compares `entries-key` (label@windowId, joined) to
     // detect a real change, including the `null → real` windowId
@@ -157,15 +163,53 @@ async function initInstanceTracking(): Promise<void> {
     };
 
     try {
-        const [instanceNum, windowCount] = await Promise.all([
+        // Phase B.7.3.2 — fetch the snapshot once for the typed-event
+        // reducer to seed itself with. Each renderer's own instance
+        // number is fetched too (one-time, never updated by typed
+        // events — stable per-renderer-per-run). `getWindowCount`
+        // becomes derived state once typed events take over, but we
+        // keep the initial RPC for the no-launcher fallback path.
+        const [instanceNum, windowCount, snapshotEntries] = await Promise.all([
             getApi().getInstanceNumber(),
             getApi().getWindowCount(),
-            refreshLabelsViaRpc(),
+            (async (): Promise<Array<{ label: string; windowId: string | null }>> => {
+                try {
+                    const all = await getApi().listWindowInstances();
+                    return Array.isArray(all) ? all : [];
+                } catch {
+                    const all = await getApi().listWindows();
+                    return (Array.isArray(all) ? all : []).map((label) => ({ label, windowId: null }));
+                }
+            })(),
         ]);
         setWindowInstanceNumAtom(instanceNum);
         setWindowCountAtom(windowCount);
+        // Seed the reducer with the snapshot. Once the first typed
+        // event arrives, `launcherEventsActive()` flips and the
+        // reducer's atom-mutation path takes over from the bespoke
+        // listener below.
+        seedKnownEntriesFromSnapshot(snapshotEntries);
+        // `lastEntriesKey` is used by the no-launcher retry path
+        // (`refreshLabelsViaRpc`); seed it from the snapshot so the
+        // first bespoke event compares against a real key.
+        lastEntriesKey = snapshotEntries
+            .filter((e) => isInstanceLabel(e.label))
+            .sort((a, b) => {
+                if (a.label === "main") return -1;
+                if (b.label === "main") return 1;
+                return a.label.localeCompare(b.label);
+            })
+            .map((e) => `${e.label}@${e.windowId ?? ""}`)
+            .join("|");
 
         await getApi().listen("window-instances-changed", (event: any) => {
+            // B.7.3.2 — when typed events are flowing, the reducer
+            // is authoritative and this listener should NOT mutate
+            // atoms. Drop the payload silently. (`task dev` mode +
+            // the brief pre-first-typed-event window in portable
+            // mode are the only times this branch falls through.)
+            if (launcherEventsActive()) return;
+
             const payload = event?.payload ?? event;
             if (payload && typeof payload === "object" && Array.isArray(payload.entries)) {
                 if (typeof payload.count === "number") {
