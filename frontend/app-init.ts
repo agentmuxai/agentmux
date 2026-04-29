@@ -25,11 +25,7 @@ import {
     pushNotification,
     removeNotificationById,
     subscribeToConnEvents,
-    windowInstanceNumAtom,
     setWindowInstanceNumAtom,
-    setWindowCountAtom,
-    setOpenWindowLabelsAtom,
-    setOpenWindowEntriesAtom,
     setReinitVersion,
     setUpdaterStatusAtom,
     setUpdaterVersionAtom,
@@ -45,9 +41,8 @@ import { ContextMenuModel } from "@/app/store/contextmenu";
 import { isHostApp } from "@/app/init/host-detect";
 import { showStartupError } from "@/app/init/error-display";
 import { withTimeout } from "@/app/init/timeout";
-import { installLauncherEventBridge, launcherEventsActive } from "@/util/launcher-events";
+import { installLauncherEventBridge } from "@/util/launcher-events";
 import {
-    isInstanceLabel,
     seedKnownEntriesFromSnapshot,
     startLauncherEventReducer,
 } from "@/app/store/launcher-event-reducer";
@@ -74,109 +69,25 @@ window.modalsModel = modalsModel;
 const RPC_TIMEOUT = 5_000; // 5 seconds for individual RPC calls
 
 /**
- * Initialize the window instance number and count atoms, and subscribe to
- * the "window-instances-changed" Tauri event so the count stays reactive.
- * Called once per window after the wave UI is fully initialized.
+ * Initialize the window-instance-number atom and seed the reducer
+ * with the current snapshot. Subsequent updates to the panel atoms
+ * come from typed launcher events via `launcher-event-reducer.ts`.
+ *
+ * Phase B.7.3.3 — bespoke `window-instances-changed` channel and
+ * its retry/fallback paths are gone. The init RPC's only job is to
+ * give the reducer a starting set of entries (so a renderer joining
+ * mid-session sees existing windows before the first typed event
+ * arrives for one of them). Pre-seed close events are tombstoned
+ * inside the reducer and skipped at seed time. (codex P2 #603.)
  */
 async function initInstanceTracking(): Promise<void> {
-    // listWindows() returns ALL keys in state.browsers, which includes
-    // browser-pane child browsers (`browser-pane-*`) and pool labels
-    // (`window-pool-*`) — not just top-level app windows. The instance
-    // panel only wants the labels it can sensibly focus. The filter
-    // is imported from `launcher-event-reducer` so the bespoke
-    // fallback path uses the EXACT same rule as the typed-event
-    // reducer. (reagent P2 #603 — the two had diverged on pool
-    // labels, which leaked into the bespoke path's view.)
-
-    // Phase B.7.3.2 — typed launcher events are authoritative once
-    // they start flowing (`launcherEventsActive()` flips on the first
-    // event). The reducer in `launcher-event-reducer.ts` mutates the
-    // InstancePanel atoms from the typed stream.
-    //
-    // Two paths coexist as fallback during B.7.3.2:
-    //
-    //   1. Launcher-driven bespoke `window-instances-changed` re-emit
-    //      (`launcher_ipc.rs::apply_event_to_shadow`) ships
-    //      `{ count, entries: [{label, windowId}] }` — same data the
-    //      typed events derive from, but as a snapshot per event.
-    //      Used here ONLY when typed events haven't been seen yet
-    //      (covers the brief window between renderer-init and the
-    //      first typed event arriving).
-    //
-    //   2. Sync emits at the mutation sites (window.rs / drag.rs /
-    //      window_pool.rs / client.rs) still ship count-only
-    //      payloads. They fire BEFORE state.browsers settles, so a
-    //      single RPC read would see stale data. Also the sole
-    //      path during `task dev` (no launcher in the loop), so we
-    //      can't retire it yet — the 6×50ms retry-on-stale polling
-    //      stays as the no-launcher path. (codex PR #569 P2 +
-    //      reagent #596 P1.) B.7.3.3 retires the sync emits.
-    //
-    // The retry compares `entries-key` (label@windowId, joined) to
-    // detect a real change, including the `null → real` windowId
-    // transition that fires after the frontend's
-    // `register_backend_window` round-trip. Up to 6×50ms ≈ 300ms
-    // covers the empirical CEF on_after_created delay with margin.
-    let lastEntriesKey = "";
-
-    const applyEntries = (entries: Array<{ label: string; windowId: string | null }>): string => {
-        const filtered = entries.filter((e) => isInstanceLabel(e.label));
-        // Stable ordering: "main" pinned first, others alphabetical
-        // by label. Without this, panel rows can shuffle between
-        // refreshes (state.browsers is a Rust HashMap with
-        // non-deterministic iteration), and two windows could both
-        // display as "Window 1" because InstancePanel uses the
-        // array index for naming and special-cases "main".
-        filtered.sort((a, b) => {
-            if (a.label === "main") return -1;
-            if (b.label === "main") return 1;
-            return a.label.localeCompare(b.label);
-        });
-        setOpenWindowLabelsAtom(filtered.map((e) => e.label));
-        setOpenWindowEntriesAtom(filtered);
-        return filtered.map((e) => `${e.label}@${e.windowId ?? ""}`).join("|");
-    };
-
-    const refreshLabelsViaRpc = async (waitForChange = false, retriesLeft = 6): Promise<void> => {
-        try {
-            let entries: Array<{ label: string; windowId: string | null }>;
-            try {
-                const all = await getApi().listWindowInstances();
-                entries = Array.isArray(all) ? all : [];
-            } catch {
-                const all = await getApi().listWindows();
-                entries = (Array.isArray(all) ? all : []).map((label) => ({ label, windowId: null }));
-            }
-            const filtered = entries.filter((e) => isInstanceLabel(e.label));
-            filtered.sort((a, b) => {
-                if (a.label === "main") return -1;
-                if (b.label === "main") return 1;
-                return a.label.localeCompare(b.label);
-            });
-            const key = filtered.map((e) => `${e.label}@${e.windowId ?? ""}`).join("|");
-            if (waitForChange && key === lastEntriesKey && retriesLeft > 0) {
-                setTimeout(() => refreshLabelsViaRpc(true, retriesLeft - 1), 50);
-                return;
-            }
-            lastEntriesKey = key;
-            setOpenWindowLabelsAtom(filtered.map((e) => e.label));
-            setOpenWindowEntriesAtom(filtered);
-        } catch {
-            setOpenWindowLabelsAtom([]);
-            setOpenWindowEntriesAtom([]);
-        }
-    };
-
     try {
-        // Phase B.7.3.2 — fetch the snapshot once for the typed-event
-        // reducer to seed itself with. Each renderer's own instance
-        // number is fetched too (one-time, never updated by typed
-        // events — stable per-renderer-per-run). `getWindowCount`
-        // becomes derived state once typed events take over, but we
-        // keep the initial RPC for the no-launcher fallback path.
-        const [instanceNum, windowCount, snapshotEntries] = await Promise.all([
+        // Each renderer's own instance number is stable per-run —
+        // fetched once. The snapshot fetch primes the reducer for
+        // labels that exist before this renderer joined; thereafter
+        // typed events drive the panel.
+        const [instanceNum, snapshotEntries] = await Promise.all([
             getApi().getInstanceNumber(),
-            getApi().getWindowCount(),
             (async (): Promise<Array<{ label: string; windowId: string | null }>> => {
                 try {
                     const all = await getApi().listWindowInstances();
@@ -188,45 +99,7 @@ async function initInstanceTracking(): Promise<void> {
             })(),
         ]);
         setWindowInstanceNumAtom(instanceNum);
-        setWindowCountAtom(windowCount);
-        // Seed the reducer with the snapshot. Once the first typed
-        // event arrives, `launcherEventsActive()` flips and the
-        // reducer's atom-mutation path takes over from the bespoke
-        // listener below.
         seedKnownEntriesFromSnapshot(snapshotEntries);
-        // `lastEntriesKey` is used by the no-launcher retry path
-        // (`refreshLabelsViaRpc`); seed it from the snapshot so the
-        // first bespoke event compares against a real key.
-        lastEntriesKey = snapshotEntries
-            .filter((e) => isInstanceLabel(e.label))
-            .sort((a, b) => {
-                if (a.label === "main") return -1;
-                if (b.label === "main") return 1;
-                return a.label.localeCompare(b.label);
-            })
-            .map((e) => `${e.label}@${e.windowId ?? ""}`)
-            .join("|");
-
-        await getApi().listen("window-instances-changed", (event: any) => {
-            // B.7.3.2 — when typed events are flowing, the reducer
-            // is authoritative and this listener should NOT mutate
-            // atoms. Drop the payload silently. (`task dev` mode +
-            // the brief pre-first-typed-event window in portable
-            // mode are the only times this branch falls through.)
-            if (launcherEventsActive()) return;
-
-            const payload = event?.payload ?? event;
-            if (payload && typeof payload === "object" && Array.isArray(payload.entries)) {
-                if (typeof payload.count === "number") {
-                    setWindowCountAtom(payload.count);
-                }
-                lastEntriesKey = applyEntries(payload.entries);
-                return;
-            }
-            const count = typeof payload === "number" ? payload : 0;
-            setWindowCountAtom(count);
-            refreshLabelsViaRpc(true);
-        });
     } catch (e) {
         console.warn("[initInstanceTracking] failed:", e);
     }

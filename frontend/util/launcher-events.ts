@@ -9,17 +9,13 @@
 // renderer per launcher event. We feed those into a SolidJS signal
 // so block-level subscribers can `createEffect()` on them.
 //
-// During the cutover (B.7.3.1), the bespoke `window-instances-changed`
-// CEF event channel is still authoritative for the InstancePanel.
-// This module just installs the cable. B.7.3.2 makes typed events
-// the authoritative path for atom updates; B.7.3.3 retires the
-// bespoke channel.
-//
-// `task dev` mode: the launcher isn't in the loop, so no events
-// arrive. The dispatcher is still installed (idempotent, no
-// side-effects), and downstream subscribers see no signal updates.
-// The bespoke `window-instances-changed` channel continues to drive
-// the UI in that mode until Phase E retires the no-launcher path.
+// Phase B.7.3.3 — typed events are the SOLE path for InstancePanel
+// state. The bespoke `window-instances-changed` channel and its 4
+// sync emit sites in the host are gone. `task dev` mode (no
+// launcher in the loop) currently leaves the InstancePanel atoms
+// at their seeded values from the init RPC; live updates require
+// the launcher. Phase E folds srv into the same reducer pattern;
+// the no-launcher mode goes away then.
 //
 // See `docs/specs/SPEC_B_7_3_LAUNCHER_EVENTS_TO_RENDERER_2026_04_29.md`.
 
@@ -51,11 +47,11 @@ export const launcherEvent = latestEvent;
 export const launcherEventVersion = eventVersion;
 
 /**
- * True once we've received at least one typed event. The reducer uses
- * this as the signal that typed events are flowing — the renderer
- * can treat them as authoritative once this flips. Until then, the
- * bespoke `window-instances-changed` channel remains the source of
- * truth (covers `task dev` mode where no launcher is in the loop).
+ * True once we've received at least one typed event. Kept as a
+ * forward-compat utility — B.7.3.3 retired its only consumer (the
+ * bespoke-channel gate in `app-init.ts`), but Phase D's `GetSnapshot`
+ * resync flow may need it again to detect "have we resynced?" vs
+ * "fresh launcher / first events not seen yet."
  */
 export const launcherEventsActive = seenAnyEvent;
 

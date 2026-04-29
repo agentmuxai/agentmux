@@ -9,16 +9,15 @@
 //
 // Phase B.7.3.1 (PR #602): scaffolding only — logged every event,
 // no atom mutation.
-// Phase B.7.3.2 (this PR): typed events become AUTHORITATIVE for
+// Phase B.7.3.2 (PR #603): typed events became AUTHORITATIVE for
 // the InstancePanel atoms (`openWindowLabelsAtom`,
-// `openWindowEntriesAtom`, `windowCountAtom`). The reducer
-// maintains an in-memory `knownEntries` map of `label →
-// {label, windowId}`, applies deltas from typed events, and
-// recomputes the atoms after each apply. The bespoke
-// `window-instances-changed` listener in `app-init.ts` is gated
-// by `!launcherEventsActive()` — it only runs when the launcher
-// isn't in the loop (e.g. `task dev` mode).
-// Phase B.7.3.3: retire the bespoke channel + 4 sync emit sites.
+// `openWindowEntriesAtom`, `windowCountAtom`). Bespoke channel
+// demoted to fallback.
+// Phase B.7.3.3 (this PR): bespoke `window-instances-changed`
+// channel and its 4 sync emit sites in the host are RETIRED.
+// Typed events are the sole path. `task dev` mode (no launcher)
+// leaves the panel at its init-RPC-seeded values; live updates
+// require the launcher in the loop.
 //
 // State seed: at init, `app-init.ts::initInstanceTracking` calls
 // `seedKnownEntriesFromSnapshot` with the RPC `listWindowInstances`
@@ -64,6 +63,27 @@ export function isApplyingRemoteEvent(): boolean {
  * appear as `Event::WindowOpened`.
  */
 const knownEntries = new Map<string, WindowEntry>();
+
+/**
+ * Set to `true` once `seedKnownEntriesFromSnapshot` has run. Until
+ * then, close events are recorded as tombstones (see
+ * `closedBeforeSeed`) so the seed can skip labels that already
+ * closed pre-seed. (codex P2 #603.)
+ */
+let seedHasHappened = false;
+
+/**
+ * Tombstone set: labels for which a `WindowClosed` /
+ * `WindowInstanceReleased` arrived BEFORE seed ran. The reducer's
+ * close path on an empty `knownEntries` is a no-op delete, so
+ * without this set, the seed would re-add the label from the
+ * stale RPC snapshot and the InstancePanel would carry a ghost
+ * row (codex P2 #603 — the seed-vs-close race).
+ *
+ * Drained at seed time. Stays `null` after seed (close events
+ * apply directly to `knownEntries`).
+ */
+let closedBeforeSeed: Set<string> | null = new Set();
 
 /**
  * Filter for labels the InstancePanel surfaces. Sub-windows + main
@@ -119,15 +139,18 @@ function recomputeAtoms(): void {
  * entries are left as the typed-event stream wrote them.
  */
 export function seedKnownEntriesFromSnapshot(entries: ReadonlyArray<WindowEntry>): void {
+    const tombstones = closedBeforeSeed;
     for (const e of entries) {
         if (!isInstanceLabel(e.label)) continue;
         if (knownEntries.has(e.label)) continue;
+        // Pre-seed close tombstone — label closed between snapshot
+        // fetch and seed; the close arm couldn't delete from an
+        // empty map, so we skip the re-add here. (codex P2 #603.)
+        if (tombstones && tombstones.has(e.label)) continue;
         knownEntries.set(e.label, { label: e.label, windowId: e.windowId });
     }
-    // Always recompute — initial atoms were set from the bespoke
-    // channel before the reducer was promoted, so even a snapshot
-    // that adds nothing new still needs to publish the consolidated
-    // view (e.g. ordering / filter differences). Idempotent.
+    seedHasHappened = true;
+    closedBeforeSeed = null;
     recomputeAtoms();
 }
 
@@ -180,9 +203,21 @@ function dispatch(evt: LauncherEvent): void {
         case "window_closed": {
             const label = String(evt.label ?? "");
             if (!label) return;
-            if (knownEntries.delete(label)) {
-                recomputeAtoms();
+            const deleted = knownEntries.delete(label);
+            if (!seedHasHappened && closedBeforeSeed) {
+                // Pre-seed: record a tombstone so seed skips this
+                // label even if it appears in the snapshot (codex P2
+                // #603). The delete above handles the case where
+                // WindowOpened arrived first pre-seed — and if it
+                // did delete an existing entry, atoms must recompute
+                // here too, otherwise the ghost row persists until
+                // seed runs (or forever if seed fails). (codex P2
+                // #604.)
+                closedBeforeSeed.add(label);
+                if (deleted) recomputeAtoms();
+                return;
             }
+            if (deleted) recomputeAtoms();
             return;
         }
         case "window_instance_assigned": {
@@ -204,9 +239,13 @@ function dispatch(evt: LauncherEvent): void {
             // deleted the entry; idempotent here.
             const label = String(evt.label ?? "");
             if (!label) return;
-            if (knownEntries.delete(label)) {
-                recomputeAtoms();
+            const deleted = knownEntries.delete(label);
+            if (!seedHasHappened && closedBeforeSeed) {
+                closedBeforeSeed.add(label);
+                if (deleted) recomputeAtoms();
+                return;
             }
+            if (deleted) recomputeAtoms();
             return;
         }
         case "backend_window_id_registered": {

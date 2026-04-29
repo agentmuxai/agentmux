@@ -683,13 +683,10 @@ impl AgentMuxHandler {
             quit_message_loop();
             tracing::warn!(target: "wrr", "[wrr] quit_message_loop returned");
         } else {
-            // Notify remaining windows of the new count.
-            let new_count = self.state.instance_count();
-            crate::events::emit_event_all_windows(
-                &self.state,
-                "window-instances-changed",
-                &serde_json::json!(new_count),
-            );
+            // Phase B.7.3.3 — `Event::WindowClosed` +
+            // `Event::WindowInstanceReleased` from the launcher
+            // drive remaining renderers' InstancePanel atoms via the
+            // CEF JS bridge; no sync emit here.
 
             // Tell the backend to clean up this window's workspace/tabs/shells.
             // This replaces the JavaScript `beforeunload` handler — running it here
