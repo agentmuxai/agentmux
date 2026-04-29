@@ -437,9 +437,6 @@ export function buildCefApi(): AppApi {
             const label = params.get("windowLabel") ?? "main";
             return await invokeCommand<number>("get_instance_number", { label });
         },
-        getWindowCount: async () => {
-            return await invokeCommand<number>("get_window_count");
-        },
 
         setJsDragActive: async (active: boolean) => {
             await invokeCommand("set_js_drag_active", { active });

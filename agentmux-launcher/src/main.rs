@@ -21,6 +21,7 @@
 )]
 
 mod data_dir;
+mod diag;
 mod hash;
 mod ipc;
 mod reducer;
@@ -74,6 +75,34 @@ async fn main() {
 
     let args: Vec<String> = std::env::args().skip(1).collect();
     log(&format!("forwarding {} CLI args to host", args.len()));
+
+    // Phase B.8 — `agentmux.exe --diag wrr` Tool client. Connects
+    // to the running launcher, captures events for a short window,
+    // prints a summary, exits. Doesn't spawn srv/host; doesn't
+    // bind the pipe; doesn't drive the reducer's lifecycle. Skip
+    // straight to the Tool flow before any privileged setup.
+    if matches!(args.first().map(String::as_str), Some("--diag")) {
+        let topic = args.get(1).map(String::as_str).unwrap_or("");
+        match topic {
+            "wrr" => {
+                match diag::run_wrr_diag(exe_dir).await {
+                    Ok(()) => std::process::exit(0),
+                    Err(msg) => {
+                        eprintln!("--diag wrr failed: {}", msg);
+                        std::process::exit(1);
+                    }
+                }
+            }
+            "" => {
+                eprintln!("usage: agentmux.exe --diag <topic>\nknown topics: wrr");
+                std::process::exit(2);
+            }
+            other => {
+                eprintln!("unknown --diag topic: {} (known: wrr)", other);
+                std::process::exit(2);
+            }
+        }
+    }
 
     #[cfg(target_os = "windows")]
     {
