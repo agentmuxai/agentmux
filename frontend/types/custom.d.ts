@@ -137,7 +137,6 @@ declare global {
         getDoubleClickTime: () => Promise<number>;
         focusWindow: (label: string) => Promise<void>;
         getInstanceNumber: () => Promise<number>;
-        getWindowCount: () => Promise<number>;
         createWorkspace: () => void;
         switchWorkspace: (workspaceId: string) => void;
         deleteWorkspace: (workspaceId: string) => void;

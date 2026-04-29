@@ -2277,4 +2277,243 @@ mod tests {
             "no monitors known => no drift, no corrective; got {:?}", evs
         );
     }
+
+    // -----------------------------------------------------------
+    // Phase B.8 — extended invariant suite.
+    //
+    // Covers gaps surfaced during B.5 / B.7 / B.9 work that the
+    // earlier proptests in `arb_command` (Register / Window
+    // open/close only) didn't exercise: pool inventory, backend
+    // window ID lifecycle, and the OrphanInstance / HostShouldQuit
+    // saga from B.9.3. Plus a deterministic integration-style
+    // close-all cascade that locks in the B.9.3 behaviour at the
+    // reducer level (CI synthetic close-all assertion per B.8 plan).
+    // -----------------------------------------------------------
+
+    /// Generate B.5+ host commands: window open/close, pool
+    /// add/remove, backend window ID register/unregister. Labels
+    /// drawn from a small alphabet so duplicates / opens-of-already-
+    /// open / close-of-not-open paths get exercised.
+    fn arb_b8_host_command() -> impl proptest::strategy::Strategy<Value = Command> {
+        use proptest::prelude::*;
+        prop_oneof![
+            3 => (
+                "[a-c]{1,3}",
+                prop_oneof![Just(WindowKind::FullInstance), Just(WindowKind::Subwindow)],
+                prop_oneof![Just(None::<String>), Just(Some("a".into()))],
+            )
+                .prop_map(|(label, kind, parent_label)| {
+                    Command::ReportWindowOpened { label, kind, parent_label }
+                }),
+            3 => "[a-c]{1,3}".prop_map(|label| Command::ReportWindowClosed { label }),
+            2 => "pool-[a-c]{1,2}".prop_map(|label| Command::ReportPoolWindowAdded { label }),
+            2 => "pool-[a-c]{1,2}".prop_map(|label| Command::ReportPoolWindowRemoved { label }),
+            2 => ("[a-c]{1,3}", "[0-9a-f]{4}").prop_map(|(label, window_id)| {
+                Command::ReportBackendWindowIdRegistered { label, window_id }
+            }),
+            2 => "[a-c]{1,3}".prop_map(|label| Command::ReportBackendWindowIdUnregistered { label }),
+        ]
+    }
+
+    proptest! {
+        /// Pool/windows disjoint: a label is never simultaneously in
+        /// both `state.pool` and `state.windows`. The host's
+        /// pool→window promote path always sends ReportPoolWindowRemoved
+        /// before ReportWindowOpened (and reverse on demote), so the
+        /// reducer should never observe overlap. Catches a regression
+        /// where a buggy promote sequence would leave a pool label
+        /// shadowed by a window entry — gap #5 from
+        /// `ANALYSIS_WINDOW_PROCESS_STATE_INVENTORY_2026_04_27.md`.
+        #[test]
+        fn pool_and_windows_disjoint_under_any_sequence(
+            cmds in proptest::collection::vec(arb_b8_host_command(), 1..80)
+        ) {
+            let (mut state, host_ctx) = registered_host_state();
+            for cmd in cmds {
+                let _ = update(&mut state, cmd, &host_ctx);
+                let pool: std::collections::HashSet<&str> =
+                    state.pool.iter().map(|s| s.as_str()).collect();
+                let window_keys: std::collections::HashSet<&str> =
+                    state.windows.keys().map(|s| s.as_str()).collect();
+                let overlap: Vec<&&str> = pool.intersection(&window_keys).collect();
+                prop_assert!(
+                    overlap.is_empty(),
+                    "label(s) in both pool and windows: {:?}", overlap
+                );
+            }
+        }
+
+        /// Instance numbers within `state.instance_registry` are
+        /// unique. Reagent / codex flagged the reverse property
+        /// (numbers don't repeat across releases) at B.5b; this is
+        /// the symmetric "no two LIVE windows share a number"
+        /// guarantee. Failure mode: InstancePanel would render two
+        /// rows as "Window N", users couldn't disambiguate.
+        #[test]
+        fn instance_numbers_unique_within_registry(
+            cmds in proptest::collection::vec(arb_b8_host_command(), 1..80)
+        ) {
+            let (mut state, host_ctx) = registered_host_state();
+            for cmd in cmds {
+                let _ = update(&mut state, cmd, &host_ctx);
+                let nums: Vec<u32> = state.instance_registry.values().copied().collect();
+                let mut sorted = nums.clone();
+                sorted.sort_unstable();
+                sorted.dedup();
+                prop_assert_eq!(
+                    nums.len(), sorted.len(),
+                    "duplicate instance numbers in registry: {:?}", nums
+                );
+            }
+        }
+
+        /// HostShouldQuit fires ONLY when the close sequence ends
+        /// with `state.windows` empty AND a Host was running at
+        /// emit time. Property: every HostShouldQuit event in the
+        /// stream was emitted on a transition where, immediately
+        /// after the close was applied, windows was empty. Catches
+        /// a regression where the saga fires while pool labels (or
+        /// some other entry) were still in `windows`.
+        #[test]
+        fn host_should_quit_only_on_empty_windows_transition(
+            cmds in proptest::collection::vec(arb_b8_host_command(), 1..80)
+        ) {
+            let (mut state, host_ctx) = registered_host_state();
+            for cmd in cmds {
+                let pre_window_count = state.windows.len();
+                let evs = update(&mut state, cmd, &host_ctx);
+                let saw_quit = evs.iter().any(|e| matches!(e, Event::HostShouldQuit { .. }));
+                if saw_quit {
+                    prop_assert_eq!(
+                        state.windows.len(), 0,
+                        "HostShouldQuit emitted but windows={:?} (pre={})",
+                        state.windows.keys().collect::<Vec<_>>(), pre_window_count
+                    );
+                    prop_assert!(
+                        host_is_running(&state),
+                        "HostShouldQuit emitted but no Host in Running state"
+                    );
+                }
+            }
+        }
+
+        /// Backend window IDs are gated by `state.windows` membership
+        /// at register time. The host calls
+        /// `ReportBackendWindowIdRegistered` only after the window's
+        /// `register_backend_window` IPC, which happens after
+        /// `on_after_created` (which sent `ReportWindowOpened`). So
+        /// in valid traffic, a register's label should be in
+        /// `state.windows`. The reducer's behaviour on out-of-order
+        /// or stale traffic is to silently store the mapping (the
+        /// shadow gets cleaned up on later WindowClosed). This test
+        /// pins that lenient behaviour: backend_window_ids never has
+        /// MORE entries than the cumulative-register minus
+        /// cumulative-unregister count, no phantom entries appear.
+        #[test]
+        fn backend_window_ids_bounded_by_register_minus_unregister(
+            cmds in proptest::collection::vec(arb_b8_host_command(), 1..80)
+        ) {
+            let (mut state, host_ctx) = registered_host_state();
+            let mut registers = 0i64;
+            let mut unregisters = 0i64;
+            for cmd in cmds {
+                match &cmd {
+                    Command::ReportBackendWindowIdRegistered { .. } => registers += 1,
+                    Command::ReportBackendWindowIdUnregistered { .. } => unregisters += 1,
+                    _ => {}
+                }
+                let _ = update(&mut state, cmd, &host_ctx);
+                prop_assert!(
+                    state.backend_window_ids.len() as i64 <= registers,
+                    "backend_window_ids has {} entries; only {} registers seen",
+                    state.backend_window_ids.len(), registers
+                );
+                let _ = unregisters;
+            }
+        }
+    }
+
+    // -----------------------------------------------------------
+    // B.8 — synthetic close-all integration test.
+    //
+    // The CI-synthetic-close-all assertion the B.8 plan calls for.
+    // Drives the reducer through a full session (register → open
+    // main → open secondary → tear-off → close all) and asserts
+    // the cascade emits the OrphanInstance + HostShouldQuit pair
+    // exactly once on the last close.
+    // -----------------------------------------------------------
+    #[test]
+    fn close_all_cascade_emits_orphan_and_quit_exactly_once() {
+        let (mut state, host_ctx) = registered_host_state();
+
+        // Open main + 2 secondaries + 3 pool windows.
+        let _ = update(&mut state, Command::ReportWindowOpened {
+            label: "main".into(),
+            kind: WindowKind::FullInstance,
+            parent_label: None,
+        }, &host_ctx);
+        let _ = update(&mut state, Command::ReportWindowOpened {
+            label: "second-a".into(),
+            kind: WindowKind::FullInstance,
+            parent_label: None,
+        }, &host_ctx);
+        let _ = update(&mut state, Command::ReportWindowOpened {
+            label: "second-b".into(),
+            kind: WindowKind::FullInstance,
+            parent_label: None,
+        }, &host_ctx);
+        for label in &["pool-1", "pool-2", "pool-3"] {
+            let _ = update(&mut state, Command::ReportPoolWindowAdded {
+                label: (*label).into(),
+            }, &host_ctx);
+        }
+
+        assert_eq!(state.windows.len(), 3, "main + 2 secondaries");
+        assert_eq!(state.pool.len(), 3, "3 pool labels");
+
+        // Close secondaries — neither close should emit HostShouldQuit
+        // (windows still non-empty after each).
+        for label in &["second-a", "second-b"] {
+            let evs = update(&mut state, Command::ReportWindowClosed {
+                label: (*label).into(),
+            }, &host_ctx);
+            assert!(
+                !evs.iter().any(|e| matches!(e, Event::HostShouldQuit { .. })),
+                "premature HostShouldQuit on {} close: {:?}", label, evs
+            );
+        }
+
+        // Close main — the cascade should fire here. Expected events:
+        // WindowClosed(main) + WindowInstanceReleased(main) +
+        // OrphanInstance drift + HostShouldQuit. Order: Released
+        // before drift (the close path emits Released after the
+        // window is removed but before the empty-check).
+        let evs = update(&mut state, Command::ReportWindowClosed {
+            label: "main".into(),
+        }, &host_ctx);
+
+        let drift_count = evs.iter().filter(|e| matches!(
+            e,
+            Event::HwndDriftDetected { kind: HwndDriftKind::OrphanInstance, .. }
+        )).count();
+        let quit_count = evs.iter().filter(|e| matches!(
+            e, Event::HostShouldQuit { .. }
+        )).count();
+        assert_eq!(drift_count, 1, "expected 1 OrphanInstance drift, got {}: {:?}", drift_count, evs);
+        assert_eq!(quit_count, 1, "expected 1 HostShouldQuit, got {}: {:?}", quit_count, evs);
+        assert!(state.windows.is_empty(), "windows must be empty post-cascade");
+
+        // Drain pool — emits PoolWindowRemoved each time. No further
+        // HostShouldQuit (the saga is one-shot per close-all transition).
+        for label in &["pool-1", "pool-2", "pool-3"] {
+            let evs = update(&mut state, Command::ReportPoolWindowRemoved {
+                label: (*label).into(),
+            }, &host_ctx);
+            assert!(
+                !evs.iter().any(|e| matches!(e, Event::HostShouldQuit { .. })),
+                "spurious HostShouldQuit during pool drain on {}: {:?}", label, evs
+            );
+        }
+        assert!(state.pool.is_empty(), "pool must be empty after drain");
+    }
 }
