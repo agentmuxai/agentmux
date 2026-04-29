@@ -1,6 +1,6 @@
-# Phase B roadmap (canonical, post-#595)
+# Phase B roadmap (canonical, post-#605)
 
-**Status:** Active reference. Updated 2026-04-28 after PR #595 (B.6 — single-instance mutex) merged. B.5 + B.6 complete; B.7 (frontend cutover) is next.
+**Status:** **Phase B is DONE** as of 2026-04-29 (PR #605 merged). All sub-phases (B.1–B.9 + B.8 exit) shipped. Next: Phase D (durability/resync) → Phase E (srv reducer) → Phase F (host reducer + scaffolding retirement). See `docs/retro/multi-reducer-status-2026-04-29.md` for the full architectural status and forward plan.
 **Author:** AgentA.
 **Read first if resuming Phase B work**, then `b5-migration-architecture-2026-04-28.md` and `multi-reducer-proposal-2026-04-28.md`.
 
@@ -52,9 +52,9 @@ Pre-Phase-B  ──► host owns 13 HashMaps  ◄── started here
                         ▼
               ✓ B.7.3.3 — retire window-instances-changed bespoke channel (#604)
                         ▼
-              ◄── HERE. B.8 remaining for Phase B exit.
-              B.8     ── Phase B exit (delete obsolete defensive code,
-                         add property tests, --diag tool, CI smoke)
+              ✓ B.8 — Phase B exit: proptests + --diag wrr + sweep + broadcast bus (#605)
+                        ▼
+                  Phase B done — golden vision (intermediate form)
                         │
                         ▼
                   Phase B done — golden vision (intermediate form)
@@ -101,12 +101,13 @@ See `b5-migration-architecture-2026-04-28.md` for why `browsers` and pool maps c
 - **B.7.3.2 (done — PR #603)**: typed events promoted to authoritative for `openWindowLabelsAtom`, `openWindowEntriesAtom`, `windowCountAtom`. Reducer maintains in-memory `knownEntries` map; `recomputeAtoms()` runs after every apply. Bespoke `window-instances-changed` listener gated by `!launcherEventsActive()` — only fires in `task dev` / no-launcher mode. `seedKnownEntriesFromSnapshot` merges (doesn't clobber) — protects against the race where typed events arrive between snapshot fetch and seed (codex P1 fix).
 - **B.7.3.3 (done — PR #604)**: bespoke `window-instances-changed` channel + 4 sync emit sites retired. Typed launcher events are the SOLE source for InstancePanel state. Net deletion ~210 LoC. Codex P2 from #603 (pre-seed close tombstone) folded in. Codex P2 follow-up #604 (pre-seed close recompute when WindowOpened-then-WindowClosed both arrive pre-seed) folded in.
 
-### B.8 — Phase B exit (1-2 PRs)
+### B.8 — Phase B exit (done — PR #605)
 
-- Property tests for invariants from `ANALYSIS_WINDOW_PROCESS_STATE_INVENTORY_2026_04_27.md`.
-- `agentmux.exe --diag` Tool client that prints launcher state.
-- CI synthetic close-all + assertion.
-- Delete obsolete defensive code (e.g., host-side `app-init.ts` retries that polling drove).
+- 5 new launcher reducer property tests + 1 deterministic close-all integration test (60 launcher tests total). Invariants: pool/windows disjoint, instance numbers unique, HostShouldQuit only on empty-windows transition, backend_window_ids bounded, close-all cascade emits OrphanInstance + HostShouldQuit exactly once.
+- `agentmux.exe --diag wrr` Tool client — connects to running instance's pipe, captures events for 2s, prints kind-grouped summary + per-event detail.
+- IPC server `tokio::sync::broadcast` bus — reducer events broadcast to all connections (codex P1 fix); cross-process observability for `--diag` and future Tool clients.
+- Diag sends `Command::Goodbye` on exit so PID records mark Exited (codex P2 fix).
+- Dead code sweep: `getApi().getWindowCount` chain (frontend + IPC dispatch + state helper) removed post-B.7.3.3.
 
 ## Beyond Phase B
 
