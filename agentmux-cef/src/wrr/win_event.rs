@@ -23,7 +23,7 @@
 
 use std::sync::{Arc, OnceLock};
 
-use windows_sys::Win32::Foundation::{HWND, POINT, RECT};
+use windows_sys::Win32::Foundation::{HWND, RECT};
 use windows_sys::Win32::Graphics::Gdi::{
     EnumDisplayMonitors, GetMonitorInfoW, HDC, HMONITOR, MONITORINFO,
 };
@@ -418,12 +418,4 @@ fn enumerate_monitors() -> Vec<agentmux_common::ipc::Rect> {
         EnumDisplayMonitors(std::ptr::null_mut(), std::ptr::null(), Some(enum_proc), 0);
     }
     MONITORS.with(|m| m.borrow().clone())
-}
-
-#[allow(dead_code)]
-fn _unused_point() {
-    // Silence unused warning from POINT import — keep the import
-    // since EnumDisplayMonitors signature evolves between
-    // windows-sys releases and we may need POINT later.
-    let _: POINT = unsafe { std::mem::zeroed() };
 }

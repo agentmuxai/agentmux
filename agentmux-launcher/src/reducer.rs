@@ -1935,6 +1935,84 @@ mod tests {
     }
 
     #[test]
+    fn wrr_orphan_destroy_runs_even_with_stale_pending_entry() {
+        // reagent #600 P1: the dual-source design (WinEvent CREATE
+        // hook with label_hint=None, then explicit on_after_created
+        // with label_hint=Some(label)) can leave a stale entry in
+        // `pending_hwnds` AFTER the mirror is linked. Pre-fix,
+        // `apply_hwnd_destroyed` early-returned on the stale
+        // pending entry and skipped the OrphanDestroy chain. Post-
+        // fix, the link drains pending and destroy runs the chain
+        // correctly. This test reproduces the exact race.
+        let (mut state, c) = registered_host_state();
+        let _ = update(
+            &mut state,
+            Command::ReportMonitorTopologyChanged {
+                rects: vec![Rect { left: 0, top: 0, right: 1920, bottom: 1080 }],
+            },
+            &c,
+        );
+        let _ = update(
+            &mut state,
+            Command::ReportWindowOpened {
+                label: "w1".into(),
+                kind: WindowKind::FullInstance,
+                parent_label: None,
+            },
+            &c,
+        );
+        // Step 1: WinEvent CREATE fires first with label_hint=None.
+        // No mirror match → stash in pending_hwnds.
+        let _ = update(
+            &mut state,
+            Command::ReportHwndOpened {
+                hwnd: 0xAA,
+                class_name: "Chrome_WidgetWin_1".into(),
+                title: "".into(),
+                label_hint: None,
+            },
+            &c,
+        );
+        assert!(state.pending_hwnds.contains_key(&0xAA), "pending entry expected after step 1");
+        // Step 2: on_after_created fires with label_hint=Some(w1).
+        // Should link the mirror AND drain the stale pending.
+        let _ = update(
+            &mut state,
+            Command::ReportHwndOpened {
+                hwnd: 0xAA,
+                class_name: "Chrome_WidgetWin_1".into(),
+                title: "".into(),
+                label_hint: Some("w1".into()),
+            },
+            &c,
+        );
+        assert!(
+            !state.pending_hwnds.contains_key(&0xAA),
+            "stale pending entry should be drained on link, but still present: {:?}",
+            state.pending_hwnds
+        );
+        // Step 3: renderer crash → ReportHwndDestroyed.
+        let evs = update(
+            &mut state,
+            Command::ReportHwndDestroyed { hwnd: 0xAA },
+            &c,
+        );
+        // Even with the (drained) pending entry history, the
+        // orphan-destroy chain must run.
+        assert!(
+            evs.iter()
+                .any(|e| matches!(e, Event::HwndDriftDetected { kind: HwndDriftKind::OrphanDestroy, .. })),
+            "OrphanDestroy must fire on renderer crash even after dual-source link, got {:?}",
+            evs
+        );
+        assert!(
+            evs.iter().any(|e| matches!(e, Event::WindowClosed { .. })),
+            "WindowClosed must fire so frontend prunes its atoms, got {:?}",
+            evs
+        );
+    }
+
+    #[test]
     fn wrr_orphan_destroy_emits_window_closed_and_instance_released() {
         // reagent #600 P1: a renderer crash that takes the HWND
         // with it must produce the same shutdown events the normal

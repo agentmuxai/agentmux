@@ -70,9 +70,20 @@ pub fn apply_hwnd_opened(
         // it before calling `state.bump_version()` (which needs &mut
         // self on State). Result tells us which branch to take
         // outside the borrow.
+        //
+        // `drain_pending` is set when the link succeeds so we can
+        // remove a matching stale `pending_hwnds` entry AFTER
+        // releasing the mirror borrow. The dual-source design
+        // (WinEvent CREATE + on_after_created) can leave a stale
+        // pending entry; without draining it,
+        // `apply_hwnd_destroyed` would early-return on the
+        // stale entry and skip the orphan-destroy chain.
+        // (reagent #600 P1.)
+        let mut drain_pending = false;
         let outcome: HwndOpenedOutcome = match state.windows.get_mut(label) {
             Some(mirror) if mirror.hwnd.is_none() => {
                 mirror.hwnd = Some(hwnd);
+                drain_pending = true;
                 HwndOpenedOutcome::Linked
             }
             Some(mirror) if mirror.hwnd == Some(hwnd) => {
@@ -83,6 +94,12 @@ pub fn apply_hwnd_opened(
                 // explicitly (label_hint=Some, this path). Or
                 // vice versa under timing variation. No-op,
                 // no drift. (codex #600 P2.)
+                //
+                // Drain any matching stale pending entry. Without
+                // this, `apply_hwnd_destroyed` would early-return
+                // on the stale pending entry instead of running
+                // the orphan-destroy chain. (reagent #600 P1.)
+                drain_pending = true;
                 HwndOpenedOutcome::Linked
             }
             Some(mirror) => {
@@ -90,6 +107,9 @@ pub fn apply_hwnd_opened(
             }
             None => HwndOpenedOutcome::NoMatchingLabel,
         };
+        if drain_pending {
+            state.pending_hwnds.remove(&hwnd);
+        }
         match outcome {
             HwndOpenedOutcome::Linked => return vec![],
             HwndOpenedOutcome::DoubleLinkedWith(existing) => {
@@ -136,10 +156,13 @@ pub fn apply_hwnd_opened(
 ///   3. HWND was pending (never linked) → drop the pending entry,
 ///      no drift (it never claimed to be a real window).
 pub fn apply_hwnd_destroyed(state: &mut State, hwnd: u64) -> Vec<Event> {
-    // Case 3: pending → just drop.
-    if state.pending_hwnds.remove(&hwnd).is_some() {
-        return vec![];
-    }
+    // Drain any pending entry first. Don't early-return: the
+    // dual-source design (WinEvent CREATE + explicit
+    // on_after_created link) can leave a stale pending entry
+    // co-existing with a linked mirror — we still need to run
+    // the mirror check below to fire the orphan-destroy chain
+    // on a renderer crash. (reagent #600 P1.)
+    let _ = state.pending_hwnds.remove(&hwnd);
 
     // Find the label whose mirror is linked to this HWND, if any.
     let orphan_label: Option<String> = state
