@@ -75,6 +75,16 @@ pub fn apply_hwnd_opened(
                 mirror.hwnd = Some(hwnd);
                 HwndOpenedOutcome::Linked
             }
+            Some(mirror) if mirror.hwnd == Some(hwnd) => {
+                // Same HWND already linked. This is a benign
+                // duplicate from the dual-source design: WinEvent
+                // CREATE hook reports first (label_hint=None,
+                // pending), then `on_after_created` reports
+                // explicitly (label_hint=Some, this path). Or
+                // vice versa under timing variation. No-op,
+                // no drift. (codex #600 P2.)
+                HwndOpenedOutcome::Linked
+            }
             Some(mirror) => {
                 HwndOpenedOutcome::DoubleLinkedWith(mirror.hwnd.unwrap_or(0))
             }
@@ -89,7 +99,7 @@ pub fn apply_hwnd_opened(
                     label: Some(label.to_string()),
                     hwnd: Some(hwnd),
                     detail: format!(
-                        "ReportHwndOpened label_hint={} already linked to hwnd={}",
+                        "ReportHwndOpened label_hint={} already linked to a different hwnd={}",
                         label, existing
                     ),
                     severity: severity_for(HwndDriftKind::HwndWithoutBrowser),

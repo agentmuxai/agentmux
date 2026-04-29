@@ -1842,6 +1842,99 @@ mod tests {
     }
 
     #[test]
+    fn wrr_duplicate_hwnd_open_for_same_label_is_idempotent() {
+        // codex #600 P2: ReportHwndOpened arrives twice (once from
+        // the WinEvent CREATE hook with label_hint=None, then again
+        // from CEF's on_after_created with label_hint=Some(label)).
+        // The second report carries the SAME hwnd that's now
+        // linked to the mirror. Should be a no-op, NOT drift.
+        let (mut state, c) = registered_host_state();
+        let _ = update(
+            &mut state,
+            Command::ReportWindowOpened {
+                label: "w1".into(),
+                kind: WindowKind::FullInstance,
+                parent_label: None,
+            },
+            &c,
+        );
+        // First link.
+        let evs1 = update(
+            &mut state,
+            Command::ReportHwndOpened {
+                hwnd: 0xAA,
+                class_name: "Chrome_WidgetWin_1".into(),
+                title: "".into(),
+                label_hint: Some("w1".into()),
+            },
+            &c,
+        );
+        assert!(
+            evs1.is_empty(),
+            "first ReportHwndOpened should silently link, got {:?}", evs1
+        );
+        // Duplicate: same label, same hwnd.
+        let evs2 = update(
+            &mut state,
+            Command::ReportHwndOpened {
+                hwnd: 0xAA,
+                class_name: "Chrome_WidgetWin_1".into(),
+                title: "".into(),
+                label_hint: Some("w1".into()),
+            },
+            &c,
+        );
+        assert!(
+            evs2.is_empty(),
+            "duplicate ReportHwndOpened with same hwnd must be no-op, got {:?}", evs2
+        );
+    }
+
+    #[test]
+    fn wrr_double_link_with_different_hwnd_for_same_label_emits_drift() {
+        // The non-duplicate path: a second ReportHwndOpened for
+        // the same label but a DIFFERENT HWND is genuine drift —
+        // host is reporting a related popup or there's a real bug.
+        let (mut state, c) = registered_host_state();
+        let _ = update(
+            &mut state,
+            Command::ReportWindowOpened {
+                label: "w1".into(),
+                kind: WindowKind::FullInstance,
+                parent_label: None,
+            },
+            &c,
+        );
+        let _ = update(
+            &mut state,
+            Command::ReportHwndOpened {
+                hwnd: 0xAA,
+                class_name: "Chrome_WidgetWin_1".into(),
+                title: "".into(),
+                label_hint: Some("w1".into()),
+            },
+            &c,
+        );
+        let evs = update(
+            &mut state,
+            Command::ReportHwndOpened {
+                hwnd: 0xBB,
+                class_name: "Chrome_WidgetWin_1".into(),
+                title: "".into(),
+                label_hint: Some("w1".into()),
+            },
+            &c,
+        );
+        assert!(
+            evs.iter().any(|e| matches!(
+                e,
+                Event::HwndDriftDetected { kind: HwndDriftKind::HwndWithoutBrowser, .. }
+            )),
+            "different HWND for same label must fire drift, got {:?}", evs
+        );
+    }
+
+    #[test]
     fn wrr_orphan_destroy_emits_window_closed_and_instance_released() {
         // reagent #600 P1: a renderer crash that takes the HWND
         // with it must produce the same shutdown events the normal
