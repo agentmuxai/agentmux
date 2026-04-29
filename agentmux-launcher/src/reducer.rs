@@ -187,6 +187,14 @@ pub fn update(state: &mut State, cmd: Command, ctx: &Ctx) -> Vec<Event> {
             }
             crate::wrr::apply_monitor_topology_changed(state, rects)
         }
+        // Phase D.1 — read-only snapshot of canonical state. Any
+        // registered client can ask; no host-only gate. Reducer state
+        // is unchanged by this command (it's a query, not a mutation),
+        // but we still bump `event_version` so the snapshot's version
+        // is monotonically distinct from prior events — a subscriber
+        // applying snapshot + delta events knows the snapshot's
+        // version is the "as-of" point.
+        Command::GetSnapshot => handle_get_snapshot(state),
     }
 }
 
@@ -497,6 +505,61 @@ fn host_is_running(state: &State) -> bool {
     })
 }
 
+/// Phase D.1 — clone the reducer's canonical state into a `Snapshot`
+/// event. Read-only; doesn't mutate state except for bumping
+/// `event_version` so the snapshot's version is monotonically
+/// distinct from prior events (subscribers applying snapshot + delta
+/// events know the snapshot is "as-of" this version).
+///
+/// Sorted-vec serialization (rather than HashMap-as-JSON-object) for:
+/// 1. Deterministic ordering across snapshots (idempotent diffs in
+///    operator output, easier test assertions).
+/// 2. Wire compatibility with `Vec<(K, V)>` decoders that don't
+///    require canonical-string-keyed JSON objects.
+fn handle_get_snapshot(state: &mut State) -> Vec<Event> {
+    let v = state.bump_version();
+
+    let mut windows: Vec<agentmux_common::ipc::WindowSnapshot> = state
+        .windows
+        .values()
+        .map(|w| agentmux_common::ipc::WindowSnapshot {
+            label: w.label.clone(),
+            kind: w.kind,
+            parent_label: w.parent_label.clone(),
+            hwnd: w.hwnd,
+            visible: w.visible,
+            iconic: w.iconic,
+            last_rect: w.last_rect,
+            foregrounded_since_open: w.foregrounded_since_open,
+        })
+        .collect();
+    windows.sort_by(|a, b| a.label.cmp(&b.label));
+
+    let mut pool: Vec<String> = state.pool.iter().cloned().collect();
+    pool.sort();
+
+    let mut instance_registry: Vec<(String, u32)> =
+        state.instance_registry.iter().map(|(k, v)| (k.clone(), *v)).collect();
+    instance_registry.sort_by(|a, b| a.0.cmp(&b.0));
+
+    let mut backend_window_ids: Vec<(String, String)> = state
+        .backend_window_ids
+        .iter()
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect();
+    backend_window_ids.sort_by(|a, b| a.0.cmp(&b.0));
+
+    vec![Event::Snapshot {
+        version: v,
+        lifecycle: state.lifecycle,
+        windows,
+        pool,
+        instance_registry,
+        backend_window_ids,
+        monitors: state.monitors.clone(),
+    }]
+}
+
 fn handle_register(
     state: &mut State,
     ctx: &Ctx,
@@ -770,6 +833,7 @@ mod tests {
             | Event::HwndDriftDetected { version, .. }
             | Event::CorrectiveWindowMove { version, .. }
             | Event::HostShouldQuit { version, .. }
+            | Event::Snapshot { version, .. }
             | Event::Error { version, .. } => *version,
         }
     }
@@ -2515,5 +2579,106 @@ mod tests {
             );
         }
         assert!(state.pool.is_empty(), "pool must be empty after drain");
+    }
+
+    // -----------------------------------------------------------
+    // Phase D.1 — GetSnapshot tests
+    // -----------------------------------------------------------
+
+    #[test]
+    fn get_snapshot_returns_canonical_state_in_one_event() {
+        let (mut state, host_ctx) = registered_host_state();
+
+        // Drive some state into the reducer.
+        let _ = update(&mut state, Command::ReportWindowOpened {
+            label: "main".into(),
+            kind: WindowKind::FullInstance,
+            parent_label: None,
+        }, &host_ctx);
+        let _ = update(&mut state, Command::ReportWindowOpened {
+            label: "window-abc".into(),
+            kind: WindowKind::FullInstance,
+            parent_label: None,
+        }, &host_ctx);
+        let _ = update(&mut state, Command::ReportPoolWindowAdded {
+            label: "pool-x".into(),
+        }, &host_ctx);
+        let _ = update(&mut state, Command::ReportBackendWindowIdRegistered {
+            label: "main".into(),
+            window_id: "uuid-main".into(),
+        }, &host_ctx);
+
+        // Snapshot.
+        let evs = update(&mut state, Command::GetSnapshot, &host_ctx);
+        assert_eq!(evs.len(), 1, "expected exactly 1 Snapshot event, got {:?}", evs);
+
+        let Event::Snapshot {
+            version,
+            lifecycle: _,
+            windows,
+            pool,
+            instance_registry,
+            backend_window_ids,
+            monitors: _,
+        } = &evs[0] else {
+            panic!("expected Snapshot, got {:?}", evs[0]);
+        };
+
+        // Sorted ordering: "main" < "window-abc".
+        assert_eq!(windows.len(), 2);
+        assert_eq!(windows[0].label, "main");
+        assert_eq!(windows[1].label, "window-abc");
+        assert_eq!(pool, &vec!["pool-x".to_string()]);
+        // instance_registry has main=1 (pre-seed) + window-abc=2.
+        assert_eq!(instance_registry.len(), 2);
+        assert_eq!(instance_registry[0], ("main".to_string(), 1));
+        assert_eq!(backend_window_ids, &vec![("main".to_string(), "uuid-main".to_string())]);
+        // Snapshot's version is monotonic w.r.t. earlier events.
+        assert!(*version > 0, "snapshot version must be non-zero (was bump_version'd)");
+    }
+
+    #[test]
+    fn get_snapshot_does_not_mutate_canonical_state() {
+        let (mut state, host_ctx) = registered_host_state();
+        let _ = update(&mut state, Command::ReportWindowOpened {
+            label: "main".into(),
+            kind: WindowKind::FullInstance,
+            parent_label: None,
+        }, &host_ctx);
+
+        let pre_windows = state.windows.clone();
+        let pre_pool = state.pool.clone();
+        let pre_instance_registry = state.instance_registry.clone();
+        let pre_backend_window_ids = state.backend_window_ids.clone();
+        let pre_lifecycle = state.lifecycle;
+
+        let _ = update(&mut state, Command::GetSnapshot, &host_ctx);
+
+        assert_eq!(state.windows, pre_windows);
+        assert_eq!(state.pool, pre_pool);
+        assert_eq!(state.instance_registry, pre_instance_registry);
+        assert_eq!(state.backend_window_ids, pre_backend_window_ids);
+        assert_eq!(state.lifecycle, pre_lifecycle);
+    }
+
+    #[test]
+    fn get_snapshot_works_for_non_host_clients() {
+        // Tool clients (e.g. --diag wrr) should be able to query
+        // snapshots — host-only gate doesn't apply.
+        let mut state = State::default();
+        let _ = update(
+            &mut state,
+            Command::Register {
+                kind: ClientKind::Tool,
+                pid: 99,
+                version: "diag".into(),
+            },
+            &ctx(1),
+        );
+        let tool_ctx = ctx_with_pid(1, 99);
+
+        let evs = update(&mut state, Command::GetSnapshot, &tool_ctx);
+        assert_eq!(evs.len(), 1);
+        assert!(matches!(evs[0], Event::Snapshot { .. }));
     }
 }
