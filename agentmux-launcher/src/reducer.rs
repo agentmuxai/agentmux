@@ -64,6 +64,13 @@ pub struct Ctx {
     /// on a connection (which MUST be Register, enforced server-
     /// side). (codex P1 + gemini HIGH PR #574 round-1.)
     pub registered_pid: Option<u32>,
+    /// Phase B.9.1 — monotonic milliseconds since some reference
+    /// epoch (the IPC server uses launcher start as the epoch).
+    /// Used by the WRR arm for per-window observability timestamps
+    /// (`last_foreground_at_ms`, `pending_hwnds[hwnd].arrived_at_ms`).
+    /// Distinct from `now_rfc3339` (wall clock) because operators
+    /// reading `--diag wrr` want age, not absolute time.
+    pub now_ms: u64,
 }
 
 /// Apply one Command to State, returning the resulting Events. State
@@ -133,6 +140,52 @@ pub fn update(state: &mut State, cmd: Command, ctx: &Ctx) -> Vec<Event> {
                 return vec![err];
             }
             handle_report_backend_window_id_unregistered(state, label)
+        }
+        // Phase B.9.1 (WRR) — Win32 reality events. Host-only
+        // because only the host installs the SetWinEventHook /
+        // wndproc wrapper. Same enforce-host pattern as the other
+        // observability reports.
+        Command::ReportHwndOpened { hwnd, class_name, title, label_hint } => {
+            if let Some(err) = enforce_host_only(state, ctx, "ReportHwndOpened") {
+                return vec![err];
+            }
+            crate::wrr::apply_hwnd_opened(state, hwnd, class_name, title, label_hint, ctx.now_ms)
+        }
+        Command::ReportHwndDestroyed { hwnd } => {
+            if let Some(err) = enforce_host_only(state, ctx, "ReportHwndDestroyed") {
+                return vec![err];
+            }
+            crate::wrr::apply_hwnd_destroyed(state, hwnd)
+        }
+        Command::ReportHwndVisibilityChanged { hwnd, visible } => {
+            if let Some(err) = enforce_host_only(state, ctx, "ReportHwndVisibilityChanged") {
+                return vec![err];
+            }
+            crate::wrr::apply_hwnd_visibility_changed(state, hwnd, visible)
+        }
+        Command::ReportHwndForegroundChanged { hwnd } => {
+            if let Some(err) = enforce_host_only(state, ctx, "ReportHwndForegroundChanged") {
+                return vec![err];
+            }
+            crate::wrr::apply_hwnd_foreground_changed(state, hwnd, ctx.now_ms)
+        }
+        Command::ReportHwndIconicChanged { hwnd, iconic } => {
+            if let Some(err) = enforce_host_only(state, ctx, "ReportHwndIconicChanged") {
+                return vec![err];
+            }
+            crate::wrr::apply_hwnd_iconic_changed(state, hwnd, iconic)
+        }
+        Command::ReportHwndPositionChanged { hwnd, rect } => {
+            if let Some(err) = enforce_host_only(state, ctx, "ReportHwndPositionChanged") {
+                return vec![err];
+            }
+            crate::wrr::apply_hwnd_position_changed(state, hwnd, rect)
+        }
+        Command::ReportMonitorTopologyChanged { rects } => {
+            if let Some(err) = enforce_host_only(state, ctx, "ReportMonitorTopologyChanged") {
+                return vec![err];
+            }
+            crate::wrr::apply_monitor_topology_changed(state, rects)
         }
     }
 }
@@ -309,6 +362,16 @@ fn handle_report_window_opened(
             kind,
             parent_label: parent_label.clone(),
             opened_at: ctx.now_rfc3339.clone(),
+            // Phase B.9.1 — observability axis defaults; populated
+            // later by the WRR `ReportHwnd*` arms when the host's
+            // Win32 hooks fire. Pre-B.9 (no host hooks installed)
+            // these stay at defaults — drift checks tolerate this.
+            hwnd: None,
+            visible: false,
+            iconic: false,
+            last_rect: None,
+            last_foreground_at_ms: None,
+            foregrounded_since_open: false,
         },
     );
     let mut out = Vec::with_capacity(2);
@@ -488,6 +551,7 @@ mod tests {
             now_rfc3339: "2026-04-28T00:00:00Z".to_string(),
             conn_id,
             registered_pid: None,
+            now_ms: 0,
         }
     }
 
@@ -496,6 +560,7 @@ mod tests {
             now_rfc3339: "2026-04-28T00:00:00Z".to_string(),
             conn_id,
             registered_pid: Some(pid),
+            now_ms: 0,
         }
     }
 
@@ -639,6 +704,7 @@ mod tests {
             | Event::BackendWindowIdRegistered { version, .. }
             | Event::BackendWindowIdUnregistered { version, .. }
             | Event::DriftDetected { version, .. }
+            | Event::HwndDriftDetected { version, .. }
             | Event::Error { version, .. } => *version,
         }
     }
