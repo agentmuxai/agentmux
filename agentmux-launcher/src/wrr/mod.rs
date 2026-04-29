@@ -144,10 +144,20 @@ pub fn apply_hwnd_destroyed(state: &mut State, hwnd: u64) -> Vec<Event> {
         // what CEF thinks. Future `ReportWindowClosed` for the
         // label will be a no-op (closed-on-missing is silently
         // tolerated upstream).
+        //
+        // Emit the SAME shutdown events the normal close path
+        // (`handle_report_window_closed`) would emit:
+        // `WindowClosed` (so subscribers prune mirrors / atoms)
+        // and `WindowInstanceReleased` (so the InstancePanel
+        // count drops). Without these the frontend would show a
+        // stale window after a renderer crash. Order: drift first
+        // (so logs lead with "this is bad"), then the shutdown
+        // events. (reagent #600 P1.)
         let _ = state.windows.remove(&label);
-        let _ = state.instance_registry.remove(&label);
-        let v = state.bump_version();
-        return vec![Event::HwndDriftDetected {
+        let released_num = state.instance_registry.remove(&label);
+        let _ = state.backend_window_ids.remove(&label);
+        let v_drift = state.bump_version();
+        let drift = Event::HwndDriftDetected {
             kind: HwndDriftKind::OrphanDestroy,
             label: Some(label.clone()),
             hwnd: Some(hwnd),
@@ -156,8 +166,23 @@ pub fn apply_hwnd_destroyed(state: &mut State, hwnd: u64) -> Vec<Event> {
                 label
             ),
             severity: severity_for(HwndDriftKind::OrphanDestroy),
-            version: v,
-        }];
+            version: v_drift,
+        };
+        let v_closed = state.bump_version();
+        let closed = Event::WindowClosed {
+            label: label.clone(),
+            version: v_closed,
+        };
+        let mut out = vec![drift, closed];
+        if let Some(num) = released_num {
+            let v_released = state.bump_version();
+            out.push(Event::WindowInstanceReleased {
+                label,
+                num,
+                version: v_released,
+            });
+        }
+        return out;
     }
 
     // Case 1 (or: HWND was already removed from a mirror by a

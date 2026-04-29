@@ -32,9 +32,11 @@ pub mod win_event;
 pub use win_event::{install_hooks, uninstall_hooks};
 
 #[cfg(not(target_os = "windows"))]
-pub fn install_hooks() {
+pub fn install_hooks(_state: std::sync::Arc<crate::state::AppState>) {
     // WRR is Windows-only — Phase 7 will revisit when cross-platform
-    // window-state mirroring lands.
+    // window-state mirroring lands. Stub matches the Windows signature
+    // so callers in main.rs compile across all targets without
+    // platform gating at the call site. (reagent #600 P1.)
 }
 
 #[cfg(not(target_os = "windows"))]

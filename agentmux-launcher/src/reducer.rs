@@ -1842,6 +1842,73 @@ mod tests {
     }
 
     #[test]
+    fn wrr_orphan_destroy_emits_window_closed_and_instance_released() {
+        // reagent #600 P1: a renderer crash that takes the HWND
+        // with it must produce the same shutdown events the normal
+        // close path would, otherwise the frontend keeps a stale
+        // window in its atoms after the crash.
+        let (mut state, c) = registered_host_state();
+        let _ = update(
+            &mut state,
+            Command::ReportMonitorTopologyChanged {
+                rects: vec![Rect { left: 0, top: 0, right: 1920, bottom: 1080 }],
+            },
+            &c,
+        );
+        let _ = update(
+            &mut state,
+            Command::ReportWindowOpened {
+                label: "w1".into(),
+                kind: WindowKind::FullInstance,
+                parent_label: None,
+            },
+            &c,
+        );
+        let _ = update(
+            &mut state,
+            Command::ReportHwndOpened {
+                hwnd: 0xAA,
+                class_name: "Chrome_WidgetWin_1".into(),
+                title: "".into(),
+                label_hint: Some("w1".into()),
+            },
+            &c,
+        );
+        // Renderer crashes — Win32 fires the destroy without CEF's
+        // close path running, so no ReportWindowClosed precedes it.
+        let evs = update(
+            &mut state,
+            Command::ReportHwndDestroyed { hwnd: 0xAA },
+            &c,
+        );
+
+        // All three: drift (operator alert) + WindowClosed
+        // (frontend prune) + WindowInstanceReleased (count drop).
+        assert!(
+            evs.iter()
+                .any(|e| matches!(e, Event::HwndDriftDetected { kind: HwndDriftKind::OrphanDestroy, .. })),
+            "expected OrphanDestroy drift, got {:?}", evs
+        );
+        assert!(
+            evs.iter().any(|e| matches!(
+                e,
+                Event::WindowClosed { label, .. } if label == "w1"
+            )),
+            "expected WindowClosed for w1, got {:?}", evs
+        );
+        assert!(
+            evs.iter().any(|e| matches!(
+                e,
+                Event::WindowInstanceReleased { label, .. } if label == "w1"
+            )),
+            "expected WindowInstanceReleased for w1, got {:?}", evs
+        );
+        // State pruned.
+        assert!(!state.windows.contains_key("w1"));
+        assert!(!state.instance_registry.contains_key("w1"));
+    }
+
+    #[test]
     fn wrr_off_monitor_with_no_known_monitors_emits_neither() {
         // No `ReportMonitorTopologyChanged` => state.monitors is
         // empty => we don't know what "off-monitor" means yet.
