@@ -70,9 +70,10 @@ pub async fn run_wrr_diag(launcher_exe_dir: &std::path::Path) -> Result<(), Stri
     write_half.flush().await
         .map_err(|e| format!("flush Register: {}", e))?;
 
-    // Read events for OBSERVATION_WINDOW. The launcher streams its
-    // event log on the connection; we collect everything that
-    // arrives in the window and print a summary.
+    // Read events for OBSERVATION_WINDOW. The launcher's IPC server
+    // (post-B.8) broadcasts every reducer event on a server-wide
+    // bus; this connection's fanout writes them to us. We collect
+    // everything that arrives in the window and print a summary.
     let reader = BufReader::new(read_half);
     let mut lines = reader.lines();
     let mut events: Vec<Event> = Vec::new();
@@ -100,6 +101,21 @@ pub async fn run_wrr_diag(launcher_exe_dir: &std::path::Path) -> Result<(), Stri
             }
             Err(_) => break, // timeout → observation window closed
         }
+    }
+
+    // Phase B.8 — send Goodbye so the server emits ProcessExited and
+    // marks our PID record as Exited. Without this, repeated
+    // `--diag wrr` invocations accumulate stale `Running` records;
+    // when Windows reuses a PID, the next Register fails with
+    // `AlreadyRegistered`. Best-effort: errors are non-fatal because
+    // we're about to exit anyway. (codex P2 PR #605.)
+    let goodbye = match serde_json::to_vec(&Command::Goodbye) {
+        Ok(mut b) => { b.push(b'\n'); b }
+        Err(_) => Vec::new(),
+    };
+    if !goodbye.is_empty() {
+        let _ = write_half.write_all(&goodbye).await;
+        let _ = write_half.flush().await;
     }
 
     print_summary(&events);
