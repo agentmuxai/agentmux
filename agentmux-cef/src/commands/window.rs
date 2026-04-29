@@ -473,14 +473,6 @@ pub fn get_instance_number(state: &Arc<AppState>, args: &serde_json::Value) -> s
     serde_json::json!(state.instance_num(label).unwrap_or(1))
 }
 
-/// Get the total window count.
-///
-/// Phase B.5c — uses `state.instance_count()` which reads from the
-/// launcher-authoritative shadow.
-pub fn get_window_count(state: &Arc<AppState>) -> serde_json::Value {
-    serde_json::json!(state.instance_count())
-}
-
 /// Register the backend window ID for a window label.
 /// Called by the frontend after it has initialized its backend Window object.
 /// Used by `on_before_close` to notify the backend when a secondary window closes.
