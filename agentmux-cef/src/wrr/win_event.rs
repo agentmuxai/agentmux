@@ -130,9 +130,13 @@ pub fn install_hooks(state: Arc<AppState>) {
         handles.push(HookHandle(h));
     }
 
+    let installed_count = handles.len();
     drop(handles);
 
-    tracing::info!("[wrr] installed {} WinEventHook range(s) for pid={}", 4, pid);
+    tracing::info!(
+        "[wrr] installed {}/{} WinEventHook range(s) for pid={}",
+        installed_count, 4, pid
+    );
 
     // Enumerate the initial monitor topology and report it once.
     // Without this, `state.monitors` stays empty in the launcher
