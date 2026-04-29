@@ -46,10 +46,14 @@ Pre-Phase-B  ──► host owns 13 HashMaps  ◄── started here
                         ▼
               ✓ B.9.3 — pool-refill drain + cefsimple-pattern quit (#601)
                         ▼
-              ◄── HERE. B.7.3 / B.8 remaining for Phase B exit.
-              B.7.3 ──  CEF JS bridge for typed launcher events
-              B.8   ──  Phase B exit (delete obsolete defensive code,
-                       add property tests, --diag tool, CI smoke)
+              ✓ B.7.3.1 — launcher events to renderer via CEF JS bridge (#602)
+                        ▼
+              ◄── HERE. B.7.3.2 / B.7.3.3 / B.8 remaining for Phase B exit.
+              B.7.3.2 ── prefer typed events for atom feeding;
+                         demote `window-instances-changed` to fallback
+              B.7.3.3 ── retire `window-instances-changed` + 4 sync emit sites
+              B.8     ── Phase B exit (delete obsolete defensive code,
+                         add property tests, --diag tool, CI smoke)
                         │
                         ▼
                   Phase B done — golden vision (intermediate form)
@@ -88,11 +92,13 @@ See `b5-migration-architecture-2026-04-28.md` for why `browsers` and pool maps c
 - The MessageBox path is reserved for genuine bind failures (namespace misconfig). Stale-state defect (gap #8) is bounded because pipe-bind happens first: a stale port file is irrelevant on the first-instance path (overwritten); on the second-instance path the live first instance wrote a fresh port:token, so forwarding lands.
 - Smoke verified on v0.33.482: second `agentmux.exe` launch yields one new window in the existing instance, no dialog. Launcher log + host log both confirm.
 
-### B.7 — frontend cutover (2-3 PRs)
+### B.7 — frontend cutover (3 PRs)
 
-- Replace `app-init.ts::refreshLabels(retriesLeft)` polling with subscription to launcher events via the CEF JS bridge.
-- Wire host's outbound JS bridge to forward launcher events to the renderer.
-- Frontend reducer fed by the event stream.
+- B.7.1 (#596): replaced `app-init.ts::refreshLabels(retriesLeft)` polling with launcher-driven re-emit carrying resolved entries.
+- B.7.2 (#597): re-emit on `BackendWindowIdRegistered/Unregistered` so windowId `null → real` transitions update the InstancePanel without a follow-up RPC.
+- **B.7.3.1 (done — PR #602)**: host outbound CEF JS bridge `launcher_event_bridge.rs` forwards every typed `Event` to every top-level renderer via `Frame::ExecuteJavaScript` calling `window.__agentmux_launcher_event(<json>)`. Renderer-side `frontend/util/launcher-events.ts` registers the dispatcher into a SolidJS signal pair; `frontend/app/store/launcher-event-reducer.ts` runs `createEffect` over it. B.7.3.1 logs only — bespoke `window-instances-changed` still feeds atoms.
+- B.7.3.2 (next): promote typed events to authoritative; demote `window-instances-changed` to fallback. Atom-mutating handlers replace the bespoke listener body.
+- B.7.3.3: retire bespoke channel + 4 sync emit sites in `commands::window`, `drag`, `window_pool`, `client.rs`.
 
 ### B.8 — Phase B exit (1-2 PRs)
 
