@@ -54,6 +54,19 @@ const TITLE_BAR_OFFSET_PX: i32 = 16;
 /// in-flight semaphore — concurrent calls collapse to one spawn
 /// in flight at a time.
 pub fn spawn_pool_window(state: &Arc<AppState>) {
+    // Phase B.9.3 — if the host has decided to quit (last user-
+    // visible window closed, draining pool), skip refill. Without
+    // this guard, every pool close triggers a refill, keeping
+    // state.browsers non-empty forever and quit_message_loop's
+    // QuitWhenIdle never reaches idle.
+    if state.is_quitting.load(Ordering::Acquire) {
+        tracing::warn!(
+            target: "wrr",
+            "[wrr] spawn_pool_window skipped — is_quitting=true (drain mode)"
+        );
+        return;
+    }
+
     // Single-flight: skip if a respawn is already pending. The
     // pending one will catch up to TARGET_SIZE; we don't need
     // to stack spawns.

@@ -240,6 +240,16 @@ pub fn post_corrective_window_move(state: &Arc<AppState>, hwnd: u64, x: i32, y: 
     post_task(ThreadId::UI, Some(&mut task));
 }
 
+// Phase B.9.3 (WRR) — `Event::HostShouldQuit` handling lives in
+// `launcher_ipc::apply_event_to_shadow`. After three smoke
+// iterations (v0.33.491–v0.33.493) confirmed `cef::post_task`
+// silently drops new tasks during the last-window-closed
+// teardown window — even when previously-posted tasks still
+// run — we bypass CEF entirely and use Win32
+// `PostThreadMessage(host_main_tid, WM_QUIT, 0, 0)` via
+// `wrr::win_event::post_thread_quit_message`. The UI thread's
+// captured TID is stored at `install_hooks` time.
+
 // ── Create new window (CEF Views) ───────────────────────────────────────
 
 wrap_task! {

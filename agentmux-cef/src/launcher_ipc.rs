@@ -378,6 +378,24 @@ fn apply_event_to_shadow(state: &std::sync::Arc<crate::state::AppState>, event: 
                 target_rect.bottom - target_rect.top,
             );
         }
+        Event::HostShouldQuit { .. } => {
+            // Phase B.9.3 — diagnostic only. The actual close
+            // cascade is now driven host-side by the
+            // `is_quitting` drain flag in `client.rs::on_before_close`
+            // (Cause A fix). This event remains as a launcher-side
+            // observability signal: when it fires, the host's
+            // close-path SHOULD have already started draining, so
+            // we just log and trust the host to exit. Three smoke
+            // sessions in v0.33.491–v0.33.494 attempted to make
+            // this saga deliver work to the host's UI thread; all
+            // failed (CEF post_task drops, direct call is UB,
+            // PostThreadMessage(WM_QUIT) ignored by CEF's pump).
+            // See `docs/retro/b9-3-lifecycle-analysis.md`.
+            tracing::warn!(
+                target: "wrr",
+                "[wrr] HostShouldQuit received — host close cascade should be in flight"
+            );
+        }
         _ => {}
     }
 }

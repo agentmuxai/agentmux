@@ -12,6 +12,39 @@ use parking_lot::Mutex;
 
 use crate::state::{AppState, WindowKind};
 
+// Phase B.9.3 — close-pool-browser task. Used by Stage 1 to defer
+// `close_browser` onto the CEF UI thread via `cef::post_task`, so
+// the call runs AFTER the current `on_before_close` unwinds.
+// `close_browser` called inline from inside another browser's
+// close callback re-enters CEF and hangs the UI thread (smoke
+// v0.33.497 confirmed).
+//
+// Two callers:
+// - Windows: HWND lookup fallback. Stage 1 prefers Win32
+//   `PostMessage(hwnd, WM_CLOSE)` (bypasses CEF's task queue —
+//   useful as a belt-and-suspenders mechanism), but if the
+//   window handle is null (early/late lifecycle, e.g. browser
+//   created without a Views top-level yet), fall through to this
+//   task so the close still happens. Otherwise self.browser_list
+//   never empties and Stage 2 never fires. (codex #601 P1.)
+// - Non-Windows: canonical path. macOS/Linux don't have
+//   `PostMessage(WM_CLOSE)`; defer close_browser via post_task
+//   for both correctness and portability. (reagent #601 P1.)
+wrap_task! {
+    pub struct ClosePoolBrowserTask {
+        browser: Browser,
+    }
+
+    impl Task {
+        fn execute(&self) {
+            let mut b = self.browser.clone();
+            if let Some(host) = b.host() {
+                host.close_browser(1); // force_close = true
+            }
+        }
+    }
+}
+
 /// Write a debug line to `%TEMP%\agentmux-close-debug.txt`.
 ///
 /// Only active when `AGENTMUX_DEBUG_CLOSE=1` is set in the environment.
@@ -369,6 +402,15 @@ impl AgentMuxHandler {
     fn on_before_close(&mut self, browser: Option<&mut Browser>) {
         debug_assert_ne!(currently_on(ThreadId::UI), 0);
 
+        // Phase B.9.3 — diagnostic trace at debug level. Filtered
+        // out in production (default RUST_LOG=info). Enable via
+        // RUST_LOG="info,wrr-trace=debug" when investigating
+        // close-cascade issues.
+        tracing::debug!(
+            target: "wrr-trace",
+            "[trace] on_before_close ENTER; self.browser_list.len()={} is_pane={}",
+            self.browser_list.len(), self.is_pane
+        );
         dlog(&format!("on_before_close fired; browser_list.len()={}", self.browser_list.len()));
 
         let mut browser = browser.cloned().expect("Browser is None");
@@ -490,29 +532,156 @@ impl AgentMuxHandler {
         //
         // Promoted pool windows ARE counted: they're removed from
         // `unpromoted_pool_labels` at promote time.
-        let user_browser_count = {
+        let (user_browser_count, browsers_keys, pool_keys) = {
             let pool_labels = self.state.unpromoted_pool_labels.lock().clone();
             let browsers = self.state.browsers.lock();
-            browsers
+            let count = browsers
                 .iter()
                 .filter(|(label, _)| {
                     !pool_labels.contains(*label) && !label.starts_with("browser-pane-")
                 })
-                .count()
+                .count();
+            let keys: Vec<String> = browsers.keys().cloned().collect();
+            let pool: Vec<String> = pool_labels.iter().cloned().collect();
+            (count, keys, pool)
         };
 
+        // Phase B.9.3 diagnostic — fires for every close (incl.
+        // pane closes). Demoted to debug for production. Enable
+        // via RUST_LOG="info,wrr-trace=debug" to see per-close
+        // gate input when investigating close-cascade issues.
+        tracing::debug!(
+            target: "wrr-trace",
+            "[trace] app-exit gate: closing_label={:?} user_count={} is_pane={} browsers={:?} unpromoted_pool={:?}",
+            label, user_browser_count, self.is_pane, browsers_keys, pool_keys
+        );
+
+        // ── Phase B.9.3 — two-stage close cascade ─────────────────
+        //
+        // Stage 1: If user_browser_count just dropped to 0 (last
+        // user-visible window closed), POST WM_CLOSE to every pool
+        // browser. Async — the message loop processes the closes on
+        // subsequent iterations. We do NOT call quit_message_loop
+        // here. Calling it from inside on_before_close DEADLOCKS the
+        // UI thread (smoke v0.33.498 confirmed: log line "calling
+        // quit_message_loop now" was last; loop never returned).
+        //
+        // Stage 2: When self.browser_list becomes empty AFTER
+        // removing this browser (i.e. every browser this handler
+        // ever managed has closed), THEN call quit_message_loop.
+        // Matches the canonical cefsimple pattern. By then there
+        // are no other in-flight CEF lifecycle events to deadlock
+        // against. The MAIN client's handler is the only one that
+        // owns top-level windows + pool windows, so this fires
+        // exactly when the entire app's CEF browser inventory is
+        // gone.
+        //
+        // Cross-platform note: the Stage 1 PostMessage is the
+        // Windows path. macOS uses NSWindow.performClose:; Linux
+        // uses X11 WM_DELETE_WINDOW. Same async-close-cascade
+        // semantics on all platforms; only the OS API differs.
         if user_browser_count == 0 && !self.is_pane {
-            dlog(&format!(
-                "last user-facing window closed (browser_list.len()={}) — calling quit_message_loop",
-                self.browser_list.len()
-            ));
-            // Last user-facing window — quit the message loop.
-            // The Job Object kills agentmux-srv which kills all shell processes,
-            // and CEF tears down any remaining pool windows during shutdown.
-            // Only the MAIN client's handler should trigger app exit — pane
-            // clients own only their own pane browser and their list emptying
-            // just means the user closed the pane, not the whole app.
+            // Phase B.9.3 — set the drain flag BEFORE collecting
+            // pool browsers. spawn_pool_window will see this and
+            // skip refill on every subsequent on_pool_window_destroyed
+            // → no new pool browsers added → state.browsers can
+            // actually drain.
+            self.state
+                .is_quitting
+                .store(true, std::sync::atomic::Ordering::Release);
+            tracing::warn!(target: "wrr", "[wrr] is_quitting=true (drain mode)");
+
+            let pool_browsers: Vec<cef::Browser> = {
+                let browsers = self.state.browsers.lock();
+                browsers
+                    .iter()
+                    .filter(|(label, _)| label.starts_with("window-pool-"))
+                    .map(|(_, b)| b.clone())
+                    .collect()
+            };
+            tracing::warn!(
+                target: "wrr",
+                "[wrr] stage 1: user_count==0; closing {} pool browser(s)",
+                pool_browsers.len()
+            );
+
+            // Windows path: prefer Win32 PostMessage(WM_CLOSE) —
+            // bypasses CEF's task queue (proven reliable; smoke
+            // v0.33.500+). When window_handle() returns null
+            // (early/late lifecycle), fall through to the
+            // post_task path so the close still happens — without
+            // the fallback, self.browser_list never empties and
+            // Stage 2 never fires. (codex #601 P1.)
+            #[cfg(target_os = "windows")]
+            {
+                use windows_sys::Win32::Foundation::HWND;
+                use windows_sys::Win32::UI::WindowsAndMessaging::{PostMessageW, WM_CLOSE};
+                for (i, mut b) in pool_browsers.into_iter().enumerate() {
+                    let hwnd_opt = b.host().and_then(|h| {
+                        let wh = h.window_handle();
+                        if wh.0.is_null() {
+                            None
+                        } else {
+                            Some(wh.0 as HWND)
+                        }
+                    });
+                    if let Some(hwnd) = hwnd_opt {
+                        let ok = unsafe { PostMessageW(hwnd, WM_CLOSE, 0, 0) };
+                        tracing::debug!(
+                            target: "wrr-trace",
+                            "[trace] stage1[{}] PostMessage(hwnd={:p}, WM_CLOSE) ok={}",
+                            i, hwnd, ok != 0
+                        );
+                    } else {
+                        // Fallback: defer close_browser via UI task.
+                        // Same path as non-Windows so the cascade
+                        // still drains.
+                        let mut task = ClosePoolBrowserTask::new(b);
+                        let posted = cef::post_task(cef::ThreadId::UI, Some(&mut task));
+                        tracing::warn!(
+                            target: "wrr",
+                            "[wrr] stage1[{}] hwnd=null; fell back to post_task(close_browser) posted={}",
+                            i, posted != 0
+                        );
+                    }
+                }
+            }
+
+            // Non-Windows path: defer `close_browser` to the UI
+            // thread via `cef::post_task`. Calling close_browser
+            // inline from inside another browser's on_before_close
+            // hangs the UI thread (CEF re-entrance, smoke
+            // v0.33.497 confirmed on Windows; same constraint on
+            // macOS / Linux per CEF docs). Windows prefers
+            // PostMessage(WM_CLOSE) as the primary path (bypasses
+            // CEF's task queue, which proved unreliable in
+            // late-teardown windows — see
+            // `docs/retro/b9-3-quit-thread-analysis.md`).
+            // (reagent #601 P1.)
+            #[cfg(not(target_os = "windows"))]
+            {
+                for (i, b) in pool_browsers.into_iter().enumerate() {
+                    let mut task = ClosePoolBrowserTask::new(b);
+                    let posted = cef::post_task(cef::ThreadId::UI, Some(&mut task));
+                    tracing::debug!(
+                        target: "wrr-trace",
+                        "[trace] stage1[{}] post_task(close_browser) posted={}",
+                        i, posted != 0
+                    );
+                }
+            }
+        }
+
+        // Stage 2: every browser this handler ever managed is now
+        // gone. Safe to call quit_message_loop — no other CEF
+        // lifecycle is in flight that could deadlock with it.
+        if self.browser_list.is_empty() && !self.is_pane {
+            tracing::warn!(
+                target: "wrr",
+                "[wrr] stage 2: self.browser_list.is_empty() — calling quit_message_loop"
+            );
             quit_message_loop();
+            tracing::warn!(target: "wrr", "[wrr] quit_message_loop returned");
         } else {
             // Notify remaining windows of the new count.
             let new_count = self.state.instance_count();
@@ -542,6 +711,12 @@ impl AgentMuxHandler {
                 tracing::warn!("{}", warn);
             }
         }
+
+        tracing::debug!(
+            target: "wrr-trace",
+            "[trace] on_before_close EXIT label={:?} self.browser_list.len()={}",
+            label, self.browser_list.len()
+        );
     }
 
     /// CEF fires this whenever the browser's loading/history state changes
