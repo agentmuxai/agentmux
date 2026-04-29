@@ -12,15 +12,24 @@ use parking_lot::Mutex;
 
 use crate::state::{AppState, WindowKind};
 
-// Phase B.9.3 — non-Windows close-pool-browser task. Built only on
-// non-Windows because Windows uses Win32 PostMessage(WM_CLOSE)
-// directly (bypasses CEF task queue). On macOS/Linux we defer
-// close_browser via the canonical cef::post_task(TID_UI, ...) so
-// the call lands on the UI thread AFTER the current
-// on_before_close unwinds (close_browser inline from another
-// browser's close callback re-enters CEF and hangs).
-// (reagent #601 P1 — non-Windows had no close path.)
-#[cfg(not(target_os = "windows"))]
+// Phase B.9.3 — close-pool-browser task. Used by Stage 1 to defer
+// `close_browser` onto the CEF UI thread via `cef::post_task`, so
+// the call runs AFTER the current `on_before_close` unwinds.
+// `close_browser` called inline from inside another browser's
+// close callback re-enters CEF and hangs the UI thread (smoke
+// v0.33.497 confirmed).
+//
+// Two callers:
+// - Windows: HWND lookup fallback. Stage 1 prefers Win32
+//   `PostMessage(hwnd, WM_CLOSE)` (bypasses CEF's task queue —
+//   useful as a belt-and-suspenders mechanism), but if the
+//   window handle is null (early/late lifecycle, e.g. browser
+//   created without a Views top-level yet), fall through to this
+//   task so the close still happens. Otherwise self.browser_list
+//   never empties and Stage 2 never fires. (codex #601 P1.)
+// - Non-Windows: canonical path. macOS/Linux don't have
+//   `PostMessage(WM_CLOSE)`; defer close_browser via post_task
+//   for both correctness and portability. (reagent #601 P1.)
 wrap_task! {
     pub struct ClosePoolBrowserTask {
         browser: Browser,
@@ -596,8 +605,13 @@ impl AgentMuxHandler {
                 pool_browsers.len()
             );
 
-            // Windows path: Win32 PostMessage(WM_CLOSE) — bypasses
-            // CEF's task queue (proven reliable; smoke v0.33.500+).
+            // Windows path: prefer Win32 PostMessage(WM_CLOSE) —
+            // bypasses CEF's task queue (proven reliable; smoke
+            // v0.33.500+). When window_handle() returns null
+            // (early/late lifecycle), fall through to the
+            // post_task path so the close still happens — without
+            // the fallback, self.browser_list never empties and
+            // Stage 2 never fires. (codex #601 P1.)
             #[cfg(target_os = "windows")]
             {
                 use windows_sys::Win32::Foundation::HWND;
@@ -619,9 +633,15 @@ impl AgentMuxHandler {
                             i, hwnd, ok != 0
                         );
                     } else {
-                        tracing::debug!(
-                            target: "wrr-trace",
-                            "[trace] stage1[{}] no hwnd available", i
+                        // Fallback: defer close_browser via UI task.
+                        // Same path as non-Windows so the cascade
+                        // still drains.
+                        let mut task = ClosePoolBrowserTask::new(b);
+                        let posted = cef::post_task(cef::ThreadId::UI, Some(&mut task));
+                        tracing::warn!(
+                            target: "wrr",
+                            "[wrr] stage1[{}] hwnd=null; fell back to post_task(close_browser) posted={}",
+                            i, posted != 0
                         );
                     }
                 }
@@ -632,14 +652,10 @@ impl AgentMuxHandler {
             // inline from inside another browser's on_before_close
             // hangs the UI thread (CEF re-entrance, smoke
             // v0.33.497 confirmed on Windows; same constraint on
-            // macOS / Linux per CEF docs). The post_task posts the
-            // call onto the UI thread's task queue; it runs after
-            // the current on_before_close unwinds. This is the
-            // canonical cross-platform path; Windows uses
-            // PostMessage(WM_CLOSE) instead because it's the OS-
-            // native idiom and bypasses CEF's task queue (which
-            // proved unreliable in similar-shaped late-teardown
-            // windows during B.9.3 saga investigation —
+            // macOS / Linux per CEF docs). Windows prefers
+            // PostMessage(WM_CLOSE) as the primary path (bypasses
+            // CEF's task queue, which proved unreliable in
+            // late-teardown windows — see
             // `docs/retro/b9-3-quit-thread-analysis.md`).
             // (reagent #601 P1.)
             #[cfg(not(target_os = "windows"))]
