@@ -15,11 +15,9 @@
 // Cross-platform: `Frame::ExecuteJavaScript` is portable across
 // CEF's Windows / macOS / Linux backends. No platform specifics.
 //
-// Coexistence with the bespoke `window-instances-changed` event:
-// during B.7.3.1 both channels deliver overlapping data. The
-// renderer prefers typed events when seen and falls back to the
-// bespoke channel when not (see `frontend/util/launcher-events.ts`
-// + `frontend/app-init.ts`). B.7.3.2/.3 retire the bespoke path.
+// Phase B.7.3.3 — typed events are the SOLE channel for
+// InstancePanel state. The bespoke `window-instances-changed`
+// event and its 4 sync emit sites in the host are retired.
 //
 // See `docs/specs/SPEC_B_7_3_LAUNCHER_EVENTS_TO_RENDERER_2026_04_29.md`.
 
