@@ -45,6 +45,8 @@ import { ContextMenuModel } from "@/app/store/contextmenu";
 import { isHostApp } from "@/app/init/host-detect";
 import { showStartupError } from "@/app/init/error-display";
 import { withTimeout } from "@/app/init/timeout";
+import { installLauncherEventBridge } from "@/util/launcher-events";
+import { startLauncherEventReducer } from "@/app/store/launcher-event-reducer";
 
 // Deferred — assigned inside initApp() after window.api is ready.
 // Do NOT call getApi() at module level: this file is statically imported by
@@ -379,6 +381,12 @@ export async function initApp() {
     appVersion = getApi().getAboutModalDetails().version;
     document.title = `AgentMux ${appVersion}`;
 
+    // Phase B.7.3.1 — install `window.__agentmux_launcher_event` BEFORE
+    // any host-touching call. The host's `launcher_event_bridge` may
+    // start dispatching as soon as the renderer's V8 context is ready;
+    // registering early guarantees no events are dropped on the floor.
+    installLauncherEventBridge();
+
     // Register context menu click handler now that window.api exists.
     ContextMenuModel.init();
 
@@ -497,6 +505,10 @@ async function initWaveWrap(initOpts: AgentMuxInitOpts) {
         }
         savedInitOpts = initOpts;
         await initWave(initOpts);
+        // Phase B.7.3.1 — start the launcher-event reducer effect now
+        // that global state is wired. Idempotent: subsequent calls
+        // (e.g. via reinitWave path) are no-ops.
+        startLauncherEventReducer();
     } catch (e) {
         getApi().sendLog("Error in initWave " + e.message + "\n" + e.stack);
         console.error("Error in initWave", e);

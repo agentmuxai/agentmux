@@ -29,6 +29,7 @@ mod commands;
 mod dev_authfile;
 mod events;
 mod ipc;
+mod launcher_event_bridge;
 mod launcher_ipc;
 mod memory_heartbeat;
 mod pane;
