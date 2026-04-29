@@ -42,11 +42,13 @@ Pre-Phase-B  ──► host owns 13 HashMaps  ◄── started here
                         ▼
               ✓ B.7.2 — re-emit on BackendWindowId events (#597)
                         ▼
-              ◄── HERE. B.9.1 in flight: WRR observation.
-                  (B.7.3 / B.8 deferred — B.9 jumped queue per
-                  user direction after stray-taskbar surface.)
-              B.7  ──  frontend cutover (delete polling)
-              B.8  ──  Phase B exit (delete obsolete defensive code,
+              ✓ B.9 — WRR observation + pure-reducer self-heal (#600)
+                        ▼
+              ✓ B.9.3 — pool-refill drain + cefsimple-pattern quit (#601)
+                        ▼
+              ◄── HERE. B.7.3 / B.8 remaining for Phase B exit.
+              B.7.3 ──  CEF JS bridge for typed launcher events
+              B.8   ──  Phase B exit (delete obsolete defensive code,
                        add property tests, --diag tool, CI smoke)
                         │
                         ▼
@@ -125,6 +127,9 @@ See `b5-migration-architecture-2026-04-28.md` for why `browsers` and pool maps c
 | Multi-reducer is the long-term architecture | 2026-04-28 | Cleaner than "scaffolding outside the model"; deferred to Phase E + F to validate the pattern incrementally |
 | `docs/retro/*.md` files are local-only | 2026-04-28 | No review churn; future agents read them via `MEMORY.md` pointer |
 | Single-instance lives in launcher pipe bind, not host port-file | B.6 (#595) | Pipe handle is OS-owned → no stale-state path; ERROR_ACCESS_DENIED is the canonical second-instance signal; user-facing MessageBox replaces silent exit |
+| WRR uses event-driven Win32 hooks, no timers / heartbeats | B.9 (#600) | `SetWinEventHook` + `WM_WINDOWPOSCHANGED` deliver every needed transition synchronously; the reducer fires drift on the same dispatch tick |
+| Pool refill is suppressed during host drain via `is_quitting` flag | B.9.3 (#601) | CEF's `quit_message_loop` is QuitWhenIdle — without suppressing refill, pool windows keep state.browsers non-empty forever and idle is never reached |
+| Cross-thread "deliver work to UI thread" uses `cef::post_task` (or Win32 PostMessage as bypass) — NOT direct calls or PostThreadMessage | B.9.3 (#601) | Direct calls from worker thread are CEF UB; PostThreadMessage(WM_QUIT) is ignored by CEF's custom Windows pump; `cef::post_task` is the documented portable bridge — and Win32 `PostMessage(hwnd, WM_CLOSE)` bypasses CEF's task queue when needed |
 
 ## How to update this doc
 
