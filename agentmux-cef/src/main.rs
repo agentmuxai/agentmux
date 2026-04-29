@@ -182,19 +182,20 @@ fn main() {
         "Initializing CEF browser process"
     );
 
-    // Phase B.6: legacy `<data-dir>/ipc-port` probe removed. Single-
-    // instance enforcement now lives in the launcher's named-pipe
-    // bind (`first_pipe_instance(true)`) which rejects a second
-    // launcher BEFORE the host is even spawned. The old probe had a
-    // known stale-state defect (gap #8 in
-    // specs/ANALYSIS_WINDOW_PROCESS_STATE_INVENTORY_2026_04_27.md):
-    // a hard crash left the file behind and the next launch
-    // connected to a dead IPC server, sent open_new_window, and
-    // exited 0 with no window opened. The launcher's pipe handle is
-    // owned by the OS; on launcher death the pipe is reaped, so
-    // there is no stale-state path. Best-effort cleanup of any
-    // leftover file from a pre-B.6 install.
-    let _ = std::fs::remove_file(data_dir.join("ipc-port"));
+    // Phase B.6 (post-fix): the named-pipe bind in the launcher is
+    // the AUTHORITATIVE single-instance lock — a second launcher
+    // hits ERROR_ACCESS_DENIED and never reaches the host. We still
+    // publish `<data-dir>/ipc-port` (port:token) so the second
+    // launcher can FORWARD an `open_new_window` request to the
+    // existing instance over HTTP and exit silently — the legacy
+    // forwarding UX users expect when double-clicking the exe twice.
+    // The pipe-bind-first ordering closes the stale-state defect
+    // (gap #8 in specs/ANALYSIS_WINDOW_PROCESS_STATE_INVENTORY_2026_04_27.md):
+    // a stale ipc-port file from a hard crash is irrelevant on the
+    // FIRST-instance path because pipe-bind succeeds and the file is
+    // overwritten; on the SECOND-instance path the live first
+    // instance wrote a fresh port:token, so forwarding lands.
+    let port_file = data_dir.join("ipc-port");
 
     // Create shared application state.
     let app_state = Arc::new(state::AppState::default());
@@ -374,11 +375,15 @@ fn main() {
     // Provides forensic data if the process later crashes from OOM / VA exhaustion.
     memory_heartbeat::start();
 
-    // Phase B.6: no `ipc-port` file write — the launcher's named pipe
-    // is the single-instance signal (see comment at the probe-removal
-    // site above). The IPC HTTP server still runs locally for the
-    // host's own command surface; it just no longer publishes its
-    // port for cross-process discovery.
+    // Phase B.6 (post-fix): publish port:token AFTER CEF init so a
+    // second launcher only forwards `open_new_window` when we're
+    // actually ready to handle it. Single-instance enforcement is
+    // the launcher's named-pipe bind — this file is purely a
+    // forwarding hint.
+    let _ = std::fs::write(
+        &port_file,
+        format!("{}:{}", ipc_port, app_state.ipc_token),
+    );
 
     // Run the CEF message loop. This blocks until quit_message_loop() is called
     // (triggered when all browser windows are closed in client.rs).
@@ -400,6 +405,12 @@ fn main() {
 
     // Drop the tokio runtime after CEF shutdown.
     drop(runtime);
+
+    // Phase B.6 (post-fix): clean up the forwarding hint so a stale
+    // file doesn't survive a graceful exit. (Hard crashes will leave
+    // it behind; harmless because pipe-bind on next launch is
+    // authoritative — see comment at the port_file declaration.)
+    let _ = std::fs::remove_file(&port_file);
 
     tracing::info!("AgentMux host shutdown complete");
 }
