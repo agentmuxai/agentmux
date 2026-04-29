@@ -66,15 +66,19 @@ export function isApplyingRemoteEvent(): boolean {
 const knownEntries = new Map<string, WindowEntry>();
 
 /**
- * `isInstanceLabel` mirrors the legacy filter in
- * `app-init.ts::initInstanceTracking`. Sub-windows + main + full
- * instances all match `/^window-/` or === "main". `window-pool-*`
- * also matches, but pool windows don't fire `WindowOpened`, so
- * they never enter `knownEntries`. Defensive belt anyway: filter
- * out `window-pool-` here too in case the host's launcher
- * implementation ever changes.
+ * Filter for labels the InstancePanel surfaces. Sub-windows + main
+ * + full instances all match `/^window-/` or === "main". Pool
+ * (`window-pool-*`) and browser-pane child HWNDs are excluded —
+ * pool windows fire `Event::PoolWindowAdded/Removed` (different
+ * event variants we don't subscribe to), and browser-pane HWNDs
+ * never appear as `Event::WindowOpened`. Defensive filter even so.
+ *
+ * Exported so `app-init.ts::initInstanceTracking` (the bespoke
+ * fallback path + the snapshot-key seed) uses the SAME filter as
+ * the typed-event reducer. (reagent P2 #603 — the two filters
+ * had diverged on `window-pool-*`.)
  */
-function isInstanceLabel(label: string): boolean {
+export function isInstanceLabel(label: string): boolean {
     if (label === "main") return true;
     if (label.startsWith("window-pool-")) return false;
     if (label.startsWith("browser-pane-")) return false;
@@ -102,17 +106,28 @@ function recomputeAtoms(): void {
  * `app-init.ts::initInstanceTracking` after `listWindowInstances`
  * returns. Subsequent typed events apply deltas on top.
  *
- * Idempotent w.r.t. repeated calls: each call clears + re-seeds.
- * Repeated typed-event apply on the same label is also idempotent
- * (`Map.set` overwrites; `Map.delete` of a missing key is a no-op).
+ * **Important — does NOT clobber existing entries.** The reducer
+ * effect is started earlier (in `initWaveWrap`, before
+ * `initInstanceTracking` runs the RPC), so typed events can arrive
+ * between snapshot-fetch and this seed call. A `BackendWindowIdRegistered`
+ * that landed first would have updated `windowEntries[label].windowId`
+ * to a real value; the snapshot — taken at an earlier moment — may
+ * still show `null` for that label. Clobbering would roll the
+ * windowId back to stale `null`, and since `launcherEventsActive()`
+ * is now true, the bespoke fallback channel won't recover it. (codex
+ * P1 #603.) So this function fills in MISSING labels only; existing
+ * entries are left as the typed-event stream wrote them.
  */
 export function seedKnownEntriesFromSnapshot(entries: ReadonlyArray<WindowEntry>): void {
-    knownEntries.clear();
     for (const e of entries) {
-        if (isInstanceLabel(e.label)) {
-            knownEntries.set(e.label, { label: e.label, windowId: e.windowId });
-        }
+        if (!isInstanceLabel(e.label)) continue;
+        if (knownEntries.has(e.label)) continue;
+        knownEntries.set(e.label, { label: e.label, windowId: e.windowId });
     }
+    // Always recompute — initial atoms were set from the bespoke
+    // channel before the reducer was promoted, so even a snapshot
+    // that adds nothing new still needs to publish the consolidated
+    // view (e.g. ordering / filter differences). Idempotent.
     recomputeAtoms();
 }
 
@@ -223,9 +238,20 @@ function dispatch(evt: LauncherEvent): void {
             return;
         }
         case "hwnd_drift_detected":
+            // Drift events fire when the launcher's pure reducer
+            // detects an off-monitor / hidden / orphan window.
+            // Currently logged at warn so they surface in the
+            // backend-forwarded `[fe]` log without being silent on
+            // the user side. UX wiring (toast / debug panel) is a
+            // separate question — see spec §Open questions #3.
+            // (reagent P2 #603.)
+            console.warn("[launcher-event] drift", evt);
+            return;
         case "corrective_window_move":
         case "host_should_quit":
-            // WRR / saga events. Logged only — UX wiring deferred.
+            // Saga events handled host-side. Renderer logs at info
+            // for observability — these are rare and meaningful.
+            console.info("[launcher-event]", evt.event, evt);
             return;
         default:
             // Forward-compat: unknown variants silently ignored.

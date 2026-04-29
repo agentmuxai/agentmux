@@ -46,7 +46,11 @@ import { isHostApp } from "@/app/init/host-detect";
 import { showStartupError } from "@/app/init/error-display";
 import { withTimeout } from "@/app/init/timeout";
 import { installLauncherEventBridge, launcherEventsActive } from "@/util/launcher-events";
-import { seedKnownEntriesFromSnapshot, startLauncherEventReducer } from "@/app/store/launcher-event-reducer";
+import {
+    isInstanceLabel,
+    seedKnownEntriesFromSnapshot,
+    startLauncherEventReducer,
+} from "@/app/store/launcher-event-reducer";
 
 // Deferred — assigned inside initApp() after window.api is ready.
 // Do NOT call getApi() at module level: this file is statically imported by
@@ -76,12 +80,13 @@ const RPC_TIMEOUT = 5_000; // 5 seconds for individual RPC calls
  */
 async function initInstanceTracking(): Promise<void> {
     // listWindows() returns ALL keys in state.browsers, which includes
-    // browser-pane child browsers (`browser-pane-*`) and other internal
-    // labels — not just top-level app windows. The instance panel only
-    // wants the labels it can sensibly focus, so filter here. Top-level
-    // window labels are either "main" or "window-<uuid>".
-    const isInstanceLabel = (l: string): boolean =>
-        l === "main" || /^window-/.test(l);
+    // browser-pane child browsers (`browser-pane-*`) and pool labels
+    // (`window-pool-*`) — not just top-level app windows. The instance
+    // panel only wants the labels it can sensibly focus. The filter
+    // is imported from `launcher-event-reducer` so the bespoke
+    // fallback path uses the EXACT same rule as the typed-event
+    // reducer. (reagent P2 #603 — the two had diverged on pool
+    // labels, which leaked into the bespoke path's view.)
 
     // Phase B.7.3.2 — typed launcher events are authoritative once
     // they start flowing (`launcherEventsActive()` flips on the first
