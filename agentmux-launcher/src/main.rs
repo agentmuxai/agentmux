@@ -639,10 +639,25 @@ fn forward_open_new_window(data_dir: &std::path::Path) -> Result<(), ForwardErro
         body.len(),
         body
     );
-    use std::io::Write;
+    use std::io::{Read, Write};
     stream
         .write_all(req.as_bytes())
         .map_err(|e| ForwardError::Fatal(format!("write request: {}", e)))?;
+    // CRITICAL: read at least the status line. The host's axum
+    // handler is async — if the launcher closes the TCP socket
+    // before axum has finished parsing + dispatching to
+    // `open_new_window`, the request can be dropped (smoke caught
+    // exactly this on v0.33.481: the launcher logged "forwarded"
+    // but no second window appeared because the process exited
+    // before axum ran the handler). We don't care about the body
+    // — `Connection: close` lets the server drop the socket once
+    // the response is written, so a single short read is enough
+    // to keep the connection alive past handler dispatch.
+    stream
+        .set_read_timeout(Some(std::time::Duration::from_secs(2)))
+        .ok();
+    let mut sink = [0u8; 64];
+    let _ = stream.read(&mut sink);
     Ok(())
 }
 
