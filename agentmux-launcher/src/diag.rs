@@ -83,6 +83,19 @@ pub async fn run_wrr_diag(launcher_exe_dir: &std::path::Path) -> Result<(), Stri
     write_half.flush().await
         .map_err(|e| format!("flush GetSnapshot: {}", e))?;
 
+    // Phase D.3 — request a replay of all retained events
+    // (`since: 0` means everything in the in-memory ring). Useful
+    // for operators to see the full event history of the running
+    // launcher without having to wait for new activity. The reply
+    // is an `Event::EventList`; rendered in the summary below.
+    let mut buf = serde_json::to_vec(&Command::GetEvents { since: 0 })
+        .map_err(|e| format!("serialize GetEvents: {}", e))?;
+    buf.push(b'\n');
+    write_half.write_all(&buf).await
+        .map_err(|e| format!("send GetEvents: {}", e))?;
+    write_half.flush().await
+        .map_err(|e| format!("flush GetEvents: {}", e))?;
+
     // Read events for OBSERVATION_WINDOW. The launcher's IPC server
     // (post-B.8) broadcasts every reducer event on a server-wide
     // bus; this connection's fanout writes them to us. We collect
@@ -146,12 +159,34 @@ pub async fn run_wrr_diag(_launcher_exe_dir: &std::path::Path) -> Result<(), Str
 #[cfg(target_os = "windows")]
 fn print_summary(events: &[Event]) {
     // Phase D.1 — pull the Snapshot out and print it first as the
-    // canonical "state now" view; remaining events are the live
-    // stream observed during the 2s window.
-    let (snapshot, stream): (Vec<_>, Vec<_>) = events
+    // canonical "state now" view.
+    // Phase D.3 — pull the EventList replay out next; what's left
+    // is the live broadcast stream observed during the 2s window.
+    let snapshot: Vec<&Event> = events
         .iter()
-        .partition(|e| matches!(e, Event::Snapshot { .. }));
+        .filter(|e| matches!(e, Event::Snapshot { .. }))
+        .collect();
+    let replay: Vec<&Event> = events
+        .iter()
+        .filter(|e| matches!(e, Event::EventList { .. }))
+        .collect();
+    let stream: Vec<&Event> = events
+        .iter()
+        .filter(|e| {
+            !matches!(
+                e,
+                Event::Snapshot { .. } | Event::EventList { .. }
+            )
+        })
+        .collect();
 
+    // Pick the LATEST snapshot in the captured set. The IPC server
+    // broadcasts snapshots to all subscribers, so concurrent diag/Tool
+    // clients can produce multiple Snapshot events in this window;
+    // using `.first()` would show the oldest (potentially another
+    // client's stale view) rather than ours. `.last()` biases toward
+    // freshness — our own snapshot reply is monotonically the latest
+    // among captured events on the broadcast bus. (codex P2 PR #607.)
     if let Some(Event::Snapshot {
         version,
         lifecycle,
@@ -160,7 +195,7 @@ fn print_summary(events: &[Event]) {
         instance_registry,
         backend_window_ids,
         monitors,
-    }) = snapshot.first().copied()
+    }) = snapshot.last().copied()
     {
         println!("=== Snapshot (event_version={}) ===", version);
         println!("Lifecycle: {:?}", lifecycle);
@@ -193,6 +228,22 @@ fn print_summary(events: &[Event]) {
         println!();
     } else {
         println!("(snapshot not received — server may be older than D.1)");
+        println!();
+    }
+
+    // Phase D.3 — replay slice from the launcher's in-memory event
+    // ring. Useful for operators wanting recent history; for
+    // resyncing subscribers, this is everything since their last
+    // seen version.
+    if let Some(Event::EventList { events: replay_events, version }) = replay.last().copied() {
+        println!("=== EventList replay (event_version={}, {} event(s)) ===", version, replay_events.len());
+        if replay_events.is_empty() {
+            println!("(empty — launcher's in-memory ring contained no events with version > 0)");
+        } else {
+            for (i, evt) in replay_events.iter().enumerate() {
+                println!("  [{}] {}", i, format_event(evt));
+            }
+        }
         println!();
     }
 
@@ -238,6 +289,7 @@ fn event_kind_name(e: &Event) -> &'static str {
         Event::CorrectiveWindowMove { .. } => "CorrectiveWindowMove",
         Event::HostShouldQuit { .. } => "HostShouldQuit",
         Event::Snapshot { .. } => "Snapshot",
+        Event::EventList { .. } => "EventList",
         _ => "Other",
     }
 }

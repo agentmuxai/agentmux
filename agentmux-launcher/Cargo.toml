@@ -1,6 +1,6 @@
 [package]
 name = "agentmux-launcher"
-version = "0.33.507"
+version = "0.33.508"
 description = "AgentMux Launcher — tiny exe that sets DLL path then spawns the CEF host"
 authors = ["AgentMux Corp"]
 edition = "2021"
@@ -24,6 +24,9 @@ tokio = { version = "1", features = [
     "sync",
     # Phase B.2: tokio::net::windows::named_pipe lives in this feature.
     "net",
+    # Phase D.2: tokio::fs (OpenOptions, File, rename) for the event-log
+    # disk-persistence writer.
+    "fs",
 ] }
 # Platform-default data_dir / config_dir resolution. Host already
 # uses this; launcher must compute the SAME paths so both processes

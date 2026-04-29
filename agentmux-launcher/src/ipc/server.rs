@@ -55,6 +55,13 @@ pub struct ServerCtx {
     /// they're response-to-this-client-only by intent. (codex P1
     /// PR #605.)
     pub events_tx: tokio::sync::broadcast::Sender<Event>,
+    /// Phase D.2 — event log: in-memory ring of recent reducer
+    /// events (replay source for D.3's `GetEvents`) + disk
+    /// persistence stream for crash forensics. Server appends to
+    /// the in-memory ring synchronously after each reducer
+    /// dispatch; the disk writer is a separate task spawned in
+    /// main.rs that subscribes to the broadcast bus.
+    pub event_log: std::sync::Arc<crate::event_log::EventLog>,
 }
 
 /// Bind the first named-pipe instance synchronously.
@@ -323,6 +330,32 @@ async fn handle_connection(stream: NamedPipeServer, ctx: Arc<ServerCtx>) {
             None
         };
 
+        // Phase D.3 — `GetEvents { since }` is handled here, not in
+        // the reducer. The reducer is pure (no I/O); querying the
+        // event log is a non-mutating read against the in-memory
+        // ring + disk fallback. We still bump `event_version` so
+        // the EventList reply's version is monotonically distinct
+        // from prior events — same convention as Snapshot.
+        if let Command::GetEvents { since } = &cmd {
+            let v = {
+                let mut state = ctx.state.lock().await;
+                state.bump_version()
+            };
+            let replay = ctx.event_log.events_since(*since);
+            // Don't log truncation as an error — it's a valid
+            // "subscriber missed events that have already been
+            // evicted" signal; the subscriber's resync logic
+            // handles it (re-fetch a fresh snapshot).
+            if ctx.event_log.replay_truncated(*since) {
+                crate::log(&format!(
+                    "[ipc] conn_id={} GetEvents since={} truncated (oldest retained event > since+1)",
+                    conn_id, since
+                ));
+            }
+            let _ = ctx.events_tx.send(Event::EventList { events: replay, version: v });
+            continue;
+        }
+
         // Dispatch through the reducer. Mutex held briefly — compute
         // the timestamp BEFORE acquiring so syscalls + string
         // formatting don't show up in lock-hold time. (gemini
@@ -390,6 +423,19 @@ async fn handle_connection(stream: NamedPipeServer, ctx: Arc<ServerCtx>) {
                     "[ipc] WRR-DRIFT [{:?}] {:?} label={:?} hwnd={:?}: {} (conn_id={})",
                     severity, kind, label, hwnd, detail, conn_id
                 ));
+            }
+            // Phase D.2 — append to the in-memory ring BEFORE
+            // broadcasting so a connection's GetEvents query that
+            // races a just-published event sees consistent
+            // results. Disk persistence (separate task) is best-
+            // effort and may lag. Snapshot / EventList variants
+            // are NOT appended — they're meta-events about the
+            // event stream itself; including them would create
+            // recursive replay (an EventList containing EventLists
+            // is meaningless). Errors are also skipped — they're
+            // per-client diagnostics, not state transitions.
+            if !matches!(event, Event::Snapshot { .. } | Event::EventList { .. } | Event::Error { .. }) {
+                ctx.event_log.append(event.clone());
             }
             // Send may fail when no receivers exist (e.g., during
             // shutdown). That's fine — events are advisory in that
@@ -510,6 +556,9 @@ async fn enforce_register_first(
         // sane diagnostic client can fix it by retrying with Register
         // first. (Same Ping-before-Register precedent — soft error.)
         Command::GetSnapshot => ("GetSnapshot before Register".to_string(), false),
+        // Phase D.3 — GetEvents before Register: same non-fatal
+        // semantics as GetSnapshot.
+        Command::GetEvents { .. } => ("GetEvents before Register".to_string(), false),
     };
     let mut state = ctx.state.lock().await;
     let v = state.bump_version();

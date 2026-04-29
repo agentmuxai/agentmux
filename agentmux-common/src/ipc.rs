@@ -219,11 +219,31 @@ pub enum Command {
     /// state-now visibility, by the frontend reducer for mid-session
     /// resync after disconnect, and by future Tool clients that need
     /// to bootstrap without observing every prior event.
-    ///
-    /// Phase D.1 reply is a one-shot snapshot — no replay of
-    /// missed events. D.2 + D.3 add the persisted event log + the
-    /// `since: u64` parameter for delta replay.
     GetSnapshot,
+    /// Phase D.3 — request an `Event::EventList` reply containing the
+    /// events the launcher has emitted with version > `since`. Used
+    /// by subscribers that hold a snapshot at version V and want to
+    /// catch up to the live stream by replaying missed events.
+    ///
+    /// Typical resync flow:
+    ///   1. `Register` → `Registered { version: V0 }`
+    ///   2. `GetSnapshot` → `Snapshot { version: V1 }` (V1 > V0)
+    ///      — apply the snapshot
+    ///   3. `GetEvents { since: V1 }` → `EventList { events, version: V2 }`
+    ///      — apply replay events to catch up to V2
+    ///   4. live broadcast events flow with version > V2
+    ///
+    /// Replay is best-effort: the launcher's in-memory ring is
+    /// bounded; if `since` is older than the oldest retained event,
+    /// the reply still contains all retained events but the
+    /// subscriber may have missed some. Caller should treat the
+    /// result as "everything I have for you" and re-fetch a snapshot
+    /// if state inconsistency is detected.
+    GetEvents {
+        /// Exclusive lower bound — events with `version > since` are
+        /// returned, in ascending order.
+        since: u64,
+    },
 }
 
 /// Phase B.9.1 — rectangle in Win32 screen coordinates (pixels).
@@ -469,6 +489,26 @@ pub enum Event {
         instance_registry: Vec<(String, u32)>,
         backend_window_ids: Vec<(String, String)>,
         monitors: Vec<Rect>,
+    },
+    /// Phase D.3 — reply to `Command::GetEvents { since }`. Carries
+    /// the events the launcher has emitted with `version > since`,
+    /// in ascending version order. Subscribers apply them in order
+    /// to catch up to the launcher's live stream.
+    ///
+    /// The `version` field on this event is the launcher's
+    /// `event_version` at the moment the reply was assembled — not
+    /// the highest version inside `events`. A subscriber treating
+    /// this as the "as-of" point for subsequent events should use
+    /// `events.last().version` (or fall back to this `version` if
+    /// `events` is empty) to know where to resume the live stream.
+    ///
+    /// Replay is best-effort: if `since` predates the launcher's
+    /// in-memory ring, `events` contains everything still retained
+    /// but the subscriber should expect potential missed events
+    /// before the first one in this reply.
+    EventList {
+        events: Vec<Event>,
+        version: u64,
     },
 }
 

@@ -195,6 +195,14 @@ pub fn update(state: &mut State, cmd: Command, ctx: &Ctx) -> Vec<Event> {
         // applying snapshot + delta events knows the snapshot's
         // version is the "as-of" point.
         Command::GetSnapshot => handle_get_snapshot(state),
+        // Phase D.3 — `GetEvents` is intercepted by the IPC server's
+        // dispatch path BEFORE reaching the reducer (it's a non-
+        // mutating read against the event log, which is I/O-adjacent
+        // — keeping it out of the pure reducer preserves the
+        // "reducer never blocks" invariant). This arm exists only
+        // to satisfy the exhaustive match; in practice it's
+        // unreachable. Returning empty Vec is the safe no-op.
+        Command::GetEvents { .. } => Vec::new(),
     }
 }
 
@@ -834,6 +842,7 @@ mod tests {
             | Event::CorrectiveWindowMove { version, .. }
             | Event::HostShouldQuit { version, .. }
             | Event::Snapshot { version, .. }
+            | Event::EventList { version, .. }
             | Event::Error { version, .. } => *version,
         }
     }
