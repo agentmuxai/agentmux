@@ -12,6 +12,30 @@ use parking_lot::Mutex;
 
 use crate::state::{AppState, WindowKind};
 
+// Phase B.9.3 — non-Windows close-pool-browser task. Built only on
+// non-Windows because Windows uses Win32 PostMessage(WM_CLOSE)
+// directly (bypasses CEF task queue). On macOS/Linux we defer
+// close_browser via the canonical cef::post_task(TID_UI, ...) so
+// the call lands on the UI thread AFTER the current
+// on_before_close unwinds (close_browser inline from another
+// browser's close callback re-enters CEF and hangs).
+// (reagent #601 P1 — non-Windows had no close path.)
+#[cfg(not(target_os = "windows"))]
+wrap_task! {
+    pub struct ClosePoolBrowserTask {
+        browser: Browser,
+    }
+
+    impl Task {
+        fn execute(&self) {
+            let mut b = self.browser.clone();
+            if let Some(host) = b.host() {
+                host.close_browser(1); // force_close = true
+            }
+        }
+    }
+}
+
 /// Write a debug line to `%TEMP%\agentmux-close-debug.txt`.
 ///
 /// Only active when `AGENTMUX_DEBUG_CLOSE=1` is set in the environment.
@@ -568,9 +592,12 @@ impl AgentMuxHandler {
             };
             tracing::warn!(
                 target: "wrr",
-                "[wrr] stage 1: user_count==0; PostMessage WM_CLOSE on {} pool browser(s)",
+                "[wrr] stage 1: user_count==0; closing {} pool browser(s)",
                 pool_browsers.len()
             );
+
+            // Windows path: Win32 PostMessage(WM_CLOSE) — bypasses
+            // CEF's task queue (proven reliable; smoke v0.33.500+).
             #[cfg(target_os = "windows")]
             {
                 use windows_sys::Win32::Foundation::HWND;
@@ -597,6 +624,34 @@ impl AgentMuxHandler {
                             "[trace] stage1[{}] no hwnd available", i
                         );
                     }
+                }
+            }
+
+            // Non-Windows path: defer `close_browser` to the UI
+            // thread via `cef::post_task`. Calling close_browser
+            // inline from inside another browser's on_before_close
+            // hangs the UI thread (CEF re-entrance, smoke
+            // v0.33.497 confirmed on Windows; same constraint on
+            // macOS / Linux per CEF docs). The post_task posts the
+            // call onto the UI thread's task queue; it runs after
+            // the current on_before_close unwinds. This is the
+            // canonical cross-platform path; Windows uses
+            // PostMessage(WM_CLOSE) instead because it's the OS-
+            // native idiom and bypasses CEF's task queue (which
+            // proved unreliable in similar-shaped late-teardown
+            // windows during B.9.3 saga investigation —
+            // `docs/retro/b9-3-quit-thread-analysis.md`).
+            // (reagent #601 P1.)
+            #[cfg(not(target_os = "windows"))]
+            {
+                for (i, b) in pool_browsers.into_iter().enumerate() {
+                    let mut task = ClosePoolBrowserTask::new(b);
+                    let posted = cef::post_task(cef::ThreadId::UI, Some(&mut task));
+                    tracing::debug!(
+                        target: "wrr-trace",
+                        "[trace] stage1[{}] post_task(close_browser) posted={}",
+                        i, posted != 0
+                    );
                 }
             }
         }
