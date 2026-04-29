@@ -274,6 +274,11 @@ async fn run_windows(
             std::process::exit(2);
         }
     };
+    // Phase B.8 — broadcast bus for reducer-emitted events. Capacity
+    // 1024 is comfortable headroom for the launcher's event volume
+    // (~10–50 events per user action × handful of subscribers); a
+    // lagging client gets `RecvError::Lagged` and reconnects.
+    let (events_tx, _) = tokio::sync::broadcast::channel::<agentmux_common::ipc::Event>(1024);
     let _ipc_handle = ipc::run_ipc_server(
         pipe_path.clone(),
         first_pipe,
@@ -281,6 +286,7 @@ async fn run_windows(
             launcher_pid: std::process::id(),
             launcher_version: env!("CARGO_PKG_VERSION").to_string(),
             state: tokio::sync::Mutex::new(state::State::default()),
+            events_tx,
         },
     );
     log(&format!("IPC server started on {}", pipe_path));
