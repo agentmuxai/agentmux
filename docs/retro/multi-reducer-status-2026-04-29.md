@@ -153,9 +153,13 @@ After B.8 merges → **Phase B done**.
 
 **Decision (2026-04-29)**: defer to Phase F. The pattern's a structural smell that reducer migration cleans up; a one-off fix would just paper over it.
 
-### 4.2 CEF Views position bug (next-steps §1.1)
+### 4.2 CEF Views position bug (next-steps §1.1) — deferred to issue #606
 
-WRR's `CorrectiveWindowMove` saga currently masks a real underlying bug — new top-level `CefWindow`s land at the Win32 hidden sentinel `(-31970, -31970)` instead of the requested offset. Investigation hooks documented; ~50 LoC fix likely via `WindowDelegate::get_initial_bounds`. Independent of reducer architecture; can ship anytime.
+WRR's `CorrectiveWindowMove` saga currently masks a real underlying bug — new top-level `CefWindow`s briefly appear at the Win32 hidden sentinel `(-31970, -31970)` before being snapped onto the primary monitor. End state is correct; the visible glitch is the only symptom.
+
+Tried 2026-04-29: naive `WindowDelegate::initial_bounds` returning `Rect{0,0,0,0}` for the "no explicit bounds" case broke rendering (zero-area black window). A real fix needs a correct sentinel for "use Views' default placement" + multi-DPI / multi-monitor verification — more careful work than a 30-min drive-by. Branch abandoned.
+
+Filed as **issue #606** for future pickup. Cosmetic-only; not blocking any phase.
 
 ---
 
