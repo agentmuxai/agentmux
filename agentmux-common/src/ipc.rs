@@ -399,6 +399,31 @@ pub enum Event {
         severity: Severity,
         version: u64,
     },
+    /// Phase B.9.2 — pure-reducer self-heal. Emitted alongside an
+    /// `HwndDriftDetected` when the reducer is confident the bug
+    /// happened at OPEN TIME (not from later user action) and a
+    /// safe corrective rect is computable. The host's WRR
+    /// subscriber listens for this and applies `SetWindowPos` on
+    /// the UI thread. No timers — the trigger is the same OS
+    /// event tick that surfaced the bug, so the correction lands
+    /// before the user has time to notice the orphan window.
+    ///
+    /// Guard for emission (per the design, suppress over-correction):
+    /// - The window's `mirror.foregrounded_since_open == false`
+    ///   (we never auto-move a window the user has already
+    ///   touched).
+    /// - The reducer can compute a target rect from
+    ///   `state.monitors` (i.e., monitors are known).
+    CorrectiveWindowMove {
+        /// Win32 HWND to move.
+        hwnd: u64,
+        /// Reducer-computed target rect. Default policy:
+        /// primary-monitor-centered at default window size.
+        target_rect: Rect,
+        /// Why correction fired — surfaces in host log + audit.
+        reason: HwndDriftKind,
+        version: u64,
+    },
 }
 
 /// Phase B.9.1 — six classes of CEF↔Win32 disagreement the reducer

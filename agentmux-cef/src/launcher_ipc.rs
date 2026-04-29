@@ -354,6 +354,30 @@ fn apply_event_to_shadow(state: &std::sync::Arc<crate::state::AppState>, event: 
             // for rationale).
             emit_window_instances_changed_with_entries(state);
         }
+        Event::CorrectiveWindowMove { hwnd, target_rect, reason, .. } => {
+            // Phase B.9.2 — pure-reducer self-heal. Reducer detected
+            // an off-monitor / sentinel-parked window that the user
+            // has never foregrounded, and computed an on-monitor
+            // target rect. Apply `SetWindowPos` to move the window
+            // before the user notices the orphan taskbar entry.
+            // The CEF UI thread is the safe caller for SetWindowPos
+            // on a CEF Views-managed window — post a UI task rather
+            // than calling from this tokio task directly.
+            tracing::warn!(
+                target: "wrr",
+                "[wrr] CorrectiveWindowMove hwnd={:#x} reason={:?} target=({},{})-({},{})",
+                hwnd, reason,
+                target_rect.left, target_rect.top, target_rect.right, target_rect.bottom
+            );
+            crate::ui_tasks::post_corrective_window_move(
+                state,
+                *hwnd,
+                target_rect.left,
+                target_rect.top,
+                target_rect.right - target_rect.left,
+                target_rect.bottom - target_rect.top,
+            );
+        }
         _ => {}
     }
 }
@@ -534,6 +558,99 @@ pub fn report_host_pool_count(count: u32) {
     let cmd = Command::ReportHostPoolCount { count };
     if let Err(e) = tx.send(cmd) {
         tracing::warn!("[launcher-ipc] report_host_pool_count: channel closed ({})", e);
+    }
+}
+
+/// Phase B.9.1 (WRR) — sync API: report a Win32 HWND created.
+/// Called from the WRR `SetWinEventHook` callback. No-op if the
+/// launcher pipe isn't connected (`task dev` mode); reducer arm
+/// stashes pending-without-label until reconciliation.
+pub fn report_hwnd_opened(
+    hwnd: u64,
+    class_name: String,
+    title: String,
+    label_hint: Option<String>,
+) {
+    let Some(tx) = COMMAND_TX.get() else {
+        return;
+    };
+    let cmd = Command::ReportHwndOpened {
+        hwnd,
+        class_name,
+        title,
+        label_hint,
+    };
+    if let Err(e) = tx.send(cmd) {
+        tracing::warn!("[launcher-ipc] report_hwnd_opened: channel closed ({})", e);
+    }
+}
+
+/// Phase B.9.1 — sync API: report a Win32 HWND destroyed.
+pub fn report_hwnd_destroyed(hwnd: u64) {
+    let Some(tx) = COMMAND_TX.get() else {
+        return;
+    };
+    let cmd = Command::ReportHwndDestroyed { hwnd };
+    if let Err(e) = tx.send(cmd) {
+        tracing::warn!("[launcher-ipc] report_hwnd_destroyed: channel closed ({})", e);
+    }
+}
+
+/// Phase B.9.1 — sync API: report visibility change.
+pub fn report_hwnd_visibility_changed(hwnd: u64, visible: bool) {
+    let Some(tx) = COMMAND_TX.get() else {
+        return;
+    };
+    let cmd = Command::ReportHwndVisibilityChanged { hwnd, visible };
+    if let Err(e) = tx.send(cmd) {
+        tracing::warn!("[launcher-ipc] report_hwnd_visibility_changed: channel closed ({})", e);
+    }
+}
+
+/// Phase B.9.1 — sync API: report foreground change.
+pub fn report_hwnd_foreground_changed(hwnd: u64) {
+    let Some(tx) = COMMAND_TX.get() else {
+        return;
+    };
+    let cmd = Command::ReportHwndForegroundChanged { hwnd };
+    if let Err(e) = tx.send(cmd) {
+        tracing::warn!("[launcher-ipc] report_hwnd_foreground_changed: channel closed ({})", e);
+    }
+}
+
+/// Phase B.9.1 — sync API: report iconic (minimized) change.
+pub fn report_hwnd_iconic_changed(hwnd: u64, iconic: bool) {
+    let Some(tx) = COMMAND_TX.get() else {
+        return;
+    };
+    let cmd = Command::ReportHwndIconicChanged { hwnd, iconic };
+    if let Err(e) = tx.send(cmd) {
+        tracing::warn!("[launcher-ipc] report_hwnd_iconic_changed: channel closed ({})", e);
+    }
+}
+
+/// Phase B.9.1 — sync API: report position change. Caller is
+/// responsible for debouncing — see `wrr/position_debounce.rs`.
+pub fn report_hwnd_position_changed(hwnd: u64, rect: agentmux_common::ipc::Rect) {
+    let Some(tx) = COMMAND_TX.get() else {
+        return;
+    };
+    let cmd = Command::ReportHwndPositionChanged { hwnd, rect };
+    if let Err(e) = tx.send(cmd) {
+        tracing::warn!("[launcher-ipc] report_hwnd_position_changed: channel closed ({})", e);
+    }
+}
+
+/// Phase B.9.1 — sync API: report current monitor topology. Sent
+/// once at install time; mid-session topology changes are a B.9.2
+/// follow-up.
+pub fn report_monitor_topology_changed(rects: Vec<agentmux_common::ipc::Rect>) {
+    let Some(tx) = COMMAND_TX.get() else {
+        return;
+    };
+    let cmd = Command::ReportMonitorTopologyChanged { rects };
+    if let Err(e) = tx.send(cmd) {
+        tracing::warn!("[launcher-ipc] report_monitor_topology_changed: channel closed ({})", e);
     }
 }
 

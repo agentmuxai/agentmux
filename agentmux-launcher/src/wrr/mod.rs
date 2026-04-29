@@ -232,25 +232,74 @@ pub fn apply_hwnd_iconic_changed(state: &mut State, hwnd: u64, iconic: bool) -> 
 /// the topology — first `ReportMonitorTopologyChanged` will
 /// reconcile every label's `last_rect` against fresh monitors).
 pub fn apply_hwnd_position_changed(state: &mut State, hwnd: u64, new_rect: Rect) -> Vec<Event> {
-    let mut drift: Vec<Event> = Vec::new();
+    let mut events: Vec<Event> = Vec::new();
     let monitors = state.monitors.clone();
-    let label_for_drift: Option<String> = state
+
+    // Phase B.9.1 diagnostic — single line per position event so
+    // operators can correlate with host-side hook activity.
+    let linked_label_diag: Option<String> = state
+        .windows
+        .iter()
+        .find(|(_, m)| m.hwnd == Some(hwnd))
+        .map(|(label, _)| label.clone());
+    crate::log(&format!(
+        "[ipc] WRR-POS hwnd={:#x} rect=({},{})-({},{}) linked={:?} monitors={} pending={}",
+        hwnd, new_rect.left, new_rect.top, new_rect.right, new_rect.bottom,
+        linked_label_diag, monitors.len(), state.pending_hwnds.len()
+    ));
+
+    // Sentinel-aware drift suppression: CEF Views creates Win32
+    // top-level windows at the (-32000,-32000) / (-31970,-31970)
+    // hidden-sentinel positions for a brief moment between
+    // CreateWindow and the first SetWindowPos that places them.
+    // Firing OffMonitor on every window's open transient produces
+    // log noise without surfacing a real bug. Suppress drift for
+    // these positions; if the window stays at the sentinel
+    // (genuine bug), the *follow-up* event that lands at a
+    // non-sentinel off-monitor position WILL fire — and if it
+    // never moves, the corrective branch below acts on the FIRST
+    // sentinel report (since the foregrounded_since_open guard
+    // catches it).
+    let is_sentinel = is_win32_hidden_sentinel(&new_rect);
+
+    // Resolve the mirror: collect everything we need from a scoped
+    // borrow, then release it before calling `state.bump_version()`
+    // (rustc E0499 — same trick as `apply_hwnd_opened`).
+    struct Resolved {
+        label: String,
+        off_monitor: bool,
+        foregrounded_since_open: bool,
+    }
+    let resolved: Option<Resolved> = state
         .windows
         .iter_mut()
         .find(|(_, m)| m.hwnd == Some(hwnd))
-        .and_then(|(label, mirror)| {
+        .map(|(label, mirror)| {
             mirror.last_rect = Some(new_rect);
-            if !monitors.is_empty() && !rect::intersects_any(&new_rect, &monitors) {
-                Some(label.clone())
-            } else {
-                None
+            let off_monitor =
+                !monitors.is_empty() && !rect::intersects_any(&new_rect, &monitors);
+            Resolved {
+                label: label.clone(),
+                off_monitor,
+                foregrounded_since_open: mirror.foregrounded_since_open,
             }
         });
-    if let Some(label) = label_for_drift {
+
+    let Some(r) = resolved else {
+        return events;
+    };
+
+    if !r.off_monitor {
+        return events;
+    }
+
+    // Window is off all monitors. Fire drift unless we're in the
+    // open-transient sentinel state (per above).
+    if !is_sentinel {
         let v = state.bump_version();
-        drift.push(Event::HwndDriftDetected {
+        events.push(Event::HwndDriftDetected {
             kind: HwndDriftKind::OffMonitor,
-            label: Some(label),
+            label: Some(r.label.clone()),
             hwnd: Some(hwnd),
             detail: format!(
                 "Window rect ({},{})-({},{}) does not intersect any of {} monitors",
@@ -261,7 +310,65 @@ pub fn apply_hwnd_position_changed(state: &mut State, hwnd: u64, new_rect: Rect)
             version: v,
         });
     }
-    drift
+
+    // Phase B.9.2 — pure-reducer self-heal. If the window has
+    // never been foregrounded, this off-monitor state is from the
+    // open transition (NOT user action), so we emit a corrective
+    // move. The host's WRR subscriber applies it via SetWindowPos
+    // on the UI thread. The Win32 hidden sentinel is INCLUDED in
+    // the corrective trigger (we always want to move a window off
+    // the sentinel before the user notices), even though it's
+    // suppressed for drift to avoid log noise.
+    if !r.foregrounded_since_open {
+        if let Some(target) = pick_primary_centered(&monitors) {
+            let v = state.bump_version();
+            events.push(Event::CorrectiveWindowMove {
+                hwnd,
+                target_rect: target,
+                reason: HwndDriftKind::OffMonitor,
+                version: v,
+            });
+        }
+    }
+
+    events
+}
+
+/// Phase B.9.1 — Win32 sentinel positions for "this window is
+/// hidden." CEF parks new windows here briefly between create
+/// and first paint; same value family (`SW_HIDE` analog used by
+/// `ITaskbarList::DeleteTab` removed windows). We suppress drift
+/// emission for these but DO trigger corrective move (the user
+/// shouldn't see the sentinel).
+fn is_win32_hidden_sentinel(r: &Rect) -> bool {
+    // Both classic ((-32000,-32000)) and the (-31970, -31970)
+    // CEF-Views variant. Plus a generous epsilon for either
+    // axis since the bottom-right corner is offset by a default
+    // window size (e.g. (-31840,-31972)).
+    (r.left <= -31000 && r.top <= -31000) || (r.right <= -31000 && r.bottom <= -31000)
+}
+
+/// Phase B.9.2 — pick a corrective target rect: centered on the
+/// first monitor at a sensible default size (1280x800 or 70% of
+/// monitor, whichever is smaller). `None` if the monitor list is
+/// empty (caller suppresses corrective in that case).
+fn pick_primary_centered(monitors: &[Rect]) -> Option<Rect> {
+    let primary = monitors.first()?;
+    let mw = primary.right - primary.left;
+    let mh = primary.bottom - primary.top;
+    if mw <= 0 || mh <= 0 {
+        return None;
+    }
+    let w = std::cmp::min(1280, (mw as f32 * 0.7) as i32);
+    let h = std::cmp::min(800, (mh as f32 * 0.7) as i32);
+    let cx = primary.left + (mw - w) / 2;
+    let cy = primary.top + (mh - h) / 2;
+    Some(Rect {
+        left: cx,
+        top: cy,
+        right: cx + w,
+        bottom: cy + h,
+    })
 }
 
 /// Phase B.9.1 — handle `Command::ReportMonitorTopologyChanged`.

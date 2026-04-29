@@ -180,6 +180,66 @@ pub fn post_move_window(state: &Arc<AppState>, label: &str, dx: i32, dy: i32) {
     post_task(ThreadId::UI, Some(&mut task));
 }
 
+// ── Phase B.9.2 (WRR) — corrective absolute-position move ─────────────────
+//
+// Reducer-driven self-heal. Triggered by `Event::CorrectiveWindowMove` when
+// the reducer detects an off-monitor / sentinel-parked window that the user
+// has never foregrounded. We bypass `state.browsers` lookup-by-label (the
+// label might not be registered yet at correction time) and use Win32
+// SetWindowPos directly against the HWND. Must run on the UI thread because
+// CEF Views' window backing the HWND is owned by the UI thread.
+
+wrap_task! {
+    pub struct CorrectiveWindowMoveTask {
+        state: Arc<AppState>,
+        hwnd: u64,
+        x: i32,
+        y: i32,
+        w: i32,
+        h: i32,
+    }
+
+    impl Task {
+        fn execute(&self) {
+            #[cfg(target_os = "windows")]
+            unsafe {
+                use windows_sys::Win32::Foundation::HWND;
+                use windows_sys::Win32::UI::WindowsAndMessaging::{
+                    SetWindowPos, SWP_NOACTIVATE, SWP_NOZORDER,
+                };
+                let h = self.hwnd as HWND;
+                let ok = SetWindowPos(
+                    h,
+                    std::ptr::null_mut(),
+                    self.x,
+                    self.y,
+                    self.w,
+                    self.h,
+                    SWP_NOZORDER | SWP_NOACTIVATE,
+                );
+                tracing::info!(
+                    target: "wrr",
+                    "[wrr] corrective SetWindowPos hwnd={:#x} -> ({},{}) {}x{} ok={}",
+                    self.hwnd, self.x, self.y, self.w, self.h, ok != 0
+                );
+            }
+            #[cfg(not(target_os = "windows"))]
+            {
+                let _ = &self.state; // suppress unused on non-Windows
+                tracing::warn!(
+                    target: "wrr",
+                    "[wrr] corrective move requested on non-Windows host: ignored"
+                );
+            }
+        }
+    }
+}
+
+pub fn post_corrective_window_move(state: &Arc<AppState>, hwnd: u64, x: i32, y: i32, w: i32, h: i32) {
+    let mut task = CorrectiveWindowMoveTask::new(state.clone(), hwnd, x, y, w, h);
+    post_task(ThreadId::UI, Some(&mut task));
+}
+
 // ── Create new window (CEF Views) ───────────────────────────────────────
 
 wrap_task! {

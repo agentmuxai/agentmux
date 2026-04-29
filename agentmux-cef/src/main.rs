@@ -35,6 +35,7 @@ mod pane;
 mod sidecar;
 mod state;
 mod ui_tasks;
+mod wrr;
 
 use std::sync::Arc;
 
@@ -399,11 +400,27 @@ fn main() {
         format!("{}:{}", ipc_port, app_state.ipc_token),
     );
 
+    // Phase B.9.1 (WRR) — install Win32 event hooks. Must come
+    // AFTER `connect_to_launcher` so the report_hwnd_* sync APIs
+    // have a live `COMMAND_TX` to push into; AFTER CEF init so
+    // any HWNDs CEF creates during initialize() are missed
+    // (acceptable — they predate the user's session and are
+    // accounted for by main-window startup paths). Idempotent;
+    // safe to call multiple times. State arg lets the callback
+    // peek `pending_window_creations` for `label_hint`.
+    wrr::install_hooks(app_state.clone());
+
     // Run the CEF message loop. This blocks until quit_message_loop() is called
     // (triggered when all browser windows are closed in client.rs).
     run_message_loop();
 
     tracing::info!("CEF message loop exited, shutting down");
+
+    // Phase B.9.1 (WRR) — tear down Win32 event hooks before any
+    // further teardown. UnhookWinEvent is cheap; doing it early
+    // prevents stray callbacks during shutdown from racing the
+    // launcher_ipc channel close.
+    wrr::uninstall_hooks();
 
     // Kill the backend sidecar on shutdown.
     {
