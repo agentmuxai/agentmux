@@ -22,6 +22,7 @@
 
 mod data_dir;
 mod diag;
+mod event_log;
 mod hash;
 mod ipc;
 mod reducer;
@@ -279,6 +280,16 @@ async fn run_windows(
     // (~10–50 events per user action × handful of subscribers); a
     // lagging client gets `RecvError::Lagged` and reconnects.
     let (events_tx, _) = tokio::sync::broadcast::channel::<agentmux_common::ipc::Event>(1024);
+
+    // Phase D.2 — event log: in-memory ring (replay source for D.3's
+    // GetEvents) + optional disk persistence at
+    // `<data-dir>/launcher-events.log` for crash forensics.
+    let log_disk_path = paths.data_dir.join("launcher-events.log");
+    let event_log = std::sync::Arc::new(event_log::EventLog::new(Some(log_disk_path)));
+    let event_log_for_writer = std::sync::Arc::clone(&event_log);
+    let disk_writer_rx = events_tx.subscribe();
+    tokio::spawn(event_log::run_disk_writer(event_log_for_writer, disk_writer_rx));
+
     let _ipc_handle = ipc::run_ipc_server(
         pipe_path.clone(),
         first_pipe,
@@ -287,6 +298,7 @@ async fn run_windows(
             launcher_version: env!("CARGO_PKG_VERSION").to_string(),
             state: tokio::sync::Mutex::new(state::State::default()),
             events_tx,
+            event_log,
         },
     );
     log(&format!("IPC server started on {}", pipe_path));
