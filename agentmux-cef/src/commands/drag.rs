@@ -375,14 +375,10 @@ pub fn open_window_at_position(state: &Arc<AppState>, args: &serde_json::Value) 
         true,
     );
 
-    // Phase B.5d — host no longer registers locally. The launcher
-    // assigns the instance number from `ReportWindowOpened`
-    // (triggered by on_after_created) and the shadow update emits
-    // a fresh `window-instances-changed` once it lands. The early
-    // emit below carries the pre-mutation count; frontend updates
-    // it again ~ms later when the shadow event arrives.
-    let count = state.instance_count();
-    events::emit_event_all_windows(state, "window-instances-changed", &serde_json::json!(count));
+    // Phase B.7.3.3 — the launcher's typed events
+    // (`Event::WindowOpened` + `Event::WindowInstanceAssigned` +
+    // `Event::BackendWindowIdRegistered`) flow through the CEF JS
+    // bridge to drive the InstancePanel atoms. No sync emit here.
 
     Ok(serde_json::json!(label))
 }
