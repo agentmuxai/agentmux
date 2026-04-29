@@ -658,6 +658,12 @@ declare global {
         __WAVE_SERVER_WS_ENDPOINT__?: string;
         __WAVE_SERVER_WEB_ENDPOINT__?: string;
         __startupPerfStart?: number;
+
+        // Phase B.7.3.1 — launcher typed-event dispatcher.
+        // Installed by `frontend/util/launcher-events.ts`; called
+        // by the host's CEF JS bridge once per top-level renderer
+        // per launcher event.
+        __agentmux_launcher_event?: (evt: { event: string; version: number; [k: string]: unknown }) => void;
     }
 }
 
