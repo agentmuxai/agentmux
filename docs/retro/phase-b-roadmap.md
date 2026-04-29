@@ -50,8 +50,9 @@ Pre-Phase-B  ──► host owns 13 HashMaps  ◄── started here
                         ▼
               ✓ B.7.3.2 — typed events authoritative for InstancePanel atoms (#603)
                         ▼
-              ◄── HERE. B.7.3.3 / B.8 remaining for Phase B exit.
-              B.7.3.3 ── retire `window-instances-changed` + 4 sync emit sites
+              ✓ B.7.3.3 — retire window-instances-changed bespoke channel (#604)
+                        ▼
+              ◄── HERE. B.8 remaining for Phase B exit.
               B.8     ── Phase B exit (delete obsolete defensive code,
                          add property tests, --diag tool, CI smoke)
                         │
@@ -98,7 +99,7 @@ See `b5-migration-architecture-2026-04-28.md` for why `browsers` and pool maps c
 - B.7.2 (#597): re-emit on `BackendWindowIdRegistered/Unregistered` so windowId `null → real` transitions update the InstancePanel without a follow-up RPC.
 - **B.7.3.1 (done — PR #602)**: host outbound CEF JS bridge `launcher_event_bridge.rs` forwards every typed `Event` to every top-level renderer via `Frame::ExecuteJavaScript` calling `window.__agentmux_launcher_event(<json>)`. Renderer-side `frontend/util/launcher-events.ts` registers the dispatcher into a SolidJS signal pair; `frontend/app/store/launcher-event-reducer.ts` runs `createEffect` over it. B.7.3.1 logs only — bespoke `window-instances-changed` still feeds atoms.
 - **B.7.3.2 (done — PR #603)**: typed events promoted to authoritative for `openWindowLabelsAtom`, `openWindowEntriesAtom`, `windowCountAtom`. Reducer maintains in-memory `knownEntries` map; `recomputeAtoms()` runs after every apply. Bespoke `window-instances-changed` listener gated by `!launcherEventsActive()` — only fires in `task dev` / no-launcher mode. `seedKnownEntriesFromSnapshot` merges (doesn't clobber) — protects against the race where typed events arrive between snapshot fetch and seed (codex P1 fix).
-- B.7.3.3 (next): retire bespoke channel + 4 sync emit sites in `commands::window`, `drag`, `window_pool`, `client.rs`. Pure deletion.
+- **B.7.3.3 (done — PR #604)**: bespoke `window-instances-changed` channel + 4 sync emit sites retired. Typed launcher events are the SOLE source for InstancePanel state. Net deletion ~210 LoC. Codex P2 from #603 (pre-seed close tombstone) folded in. Codex P2 follow-up #604 (pre-seed close recompute when WindowOpened-then-WindowClosed both arrive pre-seed) folded in.
 
 ### B.8 — Phase B exit (1-2 PRs)
 
