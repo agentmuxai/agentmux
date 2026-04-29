@@ -484,7 +484,7 @@ pub fn get_window_count(state: &Arc<AppState>) -> serde_json::Value {
 /// Register the backend window ID for a window label.
 /// Called by the frontend after it has initialized its backend Window object.
 /// Used by `on_before_close` to notify the backend when a secondary window closes.
-pub fn register_backend_window(state: &Arc<AppState>, args: &serde_json::Value) -> serde_json::Value {
+pub fn register_backend_window(_state: &Arc<AppState>, args: &serde_json::Value) -> serde_json::Value {
     let label = args.get("label").and_then(|v| v.as_str()).unwrap_or("main");
     let window_id = args.get("window_id").and_then(|v| v.as_str()).unwrap_or("");
     tracing::info!(label = %label, window_id = %window_id, "[window] register_backend_window received");
@@ -500,19 +500,10 @@ pub fn register_backend_window(state: &Arc<AppState>, args: &serde_json::Value) 
             label.to_string(),
             window_id.to_string(),
         );
-        // Notify listeners that the label→windowId mapping changed.
-        // The InstancePanel needs `windowId` to look up the backend
-        // Window record (display name in meta, workspace fallback).
-        // Without this emit, sibling windows would never re-fetch
-        // listWindowInstances after a freshly-opened window's
-        // windowId becomes available, leaving its row's name
-        // unresolvable and rename disabled. (codex PR #569 P2)
-        let count = state.instance_count();
-        crate::events::emit_event_all_windows(
-            state,
-            "window-instances-changed",
-            &serde_json::json!(count),
-        );
+        // Phase B.7.3.3 — the launcher's
+        // `Event::BackendWindowIdRegistered` (delivered via the CEF
+        // JS bridge) carries the label → windowId mapping change to
+        // every renderer's reducer. No sync emit here.
     } else {
         tracing::warn!(label = %label, "[window] register_backend_window called with empty window_id — skipped");
     }
@@ -650,9 +641,8 @@ fn open_window_with_kind(
         true,
     );
 
-    // Notify all windows of the count change
-    let count = state.instance_count();
-    crate::events::emit_event_all_windows(state, "window-instances-changed", &serde_json::json!(count));
+    // Phase B.7.3.3 — typed launcher events drive InstancePanel
+    // atoms via the CEF JS bridge; no sync emit here.
 
     Ok(serde_json::json!(label))
 }

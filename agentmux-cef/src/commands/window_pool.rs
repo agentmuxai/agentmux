@@ -559,19 +559,8 @@ pub fn promote_pool_window(
         let _ = ShowWindow(raw_hwnd, SW_SHOW);
     }
 
-    // Phase B.5d — host no longer registers locally on pool promote.
-    // The launcher assigns the instance number from
-    // `ReportWindowOpened` (sent immediately above this line in the
-    // promote path) and the shadow update emits a fresh
-    // `window-instances-changed` once it lands. The synchronous emit
-    // below carries the pre-mutation count; the shadow's later emit
-    // catches up.
-    let count = state.instance_count();
-    crate::events::emit_event_all_windows(
-        state,
-        "window-instances-changed",
-        &serde_json::json!(count),
-    );
+    // Phase B.7.3.3 — the launcher's typed events drive the
+    // InstancePanel atoms via the CEF JS bridge. No sync emit here.
 
     // Now tell the pool window's renderer to bootstrap the workspace.
     crate::events::emit_event_to_window(
