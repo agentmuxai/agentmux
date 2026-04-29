@@ -208,8 +208,13 @@ function dispatch(evt: LauncherEvent): void {
                 // Pre-seed: record a tombstone so seed skips this
                 // label even if it appears in the snapshot (codex P2
                 // #603). The delete above handles the case where
-                // WindowOpened arrived first pre-seed.
+                // WindowOpened arrived first pre-seed — and if it
+                // did delete an existing entry, atoms must recompute
+                // here too, otherwise the ghost row persists until
+                // seed runs (or forever if seed fails). (codex P2
+                // #604.)
                 closedBeforeSeed.add(label);
+                if (deleted) recomputeAtoms();
                 return;
             }
             if (deleted) recomputeAtoms();
@@ -237,6 +242,7 @@ function dispatch(evt: LauncherEvent): void {
             const deleted = knownEntries.delete(label);
             if (!seedHasHappened && closedBeforeSeed) {
                 closedBeforeSeed.add(label);
+                if (deleted) recomputeAtoms();
                 return;
             }
             if (deleted) recomputeAtoms();
