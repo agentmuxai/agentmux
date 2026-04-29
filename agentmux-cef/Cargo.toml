@@ -1,6 +1,6 @@
 [package]
 name = "agentmux-cef"
-version = "0.33.483"
+version = "0.33.484"
 description = "AgentMux Host — Desktop app with bundled Chromium"
 authors = ["AgentMux Corp"]
 edition = "2021"
@@ -65,6 +65,11 @@ windows-sys = { version = "0.59", features = [
     "Win32_System_Com",
     "Win32_Security",
     "Win32_Security_Authorization",
+    # Phase B.9.1 (WRR) — SetWinEventHook / UnhookWinEvent /
+    # HWINEVENTHOOK live under Accessibility (they originated as
+    # MSAA hooks; later events like EVENT_OBJECT_LOCATIONCHANGE
+    # piggyback on the same infrastructure).
+    "Win32_UI_Accessibility",
 ] }
 
 [target.'cfg(target_os = "windows")'.build-dependencies]
