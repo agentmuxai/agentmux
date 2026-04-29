@@ -70,6 +70,17 @@ pub async fn run_wrr_diag(launcher_exe_dir: &std::path::Path) -> Result<(), Stri
     write_half.flush().await
         .map_err(|e| format!("flush Register: {}", e))?;
 
+    // Phase D.1 — request a state snapshot. Reply arrives on the
+    // broadcast bus alongside the Register reply; we filter for it
+    // in the event collection below.
+    let mut buf = serde_json::to_vec(&Command::GetSnapshot)
+        .map_err(|e| format!("serialize GetSnapshot: {}", e))?;
+    buf.push(b'\n');
+    write_half.write_all(&buf).await
+        .map_err(|e| format!("send GetSnapshot: {}", e))?;
+    write_half.flush().await
+        .map_err(|e| format!("flush GetSnapshot: {}", e))?;
+
     // Read events for OBSERVATION_WINDOW. The launcher's IPC server
     // (post-B.8) broadcasts every reducer event on a server-wide
     // bus; this connection's fanout writes them to us. We collect
@@ -132,21 +143,65 @@ pub async fn run_wrr_diag(_launcher_exe_dir: &std::path::Path) -> Result<(), Str
 
 #[cfg(target_os = "windows")]
 fn print_summary(events: &[Event]) {
-    println!("Captured {} event(s) in {}s observation window:", events.len(), OBSERVATION_WINDOW.as_secs());
-    println!();
+    // Phase D.1 — pull the Snapshot out and print it first as the
+    // canonical "state now" view; remaining events are the live
+    // stream observed during the 2s window.
+    let (snapshot, stream): (Vec<_>, Vec<_>) = events
+        .iter()
+        .partition(|e| matches!(e, Event::Snapshot { .. }));
 
-    if events.is_empty() {
-        println!("(no events — running instance is idle. State observability via");
-        println!(" GetSnapshot RPC is Phase D scope; for now, perform a UI action");
-        println!(" on the running instance and re-run --diag wrr to capture the");
-        println!(" event stream.)");
-        return;
+    if let Some(Event::Snapshot {
+        version,
+        lifecycle,
+        windows,
+        pool,
+        instance_registry,
+        backend_window_ids,
+        monitors,
+    }) = snapshot.first().copied()
+    {
+        println!("=== Snapshot (event_version={}) ===", version);
+        println!("Lifecycle: {:?}", lifecycle);
+        println!("Monitors:  {} ({:?})", monitors.len(), monitors);
+        println!();
+        println!("Windows ({}):", windows.len());
+        if windows.is_empty() {
+            println!("  (none)");
+        } else {
+            for w in windows {
+                let inst = instance_registry
+                    .iter()
+                    .find(|(l, _)| l == &w.label)
+                    .map(|(_, n)| format!("#{}", n))
+                    .unwrap_or_else(|| "—".to_string());
+                let backend = backend_window_ids
+                    .iter()
+                    .find(|(l, _)| l == &w.label)
+                    .map(|(_, b)| b.as_str())
+                    .unwrap_or("—");
+                println!(
+                    "  {:>4} {:30} kind={:?} hwnd={:?} visible={} iconic={} fg_seen={} backend={}",
+                    inst, w.label, w.kind, w.hwnd, w.visible, w.iconic,
+                    w.foregrounded_since_open, backend
+                );
+            }
+        }
+        println!();
+        println!("Pool ({}): {:?}", pool.len(), pool);
+        println!();
+    } else {
+        println!("(snapshot not received — server may be older than D.1)");
+        println!();
     }
 
-    // Group by event kind for a quick at-a-glance view.
+    println!("=== Live stream observed in {}s ===", OBSERVATION_WINDOW.as_secs());
+    if stream.is_empty() {
+        println!("(no events — instance is idle.)");
+        return;
+    }
     use std::collections::BTreeMap;
     let mut counts: BTreeMap<&'static str, u32> = BTreeMap::new();
-    for evt in events {
+    for evt in &stream {
         *counts.entry(event_kind_name(evt)).or_insert(0) += 1;
     }
     println!("By kind:");
@@ -154,9 +209,8 @@ fn print_summary(events: &[Event]) {
         println!("  {:>4}× {}", count, kind);
     }
     println!();
-
     println!("Full stream (oldest first):");
-    for (i, evt) in events.iter().enumerate() {
+    for (i, evt) in stream.iter().enumerate() {
         println!("  [{}] {}", i, format_event(evt));
     }
 }
@@ -181,6 +235,7 @@ fn event_kind_name(e: &Event) -> &'static str {
         Event::HwndDriftDetected { .. } => "HwndDriftDetected",
         Event::CorrectiveWindowMove { .. } => "CorrectiveWindowMove",
         Event::HostShouldQuit { .. } => "HostShouldQuit",
+        Event::Snapshot { .. } => "Snapshot",
         _ => "Other",
     }
 }
