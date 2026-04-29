@@ -165,17 +165,15 @@ Filed as **issue #606** for future pickup. Cosmetic-only; not blocking any phase
 
 ## 5. What's next — Phase D / E / F
 
-### Phase D — durability / resync (~3 PRs)
+### Phase D — durability / resync
 
-After Phase B exits. Builds on the reducer's monotonic `event_version`.
+Builds on the reducer's monotonic `event_version`.
 
-| Sub-phase | Scope |
-|---|---|
-| **D.1** | `Command::GetSnapshot { since: u64 }` + `Event::Snapshot { state, events_since }` reply. Lets a reconnecting subscriber catch up without missing events. |
-| **D.2** | Persisted event log (ring buffer at `<data-dir>/launcher-events.log`). Survives launcher crash for forensics. Not authoritative state. |
-| **D.3** | Subscriber-resync protocol: `Register` → `GetSnapshot` → `EventList` → live stream. Idempotent `apply_event` becomes a typed contract (Rust `IdempotentApply` trait). |
-
-D.1 also subsumes the `--diag wrr` snapshot story (today: stream observation via Tool client; D.1 makes it a clean RPC).
+| Sub-phase | Scope | Status |
+|---|---|---|
+| **D.1** | `Command::GetSnapshot` + `Event::Snapshot` (one-shot, no replay). Diag prints state-now via the new RPC. | ✅ **done — PR #607** |
+| **D.2** | Persisted event log (ring buffer at `<data-dir>/launcher-events.log`). Survives launcher crash for forensics. Not authoritative state. | next |
+| **D.3** | Add `since: u64` parameter to `GetSnapshot` + delta-event replay. Subscriber-resync protocol: `Register` → `GetSnapshot{since}` → snapshot + missed events → live stream. Idempotent `apply_event` becomes a typed contract (Rust `IdempotentApply` trait). | after D.2 |
 
 ### Phase E — srv reducer (~5–8 PRs)
 
