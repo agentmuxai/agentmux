@@ -242,6 +242,12 @@ pub async fn connect_to_launcher(
 /// add more shadow handlers as additional host maps migrate. Other
 /// event types are no-ops here (they're already logged at the call
 /// site).
+///
+/// Phase B.7.3.1 — after the match, fan the event out to every
+/// top-level renderer via the JS bridge. Shadows are updated FIRST
+/// so that any renderer-side code that reads host state via the IPC
+/// HTTP path (e.g. `listWindowInstances`) sees a consistent view at
+/// the moment the typed event lands.
 fn apply_event_to_shadow(state: &std::sync::Arc<crate::state::AppState>, event: &Event) {
     match event {
         Event::WindowInstanceAssigned { label, num, .. } => {
@@ -398,6 +404,12 @@ fn apply_event_to_shadow(state: &std::sync::Arc<crate::state::AppState>, event: 
         }
         _ => {}
     }
+
+    // Phase B.7.3.1 — broadcast the typed event to every top-level
+    // renderer. The renderer-side dispatcher (`window.__agentmux_launcher_event`,
+    // installed by `frontend/util/launcher-events.ts`) feeds the
+    // launcher-event-reducer signal that downstream UI subscribes to.
+    crate::launcher_event_bridge::dispatch_to_renderers(state, event);
 }
 
 /// Phase B.7.1 — emit `window-instances-changed` with a resolved
