@@ -26,6 +26,7 @@ mod ipc;
 mod reducer;
 mod srv_spawner;
 mod state;
+mod wrr;
 
 #[tokio::main]
 async fn main() {

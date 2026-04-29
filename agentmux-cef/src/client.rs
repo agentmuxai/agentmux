@@ -242,6 +242,52 @@ impl AgentMuxHandler {
                 WindowKind::Subwindow => agentmux_common::ipc::WindowKind::Subwindow,
             };
             crate::launcher_ipc::report_window_opened(label.clone(), wire_kind, pending_parent.clone());
+
+            // Phase B.9.1 (WRR) — authoritative HWND link. We have
+            // both the label (popped from PendingWindowCreation
+            // above) and the native HWND (computed in the
+            // #[cfg(target_os = "windows")] block above as
+            // `views_top_hwnd` / `hwnd`). Sending an explicit
+            // ReportHwndOpened with `label_hint = Some(label)` here
+            // eliminates the race between the OS-driven
+            // EVENT_OBJECT_CREATE (which my hook captures with
+            // `label_hint = None` because pending_window_creations
+            // may already have been popped by the time the OS event
+            // bubbles back) and CEF's lifecycle. The OS-event path
+            // still runs as belt-and-suspenders for non-CEF windows
+            // / future detection of strays. (The prior pending_hwnds
+            // entry from the OS event is harmless — it ages out on
+            // the next event-driven reconciliation pass.)
+            #[cfg(target_os = "windows")]
+            {
+                // Recompute the HWND here — the prior #[cfg] block
+                // computed `hwnd` as a local that's not in scope at
+                // this site. The CEF Browser API is cheap to query
+                // a second time. Same precedence: Views' window
+                // handle first, host's window handle as fallback.
+                let mut browser_for_wrr = browser.clone();
+                let views_hwnd = browser_view_get_for_browser(Some(&mut browser_for_wrr))
+                    .and_then(|bv| bv.window())
+                    .map(|w| w.window_handle().0 as *mut std::ffi::c_void)
+                    .filter(|p| !p.is_null());
+                let host_hwnd = browser.host().and_then(|h| {
+                    let wh = h.window_handle();
+                    if wh.0.is_null() {
+                        None
+                    } else {
+                        Some(wh.0 as *mut std::ffi::c_void)
+                    }
+                });
+                let hwnd_val = views_hwnd.or(host_hwnd).map(|p| p as u64).unwrap_or(0);
+                if hwnd_val != 0 {
+                    crate::launcher_ipc::report_hwnd_opened(
+                        hwnd_val,
+                        "Chrome_WidgetWin_1".to_string(),
+                        label.clone(),
+                        Some(label.clone()),
+                    );
+                }
+            }
             // Phase B.4 follow-up — drift check after the open.
             crate::launcher_ipc::compute_and_report_host_counts(&self.state);
         }
