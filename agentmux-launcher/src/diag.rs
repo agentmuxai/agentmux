@@ -16,10 +16,12 @@
 // gets all events broadcast on the pipe without affecting the
 // running instance.
 //
-// Phase D will add a `Command::GetSnapshot` RPC for a structured
-// reply (current windows + pool + drift state) — until then, this
-// captures the live event stream over a 2s window and infers
-// state from observed events.
+// Phase D.1 — `Command::GetSnapshot` is sent right after Register
+// to capture the launcher's canonical state in one round-trip; the
+// reply (`Event::Snapshot`) is printed prominently before the live
+// event stream. Phase D.2 + D.3 will add a persisted event log + a
+// `since: u64` parameter for delta replay; until then a snapshot is
+// "as-of-now" only.
 
 use std::time::Duration;
 
