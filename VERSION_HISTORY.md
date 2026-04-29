@@ -14,6 +14,7 @@ Auto-appended by `scripts/package-cef-portable.sh`. Newest first.
 
 | Version | Date | ZIP (compressed) | Folder (uncompressed) | Note |
 |---------|------|------------------|-----------------------|------|
+| 0.33.503 | 2026-04-29 | 160.2 MiB | 334.7 MiB | |
 | 0.33.502 | 2026-04-29 | 160.2 MiB | 334.7 MiB | |
 | 0.33.394 | 2026-04-25 | 159.8 MiB | 333.7 MiB | |
 | 0.33.372 | 2026-04-24 | 159.8 MiB | 333.6 MiB | |
