@@ -21,6 +21,7 @@
 )]
 
 mod data_dir;
+mod diag;
 mod hash;
 mod ipc;
 mod reducer;
@@ -74,6 +75,34 @@ async fn main() {
 
     let args: Vec<String> = std::env::args().skip(1).collect();
     log(&format!("forwarding {} CLI args to host", args.len()));
+
+    // Phase B.8 — `agentmux.exe --diag wrr` Tool client. Connects
+    // to the running launcher, captures events for a short window,
+    // prints a summary, exits. Doesn't spawn srv/host; doesn't
+    // bind the pipe; doesn't drive the reducer's lifecycle. Skip
+    // straight to the Tool flow before any privileged setup.
+    if matches!(args.first().map(String::as_str), Some("--diag")) {
+        let topic = args.get(1).map(String::as_str).unwrap_or("");
+        match topic {
+            "wrr" => {
+                match diag::run_wrr_diag(exe_dir).await {
+                    Ok(()) => std::process::exit(0),
+                    Err(msg) => {
+                        eprintln!("--diag wrr failed: {}", msg);
+                        std::process::exit(1);
+                    }
+                }
+            }
+            "" => {
+                eprintln!("usage: agentmux.exe --diag <topic>\nknown topics: wrr");
+                std::process::exit(2);
+            }
+            other => {
+                eprintln!("unknown --diag topic: {} (known: wrr)", other);
+                std::process::exit(2);
+            }
+        }
+    }
 
     #[cfg(target_os = "windows")]
     {
@@ -245,6 +274,11 @@ async fn run_windows(
             std::process::exit(2);
         }
     };
+    // Phase B.8 — broadcast bus for reducer-emitted events. Capacity
+    // 1024 is comfortable headroom for the launcher's event volume
+    // (~10–50 events per user action × handful of subscribers); a
+    // lagging client gets `RecvError::Lagged` and reconnects.
+    let (events_tx, _) = tokio::sync::broadcast::channel::<agentmux_common::ipc::Event>(1024);
     let _ipc_handle = ipc::run_ipc_server(
         pipe_path.clone(),
         first_pipe,
@@ -252,6 +286,7 @@ async fn run_windows(
             launcher_pid: std::process::id(),
             launcher_version: env!("CARGO_PKG_VERSION").to_string(),
             state: tokio::sync::Mutex::new(state::State::default()),
+            events_tx,
         },
     );
     log(&format!("IPC server started on {}", pipe_path));

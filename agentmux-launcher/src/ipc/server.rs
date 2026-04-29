@@ -45,6 +45,16 @@ pub struct ServerCtx {
     /// Canonical state owned by the server. Mutex held only during
     /// reducer dispatch — sub-millisecond.
     pub state: Mutex<State>,
+    /// Phase B.8 — broadcast bus for reducer-emitted events. Every
+    /// reducer event from `reducer::update` is published here; each
+    /// connection subscribes and writes received events to its own
+    /// pipe. Lets observability clients (`--diag wrr`, future Tools)
+    /// see cross-process activity, not just replies to their own
+    /// commands. Per-connection direct sends (Error replies for
+    /// parse failures, register-first violations) bypass the bus —
+    /// they're response-to-this-client-only by intent. (codex P1
+    /// PR #605.)
+    pub events_tx: tokio::sync::broadcast::Sender<Event>,
 }
 
 /// Bind the first named-pipe instance synchronously.
@@ -158,7 +168,14 @@ pub fn run_ipc_server(
 /// reducer is sync; we hold the state mutex only while it runs.
 /// Events come back from the reducer as Vec<Event>; we patch sentinel
 /// fields (Registered.launcher_pid / launcher_version — the reducer
-/// can't read those) and write each line.
+/// can't read those) and publish them on the broadcast bus.
+///
+/// Phase B.8 — events from the reducer flow through the broadcast
+/// bus (`ctx.events_tx`); a per-connection fanout task subscribes
+/// and writes events to this connection's pipe. Per-connection
+/// direct writes are reserved for "response-to-this-client-only"
+/// errors (parse failure, register-first violation). (codex P1
+/// PR #605.)
 #[cfg(target_os = "windows")]
 async fn handle_connection(stream: NamedPipeServer, ctx: Arc<ServerCtx>) {
     let (read_half, write_half) = tokio::io::split(stream);
@@ -177,6 +194,46 @@ async fn handle_connection(stream: NamedPipeServer, ctx: Arc<ServerCtx>) {
     // client_id (returned in Registered) is the wire-visible one.
     let conn_id = NEXT_CONN_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
+    // Phase B.8 — fanout task: subscribe to the server-wide event
+    // bus and write each event to THIS connection's pipe. Started
+    // before any commands are processed so a registered client can
+    // start receiving events from concurrent activity immediately.
+    // Aborted when the connection's read loop returns (below).
+    let fanout_handle = {
+        let writer = Arc::clone(&writer);
+        let ctx = Arc::clone(&ctx);
+        let mut events_rx = ctx.events_tx.subscribe();
+        tokio::spawn(async move {
+            loop {
+                match events_rx.recv().await {
+                    Ok(event) => {
+                        let event = patch_launcher_identity(event, &ctx);
+                        // Errors here mean the pipe is closed; the
+                        // read loop will detect EOF on the next
+                        // iteration. Swallow + continue to drain
+                        // any remaining buffered events so we don't
+                        // accidentally hold onto channel slots.
+                        if send_event(&writer, event).await.is_err() {
+                            return;
+                        }
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                        // Slow client missed `n` events. Phase D's
+                        // GetSnapshot resync covers this case
+                        // properly; for now the client has to
+                        // reconnect to recover. Log so operators
+                        // can see when this happens.
+                        crate::log(&format!(
+                            "[ipc] conn_id={} lagged event bus, missed {} events",
+                            conn_id, n
+                        ));
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
+                }
+            }
+        })
+    };
+
     loop {
         let line = match lines.next_line().await {
             Ok(Some(l)) => l,
@@ -185,6 +242,7 @@ async fn handle_connection(stream: NamedPipeServer, ctx: Arc<ServerCtx>) {
                     "[ipc] connection conn_id={} closed (kind={:?}, pid={:?})",
                     conn_id, registered_kind, registered_pid
                 ));
+                fanout_handle.abort();
                 return;
             }
             Err(e) => {
@@ -192,6 +250,7 @@ async fn handle_connection(stream: NamedPipeServer, ctx: Arc<ServerCtx>) {
                     "[ipc] read error conn_id={}: {}",
                     conn_id, e
                 ));
+                fanout_handle.abort();
                 return;
             }
         };
@@ -230,6 +289,7 @@ async fn handle_connection(stream: NamedPipeServer, ctx: Arc<ServerCtx>) {
             let close = matches!(&reply, Event::Error { fatal: true, .. });
             let _ = send_event(&writer, reply).await;
             if close {
+                fanout_handle.abort();
                 return;
             }
             continue;
@@ -296,11 +356,13 @@ async fn handle_connection(stream: NamedPipeServer, ctx: Arc<ServerCtx>) {
             }
         }
 
-        // Write events back over the same connection. Patch the
-        // sentinel launcher_pid / launcher_version fields the reducer
-        // left blank. Drift events get a WARN-level log line so
-        // operators see mirror divergence in launcher logs without
-        // needing a subscriber to be wired up. (B.4 follow-up.)
+        // Phase B.8 — publish reducer events on the broadcast bus
+        // instead of writing them directly to this connection. The
+        // per-connection fanout task (spawned above) subscribes and
+        // writes them to its own pipe — including this connection,
+        // which sees its own events back. Drift events still log at
+        // the launcher level so operators see them regardless of
+        // subscriber wiring. (codex P1 PR #605.)
         let goodbye = matches!(cmd, Command::Goodbye);
         for event in events {
             if let Event::DriftDetected {
@@ -315,11 +377,6 @@ async fn handle_connection(stream: NamedPipeServer, ctx: Arc<ServerCtx>) {
                     kind, host_count, mirror_count, conn_id
                 ));
             }
-            // Phase B.9.1 (WRR) — drift logged at the launcher level
-            // so operators see Win32 reality divergence in
-            // launcher.log regardless of subscriber wiring. Severity
-            // tag in the log line lets a future `--diag wrr` (B.9.2)
-            // grep precisely.
             if let Event::HwndDriftDetected {
                 kind,
                 label,
@@ -334,16 +391,18 @@ async fn handle_connection(stream: NamedPipeServer, ctx: Arc<ServerCtx>) {
                     severity, kind, label, hwnd, detail, conn_id
                 ));
             }
-            let event = patch_launcher_identity(event, &ctx);
-            if send_event(&writer, event).await.is_err() {
-                return;
-            }
+            // Send may fail when no receivers exist (e.g., during
+            // shutdown). That's fine — events are advisory in that
+            // window and the per-connection fanout tasks own retry
+            // semantics via subscribe().
+            let _ = ctx.events_tx.send(event);
         }
         if goodbye {
             crate::log(&format!(
                 "[ipc] goodbye from conn_id={} kind={:?} pid={:?}",
                 conn_id, registered_kind, registered_pid
             ));
+            fanout_handle.abort();
             return;
         }
     }

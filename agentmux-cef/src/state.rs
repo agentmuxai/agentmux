@@ -381,18 +381,6 @@ impl AppState {
         self.shadow_instance_registry.lock().get(label).copied()
     }
 
-    /// Phase B.5e — authoritative instance count. Returns the
-    /// shadow's length (sole source of truth post-B.5e).
-    ///
-    /// Phase B.7.3.3 — only remaining caller is the
-    /// `getWindowCount` IPC method. The InstancePanel-driving
-    /// path (sync emits + bespoke `window-instances-changed`
-    /// re-emit) is retired; typed launcher events delivered via
-    /// the CEF JS bridge update the renderer's atoms directly.
-    pub fn instance_count(&self) -> usize {
-        self.shadow_instance_registry.lock().len()
-    }
-
     /// Phase B.5 (window_id_map step e) — authoritative
     /// label→backend_window_id lookup. Reads from the
     /// launcher-fed `shadow_backend_window_ids`. Sole source of
