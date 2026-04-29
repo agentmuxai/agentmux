@@ -1,7 +1,7 @@
 # Multi-reducer architecture — status & roadmap
 
 **Status:** Active reference. Synthesis of current state across launcher / host / srv reducers, what's been built, and what's left.
-**Date:** 2026-04-29.
+**Date:** 2026-04-29 (post-#608 / Phase D done).
 **Author:** AgentA.
 
 **Read first** if resuming reducer-architecture work. After this:
@@ -113,7 +113,7 @@ Atoms / blocks consume the typed stream. No bespoke proxy events from host. No p
 
 ---
 
-## 3. Phase B status — exit-ready except B.8
+## 3. Phase B + D status — both done
 
 | Sub-phase | Scope | Status |
 |---|---|---|
@@ -130,9 +130,18 @@ Atoms / blocks consume the typed stream. No bespoke proxy events from host. No p
 | B.7.3.1 (#602) | host outbound JS bridge for typed events | ✅ |
 | B.7.3.2 (#603) | typed events authoritative for atoms; bespoke demoted | ✅ |
 | B.7.3.3 (#604) | retire bespoke channel + 4 sync emit sites | ✅ |
-| **B.8** (open) | proptests + `--diag wrr` + dead-code sweep + close-all integration test | 🟡 **In review (PR #605, awaiting reagent + codex)** |
+| **B.8** (#605) | proptests + `--diag wrr` + dead-code sweep + close-all integration test + IPC server broadcast bus + diag Goodbye | ✅ |
 
-After B.8 merges → **Phase B done**.
+**Phase B complete.** Launcher reducer canonical for 9 projections; host subscribes via `apply_event_to_shadow`; renderer subscribes via CEF JS bridge; bespoke `window-instances-changed` channel retired.
+
+### Phase D — durability / resync (done)
+
+| Sub-phase | Scope | Status |
+|---|---|---|
+| **D.1** (#607) | `Command::GetSnapshot` + `Event::Snapshot` (one-shot, no replay). Diag prints state-now via the new RPC. | ✅ |
+| **D.2 + D.3** (#608) | Event log: in-memory ring (4096 events) for replay, plus `<data-dir>/launcher-events.log` for crash forensics. `Command::GetEvents { since: u64 }` + `Event::EventList { events, version }`. Server intercepts before reducer (log query is I/O); reducer's GetEvents arm is unreachable no-op for match exhaustiveness. | ✅ |
+
+**Phase D complete.** Subscribers can now do full resync: `Register` → `GetSnapshot` → `GetEvents { since }` → live broadcast stream. Disk persistence survives crashes for forensics.
 
 ---
 
@@ -163,21 +172,11 @@ Filed as **issue #606** for future pickup. Cosmetic-only; not blocking any phase
 
 ---
 
-## 5. What's next — Phase D / E / F
-
-### Phase D — durability / resync
-
-Builds on the reducer's monotonic `event_version`.
-
-| Sub-phase | Scope | Status |
-|---|---|---|
-| **D.1** | `Command::GetSnapshot` + `Event::Snapshot` (one-shot, no replay). Diag prints state-now via the new RPC. | ✅ **done — PR #607** |
-| **D.2** | Persisted event log (ring buffer at `<data-dir>/launcher-events.log`). Survives launcher crash for forensics. Not authoritative state. | next |
-| **D.3** | Add `since: u64` parameter to `GetSnapshot` + delta-event replay. Subscriber-resync protocol: `Register` → `GetSnapshot{since}` → snapshot + missed events → live stream. Idempotent `apply_event` becomes a typed contract (Rust `IdempotentApply` trait). | after D.2 |
+## 5. What's next — Phase E / F
 
 ### Phase E — srv reducer (~5–8 PRs)
 
-**First validation point for the multi-reducer pattern.**
+**First validation point for the multi-reducer pattern.** Up next.
 
 `agentmux-srv` already has its own state (workspaces, tabs, blocks, layout, identity accounts). Promoting it to a Redux-style reducer is the first place we exercise the cross-reducer events + sagas pattern.
 
@@ -190,6 +189,13 @@ Expected deliverables:
 - `agentmux-srv::reducer` with arms for `CreateWorkspace`, `AddTab`, `MoveTabBetweenWorkspaces`, `AddBlock`, etc.
 - Events serialized via the launcher pipe; launcher reducer holds projections of srv state for cross-process queries.
 - Renderer subscribes to srv events the same way it subscribes to launcher events (CEF JS bridge dispatcher + reducer effect).
+
+#### Phase E carryovers (codex P2s from PR #608, integrate when touching the related code)
+
+- **`agentmux-launcher/src/ipc/server.rs:438`** — `Event::Registered` is appended to the in-memory replay ring BEFORE `patch_launcher_identity` runs, so stored events keep reducer sentinels (`launcher_pid: 0`, empty `launcher_version`). When `GetEvents` returns those entries via the `EventList`, identity-patching only touches the top-level event, not nested replay events. Replay data is inconsistent with the live stream. Fix: patch identity BEFORE the `event_log.append` call (move `patch_launcher_identity` into the broadcast loop above the append).
+- **`agentmux-launcher/src/event_log.rs:121`** — `replay_truncated` computes `since + 1` directly. `Command::GetEvents { since: u64::MAX }` overflows: debug builds panic, release builds wrap. Wire input is externally reachable; should use `since.checked_add(1)` or `since.saturating_add(1)`.
+
+Both flagged as P2 (not blocking) but should fold into Phase E's first PR that touches `server.rs` / `event_log.rs` to avoid leaving them as a separate cleanup item.
 
 ### Phase F — host reducer + retire scaffolding (~5–8 PRs)
 
@@ -230,16 +236,18 @@ Linux + macOS IPC (Unix domain sockets), WRR-equivalent observation (X11/Wayland
 | Pool refill suppressed during host drain via `is_quitting` flag (B.9.3) | CEF's `quit_message_loop` is QuitWhenIdle — without suppression, pool windows keep state non-empty forever |
 | Cross-thread "deliver work to UI thread" uses `cef::post_task` (or Win32 `PostMessage(WM_CLOSE)` as bypass) — NOT direct calls | direct calls from worker thread are CEF UB; PostThreadMessage(WM_QUIT) is ignored by CEF's pump |
 | browser_panes deadlock fix waits for Phase F | structural fix via host reducer eliminates the pattern by design; one-off lock-snapshot-and-drop would paper over the smell |
+| Phase D bundled (D.2 + D.3 in one PR #608) | parts interlock: D.3's `GetEvents` reads from D.2's event log. Splitting would create intermediate states where the snapshot RPC exists but no client knows how to consume it. ~500 LoC was tractable for review. |
+| Phase E + F stay multi-PR | est. 2500–5000 LoC each; reagent + codex review quality drops at scale (PR #604 reagent flagged 16 regressions on 500 LoC; mega-PRs would skim or timeout). Bisection breaks. Multi-reducer specifically benefits from incremental validation (srv vs host pattern). Use a "phase exit" PR per phase to bundle the smaller cleanups (proptests + dead code) — same pattern as B.8 / D.2+D.3. |
 
 ---
 
 ## 7. Sequencing recommendation
 
-1. **B.8 merges** — Phase B exits.
-2. **CEF Views position bug (next-steps §1.1)** — small, removes a known masking case for B.9. 1 PR.
-3. **Phase D** — durability / resync. Independently useful even if multi-reducer is deferred.
-4. **Phase E — srv reducer.** First multi-reducer validation. The pattern that works here will work for host.
-5. **Phase F — host reducer.** Retires scaffolding maps. Fixes the browser_panes deadlock by design.
-6. **Phase 7** — cross-platform parity, parallel track at any point.
+1. ~~**B.8 merges** — Phase B exits.~~ ✅ done
+2. ~~**Phase D** — durability / resync.~~ ✅ done
+3. **Phase E — srv reducer (next).** First multi-reducer validation. Pattern that works here will work for host. Fold the two codex P2 carryovers (server.rs identity patching + event_log.rs overflow) into the first Phase E PR that touches those files.
+4. **Phase F — host reducer.** Retires scaffolding maps. Structurally fixes the browser_panes deadlock (§4.1).
+5. **Phase 7** — cross-platform parity, parallel track at any point.
+6. **Issue #606** (CEF Views position bug) — cosmetic; pick up anytime.
 
-Total remaining LoC for Phase D + E + F is significant — probably 15–25 PRs across the three phases — but each individually shippable, each with property tests, each one-step at a time.
+Phase E + F is roughly 10–16 PRs together — each individually shippable, each with property tests, each one-step at a time.
