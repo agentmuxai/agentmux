@@ -424,6 +424,19 @@ pub enum Event {
         reason: HwndDriftKind,
         version: u64,
     },
+    /// Phase B.9.3 — saga-style corrective. Reducer detected the
+    /// `OrphanInstance` transition (last user-visible label
+    /// removed from `state.windows`, host still Running). Host
+    /// subscriber handles by reaping the warm pool and calling
+    /// `quit_message_loop()`. ADVISORY, not a hard command —
+    /// the host's handler should re-check `state.browsers`
+    /// before actually quitting (the user could open a new
+    /// window in the same dispatch tick race window). Event is
+    /// idempotent: multiple emissions are safe; reaping pool +
+    /// quit are themselves idempotent.
+    HostShouldQuit {
+        version: u64,
+    },
 }
 
 /// Phase B.9.1 — six classes of CEF↔Win32 disagreement the reducer
@@ -454,6 +467,16 @@ pub enum HwndDriftKind {
     /// `ReportWindowClosed` arrived, but subsequent OS events for
     /// the HWND keep firing (it never went away on the Win32 side).
     LingeringHwnd,
+    /// Phase B.9.3 — host process is alive and registered, but
+    /// `state.windows` just transitioned to empty. The host's own
+    /// close path doesn't reap the warm pool when the last
+    /// user-visible window closes (pool windows hold
+    /// `state.browsers` non-empty, so `quit_message_loop` never
+    /// fires). The launcher's reducer is the only place that knows
+    /// "all user-meaningful labels are gone" cleanly, so we
+    /// surface the signal here. Paired with `Event::HostShouldQuit`
+    /// emitted in the same reducer call (see B.9.3 saga).
+    OrphanInstance,
 }
 
 /// Phase B.9.1 — drift severity. Operator-tunable severity floor

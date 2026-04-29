@@ -490,5 +490,10 @@ pub fn severity_for(kind: HwndDriftKind) -> Severity {
         HwndDriftKind::HiddenSinceOpen => Severity::Warn,
         HwndDriftKind::LingeringHwnd => Severity::Warn,
         HwndDriftKind::BrowserWithoutHwnd => Severity::Info,
+        // Phase B.9.3 — OrphanInstance is operationally significant
+        // (process tree won't quit) but isn't a state-machine bug
+        // per se; it's an observation about cross-process lifecycle.
+        // WARN matches the other "user can't see / use this" kinds.
+        HwndDriftKind::OrphanInstance => Severity::Warn,
     }
 }
