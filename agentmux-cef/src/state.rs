@@ -274,6 +274,15 @@ pub struct AppState {
     /// **Phase B status**: host-only sync primitive; not migrate-able.
     pub window_pool_respawn_in_flight: std::sync::atomic::AtomicBool,
 
+    /// Phase B.9.3 — set true once `on_before_close` decides
+    /// "this is the last user-visible window closing". Tells
+    /// `spawn_pool_window` to skip refill so the existing pool
+    /// can drain. Without this, every pool close triggers a
+    /// refill that adds a new pool browser, keeping
+    /// `state.browsers` non-empty forever and preventing
+    /// `quit_message_loop` from ever reaching idle.
+    pub is_quitting: std::sync::atomic::AtomicBool,
+
     /// Version-specific data directory (e.g. ai.agentmux.cef.v0-32-111/)
     pub version_data_dir: Mutex<Option<String>>,
 
@@ -348,6 +357,7 @@ impl Default for AppState {
             window_pool: Mutex::new(VecDeque::new()),
             unpromoted_pool_labels: Mutex::new(std::collections::HashSet::new()),
             window_pool_respawn_in_flight: std::sync::atomic::AtomicBool::new(false),
+            is_quitting: std::sync::atomic::AtomicBool::new(false),
             version_data_dir: Mutex::new(None),
             version_config_dir: Mutex::new(None),
             user_home_dir: Mutex::new(None),
