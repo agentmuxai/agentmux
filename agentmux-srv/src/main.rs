@@ -525,8 +525,12 @@ async fn main() {
     // `AGENTMUX_SRV_PIPE_PATH`; absent in `task dev` mode (no
     // launcher in the loop).
     //
-    // Phase E.2 — bootstrap reducer state from SQLite + spawn the
-    // persist subscriber so workspace events flow back to disk.
+    // Phase E.2 — bootstrap reducer state from SQLite at startup
+    // so the session-only projection starts populated. The persist
+    // subscriber that mirrors pipe-event effects back to SQLite is
+    // deferred to E.2c (alongside the RPC-through-reducer migration);
+    // until then, HTTP/WS RPC continues writing directly via wcore
+    // and pipe commands only mutate the reducer's session-only state.
     //
     // Bind happens BEFORE the AGENTMUXSRV-ESTART line so the
     // launcher knows the pipe is ready when host starts. Non-fatal
@@ -552,8 +556,8 @@ async fn main() {
                     // Phase E.2 — bootstrap workspaces from SQLite
                     // BEFORE the IPC server starts accepting commands.
                     // Subsequent reducer transitions flow through
-                    // update; persist subscriber mirrors back to
-                    // SQLite.
+                    // `update` and live only in this in-memory state
+                    // until E.2c lands the persist subscriber.
                     persist::bootstrap_state_from_wstore(&srv_state, &wstore_for_persist).await;
                     // Phase E.2 — no persist subscriber yet. RPC
                     // continues writing to SQLite via wcore; pipe

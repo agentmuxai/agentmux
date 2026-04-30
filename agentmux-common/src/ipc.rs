@@ -230,18 +230,17 @@ pub enum Command {
     /// state yet). E.2+ adds workspaces / tabs / blocks / etc.
     GetSrvSnapshot,
     /// Phase E.2 — create a new workspace. The reducer assigns the
-    /// `oid` (UUID) and emits `Event::WorkspaceCreated`. The
-    /// persist-subscriber then writes the new workspace to SQLite
-    /// (idempotent via version-check). Migrating from the legacy
-    /// RPC `workspace.CreateWorkspace`.
+    /// `oid` (UUID) and emits `Event::WorkspaceCreated`. In E.2 the
+    /// reducer is a session-only projection (no persist subscriber);
+    /// E.2c adds the persist subscriber + migrates HTTP/WS RPC
+    /// to flow through the reducer.
     CreateWorkspace {
         name: String,
     },
     /// Phase E.2 — delete a workspace. Reducer removes from canonical
-    /// state and emits `Event::WorkspaceDeleted`. Persist-subscriber
-    /// cascades to SQLite (workspace's tabs are also removed by srv's
-    /// existing `wcore::delete_workspace`; cascade migration is E.2b
-    /// when tab arms land).
+    /// state and emits `Event::WorkspaceDeleted`. Cascade-to-tabs +
+    /// SQLite write happen via wcore today (RPC path); migrating to
+    /// reducer-driven persistence is E.2c.
     DeleteWorkspace {
         workspace_id: String,
     },

@@ -58,10 +58,13 @@ pub struct State {
     pub next_client_id: u64,
     /// Phase E.2 — workspaces canonical to the srv reducer.
     /// Bootstrapped from SQLite at startup; subsequent transitions
-    /// flow through `update`. Persist-subscriber mirrors changes
-    /// back to SQLite (idempotent, version-gated).
+    /// flow through `update`. In E.2 the reducer is a session-only
+    /// projection — pipe-originated mutations live only in this
+    /// map until the process restarts. E.2c adds the persist
+    /// subscriber that mirrors changes back to SQLite (idempotent,
+    /// version-gated) and migrates HTTP/WS RPC through the reducer.
     pub workspaces: HashMap<String, WorkspaceRecord>,
-    // `persistence_hwm` deferred to E.2c when persist subscriber
+    // `persistence_hwm` deferred to E.2c when the persist subscriber
     // lands and there's actually something to track.
 }
 
