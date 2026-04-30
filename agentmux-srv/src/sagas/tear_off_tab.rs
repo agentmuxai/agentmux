@@ -58,32 +58,42 @@ pub async fn run(
     // We're about to move one out; if it's the only tab, we'd leave
     // an empty workspace behind, which the UI doesn't represent
     // gracefully. Mirrors `wcore::tear_off_tab`'s "cannot tear off
-    // last tab" guard. Read the reducer state under its lock
-    // (sub-millisecond) before allocating saga_id — no point starting
-    // the saga if the precondition fails.
+    // last tab" guard.
+    //
+    // **Read SQLite, not reducer state.** During the migration
+    // window, some tab-creating/moving paths (e.g.
+    // `PromoteBlockToTab`) are still wcore-direct — their writes
+    // don't flow through the reducer, so `state.workspaces[ws].tab_ids`
+    // can lag SQLite. A reducer-state pre-check would falsely reject
+    // valid tear-off requests (codex P1 round-2 #621). SQLite is the
+    // source of truth; check there. Also include `pinnedtabids` in
+    // the membership check — bootstrap merges them into the reducer's
+    // `tab_ids`, but legacy SQLite rows may still carry the entry.
     {
-        let s = state.srv_state.lock().await;
-        match s.workspaces.get(&source_workspace_id) {
-            None => {
+        let src_ws = match state.wstore.get::<crate::backend::obj::Workspace>(&source_workspace_id) {
+            Ok(Some(ws)) => ws,
+            Ok(None) => {
                 return Err(format!(
                     "TearOffTab: source workspace not found: {}",
                     source_workspace_id
                 ));
             }
-            Some(ws) => {
-                if !ws.tab_ids.iter().any(|id| id == &tab_id) {
-                    return Err(format!(
-                        "TearOffTab: tab {} is not in workspace {}",
-                        tab_id, source_workspace_id
-                    ));
-                }
-                if ws.tab_ids.len() <= 1 {
-                    return Err(format!(
-                        "TearOffTab: cannot tear off last tab from workspace {}",
-                        source_workspace_id
-                    ));
-                }
-            }
+            Err(e) => return Err(format!("TearOffTab: workspace read failed: {}", e)),
+        };
+        let in_workspace = src_ws.tabids.iter().any(|id| id == &tab_id)
+            || src_ws.pinnedtabids.iter().any(|id| id == &tab_id);
+        if !in_workspace {
+            return Err(format!(
+                "TearOffTab: tab {} is not in workspace {}",
+                tab_id, source_workspace_id
+            ));
+        }
+        let total_tabs = src_ws.tabids.len() + src_ws.pinnedtabids.len();
+        if total_tabs <= 1 {
+            return Err(format!(
+                "TearOffTab: cannot tear off last tab from workspace {}",
+                source_workspace_id
+            ));
         }
     }
 

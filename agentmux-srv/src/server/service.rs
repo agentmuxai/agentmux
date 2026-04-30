@@ -1209,15 +1209,32 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
             // the reducer's MoveTab doesn't enforce this (intentionally,
             // for sagas that legitimately drain a workspace to delete
             // it). Keep the guard at the RPC layer where the policy
-            // belongs.
-            {
-                let s = state.srv_state.lock().await;
-                if let Some(src_ws) = s.workspaces.get(&source_ws_id) {
-                    if src_ws.tab_ids.len() <= 1 {
+            // belongs. **Read SQLite, not reducer state** — during the
+            // migration window, wcore-direct tab paths
+            // (PromoteBlockToTab, etc.) leave reducer.tab_ids stale,
+            // so a reducer-state guard would falsely reject valid
+            // moves. SQLite is the source of truth (codex P1 round-2
+            // #621).
+            match store.get::<Workspace>(&source_ws_id) {
+                Ok(Some(src_ws)) => {
+                    let total_tabs = src_ws.tabids.len() + src_ws.pinnedtabids.len();
+                    if total_tabs <= 1 {
                         return WebReturnType::error(
                             "cannot move last tab out of workspace".to_string(),
                         );
                     }
+                }
+                Ok(None) => {
+                    return WebReturnType::error(format!(
+                        "MoveTabToWorkspace: source workspace not found: {}",
+                        source_ws_id
+                    ));
+                }
+                Err(e) => {
+                    return WebReturnType::error(format!(
+                        "MoveTabToWorkspace: workspace read failed: {}",
+                        e
+                    ));
                 }
             }
             let dst_index = insert_index.unwrap_or(u32::MAX);

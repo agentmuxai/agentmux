@@ -41,33 +41,45 @@ pub async fn run(
     dest_workspace_id: String,
     insert_index: Option<u32>,
 ) -> Result<Value, String> {
-    // Pre-condition checks read state under the reducer lock so we
-    // don't allocate a saga_id for an obviously-invalid request.
+    // Pre-condition checks read SQLite, not reducer state. During
+    // the migration window, wcore-direct paths (PromoteBlockToTab,
+    // etc.) leave reducer.tabs / workspaces stale relative to disk;
+    // a reducer-state pre-check would falsely reject valid restores
+    // (codex P1 round-2 #621).
     {
-        let s = state.srv_state.lock().await;
-        if !s.workspaces.contains_key(&source_workspace_id) {
-            return Err(format!(
-                "RestoreTornOffTab: source workspace not found: {}",
-                source_workspace_id
-            ));
-        }
-        if !s.workspaces.contains_key(&dest_workspace_id) {
+        let src_ws = match state.wstore.get::<crate::backend::obj::Workspace>(&source_workspace_id) {
+            Ok(Some(ws)) => ws,
+            Ok(None) => {
+                return Err(format!(
+                    "RestoreTornOffTab: source workspace not found: {}",
+                    source_workspace_id
+                ));
+            }
+            Err(e) => {
+                return Err(format!(
+                    "RestoreTornOffTab: workspace read failed: {}",
+                    e
+                ));
+            }
+        };
+        if state
+            .wstore
+            .get::<crate::backend::obj::Workspace>(&dest_workspace_id)
+            .map(|w| w.is_none())
+            .unwrap_or(true)
+        {
             return Err(format!(
                 "RestoreTornOffTab: dest workspace not found: {}",
                 dest_workspace_id
             ));
         }
-        match s.tabs.get(&tab_id) {
-            None => {
-                return Err(format!("RestoreTornOffTab: tab not found: {}", tab_id));
-            }
-            Some(tab) if tab.workspace_id != source_workspace_id => {
-                return Err(format!(
-                    "RestoreTornOffTab: tab {} is in workspace {}, not {}",
-                    tab_id, tab.workspace_id, source_workspace_id
-                ));
-            }
-            _ => {}
+        let in_workspace = src_ws.tabids.iter().any(|id| id == &tab_id)
+            || src_ws.pinnedtabids.iter().any(|id| id == &tab_id);
+        if !in_workspace {
+            return Err(format!(
+                "RestoreTornOffTab: tab {} is not in workspace {}",
+                tab_id, source_workspace_id
+            ));
         }
     }
 
