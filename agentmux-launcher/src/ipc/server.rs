@@ -256,6 +256,11 @@ async fn handle_connection(stream: NamedPipeServer, ctx: Arc<ServerCtx>) {
                     "[ipc] connection conn_id={} closed (kind={:?}, pid={:?})",
                     conn_id, registered_kind, registered_pid
                 ));
+                // Phase E.1b — synthetic Goodbye on ungraceful
+                // disconnect so the reducer marks the PID Exited;
+                // otherwise reconnect-from-same-PID hits
+                // AlreadyRegistered. (codex P1 #610.)
+                dispatch_synthetic_goodbye(&ctx, conn_id, registered_pid).await;
                 fanout_handle.abort();
                 return;
             }
@@ -264,6 +269,7 @@ async fn handle_connection(stream: NamedPipeServer, ctx: Arc<ServerCtx>) {
                     "[ipc] read error conn_id={}: {}",
                     conn_id, e
                 ));
+                dispatch_synthetic_goodbye(&ctx, conn_id, registered_pid).await;
                 fanout_handle.abort();
                 return;
             }
@@ -498,6 +504,44 @@ async fn handle_connection(stream: NamedPipeServer, ctx: Arc<ServerCtx>) {
 /// pre-Register failures so log lines can be correlated.
 static NEXT_CONN_ID: std::sync::atomic::AtomicU64 =
     std::sync::atomic::AtomicU64::new(1);
+
+/// Phase E.1b — synthetic Goodbye dispatch for ungraceful disconnects
+/// (EOF / read error before the client sent an explicit Goodbye).
+/// Without this, the reducer's process record stays Running and a
+/// reconnect from the same live PID hits AlreadyRegistered.
+/// (codex P1 #610.)
+#[cfg(target_os = "windows")]
+async fn dispatch_synthetic_goodbye(
+    ctx: &Arc<ServerCtx>,
+    conn_id: u64,
+    registered_pid: Option<u32>,
+) {
+    let Some(pid) = registered_pid else {
+        return;
+    };
+    let now_rfc3339 = chrono::Utc::now().to_rfc3339();
+    let now_ms = launcher_start_ms();
+    let events = {
+        let mut state = ctx.state.lock().await;
+        let rctx = reducer::Ctx {
+            now_rfc3339,
+            conn_id,
+            registered_pid: Some(pid),
+            now_ms,
+        };
+        reducer::update(&mut state, Command::Goodbye, &rctx)
+    };
+    for event in events {
+        let event = patch_launcher_identity(event, ctx);
+        if !matches!(
+            event,
+            Event::Snapshot { .. } | Event::EventList { .. } | Event::Error { .. }
+        ) {
+            ctx.event_log.append(event.clone());
+        }
+        let _ = ctx.events_tx.send(event);
+    }
+}
 
 /// Phase B.9.1 — milliseconds since the launcher's IPC server
 /// started (first call seeds the epoch). Used as the monotonic
