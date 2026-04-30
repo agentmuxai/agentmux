@@ -246,9 +246,12 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
                 Err(e) => WebReturnType::error(e),
             }
         }
+        // Phase E.5.3 — UpdateObjectMeta migrated through the
+        // reducer. Decomposes by otype to the typed Update*Meta
+        // command. Reducer is pass-through (validates entity exists;
+        // emits event); subscriber's apply_*_meta_updated does the
+        // shallow merge against wstore.
         ("object", "UpdateObjectMeta") => {
-            // args[0] = oref string, args[1] = meta map
-            // (Go dispatcher strips UIContext from args; TS sends [oref, meta])
             let oref_str: String = match service::get_arg(args, 0) {
                 Ok(v) => v,
                 Err(e) => return WebReturnType::error(e),
@@ -257,39 +260,76 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
                 Ok(v) => v,
                 Err(e) => return WebReturnType::error(e),
             };
-            match update_object_meta(store, &oref_str, &meta_update) {
-                Ok(()) => {
-                    // Return the updated object so the frontend WOS cache stays in sync.
-                    // (Without this, atoms like cmd:cwd never update after OSC 7 fires.)
-                    let oref = match crate::backend::ORef::parse(&oref_str) {
-                        Ok(v) => v,
-                        Err(e) => return WebReturnType::error(e.to_string()),
+            let oref = match crate::backend::ORef::parse(&oref_str) {
+                Ok(v) => v,
+                Err(e) => return WebReturnType::error(e.to_string()),
+            };
+            let meta_value = serde_json::to_value(&meta_update).unwrap_or(serde_json::Value::Null);
+            let cmd = match oref.otype.as_str() {
+                t if t == OTYPE_WORKSPACE => agentmux_common::ipc::Command::UpdateWorkspaceMeta {
+                    workspace_id: oref.oid.clone(),
+                    meta_patch: meta_value,
+                },
+                t if t == OTYPE_TAB => agentmux_common::ipc::Command::UpdateTabMeta {
+                    tab_id: oref.oid.clone(),
+                    meta_patch: meta_value,
+                },
+                t if t == OTYPE_BLOCK => agentmux_common::ipc::Command::UpdateBlockMeta {
+                    block_id: oref.oid.clone(),
+                    meta_patch: meta_value,
+                },
+                other => {
+                    // Layouts + Windows aren't meta-mutated via this path
+                    // today; fall back to wcore for forward-compat.
+                    return match update_object_meta(store, &oref_str, &meta_update) {
+                        Ok(()) => WebReturnType::success_empty(),
+                        Err(e) => WebReturnType::error(format!(
+                            "UpdateObjectMeta: unsupported otype {} via reducer; wcore fallback failed: {}",
+                            other, e
+                        )),
                     };
-                    if oref.otype == OTYPE_BLOCK {
-                        if let Ok(block) = store.must_get::<Block>(&oref.oid) {
-                            return WebReturnType::success_with_updates(vec![WaveObjUpdate {
-                                updatetype: "update".into(),
-                                otype: OTYPE_BLOCK.to_string(),
-                                oid: oref.oid.clone(),
-                                obj: Some(wave_obj_to_value(&block)),
-                            }]);
-                        }
-                    }
-                    if oref.otype == OTYPE_TAB {
-                        if let Ok(tab) = store.must_get::<Tab>(&oref.oid) {
-                            return WebReturnType::success_with_updates(vec![WaveObjUpdate {
-                                updatetype: "update".into(),
-                                otype: OTYPE_TAB.to_string(),
-                                oid: oref.oid.clone(),
-                                obj: Some(wave_obj_to_value(&tab)),
-                            }]);
-                        }
-                    }
-                    WebReturnType::success_empty()
                 }
-                Err(e) => WebReturnType::error(e),
+            };
+            let events = dispatch_to_reducer(state, cmd).await;
+            if let Some(err_msg) = events.iter().find_map(|e| match e {
+                agentmux_common::ipc::Event::Error { message, .. } => Some(message.clone()),
+                _ => None,
+            }) {
+                return WebReturnType::error(err_msg);
             }
+            for ev in &events {
+                if let Err(e) = crate::persist_subscriber::apply_event_to_wstore(ev, store) {
+                    return WebReturnType::error(format!(
+                        "UpdateObjectMeta: SQLite write failed: {}",
+                        e
+                    ));
+                }
+            }
+            publish_events(state, &events);
+            // Return the updated object so the frontend WOS cache stays in sync.
+            if oref.otype == OTYPE_BLOCK {
+                if let Ok(block) = store.must_get::<Block>(&oref.oid) {
+                    return WebReturnType::success_with_updates(vec![WaveObjUpdate {
+                        updatetype: "update".into(),
+                        otype: OTYPE_BLOCK.to_string(),
+                        oid: oref.oid.clone(),
+                        obj: Some(wave_obj_to_value(&block)),
+                    }]);
+                }
+            }
+            if oref.otype == OTYPE_TAB {
+                if let Ok(tab) = store.must_get::<Tab>(&oref.oid) {
+                    return WebReturnType::success_with_updates(vec![WaveObjUpdate {
+                        updatetype: "update".into(),
+                        otype: OTYPE_TAB.to_string(),
+                        oid: oref.oid.clone(),
+                        obj: Some(wave_obj_to_value(&tab)),
+                    }]);
+                }
+            }
+            WebReturnType::success_empty()
         }
+        // Phase E.5.3 — UpdateTabName migrated through the reducer.
         ("object", "UpdateTabName") => {
             let tab_id: String = match service::get_arg(args, 0) {
                 Ok(v) => v,
@@ -299,31 +339,40 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
                 Ok(v) => v,
                 Err(e) => return WebReturnType::error(e),
             };
-            match store.must_get::<Tab>(&tab_id) {
-                Ok(mut tab) => {
-                    tab.name = name;
-                    match store.update(&mut tab) {
-                        Ok(_) => {
-                            // Return updated tab so frontend WOS cache stays in sync
-                            if let Ok(updated_tab) = store.must_get::<Tab>(&tab_id) {
-                                let update = WaveObjUpdate {
-                                    updatetype: "update".into(),
-                                    otype: OTYPE_TAB.to_string(),
-                                    oid: tab_id.clone(),
-                                    obj: Some(wave_obj_to_value(&updated_tab)),
-                                };
-                                WebReturnType::success_with_updates(vec![update])
-                            } else {
-                                WebReturnType::success_empty()
-                            }
-                        }
-                        Err(e) => WebReturnType::error(e.to_string()),
-                    }
-                }
-                Err(e) => WebReturnType::error(e.to_string()),
+            let events = dispatch_to_reducer(
+                state,
+                agentmux_common::ipc::Command::RenameTab {
+                    tab_id: tab_id.clone(),
+                    name,
+                },
+            )
+            .await;
+            if let Some(err_msg) = events.iter().find_map(|e| match e {
+                agentmux_common::ipc::Event::Error { message, .. } => Some(message.clone()),
+                _ => None,
+            }) {
+                return WebReturnType::error(err_msg);
             }
+            for ev in &events {
+                if let Err(e) = crate::persist_subscriber::apply_event_to_wstore(ev, store) {
+                    return WebReturnType::error(format!(
+                        "UpdateTabName: SQLite write failed: {}",
+                        e
+                    ));
+                }
+            }
+            publish_events(state, &events);
+            if let Ok(updated_tab) = store.must_get::<Tab>(&tab_id) {
+                let update = WaveObjUpdate {
+                    updatetype: "update".into(),
+                    otype: OTYPE_TAB.to_string(),
+                    oid: tab_id.clone(),
+                    obj: Some(wave_obj_to_value(&updated_tab)),
+                };
+                return WebReturnType::success_with_updates(vec![update]);
+            }
+            WebReturnType::success_empty()
         }
-
         // ---- ClientService ----
         ("client", "GetClientData") => match wcore::get_client(store) {
             Ok(client) => {
@@ -868,25 +917,50 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
                 updates,
             )
         }
+        // Phase E.5.3 — UpdateWorkspace migrated through the reducer.
+        // Currently only handles rename (the only field this RPC ever
+        // mutated). Meta-only updates are dispatched as
+        // UpdateWorkspaceMeta separately by frontends.
         ("workspace", "UpdateWorkspace") => {
             let ws_id: String = match service::get_arg(args, 0) {
                 Ok(v) => v,
                 Err(e) => return WebReturnType::error(e),
             };
             let name: Option<String> = service::get_optional_arg(args, 1).unwrap_or(None);
-            match store.must_get::<Workspace>(&ws_id) {
-                Ok(mut ws) => {
-                    if let Some(n) = name {
-                        ws.name = n;
-                    }
-                    match store.update(&mut ws) {
-                        Ok(_) => WebReturnType::success_empty(),
-                        Err(e) => WebReturnType::error(e.to_string()),
-                    }
-                }
-                Err(e) => WebReturnType::error(e.to_string()),
+            let Some(name) = name else {
+                return WebReturnType::success_empty();
+            };
+            let events = dispatch_to_reducer(
+                state,
+                agentmux_common::ipc::Command::RenameWorkspace {
+                    workspace_id: ws_id.clone(),
+                    name,
+                },
+            )
+            .await;
+            if let Some(err_msg) = events.iter().find_map(|e| match e {
+                agentmux_common::ipc::Event::Error { message, .. } => Some(message.clone()),
+                _ => None,
+            }) {
+                return WebReturnType::error(err_msg);
             }
+            for ev in &events {
+                if let Err(e) = crate::persist_subscriber::apply_event_to_wstore(ev, store) {
+                    return WebReturnType::error(format!(
+                        "UpdateWorkspace: SQLite write failed: {}",
+                        e
+                    ));
+                }
+            }
+            publish_events(state, &events);
+            WebReturnType::success_empty()
         }
+        // Phase E.5.3 — UpdateTabIds migrated to ReorderTabsBulk
+        // through the reducer. The legacy `pinned_tab_ids` arg is
+        // ignored: pinning was a Waveterm feature removed from
+        // AgentMux. Bootstrap merged any legacy pinnedtabids into
+        // the reducer's tab_ids; the subscriber's apply will also
+        // clear `Workspace.pinnedtabids` in wstore on this path.
         ("workspace", "UpdateTabIds") => {
             let ws_id: String = match service::get_arg(args, 0) {
                 Ok(v) => v,
@@ -896,30 +970,40 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
                 Ok(v) => v,
                 Err(e) => return WebReturnType::error(e),
             };
-            let pinned_tab_ids: Vec<String> = service::get_arg(args, 2).unwrap_or_default();
-            match store.must_get::<Workspace>(&ws_id) {
-                Ok(mut ws) => {
-                    ws.tabids = tab_ids;
-                    ws.pinnedtabids = pinned_tab_ids;
-                    match store.update(&mut ws) {
-                        Ok(_) => {
-                            if let Ok(updated_ws) = store.must_get::<Workspace>(&ws_id) {
-                                let update = WaveObjUpdate {
-                                    updatetype: "update".into(),
-                                    otype: OTYPE_WORKSPACE.to_string(),
-                                    oid: ws_id.clone(),
-                                    obj: Some(wave_obj_to_value(&updated_ws)),
-                                };
-                                WebReturnType::success_with_updates(vec![update])
-                            } else {
-                                WebReturnType::success_empty()
-                            }
-                        }
-                        Err(e) => WebReturnType::error(e.to_string()),
-                    }
-                }
-                Err(e) => WebReturnType::error(e.to_string()),
+            // args[2] (pinned_tab_ids) intentionally ignored.
+            let events = dispatch_to_reducer(
+                state,
+                agentmux_common::ipc::Command::ReorderTabsBulk {
+                    workspace_id: ws_id.clone(),
+                    tab_ids,
+                },
+            )
+            .await;
+            if let Some(err_msg) = events.iter().find_map(|e| match e {
+                agentmux_common::ipc::Event::Error { message, .. } => Some(message.clone()),
+                _ => None,
+            }) {
+                return WebReturnType::error(err_msg);
             }
+            for ev in &events {
+                if let Err(e) = crate::persist_subscriber::apply_event_to_wstore(ev, store) {
+                    return WebReturnType::error(format!(
+                        "UpdateTabIds: SQLite write failed: {}",
+                        e
+                    ));
+                }
+            }
+            publish_events(state, &events);
+            if let Ok(updated_ws) = store.must_get::<Workspace>(&ws_id) {
+                let update = WaveObjUpdate {
+                    updatetype: "update".into(),
+                    otype: OTYPE_WORKSPACE.to_string(),
+                    oid: ws_id.clone(),
+                    obj: Some(wave_obj_to_value(&updated_ws)),
+                };
+                return WebReturnType::success_with_updates(vec![update]);
+            }
+            WebReturnType::success_empty()
         }
         ("workspace", "MoveBlockToTab") => {
             let ws_id: String = match service::get_arg(args, 0) {

@@ -233,6 +233,30 @@ pub(crate) fn apply_event_to_wstore(
             workspace_id,
             ..
         } => apply_srv_window_workspace_changed(wstore, window_id, workspace_id),
+        Event::TabsReorderedBulk {
+            workspace_id,
+            tab_ids,
+            ..
+        } => apply_tabs_reordered_bulk(wstore, workspace_id, tab_ids),
+        Event::WorkspaceRenamed {
+            workspace_id, name, ..
+        } => apply_workspace_renamed(wstore, workspace_id, name),
+        Event::TabRenamed { tab_id, name, .. } => apply_tab_renamed(wstore, tab_id, name),
+        Event::WorkspaceMetaUpdated {
+            workspace_id,
+            meta_patch,
+            ..
+        } => apply_workspace_meta_updated(wstore, workspace_id, meta_patch),
+        Event::TabMetaUpdated {
+            tab_id,
+            meta_patch,
+            ..
+        } => apply_tab_meta_updated(wstore, tab_id, meta_patch),
+        Event::BlockMetaUpdated {
+            block_id,
+            meta_patch,
+            ..
+        } => apply_block_meta_updated(wstore, block_id, meta_patch),
         // All other event variants are not domain-state mutations
         // (lifecycle, errors, snapshots). The subscriber ignores them.
         _ => Ok(()),
@@ -518,6 +542,137 @@ fn apply_srv_window_workspace_changed(
     apply_srv_window_opened(wstore, window_id, workspace_id)
 }
 
+/// Phase E.5.3 — replace the workspace's `tabids` with the new
+/// list. `pinnedtabids` is left alone (pinning is Waveterm legacy
+/// and not in the reorder scope). No-op if already matching.
+fn apply_tabs_reordered_bulk(
+    wstore: &WaveStore,
+    workspace_id: &str,
+    tab_ids: &[String],
+) -> Result<(), Box<dyn std::error::Error>> {
+    let Some(mut ws) = wstore.get::<Workspace>(workspace_id)? else {
+        return Ok(());
+    };
+    if ws.tabids == tab_ids {
+        return Ok(());
+    }
+    ws.tabids = tab_ids.to_vec();
+    wstore.update(&mut ws)?;
+    Ok(())
+}
+
+/// Phase E.5.3 — rename a persisted workspace.
+fn apply_workspace_renamed(
+    wstore: &WaveStore,
+    workspace_id: &str,
+    name: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let Some(mut ws) = wstore.get::<Workspace>(workspace_id)? else {
+        return Ok(());
+    };
+    if ws.name == name {
+        return Ok(());
+    }
+    ws.name = name.to_string();
+    wstore.update(&mut ws)?;
+    Ok(())
+}
+
+/// Phase E.5.3 — rename a persisted tab.
+fn apply_tab_renamed(
+    wstore: &WaveStore,
+    tab_id: &str,
+    name: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let Some(mut tab) = wstore.get::<Tab>(tab_id)? else {
+        return Ok(());
+    };
+    if tab.name == name {
+        return Ok(());
+    }
+    tab.name = name.to_string();
+    wstore.update(&mut tab)?;
+    Ok(())
+}
+
+/// Phase E.5.3 — apply a meta-patch to a workspace's `meta` map.
+/// Reducer doesn't track meta in `WorkspaceRecord`; this subscriber
+/// is the sole authority that mutates persisted meta. Patch is a
+/// JSON object that merges shallow-key-by-shallow-key on top of the
+/// existing meta. `null` values in the patch delete the key.
+fn apply_workspace_meta_updated(
+    wstore: &WaveStore,
+    workspace_id: &str,
+    meta_patch: &serde_json::Value,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let Some(mut ws) = wstore.get::<Workspace>(workspace_id)? else {
+        return Ok(());
+    };
+    if merge_meta_patch(&mut ws.meta, meta_patch) {
+        wstore.update(&mut ws)?;
+    }
+    Ok(())
+}
+
+/// Phase E.5.3 — apply a meta-patch to a tab's `meta` map.
+fn apply_tab_meta_updated(
+    wstore: &WaveStore,
+    tab_id: &str,
+    meta_patch: &serde_json::Value,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let Some(mut tab) = wstore.get::<Tab>(tab_id)? else {
+        return Ok(());
+    };
+    if merge_meta_patch(&mut tab.meta, meta_patch) {
+        wstore.update(&mut tab)?;
+    }
+    Ok(())
+}
+
+/// Phase E.5.3 — apply a meta-patch to a block's `meta` map.
+fn apply_block_meta_updated(
+    wstore: &WaveStore,
+    block_id: &str,
+    meta_patch: &serde_json::Value,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let Some(mut block) = wstore.get::<Block>(block_id)? else {
+        return Ok(());
+    };
+    if merge_meta_patch(&mut block.meta, meta_patch) {
+        wstore.update(&mut block)?;
+    }
+    Ok(())
+}
+
+/// Phase E.5.3 — shallow merge a JSON object patch into a
+/// `MetaMapType`. `null` patch values delete the corresponding key.
+/// Returns `true` if anything actually changed.
+fn merge_meta_patch(
+    meta: &mut crate::backend::obj::MetaMapType,
+    patch: &serde_json::Value,
+) -> bool {
+    let serde_json::Value::Object(patch_map) = patch else {
+        return false;
+    };
+    let mut changed = false;
+    for (k, v) in patch_map {
+        if v.is_null() {
+            if meta.remove(k).is_some() {
+                changed = true;
+            }
+        } else {
+            match meta.get(k) {
+                Some(existing) if existing == v => {}
+                _ => {
+                    meta.insert(k.clone(), v.clone());
+                    changed = true;
+                }
+            }
+        }
+    }
+    changed
+}
+
 /// Compact textual identifier for an event (debug logging only).
 fn event_kind(event: &Event) -> &'static str {
     match event {
@@ -530,6 +685,12 @@ fn event_kind(event: &Event) -> &'static str {
         Event::SrvWindowOpened { .. } => "SrvWindowOpened",
         Event::SrvWindowClosed { .. } => "SrvWindowClosed",
         Event::SrvWindowWorkspaceChanged { .. } => "SrvWindowWorkspaceChanged",
+        Event::TabsReorderedBulk { .. } => "TabsReorderedBulk",
+        Event::WorkspaceRenamed { .. } => "WorkspaceRenamed",
+        Event::TabRenamed { .. } => "TabRenamed",
+        Event::WorkspaceMetaUpdated { .. } => "WorkspaceMetaUpdated",
+        Event::TabMetaUpdated { .. } => "TabMetaUpdated",
+        Event::BlockMetaUpdated { .. } => "BlockMetaUpdated",
         Event::BlockCreated { .. } => "BlockCreated",
         Event::BlockDeleted { .. } => "BlockDeleted",
         _ => "Other",
