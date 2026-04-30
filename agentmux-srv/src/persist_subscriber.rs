@@ -41,7 +41,7 @@ use std::sync::Arc;
 use agentmux_common::ipc::Event;
 use tokio::sync::{broadcast, Mutex};
 
-use crate::backend::obj::{Block, LayoutState as PersistedLayoutState, Tab, Workspace};
+use crate::backend::obj::{Block, LayoutState as PersistedLayoutState, Tab, Window, Workspace};
 use crate::backend::storage::wstore::WaveStore;
 use crate::backend::wcore;
 use crate::state::State;
@@ -222,6 +222,17 @@ pub(crate) fn apply_event_to_wstore(
         Event::BlockDeleted {
             tab_id, block_id, ..
         } => apply_block_deleted(wstore, tab_id, block_id),
+        Event::SrvWindowOpened {
+            window_id,
+            workspace_id,
+            ..
+        } => apply_srv_window_opened(wstore, window_id, workspace_id),
+        Event::SrvWindowClosed { window_id, .. } => apply_srv_window_closed(wstore, window_id),
+        Event::SrvWindowWorkspaceChanged {
+            window_id,
+            workspace_id,
+            ..
+        } => apply_srv_window_workspace_changed(wstore, window_id, workspace_id),
         // All other event variants are not domain-state mutations
         // (lifecycle, errors, snapshots). The subscriber ignores them.
         _ => Ok(()),
@@ -424,6 +435,89 @@ fn apply_block_deleted(
     }
 }
 
+/// Phase E.5 — record/update a window's workspace pointer on the
+/// persisted Window row. Idempotent: inserts if missing, updates
+/// if `workspaceid` differs, no-ops if identical.
+///
+/// Also keeps `Client.windowids` in sync — appends the new window_id
+/// when the Window row is freshly created. The legacy
+/// `wcore::create_window_full` path does this too; without it, the
+/// Window row exists but `GetClientData` / focus-order logic can't
+/// see it. (codex P1 #619.)
+fn apply_srv_window_opened(
+    wstore: &WaveStore,
+    window_id: &str,
+    workspace_id: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let was_new = match wstore.get::<Window>(window_id)? {
+        Some(existing) if existing.workspaceid == workspace_id => false,
+        Some(mut existing) => {
+            existing.workspaceid = workspace_id.to_string();
+            wstore.update(&mut existing)?;
+            false
+        }
+        None => {
+            let mut window = Window {
+                oid: window_id.to_string(),
+                workspaceid: workspace_id.to_string(),
+                ..Default::default()
+            };
+            wstore.insert(&mut window)?;
+            true
+        }
+    };
+    if was_new {
+        if let Ok(mut client) = wcore::get_client(wstore) {
+            if !client.windowids.iter().any(|id| id == window_id) {
+                client.windowids.push(window_id.to_string());
+                wstore.update(&mut client)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Phase E.5 — delete the persisted Window row + remove the id
+/// from `Client.windowids`. Mirrors `wcore::close_window`'s order:
+/// prune client.windowids FIRST (so any read between the two ops
+/// doesn't see a dangling id), then delete the Window row.
+/// (codex P1 #619.)
+fn apply_srv_window_closed(
+    wstore: &WaveStore,
+    window_id: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    if wstore.get::<Window>(window_id)?.is_none() {
+        // Window already gone, but the client list might still have
+        // the id from an earlier divergence — prune defensively.
+        if let Ok(mut client) = wcore::get_client(wstore) {
+            if client.windowids.iter().any(|id| id == window_id) {
+                client.windowids.retain(|id| id != window_id);
+                wstore.update(&mut client)?;
+            }
+        }
+        return Ok(());
+    }
+    if let Ok(mut client) = wcore::get_client(wstore) {
+        if client.windowids.iter().any(|id| id == window_id) {
+            client.windowids.retain(|id| id != window_id);
+            wstore.update(&mut client)?;
+        }
+    }
+    wstore.delete::<Window>(window_id)?;
+    Ok(())
+}
+
+/// Phase E.5 — same shape as `apply_srv_window_opened` for the
+/// upsert behavior; separate function for log-clarity since the
+/// emitted event is distinct.
+fn apply_srv_window_workspace_changed(
+    wstore: &WaveStore,
+    window_id: &str,
+    workspace_id: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    apply_srv_window_opened(wstore, window_id, workspace_id)
+}
+
 /// Compact textual identifier for an event (debug logging only).
 fn event_kind(event: &Event) -> &'static str {
     match event {
@@ -433,6 +527,9 @@ fn event_kind(event: &Event) -> &'static str {
         Event::TabDeleted { .. } => "TabDeleted",
         Event::ActiveTabChanged { .. } => "ActiveTabChanged",
         Event::TabReordered { .. } => "TabReordered",
+        Event::SrvWindowOpened { .. } => "SrvWindowOpened",
+        Event::SrvWindowClosed { .. } => "SrvWindowClosed",
+        Event::SrvWindowWorkspaceChanged { .. } => "SrvWindowWorkspaceChanged",
         Event::BlockCreated { .. } => "BlockCreated",
         Event::BlockDeleted { .. } => "BlockDeleted",
         _ => "Other",

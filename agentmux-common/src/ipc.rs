@@ -281,6 +281,28 @@ pub enum Command {
         tab_id: String,
         new_index: u32,
     },
+    /// Phase E.5 — record a new window in the srv reducer's
+    /// `state.windows` map. Caller pre-assigns `window_id` (sagas
+    /// use a fresh UUID; RPC migration in PR 4 will likewise mint
+    /// the id at the RPC boundary). Validates the parent workspace
+    /// exists; errors otherwise. Used by CreateWindow + TearOff
+    /// sagas to track window↔workspace association.
+    CreateWindow {
+        window_id: String,
+        workspace_id: String,
+    },
+    /// Phase E.5 — remove a window's workspace mapping from the
+    /// reducer. Called by CloseWindow sagas after the host's CEF
+    /// window-close completes. Idempotent silent no-op on missing.
+    CloseWindowInternal {
+        window_id: String,
+    },
+    /// Phase E.5 — switch which workspace a window points at.
+    /// Errors if the window or destination workspace is unknown.
+    SwitchWorkspace {
+        window_id: String,
+        workspace_id: String,
+    },
     /// Phase E.3 — create a block inside an existing tab. Reducer
     /// validates parent tab exists, assigns the `block_id` (UUID),
     /// appends to the tab's `block_ids`, emits `Event::BlockCreated`.
@@ -710,6 +732,29 @@ pub enum Event {
         workspace_id: String,
         tab_id: String,
         new_index: u32,
+        version: u64,
+    },
+    /// Phase E.5 — srv-side window→workspace mapping established.
+    /// Distinct from launcher's `WindowOpened` (which tracks CEF
+    /// window lifecycle). Subscribers update their view of "which
+    /// workspace is each window showing."
+    SrvWindowOpened {
+        window_id: String,
+        workspace_id: String,
+        version: u64,
+    },
+    /// Phase E.5 — srv-side window mapping removed. Distinct from
+    /// launcher's `WindowClosed`.
+    SrvWindowClosed {
+        window_id: String,
+        version: u64,
+    },
+    /// Phase E.5 — a window now points at a different workspace
+    /// (used by the SwitchWorkspace command + the CloseWindow saga
+    /// when reassigning during cleanup).
+    SrvWindowWorkspaceChanged {
+        window_id: String,
+        workspace_id: String,
         version: u64,
     },
     /// Phase E.3 — block was created inside a tab.

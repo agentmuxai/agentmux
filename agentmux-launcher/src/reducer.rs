@@ -260,6 +260,34 @@ pub fn update(state: &mut State, cmd: Command, ctx: &Ctx) -> Vec<Event> {
                 version: v,
             }]
         }
+        // Phase E.5 — window↔workspace mapping commands are srv-pipe.
+        Command::CreateWindow { .. } => {
+            let v = state.bump_version();
+            vec![Event::Error {
+                code: agentmux_common::ipc::ErrorCode::InvalidCommand,
+                message: "CreateWindow is a srv-pipe command; sent to launcher pipe by mistake".into(),
+                fatal: false,
+                version: v,
+            }]
+        }
+        Command::CloseWindowInternal { .. } => {
+            let v = state.bump_version();
+            vec![Event::Error {
+                code: agentmux_common::ipc::ErrorCode::InvalidCommand,
+                message: "CloseWindowInternal is a srv-pipe command; sent to launcher pipe by mistake".into(),
+                fatal: false,
+                version: v,
+            }]
+        }
+        Command::SwitchWorkspace { .. } => {
+            let v = state.bump_version();
+            vec![Event::Error {
+                code: agentmux_common::ipc::ErrorCode::InvalidCommand,
+                message: "SwitchWorkspace is a srv-pipe command; sent to launcher pipe by mistake".into(),
+                fatal: false,
+                version: v,
+            }]
+        }
         // Phase E.3 — Block arms are also srv-pipe commands.
         Command::CreateBlock { .. } => {
             let v = state.bump_version();
@@ -944,6 +972,9 @@ mod tests {
             | Event::TabDeleted { version, .. }
             | Event::ActiveTabChanged { version, .. }
             | Event::TabReordered { version, .. }
+            | Event::SrvWindowOpened { version, .. }
+            | Event::SrvWindowClosed { version, .. }
+            | Event::SrvWindowWorkspaceChanged { version, .. }
             | Event::BlockCreated { version, .. }
             | Event::BlockDeleted { version, .. }
             | Event::Error { version, .. } => *version,
