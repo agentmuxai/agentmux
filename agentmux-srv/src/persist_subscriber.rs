@@ -438,17 +438,23 @@ fn apply_block_deleted(
 /// Phase E.5 — record/update a window's workspace pointer on the
 /// persisted Window row. Idempotent: inserts if missing, updates
 /// if `workspaceid` differs, no-ops if identical.
+///
+/// Also keeps `Client.windowids` in sync — appends the new window_id
+/// when the Window row is freshly created. The legacy
+/// `wcore::create_window_full` path does this too; without it, the
+/// Window row exists but `GetClientData` / focus-order logic can't
+/// see it. (codex P1 #619.)
 fn apply_srv_window_opened(
     wstore: &WaveStore,
     window_id: &str,
     workspace_id: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    match wstore.get::<Window>(window_id)? {
-        Some(existing) if existing.workspaceid == workspace_id => Ok(()),
+    let was_new = match wstore.get::<Window>(window_id)? {
+        Some(existing) if existing.workspaceid == workspace_id => false,
         Some(mut existing) => {
             existing.workspaceid = workspace_id.to_string();
             wstore.update(&mut existing)?;
-            Ok(())
+            false
         }
         None => {
             let mut window = Window {
@@ -457,18 +463,45 @@ fn apply_srv_window_opened(
                 ..Default::default()
             };
             wstore.insert(&mut window)?;
-            Ok(())
+            true
+        }
+    };
+    if was_new {
+        if let Ok(mut client) = wcore::get_client(wstore) {
+            if !client.windowids.iter().any(|id| id == window_id) {
+                client.windowids.push(window_id.to_string());
+                wstore.update(&mut client)?;
+            }
         }
     }
+    Ok(())
 }
 
-/// Phase E.5 — delete the persisted Window row.
+/// Phase E.5 — delete the persisted Window row + remove the id
+/// from `Client.windowids`. Mirrors `wcore::close_window`'s order:
+/// prune client.windowids FIRST (so any read between the two ops
+/// doesn't see a dangling id), then delete the Window row.
+/// (codex P1 #619.)
 fn apply_srv_window_closed(
     wstore: &WaveStore,
     window_id: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     if wstore.get::<Window>(window_id)?.is_none() {
-        return Ok(()); // already gone
+        // Window already gone, but the client list might still have
+        // the id from an earlier divergence — prune defensively.
+        if let Ok(mut client) = wcore::get_client(wstore) {
+            if client.windowids.iter().any(|id| id == window_id) {
+                client.windowids.retain(|id| id != window_id);
+                wstore.update(&mut client)?;
+            }
+        }
+        return Ok(());
+    }
+    if let Ok(mut client) = wcore::get_client(wstore) {
+        if client.windowids.iter().any(|id| id == window_id) {
+            client.windowids.retain(|id| id != window_id);
+            wstore.update(&mut client)?;
+        }
     }
     wstore.delete::<Window>(window_id)?;
     Ok(())
