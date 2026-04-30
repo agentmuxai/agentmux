@@ -85,10 +85,21 @@ pub async fn run_persist_subscriber(
     mut events_rx: tokio::sync::broadcast::Receiver<Event>,
 ) {
     tracing::info!(target: "srv-persist", "[srv-persist] subscriber started");
+    // Phase E.2 (codex P1 #611) — once we lag the broadcast bus, we
+    // don't know which event versions we missed. Setting this flag
+    // freezes `persistence_hwm` at its pre-lag value: subsequent
+    // events still get written to SQLite (idempotent), but HWM stops
+    // advancing so future bootstrap-replay (later sub-phase) re-runs
+    // from before the lag. Replay is idempotent by construction
+    // (insert-if-missing, delete-if-present), so re-applying known-
+    // persisted events is safe.
+    let mut lagged_since_start = false;
     loop {
         match events_rx.recv().await {
             Ok(event) => {
-                if let Err(e) = apply_event_to_wstore(&wstore, &state, &event).await {
+                if let Err(e) =
+                    apply_event_to_wstore(&wstore, &state, &event, lagged_since_start).await
+                {
                     tracing::warn!(
                         target: "srv-persist",
                         "[srv-persist] write failed for {:?}: {}",
@@ -98,9 +109,10 @@ pub async fn run_persist_subscriber(
                 }
             }
             Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
-                tracing::warn!(
+                lagged_since_start = true;
+                tracing::error!(
                     target: "srv-persist",
-                    "[srv-persist] lagged event bus, missed {} events — reducer state may diverge from SQLite until next HWM advance",
+                    "[srv-persist] lagged event bus, missed {} events — freezing persistence_hwm so future replay re-runs from before the gap (events still applied to SQLite, idempotent)",
                     n
                 );
             }
@@ -112,10 +124,16 @@ pub async fn run_persist_subscriber(
     }
 }
 
+// `lagged_since_start`: when true, the persist subscriber lagged
+// earlier in this session and we don't know which events were
+// missed. SQLite writes still happen (idempotent), but HWM stays
+// frozen so future bootstrap-replay re-runs from before the gap.
+// (codex P1 #611.)
 async fn apply_event_to_wstore(
     wstore: &Arc<WaveStore>,
     state: &Arc<Mutex<State>>,
     event: &Event,
+    lagged_since_start: bool,
 ) -> Result<(), String> {
     match event {
         Event::WorkspaceCreated {
@@ -141,7 +159,9 @@ async fn apply_event_to_wstore(
                     .insert(&mut ws)
                     .map_err(|e| format!("workspace insert: {}", e))?;
             }
-            advance_hwm(state, *version).await;
+            if !lagged_since_start {
+                advance_hwm(state, *version).await;
+            }
             Ok(())
         }
         Event::WorkspaceDeleted {
@@ -170,7 +190,9 @@ async fn apply_event_to_wstore(
                 }
                 Err(e) => return Err(format!("workspace cascade delete: {}", e)),
             }
-            advance_hwm(state, *version).await;
+            if !lagged_since_start {
+                advance_hwm(state, *version).await;
+            }
             Ok(())
         }
         // Phase E.2 only handles workspace lifecycle. Other event
