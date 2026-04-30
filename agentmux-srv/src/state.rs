@@ -63,13 +63,27 @@ pub struct WorkspaceRecord {
 
 /// Phase E.2b — tab as held by the srv reducer's canonical state.
 /// Tabs are owned by exactly one workspace; the workspace's
-/// `tab_ids` field gives the ordering. Block-level state lands in
-/// E.3.
+/// `tab_ids` field gives the ordering. E.3 adds `block_ids` so the
+/// tab tracks which blocks live inside it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TabRecord {
     pub tab_id: String,
     pub workspace_id: String,
     pub name: String,
+    /// Phase E.3 — ordered list of block ids in this tab. Mirrors
+    /// the persistent `Tab.blockids` field.
+    pub block_ids: Vec<String>,
+}
+
+/// Phase E.3 — block as held by the srv reducer's canonical state.
+/// Blocks are owned by exactly one tab; the tab's `block_ids`
+/// field gives the ordering. Block content (view, meta, runtimeopts)
+/// is intentionally not yet tracked — E.3 ships block lifecycle
+/// only; metadata + view land in a follow-up.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BlockRecord {
+    pub block_id: String,
+    pub tab_id: String,
 }
 
 #[derive(Debug)]
@@ -91,6 +105,11 @@ pub struct State {
     /// `WorkspaceRecord.tab_ids`. Bootstrap-loaded from SQLite at
     /// startup alongside workspaces.
     pub tabs: HashMap<String, TabRecord>,
+    /// Phase E.3 — blocks canonical to the srv reducer. Keyed by
+    /// `block_id`; ordering within a tab is held in
+    /// `TabRecord.block_ids`. Bootstrap-loaded from SQLite at startup
+    /// alongside workspaces and tabs.
+    pub blocks: HashMap<String, BlockRecord>,
     // `persistence_hwm` deferred to E.2c when the persist subscriber
     // lands and there's actually something to track.
 }
@@ -104,6 +123,7 @@ impl Default for State {
             next_client_id: 0,
             workspaces: HashMap::new(),
             tabs: HashMap::new(),
+            blocks: HashMap::new(),
         }
     }
 }

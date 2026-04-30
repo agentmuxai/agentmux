@@ -23,9 +23,9 @@ use std::sync::Arc;
 
 use tokio::sync::Mutex;
 
-use crate::backend::obj::{Tab, Workspace};
+use crate::backend::obj::{Block, Tab, Workspace};
 use crate::backend::storage::wstore::WaveStore;
-use crate::state::{State, TabRecord, WorkspaceRecord};
+use crate::state::{BlockRecord, State, TabRecord, WorkspaceRecord};
 
 /// Phase E.2 / E.2b — load workspaces and their tabs from SQLite
 /// into the reducer state. Called once at srv startup before the
@@ -51,6 +51,14 @@ pub async fn bootstrap_state_from_wstore(state: &Arc<Mutex<State>>, wstore: &Wav
         tracing::warn!(
             target: "srv-persist",
             "[srv-persist] bootstrap: failed to load tabs from wstore: {} — tabs start empty",
+            e
+        );
+        Vec::new()
+    });
+    let blocks = wstore.get_all::<Block>().unwrap_or_else(|e| {
+        tracing::warn!(
+            target: "srv-persist",
+            "[srv-persist] bootstrap: failed to load blocks from wstore: {} — blocks start empty",
             e
         );
         Vec::new()
@@ -111,19 +119,56 @@ pub async fn bootstrap_state_from_wstore(state: &Arc<Mutex<State>>, wstore: &Wav
             );
             continue;
         };
+        // Phase E.3 — filter dangling block ids on the same defensive
+        // basis we apply to tabs above.
+        let block_ids: Vec<String> = tab
+            .blockids
+            .iter()
+            .filter(|bid| blocks.iter().any(|b| &b.oid == *bid))
+            .cloned()
+            .collect();
         state.tabs.insert(
             tab.oid.clone(),
             TabRecord {
                 tab_id: tab.oid.clone(),
                 workspace_id,
                 name: tab.name.clone(),
+                block_ids,
+            },
+        );
+    }
+    for block in &blocks {
+        // Phase E.3 — recover each block's parent tab via reverse
+        // lookup against `state.tabs` (NOT raw `tabs` from SQLite):
+        // tabs orphaned in the prior loop (no parent workspace) are
+        // not in `state.tabs`, so blocks under them must also be
+        // dropped to keep reducer state consistent. (reagent P1 #613.)
+        let Some(tab_id) = state
+            .tabs
+            .values()
+            .find(|t| t.block_ids.iter().any(|bid| bid == &block.oid))
+            .map(|t| t.tab_id.clone())
+        else {
+            tracing::warn!(
+                target: "srv-persist",
+                "[srv-persist] bootstrap: block {} has no parent tab in reducer state — skipping",
+                block.oid
+            );
+            continue;
+        };
+        state.blocks.insert(
+            block.oid.clone(),
+            BlockRecord {
+                block_id: block.oid.clone(),
+                tab_id,
             },
         );
     }
     tracing::info!(
         target: "srv-persist",
-        "[srv-persist] bootstrap loaded {} workspace(s) + {} tab(s) from wstore",
+        "[srv-persist] bootstrap loaded {} workspace(s) + {} tab(s) + {} block(s) from wstore",
         state.workspaces.len(),
-        state.tabs.len()
+        state.tabs.len(),
+        state.blocks.len()
     );
 }

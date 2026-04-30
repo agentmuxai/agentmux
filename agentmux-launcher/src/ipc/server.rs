@@ -673,6 +673,15 @@ async fn enforce_register_first(
             "SetActiveTab is a srv-pipe command; sent to launcher pipe by mistake".to_string(),
             false,
         ),
+        // Phase E.3 — Block arms are also srv-pipe commands.
+        Command::CreateBlock { .. } => (
+            "CreateBlock is a srv-pipe command; sent to launcher pipe by mistake".to_string(),
+            false,
+        ),
+        Command::DeleteBlock { .. } => (
+            "DeleteBlock is a srv-pipe command; sent to launcher pipe by mistake".to_string(),
+            false,
+        ),
     };
     // Phase E.1b — connection-private error; sentinel version=0
     // (codex P2 #610). See parse-error path for rationale.

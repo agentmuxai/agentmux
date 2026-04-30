@@ -251,6 +251,25 @@ pub fn update(state: &mut State, cmd: Command, ctx: &Ctx) -> Vec<Event> {
                 version: v,
             }]
         }
+        // Phase E.3 — Block arms are also srv-pipe commands.
+        Command::CreateBlock { .. } => {
+            let v = state.bump_version();
+            vec![Event::Error {
+                code: agentmux_common::ipc::ErrorCode::InvalidCommand,
+                message: "CreateBlock is a srv-pipe command; sent to launcher pipe by mistake".into(),
+                fatal: false,
+                version: v,
+            }]
+        }
+        Command::DeleteBlock { .. } => {
+            let v = state.bump_version();
+            vec![Event::Error {
+                code: agentmux_common::ipc::ErrorCode::InvalidCommand,
+                message: "DeleteBlock is a srv-pipe command; sent to launcher pipe by mistake".into(),
+                fatal: false,
+                version: v,
+            }]
+        }
         // Phase E.1b — `GetSrvSnapshot` is a srv-pipe command. If a
         // registered client misroutes it to the launcher pipe, return
         // an explicit error so the client knows the dispatch was
@@ -915,6 +934,8 @@ mod tests {
             | Event::TabCreated { version, .. }
             | Event::TabDeleted { version, .. }
             | Event::ActiveTabChanged { version, .. }
+            | Event::BlockCreated { version, .. }
+            | Event::BlockDeleted { version, .. }
             | Event::Error { version, .. } => *version,
         }
     }

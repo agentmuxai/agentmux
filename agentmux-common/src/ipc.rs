@@ -272,6 +272,19 @@ pub enum Command {
         workspace_id: String,
         tab_id: String,
     },
+    /// Phase E.3 — create a block inside an existing tab. Reducer
+    /// validates parent tab exists, assigns the `block_id` (UUID),
+    /// appends to the tab's `block_ids`, emits `Event::BlockCreated`.
+    /// Session-only projection (no persist subscriber yet).
+    CreateBlock {
+        tab_id: String,
+    },
+    /// Phase E.3 — delete a block from a tab. Idempotent silent no-op
+    /// on missing tab or missing block.
+    DeleteBlock {
+        tab_id: String,
+        block_id: String,
+    },
     /// Phase D.3 — request an `Event::EventList` reply containing the
     /// events the launcher has emitted with version > `since`. Used
     /// by subscribers that hold a snapshot at version V and want to
@@ -628,6 +641,12 @@ pub enum Event {
         /// Workspaces with no active tab are omitted.
         #[serde(default)]
         active_tabs: Vec<(String, String)>,
+        /// Phase E.3 — sorted list of blocks in the reducer's
+        /// canonical state. `(block_id, tab_id)` pairs for
+        /// compactness. `#[serde(default)]` for forward-compat with
+        /// pre-E.3 log entries.
+        #[serde(default)]
+        blocks: Vec<(String, String)>,
     },
     /// Phase E.2 — workspace was created. Carries the assigned
     /// `oid` and `name` so subscribers (renderer, persist) can
@@ -662,6 +681,18 @@ pub enum Event {
     ActiveTabChanged {
         workspace_id: String,
         tab_id: Option<String>,
+        version: u64,
+    },
+    /// Phase E.3 — block was created inside a tab.
+    BlockCreated {
+        tab_id: String,
+        block_id: String,
+        version: u64,
+    },
+    /// Phase E.3 — block was deleted from a tab.
+    BlockDeleted {
+        tab_id: String,
+        block_id: String,
         version: u64,
     },
 }

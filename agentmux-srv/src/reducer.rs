@@ -12,7 +12,8 @@
 //   * E.1b — Register / Goodbye / Ping / GetSrvSnapshot / GetEvents
 //   * E.2  — CreateWorkspace / DeleteWorkspace
 //   * E.2b — CreateTab / DeleteTab / SetActiveTab
-//   * E.3+ — Block / Layout commands (not yet present)
+//   * E.3  — CreateBlock / DeleteBlock
+//   * E.4+ — Layout commands (not yet present)
 //
 // `Command::GetEvents` is intercepted by the IPC server before
 // reaching the reducer (server queries the event log; reducer
@@ -21,7 +22,7 @@
 
 use agentmux_common::ipc::{ClientKind, Command, ErrorCode, Event, LifecyclePhase};
 
-use crate::state::{ProcessRecord, ProcessState, State, TabRecord, WorkspaceRecord};
+use crate::state::{BlockRecord, ProcessRecord, ProcessState, State, TabRecord, WorkspaceRecord};
 
 /// Per-dispatch context. Currently just an RFC3339 timestamp + the
 /// originating connection's `conn_id` for log correlation.
@@ -49,6 +50,8 @@ pub fn update(state: &mut State, cmd: Command, ctx: &Ctx) -> Vec<Event> {
         Command::SetActiveTab { workspace_id, tab_id } => {
             handle_set_active_tab(state, workspace_id, tab_id)
         }
+        Command::CreateBlock { tab_id } => handle_create_block(state, tab_id),
+        Command::DeleteBlock { tab_id, block_id } => handle_delete_block(state, tab_id, block_id),
         // Anything else is a non-fatal protocol error. Future
         // phases (E.2b tabs, E.3 blocks, E.4 layouts) extend this
         // match by adding new arms above.
@@ -182,12 +185,19 @@ fn handle_get_srv_snapshot(state: &mut State) -> Vec<Event> {
         })
         .collect();
     active_tabs.sort_by(|a, b| a.0.cmp(&b.0));
+    let mut blocks: Vec<(String, String)> = state
+        .blocks
+        .values()
+        .map(|b| (b.block_id.clone(), b.tab_id.clone()))
+        .collect();
+    blocks.sort_by(|a, b| a.0.cmp(&b.0));
     vec![Event::SrvSnapshot {
         version: v,
         lifecycle: state.lifecycle,
         workspaces,
         tabs,
         active_tabs,
+        blocks,
     }]
 }
 
@@ -219,17 +229,23 @@ fn handle_create_workspace(state: &mut State, name: String) -> Vec<Event> {
 
 /// Phase E.2 — delete a workspace from canonical state. Idempotent:
 /// deleting a missing workspace is a silent no-op. Cascades to the
-/// workspace's tabs (E.2b): every tab whose `workspace_id` matches
-/// is removed from `state.tabs` before the workspace itself goes
-/// away. Cascade events are NOT emitted individually — subscribers
-/// observing `WorkspaceDeleted` are expected to drop dependent state
-/// (mirrors how `wcore::delete_workspace` cascades in SQLite).
+/// workspace's tabs (E.2b) and through to each tab's blocks (E.3):
+/// every tab whose `workspace_id` matches is removed from
+/// `state.tabs`, and each block in those tabs is removed from
+/// `state.blocks`, before the workspace itself goes away. Cascade
+/// events are NOT emitted individually — subscribers observing
+/// `WorkspaceDeleted` are expected to drop dependent state (mirrors
+/// how `wcore::delete_workspace` cascades in SQLite).
 fn handle_delete_workspace(state: &mut State, workspace_id: String) -> Vec<Event> {
     let Some(removed) = state.workspaces.remove(&workspace_id) else {
         return Vec::new();
     };
     for tab_id in &removed.tab_ids {
-        state.tabs.remove(tab_id);
+        if let Some(tab) = state.tabs.remove(tab_id) {
+            for block_id in &tab.block_ids {
+                state.blocks.remove(block_id);
+            }
+        }
     }
     let v = state.bump_version();
     vec![Event::WorkspaceDeleted {
@@ -264,6 +280,7 @@ fn handle_create_tab(state: &mut State, workspace_id: String, name: String) -> V
             tab_id: tab_id.clone(),
             workspace_id: workspace_id.clone(),
             name: name.clone(),
+            block_ids: Vec::new(),
         },
     );
     let workspace = state.workspaces.get_mut(&workspace_id).expect("checked");
@@ -322,7 +339,16 @@ fn handle_delete_tab(
     } else {
         None
     };
-    state.tabs.remove(&tab_id);
+    let removed_tab = state.tabs.remove(&tab_id);
+    // Phase E.3 — cascade to blocks. Subscribers observing TabDeleted
+    // are expected to drop dependent block state (no per-block
+    // BlockDeleted events emitted; mirrors workspace→tabs cascade
+    // semantics).
+    if let Some(tab) = &removed_tab {
+        for block_id in &tab.block_ids {
+            state.blocks.remove(block_id);
+        }
+    }
     let mut events = Vec::with_capacity(2);
     let v = state.bump_version();
     events.push(Event::TabDeleted {
@@ -382,6 +408,60 @@ fn handle_set_active_tab(
     }]
 }
 
+/// Phase E.3 — create a block inside a tab. Validates parent tab
+/// exists; otherwise emits `Event::Error` (non-fatal). On success:
+/// assigns a UUID, appends to the tab's `block_ids`, inserts into
+/// `state.blocks`, emits `Event::BlockCreated`.
+///
+/// NOT idempotent on retry (UUID assignment per call); saga-side
+/// dedup is responsible for at-most-once delivery in E.5+.
+fn handle_create_block(state: &mut State, tab_id: String) -> Vec<Event> {
+    if !state.tabs.contains_key(&tab_id) {
+        let v = state.bump_version();
+        return vec![Event::Error {
+            code: ErrorCode::InvalidCommand,
+            message: format!("CreateBlock: tab not found: {}", tab_id),
+            fatal: false,
+            version: v,
+        }];
+    }
+    let block_id = uuid::Uuid::new_v4().to_string();
+    state.blocks.insert(
+        block_id.clone(),
+        BlockRecord {
+            block_id: block_id.clone(),
+            tab_id: tab_id.clone(),
+        },
+    );
+    let tab = state.tabs.get_mut(&tab_id).expect("checked");
+    tab.block_ids.push(block_id.clone());
+    let v = state.bump_version();
+    vec![Event::BlockCreated {
+        tab_id,
+        block_id,
+        version: v,
+    }]
+}
+
+/// Phase E.3 — delete a block from a tab. Idempotent: deleting a
+/// missing tab or missing block is a silent no-op.
+fn handle_delete_block(state: &mut State, tab_id: String, block_id: String) -> Vec<Event> {
+    let Some(tab) = state.tabs.get_mut(&tab_id) else {
+        return Vec::new();
+    };
+    let Some(pos) = tab.block_ids.iter().position(|b| b == &block_id) else {
+        return Vec::new();
+    };
+    tab.block_ids.remove(pos);
+    state.blocks.remove(&block_id);
+    let v = state.bump_version();
+    vec![Event::BlockDeleted {
+        tab_id,
+        block_id,
+        version: v,
+    }]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -432,6 +512,8 @@ mod tests {
             | Event::TabCreated { version, .. }
             | Event::TabDeleted { version, .. }
             | Event::ActiveTabChanged { version, .. }
+            | Event::BlockCreated { version, .. }
+            | Event::BlockDeleted { version, .. }
             | Event::Error { version, .. } => *version,
         }
     }
@@ -988,6 +1070,173 @@ mod tests {
         assert!(matches!(&events[0], Event::WorkspaceDeleted { .. }));
         assert!(state.tabs.is_empty());
         assert!(!state.workspaces.contains_key(&ws_id));
+    }
+
+    fn create_tab(state: &mut State, workspace_id: &str, name: &str) -> String {
+        let events = update(
+            state,
+            Command::CreateTab {
+                workspace_id: workspace_id.into(),
+                name: name.into(),
+            },
+            &ctx(1),
+        );
+        match &events[0] {
+            Event::TabCreated { tab_id, .. } => tab_id.clone(),
+            _ => panic!("expected TabCreated"),
+        }
+    }
+
+    #[test]
+    fn create_block_validates_tab_exists() {
+        let mut state = State::default();
+        let events = update(
+            &mut state,
+            Command::CreateBlock {
+                tab_id: "no-such-tab".into(),
+            },
+            &ctx(1),
+        );
+        assert!(matches!(&events[0], Event::Error { .. }));
+        assert!(state.blocks.is_empty());
+    }
+
+    #[test]
+    fn create_block_appends_to_tab_block_ids() {
+        let mut state = State::default();
+        let ws_id = create_workspace(&mut state, "w");
+        let tab_id = create_tab(&mut state, &ws_id, "t");
+        let events = update(
+            &mut state,
+            Command::CreateBlock {
+                tab_id: tab_id.clone(),
+            },
+            &ctx(2),
+        );
+        assert!(matches!(&events[0], Event::BlockCreated { .. }));
+        let block_id = match &events[0] {
+            Event::BlockCreated { block_id, .. } => block_id.clone(),
+            _ => panic!(),
+        };
+        assert_eq!(state.tabs[&tab_id].block_ids, vec![block_id.clone()]);
+        assert_eq!(state.blocks[&block_id].tab_id, tab_id);
+    }
+
+    #[test]
+    fn delete_block_removes_from_state_and_tab() {
+        let mut state = State::default();
+        let ws_id = create_workspace(&mut state, "w");
+        let tab_id = create_tab(&mut state, &ws_id, "t");
+        let _ = update(
+            &mut state,
+            Command::CreateBlock {
+                tab_id: tab_id.clone(),
+            },
+            &ctx(2),
+        );
+        let block_id = state.tabs[&tab_id].block_ids[0].clone();
+        let events = update(
+            &mut state,
+            Command::DeleteBlock {
+                tab_id: tab_id.clone(),
+                block_id: block_id.clone(),
+            },
+            &ctx(3),
+        );
+        assert!(matches!(&events[0], Event::BlockDeleted { .. }));
+        assert!(!state.blocks.contains_key(&block_id));
+        assert!(state.tabs[&tab_id].block_ids.is_empty());
+    }
+
+    #[test]
+    fn delete_block_unknown_silent_no_op() {
+        let mut state = State::default();
+        let ws_id = create_workspace(&mut state, "w");
+        let tab_id = create_tab(&mut state, &ws_id, "t");
+        let events = update(
+            &mut state,
+            Command::DeleteBlock {
+                tab_id,
+                block_id: "ghost".into(),
+            },
+            &ctx(2),
+        );
+        assert!(events.is_empty());
+    }
+
+    #[test]
+    fn delete_tab_cascades_blocks() {
+        let mut state = State::default();
+        let ws_id = create_workspace(&mut state, "w");
+        let tab_id = create_tab(&mut state, &ws_id, "t");
+        let _ = update(
+            &mut state,
+            Command::CreateBlock {
+                tab_id: tab_id.clone(),
+            },
+            &ctx(2),
+        );
+        let _ = update(
+            &mut state,
+            Command::CreateBlock {
+                tab_id: tab_id.clone(),
+            },
+            &ctx(3),
+        );
+        assert_eq!(state.blocks.len(), 2);
+        let _ = update(
+            &mut state,
+            Command::DeleteTab {
+                workspace_id: ws_id,
+                tab_id,
+            },
+            &ctx(4),
+        );
+        assert!(state.blocks.is_empty());
+    }
+
+    #[test]
+    fn delete_workspace_cascades_through_tabs_to_blocks() {
+        let mut state = State::default();
+        let ws_id = create_workspace(&mut state, "w");
+        let tab_id = create_tab(&mut state, &ws_id, "t");
+        let _ = update(
+            &mut state,
+            Command::CreateBlock {
+                tab_id: tab_id.clone(),
+            },
+            &ctx(2),
+        );
+        let _ = update(
+            &mut state,
+            Command::CreateBlock { tab_id },
+            &ctx(3),
+        );
+        assert_eq!(state.blocks.len(), 2);
+        let _ = update(
+            &mut state,
+            Command::DeleteWorkspace { workspace_id: ws_id },
+            &ctx(4),
+        );
+        assert!(state.blocks.is_empty());
+        assert!(state.tabs.is_empty());
+    }
+
+    #[test]
+    fn snapshot_includes_blocks() {
+        let mut state = State::default();
+        let ws_id = create_workspace(&mut state, "w");
+        let tab_id = create_tab(&mut state, &ws_id, "t");
+        let _ = update(
+            &mut state,
+            Command::CreateBlock { tab_id },
+            &ctx(2),
+        );
+        let events = update(&mut state, Command::GetSrvSnapshot, &ctx(3));
+        let Event::SrvSnapshot { blocks, .. } = &events[0] else {
+            panic!("expected SrvSnapshot");
+        };
+        assert_eq!(blocks.len(), 1);
     }
 
     #[test]
