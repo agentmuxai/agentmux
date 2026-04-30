@@ -330,9 +330,16 @@ async fn run_windows(
     // spawn_backend path. Srv signals readiness via AGENTMUXSRV-ESTART on
     // stderr; the spawner returns once we see that line (or after a
     // 30s timeout).
+    // Phase E.1b — pre-compute srv's pipe path (same data-dir hash
+    // as launcher's pipe) and pass via env so srv binds it on
+    // startup. Launcher is the sole authority for the data-dir hash.
+    let srv_pipe_path = ipc::srv_pipe_name(&dir_hash);
+    log(&format!("[ipc] srv pipe path = {}", srv_pipe_path));
+
     let (srv_result, mut srv_child) = match srv_spawner::spawn_srv(
         launcher_exe_dir,
         &paths,
+        &srv_pipe_path,
         job_handle,
     )
     .await
