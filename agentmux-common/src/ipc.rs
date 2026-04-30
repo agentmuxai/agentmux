@@ -246,6 +246,32 @@ pub enum Command {
     DeleteWorkspace {
         workspace_id: String,
     },
+    /// Phase E.2b — create a tab inside an existing workspace. The
+    /// reducer assigns the `tab_id` (UUID), appends to the workspace's
+    /// ordered tab list, and emits `Event::TabCreated`. Validates the
+    /// parent workspace exists; returns `Event::Error` if not.
+    /// Session-only projection (no persist subscriber yet).
+    CreateTab {
+        workspace_id: String,
+        name: String,
+    },
+    /// Phase E.2b — delete a tab from a workspace. Reducer removes the
+    /// tab from canonical state, removes its id from the workspace's
+    /// ordered tab list, and emits `Event::TabDeleted`. If the deleted
+    /// tab was the active tab, also emits `Event::ActiveTabChanged`
+    /// pointing at the new active (next-or-prev tab, or empty if the
+    /// workspace has no tabs left).
+    DeleteTab {
+        workspace_id: String,
+        tab_id: String,
+    },
+    /// Phase E.2b — set a workspace's active tab. No-op if already
+    /// active. Errors if the workspace doesn't exist or the tab isn't
+    /// in that workspace's tab list.
+    SetActiveTab {
+        workspace_id: String,
+        tab_id: String,
+    },
     /// Phase D.3 — request an `Event::EventList` reply containing the
     /// events the launcher has emitted with version > `since`. Used
     /// by subscribers that hold a snapshot at version V and want to
@@ -588,10 +614,20 @@ pub enum Event {
         /// written by E.1b (which had no `workspaces` field) still
         /// deserialize when later sub-phases add bootstrap-replay
         /// from the on-disk log. Same forward-compat treatment will
-        /// apply to E.2b's `tabs`, E.3's `blocks`, etc.
-        /// (reagent P2 #611.)
+        /// apply to E.3's `blocks`, etc. (reagent P2 #611.)
         #[serde(default)]
         workspaces: Vec<(String, String)>,
+        /// Phase E.2b — sorted list of tabs in the reducer's canonical
+        /// state. `(tab_id, workspace_id, name)` triples for
+        /// compactness. `#[serde(default)]` for forward-compat with
+        /// pre-E.2b log entries.
+        #[serde(default)]
+        tabs: Vec<(String, String, String)>,
+        /// Phase E.2b — sorted list of `(workspace_id, active_tab_id)`
+        /// pairs for workspaces that have an active tab set.
+        /// Workspaces with no active tab are omitted.
+        #[serde(default)]
+        active_tabs: Vec<(String, String)>,
     },
     /// Phase E.2 — workspace was created. Carries the assigned
     /// `oid` and `name` so subscribers (renderer, persist) can
@@ -604,6 +640,28 @@ pub enum Event {
     /// Phase E.2 — workspace was deleted.
     WorkspaceDeleted {
         workspace_id: String,
+        version: u64,
+    },
+    /// Phase E.2b — tab was created inside a workspace. Carries the
+    /// assigned `tab_id` and parent `workspace_id` so subscribers can
+    /// place it in the correct workspace's tab list.
+    TabCreated {
+        workspace_id: String,
+        tab_id: String,
+        name: String,
+        version: u64,
+    },
+    /// Phase E.2b — tab was deleted from a workspace.
+    TabDeleted {
+        workspace_id: String,
+        tab_id: String,
+        version: u64,
+    },
+    /// Phase E.2b — a workspace's active tab changed. `tab_id: None`
+    /// means the workspace has no active tab (e.g., last tab deleted).
+    ActiveTabChanged {
+        workspace_id: String,
+        tab_id: Option<String>,
         version: u64,
     },
 }

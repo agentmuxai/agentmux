@@ -11,7 +11,8 @@
 // Arms by phase:
 //   * E.1b — Register / Goodbye / Ping / GetSrvSnapshot / GetEvents
 //   * E.2  — CreateWorkspace / DeleteWorkspace
-//   * E.2b+ — Tab / Block / Layout commands (not yet present)
+//   * E.2b — CreateTab / DeleteTab / SetActiveTab
+//   * E.3+ — Block / Layout commands (not yet present)
 //
 // `Command::GetEvents` is intercepted by the IPC server before
 // reaching the reducer (server queries the event log; reducer
@@ -20,7 +21,7 @@
 
 use agentmux_common::ipc::{ClientKind, Command, ErrorCode, Event, LifecyclePhase};
 
-use crate::state::{ProcessRecord, ProcessState, State, WorkspaceRecord};
+use crate::state::{ProcessRecord, ProcessState, State, TabRecord, WorkspaceRecord};
 
 /// Per-dispatch context. Currently just an RFC3339 timestamp + the
 /// originating connection's `conn_id` for log correlation.
@@ -43,6 +44,11 @@ pub fn update(state: &mut State, cmd: Command, ctx: &Ctx) -> Vec<Event> {
         Command::GetEvents { .. } => Vec::new(), // intercepted by server; unreachable
         Command::CreateWorkspace { name } => handle_create_workspace(state, name),
         Command::DeleteWorkspace { workspace_id } => handle_delete_workspace(state, workspace_id),
+        Command::CreateTab { workspace_id, name } => handle_create_tab(state, workspace_id, name),
+        Command::DeleteTab { workspace_id, tab_id } => handle_delete_tab(state, workspace_id, tab_id),
+        Command::SetActiveTab { workspace_id, tab_id } => {
+            handle_set_active_tab(state, workspace_id, tab_id)
+        }
         // Anything else is a non-fatal protocol error. Future
         // phases (E.2b tabs, E.3 blocks, E.4 layouts) extend this
         // match by adding new arms above.
@@ -160,10 +166,28 @@ fn handle_get_srv_snapshot(state: &mut State) -> Vec<Event> {
     // Stable ordering for diffability — reducer state is HashMap so
     // iteration order is non-deterministic.
     workspaces.sort_by(|a, b| a.0.cmp(&b.0));
+    let mut tabs: Vec<(String, String, String)> = state
+        .tabs
+        .values()
+        .map(|t| (t.tab_id.clone(), t.workspace_id.clone(), t.name.clone()))
+        .collect();
+    tabs.sort_by(|a, b| a.0.cmp(&b.0));
+    let mut active_tabs: Vec<(String, String)> = state
+        .workspaces
+        .values()
+        .filter_map(|w| {
+            w.active_tab_id
+                .as_ref()
+                .map(|t| (w.workspace_id.clone(), t.clone()))
+        })
+        .collect();
+    active_tabs.sort_by(|a, b| a.0.cmp(&b.0));
     vec![Event::SrvSnapshot {
         version: v,
         lifecycle: state.lifecycle,
         workspaces,
+        tabs,
+        active_tabs,
     }]
 }
 
@@ -181,6 +205,8 @@ fn handle_create_workspace(state: &mut State, name: String) -> Vec<Event> {
         WorkspaceRecord {
             workspace_id: workspace_id.clone(),
             name: name.clone(),
+            tab_ids: Vec::new(),
+            active_tab_id: None,
         },
     );
     let v = state.bump_version();
@@ -192,15 +218,166 @@ fn handle_create_workspace(state: &mut State, name: String) -> Vec<Event> {
 }
 
 /// Phase E.2 — delete a workspace from canonical state. Idempotent:
-/// deleting a missing workspace is a silent no-op. Cascade to the
-/// workspace's tabs is E.2b territory (tab arms not yet present).
+/// deleting a missing workspace is a silent no-op. Cascades to the
+/// workspace's tabs (E.2b): every tab whose `workspace_id` matches
+/// is removed from `state.tabs` before the workspace itself goes
+/// away. Cascade events are NOT emitted individually — subscribers
+/// observing `WorkspaceDeleted` are expected to drop dependent state
+/// (mirrors how `wcore::delete_workspace` cascades in SQLite).
 fn handle_delete_workspace(state: &mut State, workspace_id: String) -> Vec<Event> {
-    if state.workspaces.remove(&workspace_id).is_none() {
+    let Some(removed) = state.workspaces.remove(&workspace_id) else {
         return Vec::new();
+    };
+    for tab_id in &removed.tab_ids {
+        state.tabs.remove(tab_id);
     }
     let v = state.bump_version();
     vec![Event::WorkspaceDeleted {
         workspace_id,
+        version: v,
+    }]
+}
+
+/// Phase E.2b — create a tab inside a workspace. Validates the
+/// parent exists; otherwise emits `Event::Error` (non-fatal). On
+/// success: assigns a UUID, appends to the workspace's `tab_ids`,
+/// inserts into `state.tabs`, emits `Event::TabCreated`. If the
+/// workspace had no active tab, the new tab also becomes active
+/// and an `Event::ActiveTabChanged` is emitted alongside.
+///
+/// NOT idempotent on retry (same UUID-assignment caveat as
+/// `handle_create_workspace`).
+fn handle_create_tab(state: &mut State, workspace_id: String, name: String) -> Vec<Event> {
+    if !state.workspaces.contains_key(&workspace_id) {
+        let v = state.bump_version();
+        return vec![Event::Error {
+            code: ErrorCode::InvalidCommand,
+            message: format!("CreateTab: workspace not found: {}", workspace_id),
+            fatal: false,
+            version: v,
+        }];
+    }
+    let tab_id = uuid::Uuid::new_v4().to_string();
+    state.tabs.insert(
+        tab_id.clone(),
+        TabRecord {
+            tab_id: tab_id.clone(),
+            workspace_id: workspace_id.clone(),
+            name: name.clone(),
+        },
+    );
+    let workspace = state.workspaces.get_mut(&workspace_id).expect("checked");
+    workspace.tab_ids.push(tab_id.clone());
+    let activated = if workspace.active_tab_id.is_none() {
+        workspace.active_tab_id = Some(tab_id.clone());
+        true
+    } else {
+        false
+    };
+    let mut events = Vec::with_capacity(2);
+    let v = state.bump_version();
+    events.push(Event::TabCreated {
+        workspace_id: workspace_id.clone(),
+        tab_id: tab_id.clone(),
+        name,
+        version: v,
+    });
+    if activated {
+        let v2 = state.bump_version();
+        events.push(Event::ActiveTabChanged {
+            workspace_id,
+            tab_id: Some(tab_id),
+            version: v2,
+        });
+    }
+    events
+}
+
+/// Phase E.2b — delete a tab from a workspace. Idempotent: deleting
+/// a missing tab is a silent no-op. If the deleted tab was the
+/// active tab, the workspace's active tab becomes the next tab in
+/// `tab_ids` (or the previous one if the deleted was last; or None
+/// if the workspace is now empty), and an `Event::ActiveTabChanged`
+/// is emitted alongside `Event::TabDeleted`.
+fn handle_delete_tab(
+    state: &mut State,
+    workspace_id: String,
+    tab_id: String,
+) -> Vec<Event> {
+    let Some(workspace) = state.workspaces.get_mut(&workspace_id) else {
+        return Vec::new();
+    };
+    let Some(pos) = workspace.tab_ids.iter().position(|t| t == &tab_id) else {
+        return Vec::new();
+    };
+    workspace.tab_ids.remove(pos);
+    let active_changed = if workspace.active_tab_id.as_deref() == Some(tab_id.as_str()) {
+        let new_active = workspace
+            .tab_ids
+            .get(pos)
+            .or_else(|| pos.checked_sub(1).and_then(|i| workspace.tab_ids.get(i)))
+            .cloned();
+        workspace.active_tab_id = new_active.clone();
+        Some(new_active)
+    } else {
+        None
+    };
+    state.tabs.remove(&tab_id);
+    let mut events = Vec::with_capacity(2);
+    let v = state.bump_version();
+    events.push(Event::TabDeleted {
+        workspace_id: workspace_id.clone(),
+        tab_id,
+        version: v,
+    });
+    if let Some(new_active) = active_changed {
+        let v2 = state.bump_version();
+        events.push(Event::ActiveTabChanged {
+            workspace_id,
+            tab_id: new_active,
+            version: v2,
+        });
+    }
+    events
+}
+
+/// Phase E.2b — set a workspace's active tab. No-op if already
+/// active. Errors (non-fatal) if the workspace doesn't exist or the
+/// tab isn't in that workspace's tab list.
+fn handle_set_active_tab(
+    state: &mut State,
+    workspace_id: String,
+    tab_id: String,
+) -> Vec<Event> {
+    let Some(workspace) = state.workspaces.get_mut(&workspace_id) else {
+        let v = state.bump_version();
+        return vec![Event::Error {
+            code: ErrorCode::InvalidCommand,
+            message: format!("SetActiveTab: workspace not found: {}", workspace_id),
+            fatal: false,
+            version: v,
+        }];
+    };
+    if !workspace.tab_ids.iter().any(|t| t == &tab_id) {
+        let v = state.bump_version();
+        return vec![Event::Error {
+            code: ErrorCode::InvalidCommand,
+            message: format!(
+                "SetActiveTab: tab {} not in workspace {}",
+                tab_id, workspace_id
+            ),
+            fatal: false,
+            version: v,
+        }];
+    }
+    if workspace.active_tab_id.as_deref() == Some(tab_id.as_str()) {
+        return Vec::new();
+    }
+    workspace.active_tab_id = Some(tab_id.clone());
+    let v = state.bump_version();
+    vec![Event::ActiveTabChanged {
+        workspace_id,
+        tab_id: Some(tab_id),
         version: v,
     }]
 }
@@ -252,6 +429,9 @@ mod tests {
             | Event::SagaFailed { version, .. }
             | Event::WorkspaceCreated { version, .. }
             | Event::WorkspaceDeleted { version, .. }
+            | Event::TabCreated { version, .. }
+            | Event::TabDeleted { version, .. }
+            | Event::ActiveTabChanged { version, .. }
             | Event::Error { version, .. } => *version,
         }
     }
@@ -519,6 +699,319 @@ mod tests {
         assert_eq!(workspaces.len(), 2);
         // Sorted by id; verify ordering deterministic (ascending).
         assert!(workspaces[0].0 < workspaces[1].0);
+    }
+
+    fn create_workspace(state: &mut State, name: &str) -> String {
+        let events = update(
+            state,
+            Command::CreateWorkspace { name: name.into() },
+            &ctx(1),
+        );
+        match &events[0] {
+            Event::WorkspaceCreated { workspace_id, .. } => workspace_id.clone(),
+            _ => panic!("expected WorkspaceCreated"),
+        }
+    }
+
+    #[test]
+    fn create_tab_validates_workspace_exists() {
+        let mut state = State::default();
+        let events = update(
+            &mut state,
+            Command::CreateTab {
+                workspace_id: "no-such-ws".into(),
+                name: "t1".into(),
+            },
+            &ctx(1),
+        );
+        assert!(matches!(&events[0], Event::Error { .. }));
+        assert!(state.tabs.is_empty());
+    }
+
+    #[test]
+    fn create_tab_first_tab_becomes_active() {
+        let mut state = State::default();
+        let ws_id = create_workspace(&mut state, "w");
+        let events = update(
+            &mut state,
+            Command::CreateTab {
+                workspace_id: ws_id.clone(),
+                name: "t1".into(),
+            },
+            &ctx(1),
+        );
+        // First event: TabCreated; second: ActiveTabChanged.
+        assert!(matches!(&events[0], Event::TabCreated { .. }));
+        assert!(matches!(&events[1], Event::ActiveTabChanged { .. }));
+        let workspace = &state.workspaces[&ws_id];
+        assert_eq!(workspace.tab_ids.len(), 1);
+        assert_eq!(workspace.active_tab_id, Some(workspace.tab_ids[0].clone()));
+        assert_eq!(state.tabs.len(), 1);
+    }
+
+    #[test]
+    fn create_tab_second_tab_does_not_steal_active() {
+        let mut state = State::default();
+        let ws_id = create_workspace(&mut state, "w");
+        let _ = update(
+            &mut state,
+            Command::CreateTab {
+                workspace_id: ws_id.clone(),
+                name: "t1".into(),
+            },
+            &ctx(1),
+        );
+        let first_active = state.workspaces[&ws_id].active_tab_id.clone();
+        let events = update(
+            &mut state,
+            Command::CreateTab {
+                workspace_id: ws_id.clone(),
+                name: "t2".into(),
+            },
+            &ctx(2),
+        );
+        // Only TabCreated — second tab does not become active.
+        assert!(matches!(&events[0], Event::TabCreated { .. }));
+        assert_eq!(events.len(), 1);
+        assert_eq!(state.workspaces[&ws_id].active_tab_id, first_active);
+        assert_eq!(state.workspaces[&ws_id].tab_ids.len(), 2);
+    }
+
+    #[test]
+    fn delete_tab_removes_from_state_and_workspace_list() {
+        let mut state = State::default();
+        let ws_id = create_workspace(&mut state, "w");
+        let _ = update(
+            &mut state,
+            Command::CreateTab {
+                workspace_id: ws_id.clone(),
+                name: "t1".into(),
+            },
+            &ctx(1),
+        );
+        let _ = update(
+            &mut state,
+            Command::CreateTab {
+                workspace_id: ws_id.clone(),
+                name: "t2".into(),
+            },
+            &ctx(2),
+        );
+        let tab2_id = state.workspaces[&ws_id].tab_ids[1].clone();
+        let events = update(
+            &mut state,
+            Command::DeleteTab {
+                workspace_id: ws_id.clone(),
+                tab_id: tab2_id.clone(),
+            },
+            &ctx(3),
+        );
+        assert!(matches!(&events[0], Event::TabDeleted { .. }));
+        // tab2 wasn't active, so no ActiveTabChanged.
+        assert_eq!(events.len(), 1);
+        assert!(!state.tabs.contains_key(&tab2_id));
+        assert_eq!(state.workspaces[&ws_id].tab_ids.len(), 1);
+    }
+
+    #[test]
+    fn delete_active_tab_promotes_neighbor() {
+        let mut state = State::default();
+        let ws_id = create_workspace(&mut state, "w");
+        let _ = update(
+            &mut state,
+            Command::CreateTab {
+                workspace_id: ws_id.clone(),
+                name: "t1".into(),
+            },
+            &ctx(1),
+        );
+        let _ = update(
+            &mut state,
+            Command::CreateTab {
+                workspace_id: ws_id.clone(),
+                name: "t2".into(),
+            },
+            &ctx(2),
+        );
+        let tab1_id = state.workspaces[&ws_id].tab_ids[0].clone();
+        let tab2_id = state.workspaces[&ws_id].tab_ids[1].clone();
+        // tab1 was created first → it's active. Delete it.
+        let events = update(
+            &mut state,
+            Command::DeleteTab {
+                workspace_id: ws_id.clone(),
+                tab_id: tab1_id.clone(),
+            },
+            &ctx(3),
+        );
+        assert!(matches!(&events[0], Event::TabDeleted { .. }));
+        assert!(matches!(
+            &events[1],
+            Event::ActiveTabChanged { tab_id: Some(_), .. }
+        ));
+        // tab2 should now be active.
+        assert_eq!(state.workspaces[&ws_id].active_tab_id, Some(tab2_id));
+    }
+
+    #[test]
+    fn delete_last_tab_clears_active_to_none() {
+        let mut state = State::default();
+        let ws_id = create_workspace(&mut state, "w");
+        let _ = update(
+            &mut state,
+            Command::CreateTab {
+                workspace_id: ws_id.clone(),
+                name: "t1".into(),
+            },
+            &ctx(1),
+        );
+        let tab1_id = state.workspaces[&ws_id].tab_ids[0].clone();
+        let events = update(
+            &mut state,
+            Command::DeleteTab {
+                workspace_id: ws_id.clone(),
+                tab_id: tab1_id,
+            },
+            &ctx(2),
+        );
+        assert!(matches!(&events[0], Event::TabDeleted { .. }));
+        assert!(matches!(
+            &events[1],
+            Event::ActiveTabChanged { tab_id: None, .. }
+        ));
+        assert_eq!(state.workspaces[&ws_id].active_tab_id, None);
+        assert!(state.tabs.is_empty());
+    }
+
+    #[test]
+    fn delete_unknown_tab_silent_no_op() {
+        let mut state = State::default();
+        let ws_id = create_workspace(&mut state, "w");
+        let events = update(
+            &mut state,
+            Command::DeleteTab {
+                workspace_id: ws_id,
+                tab_id: "ghost".into(),
+            },
+            &ctx(1),
+        );
+        assert!(events.is_empty());
+    }
+
+    #[test]
+    fn set_active_tab_validates_workspace_and_tab() {
+        let mut state = State::default();
+        let ws_id = create_workspace(&mut state, "w");
+        let _ = update(
+            &mut state,
+            Command::CreateTab {
+                workspace_id: ws_id.clone(),
+                name: "t1".into(),
+            },
+            &ctx(1),
+        );
+        // Wrong workspace.
+        let events = update(
+            &mut state,
+            Command::SetActiveTab {
+                workspace_id: "no-such".into(),
+                tab_id: "x".into(),
+            },
+            &ctx(2),
+        );
+        assert!(matches!(&events[0], Event::Error { .. }));
+        // Right workspace, wrong tab.
+        let events = update(
+            &mut state,
+            Command::SetActiveTab {
+                workspace_id: ws_id,
+                tab_id: "ghost".into(),
+            },
+            &ctx(3),
+        );
+        assert!(matches!(&events[0], Event::Error { .. }));
+    }
+
+    #[test]
+    fn set_active_tab_idempotent_no_event_when_already_active() {
+        let mut state = State::default();
+        let ws_id = create_workspace(&mut state, "w");
+        let _ = update(
+            &mut state,
+            Command::CreateTab {
+                workspace_id: ws_id.clone(),
+                name: "t1".into(),
+            },
+            &ctx(1),
+        );
+        let tab_id = state.workspaces[&ws_id].tab_ids[0].clone();
+        // Already active (auto-activated on first tab create).
+        let events = update(
+            &mut state,
+            Command::SetActiveTab {
+                workspace_id: ws_id,
+                tab_id,
+            },
+            &ctx(2),
+        );
+        assert!(events.is_empty());
+    }
+
+    #[test]
+    fn delete_workspace_cascades_tabs() {
+        let mut state = State::default();
+        let ws_id = create_workspace(&mut state, "w");
+        let _ = update(
+            &mut state,
+            Command::CreateTab {
+                workspace_id: ws_id.clone(),
+                name: "t1".into(),
+            },
+            &ctx(1),
+        );
+        let _ = update(
+            &mut state,
+            Command::CreateTab {
+                workspace_id: ws_id.clone(),
+                name: "t2".into(),
+            },
+            &ctx(2),
+        );
+        assert_eq!(state.tabs.len(), 2);
+        let events = update(
+            &mut state,
+            Command::DeleteWorkspace {
+                workspace_id: ws_id.clone(),
+            },
+            &ctx(3),
+        );
+        assert!(matches!(&events[0], Event::WorkspaceDeleted { .. }));
+        assert!(state.tabs.is_empty());
+        assert!(!state.workspaces.contains_key(&ws_id));
+    }
+
+    #[test]
+    fn snapshot_includes_tabs_and_active_tabs() {
+        let mut state = State::default();
+        let ws_id = create_workspace(&mut state, "w");
+        let _ = update(
+            &mut state,
+            Command::CreateTab {
+                workspace_id: ws_id.clone(),
+                name: "t1".into(),
+            },
+            &ctx(1),
+        );
+        let events = update(&mut state, Command::GetSrvSnapshot, &ctx(2));
+        let Event::SrvSnapshot {
+            tabs, active_tabs, ..
+        } = &events[0]
+        else {
+            panic!("expected SrvSnapshot");
+        };
+        assert_eq!(tabs.len(), 1);
+        assert_eq!(active_tabs.len(), 1);
+        assert_eq!(active_tabs[0].0, ws_id);
     }
 
     #[test]
