@@ -7,7 +7,7 @@ use crate::backend::reactive as backend_reactive;
 use crate::backend::wconfig;
 use crate::backend::wcore;
 
-fn test_state() -> AppState {
+pub(crate) fn test_state() -> AppState {
     let wstore = Arc::new(WaveStore::open_in_memory().unwrap());
     let filestore = Arc::new(FileStore::open_in_memory().unwrap());
     let event_bus = Arc::new(EventBus::new());
@@ -53,6 +53,7 @@ fn test_state() -> AppState {
         // Tests get fresh state + a dummy broadcast bus.
         srv_state: Arc::new(tokio::sync::Mutex::new(crate::state::State::default())),
         srv_events_tx: tokio::sync::broadcast::channel::<agentmux_common::ipc::Event>(64).0,
+        saga_id_alloc: Arc::new(std::sync::atomic::AtomicU64::new(0)),
     }
 }
 
