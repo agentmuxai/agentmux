@@ -288,6 +288,61 @@ pub fn update(state: &mut State, cmd: Command, ctx: &Ctx) -> Vec<Event> {
                 version: v,
             }]
         }
+        // Phase E.5.3 — atomic single-step domain commands are srv-pipe.
+        Command::ReorderTabsBulk { .. } => {
+            let v = state.bump_version();
+            vec![Event::Error {
+                code: agentmux_common::ipc::ErrorCode::InvalidCommand,
+                message: "ReorderTabsBulk is a srv-pipe command; sent to launcher pipe by mistake".into(),
+                fatal: false,
+                version: v,
+            }]
+        }
+        Command::RenameWorkspace { .. } => {
+            let v = state.bump_version();
+            vec![Event::Error {
+                code: agentmux_common::ipc::ErrorCode::InvalidCommand,
+                message: "RenameWorkspace is a srv-pipe command; sent to launcher pipe by mistake".into(),
+                fatal: false,
+                version: v,
+            }]
+        }
+        Command::RenameTab { .. } => {
+            let v = state.bump_version();
+            vec![Event::Error {
+                code: agentmux_common::ipc::ErrorCode::InvalidCommand,
+                message: "RenameTab is a srv-pipe command; sent to launcher pipe by mistake".into(),
+                fatal: false,
+                version: v,
+            }]
+        }
+        Command::UpdateWorkspaceMeta { .. } => {
+            let v = state.bump_version();
+            vec![Event::Error {
+                code: agentmux_common::ipc::ErrorCode::InvalidCommand,
+                message: "UpdateWorkspaceMeta is a srv-pipe command; sent to launcher pipe by mistake".into(),
+                fatal: false,
+                version: v,
+            }]
+        }
+        Command::UpdateTabMeta { .. } => {
+            let v = state.bump_version();
+            vec![Event::Error {
+                code: agentmux_common::ipc::ErrorCode::InvalidCommand,
+                message: "UpdateTabMeta is a srv-pipe command; sent to launcher pipe by mistake".into(),
+                fatal: false,
+                version: v,
+            }]
+        }
+        Command::UpdateBlockMeta { .. } => {
+            let v = state.bump_version();
+            vec![Event::Error {
+                code: agentmux_common::ipc::ErrorCode::InvalidCommand,
+                message: "UpdateBlockMeta is a srv-pipe command; sent to launcher pipe by mistake".into(),
+                fatal: false,
+                version: v,
+            }]
+        }
         // Phase E.3 — Block arms are also srv-pipe commands.
         Command::CreateBlock { .. } => {
             let v = state.bump_version();
@@ -975,6 +1030,12 @@ mod tests {
             | Event::SrvWindowOpened { version, .. }
             | Event::SrvWindowClosed { version, .. }
             | Event::SrvWindowWorkspaceChanged { version, .. }
+            | Event::TabsReorderedBulk { version, .. }
+            | Event::WorkspaceRenamed { version, .. }
+            | Event::TabRenamed { version, .. }
+            | Event::WorkspaceMetaUpdated { version, .. }
+            | Event::TabMetaUpdated { version, .. }
+            | Event::BlockMetaUpdated { version, .. }
             | Event::BlockCreated { version, .. }
             | Event::BlockDeleted { version, .. }
             | Event::Error { version, .. } => *version,
