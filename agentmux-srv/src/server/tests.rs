@@ -49,6 +49,10 @@ fn test_state() -> AppState {
         history_service: Arc::new(crate::backend::history::HistoryService::new()),
         lan_discovery: None,
         process_tracker,
+        // Phase E.2c.2 — workspace RPC dispatches through reducer.
+        // Tests get fresh state + a dummy broadcast bus.
+        srv_state: Arc::new(tokio::sync::Mutex::new(crate::state::State::default())),
+        srv_events_tx: tokio::sync::broadcast::channel::<agentmux_common::ipc::Event>(64).0,
     }
 }
 

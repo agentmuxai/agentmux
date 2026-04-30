@@ -19,7 +19,7 @@ pub(super) async fn handle_service(
         Ok(c) => c,
         Err(e) => return Json(WebReturnType::error(format!("invalid request body: {e}"))),
     };
-    let result = dispatch_service(&state, &call);
+    let result = dispatch_service(&state, &call).await;
     let elapsed = service_start.elapsed();
     tracing::info!(
         "[http-perf] {}.{}: {:.2}ms",
@@ -54,7 +54,7 @@ pub(super) async fn handle_service(
     Json(result)
 }
 
-fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType {
+async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType {
     let store = &state.wstore;
     let args = &call.args;
 
@@ -380,11 +380,43 @@ fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType {
         }
 
         // ---- WorkspaceService ----
+        // Phase E.2c.2 — workspace lifecycle now flows through the
+        // srv reducer. Handlers dispatch the corresponding `Command`
+        // into the reducer (mutating `state.workspaces` and emitting
+        // events), publish those events on the broadcast bus
+        // (subscriber writes them back to SQLite asynchronously),
+        // and return synchronously by reading from the reducer's
+        // session-only state. wcore is no longer the authoritative
+        // path for workspace mutations.
         ("workspace", "CreateWorkspace") => {
             let name: String = service::get_arg(args, 0).unwrap_or_default();
-            match wcore::create_workspace(store, &name) {
-                Ok(ws) => WebReturnType::success(serde_json::to_value(&ws).unwrap_or_default()),
-                Err(e) => WebReturnType::error(e.to_string()),
+            let events = dispatch_to_reducer(
+                state,
+                agentmux_common::ipc::Command::CreateWorkspace { name: name.clone() },
+            )
+            .await;
+            let workspace_id = events.iter().find_map(|e| match e {
+                agentmux_common::ipc::Event::WorkspaceCreated { workspace_id, .. } => {
+                    Some(workspace_id.clone())
+                }
+                _ => None,
+            });
+            publish_events(state, &events);
+            match workspace_id {
+                Some(id) => {
+                    let ws = build_workspace_from_state(state, &id).await;
+                    match ws {
+                        Some(ws) => {
+                            WebReturnType::success(serde_json::to_value(&ws).unwrap_or_default())
+                        }
+                        None => WebReturnType::error(
+                            "CreateWorkspace: reducer state missing newly-created workspace".to_string(),
+                        ),
+                    }
+                }
+                None => {
+                    WebReturnType::error("CreateWorkspace: reducer did not emit WorkspaceCreated".to_string())
+                }
             }
         }
         ("workspace", "GetWorkspace") => {
@@ -392,9 +424,15 @@ fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType {
                 Ok(v) => v,
                 Err(e) => return WebReturnType::error(e),
             };
-            match wcore::get_workspace(store, &ws_id) {
-                Ok(ws) => WebReturnType::success(serde_json::to_value(&ws).unwrap_or_default()),
-                Err(e) => WebReturnType::error(e.to_string()),
+            // Read-through from reducer state. Falls back to wstore
+            // (which the subscriber may have raced to) only if the
+            // reducer doesn't know the id.
+            match build_workspace_from_state(state, &ws_id).await {
+                Some(ws) => WebReturnType::success(serde_json::to_value(&ws).unwrap_or_default()),
+                None => match wcore::get_workspace(store, &ws_id) {
+                    Ok(ws) => WebReturnType::success(serde_json::to_value(&ws).unwrap_or_default()),
+                    Err(e) => WebReturnType::error(e.to_string()),
+                },
             }
         }
         ("workspace", "DeleteWorkspace") => {
@@ -402,9 +440,23 @@ fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType {
                 Ok(v) => v,
                 Err(e) => return WebReturnType::error(e),
             };
-            match wcore::delete_workspace(store, &ws_id) {
-                Ok(()) => WebReturnType::success_empty(),
-                Err(e) => WebReturnType::error(e.to_string()),
+            let events = dispatch_to_reducer(
+                state,
+                agentmux_common::ipc::Command::DeleteWorkspace {
+                    workspace_id: ws_id.clone(),
+                },
+            )
+            .await;
+            publish_events(state, &events);
+            // Reducer deletes are silent on missing — treat any
+            // dispatch as success at the RPC layer (matches prior
+            // wcore::delete_workspace which returned Ok(()) on
+            // success and an error on missing; we now only error
+            // if the reducer emitted an Error event).
+            if events.iter().any(|e| matches!(e, agentmux_common::ipc::Event::Error { .. })) {
+                WebReturnType::error(format!("DeleteWorkspace failed: {}", ws_id))
+            } else {
+                WebReturnType::success_empty()
             }
         }
         ("workspace", "ListWorkspaces") => match wcore::list_workspaces(store) {
@@ -1083,4 +1135,51 @@ pub(crate) fn update_object_meta(
         _ => return Err(format!("cannot update meta for otype: {}", oref.otype)),
     }
     Ok(())
+}
+
+
+// ---- Phase E.2c.2 reducer-dispatch helpers ----
+
+/// Dispatch a command into the srv reducer and return the emitted
+/// events. Locks the reducer mutex briefly; the lock is released
+/// before any I/O (caller is responsible for publishing the events
+/// to the broadcast bus).
+async fn dispatch_to_reducer(
+    state: &AppState,
+    cmd: agentmux_common::ipc::Command,
+) -> Vec<agentmux_common::ipc::Event> {
+    let now = chrono::Utc::now().to_rfc3339();
+    let mut s = state.srv_state.lock().await;
+    let ctx = crate::reducer::Ctx {
+        now_rfc3339: now,
+        // RPC-originated dispatch has no IPC connection — sentinel.
+        conn_id: 0,
+        registered_pid: None,
+    };
+    crate::reducer::update(&mut s, cmd, &ctx)
+}
+
+/// Publish each event on the srv broadcast bus. Failures (no
+/// subscribers) are non-fatal.
+fn publish_events(state: &AppState, events: &[agentmux_common::ipc::Event]) {
+    for event in events {
+        let _ = state.srv_events_tx.send(event.clone());
+    }
+}
+
+/// Build a `Workspace` (the persistent object shape) from the
+/// reducer's `WorkspaceRecord` for synchronous RPC responses.
+/// Returns `None` if the reducer doesn't know the id.
+async fn build_workspace_from_state(
+    state: &AppState,
+    workspace_id: &str,
+) -> Option<Workspace> {
+    let s = state.srv_state.lock().await;
+    s.workspaces.get(workspace_id).map(|record| Workspace {
+        oid: record.workspace_id.clone(),
+        name: record.name.clone(),
+        tabids: record.tab_ids.clone(),
+        activetabid: record.active_tab_id.clone().unwrap_or_default(),
+        ..Default::default()
+    })
 }
