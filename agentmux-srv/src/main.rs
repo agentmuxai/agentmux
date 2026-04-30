@@ -2,6 +2,7 @@ mod backend;
 mod config;
 mod event_log;
 mod persist;
+mod persist_subscriber;
 mod reducer;
 mod server;
 mod srv_ipc;
@@ -562,10 +563,24 @@ async fn main() {
                     // `update` and live only in this in-memory state
                     // until E.2c lands the persist subscriber.
                     persist::bootstrap_state_from_wstore(&srv_state, &wstore_for_persist).await;
-                    // Phase E.2 — no persist subscriber yet. RPC
-                    // continues writing to SQLite via wcore; pipe
-                    // commands only update reducer state. Persist
-                    // subscriber lands in E.2c with RPC migration.
+                    // Phase E.2c.1 — persist subscriber. Plumbing only:
+                    // the subscriber consumes Workspace/Tab/Block
+                    // events from the broadcast bus and mirrors them
+                    // back to SQLite via wcore. In E.2c.1 there are
+                    // no in-process producers (RPC still writes wcore
+                    // directly; saga coordinator empty), so this task
+                    // is dead-code in production. It exists so E.5
+                    // sagas + E.2c.2 RPC migration have a target to
+                    // write against. Lagged-bus recovery (full-resync
+                    // from reducer state) lands in E.2c.2 alongside
+                    // workspace RPC migration where resync is
+                    // non-destructive.
+                    let subscriber_rx = events_tx.subscribe();
+                    let subscriber_wstore = std::sync::Arc::clone(&wstore_for_persist);
+                    persist_subscriber::spawn_persist_subscriber(
+                        subscriber_rx,
+                        subscriber_wstore,
+                    );
 
                     let srv_ctx = srv_ipc::ServerCtx {
                         srv_pid: std::process::id(),
