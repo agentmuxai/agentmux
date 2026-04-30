@@ -347,6 +347,45 @@ pub enum Command {
         block_id: String,
         meta_patch: serde_json::Value,
     },
+    /// Phase E.5.5 — move a tab from one workspace to another.
+    /// Reducer:
+    /// * Removes `tab_id` from `src_workspace_id.tab_ids`.
+    /// * Updates `tab.workspace_id = dst_workspace_id`.
+    /// * Inserts `tab_id` at `dst_index` in `dst_workspace_id.tab_ids`,
+    ///   clamping to the dst list length.
+    /// * If `tab_id` was the source workspace's `active_tab_id`, the
+    ///   source's active reverts to its first remaining tab (or
+    ///   `None` if the source becomes empty).
+    /// Errors if any of: source workspace, dest workspace, or tab is
+    /// missing; if `tab.workspace_id != src_workspace_id`; or if
+    /// the tab is the source workspace's last tab AND no caller has
+    /// arranged a fallback (callers like tear-off should reject the
+    /// move at the saga layer if removing the tab would empty the
+    /// source — preserving the "workspaces have at least one tab"
+    /// invariant most UI paths assume). Used by the TearOffTab,
+    /// MoveTabToWorkspace, and RestoreTornOffTab sagas.
+    MoveTab {
+        tab_id: String,
+        src_workspace_id: String,
+        dst_workspace_id: String,
+        dst_index: u32,
+    },
+    /// Phase E.5.5 — move a block from one tab to another (or to a
+    /// different position in the same tab).
+    /// Reducer:
+    /// * Removes `block_id` from `src_tab_id.block_ids`.
+    /// * Updates `block.tab_id = dst_tab_id`.
+    /// * Inserts `block_id` at `dst_index` in `dst_tab_id.block_ids`,
+    ///   clamping to the dst list length.
+    /// Errors if source tab, dest tab, or block is missing, or if
+    /// `block.tab_id != src_tab_id`. Used by TearOffBlock and the
+    /// MoveBlockToTab saga.
+    MoveBlock {
+        block_id: String,
+        src_tab_id: String,
+        dst_tab_id: String,
+        dst_index: u32,
+    },
     /// Phase E.3 — create a block inside an existing tab. Reducer
     /// validates parent tab exists, assigns the `block_id` (UUID),
     /// appends to the tab's `block_ids`, emits `Event::BlockCreated`.
@@ -841,6 +880,35 @@ pub enum Event {
     BlockMetaUpdated {
         block_id: String,
         meta_patch: serde_json::Value,
+        version: u64,
+    },
+    /// Phase E.5.5 — a tab was moved from one workspace to another.
+    /// Subscribers should rewrite both workspaces' `tabids` and the
+    /// tab's `parentoref`/`workspaceid` to match the reducer's view.
+    /// `dst_index` reflects the position in `dst_workspace_id.tab_ids`
+    /// AFTER insertion (already clamped by the reducer).
+    /// Carries enough information to re-derive the new state without
+    /// reading the reducer (subscribers replay events post-Lagged).
+    TabMoved {
+        tab_id: String,
+        src_workspace_id: String,
+        dst_workspace_id: String,
+        dst_index: u32,
+        /// The source workspace's new `active_tab_id` after the move,
+        /// or `None` if the source has no remaining tabs. Subscribers
+        /// rewrite the source's `activetabid` to match.
+        new_src_active_tab_id: Option<String>,
+        version: u64,
+    },
+    /// Phase E.5.5 — a block was moved from one tab to another (or
+    /// repositioned within the same tab). Subscribers update both
+    /// tabs' `blockids` and the block's `parentoref`. `dst_index`
+    /// reflects post-insertion position.
+    BlockMoved {
+        block_id: String,
+        src_tab_id: String,
+        dst_tab_id: String,
+        dst_index: u32,
         version: u64,
     },
     /// Phase E.3 — block was created inside a tab.

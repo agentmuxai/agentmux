@@ -362,6 +362,25 @@ pub fn update(state: &mut State, cmd: Command, ctx: &Ctx) -> Vec<Event> {
                 version: v,
             }]
         }
+        // Phase E.5.5 — saga-driven move commands are srv-pipe.
+        Command::MoveTab { .. } => {
+            let v = state.bump_version();
+            vec![Event::Error {
+                code: agentmux_common::ipc::ErrorCode::InvalidCommand,
+                message: "MoveTab is a srv-pipe command; sent to launcher pipe by mistake".into(),
+                fatal: false,
+                version: v,
+            }]
+        }
+        Command::MoveBlock { .. } => {
+            let v = state.bump_version();
+            vec![Event::Error {
+                code: agentmux_common::ipc::ErrorCode::InvalidCommand,
+                message: "MoveBlock is a srv-pipe command; sent to launcher pipe by mistake".into(),
+                fatal: false,
+                version: v,
+            }]
+        }
         // Phase E.1b — `GetSrvSnapshot` is a srv-pipe command. If a
         // registered client misroutes it to the launcher pipe, return
         // an explicit error so the client knows the dispatch was
