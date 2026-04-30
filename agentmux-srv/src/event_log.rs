@@ -1,36 +1,36 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// Phase D.2 — event log: in-memory ring buffer of recent reducer
-// events, used by D.3's replay protocol; plus an optional disk
-// persistence stream at `<data-dir>/launcher-events.log` for
-// crash forensics.
+// Phase E.1b — srv-side event log. Mirror of agentmux-launcher's
+// event log, but for srv's reducer. Disk path is `<data-dir>/srv-events.log`
+// (vs launcher's `launcher-events.log`); the in-memory ring + replay
+// semantics are identical.
 //
 // Two roles, kept clean:
 //
 // 1. **In-memory ring** is the source of truth for replay during
-//    the launcher's lifetime. `GetEvents { since: u64 }` reads
-//    from it. Bounded by `MAX_RING_EVENTS` to stop unbounded
-//    memory growth in long sessions; oldest events evict first.
-//    A subscriber that fell behind further than the ring's
-//    coverage gets an `EventList` of whatever's still in the ring
-//    + a flag indicating they may have missed some — it's their
-//    job to recover by treating subsequent events as authoritative.
+//    srv's lifetime. `GetEvents { since: u64 }` reads from it.
+//    Bounded by `MAX_RING_EVENTS` to stop unbounded memory growth
+//    in long sessions; oldest events evict first. A subscriber
+//    that fell behind further than the ring's coverage gets an
+//    `EventList` of whatever's still in the ring + a flag
+//    indicating they may have missed some — it's their job to
+//    recover by treating subsequent events as authoritative.
 //
 // 2. **Disk file** is purely forensic. Append-only JSON-lines.
-//    Survives launcher crash so an operator can post-mortem
-//    "what was the launcher doing right before it died."
-//    Fire-and-forget: write failures log a warning but never
-//    block the in-memory path. Rotated when it exceeds
-//    `MAX_DISK_BYTES` (renames current to `.old`, starts fresh).
+//    Survives srv crash so an operator can post-mortem
+//    "what was srv doing right before it died." Fire-and-forget:
+//    write failures log a warning but never block the in-memory
+//    path. Rotated when it exceeds `MAX_DISK_BYTES` (renames
+//    current to `.old`, starts fresh).
 //
 // Why both: in-memory satisfies D.3's resync needs at zero I/O
 // cost in the happy path. Disk satisfies the "what happened
 // before the crash" debugging story without complicating the
-// replay reader (which would otherwise need fallback-to-disk
-// logic when the ring's coverage doesn't reach back far enough).
+// replay reader.
 //
-// Phase D.3 adds the wire protocol that consumes this module.
+// Phase E.7 cleanup: lift the shared parts into agentmux-common
+// and unify launcher + srv event logs. (reagent P2 #610.)
 
 use std::collections::VecDeque;
 use std::path::PathBuf;
