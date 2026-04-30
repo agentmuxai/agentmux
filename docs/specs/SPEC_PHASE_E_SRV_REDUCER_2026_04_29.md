@@ -429,8 +429,8 @@ Per the multi-reducer-status doc decision: Phase E + F stay multi-PR (mega-PRs h
 
 | PR | Scope | Est LoC |
 |---|---|---|
-| **E.1a** | Saga coordinator infrastructure: `agentmux-launcher::saga` module, `Saga` trait, `SagaCoordinator` task, `SagaStarted`/`SagaCompleted`/`SagaFailed` events, `saga_id` field on `Command` + `Event`. **No actual sagas yet — just the framework.** Plus durable event-log hardening (fsync per append, persistence HWM tracking) and the two codex P2 carryovers from PR #608 (identity-patch ordering + replay_truncated overflow). | ~500 |
-| **E.1b** | New `agentmux-srv::reducer` skeleton: types (`State`, `Cmd`, `Event`), `update` function with arms for `Register` / `Goodbye` / `GetSrvSnapshot` / `GetEvents`. Property tests. New srv pipe + broadcast bus + event log (mirrors launcher's). Host bridge subscribes to srv pipe. Renderer-side dispatcher receives events from both pipes. No domain commands yet — just plumbing. | ~600 |
+| **E.1a** | Saga coordinator infrastructure: `agentmux-launcher::saga` module, `Saga` trait, `SagaCoordinator` task, `SagaStarted`/`SagaCompleted`/`SagaFailed` events, `saga_id` field on `Command` + `Event`. **No actual sagas yet — just the framework.** Plus durable event-log hardening for the launcher (fsync per append) and the two codex P2 carryovers from PR #608 (identity-patch ordering + replay_truncated overflow). | ~500 |
+| **E.1b** | New `agentmux-srv::reducer` skeleton: types (`State`, `Cmd`, `Event`), `update` function with arms for `Register` / `Goodbye` / `GetSrvSnapshot` / `GetEvents`. Property tests. New srv pipe + broadcast bus + event log (mirrors launcher's, including persistence HWM tracking for §6.1's bootstrap-replay). Host bridge subscribes to srv pipe. Renderer-side dispatcher receives events from both pipes. No domain commands yet — just plumbing. | ~600 |
 | **E.2** | Workspace + Tab + ActiveTab arms. SQLite-bootstrap path **with replay-from-HWM (§6.1)**. Idempotent persist-subscriber (`upsert_*_if_version_higher`). RPC `dispatch_service` migrates these arms to go through the reducer (coexisting with bespoke WaveObjUpdate path). | ~800 |
 | **E.3** | Block lifecycle arms (`CreateBlock`, `DeleteBlock`, `UpdateBlockMeta`). Same pattern as E.2. | ~400 |
 | **E.4** | Layout state arms. Trickier: `LayoutState` has `pendingbackendactions` that hint at an existing async surface; reducer ingests it as commands. | ~500 |
@@ -621,10 +621,64 @@ Implication for Phase E: don't migrate BlockController state into the srv reduce
 
 ---
 
-## 14. What this spec does NOT do
+## 14. Phase G preview — pure event-sourced (drop SQLite)
+
+**Deferred. Optional. Only worth doing if Phase E validates the reducer pattern end-to-end and there's demonstrable value.**
+
+Phase E keeps SQLite as a projection (the persist-subscriber writes srv reducer events to it; bootstrap reads it). After Phase E ships, the natural follow-up question is: do we need SQLite at all?
+
+A pure event-sourced architecture would replace it with:
+
+- **Event log** as the only on-disk source of truth (already durable post-E.1a).
+- **Periodic snapshots** of reducer state written to disk, so startup time stays bounded.
+- **Bootstrap = "load latest snapshot + replay events since snapshot."** No SQLite involvement.
+
+### What Phase G would deliver
+
+| Step | Goal |
+|---|---|
+| G.1 | Snapshot writer task in srv: serializes `State` to disk every N events / M minutes; fsync; rotates oldest snapshots. |
+| G.2 | Bootstrap path switches from `wstore.list_*` + replay-from-HWM to `load_snapshot` + replay-since-snapshot. |
+| G.3 | One-time migration: first run after this lands reads the old SQLite DB, emits synthetic events to populate the log, then deletes the DB. |
+| G.4 | Retire `WaveStore` for the migrated object types (`Workspace`, `Tab`, `Block`, `LayoutState`, `Window`, `Client`). Other WaveStore consumers (subagent metadata, etc.) stay if they aren't reducer-state. |
+| G.5 | Log truncation policy: events older than the most recent snapshot can be safely deleted. Implement and tune. |
+
+### Why deferred (not Phase E)
+
+Phase E is already 8 PRs / ~4600 LoC. Adding "drop SQLite" doubles the scope and risk surface (snapshot consistency, log truncation correctness, migration). Risk-reward is poor: cleanliness benefit only materializes after the snapshot work, which is itself meaningful complexity.
+
+After Phase E lands and the reducer pattern is validated end-to-end, dropping SQLite becomes a focused PR sequence rather than a phase-level effort. Defer the decision.
+
+### What Phase G unlocks
+
+- **Single source of truth.** No SQLite ↔ reducer divergence failure modes.
+- **No persist-subscriber.** Whole subsystem deleted.
+- **Schema evolution via event versions** instead of SQLite migrations.
+- **Cleaner mental model** — events are universal currency across all reducers.
+
+### What Phase G does NOT change
+
+- **History data** (`history/`, `claude_adapter`) is already file-based, not in `WaveStore`. Unaffected.
+- **Identity accounts** (`agent-config`) have their own watcher. Unaffected.
+- **`BlockController`** is live-process state, not stored. Unaffected.
+- **`MessageBus`** is transient routing, not persisted. Unaffected.
+
+### Open questions for Phase G (parked)
+
+- Snapshot cadence policy (event-count, time-based, size-based, hybrid).
+- Snapshot file format (bincode? JSON-lines? CBOR?). Trade speed vs introspectability.
+- Multi-snapshot retention vs single rolling snapshot.
+- External tools that may read `wstore.db` today (need to inventory before retirement).
+
+**Bottom line:** Phase G is the right architecture if the reducer pattern works. Phase E is the validation that it works. Make the call after E ships, not before.
+
+---
+
+## 15. What this spec does NOT do
 
 - **Doesn't fully design Phase F.** §13 sketches enough to inform E's design; the full spec lands when E does.
-- **Doesn't change disk format.** SQLite tables stay as-is; persist-subscriber writes the same rows it would have written via direct `wstore.must_*` calls.
+- **Doesn't fully design Phase G.** §14 sketches the option; the full spec is conditional on Phase E success.
+- **Doesn't change disk format in Phase E.** SQLite tables stay as-is; persist-subscriber writes the same rows it would have written via direct `wstore.must_*` calls. Phase G changes this.
 - **Doesn't address Phase 7.** Cross-platform IPC (Unix domain sockets) is independent of the reducer-architecture work.
 - **Doesn't persist saga state across launcher restart.** In-flight sagas are abandoned on launcher crash. Renderer-side timeout safety net handles the renderer-visible consequence. Persistent sagas are Phase F or beyond.
 - **Doesn't migrate `BlockController` or `MessageBus` into the srv reducer.** Same scaffolding-vs-reducer discipline as host's `browsers`.
