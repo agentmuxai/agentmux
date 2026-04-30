@@ -168,7 +168,16 @@ async fn resync_workspaces(
 /// arm checks for the entity's current SQLite state before writing
 /// so duplicate events (from at-least-once delivery semantics) don't
 /// produce duplicate rows or wcore errors.
-fn apply_event_to_wstore(
+///
+/// Phase E.2c.2 — exposed at crate visibility so RPC handlers in
+/// `service.rs` can apply events synchronously after dispatching
+/// through the reducer. This closes the race where the async
+/// subscriber hadn't yet written SQLite by the time a follow-up
+/// RPC (e.g., `CreateTab` against a just-created workspace) tried
+/// to read it. Calling this from the RPC handler followed by the
+/// subscriber receiving the broadcast event is safe because the
+/// arms are idempotent — the subscriber's later apply is a no-op.
+pub(crate) fn apply_event_to_wstore(
     event: &Event,
     wstore: &WaveStore,
 ) -> Result<(), Box<dyn std::error::Error>> {
