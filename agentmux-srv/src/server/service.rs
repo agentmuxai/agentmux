@@ -380,14 +380,27 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
         }
 
         // ---- WorkspaceService ----
-        // Phase E.2c.2 — workspace lifecycle now flows through the
-        // srv reducer. Handlers dispatch the corresponding `Command`
-        // into the reducer (mutating `state.workspaces` and emitting
-        // events), publish those events on the broadcast bus
-        // (subscriber writes them back to SQLite asynchronously),
-        // and return synchronously by reading from the reducer's
-        // session-only state. wcore is no longer the authoritative
-        // path for workspace mutations.
+        // Phase E.2c.2 — workspace lifecycle dispatches through the
+        // srv reducer for event emission (sagas / renderer / persist
+        // subscriber consume them) AND synchronously applies the
+        // emitted events to SQLite via the subscriber's apply path.
+        // Synchronous SQLite writes are required during the migration
+        // window because tab/block RPC still hits wcore directly and
+        // expects workspaces to be present in SQLite by the time the
+        // RPC reply returns (e.g., a CreateTab call right after
+        // CreateWorkspace would 404 on the workspace lookup if we
+        // only relied on the async subscriber). The subscriber later
+        // receives the same event on the broadcast bus and re-applies
+        // idempotently — safe because each apply arm checks SQLite
+        // state before writing. (Both reagent + codex flagged this
+        // race as P1 #615.)
+        //
+        // Reads (`GetWorkspace` / `ListWorkspaces`) stay on wstore
+        // until the tab + block RPC layers also migrate (E.2c.3 +
+        // E.2c.4). The reducer's `WorkspaceRecord` doesn't track
+        // `pinnedtabids` and its `tabids` / `activetabid` go stale
+        // immediately after any wcore-direct tab op — reading from
+        // it before tabs are migrated returns wrong data.
         ("workspace", "CreateWorkspace") => {
             let name: String = service::get_arg(args, 0).unwrap_or_default();
             let events = dispatch_to_reducer(
@@ -395,28 +408,36 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
                 agentmux_common::ipc::Command::CreateWorkspace { name: name.clone() },
             )
             .await;
+            // Apply synchronously to wstore BEFORE returning — the
+            // subscriber's later apply is an idempotent no-op.
+            for ev in &events {
+                if let Err(e) = crate::persist_subscriber::apply_event_to_wstore(ev, store) {
+                    return WebReturnType::error(format!(
+                        "CreateWorkspace: SQLite write failed: {}",
+                        e
+                    ));
+                }
+            }
+            publish_events(state, &events);
             let workspace_id = events.iter().find_map(|e| match e {
                 agentmux_common::ipc::Event::WorkspaceCreated { workspace_id, .. } => {
                     Some(workspace_id.clone())
                 }
                 _ => None,
             });
-            publish_events(state, &events);
             match workspace_id {
-                Some(id) => {
-                    let ws = build_workspace_from_state(state, &id).await;
-                    match ws {
-                        Some(ws) => {
-                            WebReturnType::success(serde_json::to_value(&ws).unwrap_or_default())
-                        }
-                        None => WebReturnType::error(
-                            "CreateWorkspace: reducer state missing newly-created workspace".to_string(),
-                        ),
+                Some(id) => match wcore::get_workspace(store, &id) {
+                    Ok(ws) => {
+                        WebReturnType::success(serde_json::to_value(&ws).unwrap_or_default())
                     }
-                }
-                None => {
-                    WebReturnType::error("CreateWorkspace: reducer did not emit WorkspaceCreated".to_string())
-                }
+                    Err(e) => WebReturnType::error(format!(
+                        "CreateWorkspace: post-write read failed: {}",
+                        e
+                    )),
+                },
+                None => WebReturnType::error(
+                    "CreateWorkspace: reducer did not emit WorkspaceCreated".to_string(),
+                ),
             }
         }
         ("workspace", "GetWorkspace") => {
@@ -424,15 +445,13 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
                 Ok(v) => v,
                 Err(e) => return WebReturnType::error(e),
             };
-            // Read-through from reducer state. Falls back to wstore
-            // (which the subscriber may have raced to) only if the
-            // reducer doesn't know the id.
-            match build_workspace_from_state(state, &ws_id).await {
-                Some(ws) => WebReturnType::success(serde_json::to_value(&ws).unwrap_or_default()),
-                None => match wcore::get_workspace(store, &ws_id) {
-                    Ok(ws) => WebReturnType::success(serde_json::to_value(&ws).unwrap_or_default()),
-                    Err(e) => WebReturnType::error(e.to_string()),
-                },
+            // wstore-direct during the migration window (see
+            // ("workspace", ...) header comment above for the
+            // rationale). Reducer-state reads return on E.2c.3+ once
+            // tabs (and pinned tabs) live in the reducer.
+            match wcore::get_workspace(store, &ws_id) {
+                Ok(ws) => WebReturnType::success(serde_json::to_value(&ws).unwrap_or_default()),
+                Err(e) => WebReturnType::error(e.to_string()),
             }
         }
         ("workspace", "DeleteWorkspace") => {
@@ -447,12 +466,18 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
                 },
             )
             .await;
+            // Apply synchronously to wstore BEFORE returning so
+            // follow-up RPCs don't see the stale row. Subscriber's
+            // later apply is idempotent.
+            for ev in &events {
+                if let Err(e) = crate::persist_subscriber::apply_event_to_wstore(ev, store) {
+                    return WebReturnType::error(format!(
+                        "DeleteWorkspace: SQLite write failed: {}",
+                        e
+                    ));
+                }
+            }
             publish_events(state, &events);
-            // Reducer deletes are silent on missing — treat any
-            // dispatch as success at the RPC layer (matches prior
-            // wcore::delete_workspace which returned Ok(()) on
-            // success and an error on missing; we now only error
-            // if the reducer emitted an Error event).
             if events.iter().any(|e| matches!(e, agentmux_common::ipc::Event::Error { .. })) {
                 WebReturnType::error(format!("DeleteWorkspace failed: {}", ws_id))
             } else {
@@ -1170,6 +1195,15 @@ fn publish_events(state: &AppState, events: &[agentmux_common::ipc::Event]) {
 /// Build a `Workspace` (the persistent object shape) from the
 /// reducer's `WorkspaceRecord` for synchronous RPC responses.
 /// Returns `None` if the reducer doesn't know the id.
+///
+/// E.2c.2 status: NOT YET USED at call sites — the reducer's
+/// WorkspaceRecord doesn't carry `pinnedtabids`, and its
+/// `tabids`/`activetabid` go stale relative to wstore-direct tab
+/// operations. Reads stay on wstore (which the synchronous
+/// apply-after-dispatch keeps in sync). Once tab RPC migrates in
+/// E.2c.3 — making tabs live in the reducer — this helper becomes
+/// the read path for `GetWorkspace`. (reagent + codex P1 #615.)
+#[allow(dead_code)]
 async fn build_workspace_from_state(
     state: &AppState,
     workspace_id: &str,
