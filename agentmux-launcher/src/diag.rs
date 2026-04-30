@@ -290,6 +290,9 @@ fn event_kind_name(e: &Event) -> &'static str {
         Event::HostShouldQuit { .. } => "HostShouldQuit",
         Event::Snapshot { .. } => "Snapshot",
         Event::EventList { .. } => "EventList",
+        Event::SagaStarted { .. } => "SagaStarted",
+        Event::SagaCompleted { .. } => "SagaCompleted",
+        Event::SagaFailed { .. } => "SagaFailed",
         _ => "Other",
     }
 }
