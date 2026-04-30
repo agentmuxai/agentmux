@@ -99,18 +99,33 @@ async fn run_persist_subscriber(
     }
 }
 
-/// Snapshot `state.workspaces` and reconcile against SQLite.
-/// Workspace-scoped only — tab/block resync expands here as each
-/// entity's RPC layer migrates through the reducer.
+/// Snapshot `state.workspaces` and reconcile against SQLite —
+/// INSERT/UPDATE only, no deletes. Workspace-scoped (tab/block
+/// resync expands here as each entity's RPC layer migrates).
+///
+/// Why no delete-phase: during the migration window, workspaces
+/// can be created OUTSIDE the reducer (e.g., the still-wcore-direct
+/// `CreateWindow` flow calls `wcore::create_window_full` which
+/// creates a workspace under the hood). Those workspaces aren't in
+/// `state.workspaces`. If the subscriber lagged and we did a
+/// delete-not-in-snapshot pass, we'd cascade-delete legitimate
+/// workspaces — data loss triggered by bus pressure rather than a
+/// user action. Far better for a stale workspace deleted-via-reducer
+/// to linger on disk after a Lagged event than to lose a real one.
+/// (codex P1 #615.)
+///
+/// Stale-after-Lagged scenario: reducer fires WorkspaceDeleted, the
+/// subscriber drops it on Lagged, resync runs but only insert/updates.
+/// SQLite still has the deleted workspace's row. The next user-driven
+/// DeleteWorkspace (which falls through to `wcore::delete_workspace`
+/// for unknown-to-reducer rows) cleans it up. Acceptable behaviour
+/// during the migration; tightens once all RPC is reducer-driven.
 ///
 /// Strategy:
 ///   1. Lock state, snapshot the workspace map (ids + names),
 ///      release the lock.
 ///   2. For each workspace in the snapshot: insert if missing,
 ///      no-op if name matches, update if name differs.
-///   3. For each SQLite workspace not in the snapshot: delete
-///      via `wcore::delete_workspace` (cascades to tabs/blocks/
-///      layouts).
 async fn resync_workspaces(
     state: &Arc<Mutex<State>>,
     wstore: &WaveStore,
@@ -123,8 +138,6 @@ async fn resync_workspaces(
             .map(|w| (w.workspace_id.clone(), w.name.clone()))
             .collect()
     };
-    let snapshot_ids: std::collections::HashSet<String> =
-        snapshot.iter().map(|(id, _)| id.clone()).collect();
 
     for (workspace_id, name) in &snapshot {
         match wstore.get::<Workspace>(workspace_id)? {
@@ -142,22 +155,6 @@ async fn resync_workspaces(
                     ..Default::default()
                 };
                 wstore.insert(&mut ws)?;
-            }
-        }
-    }
-
-    // Drop SQLite workspaces the reducer no longer knows about.
-    let on_disk = wstore.get_all::<Workspace>()?;
-    for ws in on_disk {
-        if !snapshot_ids.contains(&ws.oid) {
-            // Cascades to tabs/blocks/layouts.
-            if let Err(e) = wcore::delete_workspace(wstore, &ws.oid) {
-                tracing::warn!(
-                    target: "srv-persist-subscriber",
-                    "[srv-persist-subscriber] resync: failed to delete workspace {}: {}",
-                    ws.oid,
-                    e
-                );
             }
         }
     }
