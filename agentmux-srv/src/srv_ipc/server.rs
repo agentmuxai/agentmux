@@ -373,8 +373,13 @@ async fn enforce_register_first(
     // Phase E.1b — connection-private error; sentinel version=0
     // (codex P2 #610).
     let v = 0;
+    // Phase E.1b — match launcher's `NotRegistered` error code for
+    // pre-Register violations (vs InvalidCommand which is for
+    // parse/shape problems). Clients dispatching on error code
+    // need consistent semantics across both pipes.
+    // (reagent + codex P2 #610.)
     Some(Event::Error {
-        code: ErrorCode::InvalidCommand,
+        code: ErrorCode::NotRegistered,
         message: msg,
         fatal,
         version: v,
