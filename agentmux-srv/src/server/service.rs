@@ -485,7 +485,15 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
             // untouched (no divergence). If wcore succeeds, the
             // reducer dispatch + bus publish keep the rest of the
             // system in sync. (codex P2 #615 — divergence-on-failure.)
-            let exists_in_wstore = wstore_workspace_exists(store, &ws_id);
+            let exists_in_wstore = match wstore_workspace_exists(store, &ws_id) {
+                Ok(v) => v,
+                Err(e) => {
+                    return WebReturnType::error(format!(
+                        "DeleteWorkspace: SQLite read failed: {}",
+                        e
+                    ))
+                }
+            };
             if exists_in_wstore {
                 if let Err(e) = wcore::delete_workspace(store, &ws_id) {
                     return WebReturnType::error(format!(
@@ -1237,11 +1245,18 @@ fn publish_events(state: &AppState, events: &[agentmux_common::ipc::Event]) {
 }
 
 /// Existence check used by `DeleteWorkspace` to decide whether to
-/// run the wcore delete path. `wstore.get` returns `Ok(None)` for
-/// missing rows; treat any error as "doesn't exist" so we don't
-/// double-fail when the caller would've gotten a clean 404.
-fn wstore_workspace_exists(store: &WaveStore, workspace_id: &str) -> bool {
-    matches!(store.get::<Workspace>(workspace_id), Ok(Some(_)))
+/// run the wcore delete path. Propagates `StoreError` so the caller
+/// can surface real I/O / corruption failures instead of
+/// misclassifying them as "not found" (codex P2 #615 carryover —
+/// the prior `bool` return collapsed `Err(_)` into `false`, which
+/// led to silent successes when SQLite was unhealthy: reducer would
+/// delete its own copy and report success while the disk row was
+/// never touched).
+fn wstore_workspace_exists(
+    store: &WaveStore,
+    workspace_id: &str,
+) -> Result<bool, crate::backend::storage::StoreError> {
+    Ok(store.get::<Workspace>(workspace_id)?.is_some())
 }
 
 // `build_workspace_from_state` removed in E.2c.2. The reducer's
