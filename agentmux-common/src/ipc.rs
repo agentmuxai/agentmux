@@ -898,6 +898,18 @@ pub enum Event {
         /// or `None` if the source has no remaining tabs. Subscribers
         /// rewrite the source's `activetabid` to match.
         new_src_active_tab_id: Option<String>,
+        /// The destination workspace's new `active_tab_id` after the
+        /// move. Wcore behavior (`move_tab_to_workspace`) was to
+        /// always set the moved tab as dst's active; the reducer
+        /// mirrors that. `None` means "do not change dst.active_tab_id"
+        /// — reserved for future flows where the moved tab shouldn't
+        /// steal focus. Codex P2 #621.
+        ///
+        /// `#[serde(default)]` for forward-compat with pre-PR3
+        /// `srv-events.log` entries (none in production yet, but the
+        /// pattern is established).
+        #[serde(default)]
+        new_dst_active_tab_id: Option<String>,
         version: u64,
     },
     /// Phase E.5.5 — a block was moved from one tab to another (or

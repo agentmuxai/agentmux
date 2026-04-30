@@ -1174,6 +1174,12 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
                 WebReturnType::success_empty()
             }
         }
+        // Phase E.5.5 — MoveTabToWorkspace migrated to dispatch
+        // Command::MoveTab through the reducer. Closes codex P1 #621
+        // (the saga's reducer-state pre-check rejected tear-off after
+        // a wcore-direct cross-window drag had left state.tabs stale)
+        // by routing all tab moves through the reducer so its view
+        // always matches SQLite.
         ("workspace", "MoveTabToWorkspace") => {
             let tab_id: String = match service::get_arg(args, 0) {
                 Ok(v) => v,
@@ -1187,31 +1193,77 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
                 Ok(v) => v,
                 Err(e) => return WebReturnType::error(e),
             };
-            let insert_index: Option<usize> = service::get_arg(args, 3).ok();
-            tracing::info!(tab_id = %tab_id, source_ws = %source_ws_id, dest_ws = %dest_ws_id, insert_index = ?insert_index, "[dnd:svc] MoveTabToWorkspace");
-            match wcore::move_tab_to_workspace(store, &tab_id, &source_ws_id, &dest_ws_id, insert_index) {
-                Ok(()) => {
-                    let mut updates = Vec::new();
-                    if let Ok(src_ws) = store.must_get::<Workspace>(&source_ws_id) {
-                        updates.push(WaveObjUpdate {
-                            updatetype: "update".into(),
-                            otype: OTYPE_WORKSPACE.to_string(),
-                            oid: source_ws_id.clone(),
-                            obj: Some(wave_obj_to_value(&src_ws)),
-                        });
-                    }
-                    if let Ok(dst_ws) = store.must_get::<Workspace>(&dest_ws_id) {
-                        updates.push(WaveObjUpdate {
-                            updatetype: "update".into(),
-                            otype: OTYPE_WORKSPACE.to_string(),
-                            oid: dest_ws_id.clone(),
-                            obj: Some(wave_obj_to_value(&dst_ws)),
-                        });
-                    }
-                    WebReturnType::success_with_updates(updates)
-                }
-                Err(e) => WebReturnType::error(e.to_string()),
+            let insert_index: Option<u32> = service::get_arg::<usize>(args, 3)
+                .ok()
+                .map(|v| v.try_into().unwrap_or(u32::MAX));
+            tracing::info!(tab_id = %tab_id, source_ws = %source_ws_id, dest_ws = %dest_ws_id, insert_index = ?insert_index, "[dnd:svc] MoveTabToWorkspace via reducer");
+            // Same-workspace short-circuit matches wcore behaviour.
+            // The reducer rejects same-workspace moves outright (use
+            // ReorderTab instead); for the RPC contract, treat it as
+            // a no-op success so existing callers don't see a
+            // behavioural regression.
+            if source_ws_id == dest_ws_id {
+                return WebReturnType::success_empty();
             }
+            // Last-tab guard mirrors wcore::move_tab_to_workspace —
+            // the reducer's MoveTab doesn't enforce this (intentionally,
+            // for sagas that legitimately drain a workspace to delete
+            // it). Keep the guard at the RPC layer where the policy
+            // belongs.
+            {
+                let s = state.srv_state.lock().await;
+                if let Some(src_ws) = s.workspaces.get(&source_ws_id) {
+                    if src_ws.tab_ids.len() <= 1 {
+                        return WebReturnType::error(
+                            "cannot move last tab out of workspace".to_string(),
+                        );
+                    }
+                }
+            }
+            let dst_index = insert_index.unwrap_or(u32::MAX);
+            let events = dispatch_to_reducer(
+                state,
+                agentmux_common::ipc::Command::MoveTab {
+                    tab_id: tab_id.clone(),
+                    src_workspace_id: source_ws_id.clone(),
+                    dst_workspace_id: dest_ws_id.clone(),
+                    dst_index,
+                },
+            )
+            .await;
+            if let Some(err_msg) = events.iter().find_map(|e| match e {
+                agentmux_common::ipc::Event::Error { message, .. } => Some(message.clone()),
+                _ => None,
+            }) {
+                return WebReturnType::error(err_msg);
+            }
+            for ev in &events {
+                if let Err(e) = crate::persist_subscriber::apply_event_to_wstore(ev, store) {
+                    return WebReturnType::error(format!(
+                        "MoveTabToWorkspace: SQLite write failed: {}",
+                        e
+                    ));
+                }
+            }
+            publish_events(state, &events);
+            let mut updates = Vec::new();
+            if let Ok(src_ws) = store.must_get::<Workspace>(&source_ws_id) {
+                updates.push(WaveObjUpdate {
+                    updatetype: "update".into(),
+                    otype: OTYPE_WORKSPACE.to_string(),
+                    oid: source_ws_id.clone(),
+                    obj: Some(wave_obj_to_value(&src_ws)),
+                });
+            }
+            if let Ok(dst_ws) = store.must_get::<Workspace>(&dest_ws_id) {
+                updates.push(WaveObjUpdate {
+                    updatetype: "update".into(),
+                    otype: OTYPE_WORKSPACE.to_string(),
+                    oid: dest_ws_id.clone(),
+                    obj: Some(wave_obj_to_value(&dst_ws)),
+                });
+            }
+            WebReturnType::success_with_updates(updates)
         }
         // Phase E.5.6 — RestoreTornOffTab migrated to saga (MoveTab
         // back + conditional DeleteWorkspaceCascade if source becomes

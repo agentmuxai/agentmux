@@ -813,11 +813,16 @@ fn handle_move_tab(
         src.active_tab_id.clone()
     };
 
-    // Insert into dst at clamped index.
+    // Insert into dst at clamped index. Set the moved tab as dst's
+    // new active tab — mirrors wcore::move_tab_to_workspace
+    // behaviour and addresses codex P2 #621 (dst.active_tab_id was
+    // previously left untouched, so a saga-driven tear-off could
+    // produce a destination workspace with no active tab selected).
     let final_dst_index: u32 = {
         let dst = state.workspaces.get_mut(&dst_workspace_id).expect("checked");
         let clamped = (dst_index as usize).min(dst.tab_ids.len());
         dst.tab_ids.insert(clamped, tab_id.clone());
+        dst.active_tab_id = Some(tab_id.clone());
         clamped as u32
     };
 
@@ -830,11 +835,12 @@ fn handle_move_tab(
 
     let v = state.bump_version();
     vec![Event::TabMoved {
-        tab_id,
+        tab_id: tab_id.clone(),
         src_workspace_id,
         dst_workspace_id,
         dst_index: final_dst_index,
         new_src_active_tab_id,
+        new_dst_active_tab_id: Some(tab_id),
         version: v,
     }]
 }

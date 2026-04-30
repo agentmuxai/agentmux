@@ -263,6 +263,7 @@ pub(crate) fn apply_event_to_wstore(
             dst_workspace_id,
             dst_index,
             new_src_active_tab_id,
+            new_dst_active_tab_id,
             ..
         } => apply_tab_moved(
             wstore,
@@ -271,6 +272,7 @@ pub(crate) fn apply_event_to_wstore(
             dst_workspace_id,
             *dst_index,
             new_src_active_tab_id.as_deref(),
+            new_dst_active_tab_id.as_deref(),
         ),
         Event::BlockMoved {
             block_id,
@@ -694,6 +696,7 @@ fn apply_tab_moved(
     dst_workspace_id: &str,
     dst_index: u32,
     new_src_active_tab_id: Option<&str>,
+    new_dst_active_tab_id: Option<&str>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Source workspace: remove the tab and update activetabid.
     if let Some(mut src_ws) = wstore.get::<Workspace>(src_workspace_id)? {
@@ -712,12 +715,23 @@ fn apply_tab_moved(
         }
     }
 
-    // Dest workspace: insert at clamped index. Skip if already there
-    // (idempotent on duplicate event delivery).
+    // Dest workspace: insert at clamped index + update active_tab_id
+    // if the event carries one (codex P2 #621). Skip insert if the
+    // tab is already present (idempotent on duplicate delivery).
     if let Some(mut dst_ws) = wstore.get::<Workspace>(dst_workspace_id)? {
+        let mut changed = false;
         if !dst_ws.tabids.iter().any(|id| id == tab_id) {
             let clamped = (dst_index as usize).min(dst_ws.tabids.len());
             dst_ws.tabids.insert(clamped, tab_id.to_string());
+            changed = true;
+        }
+        if let Some(new_active) = new_dst_active_tab_id {
+            if dst_ws.activetabid != new_active {
+                dst_ws.activetabid = new_active.to_string();
+                changed = true;
+            }
+        }
+        if changed {
             wstore.update(&mut dst_ws)?;
         }
     }
@@ -1316,7 +1330,8 @@ mod tests {
         let src = s.get::<Workspace>("src-ws").unwrap().unwrap();
         assert_eq!(src.tabids, vec!["tab-1".to_string()]);
 
-        // Move it.
+        // Move it. Set dst active to the moved tab (per reducer
+        // semantics + codex P2 #621).
         apply_event_to_wstore(
             &Event::TabMoved {
                 tab_id: "tab-1".into(),
@@ -1324,6 +1339,7 @@ mod tests {
                 dst_workspace_id: "dst-ws".into(),
                 dst_index: 0,
                 new_src_active_tab_id: None,
+                new_dst_active_tab_id: Some("tab-1".into()),
                 version: 3,
             },
             &s,
@@ -1334,6 +1350,7 @@ mod tests {
         assert!(src.tabids.is_empty());
         assert_eq!(src.activetabid, "");
         assert_eq!(dst.tabids, vec!["tab-1".to_string()]);
+        assert_eq!(dst.activetabid, "tab-1", "dst active should be the moved tab");
     }
 
     #[test]
@@ -1366,6 +1383,7 @@ mod tests {
             dst_workspace_id: "dst-ws".into(),
             dst_index: 0,
             new_src_active_tab_id: None,
+            new_dst_active_tab_id: Some("tab-1".into()),
             version: 3,
         };
         apply_event_to_wstore(&ev, &s).unwrap();
