@@ -287,6 +287,15 @@ pub enum Command {
     /// Session-only projection (no persist subscriber yet).
     CreateBlock {
         tab_id: String,
+        /// Phase E.2c.4 — block metadata (`view`, layout hints, etc.)
+        /// passed through to the persisted Block row. The reducer
+        /// itself doesn't track meta — it forwards it untouched into
+        /// `Event::BlockCreated` so the persist subscriber writes
+        /// the Block with the correct meta map. `#[serde(default)]`
+        /// for forward-compat with old log entries that pre-date the
+        /// meta field.
+        #[serde(default)]
+        meta: serde_json::Value,
     },
     /// Phase E.3 — delete a block from a tab. Idempotent silent no-op
     /// on missing tab or missing block.
@@ -707,6 +716,12 @@ pub enum Event {
     BlockCreated {
         tab_id: String,
         block_id: String,
+        /// Phase E.2c.4 — meta carried through from
+        /// `Command::CreateBlock`. The persist subscriber writes
+        /// the Block row with this meta map. `#[serde(default)]` for
+        /// forward-compat with pre-E.2c.4 log entries.
+        #[serde(default)]
+        meta: serde_json::Value,
         version: u64,
     },
     /// Phase E.3 — block was deleted from a tab.
