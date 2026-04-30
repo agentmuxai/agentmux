@@ -266,6 +266,8 @@ fn event_version(e: &Event) -> u64 {
         | Event::SagaCompleted { version, .. }
         | Event::SagaFailed { version, .. }
         | Event::SrvSnapshot { version, .. }
+        | Event::WorkspaceCreated { version, .. }
+        | Event::WorkspaceDeleted { version, .. }
         | Event::Error { version, .. } => *version,
     }
 }

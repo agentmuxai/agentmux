@@ -12,8 +12,9 @@
 //   * Per-connection fanout task: subscribe to the bus before reading
 //     commands so events emitted while the read loop awaits aren't lost.
 //
-// E.1b is plumbing only — the reducer's domain-command surface is
-// empty. E.2+ adds workspace/tab/block arms.
+// E.1b laid the plumbing; E.2 added workspace arms; tab/block/
+// layout arms arrive in E.2b through E.4. See
+// `agentmux-srv::reducer` for the current command surface.
 
 pub mod server;
 

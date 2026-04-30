@@ -1,6 +1,7 @@
 mod backend;
 mod config;
 mod event_log;
+mod persist;
 mod reducer;
 mod server;
 mod srv_ipc;
@@ -495,6 +496,14 @@ async fn main() {
     backend::process_tracker::registry::set_global(process_tracker.clone());
     backend::process_tracker::registry::spawn_poller(process_tracker.clone());
 
+    // Phase E.2 — keep an extra Arc<WaveStore> clone for the
+    // srv-pipe bootstrap path (loads workspaces from SQLite into
+    // the reducer's session-only state). Lives outside AppState
+    // because the IPC server is initialized further below. The
+    // persist subscriber that this clone will also feed lands in
+    // E.2c.
+    let wstore_for_persist = Arc::clone(&wstore);
+
     let state = AppState {
         auth_key: config.auth_key.clone(),
         version: version.clone(),
@@ -517,8 +526,14 @@ async fn main() {
 
     // Phase E.1b — srv pipe IPC server. Bound when launcher passes
     // `AGENTMUX_SRV_PIPE_PATH`; absent in `task dev` mode (no
-    // launcher in the loop). Reducer is currently plumbing-only;
-    // E.2+ adds workspace/tab/block command arms.
+    // launcher in the loop).
+    //
+    // Phase E.2 — bootstrap reducer state from SQLite at startup
+    // so the session-only projection starts populated. The persist
+    // subscriber that mirrors pipe-event effects back to SQLite is
+    // deferred to E.2c (alongside the RPC-through-reducer migration);
+    // until then, HTTP/WS RPC continues writing directly via wcore
+    // and pipe commands only mutate the reducer's session-only state.
     //
     // Bind happens BEFORE the AGENTMUXSRV-ESTART line so the
     // launcher knows the pipe is ready when host starts. Non-fatal
@@ -540,6 +555,18 @@ async fn main() {
 
                     let srv_state =
                         std::sync::Arc::new(tokio::sync::Mutex::new(state::State::default()));
+
+                    // Phase E.2 — bootstrap workspaces from SQLite
+                    // BEFORE the IPC server starts accepting commands.
+                    // Subsequent reducer transitions flow through
+                    // `update` and live only in this in-memory state
+                    // until E.2c lands the persist subscriber.
+                    persist::bootstrap_state_from_wstore(&srv_state, &wstore_for_persist).await;
+                    // Phase E.2 — no persist subscriber yet. RPC
+                    // continues writing to SQLite via wcore; pipe
+                    // commands only update reducer state. Persist
+                    // subscriber lands in E.2c with RPC migration.
+
                     let srv_ctx = srv_ipc::ServerCtx {
                         srv_pid: std::process::id(),
                         srv_version: version.clone(),

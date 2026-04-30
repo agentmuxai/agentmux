@@ -649,6 +649,17 @@ async fn enforce_register_first(
             "GetSrvSnapshot is a srv-pipe command; sent to launcher pipe by mistake".to_string(),
             false,
         ),
+        // Phase E.2 — srv-pipe commands sent to launcher pipe by
+        // mistake. Soft error — clients can recover by routing to
+        // the right pipe.
+        Command::CreateWorkspace { .. } => (
+            "CreateWorkspace is a srv-pipe command; sent to launcher pipe by mistake".to_string(),
+            false,
+        ),
+        Command::DeleteWorkspace { .. } => (
+            "DeleteWorkspace is a srv-pipe command; sent to launcher pipe by mistake".to_string(),
+            false,
+        ),
     };
     // Phase E.1b — connection-private error; sentinel version=0
     // (codex P2 #610). See parse-error path for rationale.

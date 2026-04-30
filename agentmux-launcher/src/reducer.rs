@@ -203,6 +203,26 @@ pub fn update(state: &mut State, cmd: Command, ctx: &Ctx) -> Vec<Event> {
         // to satisfy the exhaustive match; in practice it's
         // unreachable. Returning empty Vec is the safe no-op.
         Command::GetEvents { .. } => Vec::new(),
+        // Phase E.2 — srv-pipe domain commands routed to launcher
+        // pipe by mistake.
+        Command::CreateWorkspace { .. } => {
+            let v = state.bump_version();
+            vec![Event::Error {
+                code: agentmux_common::ipc::ErrorCode::InvalidCommand,
+                message: "CreateWorkspace is a srv-pipe command; sent to launcher pipe by mistake".into(),
+                fatal: false,
+                version: v,
+            }]
+        }
+        Command::DeleteWorkspace { .. } => {
+            let v = state.bump_version();
+            vec![Event::Error {
+                code: agentmux_common::ipc::ErrorCode::InvalidCommand,
+                message: "DeleteWorkspace is a srv-pipe command; sent to launcher pipe by mistake".into(),
+                fatal: false,
+                version: v,
+            }]
+        }
         // Phase E.1b — `GetSrvSnapshot` is a srv-pipe command. If a
         // registered client misroutes it to the launcher pipe, return
         // an explicit error so the client knows the dispatch was
@@ -862,6 +882,8 @@ mod tests {
             | Event::SagaCompleted { version, .. }
             | Event::SagaFailed { version, .. }
             | Event::SrvSnapshot { version, .. }
+            | Event::WorkspaceCreated { version, .. }
+            | Event::WorkspaceDeleted { version, .. }
             | Event::Error { version, .. } => *version,
         }
     }
