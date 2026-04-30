@@ -271,6 +271,8 @@ fn event_version(e: &Event) -> u64 {
         | Event::TabCreated { version, .. }
         | Event::TabDeleted { version, .. }
         | Event::ActiveTabChanged { version, .. }
+        | Event::BlockCreated { version, .. }
+        | Event::BlockDeleted { version, .. }
         | Event::Error { version, .. } => *version,
     }
 }
