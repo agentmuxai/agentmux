@@ -582,6 +582,14 @@ pub enum Event {
         /// canonical state. (id, name) pairs for compactness; full
         /// state available via per-event subscription. Empty before
         /// E.2 lands.
+        ///
+        /// `#[serde(default)]` so old `srv-events.log` entries
+        /// written by E.1b (which had no `workspaces` field) still
+        /// deserialize when later sub-phases add bootstrap-replay
+        /// from the on-disk log. Same forward-compat treatment will
+        /// apply to E.2b's `tabs`, E.3's `blocks`, etc.
+        /// (reagent P2 #611.)
+        #[serde(default)]
         workspaces: Vec<(String, String)>,
     },
     /// Phase E.2 — workspace was created. Carries the assigned
