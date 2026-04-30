@@ -639,6 +639,15 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
                 },
             )
             .await;
+            // reagent P1 #622: surface reducer rejection before
+            // applying / publishing. Every other primary dispatch in
+            // this PR follows this pattern; CloseWindow was missing it.
+            if let Some(err_msg) = close_events.iter().find_map(|e| match e {
+                agentmux_common::ipc::Event::Error { message, .. } => Some(message.clone()),
+                _ => None,
+            }) {
+                return WebReturnType::error(err_msg);
+            }
             for ev in &close_events {
                 if let Err(e) = crate::persist_subscriber::apply_event_to_wstore(ev, store) {
                     return WebReturnType::error(format!(
@@ -1285,6 +1294,17 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
             };
             let auto_close: bool = service::get_arg(args, 4).unwrap_or(true);
             tracing::info!(ws_id = %ws_id, block_id = %block_id, source_tab = %source_tab_id, dest_tab = %dest_tab_id, "[dnd:svc] MoveBlockToTab via reducer");
+            // codex P2 #622: same-tab requests were no-ops in the
+            // prior wcore handler. The reducer's MoveBlock treats
+            // same source = dest as an in-tab reorder; with
+            // `dst_index: u32::MAX` it would silently move the block
+            // to the end of the list. Short-circuit to preserve the
+            // prior contract — a `MoveBlockToTab` whose dest equals
+            // the source is a UI quirk (e.g. drop on origin tab),
+            // not an intentional reorder.
+            if source_tab_id == dest_tab_id {
+                return WebReturnType::success_empty();
+            }
             // Move the block via the reducer. dst_index 0 to mirror
             // wcore::move_block_to_tab which appended at end... wait,
             // wcore appends, so end-of-list. The reducer's MoveBlock

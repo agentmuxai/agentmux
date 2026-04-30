@@ -337,7 +337,7 @@ fn handle_delete_workspace(state: &mut State, workspace_id: String) -> Vec<Event
 /// NOT idempotent on retry (same UUID-assignment caveat as
 /// `handle_create_workspace`).
 fn handle_create_tab(state: &mut State, workspace_id: String, name: String) -> Vec<Event> {
-    if !state.workspaces.contains_key(&workspace_id) {
+    let Some(workspace_record) = state.workspaces.get(&workspace_id) else {
         let v = state.bump_version();
         return vec![Event::Error {
             code: ErrorCode::InvalidCommand,
@@ -345,14 +345,25 @@ fn handle_create_tab(state: &mut State, workspace_id: String, name: String) -> V
             fatal: false,
             version: v,
         }];
-    }
+    };
+    // codex P2 #622: auto-generate `tabN` when name is empty,
+    // matching `wcore::create_tab`'s default-naming behaviour. The
+    // counter uses the reducer's tab_ids length + 1 (matching the
+    // old SQLite-side count: tabids.len() + pinnedtabids.len() + 1
+    // — pinnedtabids stays at zero in production since pinning
+    // was removed in E.2c.3b, so reducer-only counting matches).
+    let resolved_name = if name.is_empty() {
+        format!("tab{}", workspace_record.tab_ids.len() + 1)
+    } else {
+        name
+    };
     let tab_id = uuid::Uuid::new_v4().to_string();
     state.tabs.insert(
         tab_id.clone(),
         TabRecord {
             tab_id: tab_id.clone(),
             workspace_id: workspace_id.clone(),
-            name: name.clone(),
+            name: resolved_name.clone(),
             block_ids: Vec::new(),
         },
     );
@@ -369,7 +380,7 @@ fn handle_create_tab(state: &mut State, workspace_id: String, name: String) -> V
     events.push(Event::TabCreated {
         workspace_id: workspace_id.clone(),
         tab_id: tab_id.clone(),
-        name,
+        name: resolved_name,
         version: v,
     });
     if activated {
@@ -1905,6 +1916,57 @@ mod tests {
         match &events[0] {
             Event::TabCreated { tab_id, .. } => tab_id.clone(),
             _ => panic!("expected TabCreated"),
+        }
+    }
+
+    /// codex P2 #622: empty name auto-generates `tabN`, mirroring
+    /// `wcore::create_tab`'s default-naming behaviour. Without this,
+    /// CreateWindow's "fresh workspace" path + TearOffBlock's new tab
+    /// would land with blank titles — a user-visible regression.
+    #[test]
+    fn create_tab_auto_generates_tabN_when_name_empty() {
+        let mut state = State::default();
+        let ws_id = create_workspace(&mut state, "w");
+        let events = update(
+            &mut state,
+            Command::CreateTab {
+                workspace_id: ws_id.clone(),
+                name: String::new(),
+            },
+            &ctx(2),
+        );
+        match &events[0] {
+            Event::TabCreated { name, tab_id, .. } => {
+                assert_eq!(name, "tab1", "first tab in fresh workspace");
+                assert_eq!(state.tabs[tab_id].name, "tab1");
+            }
+            other => panic!("expected TabCreated, got {:?}", other),
+        }
+        // Second empty-name CreateTab → "tab2".
+        let events = update(
+            &mut state,
+            Command::CreateTab {
+                workspace_id: ws_id.clone(),
+                name: String::new(),
+            },
+            &ctx(3),
+        );
+        match &events[0] {
+            Event::TabCreated { name, .. } => assert_eq!(name, "tab2"),
+            other => panic!("expected TabCreated, got {:?}", other),
+        }
+        // Explicit non-empty name passes through verbatim.
+        let events = update(
+            &mut state,
+            Command::CreateTab {
+                workspace_id: ws_id,
+                name: "my custom tab".into(),
+            },
+            &ctx(4),
+        );
+        match &events[0] {
+            Event::TabCreated { name, .. } => assert_eq!(name, "my custom tab"),
+            other => panic!("expected TabCreated, got {:?}", other),
         }
     }
 
