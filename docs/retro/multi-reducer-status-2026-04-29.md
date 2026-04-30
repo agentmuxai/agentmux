@@ -174,9 +174,20 @@ Filed as **issue #606** for future pickup. Cosmetic-only; not blocking any phase
 
 ## 5. What's next — Phase E / F
 
-### Phase E — srv reducer (~5–8 PRs)
+### Phase E — srv reducer + saga coordinator (~8 PRs)
 
-**First validation point for the multi-reducer pattern.** Up next.
+**First validation point for the multi-reducer pattern.** Now in progress.
+
+| Sub-phase | Scope | Status |
+|---|---|---|
+| **E.1a** (#609) | Saga coordinator framework: `Saga` trait, `SagaCoordinator` task, `SagaStarted/Completed/Failed` events. Plus durable event-log fsync + 2 codex P2 carryovers from #608 | ✅ |
+| **E.1b** | srv reducer skeleton + new srv pipe + broadcast bus + event log + persistence HWM tracking | next |
+| **E.2** | Workspace + Tab + ActiveTab arms; SQLite-bootstrap with replay-from-HWM; idempotent persist-subscriber | |
+| **E.3** | Block lifecycle arms | |
+| **E.4** | Layout state arms | |
+| **E.5** | Drag/tear-off sagas — first concrete consumers of E.1a's coordinator | |
+| **E.6** | Renderer: per-source version tracking + saga-buffer; bespoke WaveObjUpdate retired | |
+| **E.7 — exit** | Property tests + cross-reducer integration tests + `--diag srv` / `--diag sagas` | |
 
 `agentmux-srv` already has its own state (workspaces, tabs, blocks, layout, identity accounts). Promoting it to a Redux-style reducer is the first place we exercise the cross-reducer events + sagas pattern.
 
