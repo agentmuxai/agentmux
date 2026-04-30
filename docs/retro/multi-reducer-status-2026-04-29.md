@@ -184,8 +184,8 @@ Filed as **issue #606** for future pickup. Cosmetic-only; not blocking any phase
 | **E.1b** (#610) | srv reducer skeleton + new srv pipe + broadcast bus + event log. 4 review rounds: codex P1 EventList unicast + P1 reconnect-after-disconnect (synthetic Goodbye) + P2 ErrorCode alignment | ✅ |
 | **E.2** (#611) | Workspace lifecycle arms (CreateWorkspace / DeleteWorkspace) + SQLite bootstrap into reducer's session-only projection. Persist subscriber descoped after codex flagged systemic bus-lag / HWM issues — deferred to E.2c. 5 review rounds: codex P1 cascade-delete, codex P1 HWM-freeze-on-lag (resolved by dropping subscriber), 4 reagent P2 stale-doc rounds | ✅ |
 | **E.2b** (#612) | Tab + ActiveTab arms (CreateTab / DeleteTab / SetActiveTab) + DeleteWorkspace cascade. Bootstrap loads tabs alongside workspaces (via reverse-lookup against both `tabids` and `pinnedtabids`). 2 review rounds: codex P1 pinned-tab orphaning fixed in second push | ✅ |
-| **E.2c** | RPC migration through reducer + persist subscriber + host bridge + renderer dispatcher | |
-| **E.3** | Block lifecycle arms | |
+| **E.3** (#613) | Block lifecycle arms (CreateBlock / DeleteBlock) + two-level workspace→tabs→blocks cascade. Bootstrap loads blocks. Block content (view, meta, runtimeopts) deferred to follow-up. **Skipped ahead of E.2c** because E.2c needs design input on persist-subscriber bus-lag handling. 2 review rounds: reagent+codex both flagged the same orphan-tab block-cascade P1, fixed by reverse-lookup against state.tabs | ✅ |
+| **E.2c** (held) | RPC migration through reducer + persist subscriber + host bridge + renderer dispatcher. Held pending design decisions: persist-subscriber bus-lag/HWM correctness, RPC migration concurrency, host bridge subscription, renderer source-tagging | |
 | **E.4** | Layout state arms | |
 | **E.5** | Drag/tear-off sagas — first concrete consumers of E.1a's coordinator | |
 | **E.6** | Renderer: per-source version tracking + saga-buffer; bespoke WaveObjUpdate retired | |
