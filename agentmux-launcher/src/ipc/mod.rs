@@ -35,3 +35,11 @@ pub use server::run_ipc_server;
 pub fn pipe_name(data_dir_hash16: &str) -> String {
     format!("\\\\.\\pipe\\agentmux-{}\\command", data_dir_hash16)
 }
+
+/// Phase E.1b — srv-side pipe path. Same data-dir hash as the
+/// launcher pipe (multi-instance scoping is identical), different
+/// leaf name. Both pipes coexist; subscribers connect to whichever
+/// reducer they need.
+pub fn srv_pipe_name(data_dir_hash16: &str) -> String {
+    format!("\\\\.\\pipe\\agentmux-{}\\srv-command", data_dir_hash16)
+}

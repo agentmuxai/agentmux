@@ -575,6 +575,13 @@ async fn enforce_register_first(
         // Phase D.3 — GetEvents before Register: same non-fatal
         // semantics as GetSnapshot.
         Command::GetEvents { .. } => ("GetEvents before Register".to_string(), false),
+        // Phase E.1b — GetSrvSnapshot is a srv-pipe command; if a
+        // client sends it to the launcher pipe by mistake, soft
+        // error: not the launcher's command.
+        Command::GetSrvSnapshot => (
+            "GetSrvSnapshot is a srv-pipe command; sent to launcher pipe by mistake".to_string(),
+            false,
+        ),
     };
     let mut state = ctx.state.lock().await;
     let v = state.bump_version();
