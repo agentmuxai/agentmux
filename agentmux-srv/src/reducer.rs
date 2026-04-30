@@ -268,6 +268,14 @@ fn handle_delete_workspace(state: &mut State, workspace_id: String) -> Vec<Event
             }
         }
     }
+    // Phase E.5 — also drop window mappings that point at the
+    // deleted workspace. Without this, `state.windows` keeps
+    // dangling refs and saga steps that inspect window→workspace
+    // membership make decisions from invalid state.
+    // (codex P1 #619.)
+    state
+        .windows
+        .retain(|_, record| record.workspace_id != workspace_id);
     let v = state.bump_version();
     vec![Event::WorkspaceDeleted {
         workspace_id,
@@ -1697,6 +1705,37 @@ mod tests {
             &ctx(3),
         );
         assert!(events.is_empty());
+    }
+
+    #[test]
+    fn delete_workspace_drops_pointing_windows() {
+        let mut state = State::default();
+        let ws_a = create_workspace(&mut state, "a");
+        let ws_b = create_workspace(&mut state, "b");
+        let _ = update(
+            &mut state,
+            Command::CreateWindow {
+                window_id: "win-a".into(),
+                workspace_id: ws_a.clone(),
+            },
+            &ctx(2),
+        );
+        let _ = update(
+            &mut state,
+            Command::CreateWindow {
+                window_id: "win-b".into(),
+                workspace_id: ws_b.clone(),
+            },
+            &ctx(3),
+        );
+        // Delete workspace A; only win-a should be dropped, win-b survives.
+        let _ = update(
+            &mut state,
+            Command::DeleteWorkspace { workspace_id: ws_a },
+            &ctx(4),
+        );
+        assert!(!state.windows.contains_key("win-a"));
+        assert_eq!(state.windows["win-b"].workspace_id, ws_b);
     }
 
     #[test]
