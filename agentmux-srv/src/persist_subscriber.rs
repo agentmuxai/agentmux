@@ -342,19 +342,33 @@ fn apply_tab_reordered(
     let Some(mut ws) = wstore.get::<Workspace>(workspace_id)? else {
         return Ok(());
     };
-    let Some(current_pos) = ws.tabids.iter().position(|t| t == tab_id) else {
-        // Tab might have been a legacy pinned entry, or already
-        // gone — silent no-op (idempotent).
-        return Ok(());
-    };
-    let len = ws.tabids.len();
-    let target = (new_index as usize).min(len.saturating_sub(1));
-    if current_pos == target {
-        return Ok(());
+    // Pinning was removed from AgentMux but legacy SQLite databases
+    // can still have entries in `Workspace.pinnedtabids`; bootstrap
+    // surfaces those as regular tabs in the reducer's `tab_ids`. The
+    // reducer can therefore emit a TabReordered for a tab that on
+    // disk still lives in `pinnedtabids`. Search both lists so the
+    // reorder lands wherever the tab actually is. (codex P2 #617.)
+    let target_index = (new_index as usize);
+    if let Some(current_pos) = ws.tabids.iter().position(|t| t == tab_id) {
+        let len = ws.tabids.len();
+        let target = target_index.min(len.saturating_sub(1));
+        if current_pos == target {
+            return Ok(());
+        }
+        let id = ws.tabids.remove(current_pos);
+        ws.tabids.insert(target, id);
+        wstore.update(&mut ws)?;
+    } else if let Some(current_pos) = ws.pinnedtabids.iter().position(|t| t == tab_id) {
+        let len = ws.pinnedtabids.len();
+        let target = target_index.min(len.saturating_sub(1));
+        if current_pos == target {
+            return Ok(());
+        }
+        let id = ws.pinnedtabids.remove(current_pos);
+        ws.pinnedtabids.insert(target, id);
+        wstore.update(&mut ws)?;
     }
-    let id = ws.tabids.remove(current_pos);
-    ws.tabids.insert(target, id);
-    wstore.update(&mut ws)?;
+    // Tab not in either list — silent no-op (idempotent).
     Ok(())
 }
 
