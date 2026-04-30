@@ -86,6 +86,23 @@ pub struct BlockRecord {
     pub tab_id: String,
 }
 
+/// Phase E.5 — window-to-workspace mapping as held by the srv
+/// reducer's canonical state. Mirrors the persistent
+/// `Window.workspaceid` field. Used by sagas (TearOff/Restore/
+/// CreateWindow/CloseWindow) that need to coordinate the
+/// window↔workspace lifecycle atomically.
+///
+/// Note: this is NOT the same as the launcher's `state::Window` —
+/// the launcher tracks CEF window ownership (label, kind, hwnd).
+/// The srv `WindowRecord` is purely "which workspace does this
+/// window currently point at." Both are valid orthogonal projections
+/// of the same on-disk Window row.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WindowRecord {
+    pub window_id: String,
+    pub workspace_id: String,
+}
+
 #[derive(Debug)]
 pub struct State {
     pub lifecycle: LifecyclePhase,
@@ -110,6 +127,11 @@ pub struct State {
     /// `TabRecord.block_ids`. Bootstrap-loaded from SQLite at startup
     /// alongside workspaces and tabs.
     pub blocks: HashMap<String, BlockRecord>,
+    /// Phase E.5 — window→workspace mapping. Bootstrap-loaded from
+    /// SQLite Window rows. Mutated by the saga-driven CreateWindow/
+    /// CloseWindow/SwitchWorkspace commands; sagas use it to keep
+    /// window+workspace lifecycle coherent.
+    pub windows: HashMap<String, WindowRecord>,
     // `persistence_hwm` deferred to E.2c when the persist subscriber
     // lands and there's actually something to track.
 }
@@ -124,6 +146,7 @@ impl Default for State {
             workspaces: HashMap::new(),
             tabs: HashMap::new(),
             blocks: HashMap::new(),
+            windows: HashMap::new(),
         }
     }
 }
