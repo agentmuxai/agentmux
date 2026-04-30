@@ -181,7 +181,7 @@ Filed as **issue #606** for future pickup. Cosmetic-only; not blocking any phase
 | Sub-phase | Scope | Status |
 |---|---|---|
 | **E.1a** (#609) | Saga coordinator framework: `Saga` trait, `SagaCoordinator` task, `SagaStarted/Completed/Failed` events. Plus durable event-log fsync + 2 codex P2 carryovers from #608 | ✅ |
-| **E.1b** | srv reducer skeleton + new srv pipe + broadcast bus + event log + persistence HWM tracking | next |
+| **E.1b** (#610) | srv reducer skeleton + new srv pipe + broadcast bus + event log. 4 review rounds: codex P1 EventList unicast + P1 reconnect-after-disconnect (synthetic Goodbye) + P2 ErrorCode alignment | ✅ |
 | **E.2** | Workspace + Tab + ActiveTab arms; SQLite-bootstrap with replay-from-HWM; idempotent persist-subscriber | |
 | **E.3** | Block lifecycle arms | |
 | **E.4** | Layout state arms | |
