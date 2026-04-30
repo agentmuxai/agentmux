@@ -214,8 +214,11 @@ pub(crate) fn apply_event_to_wstore(
             ..
         } => apply_tab_reordered(wstore, workspace_id, tab_id, *new_index),
         Event::BlockCreated {
-            tab_id, block_id, ..
-        } => apply_block_created(wstore, tab_id, block_id),
+            tab_id,
+            block_id,
+            meta,
+            ..
+        } => apply_block_created(wstore, tab_id, block_id, meta),
         Event::BlockDeleted {
             tab_id, block_id, ..
         } => apply_block_deleted(wstore, tab_id, block_id),
@@ -376,11 +379,23 @@ fn apply_block_created(
     wstore: &WaveStore,
     tab_id: &str,
     block_id: &str,
+    meta: &serde_json::Value,
 ) -> Result<(), Box<dyn std::error::Error>> {
     if wstore.get::<Block>(block_id)?.is_none() {
+        // Phase E.2c.4 — write the meta map carried in the event
+        // (`view`, layout hints, etc.) so reducer-routed CreateBlock
+        // RPC produces blocks with valid view/meta in SQLite. Without
+        // this, the frontend sees a block with empty meta and renders
+        // a blank pane.
+        let meta_map: crate::backend::obj::MetaMapType = match meta {
+            serde_json::Value::Object(_) => serde_json::from_value(meta.clone())
+                .unwrap_or_default(),
+            _ => Default::default(),
+        };
         let mut block = Block {
             oid: block_id.to_string(),
             parentoref: format!("tab:{}", tab_id),
+            meta: meta_map,
             ..Default::default()
         };
         wstore.insert(&mut block)?;
@@ -693,11 +708,7 @@ mod tests {
         )
         .unwrap();
         apply_event_to_wstore(
-            &Event::BlockCreated {
-                tab_id: "tab-1".into(),
-                block_id: "block-1".into(),
-                version: 3,
-            },
+            &Event::BlockCreated { tab_id: "tab-1".into(), block_id: "block-1".into(), meta: serde_json::Value::Null, version: 3 },
             &s,
         )
         .unwrap();
@@ -730,11 +741,7 @@ mod tests {
         )
         .unwrap();
         apply_event_to_wstore(
-            &Event::BlockCreated {
-                tab_id: "tab-1".into(),
-                block_id: "block-1".into(),
-                version: 3,
-            },
+            &Event::BlockCreated { tab_id: "tab-1".into(), block_id: "block-1".into(), meta: serde_json::Value::Null, version: 3 },
             &s,
         )
         .unwrap();

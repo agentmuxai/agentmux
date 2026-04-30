@@ -31,6 +31,8 @@ mod events;
 mod ipc;
 mod launcher_event_bridge;
 mod launcher_ipc;
+mod srv_event_bridge;
+mod srv_ipc;
 mod memory_heartbeat;
 mod pane;
 mod sidecar;
@@ -232,6 +234,15 @@ fn main() {
     // Failure to connect is non-fatal in B.2 (host can still run);
     // B.5+ will tighten when the host depends on IPC for state.
     let _launcher_ipc = runtime.block_on(launcher_ipc::connect_to_launcher(app_state.clone()));
+
+    // Phase E.2c.5a — connect to the srv reducer's pipe. Forwards
+    // srv events (workspace / tab / block lifecycle) to every
+    // top-level renderer via the JS bridge. Renderer-side handler
+    // (`window.__agentmux_srv_event`) lands in E.2c.5b. Non-fatal
+    // if absent: `task dev` mode doesn't run the launcher and so
+    // doesn't set `AGENTMUX_SRV_PIPE_PATH` — host runs without the
+    // bridge, frontend uses the legacy waveobj:update path.
+    let _srv_ipc = runtime.block_on(srv_ipc::connect_to_srv(app_state.clone()));
 
     // Phase B.1: if launcher already spawned srv (the normal portable
     // / installed path post-PR-#570 + B.1), populate state from the
