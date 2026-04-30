@@ -1,6 +1,10 @@
 mod backend;
 mod config;
+mod event_log;
+mod reducer;
 mod server;
+mod srv_ipc;
+mod state;
 #[cfg(windows)]
 mod crash_monitor;
 
@@ -510,6 +514,61 @@ async fn main() {
         http_client: reqwest::Client::new(),
         process_tracker,
     };
+
+    // Phase E.1b — srv pipe IPC server. Bound when launcher passes
+    // `AGENTMUX_SRV_PIPE_PATH`; absent in `task dev` mode (no
+    // launcher in the loop). Reducer is currently plumbing-only;
+    // E.2+ adds workspace/tab/block command arms.
+    //
+    // Bind happens BEFORE the AGENTMUXSRV-ESTART line so the
+    // launcher knows the pipe is ready when host starts. Non-fatal
+    // if the bind fails — srv keeps running with HTTP/WS only.
+    #[cfg(target_os = "windows")]
+    if let Ok(srv_pipe_path) = std::env::var("AGENTMUX_SRV_PIPE_PATH") {
+        if !srv_pipe_path.is_empty() {
+            match srv_ipc::server::bind_first_pipe_instance(&srv_pipe_path) {
+                Ok(first_pipe) => {
+                    let (events_tx, _) = tokio::sync::broadcast::channel::<
+                        agentmux_common::ipc::Event,
+                    >(1024);
+                    let log_disk_path = base::get_wave_data_dir().join("srv-events.log");
+                    let event_log =
+                        std::sync::Arc::new(event_log::EventLog::new(Some(log_disk_path)));
+                    let disk_writer_rx = events_tx.subscribe();
+                    let log_for_writer = std::sync::Arc::clone(&event_log);
+                    tokio::spawn(event_log::run_disk_writer(log_for_writer, disk_writer_rx));
+
+                    let srv_state =
+                        std::sync::Arc::new(tokio::sync::Mutex::new(state::State::default()));
+                    let srv_ctx = srv_ipc::ServerCtx {
+                        srv_pid: std::process::id(),
+                        srv_version: version.clone(),
+                        state: srv_state,
+                        events_tx,
+                        event_log,
+                    };
+                    let _srv_ipc_handle = srv_ipc::run_srv_ipc_server(
+                        srv_pipe_path.clone(),
+                        first_pipe,
+                        srv_ctx,
+                    );
+                    tracing::info!(
+                        target: "srv-ipc",
+                        "[srv-ipc] bound + spawned on {}",
+                        srv_pipe_path
+                    );
+                }
+                Err(e) => {
+                    tracing::error!(
+                        target: "srv-ipc",
+                        "[srv-ipc] bind failed on {}: {} — srv runs without pipe IPC",
+                        srv_pipe_path,
+                        e
+                    );
+                }
+            }
+        }
+    }
 
     // 6. Emit AGENTMUXSRV-ESTART on stderr (exact format from cmd/server/main-server.go:617)
     eprintln!(

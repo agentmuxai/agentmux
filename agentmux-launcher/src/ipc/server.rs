@@ -256,6 +256,11 @@ async fn handle_connection(stream: NamedPipeServer, ctx: Arc<ServerCtx>) {
                     "[ipc] connection conn_id={} closed (kind={:?}, pid={:?})",
                     conn_id, registered_kind, registered_pid
                 ));
+                // Phase E.1b — synthetic Goodbye on ungraceful
+                // disconnect so the reducer marks the PID Exited;
+                // otherwise reconnect-from-same-PID hits
+                // AlreadyRegistered. (codex P1 #610.)
+                dispatch_synthetic_goodbye(&ctx, conn_id, registered_pid).await;
                 fanout_handle.abort();
                 return;
             }
@@ -264,6 +269,7 @@ async fn handle_connection(stream: NamedPipeServer, ctx: Arc<ServerCtx>) {
                     "[ipc] read error conn_id={}: {}",
                     conn_id, e
                 ));
+                dispatch_synthetic_goodbye(&ctx, conn_id, registered_pid).await;
                 fanout_handle.abort();
                 return;
             }
@@ -276,16 +282,20 @@ async fn handle_connection(stream: NamedPipeServer, ctx: Arc<ServerCtx>) {
         let cmd = match serde_json::from_str::<Command>(&line) {
             Ok(c) => c,
             Err(e) => {
-                let mut state = ctx.state.lock().await;
-                let v = state.bump_version();
-                drop(state);
+                // Phase E.1b — parse errors are connection-private
+                // (sent only to the offender, not broadcast, not
+                // appended to the event log). Don't bump the global
+                // event_version: other subscribers would see version
+                // gaps and treat them as missed events. Use 0 as a
+                // sentinel for "not part of the ordered stream."
+                // (codex P2 #610.)
                 let _ = send_event(
                     &writer,
                     Event::Error {
                         code: ErrorCode::InvalidCommand,
                         message: format!("parse failed: {}", e),
                         fatal: false,
-                        version: v,
+                        version: 0,
                     },
                 )
                 .await;
@@ -310,16 +320,16 @@ async fn handle_connection(stream: NamedPipeServer, ctx: Arc<ServerCtx>) {
         }
         if let Command::Register { .. } = &cmd {
             if registered_kind.is_some() {
-                let mut state = ctx.state.lock().await;
-                let v = state.bump_version();
-                drop(state);
+                // Phase E.1b — connection-private error; same
+                // version-sentinel rationale as parse-error path
+                // above. (codex P2 #610.)
                 let _ = send_event(
                     &writer,
                     Event::Error {
                         code: ErrorCode::AlreadyRegistered,
                         message: "Register sent twice on the same connection".into(),
                         fatal: false,
-                        version: v,
+                        version: 0,
                     },
                 )
                 .await;
@@ -340,13 +350,25 @@ async fn handle_connection(stream: NamedPipeServer, ctx: Arc<ServerCtx>) {
         // Phase D.3 — `GetEvents { since }` is handled here, not in
         // the reducer. The reducer is pure (no I/O); querying the
         // event log is a non-mutating read against the in-memory
-        // ring + disk fallback. We still bump `event_version` so
-        // the EventList reply's version is monotonically distinct
-        // from prior events — same convention as Snapshot.
+        // ring + disk fallback.
+        //
+        // Phase E.1b — the reply (`Event::EventList`) is sent
+        // DIRECTLY to the requesting connection, NOT broadcast on
+        // the shared bus. EventList is request/response, not a
+        // state transition; broadcasting it would force every
+        // subscriber to process foreign replay payloads
+        // (potentially treating them as their own catch-up data,
+        // duplicating state application). (codex P1 #610.)
         if let Command::GetEvents { since } = &cmd {
+            // Phase E.1b — read the current version WITHOUT bumping
+            // (codex P2 #610). EventList is connection-private; the
+            // version it carries is the "as-of" point for the
+            // requester's next resync, not a new state-transition
+            // marker. Bumping would create a global gap that other
+            // subscribers see as missed events.
             let v = {
-                let mut state = ctx.state.lock().await;
-                state.bump_version()
+                let state = ctx.state.lock().await;
+                state.event_version
             };
             let replay = ctx.event_log.events_since(*since);
             // Don't log truncation as an error — it's a valid
@@ -359,7 +381,14 @@ async fn handle_connection(stream: NamedPipeServer, ctx: Arc<ServerCtx>) {
                     conn_id, since
                 ));
             }
-            let _ = ctx.events_tx.send(Event::EventList { events: replay, version: v });
+            let _ = send_event(
+                &writer,
+                Event::EventList {
+                    events: replay,
+                    version: v,
+                },
+            )
+            .await;
             continue;
         }
 
@@ -476,6 +505,44 @@ async fn handle_connection(stream: NamedPipeServer, ctx: Arc<ServerCtx>) {
 static NEXT_CONN_ID: std::sync::atomic::AtomicU64 =
     std::sync::atomic::AtomicU64::new(1);
 
+/// Phase E.1b — synthetic Goodbye dispatch for ungraceful disconnects
+/// (EOF / read error before the client sent an explicit Goodbye).
+/// Without this, the reducer's process record stays Running and a
+/// reconnect from the same live PID hits AlreadyRegistered.
+/// (codex P1 #610.)
+#[cfg(target_os = "windows")]
+async fn dispatch_synthetic_goodbye(
+    ctx: &Arc<ServerCtx>,
+    conn_id: u64,
+    registered_pid: Option<u32>,
+) {
+    let Some(pid) = registered_pid else {
+        return;
+    };
+    let now_rfc3339 = chrono::Utc::now().to_rfc3339();
+    let now_ms = launcher_start_ms();
+    let events = {
+        let mut state = ctx.state.lock().await;
+        let rctx = reducer::Ctx {
+            now_rfc3339,
+            conn_id,
+            registered_pid: Some(pid),
+            now_ms,
+        };
+        reducer::update(&mut state, Command::Goodbye, &rctx)
+    };
+    for event in events {
+        let event = patch_launcher_identity(event, ctx);
+        if !matches!(
+            event,
+            Event::Snapshot { .. } | Event::EventList { .. } | Event::Error { .. }
+        ) {
+            ctx.event_log.append(event.clone());
+        }
+        let _ = ctx.events_tx.send(event);
+    }
+}
+
 /// Phase B.9.1 — milliseconds since the launcher's IPC server
 /// started (first call seeds the epoch). Used as the monotonic
 /// clock for WRR observability timestamps in `reducer::Ctx::now_ms`.
@@ -575,9 +642,17 @@ async fn enforce_register_first(
         // Phase D.3 — GetEvents before Register: same non-fatal
         // semantics as GetSnapshot.
         Command::GetEvents { .. } => ("GetEvents before Register".to_string(), false),
+        // Phase E.1b — GetSrvSnapshot is a srv-pipe command; if a
+        // client sends it to the launcher pipe by mistake, soft
+        // error: not the launcher's command.
+        Command::GetSrvSnapshot => (
+            "GetSrvSnapshot is a srv-pipe command; sent to launcher pipe by mistake".to_string(),
+            false,
+        ),
     };
-    let mut state = ctx.state.lock().await;
-    let v = state.bump_version();
+    // Phase E.1b — connection-private error; sentinel version=0
+    // (codex P2 #610). See parse-error path for rationale.
+    let v = 0;
     Some(Event::Error {
         code: ErrorCode::NotRegistered,
         message: msg,

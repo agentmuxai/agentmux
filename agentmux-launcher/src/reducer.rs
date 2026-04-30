@@ -203,6 +203,21 @@ pub fn update(state: &mut State, cmd: Command, ctx: &Ctx) -> Vec<Event> {
         // to satisfy the exhaustive match; in practice it's
         // unreachable. Returning empty Vec is the safe no-op.
         Command::GetEvents { .. } => Vec::new(),
+        // Phase E.1b — `GetSrvSnapshot` is a srv-pipe command. If a
+        // registered client misroutes it to the launcher pipe, return
+        // an explicit error so the client knows the dispatch was
+        // wrong (vs silently appearing successful with no reply).
+        // Pre-Register, `enforce_register_first` already returns a
+        // soft error. (codex P2 #610.)
+        Command::GetSrvSnapshot => {
+            let v = state.bump_version();
+            vec![Event::Error {
+                code: agentmux_common::ipc::ErrorCode::InvalidCommand,
+                message: "GetSrvSnapshot is a srv-pipe command; sent to launcher pipe by mistake".to_string(),
+                fatal: false,
+                version: v,
+            }]
+        }
     }
 }
 
@@ -846,6 +861,7 @@ mod tests {
             | Event::SagaStarted { version, .. }
             | Event::SagaCompleted { version, .. }
             | Event::SagaFailed { version, .. }
+            | Event::SrvSnapshot { version, .. }
             | Event::Error { version, .. } => *version,
         }
     }
