@@ -677,49 +677,52 @@ fn handle_reorder_tabs_bulk(
     workspace_id: String,
     tab_ids: Vec<String>,
 ) -> Vec<Event> {
-    // Validate using `&` borrow first so we can call `bump_version`
-    // (which needs `&mut state`) on error paths without borrow conflict.
-    let validation_error: Option<String> = {
-        let Some(workspace) = state.workspaces.get(&workspace_id) else {
-            let v = state.bump_version();
-            return vec![Event::Error {
-                code: ErrorCode::InvalidCommand,
-                message: format!("ReorderTabsBulk: workspace not found: {}", workspace_id),
-                fatal: false,
-                version: v,
-            }];
-        };
-        if workspace.tab_ids == tab_ids {
-            return Vec::new();
-        }
-        if workspace.tab_ids.len() != tab_ids.len() {
-            Some(format!(
-                "ReorderTabsBulk: new tab_ids has {} entries; workspace has {}",
-                tab_ids.len(),
-                workspace.tab_ids.len()
-            ))
-        } else {
-            let current_set: std::collections::HashSet<&String> =
-                workspace.tab_ids.iter().collect();
-            let new_set: std::collections::HashSet<&String> = tab_ids.iter().collect();
-            if current_set != new_set {
-                Some(
-                    "ReorderTabsBulk: new tab_ids must be a permutation of the workspace's current set"
-                        .to_string(),
-                )
-            } else {
-                None
-            }
-        }
-    };
-    if let Some(message) = validation_error {
+    // codex P1 #620 carryover: relax membership validation until tab
+    // moves are migrated through the reducer. `MoveTabToWorkspace`
+    // and `PromoteBlockToTab` (planned for PR 4) still write through
+    // wcore without dispatching reducer commands, so the reducer's
+    // view of `workspace.tab_ids` can be stale relative to SQLite.
+    // A subsequent `UpdateTabIds` (now routed through this command)
+    // must not refuse the canonical order just because the reducer
+    // hasn't seen the upstream move yet — that would be a
+    // user-visible regression vs. the prior wcore-direct path.
+    //
+    // Treat the caller's `tab_ids` as authoritative. The remaining
+    // checks are basic sanity: the workspace must exist in the
+    // reducer, and `tab_ids` must not contain duplicates (which would
+    // produce a corrupt persisted ordering with no way for the
+    // subscriber to recover). Length / set comparison against the
+    // reducer's stale view is dropped here; PR 4 reinstates strict
+    // validation once tab moves go through the reducer.
+    if !state.workspaces.contains_key(&workspace_id) {
         let v = state.bump_version();
         return vec![Event::Error {
             code: ErrorCode::InvalidCommand,
-            message,
+            message: format!("ReorderTabsBulk: workspace not found: {}", workspace_id),
             fatal: false,
             version: v,
         }];
+    }
+    {
+        let mut seen: std::collections::HashSet<&String> =
+            std::collections::HashSet::with_capacity(tab_ids.len());
+        for id in &tab_ids {
+            if !seen.insert(id) {
+                let v = state.bump_version();
+                return vec![Event::Error {
+                    code: ErrorCode::InvalidCommand,
+                    message: format!(
+                        "ReorderTabsBulk: tab_ids contains duplicate entry: {}",
+                        id
+                    ),
+                    fatal: false,
+                    version: v,
+                }];
+            }
+        }
+    }
+    if state.workspaces.get(&workspace_id).expect("checked").tab_ids == tab_ids {
+        return Vec::new();
     }
     state.workspaces.get_mut(&workspace_id).expect("checked").tab_ids = tab_ids.clone();
     let v = state.bump_version();
@@ -1560,6 +1563,84 @@ mod tests {
                 new_index: 0,
             },
             &ctx(2),
+        );
+        assert!(matches!(&events[0], Event::Error { .. }));
+    }
+
+    /// codex P1 #620 carryover: `ReorderTabsBulk` must accept a list
+    /// containing tab_ids the reducer hasn't seen yet (because they
+    /// arrived via wcore-direct paths like `MoveTabToWorkspace`).
+    /// Strict permutation validation against the reducer's stale view
+    /// would falsely reject the canonical SQLite ordering during the
+    /// migration window.
+    #[test]
+    fn reorder_tabs_bulk_accepts_unknown_ids_during_migration() {
+        let mut state = State::default();
+        let ws_id = create_workspace(&mut state, "w");
+        let known = create_tab(&mut state, &ws_id, "known");
+        // Simulate a wcore-direct move that landed a new tab in this
+        // workspace's SQLite list without going through the reducer.
+        // The reducer's `workspace.tab_ids` is now stale: it knows
+        // about `known` only, but SQLite has both `known` and
+        // `imported` (and the latter belongs to an entirely different
+        // workspace from the reducer's perspective).
+        let imported = "imported-tab".to_string();
+        let events = update(
+            &mut state,
+            Command::ReorderTabsBulk {
+                workspace_id: ws_id.clone(),
+                tab_ids: vec![imported.clone(), known.clone()],
+            },
+            &ctx(99),
+        );
+        assert!(
+            matches!(&events[0], Event::TabsReorderedBulk { .. }),
+            "expected TabsReorderedBulk, got {:?}",
+            events.first()
+        );
+        let ws = state.workspaces.get(&ws_id).expect("ws still present");
+        assert_eq!(ws.tab_ids, vec![imported, known]);
+    }
+
+    /// codex P1 #620 carryover: a duplicate tab_id in the new list
+    /// is still rejected — that would corrupt the persisted ordering
+    /// in a way the subscriber can't recover from.
+    #[test]
+    fn reorder_tabs_bulk_rejects_duplicates() {
+        let mut state = State::default();
+        let ws_id = create_workspace(&mut state, "w");
+        let t1 = create_tab(&mut state, &ws_id, "t1");
+        let events = update(
+            &mut state,
+            Command::ReorderTabsBulk {
+                workspace_id: ws_id,
+                tab_ids: vec![t1.clone(), t1.clone()],
+            },
+            &ctx(2),
+        );
+        match &events[0] {
+            Event::Error { code, message, .. } => {
+                assert_eq!(*code, ErrorCode::InvalidCommand);
+                assert!(
+                    message.contains("duplicate"),
+                    "error should mention duplicate, got: {}",
+                    message
+                );
+            }
+            other => panic!("expected Error event, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn reorder_tabs_bulk_validates_workspace() {
+        let mut state = State::default();
+        let events = update(
+            &mut state,
+            Command::ReorderTabsBulk {
+                workspace_id: "no-such-ws".into(),
+                tab_ids: vec!["a".into()],
+            },
+            &ctx(1),
         );
         assert!(matches!(&events[0], Event::Error { .. }));
     }
