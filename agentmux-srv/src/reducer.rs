@@ -11,9 +11,12 @@
 // Arms by phase:
 //   * E.1b — Register / Goodbye / Ping / GetSrvSnapshot / GetEvents
 //   * E.2  — CreateWorkspace / DeleteWorkspace
-//   * E.2b — CreateTab / DeleteTab / SetActiveTab
+//   * E.2b — CreateTab / DeleteTab / SetActiveTab / ReorderTab
 //   * E.3  — CreateBlock / DeleteBlock
-//   * E.4+ — Layout commands (not yet present)
+//   * E.5  — CreateWindow / CloseWindowInternal / SwitchWorkspace
+//             (window↔workspace mapping for sagas)
+//   * E.5+ — saga-driven multi-step commands (TearOff/Restore/Move)
+//             land via the saga coordinator dispatching atomic arms
 //
 // `Command::GetEvents` is intercepted by the IPC server before
 // reaching the reducer (server queries the event log; reducer
@@ -22,7 +25,9 @@
 
 use agentmux_common::ipc::{ClientKind, Command, ErrorCode, Event, LifecyclePhase};
 
-use crate::state::{BlockRecord, ProcessRecord, ProcessState, State, TabRecord, WorkspaceRecord};
+use crate::state::{
+    BlockRecord, ProcessRecord, ProcessState, State, TabRecord, WindowRecord, WorkspaceRecord,
+};
 
 /// Per-dispatch context. Currently just an RFC3339 timestamp + the
 /// originating connection's `conn_id` for log correlation.
@@ -57,6 +62,17 @@ pub fn update(state: &mut State, cmd: Command, ctx: &Ctx) -> Vec<Event> {
         } => handle_reorder_tab(state, workspace_id, tab_id, new_index),
         Command::CreateBlock { tab_id, meta } => handle_create_block(state, tab_id, meta),
         Command::DeleteBlock { tab_id, block_id } => handle_delete_block(state, tab_id, block_id),
+        Command::CreateWindow {
+            window_id,
+            workspace_id,
+        } => handle_create_window(state, window_id, workspace_id),
+        Command::CloseWindowInternal { window_id } => {
+            handle_close_window_internal(state, window_id)
+        }
+        Command::SwitchWorkspace {
+            window_id,
+            workspace_id,
+        } => handle_switch_workspace(state, window_id, workspace_id),
         // Anything else is a non-fatal protocol error. Future
         // phases (E.2b tabs, E.3 blocks, E.4 layouts) extend this
         // match by adding new arms above.
@@ -519,6 +535,99 @@ fn handle_delete_block(state: &mut State, tab_id: String, block_id: String) -> V
     }]
 }
 
+/// Phase E.5 — record a new window→workspace mapping. Validates
+/// the parent workspace exists; otherwise emits `Event::Error`
+/// (non-fatal). Idempotent on duplicate `window_id`: re-issuing
+/// for the same window updates the workspace pointer if it
+/// changed, or no-ops if identical.
+fn handle_create_window(
+    state: &mut State,
+    window_id: String,
+    workspace_id: String,
+) -> Vec<Event> {
+    if !state.workspaces.contains_key(&workspace_id) {
+        let v = state.bump_version();
+        return vec![Event::Error {
+            code: ErrorCode::InvalidCommand,
+            message: format!("CreateWindow: workspace not found: {}", workspace_id),
+            fatal: false,
+            version: v,
+        }];
+    }
+    if let Some(existing) = state.windows.get(&window_id) {
+        if existing.workspace_id == workspace_id {
+            return Vec::new();
+        }
+    }
+    state.windows.insert(
+        window_id.clone(),
+        WindowRecord {
+            window_id: window_id.clone(),
+            workspace_id: workspace_id.clone(),
+        },
+    );
+    let v = state.bump_version();
+    vec![Event::SrvWindowOpened {
+        window_id,
+        workspace_id,
+        version: v,
+    }]
+}
+
+/// Phase E.5 — remove a window's workspace mapping. Idempotent
+/// silent no-op on missing.
+fn handle_close_window_internal(state: &mut State, window_id: String) -> Vec<Event> {
+    if state.windows.remove(&window_id).is_none() {
+        return Vec::new();
+    }
+    let v = state.bump_version();
+    vec![Event::SrvWindowClosed {
+        window_id,
+        version: v,
+    }]
+}
+
+/// Phase E.5 — change which workspace a window points at. Errors
+/// (non-fatal) if the window or destination workspace is unknown.
+/// No-op if the window is already pointing at the destination.
+fn handle_switch_workspace(
+    state: &mut State,
+    window_id: String,
+    workspace_id: String,
+) -> Vec<Event> {
+    if !state.workspaces.contains_key(&workspace_id) {
+        let v = state.bump_version();
+        return vec![Event::Error {
+            code: ErrorCode::InvalidCommand,
+            message: format!(
+                "SwitchWorkspace: destination workspace not found: {}",
+                workspace_id
+            ),
+            fatal: false,
+            version: v,
+        }];
+    }
+    let Some(window) = state.windows.get_mut(&window_id) else {
+        let v = state.bump_version();
+        return vec![Event::Error {
+            code: ErrorCode::InvalidCommand,
+            message: format!("SwitchWorkspace: window not found: {}", window_id),
+            fatal: false,
+            version: v,
+        }];
+    };
+    if window.workspace_id == workspace_id {
+        return Vec::new();
+    }
+    window.workspace_id = workspace_id.clone();
+    let v = state.bump_version();
+    vec![Event::SrvWindowWorkspaceChanged {
+        window_id,
+        workspace_id,
+        version: v,
+    }]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -572,6 +681,9 @@ mod tests {
             | Event::TabReordered { version, .. }
             | Event::BlockCreated { version, .. }
             | Event::BlockDeleted { version, .. }
+            | Event::SrvWindowOpened { version, .. }
+            | Event::SrvWindowClosed { version, .. }
+            | Event::SrvWindowWorkspaceChanged { version, .. }
             | Event::Error { version, .. } => *version,
         }
     }
@@ -1404,6 +1516,187 @@ mod tests {
             panic!("expected SrvSnapshot");
         };
         assert_eq!(blocks.len(), 1);
+    }
+
+    // ---- E.5: window↔workspace mapping arms ----
+
+    #[test]
+    fn create_window_validates_workspace_exists() {
+        let mut state = State::default();
+        let events = update(
+            &mut state,
+            Command::CreateWindow {
+                window_id: "win-1".into(),
+                workspace_id: "no-such-ws".into(),
+            },
+            &ctx(1),
+        );
+        assert!(matches!(&events[0], Event::Error { .. }));
+        assert!(state.windows.is_empty());
+    }
+
+    #[test]
+    fn create_window_inserts_record_and_emits_event() {
+        let mut state = State::default();
+        let ws_id = create_workspace(&mut state, "w");
+        let events = update(
+            &mut state,
+            Command::CreateWindow {
+                window_id: "win-1".into(),
+                workspace_id: ws_id.clone(),
+            },
+            &ctx(2),
+        );
+        assert!(matches!(
+            &events[0],
+            Event::SrvWindowOpened { window_id, workspace_id, .. }
+                if window_id == "win-1" && *workspace_id == ws_id
+        ));
+        assert_eq!(state.windows["win-1"].workspace_id, ws_id);
+    }
+
+    #[test]
+    fn create_window_idempotent_on_same_workspace() {
+        let mut state = State::default();
+        let ws_id = create_workspace(&mut state, "w");
+        let _ = update(
+            &mut state,
+            Command::CreateWindow {
+                window_id: "win-1".into(),
+                workspace_id: ws_id.clone(),
+            },
+            &ctx(2),
+        );
+        let events = update(
+            &mut state,
+            Command::CreateWindow {
+                window_id: "win-1".into(),
+                workspace_id: ws_id,
+            },
+            &ctx(3),
+        );
+        assert!(events.is_empty());
+    }
+
+    #[test]
+    fn close_window_internal_removes_record() {
+        let mut state = State::default();
+        let ws_id = create_workspace(&mut state, "w");
+        let _ = update(
+            &mut state,
+            Command::CreateWindow {
+                window_id: "win-1".into(),
+                workspace_id: ws_id,
+            },
+            &ctx(2),
+        );
+        let events = update(
+            &mut state,
+            Command::CloseWindowInternal {
+                window_id: "win-1".into(),
+            },
+            &ctx(3),
+        );
+        assert!(matches!(&events[0], Event::SrvWindowClosed { .. }));
+        assert!(state.windows.is_empty());
+    }
+
+    #[test]
+    fn close_window_internal_silent_on_missing() {
+        let mut state = State::default();
+        let events = update(
+            &mut state,
+            Command::CloseWindowInternal {
+                window_id: "ghost".into(),
+            },
+            &ctx(1),
+        );
+        assert!(events.is_empty());
+    }
+
+    #[test]
+    fn switch_workspace_updates_window_pointer() {
+        let mut state = State::default();
+        let ws_a = create_workspace(&mut state, "a");
+        let ws_b = create_workspace(&mut state, "b");
+        let _ = update(
+            &mut state,
+            Command::CreateWindow {
+                window_id: "win-1".into(),
+                workspace_id: ws_a.clone(),
+            },
+            &ctx(2),
+        );
+        let events = update(
+            &mut state,
+            Command::SwitchWorkspace {
+                window_id: "win-1".into(),
+                workspace_id: ws_b.clone(),
+            },
+            &ctx(3),
+        );
+        assert!(matches!(
+            &events[0],
+            Event::SrvWindowWorkspaceChanged { workspace_id, .. } if *workspace_id == ws_b
+        ));
+        assert_eq!(state.windows["win-1"].workspace_id, ws_b);
+    }
+
+    #[test]
+    fn switch_workspace_validates_window_and_destination() {
+        let mut state = State::default();
+        let ws_id = create_workspace(&mut state, "a");
+        // Unknown window.
+        let events = update(
+            &mut state,
+            Command::SwitchWorkspace {
+                window_id: "ghost".into(),
+                workspace_id: ws_id.clone(),
+            },
+            &ctx(2),
+        );
+        assert!(matches!(&events[0], Event::Error { .. }));
+        // Known window, unknown workspace.
+        let _ = update(
+            &mut state,
+            Command::CreateWindow {
+                window_id: "win-1".into(),
+                workspace_id: ws_id,
+            },
+            &ctx(3),
+        );
+        let events = update(
+            &mut state,
+            Command::SwitchWorkspace {
+                window_id: "win-1".into(),
+                workspace_id: "no-such-ws".into(),
+            },
+            &ctx(4),
+        );
+        assert!(matches!(&events[0], Event::Error { .. }));
+    }
+
+    #[test]
+    fn switch_workspace_no_op_when_already_pointing() {
+        let mut state = State::default();
+        let ws_id = create_workspace(&mut state, "a");
+        let _ = update(
+            &mut state,
+            Command::CreateWindow {
+                window_id: "win-1".into(),
+                workspace_id: ws_id.clone(),
+            },
+            &ctx(2),
+        );
+        let events = update(
+            &mut state,
+            Command::SwitchWorkspace {
+                window_id: "win-1".into(),
+                workspace_id: ws_id,
+            },
+            &ctx(3),
+        );
+        assert!(events.is_empty());
     }
 
     #[test]

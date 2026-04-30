@@ -23,9 +23,9 @@ use std::sync::Arc;
 
 use tokio::sync::Mutex;
 
-use crate::backend::obj::{Block, Tab, Workspace};
+use crate::backend::obj::{Block, Tab, Window, Workspace};
 use crate::backend::storage::wstore::WaveStore;
-use crate::state::{BlockRecord, State, TabRecord, WorkspaceRecord};
+use crate::state::{BlockRecord, State, TabRecord, WindowRecord, WorkspaceRecord};
 
 /// Phase E.2 / E.2b — load workspaces and their tabs from SQLite
 /// into the reducer state. Called once at srv startup before the
@@ -164,11 +164,50 @@ pub async fn bootstrap_state_from_wstore(state: &Arc<Mutex<State>>, wstore: &Wav
             },
         );
     }
+    // Phase E.5 — load Window→Workspace mappings. Used by sagas
+    // (TearOff/Restore/CreateWindow/CloseWindow) that coordinate
+    // window+workspace lifecycle. Skip windows whose `workspaceid`
+    // refers to a workspace that didn't load — those are dangling
+    // refs, same defensive treatment as orphan tabs/blocks.
+    let windows = wstore.get_all::<Window>().unwrap_or_else(|e| {
+        tracing::warn!(
+            target: "srv-persist",
+            "[srv-persist] bootstrap: failed to load windows from wstore: {} — windows start empty",
+            e
+        );
+        Vec::new()
+    });
+    for window in &windows {
+        if window.workspaceid.is_empty() {
+            tracing::warn!(
+                target: "srv-persist",
+                "[srv-persist] bootstrap: window {} has empty workspaceid — skipping",
+                window.oid
+            );
+            continue;
+        }
+        if !state.workspaces.contains_key(&window.workspaceid) {
+            tracing::warn!(
+                target: "srv-persist",
+                "[srv-persist] bootstrap: window {} points at unknown workspace {} — skipping",
+                window.oid, window.workspaceid
+            );
+            continue;
+        }
+        state.windows.insert(
+            window.oid.clone(),
+            WindowRecord {
+                window_id: window.oid.clone(),
+                workspace_id: window.workspaceid.clone(),
+            },
+        );
+    }
     tracing::info!(
         target: "srv-persist",
-        "[srv-persist] bootstrap loaded {} workspace(s) + {} tab(s) + {} block(s) from wstore",
+        "[srv-persist] bootstrap loaded {} workspace(s) + {} tab(s) + {} block(s) + {} window(s) from wstore",
         state.workspaces.len(),
         state.tabs.len(),
-        state.blocks.len()
+        state.blocks.len(),
+        state.windows.len()
     );
 }
