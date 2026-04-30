@@ -55,7 +55,7 @@ pub fn update(state: &mut State, cmd: Command, ctx: &Ctx) -> Vec<Event> {
             tab_id,
             new_index,
         } => handle_reorder_tab(state, workspace_id, tab_id, new_index),
-        Command::CreateBlock { tab_id } => handle_create_block(state, tab_id),
+        Command::CreateBlock { tab_id, meta } => handle_create_block(state, tab_id, meta),
         Command::DeleteBlock { tab_id, block_id } => handle_delete_block(state, tab_id, block_id),
         // Anything else is a non-fatal protocol error. Future
         // phases (E.2b tabs, E.3 blocks, E.4 layouts) extend this
@@ -467,7 +467,11 @@ fn handle_reorder_tab(
 ///
 /// NOT idempotent on retry (UUID assignment per call); saga-side
 /// dedup is responsible for at-most-once delivery in E.5+.
-fn handle_create_block(state: &mut State, tab_id: String) -> Vec<Event> {
+fn handle_create_block(
+    state: &mut State,
+    tab_id: String,
+    meta: serde_json::Value,
+) -> Vec<Event> {
     if !state.tabs.contains_key(&tab_id) {
         let v = state.bump_version();
         return vec![Event::Error {
@@ -491,6 +495,7 @@ fn handle_create_block(state: &mut State, tab_id: String) -> Vec<Event> {
     vec![Event::BlockCreated {
         tab_id,
         block_id,
+        meta,
         version: v,
     }]
 }
@@ -1266,9 +1271,7 @@ mod tests {
         let mut state = State::default();
         let events = update(
             &mut state,
-            Command::CreateBlock {
-                tab_id: "no-such-tab".into(),
-            },
+            Command::CreateBlock { tab_id: "no-such-tab".into(), meta: serde_json::Value::Null },
             &ctx(1),
         );
         assert!(matches!(&events[0], Event::Error { .. }));
@@ -1282,9 +1285,7 @@ mod tests {
         let tab_id = create_tab(&mut state, &ws_id, "t");
         let events = update(
             &mut state,
-            Command::CreateBlock {
-                tab_id: tab_id.clone(),
-            },
+            Command::CreateBlock { tab_id: tab_id.clone(), meta: serde_json::Value::Null },
             &ctx(2),
         );
         assert!(matches!(&events[0], Event::BlockCreated { .. }));
@@ -1303,9 +1304,7 @@ mod tests {
         let tab_id = create_tab(&mut state, &ws_id, "t");
         let _ = update(
             &mut state,
-            Command::CreateBlock {
-                tab_id: tab_id.clone(),
-            },
+            Command::CreateBlock { tab_id: tab_id.clone(), meta: serde_json::Value::Null },
             &ctx(2),
         );
         let block_id = state.tabs[&tab_id].block_ids[0].clone();
@@ -1345,16 +1344,12 @@ mod tests {
         let tab_id = create_tab(&mut state, &ws_id, "t");
         let _ = update(
             &mut state,
-            Command::CreateBlock {
-                tab_id: tab_id.clone(),
-            },
+            Command::CreateBlock { tab_id: tab_id.clone(), meta: serde_json::Value::Null },
             &ctx(2),
         );
         let _ = update(
             &mut state,
-            Command::CreateBlock {
-                tab_id: tab_id.clone(),
-            },
+            Command::CreateBlock { tab_id: tab_id.clone(), meta: serde_json::Value::Null },
             &ctx(3),
         );
         assert_eq!(state.blocks.len(), 2);
@@ -1376,14 +1371,12 @@ mod tests {
         let tab_id = create_tab(&mut state, &ws_id, "t");
         let _ = update(
             &mut state,
-            Command::CreateBlock {
-                tab_id: tab_id.clone(),
-            },
+            Command::CreateBlock { tab_id: tab_id.clone(), meta: serde_json::Value::Null },
             &ctx(2),
         );
         let _ = update(
             &mut state,
-            Command::CreateBlock { tab_id },
+            Command::CreateBlock { tab_id, meta: serde_json::Value::Null },
             &ctx(3),
         );
         assert_eq!(state.blocks.len(), 2);
@@ -1403,7 +1396,7 @@ mod tests {
         let tab_id = create_tab(&mut state, &ws_id, "t");
         let _ = update(
             &mut state,
-            Command::CreateBlock { tab_id },
+            Command::CreateBlock { tab_id, meta: serde_json::Value::Null },
             &ctx(2),
         );
         let events = update(&mut state, Command::GetSrvSnapshot, &ctx(3));

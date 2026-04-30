@@ -117,32 +117,84 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
                     _ => return WebReturnType::error("missing uicontext.activetabid"),
                 },
             };
-            match wcore::create_block(store, &tab_id, block_def.meta) {
-                Ok(block) => {
-                    let block_oid = block.oid.clone();
-                    let block_update = WaveObjUpdate {
-                        updatetype: "update".into(),
-                        otype: OTYPE_BLOCK.to_string(),
-                        oid: block.oid.clone(),
-                        obj: Some(wave_obj_to_value(&block)),
-                    };
-                    let updates = match store.must_get::<Tab>(&tab_id) {
-                        Ok(tab) => {
-                            let tab_update = WaveObjUpdate {
-                                updatetype: "update".into(),
-                                otype: OTYPE_TAB.to_string(),
-                                oid: tab_id.clone(),
-                                obj: Some(wave_obj_to_value(&tab)),
-                            };
-                            vec![block_update, tab_update]
-                        }
-                        Err(_) => vec![block_update],
-                    };
-                    WebReturnType::success_data_updates(serde_json::json!(block_oid), updates)
+            // Phase E.2c.4 — CreateBlock dispatches through the reducer
+            // (forward+compensate on SQLite failure). The reducer
+            // assigns the block_id; the persist subscriber's apply
+            // path writes the Block row with the caller's meta map.
+            let meta_value =
+                serde_json::to_value(&block_def.meta).unwrap_or(serde_json::Value::Null);
+            let events = dispatch_to_reducer(
+                state,
+                agentmux_common::ipc::Command::CreateBlock {
+                    tab_id: tab_id.clone(),
+                    meta: meta_value,
+                },
+            )
+            .await;
+            // Surface reducer Error events (tab not found).
+            if let Some(err_msg) = events.iter().find_map(|e| match e {
+                agentmux_common::ipc::Event::Error { message, .. } => Some(message.clone()),
+                _ => None,
+            }) {
+                return WebReturnType::error(err_msg);
+            }
+            let block_id = events.iter().find_map(|e| match e {
+                agentmux_common::ipc::Event::BlockCreated { block_id, .. } => {
+                    Some(block_id.clone())
                 }
-                Err(e) => WebReturnType::error(e.to_string()),
+                _ => None,
+            });
+            let mut apply_err: Option<String> = None;
+            for ev in &events {
+                if let Err(e) = crate::persist_subscriber::apply_event_to_wstore(ev, store) {
+                    apply_err = Some(e.to_string());
+                    break;
+                }
+            }
+            if let Some(err) = apply_err {
+                if let Some(bid) = block_id.as_ref() {
+                    compensate_via_reducer(
+                        state,
+                        agentmux_common::ipc::Command::DeleteBlock {
+                            tab_id: tab_id.clone(),
+                            block_id: bid.clone(),
+                        },
+                        store,
+                    )
+                    .await;
+                }
+                return WebReturnType::error(format!("CreateBlock: SQLite write failed: {}", err));
+            }
+            publish_events(state, &events);
+            match block_id {
+                Some(bid) => {
+                    let mut updates = vec![];
+                    if let Ok(block) = store.must_get::<Block>(&bid) {
+                        updates.push(WaveObjUpdate {
+                            updatetype: "update".into(),
+                            otype: OTYPE_BLOCK.to_string(),
+                            oid: bid.clone(),
+                            obj: Some(wave_obj_to_value(&block)),
+                        });
+                    }
+                    if let Ok(tab) = store.must_get::<Tab>(&tab_id) {
+                        updates.push(WaveObjUpdate {
+                            updatetype: "update".into(),
+                            otype: OTYPE_TAB.to_string(),
+                            oid: tab_id.clone(),
+                            obj: Some(wave_obj_to_value(&tab)),
+                        });
+                    }
+                    WebReturnType::success_data_updates(serde_json::json!(bid), updates)
+                }
+                None => WebReturnType::error(
+                    "CreateBlock: reducer did not emit BlockCreated".to_string(),
+                ),
             }
         }
+        // Phase E.2c.4 — DeleteBlock SQLite-first via wcore (cascades
+        // for PTY/controller already handled before the wcore call),
+        // then dispatch reducer's DeleteBlock to keep state in sync.
         ("object", "DeleteBlock") => {
             let tab_id = match call
                 .uicontext
@@ -160,10 +212,21 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
             // and child process are torn down and the registry entry is cleared
             // regardless of DB outcome.
             blockcontroller::delete_controller(&block_id);
-            match wcore::delete_block(store, &tab_id, &block_id) {
-                Ok(()) => WebReturnType::success_empty(),
-                Err(e) => WebReturnType::error(e.to_string()),
+            if let Err(e) = wcore::delete_block(store, &tab_id, &block_id) {
+                return WebReturnType::error(e.to_string());
             }
+            // Reducer dispatch is silent on missing — safe to call
+            // unconditionally now that SQLite is consistent.
+            let events = dispatch_to_reducer(
+                state,
+                agentmux_common::ipc::Command::DeleteBlock {
+                    tab_id: tab_id.clone(),
+                    block_id: block_id.clone(),
+                },
+            )
+            .await;
+            publish_events(state, &events);
+            WebReturnType::success_empty()
         }
         ("object", "UpdateObject") => {
             let wave_obj_value: serde_json::Value = match service::get_arg(args, 0) {
