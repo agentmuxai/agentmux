@@ -155,16 +155,20 @@ async fn handle_connection(stream: NamedPipeServer, ctx: Arc<ServerCtx>) {
         let cmd = match serde_json::from_str::<Command>(&line) {
             Ok(c) => c,
             Err(e) => {
-                let mut state = ctx.state.lock().await;
-                let v = state.bump_version();
-                drop(state);
+                // Phase E.1b — parse errors are connection-private
+                // (sent only to the offender, not broadcast, not
+                // appended to the event log). Don't bump the global
+                // event_version: other subscribers would see version
+                // gaps and treat them as missed events. Use 0 as a
+                // sentinel for "not part of the ordered stream."
+                // (codex P2 #610.)
                 let _ = send_event(
                     &writer,
                     Event::Error {
                         code: ErrorCode::InvalidCommand,
                         message: format!("parse failed: {}", e),
                         fatal: false,
-                        version: v,
+                        version: 0,
                     },
                 )
                 .await;
@@ -184,16 +188,15 @@ async fn handle_connection(stream: NamedPipeServer, ctx: Arc<ServerCtx>) {
         }
         if let Command::Register { .. } = &cmd {
             if registered_kind.is_some() {
-                let mut state = ctx.state.lock().await;
-                let v = state.bump_version();
-                drop(state);
+                // Phase E.1b — connection-private error; sentinel
+                // version=0 (codex P2 #610).
                 let _ = send_event(
                     &writer,
                     Event::Error {
                         code: ErrorCode::AlreadyRegistered,
                         message: "Register sent twice on the same connection".into(),
                         fatal: false,
-                        version: v,
+                        version: 0,
                     },
                 )
                 .await;
@@ -209,19 +212,37 @@ async fn handle_connection(stream: NamedPipeServer, ctx: Arc<ServerCtx>) {
 
         // Phase D.3 — `GetEvents` is intercepted before the reducer
         // (log query is I/O-adjacent; reducer stays pure).
+        //
+        // The reply (`Event::EventList`) is sent DIRECTLY to the
+        // requesting connection — NOT broadcast on the shared bus.
+        // EventList is request/response, not a state transition;
+        // broadcasting it would force every subscriber to process
+        // foreign replay payloads (potentially treating them as their
+        // own catch-up data, duplicating state application). (codex
+        // P1 #610.)
         if let Command::GetEvents { since } = &cmd {
+            // Phase E.1b — read the current version WITHOUT bumping
+            // (codex P2 #610). EventList is connection-private; the
+            // version it carries is the "as-of" point for the
+            // requester's next resync, not a new state-transition
+            // marker. Bumping would create a global gap that other
+            // subscribers see as missed events.
             let v = {
-                let mut state = ctx.state.lock().await;
-                state.bump_version()
+                let state = ctx.state.lock().await;
+                state.event_version
             };
             let replay = ctx.event_log.events_since(*since);
             if ctx.event_log.replay_truncated(*since) {
                 tracing::warn!(target: "srv-ipc", "[srv-ipc] conn_id={} GetEvents since={} truncated", conn_id, since);
             }
-            let _ = ctx.events_tx.send(Event::EventList {
-                events: replay,
-                version: v,
-            });
+            let _ = send_event(
+                &writer,
+                Event::EventList {
+                    events: replay,
+                    version: v,
+                },
+            )
+            .await;
             continue;
         }
 
@@ -299,8 +320,9 @@ async fn enforce_register_first(
         // dispatch reaches it.
         _ => ("Command before Register".to_string(), false),
     };
-    let mut state = ctx.state.lock().await;
-    let v = state.bump_version();
+    // Phase E.1b — connection-private error; sentinel version=0
+    // (codex P2 #610).
+    let v = 0;
     Some(Event::Error {
         code: ErrorCode::InvalidCommand,
         message: msg,
