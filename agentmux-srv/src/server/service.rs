@@ -958,9 +958,12 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
         // Phase E.5.3 — UpdateTabIds migrated to ReorderTabsBulk
         // through the reducer. The legacy `pinned_tab_ids` arg is
         // ignored: pinning was a Waveterm feature removed from
-        // AgentMux. Bootstrap merged any legacy pinnedtabids into
-        // the reducer's tab_ids; the subscriber's apply will also
-        // clear `Workspace.pinnedtabids` in wstore on this path.
+        // AgentMux. Bootstrap merged any legacy `pinnedtabids` into
+        // the reducer's `tab_ids`. The subscriber's
+        // `apply_tabs_reordered_bulk` rewrites `Workspace.tabids`
+        // only — leaves any pre-existing `pinnedtabids` rows alone
+        // (legacy data persists harmlessly until the next user-driven
+        // workspace mutation that touches that field).
         ("workspace", "UpdateTabIds") => {
             let ws_id: String = match service::get_arg(args, 0) {
                 Ok(v) => v,
