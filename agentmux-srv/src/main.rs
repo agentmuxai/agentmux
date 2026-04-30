@@ -497,13 +497,36 @@ async fn main() {
     backend::process_tracker::registry::set_global(process_tracker.clone());
     backend::process_tracker::registry::spawn_poller(process_tracker.clone());
 
-    // Phase E.2 — keep an extra Arc<WaveStore> clone for the
-    // srv-pipe bootstrap path (loads workspaces from SQLite into
-    // the reducer's session-only state). Lives outside AppState
-    // because the IPC server is initialized further below. The
-    // persist subscriber that this clone will also feed lands in
-    // E.2c.
+    // Phase E.2 / E.2c.2 — srv reducer plumbing, hoisted out of the
+    // (conditional) pipe-IPC bind block so HTTP/WS RPC handlers in
+    // dispatch_service can route through the reducer. State, event
+    // bus, event log, and persist subscriber all live unconditionally;
+    // the pipe IPC server is still conditional on
+    // `AGENTMUX_SRV_PIPE_PATH` being set (absent in `task dev` mode).
     let wstore_for_persist = Arc::clone(&wstore);
+    let srv_state = std::sync::Arc::new(tokio::sync::Mutex::new(state::State::default()));
+    let (srv_events_tx, _) =
+        tokio::sync::broadcast::channel::<agentmux_common::ipc::Event>(1024);
+    let srv_event_log = std::sync::Arc::new(event_log::EventLog::new(Some(
+        base::get_wave_data_dir().join("srv-events.log"),
+    )));
+
+    // Bootstrap reducer state from SQLite. Always runs (even in
+    // `task dev` where there's no pipe IPC server) so RPC handlers
+    // dispatching through the reducer see populated state.
+    persist::bootstrap_state_from_wstore(&srv_state, &wstore_for_persist).await;
+
+    // Spawn the disk writer (forensic log of every reducer event)
+    // and the persist subscriber (idempotent SQLite write-back).
+    let disk_writer_rx = srv_events_tx.subscribe();
+    let log_for_writer = std::sync::Arc::clone(&srv_event_log);
+    tokio::spawn(event_log::run_disk_writer(log_for_writer, disk_writer_rx));
+    let subscriber_rx = srv_events_tx.subscribe();
+    persist_subscriber::spawn_persist_subscriber(
+        subscriber_rx,
+        std::sync::Arc::clone(&wstore_for_persist),
+        std::sync::Arc::clone(&srv_state),
+    );
 
     let state = AppState {
         auth_key: config.auth_key.clone(),
@@ -523,6 +546,12 @@ async fn main() {
         local_web_url: local_web_url.clone(),
         http_client: reqwest::Client::new(),
         process_tracker,
+        // Phase E.2c.2 — reducer state + event bus exposed to HTTP/WS
+        // dispatch handlers. Workspace handlers route through the
+        // reducer and publish events to `srv_events_tx`; the persist
+        // subscriber writes back to SQLite asynchronously.
+        srv_state: std::sync::Arc::clone(&srv_state),
+        srv_events_tx: srv_events_tx.clone(),
     };
 
     // Phase E.1b — srv pipe IPC server. Bound when launcher passes
@@ -544,50 +573,16 @@ async fn main() {
         if !srv_pipe_path.is_empty() {
             match srv_ipc::server::bind_first_pipe_instance(&srv_pipe_path) {
                 Ok(first_pipe) => {
-                    let (events_tx, _) = tokio::sync::broadcast::channel::<
-                        agentmux_common::ipc::Event,
-                    >(1024);
-                    let log_disk_path = base::get_wave_data_dir().join("srv-events.log");
-                    let event_log =
-                        std::sync::Arc::new(event_log::EventLog::new(Some(log_disk_path)));
-                    let disk_writer_rx = events_tx.subscribe();
-                    let log_for_writer = std::sync::Arc::clone(&event_log);
-                    tokio::spawn(event_log::run_disk_writer(log_for_writer, disk_writer_rx));
-
-                    let srv_state =
-                        std::sync::Arc::new(tokio::sync::Mutex::new(state::State::default()));
-
-                    // Phase E.2 — bootstrap workspaces from SQLite
-                    // BEFORE the IPC server starts accepting commands.
-                    // Subsequent reducer transitions flow through
-                    // `update` and live only in this in-memory state
-                    // until E.2c lands the persist subscriber.
-                    persist::bootstrap_state_from_wstore(&srv_state, &wstore_for_persist).await;
-                    // Phase E.2c.1 — persist subscriber. Plumbing only:
-                    // the subscriber consumes Workspace/Tab/Block
-                    // events from the broadcast bus and mirrors them
-                    // back to SQLite via wcore. In E.2c.1 there are
-                    // no in-process producers (RPC still writes wcore
-                    // directly; saga coordinator empty), so this task
-                    // is dead-code in production. It exists so E.5
-                    // sagas + E.2c.2 RPC migration have a target to
-                    // write against. Lagged-bus recovery (full-resync
-                    // from reducer state) lands in E.2c.2 alongside
-                    // workspace RPC migration where resync is
-                    // non-destructive.
-                    let subscriber_rx = events_tx.subscribe();
-                    let subscriber_wstore = std::sync::Arc::clone(&wstore_for_persist);
-                    persist_subscriber::spawn_persist_subscriber(
-                        subscriber_rx,
-                        subscriber_wstore,
-                    );
-
+                    // Phase E.2c.2 — pipe IPC server reuses the
+                    // hoisted srv_state / events_tx / event_log so
+                    // pipe-originated commands and HTTP/WS-originated
+                    // commands mutate the same canonical state.
                     let srv_ctx = srv_ipc::ServerCtx {
                         srv_pid: std::process::id(),
                         srv_version: version.clone(),
-                        state: srv_state,
-                        events_tx,
-                        event_log,
+                        state: std::sync::Arc::clone(&srv_state),
+                        events_tx: srv_events_tx.clone(),
+                        event_log: std::sync::Arc::clone(&srv_event_log),
                     };
                     let _srv_ipc_handle = srv_ipc::run_srv_ipc_server(
                         srv_pipe_path.clone(),
