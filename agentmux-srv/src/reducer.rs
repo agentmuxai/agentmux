@@ -166,10 +166,11 @@ fn handle_get_srv_snapshot(state: &mut State) -> Vec<Event> {
 
 /// Phase E.2 — create a new workspace. Reducer assigns the OID
 /// (UUID), inserts into canonical state, emits WorkspaceCreated.
-/// Idempotent w.r.t. the assigned OID: if a saga or retry fires
-/// CreateWorkspace twice, the second insertion overwrites the
-/// first (with a different OID — no collision possible since OIDs
-/// are UUIDs).
+/// NOT idempotent on retry: each invocation generates a fresh UUID
+/// and inserts a new row, so a saga that double-fires CreateWorkspace
+/// would create two distinct workspaces. Saga-side dedup (correlation
+/// IDs / saga state machine) is responsible for at-most-once delivery
+/// when sagas land in E.5+.
 fn handle_create_workspace(state: &mut State, name: String) -> Vec<Event> {
     let workspace_id = uuid::Uuid::new_v4().to_string();
     state.workspaces.insert(

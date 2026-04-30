@@ -7,16 +7,18 @@
 // pipe IPC server; mutex held only during reducer dispatch
 // (sub-millisecond).
 //
-// What's here in E.1b:
-//   * `LifecyclePhase` (re-exported from agentmux-common::ipc)
-//   * `ProcessRecord` — pid, kind, state, spawned_at
-//   * `ProcessState` — Spawning / Running / Exited
-//   * `State` — top-level: lifecycle + process map + monotonic counters
+// What's here:
+//   * `LifecyclePhase` (re-exported from agentmux-common::ipc) — E.1b
+//   * `ProcessRecord` — pid, kind, state, spawned_at — E.1b
+//   * `ProcessState` — Spawning / Running / Exited — E.1b
+//   * `WorkspaceRecord` — workspace_id, name — E.2
+//   * `State` — top-level: lifecycle + process map + workspaces +
+//     monotonic counters
 //
 // What's intentionally NOT here yet:
-//   * Domain state (workspaces, tabs, blocks, layouts) — E.2+
-//   * SQLite-bootstrap path / persistence HWM — E.2 (when there's
-//     domain state to persist)
+//   * Tab / Block / Layout domain state — E.2b+
+//   * `persistence_hwm` field — E.2c (lands with the persist
+//     subscriber that mirrors pipe-event effects back to SQLite)
 
 use std::collections::HashMap;
 

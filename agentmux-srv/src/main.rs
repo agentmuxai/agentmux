@@ -497,8 +497,11 @@ async fn main() {
     backend::process_tracker::registry::spawn_poller(process_tracker.clone());
 
     // Phase E.2 — keep an extra Arc<WaveStore> clone for the
-    // srv-pipe / persist subscriber path which lives outside
-    // AppState (and is initialized further below).
+    // srv-pipe bootstrap path (loads workspaces from SQLite into
+    // the reducer's session-only state). Lives outside AppState
+    // because the IPC server is initialized further below. The
+    // persist subscriber that this clone will also feed lands in
+    // E.2c.
     let wstore_for_persist = Arc::clone(&wstore);
 
     let state = AppState {
