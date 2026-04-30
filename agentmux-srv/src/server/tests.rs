@@ -27,6 +27,10 @@ fn test_state() -> AppState {
 
     let config_watcher = Arc::new(wconfig::ConfigWatcher::new());
 
+    let process_tracker = Arc::new(
+        crate::backend::process_tracker::registry::AgentProcessRegistry::new(Some(broker.clone())),
+    );
+
     AppState {
         auth_key: "test-secret-key".to_string(),
         version: "0.28.20".to_string(),
@@ -44,6 +48,7 @@ fn test_state() -> AppState {
         subagent_watcher: Arc::new(crate::backend::subagent_watcher::SubagentWatcher::new(event_bus)),
         history_service: Arc::new(crate::backend::history::HistoryService::new()),
         lan_discovery: None,
+        process_tracker,
     }
 }
 

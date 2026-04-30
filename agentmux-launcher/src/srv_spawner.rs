@@ -88,9 +88,14 @@ impl std::fmt::Display for SrvSpawnError {
 /// Caller keeps the returned `Child` alive — drop closes srv's
 /// stdin and srv's existing PPID death-watcher takes over (already
 /// part of agentmux-srv per `SPEC_BACKEND_LIFECYCLE.md`).
+// Phase E.1b — `srv_pipe_path` is the launcher-computed pipe path
+// (same data-dir hash as launcher's own pipe, different leaf name).
+// Passed via `AGENTMUX_SRV_PIPE_PATH` so srv doesn't have to
+// recompute the hash; launcher is the single source of truth.
 pub async fn spawn_srv(
     launcher_exe_dir: &Path,
     paths: &DataPaths,
+    srv_pipe_path: &str,
     #[cfg(target_os = "windows")] job_handle: windows_sys::Win32::Foundation::HANDLE,
 ) -> Result<(SrvSpawnResult, Child), SrvSpawnError> {
     let backend_path = resolve_srv_binary(launcher_exe_dir)?;
@@ -125,6 +130,7 @@ pub async fn spawn_srv(
     .env("AGENTMUX_SETTINGS_DIR", paths.config_dir.to_string_lossy().to_string())
     .env("AGENTMUX_APP_PATH", &app_path_str)
     .env("AGENTMUX_DEV", if cfg!(debug_assertions) { "1" } else { "" })
+    .env("AGENTMUX_SRV_PIPE_PATH", srv_pipe_path)
     .stdin(Stdio::piped())
     .stdout(Stdio::piped())
     .stderr(Stdio::piped())

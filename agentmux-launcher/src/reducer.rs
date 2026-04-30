@@ -203,6 +203,12 @@ pub fn update(state: &mut State, cmd: Command, ctx: &Ctx) -> Vec<Event> {
         // to satisfy the exhaustive match; in practice it's
         // unreachable. Returning empty Vec is the safe no-op.
         Command::GetEvents { .. } => Vec::new(),
+        // Phase E.1b — `GetSrvSnapshot` is a srv-pipe command. If
+        // it reaches the launcher reducer, the client sent it to
+        // the wrong pipe. The server returns an error before the
+        // reducer is invoked; this arm exists for match
+        // exhaustiveness only.
+        Command::GetSrvSnapshot => Vec::new(),
     }
 }
 
@@ -846,6 +852,7 @@ mod tests {
             | Event::SagaStarted { version, .. }
             | Event::SagaCompleted { version, .. }
             | Event::SagaFailed { version, .. }
+            | Event::SrvSnapshot { version, .. }
             | Event::Error { version, .. } => *version,
         }
     }

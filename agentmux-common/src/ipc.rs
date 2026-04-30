@@ -220,6 +220,15 @@ pub enum Command {
     /// resync after disconnect, and by future Tool clients that need
     /// to bootstrap without observing every prior event.
     GetSnapshot,
+    /// Phase E.1b — srv-side equivalent of `GetSnapshot`. Routed to
+    /// the srv pipe; reducer replies with `Event::SrvSnapshot`.
+    /// Separate from `GetSnapshot` (launcher) per spec §4.3 — each
+    /// reducer is canonical for its domain and replies on its own
+    /// pipe.
+    ///
+    /// E.1b reply is sparse (lifecycle + version only — no domain
+    /// state yet). E.2+ adds workspaces / tabs / blocks / etc.
+    GetSrvSnapshot,
     /// Phase D.3 — request an `Event::EventList` reply containing the
     /// events the launcher has emitted with version > `since`. Used
     /// by subscribers that hold a snapshot at version V and want to
@@ -542,6 +551,19 @@ pub enum Event {
         saga_id: u64,
         reason: String,
         version: u64,
+    },
+    /// Phase E.1b — srv-side snapshot reply. Sparse for E.1b
+    /// (lifecycle only); E.2+ populates with `workspaces`, `tabs`,
+    /// `blocks`, `layouts`, etc.
+    ///
+    /// `version` is the srv reducer's `event_version` at snapshot
+    /// time, monotonically distinct from prior srv events so
+    /// subscribers know the "as-of" point for delta application.
+    SrvSnapshot {
+        version: u64,
+        lifecycle: LifecyclePhase,
+        // Domain state placeholders — populated in Phase E.2+.
+        // Empty in E.1b (skeleton only).
     },
 }
 

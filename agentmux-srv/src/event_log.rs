@@ -158,7 +158,7 @@ pub async fn run_disk_writer(
     let mut file = match open_for_append(&path).await {
         Ok(f) => f,
         Err(e) => {
-            crate::log(&format!(
+            tracing::warn!(target: "event-log", "{}", format!(
                 "[event-log] cannot open {} for append: {} — disk persistence disabled",
                 path.display(),
                 e
@@ -174,7 +174,7 @@ pub async fn run_disk_writer(
                 let mut buf = match serde_json::to_vec(&event) {
                     Ok(b) => b,
                     Err(e) => {
-                        crate::log(&format!("[event-log] serialize failed: {}", e));
+                        tracing::warn!(target: "event-log", "{}", format!("[event-log] serialize failed: {}", e));
                         continue;
                     }
                 };
@@ -186,12 +186,12 @@ pub async fn run_disk_writer(
                     // to the existing file (it'll just exceed cap).
                     drop(file);
                     if let Err(e) = tokio::fs::rename(&path, &rotated_path).await {
-                        crate::log(&format!("[event-log] rotation rename failed: {} — continuing without rotation", e));
+                        tracing::warn!(target: "event-log", "{}", format!("[event-log] rotation rename failed: {} — continuing without rotation", e));
                     }
                     file = match open_for_append(&path).await {
                         Ok(f) => f,
                         Err(e) => {
-                            crate::log(&format!(
+                            tracing::warn!(target: "event-log", "{}", format!(
                                 "[event-log] post-rotation open failed: {} — disk persistence stopping",
                                 e
                             ));
@@ -201,7 +201,7 @@ pub async fn run_disk_writer(
                     bytes_written = 0;
                 }
                 if let Err(e) = file.write_all(&buf).await {
-                    crate::log(&format!("[event-log] write failed: {} — dropping event from disk stream", e));
+                    tracing::warn!(target: "event-log", "{}", format!("[event-log] write failed: {} — dropping event from disk stream", e));
                     continue;
                 }
                 // Phase E.1a — durable: fsync per append so events
@@ -213,12 +213,12 @@ pub async fn run_disk_writer(
                 // (group commit). Skipping for E.1a — premature
                 // optimization; revisit if profiling shows a hot path.
                 if let Err(e) = file.sync_data().await {
-                    crate::log(&format!("[event-log] sync_data failed: {} — event written but not fsynced", e));
+                    tracing::warn!(target: "event-log", "{}", format!("[event-log] sync_data failed: {} — event written but not fsynced", e));
                 }
                 bytes_written += buf.len() as u64;
             }
             Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
-                crate::log(&format!("[event-log] disk writer lagged, missed {} events", n));
+                tracing::warn!(target: "event-log", "{}", format!("[event-log] disk writer lagged, missed {} events", n));
             }
             Err(tokio::sync::broadcast::error::RecvError::Closed) => {
                 let _ = file.flush().await;
