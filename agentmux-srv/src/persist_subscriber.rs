@@ -207,6 +207,12 @@ pub(crate) fn apply_event_to_wstore(
             tab_id,
             ..
         } => apply_active_tab_changed(wstore, workspace_id, tab_id.as_deref()),
+        Event::TabReordered {
+            workspace_id,
+            tab_id,
+            new_index,
+            ..
+        } => apply_tab_reordered(wstore, workspace_id, tab_id, *new_index),
         Event::BlockCreated {
             tab_id, block_id, ..
         } => apply_block_created(wstore, tab_id, block_id),
@@ -327,6 +333,45 @@ fn apply_active_tab_changed(
     Ok(())
 }
 
+fn apply_tab_reordered(
+    wstore: &WaveStore,
+    workspace_id: &str,
+    tab_id: &str,
+    new_index: u32,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let Some(mut ws) = wstore.get::<Workspace>(workspace_id)? else {
+        return Ok(());
+    };
+    // Pinning was removed from AgentMux but legacy SQLite databases
+    // can still have entries in `Workspace.pinnedtabids`; bootstrap
+    // surfaces those as regular tabs in the reducer's `tab_ids`. The
+    // reducer can therefore emit a TabReordered for a tab that on
+    // disk still lives in `pinnedtabids`. Search both lists so the
+    // reorder lands wherever the tab actually is. (codex P2 #617.)
+    let target_index = (new_index as usize);
+    if let Some(current_pos) = ws.tabids.iter().position(|t| t == tab_id) {
+        let len = ws.tabids.len();
+        let target = target_index.min(len.saturating_sub(1));
+        if current_pos == target {
+            return Ok(());
+        }
+        let id = ws.tabids.remove(current_pos);
+        ws.tabids.insert(target, id);
+        wstore.update(&mut ws)?;
+    } else if let Some(current_pos) = ws.pinnedtabids.iter().position(|t| t == tab_id) {
+        let len = ws.pinnedtabids.len();
+        let target = target_index.min(len.saturating_sub(1));
+        if current_pos == target {
+            return Ok(());
+        }
+        let id = ws.pinnedtabids.remove(current_pos);
+        ws.pinnedtabids.insert(target, id);
+        wstore.update(&mut ws)?;
+    }
+    // Tab not in either list — silent no-op (idempotent).
+    Ok(())
+}
+
 fn apply_block_created(
     wstore: &WaveStore,
     tab_id: &str,
@@ -372,6 +417,7 @@ fn event_kind(event: &Event) -> &'static str {
         Event::TabCreated { .. } => "TabCreated",
         Event::TabDeleted { .. } => "TabDeleted",
         Event::ActiveTabChanged { .. } => "ActiveTabChanged",
+        Event::TabReordered { .. } => "TabReordered",
         Event::BlockCreated { .. } => "BlockCreated",
         Event::BlockDeleted { .. } => "BlockDeleted",
         _ => "Other",

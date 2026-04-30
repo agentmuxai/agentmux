@@ -673,6 +673,10 @@ async fn enforce_register_first(
             "SetActiveTab is a srv-pipe command; sent to launcher pipe by mistake".to_string(),
             false,
         ),
+        Command::ReorderTab { .. } => (
+            "ReorderTab is a srv-pipe command; sent to launcher pipe by mistake".to_string(),
+            false,
+        ),
         // Phase E.3 — Block arms are also srv-pipe commands.
         Command::CreateBlock { .. } => (
             "CreateBlock is a srv-pipe command; sent to launcher pipe by mistake".to_string(),

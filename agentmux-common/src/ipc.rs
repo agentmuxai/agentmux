@@ -272,6 +272,15 @@ pub enum Command {
         workspace_id: String,
         tab_id: String,
     },
+    /// Phase E.2c.3b — reorder a tab within its workspace's
+    /// `tab_ids`. `new_index` is clamped to the list length; no-op
+    /// if the tab is already at that position. Errors if the
+    /// workspace doesn't exist or the tab isn't in its tab list.
+    ReorderTab {
+        workspace_id: String,
+        tab_id: String,
+        new_index: u32,
+    },
     /// Phase E.3 — create a block inside an existing tab. Reducer
     /// validates parent tab exists, assigns the `block_id` (UUID),
     /// appends to the tab's `block_ids`, emits `Event::BlockCreated`.
@@ -681,6 +690,17 @@ pub enum Event {
     ActiveTabChanged {
         workspace_id: String,
         tab_id: Option<String>,
+        version: u64,
+    },
+    /// Phase E.2c.3b — a tab was reordered within its workspace's
+    /// `tab_ids`. Subscribers should rewrite the workspace's tab
+    /// order to match the reducer's authoritative list (which lives
+    /// in the snapshot's `tabs` field; subscribers can also recompute
+    /// from `tab_id` + `new_index` against their last-known order).
+    TabReordered {
+        workspace_id: String,
+        tab_id: String,
+        new_index: u32,
         version: u64,
     },
     /// Phase E.3 — block was created inside a tab.
