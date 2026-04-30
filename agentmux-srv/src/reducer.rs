@@ -50,6 +50,11 @@ pub fn update(state: &mut State, cmd: Command, ctx: &Ctx) -> Vec<Event> {
         Command::SetActiveTab { workspace_id, tab_id } => {
             handle_set_active_tab(state, workspace_id, tab_id)
         }
+        Command::ReorderTab {
+            workspace_id,
+            tab_id,
+            new_index,
+        } => handle_reorder_tab(state, workspace_id, tab_id, new_index),
         Command::CreateBlock { tab_id } => handle_create_block(state, tab_id),
         Command::DeleteBlock { tab_id, block_id } => handle_delete_block(state, tab_id, block_id),
         // Anything else is a non-fatal protocol error. Future
@@ -408,6 +413,53 @@ fn handle_set_active_tab(
     }]
 }
 
+/// Phase E.2c.3b — reorder a tab within its workspace's
+/// `tab_ids`. `new_index` is clamped to `tab_ids.len()`. No-op
+/// if the tab is already at that position. Errors (non-fatal) if
+/// the workspace doesn't exist or the tab isn't in its tab list.
+fn handle_reorder_tab(
+    state: &mut State,
+    workspace_id: String,
+    tab_id: String,
+    new_index: u32,
+) -> Vec<Event> {
+    let Some(workspace) = state.workspaces.get_mut(&workspace_id) else {
+        let v = state.bump_version();
+        return vec![Event::Error {
+            code: ErrorCode::InvalidCommand,
+            message: format!("ReorderTab: workspace not found: {}", workspace_id),
+            fatal: false,
+            version: v,
+        }];
+    };
+    let Some(current_pos) = workspace.tab_ids.iter().position(|t| t == &tab_id) else {
+        let v = state.bump_version();
+        return vec![Event::Error {
+            code: ErrorCode::InvalidCommand,
+            message: format!(
+                "ReorderTab: tab {} not in workspace {}",
+                tab_id, workspace_id
+            ),
+            fatal: false,
+            version: v,
+        }];
+    };
+    let len = workspace.tab_ids.len();
+    let target = (new_index as usize).min(len.saturating_sub(1));
+    if current_pos == target {
+        return Vec::new();
+    }
+    let id = workspace.tab_ids.remove(current_pos);
+    workspace.tab_ids.insert(target, id);
+    let v = state.bump_version();
+    vec![Event::TabReordered {
+        workspace_id,
+        tab_id,
+        new_index: target as u32,
+        version: v,
+    }]
+}
+
 /// Phase E.3 — create a block inside a tab. Validates parent tab
 /// exists; otherwise emits `Event::Error` (non-fatal). On success:
 /// assigns a UUID, appends to the tab's `block_ids`, inserts into
@@ -512,6 +564,7 @@ mod tests {
             | Event::TabCreated { version, .. }
             | Event::TabDeleted { version, .. }
             | Event::ActiveTabChanged { version, .. }
+            | Event::TabReordered { version, .. }
             | Event::BlockCreated { version, .. }
             | Event::BlockDeleted { version, .. }
             | Event::Error { version, .. } => *version,
@@ -1037,6 +1090,127 @@ mod tests {
             &ctx(2),
         );
         assert!(events.is_empty());
+    }
+
+    #[test]
+    fn reorder_tab_moves_to_new_index() {
+        let mut state = State::default();
+        let ws_id = create_workspace(&mut state, "w");
+        for i in 1..=3 {
+            let _ = update(
+                &mut state,
+                Command::CreateTab {
+                    workspace_id: ws_id.clone(),
+                    name: format!("t{}", i),
+                },
+                &ctx(i),
+            );
+        }
+        let original = state.workspaces[&ws_id].tab_ids.clone();
+        // Move first tab to index 2 (last).
+        let events = update(
+            &mut state,
+            Command::ReorderTab {
+                workspace_id: ws_id.clone(),
+                tab_id: original[0].clone(),
+                new_index: 2,
+            },
+            &ctx(10),
+        );
+        assert!(matches!(&events[0], Event::TabReordered { .. }));
+        let after = &state.workspaces[&ws_id].tab_ids;
+        assert_eq!(after[0], original[1]);
+        assert_eq!(after[1], original[2]);
+        assert_eq!(after[2], original[0]);
+    }
+
+    #[test]
+    fn reorder_tab_clamps_to_last_index() {
+        let mut state = State::default();
+        let ws_id = create_workspace(&mut state, "w");
+        let _ = update(
+            &mut state,
+            Command::CreateTab {
+                workspace_id: ws_id.clone(),
+                name: "t1".into(),
+            },
+            &ctx(1),
+        );
+        let _ = update(
+            &mut state,
+            Command::CreateTab {
+                workspace_id: ws_id.clone(),
+                name: "t2".into(),
+            },
+            &ctx(2),
+        );
+        let original = state.workspaces[&ws_id].tab_ids.clone();
+        // Asking for index 99 should clamp to 1 (len-1).
+        let events = update(
+            &mut state,
+            Command::ReorderTab {
+                workspace_id: ws_id.clone(),
+                tab_id: original[0].clone(),
+                new_index: 99,
+            },
+            &ctx(3),
+        );
+        if let Event::TabReordered { new_index, .. } = &events[0] {
+            assert_eq!(*new_index, 1);
+        } else {
+            panic!("expected TabReordered");
+        }
+    }
+
+    #[test]
+    fn reorder_tab_already_at_position_no_op() {
+        let mut state = State::default();
+        let ws_id = create_workspace(&mut state, "w");
+        let _ = update(
+            &mut state,
+            Command::CreateTab {
+                workspace_id: ws_id.clone(),
+                name: "t1".into(),
+            },
+            &ctx(1),
+        );
+        let tab_id = state.workspaces[&ws_id].tab_ids[0].clone();
+        let events = update(
+            &mut state,
+            Command::ReorderTab {
+                workspace_id: ws_id,
+                tab_id,
+                new_index: 0,
+            },
+            &ctx(2),
+        );
+        assert!(events.is_empty());
+    }
+
+    #[test]
+    fn reorder_tab_validates_workspace_and_tab() {
+        let mut state = State::default();
+        let events = update(
+            &mut state,
+            Command::ReorderTab {
+                workspace_id: "no-such-ws".into(),
+                tab_id: "x".into(),
+                new_index: 0,
+            },
+            &ctx(1),
+        );
+        assert!(matches!(&events[0], Event::Error { .. }));
+        let ws_id = create_workspace(&mut state, "w");
+        let events = update(
+            &mut state,
+            Command::ReorderTab {
+                workspace_id: ws_id,
+                tab_id: "ghost".into(),
+                new_index: 0,
+            },
+            &ctx(2),
+        );
+        assert!(matches!(&events[0], Event::Error { .. }));
     }
 
     #[test]
