@@ -978,12 +978,18 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
                 Err(e) => return WebReturnType::error(e),
             };
             tracing::info!(ws_id = %ws_id, tab_id = %tab_id, new_index = %new_index, "[dnd:svc] ReorderTab");
+            // Clamp to u32::MAX rather than truncating via `as u32`.
+            // The reducer further clamps to `tab_ids.len() - 1` so an
+            // absurd usize ends up at the last position — matching
+            // the prior `wcore::reorder_tab` behaviour where any
+            // out-of-range usize clamped to the end. (codex P3 #617.)
+            let new_index_u32 = u32::try_from(new_index).unwrap_or(u32::MAX);
             let events = dispatch_to_reducer(
                 state,
                 agentmux_common::ipc::Command::ReorderTab {
                     workspace_id: ws_id.clone(),
                     tab_id: tab_id.clone(),
-                    new_index: new_index as u32,
+                    new_index: new_index_u32,
                 },
             )
             .await;
