@@ -742,27 +742,48 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
             // Detect and fall through to wcore for those.
             let is_pinned = match store.get::<Workspace>(&ws_id) {
                 Ok(Some(ws)) => ws.pinnedtabids.iter().any(|t| t == &tab_id),
-                _ => false,
+                Ok(None) => false,
+                Err(e) => {
+                    // Surface SQLite errors instead of falling through
+                    // into the reducer path with a misleading "tab
+                    // not in workspace" reducer error. (codex P2 #616.)
+                    return WebReturnType::error(format!(
+                        "SetActiveTab: SQLite read failed: {}",
+                        e
+                    ));
+                }
             };
             if is_pinned {
                 return match wcore::set_active_tab(store, &ws_id, &tab_id) {
                     Ok(()) => {
                         // Pinned tabs aren't in the reducer's
                         // WorkspaceRecord.tab_ids (E.2c.3 doesn't yet
-                        // model them). Clear the reducer's
-                        // active_tab_id so the next SetActiveTab on a
-                        // regular tab isn't a no-op (would happen if
-                        // the reducer still pointed at a previously-
-                        // active regular tab — bouncing between
-                        // pinned and regular would lose user switch
-                        // requests). Direct mutation outside the
-                        // reducer is a transitional hack; E.2c.3b
-                        // adds pinned-tab support and unifies the
-                        // path. (codex P1 #616.)
+                        // model them). Direct-mutate
+                        // `active_tab_id = Some(pinned_tab_id)` so
+                        // both bugs from the prior iterations are
+                        // avoided:
+                        //   * Setting `None` would cause the next
+                        //     CreateTab(activate=false) to be auto-
+                        //     activated (handle_create_tab auto-
+                        //     activates when active_tab_id is None).
+                        //     codex P1 #616 round-3.
+                        //   * Leaving the previous regular tab as
+                        //     active would make the next
+                        //     SetActiveTab(same regular) a no-op
+                        //     (reducer thinks it's already active),
+                        //     so user bounces pinned→regular would
+                        //     be lost. codex P1 #616 round-2.
+                        // Storing the pinned id here is "external"
+                        // to the reducer's tab_ids set, but the
+                        // reducer is a session-only projection
+                        // during the migration window — having a
+                        // value the reducer wouldn't validate via
+                        // its own command path is fine. E.2c.3b
+                        // adds proper pinned support and unifies.
                         {
                             let mut s = state.srv_state.lock().await;
                             if let Some(ws_record) = s.workspaces.get_mut(&ws_id) {
-                                ws_record.active_tab_id = None;
+                                ws_record.active_tab_id = Some(tab_id.clone());
                             }
                         }
                         if let Ok(ws) = store.must_get::<Workspace>(&ws_id) {
