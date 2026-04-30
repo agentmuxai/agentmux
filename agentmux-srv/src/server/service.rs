@@ -541,14 +541,12 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
             Ok(list) => WebReturnType::success(serde_json::to_value(&list).unwrap_or_default()),
             Err(e) => WebReturnType::error(e.to_string()),
         },
-        // Phase E.2c.3 — CreateTab routes through the reducer for
-        // regular (unpinned) tabs. Pinned tabs (`pinned=true` in
-        // args[3]) stay on the wcore-direct path until E.2c.3b adds
-        // pinned-tab support to the reducer. The split is necessary
-        // because the reducer's WorkspaceRecord doesn't yet track
-        // `pinned_tab_ids` separately — adding that is structural
-        // (state shape + bootstrap split + subscriber routing) and
-        // doesn't fit cleanly into this PR.
+        // Phase E.2c.3b — CreateTab dispatches through the reducer.
+        // The `pinned` argument from older clients is ignored:
+        // pinning was a Waveterm feature removed from AgentMux.
+        // Legacy SQLite databases may still have entries in
+        // `Workspace.pinnedtabids`; bootstrap merges them into
+        // `tab_ids` so they behave as regular tabs.
         ("workspace", "CreateTab") => {
             let ws_id: String = match service::get_arg(args, 0) {
                 Ok(v) => v,
@@ -556,45 +554,13 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
             };
             let tab_name: String = service::get_arg(args, 1).unwrap_or_default();
             let activate: bool = service::get_arg(args, 2).unwrap_or(true);
-            let pinned: bool = service::get_arg(args, 3).unwrap_or(false);
-            if pinned {
-                // Pinned-tab path: wcore-direct (unchanged from E.2c.2).
-                match wcore::create_tab_with_opts(store, &ws_id, &tab_name, true) {
-                    Ok(tab) => {
-                        if activate {
-                            let _ = wcore::set_active_tab(store, &ws_id, &tab.oid);
-                        }
-                        let tab_oid = tab.oid.clone();
-                        let mut updates = vec![WaveObjUpdate {
-                            updatetype: "update".into(),
-                            otype: OTYPE_TAB.to_string(),
-                            oid: tab.oid.clone(),
-                            obj: Some(wave_obj_to_value(&tab)),
-                        }];
-                        if let Ok(ws) = store.must_get::<Workspace>(&ws_id) {
-                            updates.push(WaveObjUpdate {
-                                updatetype: "update".into(),
-                                otype: OTYPE_WORKSPACE.to_string(),
-                                oid: ws_id.clone(),
-                                obj: Some(wave_obj_to_value(&ws)),
-                            });
-                        }
-                        return WebReturnType::success_data_updates(
-                            serde_json::to_value(&tab_oid).unwrap_or_default(),
-                            updates,
-                        );
-                    }
-                    Err(e) => return WebReturnType::error(e.to_string()),
-                }
-            }
-            // Regular tab: dispatch through reducer. Auto-generate
-            // a `tab{N}` name when the caller passed empty so the
-            // reducer path matches the wcore behaviour
-            // (wcore::create_tab_with_opts auto-names empties from
-            // `ws.tabids.len() + ws.pinnedtabids.len()`). Without
-            // this, regular reducer-routed tabs got blank titles
-            // while pinned wcore-routed tabs auto-named — UX
-            // inconsistency. (reagent + codex P1 #616.)
+            // args[3] (`pinned`) intentionally ignored.
+            // Auto-generate a `tab{N}` name when the caller passed
+            // empty so behaviour matches the prior wcore path. Counts
+            // both `tabids` and any leftover `pinnedtabids` from
+            // legacy data so the numbering doesn't collide with
+            // pre-removal entries that bootstrap will surface as
+            // regular tabs.
             let resolved_name = if tab_name.is_empty() {
                 match store.get::<Workspace>(&ws_id) {
                     Ok(Some(ws)) => {
@@ -737,50 +703,11 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
             // orphaned block nodes that would render as blank panes.
             let _ = wcore::heal_layout(store, &tab_id);
 
-            // Pinned tabs aren't tracked in the reducer yet — dispatch
-            // would emit Error("tab not in workspace's tab list").
-            // Detect and fall through to wcore for those.
-            let is_pinned = match store.get::<Workspace>(&ws_id) {
-                Ok(Some(ws)) => ws.pinnedtabids.iter().any(|t| t == &tab_id),
-                _ => false,
-            };
-            if is_pinned {
-                return match wcore::set_active_tab(store, &ws_id, &tab_id) {
-                    Ok(()) => {
-                        // Pinned tabs aren't in the reducer's
-                        // WorkspaceRecord.tab_ids (E.2c.3 doesn't yet
-                        // model them). Clear the reducer's
-                        // active_tab_id so the next SetActiveTab on a
-                        // regular tab isn't a no-op (would happen if
-                        // the reducer still pointed at a previously-
-                        // active regular tab — bouncing between
-                        // pinned and regular would lose user switch
-                        // requests). Direct mutation outside the
-                        // reducer is a transitional hack; E.2c.3b
-                        // adds pinned-tab support and unifies the
-                        // path. (codex P1 #616.)
-                        {
-                            let mut s = state.srv_state.lock().await;
-                            if let Some(ws_record) = s.workspaces.get_mut(&ws_id) {
-                                ws_record.active_tab_id = None;
-                            }
-                        }
-                        if let Ok(ws) = store.must_get::<Workspace>(&ws_id) {
-                            let update = WaveObjUpdate {
-                                updatetype: "update".into(),
-                                otype: OTYPE_WORKSPACE.to_string(),
-                                oid: ws_id.clone(),
-                                obj: Some(wave_obj_to_value(&ws)),
-                            };
-                            WebReturnType::success_with_updates(vec![update])
-                        } else {
-                            WebReturnType::success_empty()
-                        }
-                    }
-                    Err(e) => WebReturnType::error(e.to_string()),
-                };
-            }
-
+            // Phase E.2c.3b — pinning was removed from AgentMux
+            // (Waveterm legacy). All tabs are regular; dispatch
+            // straight through the reducer. Bootstrap merges any
+            // legacy `pinnedtabids` into the reducer's `tab_ids` so
+            // tabs from older databases are reachable as normal tabs.
             let events = dispatch_to_reducer(
                 state,
                 agentmux_common::ipc::Command::SetActiveTab {
@@ -826,6 +753,12 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
                 WebReturnType::success_empty()
             }
         }
+        // Phase E.2c.3b — CloseTab applies SQLite first via wcore
+        // (cascades to blocks + layouts), then dispatches the
+        // reducer's DeleteTab to keep state in sync. Same SQLite-
+        // first pattern as DeleteWorkspace — Delete cascades touch
+        // many records and rolling back the reducer on a partial
+        // wcore failure is impractical.
         ("workspace", "CloseTab") => {
             let ws_id: String = match service::get_arg(args, 0) {
                 Ok(v) => v,
@@ -835,35 +768,42 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
                 Ok(v) => v,
                 Err(e) => return WebReturnType::error(e),
             };
-            match wcore::delete_tab(store, &ws_id, &tab_id) {
-                Ok(()) => {
-                    let rtn = CloseTabRtnType {
-                        closewindow: false,
-                        newactivetabid: String::new(),
-                    };
-                    let mut updates = vec![];
-                    // Include deleted tab update so frontend removes it from cache
-                    updates.push(WaveObjUpdate {
-                        updatetype: "delete".into(),
-                        otype: OTYPE_TAB.to_string(),
-                        oid: tab_id.clone(),
-                        obj: None,
-                    });
-                    if let Ok(ws) = store.must_get::<Workspace>(&ws_id) {
-                        updates.push(WaveObjUpdate {
-                            updatetype: "update".into(),
-                            otype: OTYPE_WORKSPACE.to_string(),
-                            oid: ws_id.clone(),
-                            obj: Some(wave_obj_to_value(&ws)),
-                        });
-                    }
-                    WebReturnType::success_data_updates(
-                        serde_json::to_value(&rtn).unwrap_or_default(),
-                        updates,
-                    )
-                }
-                Err(e) => WebReturnType::error(e.to_string()),
+            if let Err(e) = wcore::delete_tab(store, &ws_id, &tab_id) {
+                return WebReturnType::error(e.to_string());
             }
+            // Reducer dispatch is silent on missing — safe to call
+            // unconditionally now that SQLite is consistent.
+            let events = dispatch_to_reducer(
+                state,
+                agentmux_common::ipc::Command::DeleteTab {
+                    workspace_id: ws_id.clone(),
+                    tab_id: tab_id.clone(),
+                },
+            )
+            .await;
+            publish_events(state, &events);
+            let rtn = CloseTabRtnType {
+                closewindow: false,
+                newactivetabid: String::new(),
+            };
+            let mut updates = vec![WaveObjUpdate {
+                updatetype: "delete".into(),
+                otype: OTYPE_TAB.to_string(),
+                oid: tab_id.clone(),
+                obj: None,
+            }];
+            if let Ok(ws) = store.must_get::<Workspace>(&ws_id) {
+                updates.push(WaveObjUpdate {
+                    updatetype: "update".into(),
+                    otype: OTYPE_WORKSPACE.to_string(),
+                    oid: ws_id.clone(),
+                    obj: Some(wave_obj_to_value(&ws)),
+                });
+            }
+            WebReturnType::success_data_updates(
+                serde_json::to_value(&rtn).unwrap_or_default(),
+                updates,
+            )
         }
         ("workspace", "UpdateWorkspace") => {
             let ws_id: String = match service::get_arg(args, 0) {
@@ -1018,6 +958,12 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
                 Err(e) => WebReturnType::error(e.to_string()),
             }
         }
+        // Phase E.2c.3b — ReorderTab dispatches through the reducer.
+        // Forward+compensate isn't useful here (reorder is its own
+        // inverse), so on SQLite apply failure we just surface the
+        // error and the reducer state ends up ahead of disk for the
+        // remainder of the session — converges back at next restart
+        // via bootstrap.
         ("workspace", "ReorderTab") => {
             let ws_id: String = match service::get_arg(args, 0) {
                 Ok(v) => v,
@@ -1032,21 +978,43 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
                 Err(e) => return WebReturnType::error(e),
             };
             tracing::info!(ws_id = %ws_id, tab_id = %tab_id, new_index = %new_index, "[dnd:svc] ReorderTab");
-            match wcore::reorder_tab(store, &ws_id, &tab_id, new_index) {
-                Ok(()) => {
-                    if let Ok(ws) = store.must_get::<Workspace>(&ws_id) {
-                        let update = WaveObjUpdate {
-                            updatetype: "update".into(),
-                            otype: OTYPE_WORKSPACE.to_string(),
-                            oid: ws_id.clone(),
-                            obj: Some(wave_obj_to_value(&ws)),
-                        };
-                        WebReturnType::success_with_updates(vec![update])
-                    } else {
-                        WebReturnType::success_empty()
-                    }
+            let events = dispatch_to_reducer(
+                state,
+                agentmux_common::ipc::Command::ReorderTab {
+                    workspace_id: ws_id.clone(),
+                    tab_id: tab_id.clone(),
+                    new_index: new_index as u32,
+                },
+            )
+            .await;
+            // Surface reducer Error events.
+            if let Some(err_msg) = events.iter().find_map(|e| match e {
+                agentmux_common::ipc::Event::Error { message, .. } => Some(message.clone()),
+                _ => None,
+            }) {
+                return WebReturnType::error(err_msg);
+            }
+            let mut apply_err: Option<String> = None;
+            for ev in &events {
+                if let Err(e) = crate::persist_subscriber::apply_event_to_wstore(ev, store) {
+                    apply_err = Some(e.to_string());
+                    break;
                 }
-                Err(e) => WebReturnType::error(e.to_string()),
+            }
+            if let Some(err) = apply_err {
+                return WebReturnType::error(format!("ReorderTab: SQLite write failed: {}", err));
+            }
+            publish_events(state, &events);
+            if let Ok(ws) = store.must_get::<Workspace>(&ws_id) {
+                let update = WaveObjUpdate {
+                    updatetype: "update".into(),
+                    otype: OTYPE_WORKSPACE.to_string(),
+                    oid: ws_id.clone(),
+                    obj: Some(wave_obj_to_value(&ws)),
+                };
+                WebReturnType::success_with_updates(vec![update])
+            } else {
+                WebReturnType::success_empty()
             }
         }
         ("workspace", "MoveTabToWorkspace") => {

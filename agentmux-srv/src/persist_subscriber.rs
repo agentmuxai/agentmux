@@ -207,6 +207,12 @@ pub(crate) fn apply_event_to_wstore(
             tab_id,
             ..
         } => apply_active_tab_changed(wstore, workspace_id, tab_id.as_deref()),
+        Event::TabReordered {
+            workspace_id,
+            tab_id,
+            new_index,
+            ..
+        } => apply_tab_reordered(wstore, workspace_id, tab_id, *new_index),
         Event::BlockCreated {
             tab_id, block_id, ..
         } => apply_block_created(wstore, tab_id, block_id),
@@ -327,6 +333,31 @@ fn apply_active_tab_changed(
     Ok(())
 }
 
+fn apply_tab_reordered(
+    wstore: &WaveStore,
+    workspace_id: &str,
+    tab_id: &str,
+    new_index: u32,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let Some(mut ws) = wstore.get::<Workspace>(workspace_id)? else {
+        return Ok(());
+    };
+    let Some(current_pos) = ws.tabids.iter().position(|t| t == tab_id) else {
+        // Tab might have been a legacy pinned entry, or already
+        // gone — silent no-op (idempotent).
+        return Ok(());
+    };
+    let len = ws.tabids.len();
+    let target = (new_index as usize).min(len.saturating_sub(1));
+    if current_pos == target {
+        return Ok(());
+    }
+    let id = ws.tabids.remove(current_pos);
+    ws.tabids.insert(target, id);
+    wstore.update(&mut ws)?;
+    Ok(())
+}
+
 fn apply_block_created(
     wstore: &WaveStore,
     tab_id: &str,
@@ -372,6 +403,7 @@ fn event_kind(event: &Event) -> &'static str {
         Event::TabCreated { .. } => "TabCreated",
         Event::TabDeleted { .. } => "TabDeleted",
         Event::ActiveTabChanged { .. } => "ActiveTabChanged",
+        Event::TabReordered { .. } => "TabReordered",
         Event::BlockCreated { .. } => "BlockCreated",
         Event::BlockDeleted { .. } => "BlockDeleted",
         _ => "Other",
