@@ -139,16 +139,19 @@ pub async fn bootstrap_state_from_wstore(state: &Arc<Mutex<State>>, wstore: &Wav
     }
     for block in &blocks {
         // Phase E.3 — recover each block's parent tab via reverse
-        // lookup against `Tab.blockids`. Blocks without a known
-        // parent are skipped (orphans).
-        let Some(tab_id) = tabs
-            .iter()
-            .find(|t| t.blockids.iter().any(|bid| bid == &block.oid))
-            .map(|t| t.oid.clone())
+        // lookup against `state.tabs` (NOT raw `tabs` from SQLite):
+        // tabs orphaned in the prior loop (no parent workspace) are
+        // not in `state.tabs`, so blocks under them must also be
+        // dropped to keep reducer state consistent. (reagent P1 #613.)
+        let Some(tab_id) = state
+            .tabs
+            .values()
+            .find(|t| t.block_ids.iter().any(|bid| bid == &block.oid))
+            .map(|t| t.tab_id.clone())
         else {
             tracing::warn!(
                 target: "srv-persist",
-                "[srv-persist] bootstrap: block {} has no parent tab — skipping",
+                "[srv-persist] bootstrap: block {} has no parent tab in reducer state — skipping",
                 block.oid
             );
             continue;
