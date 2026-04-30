@@ -268,6 +268,9 @@ fn event_version(e: &Event) -> u64 {
         | Event::SrvSnapshot { version, .. }
         | Event::WorkspaceCreated { version, .. }
         | Event::WorkspaceDeleted { version, .. }
+        | Event::TabCreated { version, .. }
+        | Event::TabDeleted { version, .. }
+        | Event::ActiveTabChanged { version, .. }
         | Event::Error { version, .. } => *version,
     }
 }

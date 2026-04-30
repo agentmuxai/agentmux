@@ -660,6 +660,19 @@ async fn enforce_register_first(
             "DeleteWorkspace is a srv-pipe command; sent to launcher pipe by mistake".to_string(),
             false,
         ),
+        // Phase E.2b — Tab arms are also srv-pipe commands.
+        Command::CreateTab { .. } => (
+            "CreateTab is a srv-pipe command; sent to launcher pipe by mistake".to_string(),
+            false,
+        ),
+        Command::DeleteTab { .. } => (
+            "DeleteTab is a srv-pipe command; sent to launcher pipe by mistake".to_string(),
+            false,
+        ),
+        Command::SetActiveTab { .. } => (
+            "SetActiveTab is a srv-pipe command; sent to launcher pipe by mistake".to_string(),
+            false,
+        ),
     };
     // Phase E.1b — connection-private error; sentinel version=0
     // (codex P2 #610). See parse-error path for rationale.

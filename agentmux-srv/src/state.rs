@@ -44,10 +44,30 @@ pub struct ProcessRecord {
 /// Phase E.2 — workspace as held by the srv reducer's canonical
 /// state. Mirrors the persistent `Workspace` struct in
 /// `agentmux_srv::backend::obj::Workspace` but with the reducer-
-/// canonical fields the cross-process events care about. Tabs
-/// are tracked separately in E.2b.
+/// canonical fields the cross-process events care about.
+///
+/// Phase E.2b extends the record with `tab_ids` (ordered) and
+/// `active_tab_id`. Tabs themselves live in `state.tabs` keyed by
+/// tab_id; the workspace owns the ordering.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorkspaceRecord {
+    pub workspace_id: String,
+    pub name: String,
+    /// Ordered list of tab ids in this workspace. Mirrors the
+    /// persistent `Workspace.tabids` field.
+    pub tab_ids: Vec<String>,
+    /// The active tab in this workspace, if any. `None` when the
+    /// workspace has no tabs or has not yet had one selected.
+    pub active_tab_id: Option<String>,
+}
+
+/// Phase E.2b — tab as held by the srv reducer's canonical state.
+/// Tabs are owned by exactly one workspace; the workspace's
+/// `tab_ids` field gives the ordering. Block-level state lands in
+/// E.3.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TabRecord {
+    pub tab_id: String,
     pub workspace_id: String,
     pub name: String,
 }
@@ -66,6 +86,11 @@ pub struct State {
     /// subscriber that mirrors changes back to SQLite (idempotent,
     /// version-gated) and migrates HTTP/WS RPC through the reducer.
     pub workspaces: HashMap<String, WorkspaceRecord>,
+    /// Phase E.2b — tabs canonical to the srv reducer. Keyed by
+    /// `tab_id`; ordering within a workspace is held in
+    /// `WorkspaceRecord.tab_ids`. Bootstrap-loaded from SQLite at
+    /// startup alongside workspaces.
+    pub tabs: HashMap<String, TabRecord>,
     // `persistence_hwm` deferred to E.2c when the persist subscriber
     // lands and there's actually something to track.
 }
@@ -78,6 +103,7 @@ impl Default for State {
             event_version: 0,
             next_client_id: 0,
             workspaces: HashMap::new(),
+            tabs: HashMap::new(),
         }
     }
 }
