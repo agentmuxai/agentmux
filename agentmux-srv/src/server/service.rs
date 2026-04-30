@@ -428,11 +428,12 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
             }
             if let Some(err) = apply_err {
                 if let Some(id) = workspace_id.as_ref() {
-                    let _ = dispatch_to_reducer(
+                    compensate_via_reducer(
                         state,
                         agentmux_common::ipc::Command::DeleteWorkspace {
                             workspace_id: id.clone(),
                         },
+                        store,
                     )
                     .await;
                 }
@@ -586,12 +587,29 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
                     Err(e) => return WebReturnType::error(e.to_string()),
                 }
             }
-            // Regular tab: dispatch through reducer.
+            // Regular tab: dispatch through reducer. Auto-generate
+            // a `tab{N}` name when the caller passed empty so the
+            // reducer path matches the wcore behaviour
+            // (wcore::create_tab_with_opts auto-names empties from
+            // `ws.tabids.len() + ws.pinnedtabids.len()`). Without
+            // this, regular reducer-routed tabs got blank titles
+            // while pinned wcore-routed tabs auto-named — UX
+            // inconsistency. (reagent + codex P1 #616.)
+            let resolved_name = if tab_name.is_empty() {
+                match store.get::<Workspace>(&ws_id) {
+                    Ok(Some(ws)) => {
+                        format!("tab{}", ws.tabids.len() + ws.pinnedtabids.len() + 1)
+                    }
+                    _ => "tab1".to_string(),
+                }
+            } else {
+                tab_name.clone()
+            };
             let events = dispatch_to_reducer(
                 state,
                 agentmux_common::ipc::Command::CreateTab {
                     workspace_id: ws_id.clone(),
-                    name: tab_name.clone(),
+                    name: resolved_name,
                 },
             )
             .await;
@@ -621,13 +639,14 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
                 }
             }
             if let Some(err) = apply_err {
-                if let (Some(tid), _) = (tab_id.as_ref(), ()) {
-                    let _ = dispatch_to_reducer(
+                if let Some(tid) = tab_id.as_ref() {
+                    compensate_via_reducer(
                         state,
                         agentmux_common::ipc::Command::DeleteTab {
                             workspace_id: ws_id.clone(),
                             tab_id: tid.clone(),
                         },
+                        store,
                     )
                     .await;
                 }
@@ -728,6 +747,24 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
             if is_pinned {
                 return match wcore::set_active_tab(store, &ws_id, &tab_id) {
                     Ok(()) => {
+                        // Pinned tabs aren't in the reducer's
+                        // WorkspaceRecord.tab_ids (E.2c.3 doesn't yet
+                        // model them). Clear the reducer's
+                        // active_tab_id so the next SetActiveTab on a
+                        // regular tab isn't a no-op (would happen if
+                        // the reducer still pointed at a previously-
+                        // active regular tab — bouncing between
+                        // pinned and regular would lose user switch
+                        // requests). Direct mutation outside the
+                        // reducer is a transitional hack; E.2c.3b
+                        // adds pinned-tab support and unifies the
+                        // path. (codex P1 #616.)
+                        {
+                            let mut s = state.srv_state.lock().await;
+                            if let Some(ws_record) = s.workspaces.get_mut(&ws_id) {
+                                ws_record.active_tab_id = None;
+                            }
+                        }
                         if let Ok(ws) = store.must_get::<Workspace>(&ws_id) {
                             let update = WaveObjUpdate {
                                 updatetype: "update".into(),
@@ -1422,6 +1459,30 @@ async fn dispatch_to_reducer(
 fn publish_events(state: &AppState, events: &[agentmux_common::ipc::Event]) {
     for event in events {
         let _ = state.srv_events_tx.send(event.clone());
+    }
+}
+
+/// Compensation helper: dispatch a command into the reducer and
+/// apply its emitted events to wstore best-effort. Used when an
+/// earlier sync apply partially wrote SQLite and we need to undo
+/// the leaked rows. SQLite errors during compensation are logged
+/// but ignored — the caller is already returning an error to the
+/// client; throwing on the cleanup just hides the original cause.
+/// (codex P1 + reagent P2 #616 — partial-write cleanup.)
+async fn compensate_via_reducer(
+    state: &AppState,
+    cmd: agentmux_common::ipc::Command,
+    store: &WaveStore,
+) {
+    let events = dispatch_to_reducer(state, cmd).await;
+    for ev in &events {
+        if let Err(e) = crate::persist_subscriber::apply_event_to_wstore(ev, store) {
+            tracing::warn!(
+                "compensation: SQLite cleanup failed for event {:?}: {}",
+                std::mem::discriminant(ev),
+                e
+            );
+        }
     }
 }
 
