@@ -57,14 +57,17 @@ pub async fn bootstrap_state_from_wstore(state: &Arc<Mutex<State>>, wstore: &Wav
     });
     let mut state = state.lock().await;
     for ws in &workspaces {
-        // Filter the workspace's `tabids` against tabs we actually
-        // loaded — defensively drop dangling references rather than
-        // surface them to subscribers as fictional tabs. The active
-        // tab pointer is similarly only retained when it points at a
-        // tab present in the filtered list.
+        // The persistent `Workspace` carries two ordered lists:
+        // `tabids` (regular tabs) and `pinnedtabids` (sticky tabs).
+        // Both are equally "owned by this workspace" for reducer
+        // purposes — only their UX semantics differ. Concatenate
+        // pinned-then-regular (pinning convention puts pinned tabs
+        // first), then filter against the tabs we actually loaded
+        // to drop dangling references defensively. (codex P1 #612.)
         let tab_ids: Vec<String> = ws
-            .tabids
+            .pinnedtabids
             .iter()
+            .chain(ws.tabids.iter())
             .filter(|tid| tabs.iter().any(|t| &t.oid == *tid))
             .cloned()
             .collect();
@@ -88,11 +91,17 @@ pub async fn bootstrap_state_from_wstore(state: &Arc<Mutex<State>>, wstore: &Wav
     for tab in &tabs {
         // Each tab needs to know its parent workspace_id, which the
         // persistent `Tab` struct doesn't carry directly — we recover
-        // it from whichever workspace lists this tab in `tabids`.
-        // Tabs whose parent isn't loaded are skipped (orphans).
+        // it from whichever workspace lists this tab id in EITHER
+        // `tabids` OR `pinnedtabids`. Tabs whose parent isn't loaded
+        // are skipped (orphans). (codex P1 #612.)
         let Some(workspace_id) = workspaces
             .iter()
-            .find(|ws| ws.tabids.iter().any(|tid| tid == &tab.oid))
+            .find(|ws| {
+                ws.tabids
+                    .iter()
+                    .chain(ws.pinnedtabids.iter())
+                    .any(|tid| tid == &tab.oid)
+            })
             .map(|ws| ws.oid.clone())
         else {
             tracing::warn!(
