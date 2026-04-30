@@ -329,7 +329,22 @@ These are non-blocking but should fold into one of the PRs above when convenient
 
 ---
 
+## 9b. Post-E.5 follow-up PRs (small, scheduled)
+
+Two cheap correctness gaps worth filing now so they don't get lost. Both are documented in `docs/retro/saga-coordinator-location-analysis-2026-04-30.md` §6.3-§6.4.
+
+| ID | Scope | LoC | When | Why |
+|---|---|---|---|---|
+| **F1.A** | Wrap each `apply_*_event` arm in the persist subscriber in a `wstore` BEGIN/COMMIT transaction. Today's subscriber does sequential `store.update`/`store.insert` calls non-transactionally; partial failures can leave half-written rows. | ~200 | Inside PR 4 (low extra LOC) or standalone | Cheapest robustness win. Real correctness gap that exists today, not a Phase F problem. |
+| **F1.B** | Frontend cleanup on host pool-promote failure: in `tabbar.tsx::requestTearOff` (and block-tear-off equivalents), if `tear_off_pool_promote` returns `pool_exhausted` AND `open_window_at_position` then fails, dispatch `WorkspaceService.DeleteWorkspaceCascade` to clean up the orphan workspace just created via `TearOffTab`. Show a user-facing error toast. | ~50 TS | Standalone, post-E.5 | Trivial fix for a real failure mode that produces visible junk in the workspace list. |
+
+The other three robustness gaps (host as saga step, renderer registration as saga step, persistent saga state) are deferred until Phase F has a written spec. They are not currently scoped or scheduled.
+
+---
+
 ## 10. Decision log
 
 - **2026-04-30:** plan written. 4-PR structure agreed. Hot-fix Option A skipped in favor of going straight to sagas.
+- **2026-04-30:** coordinator location decided as srv-side (Path A). See `docs/retro/saga-coordinator-location-analysis-2026-04-30.md`.
+- **2026-04-30:** post-E.5 follow-ups F1.A (subscriber transactions) and F1.B (frontend orphan cleanup) added to plan §9b.
 - Refer to `SPEC_PHASE_E_SAGAS_2026-04-30.md` for the design spec; this plan is the execution sequence.
