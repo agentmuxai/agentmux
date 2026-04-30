@@ -1,58 +1,67 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// Phase E.2c.1 — persist subscriber. A tokio task that consumes the
-// srv reducer's broadcast bus and mirrors workspace/tab/block
-// lifecycle events back to SQLite via wcore.
+// Phase E.2c.1+E.2c.2 — persist subscriber. A tokio task that
+// consumes the srv reducer's broadcast bus and mirrors
+// workspace/tab/block lifecycle events back to SQLite via wcore.
 //
-// Status in E.2c.1: PLUMBING ONLY.
+// Status:
+//   * E.2c.1 (#614) shipped the per-event apply path. Subscriber was
+//     dead-code in production because no producer existed.
+//   * E.2c.2 (this) wires the workspace HTTP/WS RPC handlers through
+//     the reducer, making the subscriber LIVE for workspace events.
+//     Adds full-resync-on-`Lagged` for workspaces (RPC-migrated
+//     entities only — tab/block resync lands in E.2c.3 / E.2c.4).
 //
-// The subscriber is dead-code in production today because no
-// in-process caller currently emits the Workspace/Tab/Block events
-// it consumes — RPC handlers still write SQLite directly via wcore;
-// the saga coordinator (E.5+) is empty. The subscriber's job in
-// E.2c.1 is to establish the persist-back pattern so the saga
-// coordinator and the future RPC migration (E.2c.2+) have a target
-// to write against. Idempotent applies are exercised by the unit
-// tests in this module.
+// Bus-lag handling:
+//   On RecvError::Lagged(n) the subscriber drops `n` events.
+//   Naive HWM advancement past dropped events would permanently
+//   diverge SQLite from reducer state. Instead we do a workspace-
+//   scoped resync: snapshot `state.workspaces` under the reducer
+//   mutex, write each workspace into SQLite (idempotent insert /
+//   no-op / update). The resync is INSERT/UPDATE only — no deletes —
+//   because workspaces can also be created OUTSIDE the reducer
+//   during the migration window (e.g., the still-wcore-direct
+//   `CreateWindow` flow calls `wcore::create_window_full` which
+//   creates a workspace under the hood). Deleting workspaces
+//   missing from the reducer snapshot would lose those legitimate
+//   rows. Stale workspaces deleted-via-reducer that the subscriber
+//   missed on Lagged linger on disk until the next user-driven
+//   DeleteWorkspace cleans them up via the wcore fallback in
+//   service.rs. (codex P1 #615.)
 //
-// What this module does NOT do (intentionally):
-//   * Full-resync on broadcast `Lagged`. Resync would write the
-//     reducer's session-only state back to SQLite. That state is
-//     FROZEN at bootstrap for any entity the reducer doesn't
-//     mutate (i.e., everything RPC writes today). Doing a resync
-//     before RPC is migrated would clobber those RPC-driven writes.
-//     Resync lands in E.2c.2 alongside the workspace RPC migration,
-//     where reducer state actually tracks live changes.
-//   * Per-event ACK / sequence-number tracking. Bus is fire-and-
-//     forget; subscriber position is whatever tokio broadcast says.
-//   * Bus-lag recovery beyond a warning log. With no live event
-//     producers in E.2c.1, lag is impossible in practice — adding
-//     real recovery before producers exist is YAGNI. E.2c.2 brings
-//     the producer (RPC migration) AND the recovery (full-resync).
+//   IMPORTANT: tab/block resync is NOT done here yet. Tabs and
+//   blocks remain RPC-direct via wcore; the reducer's view of them
+//   is FROZEN at bootstrap. Doing tab/block resync before E.2c.3
+//   and E.2c.4 land would clobber RPC-driven writes the reducer
+//   doesn't see. Resync expands as each entity migrates.
 
 use std::sync::Arc;
 
 use agentmux_common::ipc::Event;
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, Mutex};
 
-use crate::backend::obj::{Block, Tab, Workspace};
+use crate::backend::obj::{Block, LayoutState as PersistedLayoutState, Tab, Workspace};
 use crate::backend::storage::wstore::WaveStore;
 use crate::backend::wcore;
+use crate::state::State;
 
 /// Spawn the persist subscriber task. Runs until the broadcast
 /// channel closes (i.e., the reducer's bus is dropped at process
-/// shutdown).
+/// shutdown). The `state` handle is used for workspace-scoped
+/// full-resync after a `RecvError::Lagged`.
 pub fn spawn_persist_subscriber(
     events_rx: broadcast::Receiver<Event>,
     wstore: Arc<WaveStore>,
+    state: Arc<Mutex<State>>,
 ) -> tokio::task::JoinHandle<()> {
-    tokio::spawn(run_persist_subscriber(events_rx, wstore))
+    tokio::spawn(run_persist_subscriber(events_rx, wstore, state))
 }
 
 async fn run_persist_subscriber(
     mut events_rx: broadcast::Receiver<Event>,
     wstore: Arc<WaveStore>,
+    state: Arc<Mutex<State>>,
 ) {
     tracing::info!(target: "srv-persist-subscriber", "[srv-persist-subscriber] started");
     loop {
@@ -68,18 +77,25 @@ async fn run_persist_subscriber(
                 }
             }
             Err(broadcast::error::RecvError::Lagged(n)) => {
-                // E.2c.1 — log only. Real recovery (full-resync from
-                // reducer state) lands in E.2c.2 once the RPC
-                // migration makes resync non-destructive. With no
-                // live producers in E.2c.1 (saga coordinator empty,
-                // RPC still writes wcore directly), Lagged is
-                // unreachable — this arm exists only because the
-                // tokio API requires handling it.
+                // Workspace-scoped full resync. Subscriber dropped
+                // `n` events; rather than guess which entities were
+                // affected, snapshot the reducer's workspace map and
+                // reconcile SQLite against it. RPC-migrated entities
+                // (workspaces in E.2c.2) are correctly recovered;
+                // not-yet-migrated entities (tab/block) are left
+                // alone — see module-level docs.
                 tracing::warn!(
                     target: "srv-persist-subscriber",
-                    "[srv-persist-subscriber] dropped {} event(s) — SQLite may diverge from reducer; resync lands in E.2c.2",
+                    "[srv-persist-subscriber] dropped {} event(s) — running workspace resync",
                     n
                 );
+                if let Err(e) = resync_workspaces(&state, &wstore).await {
+                    tracing::error!(
+                        target: "srv-persist-subscriber",
+                        "[srv-persist-subscriber] resync failed: {} — SQLite may diverge from reducer until next event",
+                        e
+                    );
+                }
             }
             Err(broadcast::error::RecvError::Closed) => {
                 tracing::info!(target: "srv-persist-subscriber", "[srv-persist-subscriber] bus closed — exiting");
@@ -89,11 +105,82 @@ async fn run_persist_subscriber(
     }
 }
 
+/// Snapshot `state.workspaces` and reconcile against SQLite —
+/// INSERT/UPDATE only, no deletes. Workspace-scoped (tab/block
+/// resync expands here as each entity's RPC layer migrates).
+///
+/// Why no delete-phase: during the migration window, workspaces
+/// can be created OUTSIDE the reducer (e.g., the still-wcore-direct
+/// `CreateWindow` flow calls `wcore::create_window_full` which
+/// creates a workspace under the hood). Those workspaces aren't in
+/// `state.workspaces`. If the subscriber lagged and we did a
+/// delete-not-in-snapshot pass, we'd cascade-delete legitimate
+/// workspaces — data loss triggered by bus pressure rather than a
+/// user action. Far better for a stale workspace deleted-via-reducer
+/// to linger on disk after a Lagged event than to lose a real one.
+/// (codex P1 #615.)
+///
+/// Stale-after-Lagged scenario: reducer fires WorkspaceDeleted, the
+/// subscriber drops it on Lagged, resync runs but only insert/updates.
+/// SQLite still has the deleted workspace's row. The next user-driven
+/// DeleteWorkspace (which falls through to `wcore::delete_workspace`
+/// for unknown-to-reducer rows) cleans it up. Acceptable behaviour
+/// during the migration; tightens once all RPC is reducer-driven.
+///
+/// Strategy:
+///   1. Lock state, snapshot the workspace map (ids + names),
+///      release the lock.
+///   2. For each workspace in the snapshot: insert if missing,
+///      no-op if name matches, update if name differs.
+async fn resync_workspaces(
+    state: &Arc<Mutex<State>>,
+    wstore: &WaveStore,
+) -> Result<(), Box<dyn std::error::Error>> {
+    // Snapshot under lock; release before any I/O.
+    let snapshot: Vec<(String, String)> = {
+        let s = state.lock().await;
+        s.workspaces
+            .values()
+            .map(|w| (w.workspace_id.clone(), w.name.clone()))
+            .collect()
+    };
+
+    for (workspace_id, name) in &snapshot {
+        match wstore.get::<Workspace>(workspace_id)? {
+            Some(existing) if existing.name == *name => {
+                // Already in sync.
+            }
+            Some(mut existing) => {
+                existing.name = name.clone();
+                wstore.update(&mut existing)?;
+            }
+            None => {
+                let mut ws = Workspace {
+                    oid: workspace_id.clone(),
+                    name: name.clone(),
+                    ..Default::default()
+                };
+                wstore.insert(&mut ws)?;
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Apply one reducer event to the on-disk store. Idempotent: each
 /// arm checks for the entity's current SQLite state before writing
 /// so duplicate events (from at-least-once delivery semantics) don't
 /// produce duplicate rows or wcore errors.
-fn apply_event_to_wstore(
+///
+/// Phase E.2c.2 — exposed at crate visibility so RPC handlers in
+/// `service.rs` can apply events synchronously after dispatching
+/// through the reducer. This closes the race where the async
+/// subscriber hadn't yet written SQLite by the time a follow-up
+/// RPC (e.g., `CreateTab` against a just-created workspace) tried
+/// to read it. Calling this from the RPC handler followed by the
+/// subscriber receiving the broadcast event is safe because the
+/// arms are idempotent — the subscriber's later apply is a no-op.
+pub(crate) fn apply_event_to_wstore(
     event: &Event,
     wstore: &WaveStore,
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -167,9 +254,27 @@ fn apply_tab_created(
     name: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     if wstore.get::<Tab>(tab_id)?.is_none() {
+        // Phase E.2c.2 — create a LayoutState row alongside the Tab
+        // so downstream flows that hard-require `Tab.layoutstate`
+        // (e.g., `wcore::tear_off_block`'s
+        // `must_get::<LayoutState>(&tab.layoutstate)`) work for
+        // reducer-originated tabs. Mirrors the wcore::create_tab
+        // pattern. (codex P2 #614.)
+        let mut layout = PersistedLayoutState {
+            oid: uuid::Uuid::new_v4().to_string(),
+            rootnode: None,
+            magnifiednodeid: String::new(),
+            focusednodeid: String::new(),
+            leaforder: None,
+            pendingbackendactions: None,
+            meta: None,
+            ..Default::default()
+        };
+        wstore.insert(&mut layout)?;
         let mut tab = Tab {
             oid: tab_id.to_string(),
             name: name.to_string(),
+            layoutstate: layout.oid.clone(),
             ..Default::default()
         };
         wstore.insert(&mut tab)?;
@@ -458,6 +563,65 @@ mod tests {
         .unwrap();
         let ws = s.get::<Workspace>("ws-1").unwrap().unwrap();
         assert_eq!(ws.activetabid, "");
+    }
+
+    #[test]
+    fn tab_created_provisions_layoutstate() {
+        let s = store();
+        apply_event_to_wstore(
+            &Event::WorkspaceCreated {
+                workspace_id: "ws-1".into(),
+                name: "Alpha".into(),
+                version: 1,
+            },
+            &s,
+        )
+        .unwrap();
+        apply_event_to_wstore(
+            &Event::TabCreated {
+                workspace_id: "ws-1".into(),
+                tab_id: "tab-1".into(),
+                name: "Tab".into(),
+                version: 2,
+            },
+            &s,
+        )
+        .unwrap();
+        let tab = s.get::<Tab>("tab-1").unwrap().unwrap();
+        // codex P2 #614: tab must reference a real LayoutState row,
+        // not be left with empty layoutstate.
+        assert!(!tab.layoutstate.is_empty());
+        let layout = s
+            .get::<PersistedLayoutState>(&tab.layoutstate)
+            .unwrap()
+            .expect("layout row must exist");
+        assert_eq!(layout.oid, tab.layoutstate);
+    }
+
+    #[test]
+    fn workspace_deleted_cascades_pinned_tabs() {
+        let s = store();
+        // Build a workspace with a pinned tab via wcore (the bug
+        // path: pinned tab created via wcore::create_tab_with_opts).
+        let ws = wcore::create_workspace(&s, "Alpha").unwrap();
+        let pinned_tab =
+            wcore::create_tab_with_opts(&s, &ws.oid, "PinnedTab", true).unwrap();
+        // Verify pinned tab is in pinnedtabids (sanity).
+        let ws_loaded = s.get::<Workspace>(&ws.oid).unwrap().unwrap();
+        assert!(ws_loaded.pinnedtabids.contains(&pinned_tab.oid));
+        // Delete via the subscriber's WorkspaceDeleted handler.
+        apply_event_to_wstore(
+            &Event::WorkspaceDeleted {
+                workspace_id: ws.oid.clone(),
+                version: 1,
+            },
+            &s,
+        )
+        .unwrap();
+        // codex P1 #614: pinned tab must be cascade-deleted, not
+        // orphaned.
+        assert!(s.get::<Tab>(&pinned_tab.oid).unwrap().is_none());
+        assert!(s.get::<Workspace>(&ws.oid).unwrap().is_none());
     }
 
     #[test]

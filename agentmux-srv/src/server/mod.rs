@@ -65,6 +65,18 @@ pub struct AppState {
     pub local_web_url: String,
     /// Shared HTTP client for cross-instance inject forwarding.
     pub http_client: reqwest::Client,
+    /// Phase E.2c.2 — srv reducer's canonical state. Workspace HTTP/WS
+    /// RPC handlers route through the reducer (dispatch
+    /// `Command::Create/Delete/...Workspace` and read out of
+    /// `state.workspaces`); the persist subscriber mirrors emitted
+    /// events back to SQLite. Tab/Block RPC migrations land in
+    /// E.2c.3 / E.2c.4.
+    pub srv_state: std::sync::Arc<tokio::sync::Mutex<crate::state::State>>,
+    /// Phase E.2c.2 — broadcast bus for srv reducer events. RPC
+    /// handlers publish reducer-emitted events here so the persist
+    /// subscriber writes them back to SQLite. Pipe IPC server (when
+    /// bound) shares the same bus.
+    pub srv_events_tx: tokio::sync::broadcast::Sender<agentmux_common::ipc::Event>,
 }
 
 /// Build the Axum router with all routes, auth middleware, and CORS.
