@@ -303,6 +303,50 @@ pub enum Command {
         window_id: String,
         workspace_id: String,
     },
+    /// Phase E.5.3 — replace a workspace's `tab_ids` with the given
+    /// list. The new list must be a permutation of the current set
+    /// (same elements, possibly different order); reducer errors
+    /// otherwise. Used by the drag-reorder UI's bulk-reorder path
+    /// (replaces wcore-direct `UpdateTabIds`).
+    ReorderTabsBulk {
+        workspace_id: String,
+        tab_ids: Vec<String>,
+    },
+    /// Phase E.5.3 — rename a workspace. Errors if the workspace
+    /// doesn't exist; no-op if the name is identical.
+    RenameWorkspace {
+        workspace_id: String,
+        name: String,
+    },
+    /// Phase E.5.3 — rename a tab. Errors if the tab doesn't exist;
+    /// no-op if identical.
+    RenameTab {
+        tab_id: String,
+        name: String,
+    },
+    /// Phase E.5.3 — apply a meta-patch to a workspace. The reducer
+    /// validates the entity exists and emits `Event::WorkspaceMetaUpdated`
+    /// with the patch payload; the persist subscriber performs the
+    /// actual merge against wstore. Reducer state does NOT track meta
+    /// in E.5.3 — pass-through preserves the reducer's small footprint
+    /// without losing the migration property (every mutation goes
+    /// through the reducer's broadcast bus).
+    UpdateWorkspaceMeta {
+        workspace_id: String,
+        meta_patch: serde_json::Value,
+    },
+    /// Phase E.5.3 — apply a meta-patch to a tab. Same pass-through
+    /// shape as `UpdateWorkspaceMeta`.
+    UpdateTabMeta {
+        tab_id: String,
+        meta_patch: serde_json::Value,
+    },
+    /// Phase E.5.3 — apply a meta-patch to a block. Same pass-through
+    /// shape as `UpdateWorkspaceMeta`.
+    UpdateBlockMeta {
+        block_id: String,
+        meta_patch: serde_json::Value,
+    },
     /// Phase E.3 — create a block inside an existing tab. Reducer
     /// validates parent tab exists, assigns the `block_id` (UUID),
     /// appends to the tab's `block_ids`, emits `Event::BlockCreated`.
@@ -755,6 +799,48 @@ pub enum Event {
     SrvWindowWorkspaceChanged {
         window_id: String,
         workspace_id: String,
+        version: u64,
+    },
+    /// Phase E.5.3 — workspace's `tab_ids` was replaced wholesale.
+    /// Subscribers should rewrite the persistent `Workspace.tabids`
+    /// to match the new list (preserving `pinnedtabids` separately —
+    /// pinning is a Waveterm legacy and not in scope here).
+    TabsReorderedBulk {
+        workspace_id: String,
+        tab_ids: Vec<String>,
+        version: u64,
+    },
+    /// Phase E.5.3 — workspace was renamed.
+    WorkspaceRenamed {
+        workspace_id: String,
+        name: String,
+        version: u64,
+    },
+    /// Phase E.5.3 — tab was renamed.
+    TabRenamed {
+        tab_id: String,
+        name: String,
+        version: u64,
+    },
+    /// Phase E.5.3 — meta-patch applied to a workspace. Carries the
+    /// patch (NOT the resolved meta map); subscribers merge against
+    /// the workspace's existing meta. This shape lets sagas inspect
+    /// what changed without needing the prior state.
+    WorkspaceMetaUpdated {
+        workspace_id: String,
+        meta_patch: serde_json::Value,
+        version: u64,
+    },
+    /// Phase E.5.3 — meta-patch applied to a tab.
+    TabMetaUpdated {
+        tab_id: String,
+        meta_patch: serde_json::Value,
+        version: u64,
+    },
+    /// Phase E.5.3 — meta-patch applied to a block.
+    BlockMetaUpdated {
+        block_id: String,
+        meta_patch: serde_json::Value,
         version: u64,
     },
     /// Phase E.3 — block was created inside a tab.

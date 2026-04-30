@@ -690,6 +690,31 @@ async fn enforce_register_first(
             "SwitchWorkspace is a srv-pipe command; sent to launcher pipe by mistake".to_string(),
             false,
         ),
+        // Phase E.5.3 — atomic single-step domain commands are srv-pipe.
+        Command::ReorderTabsBulk { .. } => (
+            "ReorderTabsBulk is a srv-pipe command; sent to launcher pipe by mistake".to_string(),
+            false,
+        ),
+        Command::RenameWorkspace { .. } => (
+            "RenameWorkspace is a srv-pipe command; sent to launcher pipe by mistake".to_string(),
+            false,
+        ),
+        Command::RenameTab { .. } => (
+            "RenameTab is a srv-pipe command; sent to launcher pipe by mistake".to_string(),
+            false,
+        ),
+        Command::UpdateWorkspaceMeta { .. } => (
+            "UpdateWorkspaceMeta is a srv-pipe command; sent to launcher pipe by mistake".to_string(),
+            false,
+        ),
+        Command::UpdateTabMeta { .. } => (
+            "UpdateTabMeta is a srv-pipe command; sent to launcher pipe by mistake".to_string(),
+            false,
+        ),
+        Command::UpdateBlockMeta { .. } => (
+            "UpdateBlockMeta is a srv-pipe command; sent to launcher pipe by mistake".to_string(),
+            false,
+        ),
         // Phase E.3 — Block arms are also srv-pipe commands.
         Command::CreateBlock { .. } => (
             "CreateBlock is a srv-pipe command; sent to launcher pipe by mistake".to_string(),

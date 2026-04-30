@@ -275,6 +275,12 @@ fn event_version(e: &Event) -> u64 {
         | Event::SrvWindowOpened { version, .. }
         | Event::SrvWindowClosed { version, .. }
         | Event::SrvWindowWorkspaceChanged { version, .. }
+        | Event::TabsReorderedBulk { version, .. }
+        | Event::WorkspaceRenamed { version, .. }
+        | Event::TabRenamed { version, .. }
+        | Event::WorkspaceMetaUpdated { version, .. }
+        | Event::TabMetaUpdated { version, .. }
+        | Event::BlockMetaUpdated { version, .. }
         | Event::BlockCreated { version, .. }
         | Event::BlockDeleted { version, .. }
         | Event::Error { version, .. } => *version,

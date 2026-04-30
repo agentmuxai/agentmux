@@ -73,6 +73,26 @@ pub fn update(state: &mut State, cmd: Command, ctx: &Ctx) -> Vec<Event> {
             window_id,
             workspace_id,
         } => handle_switch_workspace(state, window_id, workspace_id),
+        Command::ReorderTabsBulk {
+            workspace_id,
+            tab_ids,
+        } => handle_reorder_tabs_bulk(state, workspace_id, tab_ids),
+        Command::RenameWorkspace { workspace_id, name } => {
+            handle_rename_workspace(state, workspace_id, name)
+        }
+        Command::RenameTab { tab_id, name } => handle_rename_tab(state, tab_id, name),
+        Command::UpdateWorkspaceMeta {
+            workspace_id,
+            meta_patch,
+        } => handle_update_workspace_meta(state, workspace_id, meta_patch),
+        Command::UpdateTabMeta {
+            tab_id,
+            meta_patch,
+        } => handle_update_tab_meta(state, tab_id, meta_patch),
+        Command::UpdateBlockMeta {
+            block_id,
+            meta_patch,
+        } => handle_update_block_meta(state, block_id, meta_patch),
         // Anything else is a non-fatal protocol error. Future
         // phases (E.2b tabs, E.3 blocks, E.4 layouts) extend this
         // match by adding new arms above.
@@ -268,19 +288,31 @@ fn handle_delete_workspace(state: &mut State, workspace_id: String) -> Vec<Event
             }
         }
     }
-    // Phase E.5 — also drop window mappings that point at the
-    // deleted workspace. Without this, `state.windows` keeps
-    // dangling refs and saga steps that inspect window→workspace
-    // membership make decisions from invalid state.
-    // (codex P1 #619.)
-    state
+    // Phase E.5 — drop window mappings that point at the deleted
+    // workspace AND emit `SrvWindowClosed` for each so the persist
+    // subscriber prunes the SQLite Window row + Client.windowids.
+    // The original cascade (E.5.1+2) was silent, leaving downstream
+    // projections out of sync. (codex P1 follow-up to #619.)
+    let dropped_window_ids: Vec<String> = state
         .windows
-        .retain(|_, record| record.workspace_id != workspace_id);
+        .iter()
+        .filter(|(_, w)| w.workspace_id == workspace_id)
+        .map(|(id, _)| id.clone())
+        .collect();
+    for id in &dropped_window_ids {
+        state.windows.remove(id);
+    }
+    let mut events = Vec::with_capacity(1 + dropped_window_ids.len());
     let v = state.bump_version();
-    vec![Event::WorkspaceDeleted {
+    events.push(Event::WorkspaceDeleted {
         workspace_id,
         version: v,
-    }]
+    });
+    for window_id in dropped_window_ids {
+        let v = state.bump_version();
+        events.push(Event::SrvWindowClosed { window_id, version: v });
+    }
+    events
 }
 
 /// Phase E.2b — create a tab inside a workspace. Validates the
@@ -636,6 +668,194 @@ fn handle_switch_workspace(
     }]
 }
 
+/// Phase E.5.3 — replace a workspace's `tab_ids` with the given
+/// list. Validates the workspace exists and the new list is a
+/// permutation of the current set (same elements, possibly
+/// different order). No-op if identical.
+fn handle_reorder_tabs_bulk(
+    state: &mut State,
+    workspace_id: String,
+    tab_ids: Vec<String>,
+) -> Vec<Event> {
+    // Validate using `&` borrow first so we can call `bump_version`
+    // (which needs `&mut state`) on error paths without borrow conflict.
+    let validation_error: Option<String> = {
+        let Some(workspace) = state.workspaces.get(&workspace_id) else {
+            let v = state.bump_version();
+            return vec![Event::Error {
+                code: ErrorCode::InvalidCommand,
+                message: format!("ReorderTabsBulk: workspace not found: {}", workspace_id),
+                fatal: false,
+                version: v,
+            }];
+        };
+        if workspace.tab_ids == tab_ids {
+            return Vec::new();
+        }
+        if workspace.tab_ids.len() != tab_ids.len() {
+            Some(format!(
+                "ReorderTabsBulk: new tab_ids has {} entries; workspace has {}",
+                tab_ids.len(),
+                workspace.tab_ids.len()
+            ))
+        } else {
+            let current_set: std::collections::HashSet<&String> =
+                workspace.tab_ids.iter().collect();
+            let new_set: std::collections::HashSet<&String> = tab_ids.iter().collect();
+            if current_set != new_set {
+                Some(
+                    "ReorderTabsBulk: new tab_ids must be a permutation of the workspace's current set"
+                        .to_string(),
+                )
+            } else {
+                None
+            }
+        }
+    };
+    if let Some(message) = validation_error {
+        let v = state.bump_version();
+        return vec![Event::Error {
+            code: ErrorCode::InvalidCommand,
+            message,
+            fatal: false,
+            version: v,
+        }];
+    }
+    state.workspaces.get_mut(&workspace_id).expect("checked").tab_ids = tab_ids.clone();
+    let v = state.bump_version();
+    vec![Event::TabsReorderedBulk {
+        workspace_id,
+        tab_ids,
+        version: v,
+    }]
+}
+
+/// Phase E.5.3 — rename a workspace. Errors if missing; no-op if
+/// the name is unchanged.
+fn handle_rename_workspace(state: &mut State, workspace_id: String, name: String) -> Vec<Event> {
+    let Some(workspace) = state.workspaces.get_mut(&workspace_id) else {
+        let v = state.bump_version();
+        return vec![Event::Error {
+            code: ErrorCode::InvalidCommand,
+            message: format!("RenameWorkspace: workspace not found: {}", workspace_id),
+            fatal: false,
+            version: v,
+        }];
+    };
+    if workspace.name == name {
+        return Vec::new();
+    }
+    workspace.name = name.clone();
+    let v = state.bump_version();
+    vec![Event::WorkspaceRenamed {
+        workspace_id,
+        name,
+        version: v,
+    }]
+}
+
+/// Phase E.5.3 — rename a tab. Errors if missing; no-op if the
+/// name is unchanged.
+fn handle_rename_tab(state: &mut State, tab_id: String, name: String) -> Vec<Event> {
+    let Some(tab) = state.tabs.get_mut(&tab_id) else {
+        let v = state.bump_version();
+        return vec![Event::Error {
+            code: ErrorCode::InvalidCommand,
+            message: format!("RenameTab: tab not found: {}", tab_id),
+            fatal: false,
+            version: v,
+        }];
+    };
+    if tab.name == name {
+        return Vec::new();
+    }
+    tab.name = name.clone();
+    let v = state.bump_version();
+    vec![Event::TabRenamed {
+        tab_id,
+        name,
+        version: v,
+    }]
+}
+
+/// Phase E.5.3 — pass-through validation + emit for workspace
+/// meta updates. The reducer does NOT mutate meta in state (it
+/// doesn't track meta in WorkspaceRecord); the persist subscriber
+/// applies the patch directly to wstore. This keeps the reducer's
+/// state shape unchanged while still routing every meta mutation
+/// through the broadcast bus for observers.
+fn handle_update_workspace_meta(
+    state: &mut State,
+    workspace_id: String,
+    meta_patch: serde_json::Value,
+) -> Vec<Event> {
+    if !state.workspaces.contains_key(&workspace_id) {
+        let v = state.bump_version();
+        return vec![Event::Error {
+            code: ErrorCode::InvalidCommand,
+            message: format!(
+                "UpdateWorkspaceMeta: workspace not found: {}",
+                workspace_id
+            ),
+            fatal: false,
+            version: v,
+        }];
+    }
+    let v = state.bump_version();
+    vec![Event::WorkspaceMetaUpdated {
+        workspace_id,
+        meta_patch,
+        version: v,
+    }]
+}
+
+/// Phase E.5.3 — pass-through for tab meta updates. Same shape as
+/// `handle_update_workspace_meta`.
+fn handle_update_tab_meta(
+    state: &mut State,
+    tab_id: String,
+    meta_patch: serde_json::Value,
+) -> Vec<Event> {
+    if !state.tabs.contains_key(&tab_id) {
+        let v = state.bump_version();
+        return vec![Event::Error {
+            code: ErrorCode::InvalidCommand,
+            message: format!("UpdateTabMeta: tab not found: {}", tab_id),
+            fatal: false,
+            version: v,
+        }];
+    }
+    let v = state.bump_version();
+    vec![Event::TabMetaUpdated {
+        tab_id,
+        meta_patch,
+        version: v,
+    }]
+}
+
+/// Phase E.5.3 — pass-through for block meta updates. Same shape.
+fn handle_update_block_meta(
+    state: &mut State,
+    block_id: String,
+    meta_patch: serde_json::Value,
+) -> Vec<Event> {
+    if !state.blocks.contains_key(&block_id) {
+        let v = state.bump_version();
+        return vec![Event::Error {
+            code: ErrorCode::InvalidCommand,
+            message: format!("UpdateBlockMeta: block not found: {}", block_id),
+            fatal: false,
+            version: v,
+        }];
+    }
+    let v = state.bump_version();
+    vec![Event::BlockMetaUpdated {
+        block_id,
+        meta_patch,
+        version: v,
+    }]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -692,6 +912,12 @@ mod tests {
             | Event::SrvWindowOpened { version, .. }
             | Event::SrvWindowClosed { version, .. }
             | Event::SrvWindowWorkspaceChanged { version, .. }
+            | Event::TabsReorderedBulk { version, .. }
+            | Event::WorkspaceRenamed { version, .. }
+            | Event::TabRenamed { version, .. }
+            | Event::WorkspaceMetaUpdated { version, .. }
+            | Event::TabMetaUpdated { version, .. }
+            | Event::BlockMetaUpdated { version, .. }
             | Event::Error { version, .. } => *version,
         }
     }
@@ -1708,7 +1934,7 @@ mod tests {
     }
 
     #[test]
-    fn delete_workspace_drops_pointing_windows() {
+    fn delete_workspace_drops_pointing_windows_and_emits_events() {
         let mut state = State::default();
         let ws_a = create_workspace(&mut state, "a");
         let ws_b = create_workspace(&mut state, "b");
@@ -1728,12 +1954,23 @@ mod tests {
             },
             &ctx(3),
         );
-        // Delete workspace A; only win-a should be dropped, win-b survives.
-        let _ = update(
+        // Delete workspace A; only win-a should be dropped + emit
+        // SrvWindowClosed; win-b survives.
+        let events = update(
             &mut state,
             Command::DeleteWorkspace { workspace_id: ws_a },
             &ctx(4),
         );
+        assert!(matches!(&events[0], Event::WorkspaceDeleted { .. }));
+        assert!(events.iter().any(|e| matches!(
+            e,
+            Event::SrvWindowClosed { window_id, .. } if window_id == "win-a"
+        )));
+        // Verify win-b was NOT closed.
+        assert!(!events.iter().any(|e| matches!(
+            e,
+            Event::SrvWindowClosed { window_id, .. } if window_id == "win-b"
+        )));
         assert!(!state.windows.contains_key("win-a"));
         assert_eq!(state.windows["win-b"].workspace_id, ws_b);
     }
