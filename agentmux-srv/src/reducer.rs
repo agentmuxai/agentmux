@@ -1,15 +1,17 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// Phase E.1b — srv reducer skeleton.
+// Phase E — srv reducer.
 //
 // Pure functional core: `update(&mut State, Command, &Ctx) -> Vec<Event>`.
 // Never blocks, never awaits, never does I/O. Same discipline as
 // `agentmux-launcher::reducer`. Mutex held only during dispatch
 // (sub-millisecond).
 //
-// E.1b arms: Register / Goodbye / Ping / GetSrvSnapshot / GetEvents.
-// E.2+ adds domain commands (CreateWorkspace, CreateTab, etc.).
+// Arms by phase:
+//   * E.1b — Register / Goodbye / Ping / GetSrvSnapshot / GetEvents
+//   * E.2  — CreateWorkspace / DeleteWorkspace
+//   * E.2b+ — Tab / Block / Layout commands (not yet present)
 //
 // `Command::GetEvents` is intercepted by the IPC server before
 // reaching the reducer (server queries the event log; reducer
@@ -41,8 +43,9 @@ pub fn update(state: &mut State, cmd: Command, ctx: &Ctx) -> Vec<Event> {
         Command::GetEvents { .. } => Vec::new(), // intercepted by server; unreachable
         Command::CreateWorkspace { name } => handle_create_workspace(state, name),
         Command::DeleteWorkspace { workspace_id } => handle_delete_workspace(state, workspace_id),
-        // E.1b accepts only the above; everything else is a non-fatal
-        // protocol error. E.2+ adds domain commands as new arms.
+        // Anything else is a non-fatal protocol error. Future
+        // phases (E.2b tabs, E.3 blocks, E.4 layouts) extend this
+        // match by adding new arms above.
         other => {
             let v = state.bump_version();
             vec![Event::Error {

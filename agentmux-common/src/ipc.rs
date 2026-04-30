@@ -226,8 +226,10 @@ pub enum Command {
     /// reducer is canonical for its domain and replies on its own
     /// pipe.
     ///
-    /// E.1b reply is sparse (lifecycle + version only — no domain
-    /// state yet). E.2+ adds workspaces / tabs / blocks / etc.
+    /// Reply contents grow with each phase: E.1b had lifecycle +
+    /// version only; E.2 added `workspaces`; E.2b+ will add tabs /
+    /// blocks / layouts. See `Event::SrvSnapshot` for the current
+    /// shape.
     GetSrvSnapshot,
     /// Phase E.2 — create a new workspace. The reducer assigns the
     /// `oid` (UUID) and emits `Event::WorkspaceCreated`. In E.2 the
