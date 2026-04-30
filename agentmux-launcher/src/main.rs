@@ -299,11 +299,19 @@ async fn run_windows(
     // Phase E.1a — saga coordinator task. Subscribes to the broadcast
     // bus, drives in-flight sagas. E.1a registry is empty — framework
     // only. E.5 adds the first concrete saga consumer (tear-off).
+    //
+    // Subscribe BEFORE spawning so the race window between construction
+    // and first `recv()` doesn't drop early events. (reagent P2 PR #609.)
+    // Same pattern as the disk writer above.
     let saga_coord = std::sync::Arc::new(saga::SagaCoordinator::new(
         events_tx.clone(),
         std::sync::Arc::clone(&state),
     ));
-    tokio::spawn(saga::run_coordinator(std::sync::Arc::clone(&saga_coord)));
+    let saga_rx = events_tx.subscribe();
+    tokio::spawn(saga::run_coordinator(
+        std::sync::Arc::clone(&saga_coord),
+        saga_rx,
+    ));
 
     let _ipc_handle = ipc::run_ipc_server(
         pipe_path.clone(),
