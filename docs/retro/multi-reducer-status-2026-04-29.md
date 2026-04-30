@@ -182,7 +182,9 @@ Filed as **issue #606** for future pickup. Cosmetic-only; not blocking any phase
 |---|---|---|
 | **E.1a** (#609) | Saga coordinator framework: `Saga` trait, `SagaCoordinator` task, `SagaStarted/Completed/Failed` events. Plus durable event-log fsync + 2 codex P2 carryovers from #608 | ✅ |
 | **E.1b** (#610) | srv reducer skeleton + new srv pipe + broadcast bus + event log. 4 review rounds: codex P1 EventList unicast + P1 reconnect-after-disconnect (synthetic Goodbye) + P2 ErrorCode alignment | ✅ |
-| **E.2** | Workspace + Tab + ActiveTab arms; SQLite-bootstrap with replay-from-HWM; idempotent persist-subscriber | |
+| **E.2** (#611) | Workspace lifecycle arms (CreateWorkspace / DeleteWorkspace) + SQLite bootstrap into reducer's session-only projection. Persist subscriber descoped after codex flagged systemic bus-lag / HWM issues — deferred to E.2c. 5 review rounds: codex P1 cascade-delete, codex P1 HWM-freeze-on-lag (resolved by dropping subscriber), 4 reagent P2 stale-doc rounds | ✅ |
+| **E.2b** | Tab + ActiveTab arms (per-workspace) | |
+| **E.2c** | RPC migration through reducer + persist subscriber + host bridge + renderer dispatcher | |
 | **E.3** | Block lifecycle arms | |
 | **E.4** | Layout state arms | |
 | **E.5** | Drag/tear-off sagas — first concrete consumers of E.1a's coordinator | |
