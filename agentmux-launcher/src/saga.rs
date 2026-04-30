@@ -158,15 +158,22 @@ impl SagaCoordinator {
     }
 }
 
-/// Run the coordinator's bus-subscription loop. E.1a: subscribes
-/// to the bus, observes every event, holds the registry empty
-/// (no sagas to drive). E.5+: routes events to sagas, dispatches
-/// IssueCmd actions, emits lifecycle events.
+/// Run the coordinator's bus-subscription loop. E.1a: observes
+/// every event, holds the registry empty (no sagas to drive).
+/// E.5+: routes events to sagas, dispatches IssueCmd actions,
+/// emits lifecycle events.
 ///
-/// Spawned once per launcher run from `main.rs` alongside the IPC
-/// server and disk writer.
-pub async fn run_coordinator(coord: Arc<SagaCoordinator>) {
-    let mut events_rx = coord.events_tx.subscribe();
+/// **Receiver is passed in, not subscribed inside.** Subscribing
+/// before `tokio::spawn` (in `main.rs`) ensures events emitted
+/// between coordinator construction and the first `recv()` aren't
+/// lost to the race window. Same pattern as `event_log::run_disk_writer`.
+/// (reagent P2 PR #609 — preempt E.5 saga drops once real consumers
+/// land.)
+pub async fn run_coordinator(
+    coord: Arc<SagaCoordinator>,
+    mut events_rx: tokio::sync::broadcast::Receiver<Event>,
+) {
+    let _ = coord; // E.1a: registry empty; coord ref held for E.5+
     crate::log("[saga] coordinator started (no in-flight sagas — E.1a is framework-only)");
 
     loop {
@@ -208,7 +215,10 @@ mod tests {
         let (events_tx, _rx) = tokio::sync::broadcast::channel::<Event>(64);
         let state = Arc::new(tokio::sync::Mutex::new(crate::state::State::default()));
         let coord = Arc::new(SagaCoordinator::new(events_tx.clone(), Arc::clone(&state)));
-        let handle = tokio::spawn(run_coordinator(Arc::clone(&coord)));
+        // Subscribe BEFORE spawn (per reagent P2 PR #609) so the
+        // pattern in `main.rs` is exercised here too.
+        let coord_rx = events_tx.subscribe();
+        let handle = tokio::spawn(run_coordinator(Arc::clone(&coord), coord_rx));
 
         // Push a few events; coordinator should observe them
         // without acting (no sagas in flight).
