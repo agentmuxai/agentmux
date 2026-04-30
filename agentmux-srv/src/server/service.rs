@@ -431,28 +431,269 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
                 Err(e) => WebReturnType::error(e.to_string()),
             }
         }
+        // Phase E.5.8 — CreateWindow migrated through the reducer.
+        // Two paths: (1) empty workspace_id → CreateWorkspace +
+        // CreateTab + CreateWindow as a multi-step dispatch (mirrors
+        // wcore::create_window_full's "fresh workspace" path); (2)
+        // existing workspace_id → just CreateWindow. The subscriber's
+        // apply_srv_window_opened handles `Client.windowids` updates
+        // and Window-row creation. Layout setup for the new tab uses
+        // the apply_tab_created provisioning (E.4 layout migration is
+        // separate; default rootnode = None matches wcore behaviour).
         ("window", "CreateWindow") => {
-            let ws_id: String = match service::get_arg(args, 1) {
-                Ok(v) => v,
-                Err(e) => return WebReturnType::error(e),
-            };
-            match wcore::create_window_full(store, &ws_id) {
-                Ok(win) => {
-                    WebReturnType::success(serde_json::to_value(&win).unwrap_or_default())
+            let requested_ws_id: String = service::get_arg(args, 1).unwrap_or_default();
+            // Resolve / create the workspace.
+            let (ws_id, fresh_workspace_events): (String, Vec<agentmux_common::ipc::Event>) =
+                if requested_ws_id.is_empty() {
+                    // Step 1: create workspace.
+                    let ws_events = dispatch_to_reducer(
+                        state,
+                        agentmux_common::ipc::Command::CreateWorkspace {
+                            name: String::new(),
+                        },
+                    )
+                    .await;
+                    if let Some(err_msg) = ws_events.iter().find_map(|e| match e {
+                        agentmux_common::ipc::Event::Error { message, .. } => {
+                            Some(message.clone())
+                        }
+                        _ => None,
+                    }) {
+                        return WebReturnType::error(err_msg);
+                    }
+                    for ev in &ws_events {
+                        if let Err(e) =
+                            crate::persist_subscriber::apply_event_to_wstore(ev, store)
+                        {
+                            return WebReturnType::error(format!(
+                                "CreateWindow: SQLite write failed: {}",
+                                e
+                            ));
+                        }
+                    }
+                    let new_ws_id = ws_events
+                        .iter()
+                        .find_map(|e| match e {
+                            agentmux_common::ipc::Event::WorkspaceCreated {
+                                workspace_id, ..
+                            } => Some(workspace_id.clone()),
+                            _ => None,
+                        })
+                        .unwrap_or_default();
+                    // Step 2: create tab.
+                    let tab_events = dispatch_to_reducer(
+                        state,
+                        agentmux_common::ipc::Command::CreateTab {
+                            workspace_id: new_ws_id.clone(),
+                            name: String::new(),
+                        },
+                    )
+                    .await;
+                    if let Some(err_msg) = tab_events.iter().find_map(|e| match e {
+                        agentmux_common::ipc::Event::Error { message, .. } => {
+                            Some(message.clone())
+                        }
+                        _ => None,
+                    }) {
+                        // Compensate: delete the empty workspace.
+                        let comp = dispatch_to_reducer(
+                            state,
+                            agentmux_common::ipc::Command::DeleteWorkspace {
+                                workspace_id: new_ws_id.clone(),
+                            },
+                        )
+                        .await;
+                        for ev in &comp {
+                            let _ = crate::persist_subscriber::apply_event_to_wstore(ev, store);
+                        }
+                        publish_events(state, &comp);
+                        return WebReturnType::error(err_msg);
+                    }
+                    for ev in &tab_events {
+                        if let Err(e) =
+                            crate::persist_subscriber::apply_event_to_wstore(ev, store)
+                        {
+                            return WebReturnType::error(format!(
+                                "CreateWindow: SQLite write failed: {}",
+                                e
+                            ));
+                        }
+                    }
+                    let mut combined = ws_events;
+                    combined.extend(tab_events);
+                    (new_ws_id, combined)
+                } else {
+                    // Existing workspace — verify it's in the reducer
+                    // (or SQLite), but no creation needed.
+                    let exists_in_sqlite = match store.get::<Workspace>(&requested_ws_id) {
+                        Ok(opt) => opt.is_some(),
+                        Err(e) => {
+                            return WebReturnType::error(format!(
+                                "CreateWindow: workspace lookup failed: {}",
+                                e
+                            ));
+                        }
+                    };
+                    if !exists_in_sqlite {
+                        return WebReturnType::error(format!(
+                            "CreateWindow: workspace not found: {}",
+                            requested_ws_id
+                        ));
+                    }
+                    (requested_ws_id, Vec::new())
+                };
+
+            // Step 3: register the window in the reducer.
+            let window_id = uuid::Uuid::new_v4().to_string();
+            let win_events = dispatch_to_reducer(
+                state,
+                agentmux_common::ipc::Command::CreateWindow {
+                    window_id: window_id.clone(),
+                    workspace_id: ws_id.clone(),
+                },
+            )
+            .await;
+            if let Some(err_msg) = win_events.iter().find_map(|e| match e {
+                agentmux_common::ipc::Event::Error { message, .. } => Some(message.clone()),
+                _ => None,
+            }) {
+                // Compensate the fresh workspace if we created one.
+                if !fresh_workspace_events.is_empty() {
+                    let comp = dispatch_to_reducer(
+                        state,
+                        agentmux_common::ipc::Command::DeleteWorkspace {
+                            workspace_id: ws_id.clone(),
+                        },
+                    )
+                    .await;
+                    for ev in &comp {
+                        let _ = crate::persist_subscriber::apply_event_to_wstore(ev, store);
+                    }
+                    publish_events(state, &comp);
                 }
-                Err(e) => WebReturnType::error(e.to_string()),
+                return WebReturnType::error(err_msg);
+            }
+            for ev in &win_events {
+                if let Err(e) = crate::persist_subscriber::apply_event_to_wstore(ev, store) {
+                    return WebReturnType::error(format!(
+                        "CreateWindow: SQLite write failed: {}",
+                        e
+                    ));
+                }
+            }
+            // Mark the window as `isnew` so the host's first-paint
+            // signaling logic still applies — wcore::create_window_full
+            // set this; the subscriber's default is `isnew: false`.
+            if let Ok(mut win) = store.must_get::<Window>(&window_id) {
+                if !win.isnew {
+                    win.isnew = true;
+                    let _ = store.update(&mut win);
+                }
+            }
+            // Publish all events from this multi-step (workspace + tab + window).
+            let mut all_events = fresh_workspace_events;
+            all_events.extend(win_events);
+            publish_events(state, &all_events);
+            // Return the Window struct (matches the prior RPC contract).
+            match store.must_get::<Window>(&window_id) {
+                Ok(win) => WebReturnType::success(serde_json::to_value(&win).unwrap_or_default()),
+                Err(e) => WebReturnType::error(format!(
+                    "CreateWindow: window read-back failed: {}",
+                    e
+                )),
             }
         }
+        // Phase E.5.8 — CloseWindow migrated through the reducer.
+        // Sequence:
+        //   1. Look up the window's workspace (for cascade decision).
+        //   2. Dispatch Command::CloseWindowInternal — emits
+        //      SrvWindowClosed; subscriber prunes Client.windowids.
+        //   3. If no other window points at the same workspace, dispatch
+        //      Command::DeleteWorkspace which cascades through tabs+blocks.
+        // Mirrors `wcore::close_window` behaviour where each window
+        // owns one workspace, but uses the reducer-routed conditional
+        // pattern so future multi-window-on-same-workspace flows
+        // don't accidentally drop user state.
         ("window", "CloseWindow") => {
             let window_id: String = match service::get_arg(args, 0) {
                 Ok(v) => v,
                 Err(e) => return WebReturnType::error(e),
             };
-            match wcore::close_window(store, &window_id) {
-                Ok(()) => WebReturnType::success_empty(),
-                Err(e) => WebReturnType::error(e.to_string()),
+            // Look up the window's workspace before we close it.
+            // Read SQLite (source of truth during migration).
+            let ws_id: Option<String> = match store.get::<Window>(&window_id) {
+                Ok(Some(w)) => Some(w.workspaceid.clone()),
+                Ok(None) => None,
+                Err(e) => {
+                    return WebReturnType::error(format!(
+                        "CloseWindow: window lookup failed: {}",
+                        e
+                    ));
+                }
+            };
+            // Step 1: drop the window mapping in reducer.
+            let close_events = dispatch_to_reducer(
+                state,
+                agentmux_common::ipc::Command::CloseWindowInternal {
+                    window_id: window_id.clone(),
+                },
+            )
+            .await;
+            // reagent P1 #622: surface reducer rejection before
+            // applying / publishing. Every other primary dispatch in
+            // this PR follows this pattern; CloseWindow was missing it.
+            if let Some(err_msg) = close_events.iter().find_map(|e| match e {
+                agentmux_common::ipc::Event::Error { message, .. } => Some(message.clone()),
+                _ => None,
+            }) {
+                return WebReturnType::error(err_msg);
             }
+            for ev in &close_events {
+                if let Err(e) = crate::persist_subscriber::apply_event_to_wstore(ev, store) {
+                    return WebReturnType::error(format!(
+                        "CloseWindow: SQLite write failed: {}",
+                        e
+                    ));
+                }
+            }
+            publish_events(state, &close_events);
+            // Step 2: cascade delete the workspace if no other window
+            // points at it. The reducer keeps state.windows updated;
+            // check there.
+            if let Some(ws_id) = ws_id {
+                let any_other_window = {
+                    let s = state.srv_state.lock().await;
+                    s.windows.values().any(|w| w.workspace_id == ws_id)
+                };
+                if !any_other_window {
+                    let del_events = dispatch_to_reducer(
+                        state,
+                        agentmux_common::ipc::Command::DeleteWorkspace {
+                            workspace_id: ws_id.clone(),
+                        },
+                    )
+                    .await;
+                    for ev in &del_events {
+                        if let Err(e) = crate::persist_subscriber::apply_event_to_wstore(ev, store)
+                        {
+                            tracing::warn!(
+                                "CloseWindow: workspace cascade SQLite write failed: {}",
+                                e
+                            );
+                        }
+                    }
+                    publish_events(state, &del_events);
+                }
+            }
+            // Subscriber's apply_srv_window_closed already pruned
+            // Client.windowids and deleted the Window row; nothing
+            // more for the handler to do.
+            WebReturnType::success_empty()
         }
+        // Phase E.5.8 — SwitchWorkspace migrated to single-step
+        // reducer dispatch. The reducer validates window + workspace
+        // both exist + emits SrvWindowWorkspaceChanged; subscriber
+        // writes Window.workspaceid in SQLite.
         ("window", "SwitchWorkspace") => {
             let window_id: String = match service::get_arg(args, 0) {
                 Ok(v) => v,
@@ -462,10 +703,30 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
                 Ok(v) => v,
                 Err(e) => return WebReturnType::error(e),
             };
-            match wcore::switch_workspace(store, &window_id, &ws_id) {
-                Ok(()) => WebReturnType::success_empty(),
-                Err(e) => WebReturnType::error(e.to_string()),
+            let events = dispatch_to_reducer(
+                state,
+                agentmux_common::ipc::Command::SwitchWorkspace {
+                    window_id: window_id.clone(),
+                    workspace_id: ws_id.clone(),
+                },
+            )
+            .await;
+            if let Some(err_msg) = events.iter().find_map(|e| match e {
+                agentmux_common::ipc::Event::Error { message, .. } => Some(message.clone()),
+                _ => None,
+            }) {
+                return WebReturnType::error(err_msg);
             }
+            for ev in &events {
+                if let Err(e) = crate::persist_subscriber::apply_event_to_wstore(ev, store) {
+                    return WebReturnType::error(format!(
+                        "SwitchWorkspace: SQLite write failed: {}",
+                        e
+                    ));
+                }
+            }
+            publish_events(state, &events);
+            WebReturnType::success_empty()
         }
         ("window", "SetWindowPosAndSize") => {
             let window_id: String = match service::get_arg(args, 0) {
@@ -1009,6 +1270,11 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
             }
             WebReturnType::success_empty()
         }
+        // Phase E.5.7 — MoveBlockToTab migrated to dispatch
+        // Command::MoveBlock through the reducer. Auto-close empty
+        // source tab still uses Command::DeleteTab. ws_id arg kept
+        // for backward compat — used only for the post-op SQLite
+        // refresh + auto-close workspace check.
         ("workspace", "MoveBlockToTab") => {
             let ws_id: String = match service::get_arg(args, 0) {
                 Ok(v) => v,
@@ -1027,39 +1293,106 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
                 Err(e) => return WebReturnType::error(e),
             };
             let auto_close: bool = service::get_arg(args, 4).unwrap_or(true);
-            tracing::info!(ws_id = %ws_id, block_id = %block_id, source_tab = %source_tab_id, dest_tab = %dest_tab_id, "[dnd:svc] MoveBlockToTab");
-            match wcore::move_block_to_tab(store, &block_id, &source_tab_id, &dest_tab_id, &ws_id, auto_close) {
-                Ok(()) => {
-                    let mut updates = vec![];
-                    if let Ok(src) = store.must_get::<Tab>(&source_tab_id) {
-                        updates.push(WaveObjUpdate {
-                            updatetype: "update".into(),
-                            otype: OTYPE_TAB.to_string(),
-                            oid: source_tab_id.clone(),
-                            obj: Some(wave_obj_to_value(&src)),
-                        });
-                    }
-                    if let Ok(dst) = store.must_get::<Tab>(&dest_tab_id) {
-                        updates.push(WaveObjUpdate {
-                            updatetype: "update".into(),
-                            otype: OTYPE_TAB.to_string(),
-                            oid: dest_tab_id.clone(),
-                            obj: Some(wave_obj_to_value(&dst)),
-                        });
-                    }
-                    if let Ok(ws) = store.must_get::<Workspace>(&ws_id) {
-                        updates.push(WaveObjUpdate {
-                            updatetype: "update".into(),
-                            otype: OTYPE_WORKSPACE.to_string(),
-                            oid: ws_id.clone(),
-                            obj: Some(wave_obj_to_value(&ws)),
-                        });
-                    }
-                    WebReturnType::success_with_updates(updates)
-                }
-                Err(e) => WebReturnType::error(e.to_string()),
+            tracing::info!(ws_id = %ws_id, block_id = %block_id, source_tab = %source_tab_id, dest_tab = %dest_tab_id, "[dnd:svc] MoveBlockToTab via reducer");
+            // codex P2 #622: same-tab requests were no-ops in the
+            // prior wcore handler. The reducer's MoveBlock treats
+            // same source = dest as an in-tab reorder; with
+            // `dst_index: u32::MAX` it would silently move the block
+            // to the end of the list. Short-circuit to preserve the
+            // prior contract — a `MoveBlockToTab` whose dest equals
+            // the source is a UI quirk (e.g. drop on origin tab),
+            // not an intentional reorder.
+            if source_tab_id == dest_tab_id {
+                return WebReturnType::success_empty();
             }
+            // Move the block via the reducer. dst_index 0 to mirror
+            // wcore::move_block_to_tab which appended at end... wait,
+            // wcore appends, so end-of-list. The reducer's MoveBlock
+            // clamps dst_index to dst.block_ids.len(); use u32::MAX
+            // to land at the end.
+            let events = dispatch_to_reducer(
+                state,
+                agentmux_common::ipc::Command::MoveBlock {
+                    block_id: block_id.clone(),
+                    src_tab_id: source_tab_id.clone(),
+                    dst_tab_id: dest_tab_id.clone(),
+                    dst_index: u32::MAX,
+                },
+            )
+            .await;
+            if let Some(err_msg) = events.iter().find_map(|e| match e {
+                agentmux_common::ipc::Event::Error { message, .. } => Some(message.clone()),
+                _ => None,
+            }) {
+                return WebReturnType::error(err_msg);
+            }
+            for ev in &events {
+                if let Err(e) = crate::persist_subscriber::apply_event_to_wstore(ev, store) {
+                    return WebReturnType::error(format!(
+                        "MoveBlockToTab: SQLite write failed: {}",
+                        e
+                    ));
+                }
+            }
+            publish_events(state, &events);
+            // Auto-close empty source tab (mirrors wcore::move_block_to_tab).
+            if auto_close {
+                let should_close = match store.must_get::<Tab>(&source_tab_id) {
+                    Ok(t) => t.blockids.is_empty(),
+                    Err(_) => false,
+                };
+                if should_close {
+                    let total_tabs = match store.must_get::<Workspace>(&ws_id) {
+                        Ok(ws) => ws.tabids.len() + ws.pinnedtabids.len(),
+                        Err(_) => 0,
+                    };
+                    if total_tabs > 1 {
+                        let close_events = dispatch_to_reducer(
+                            state,
+                            agentmux_common::ipc::Command::DeleteTab {
+                                workspace_id: ws_id.clone(),
+                                tab_id: source_tab_id.clone(),
+                            },
+                        )
+                        .await;
+                        for ev in &close_events {
+                            let _ = crate::persist_subscriber::apply_event_to_wstore(ev, store);
+                        }
+                        publish_events(state, &close_events);
+                    }
+                }
+            }
+            let mut updates = vec![];
+            if let Ok(src) = store.must_get::<Tab>(&source_tab_id) {
+                updates.push(WaveObjUpdate {
+                    updatetype: "update".into(),
+                    otype: OTYPE_TAB.to_string(),
+                    oid: source_tab_id.clone(),
+                    obj: Some(wave_obj_to_value(&src)),
+                });
+            }
+            if let Ok(dst) = store.must_get::<Tab>(&dest_tab_id) {
+                updates.push(WaveObjUpdate {
+                    updatetype: "update".into(),
+                    otype: OTYPE_TAB.to_string(),
+                    oid: dest_tab_id.clone(),
+                    obj: Some(wave_obj_to_value(&dst)),
+                });
+            }
+            if let Ok(ws) = store.must_get::<Workspace>(&ws_id) {
+                updates.push(WaveObjUpdate {
+                    updatetype: "update".into(),
+                    otype: OTYPE_WORKSPACE.to_string(),
+                    oid: ws_id.clone(),
+                    obj: Some(wave_obj_to_value(&ws)),
+                });
+            }
+            WebReturnType::success_with_updates(updates)
         }
+        // Phase E.5.7 — PromoteBlockToTab migrated to saga
+        // (CreateTab + MoveBlock). Layout setup + SetActiveTab +
+        // auto-close source tab stay wcore-direct here (E.4 layout
+        // territory). Same shape as TearOffBlock's RPC handler.
         ("workspace", "PromoteBlockToTab") => {
             let ws_id: String = match service::get_arg(args, 0) {
                 Ok(v) => v,
@@ -1074,40 +1407,106 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
                 Err(e) => return WebReturnType::error(e),
             };
             let auto_close: bool = service::get_arg(args, 3).unwrap_or(true);
-            tracing::info!(ws_id = %ws_id, block_id = %block_id, source_tab = %source_tab_id, "[dnd:svc] PromoteBlockToTab");
-            match wcore::promote_block_to_tab(store, &block_id, &source_tab_id, &ws_id, auto_close) {
-                Ok(new_tab) => {
-                    let new_tab_oid = new_tab.oid.clone();
-                    let mut updates = vec![];
-                    updates.push(WaveObjUpdate {
-                        updatetype: "update".into(),
-                        otype: OTYPE_TAB.to_string(),
-                        oid: new_tab.oid.clone(),
-                        obj: Some(wave_obj_to_value(&new_tab)),
-                    });
-                    if let Ok(src) = store.must_get::<Tab>(&source_tab_id) {
-                        updates.push(WaveObjUpdate {
-                            updatetype: "update".into(),
-                            otype: OTYPE_TAB.to_string(),
-                            oid: source_tab_id.clone(),
-                            obj: Some(wave_obj_to_value(&src)),
-                        });
-                    }
-                    if let Ok(ws) = store.must_get::<Workspace>(&ws_id) {
-                        updates.push(WaveObjUpdate {
-                            updatetype: "update".into(),
-                            otype: OTYPE_WORKSPACE.to_string(),
-                            oid: ws_id.clone(),
-                            obj: Some(wave_obj_to_value(&ws)),
-                        });
-                    }
-                    WebReturnType::success_data_updates(
-                        serde_json::to_value(&new_tab_oid).unwrap_or_default(),
-                        updates,
-                    )
-                }
-                Err(e) => WebReturnType::error(e.to_string()),
+            tracing::info!(ws_id = %ws_id, block_id = %block_id, source_tab = %source_tab_id, "[dnd:svc] PromoteBlockToTab via saga");
+            let saga_result = crate::sagas::promote_block_to_tab::run(
+                state,
+                block_id.clone(),
+                source_tab_id.clone(),
+                ws_id.clone(),
+            )
+            .await;
+            let new_tab_oid = match saga_result {
+                Ok(v) => v
+                    .get("new_tab_id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or_default()
+                    .to_string(),
+                Err(reason) => return WebReturnType::error(reason),
+            };
+
+            // Layout setup: rootnode + leaforder for the new tab so
+            // the frontend renders the moved block correctly. Same
+            // helper TearOffBlock uses.
+            if let Err(e) = setup_torn_off_block_layout(store, &new_tab_oid, &block_id) {
+                tracing::warn!(new_tab = %new_tab_oid, "PromoteBlockToTab: layout setup failed: {}", e);
             }
+            // Source tab: queue layout-delete action.
+            if let Err(e) = queue_source_layout_delete(store, &source_tab_id, &block_id) {
+                tracing::warn!(source_tab = %source_tab_id, "PromoteBlockToTab: source layout delete-action enqueue failed: {}", e);
+            }
+            // Set the new tab as active in the workspace via reducer.
+            let active_events = dispatch_to_reducer(
+                state,
+                agentmux_common::ipc::Command::SetActiveTab {
+                    workspace_id: ws_id.clone(),
+                    tab_id: new_tab_oid.clone(),
+                },
+            )
+            .await;
+            for ev in &active_events {
+                if let Err(e) = crate::persist_subscriber::apply_event_to_wstore(ev, store) {
+                    tracing::warn!("PromoteBlockToTab: SetActiveTab apply failed: {}", e);
+                }
+            }
+            publish_events(state, &active_events);
+
+            // Auto-close empty source tab (mirrors wcore behaviour).
+            if auto_close {
+                let should_close = match store.must_get::<Tab>(&source_tab_id) {
+                    Ok(t) => t.blockids.is_empty(),
+                    Err(_) => false,
+                };
+                if should_close {
+                    let total_tabs = match store.must_get::<Workspace>(&ws_id) {
+                        Ok(ws) => ws.tabids.len() + ws.pinnedtabids.len(),
+                        Err(_) => 0,
+                    };
+                    if total_tabs > 1 {
+                        let close_events = dispatch_to_reducer(
+                            state,
+                            agentmux_common::ipc::Command::DeleteTab {
+                                workspace_id: ws_id.clone(),
+                                tab_id: source_tab_id.clone(),
+                            },
+                        )
+                        .await;
+                        for ev in &close_events {
+                            let _ = crate::persist_subscriber::apply_event_to_wstore(ev, store);
+                        }
+                        publish_events(state, &close_events);
+                    }
+                }
+            }
+
+            let mut updates = vec![];
+            if let Ok(new_tab) = store.must_get::<Tab>(&new_tab_oid) {
+                updates.push(WaveObjUpdate {
+                    updatetype: "update".into(),
+                    otype: OTYPE_TAB.to_string(),
+                    oid: new_tab_oid.clone(),
+                    obj: Some(wave_obj_to_value(&new_tab)),
+                });
+            }
+            if let Ok(src) = store.must_get::<Tab>(&source_tab_id) {
+                updates.push(WaveObjUpdate {
+                    updatetype: "update".into(),
+                    otype: OTYPE_TAB.to_string(),
+                    oid: source_tab_id.clone(),
+                    obj: Some(wave_obj_to_value(&src)),
+                });
+            }
+            if let Ok(ws) = store.must_get::<Workspace>(&ws_id) {
+                updates.push(WaveObjUpdate {
+                    updatetype: "update".into(),
+                    otype: OTYPE_WORKSPACE.to_string(),
+                    oid: ws_id.clone(),
+                    obj: Some(wave_obj_to_value(&ws)),
+                });
+            }
+            WebReturnType::success_data_updates(
+                serde_json::to_value(&new_tab_oid).unwrap_or_default(),
+                updates,
+            )
         }
         // Phase E.2c.3b — ReorderTab dispatches through the reducer.
         // Forward+compensate isn't useful here (reorder is its own
