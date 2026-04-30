@@ -17,12 +17,18 @@
 //   On RecvError::Lagged(n) the subscriber drops `n` events.
 //   Naive HWM advancement past dropped events would permanently
 //   diverge SQLite from reducer state. Instead we do a workspace-
-//   scoped FULL RESYNC: snapshot `state.workspaces` under the
-//   reducer mutex, write each workspace into SQLite (idempotent
-//   insert/update), and delete any SQLite workspace that the reducer
-//   no longer knows about. Workspace state in the reducer is
-//   authoritative for RPC writes (E.2c.2 migration), so resyncing
-//   from it is correct.
+//   scoped resync: snapshot `state.workspaces` under the reducer
+//   mutex, write each workspace into SQLite (idempotent insert /
+//   no-op / update). The resync is INSERT/UPDATE only — no deletes —
+//   because workspaces can also be created OUTSIDE the reducer
+//   during the migration window (e.g., the still-wcore-direct
+//   `CreateWindow` flow calls `wcore::create_window_full` which
+//   creates a workspace under the hood). Deleting workspaces
+//   missing from the reducer snapshot would lose those legitimate
+//   rows. Stale workspaces deleted-via-reducer that the subscriber
+//   missed on Lagged linger on disk until the next user-driven
+//   DeleteWorkspace cleans them up via the wcore fallback in
+//   service.rs. (codex P1 #615.)
 //
 //   IMPORTANT: tab/block resync is NOT done here yet. Tabs and
 //   blocks remain RPC-direct via wcore; the reducer's view of them

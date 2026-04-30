@@ -408,23 +408,40 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
                 agentmux_common::ipc::Command::CreateWorkspace { name: name.clone() },
             )
             .await;
-            // Apply synchronously to wstore BEFORE returning — the
-            // subscriber's later apply is an idempotent no-op.
-            for ev in &events {
-                if let Err(e) = crate::persist_subscriber::apply_event_to_wstore(ev, store) {
-                    return WebReturnType::error(format!(
-                        "CreateWorkspace: SQLite write failed: {}",
-                        e
-                    ));
-                }
-            }
-            publish_events(state, &events);
             let workspace_id = events.iter().find_map(|e| match e {
                 agentmux_common::ipc::Event::WorkspaceCreated { workspace_id, .. } => {
                     Some(workspace_id.clone())
                 }
                 _ => None,
             });
+            // Apply synchronously to wstore BEFORE publishing or
+            // returning. On SQLite failure, dispatch a compensating
+            // `DeleteWorkspace` so the reducer's session-only state
+            // doesn't carry a ghost workspace that was never
+            // persisted (codex P2 #615).
+            let mut apply_err: Option<String> = None;
+            for ev in &events {
+                if let Err(e) = crate::persist_subscriber::apply_event_to_wstore(ev, store) {
+                    apply_err = Some(e.to_string());
+                    break;
+                }
+            }
+            if let Some(err) = apply_err {
+                if let Some(id) = workspace_id.as_ref() {
+                    let _ = dispatch_to_reducer(
+                        state,
+                        agentmux_common::ipc::Command::DeleteWorkspace {
+                            workspace_id: id.clone(),
+                        },
+                    )
+                    .await;
+                }
+                return WebReturnType::error(format!(
+                    "CreateWorkspace: SQLite write failed: {}",
+                    err
+                ));
+            }
+            publish_events(state, &events);
             match workspace_id {
                 Some(id) => match wcore::get_workspace(store, &id) {
                     Ok(ws) => {
@@ -459,6 +476,45 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
                 Ok(v) => v,
                 Err(e) => return WebReturnType::error(e),
             };
+            // Phase E.2c.2 — DeleteWorkspace applies SQLite FIRST,
+            // THEN dispatches the reducer command. Inverse order
+            // vs CreateWorkspace because Delete cascades touch many
+            // records (tabs, blocks, layouts) and rolling back the
+            // reducer on a partial wcore failure is impractical.
+            // SQLite-first means: if wcore fails, the reducer is
+            // untouched (no divergence). If wcore succeeds, the
+            // reducer dispatch + bus publish keep the rest of the
+            // system in sync. (codex P2 #615 — divergence-on-failure.)
+            let exists_in_wstore = wstore_workspace_exists(store, &ws_id);
+            if exists_in_wstore {
+                if let Err(e) = wcore::delete_workspace(store, &ws_id) {
+                    return WebReturnType::error(format!(
+                        "DeleteWorkspace: SQLite delete failed: {}",
+                        e
+                    ));
+                }
+            } else {
+                // Not in SQLite — confirm the reducer doesn't know
+                // about it either before surfacing NotFound. (Bootstrap
+                // populates the reducer from SQLite, so a ws absent
+                // from SQLite is normally absent from the reducer too;
+                // this guard handles future races where the orderings
+                // could diverge.)
+                let exists_in_state = state
+                    .srv_state
+                    .lock()
+                    .await
+                    .workspaces
+                    .contains_key(&ws_id);
+                if !exists_in_state {
+                    return WebReturnType::error(format!(
+                        "DeleteWorkspace: workspace not found: {}",
+                        ws_id
+                    ));
+                }
+            }
+            // Reducer dispatch is silent on missing — safe to call
+            // unconditionally now that SQLite is consistent.
             let events = dispatch_to_reducer(
                 state,
                 agentmux_common::ipc::Command::DeleteWorkspace {
@@ -466,36 +522,9 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
                 },
             )
             .await;
-            // Apply synchronously to wstore BEFORE returning so
-            // follow-up RPCs don't see the stale row. Subscriber's
-            // later apply is idempotent.
-            for ev in &events {
-                if let Err(e) = crate::persist_subscriber::apply_event_to_wstore(ev, store) {
-                    return WebReturnType::error(format!(
-                        "DeleteWorkspace: SQLite write failed: {}",
-                        e
-                    ));
-                }
-            }
             publish_events(state, &events);
             if events.iter().any(|e| matches!(e, agentmux_common::ipc::Event::Error { .. })) {
                 return WebReturnType::error(format!("DeleteWorkspace failed: {}", ws_id));
-            }
-            // Phase E.2c.2 — empty event list means the reducer
-            // didn't know about this workspace, but the workspace
-            // may still exist in SQLite (e.g., created via the
-            // still-wcore-direct window flow `CreateWindow` →
-            // `wcore::create_window_full`). Fall back to
-            // `wcore::delete_workspace` so the disk row is removed.
-            // Idempotent: if the workspace is also absent from
-            // SQLite, surface the NotFound error to the caller —
-            // matches the prior all-wcore behaviour and avoids
-            // silently succeeding on a no-op delete. (codex P1 #615.)
-            if events.is_empty() {
-                return match wcore::delete_workspace(store, &ws_id) {
-                    Ok(()) => WebReturnType::success_empty(),
-                    Err(e) => WebReturnType::error(e.to_string()),
-                };
             }
             WebReturnType::success_empty()
         }
@@ -1205,6 +1234,14 @@ fn publish_events(state: &AppState, events: &[agentmux_common::ipc::Event]) {
     for event in events {
         let _ = state.srv_events_tx.send(event.clone());
     }
+}
+
+/// Existence check used by `DeleteWorkspace` to decide whether to
+/// run the wcore delete path. `wstore.get` returns `Ok(None)` for
+/// missing rows; treat any error as "doesn't exist" so we don't
+/// double-fail when the caller would've gotten a clean 404.
+fn wstore_workspace_exists(store: &WaveStore, workspace_id: &str) -> bool {
+    matches!(store.get::<Workspace>(workspace_id), Ok(Some(_)))
 }
 
 // `build_workspace_from_state` removed in E.2c.2. The reducer's
