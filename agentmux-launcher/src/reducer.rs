@@ -843,6 +843,9 @@ mod tests {
             | Event::HostShouldQuit { version, .. }
             | Event::Snapshot { version, .. }
             | Event::EventList { version, .. }
+            | Event::SagaStarted { version, .. }
+            | Event::SagaCompleted { version, .. }
+            | Event::SagaFailed { version, .. }
             | Event::Error { version, .. } => *version,
         }
     }

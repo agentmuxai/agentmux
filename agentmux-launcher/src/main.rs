@@ -26,6 +26,7 @@ mod event_log;
 mod hash;
 mod ipc;
 mod reducer;
+mod saga;
 mod srv_spawner;
 mod state;
 mod wrr;
@@ -290,13 +291,35 @@ async fn run_windows(
     let disk_writer_rx = events_tx.subscribe();
     tokio::spawn(event_log::run_disk_writer(event_log_for_writer, disk_writer_rx));
 
+    // Phase E.1a — canonical state shared between IPC server + saga
+    // coordinator (and, in E.5, individual sagas). Single Mutex
+    // owner, multiple readers via Arc.
+    let state = std::sync::Arc::new(tokio::sync::Mutex::new(state::State::default()));
+
+    // Phase E.1a — saga coordinator task. Subscribes to the broadcast
+    // bus, drives in-flight sagas. E.1a registry is empty — framework
+    // only. E.5 adds the first concrete saga consumer (tear-off).
+    //
+    // Subscribe BEFORE spawning so the race window between construction
+    // and first `recv()` doesn't drop early events. (reagent P2 PR #609.)
+    // Same pattern as the disk writer above.
+    let saga_coord = std::sync::Arc::new(saga::SagaCoordinator::new(
+        events_tx.clone(),
+        std::sync::Arc::clone(&state),
+    ));
+    let saga_rx = events_tx.subscribe();
+    tokio::spawn(saga::run_coordinator(
+        std::sync::Arc::clone(&saga_coord),
+        saga_rx,
+    ));
+
     let _ipc_handle = ipc::run_ipc_server(
         pipe_path.clone(),
         first_pipe,
         ipc::server::ServerCtx {
             launcher_pid: std::process::id(),
             launcher_version: env!("CARGO_PKG_VERSION").to_string(),
-            state: tokio::sync::Mutex::new(state::State::default()),
+            state,
             events_tx,
             event_log,
         },

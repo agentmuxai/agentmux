@@ -118,7 +118,14 @@ impl EventLog {
     pub fn replay_truncated(&self, since: u64) -> bool {
         let ring = self.ring.lock().expect("event-log ring mutex poisoned");
         match ring.front() {
-            Some(oldest) => event_version(oldest) > since + 1,
+            // Phase E.1a (codex P2 #608) — saturating_add guards
+            // against `since: u64::MAX` overflow. Wire input is
+            // externally reachable; debug builds would panic, release
+            // would wrap. Saturating means "since == u64::MAX" trivially
+            // returns false (oldest can't exceed u64::MAX), which is
+            // the correct semantic — there's no possible event newer
+            // than that, so there can't be a gap.
+            Some(oldest) => event_version(oldest) > since.saturating_add(1),
             None => false,
         }
     }
@@ -197,6 +204,17 @@ pub async fn run_disk_writer(
                     crate::log(&format!("[event-log] write failed: {} — dropping event from disk stream", e));
                     continue;
                 }
+                // Phase E.1a — durable: fsync per append so events
+                // written before a crash survive it. Required by
+                // Phase E §6.4 for srv's bootstrap-replay correctness.
+                // Latency cost: ~ms per event vs microseconds without
+                // sync. Acceptable for our event volume (~10–50 per
+                // user action). Trade-off considered: batched fsync
+                // (group commit). Skipping for E.1a — premature
+                // optimization; revisit if profiling shows a hot path.
+                if let Err(e) = file.sync_data().await {
+                    crate::log(&format!("[event-log] sync_data failed: {} — event written but not fsynced", e));
+                }
                 bytes_written += buf.len() as u64;
             }
             Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
@@ -244,6 +262,9 @@ fn event_version(e: &Event) -> u64 {
         | Event::HostShouldQuit { version, .. }
         | Event::Snapshot { version, .. }
         | Event::EventList { version, .. }
+        | Event::SagaStarted { version, .. }
+        | Event::SagaCompleted { version, .. }
+        | Event::SagaFailed { version, .. }
         | Event::Error { version, .. } => *version,
     }
 }

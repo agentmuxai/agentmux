@@ -510,6 +510,39 @@ pub enum Event {
         events: Vec<Event>,
         version: u64,
     },
+    /// Phase E.1a — emitted by the saga coordinator when a new saga
+    /// starts. `name` is the saga's static name (e.g. "tear_off_block")
+    /// for `--diag` output. Subscribers (renderer especially) use
+    /// `saga_id` to start buffering subsequent events with that id
+    /// until the matching `SagaCompleted` or `SagaFailed` arrives.
+    ///
+    /// `saga_id` is monotonic per launcher run, allocated by the
+    /// coordinator. Persisting saga state across launcher restarts
+    /// is deferred (Phase F or beyond); restart abandons in-flight
+    /// sagas, and renderer-side timeouts handle the visible
+    /// consequence.
+    SagaStarted {
+        saga_id: u64,
+        name: String,
+        version: u64,
+    },
+    /// Phase E.1a — saga ended successfully. All events with this
+    /// `saga_id` have been emitted; subscribers can flush their
+    /// buffers and apply the changes atomically.
+    SagaCompleted {
+        saga_id: u64,
+        version: u64,
+    },
+    /// Phase E.1a — saga ended in failure. `reason` is operator-
+    /// readable; if compensation actions were issued, they appear
+    /// as ordinary commands/events on the bus before this event.
+    /// Renderers should discard their buffer for this `saga_id` —
+    /// no atomic apply.
+    SagaFailed {
+        saga_id: u64,
+        reason: String,
+        version: u64,
+    },
 }
 
 /// Phase D.1 — serializable view of one window in the launcher

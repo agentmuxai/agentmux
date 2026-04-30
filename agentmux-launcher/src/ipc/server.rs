@@ -44,7 +44,13 @@ pub struct ServerCtx {
     pub launcher_version: String,
     /// Canonical state owned by the server. Mutex held only during
     /// reducer dispatch — sub-millisecond.
-    pub state: Mutex<State>,
+    ///
+    /// Phase E.1a — moved from `Mutex<State>` to `Arc<Mutex<State>>`
+    /// so the saga coordinator can share access. The coordinator
+    /// needs `bump_version` when emitting saga lifecycle events and
+    /// will (in E.5) inspect state during saga decisions. Sharing
+    /// via `Arc` keeps the existing single-writer-mutex discipline.
+    pub state: std::sync::Arc<Mutex<State>>,
     /// Phase B.8 — broadcast bus for reducer-emitted events. Every
     /// reducer event from `reducer::update` is published here; each
     /// connection subscribes and writes received events to its own
@@ -214,7 +220,8 @@ async fn handle_connection(stream: NamedPipeServer, ctx: Arc<ServerCtx>) {
             loop {
                 match events_rx.recv().await {
                     Ok(event) => {
-                        let event = patch_launcher_identity(event, &ctx);
+                        // Identity is patched at the publisher (before
+                        // log + bus). No need to re-patch here.
                         // Errors here mean the pipe is closed; the
                         // read loop will detect EOF on the next
                         // iteration. Swallow + continue to drain
@@ -424,6 +431,15 @@ async fn handle_connection(stream: NamedPipeServer, ctx: Arc<ServerCtx>) {
                     severity, kind, label, hwnd, detail, conn_id
                 ));
             }
+            // Phase E.1a (codex P2 #608) — patch sentinel identity
+            // BEFORE appending to the log. Reducer emits
+            // `Event::Registered { launcher_pid: 0, launcher_version: "" }`
+            // because it doesn't know the launcher's identity; the
+            // server fills it in. Pre-fix, the patch happened only at
+            // per-connection write, so `GetEvents` replay returned
+            // stored sentinels, inconsistent with live broadcast.
+            let event = patch_launcher_identity(event, &ctx);
+
             // Phase D.2 — append to the in-memory ring BEFORE
             // broadcasting so a connection's GetEvents query that
             // races a just-published event sees consistent
