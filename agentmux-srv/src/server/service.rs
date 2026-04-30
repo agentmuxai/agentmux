@@ -1174,6 +1174,12 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
                 WebReturnType::success_empty()
             }
         }
+        // Phase E.5.5 — MoveTabToWorkspace migrated to dispatch
+        // Command::MoveTab through the reducer. Closes codex P1 #621
+        // (the saga's reducer-state pre-check rejected tear-off after
+        // a wcore-direct cross-window drag had left state.tabs stale)
+        // by routing all tab moves through the reducer so its view
+        // always matches SQLite.
         ("workspace", "MoveTabToWorkspace") => {
             let tab_id: String = match service::get_arg(args, 0) {
                 Ok(v) => v,
@@ -1187,32 +1193,100 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
                 Ok(v) => v,
                 Err(e) => return WebReturnType::error(e),
             };
-            let insert_index: Option<usize> = service::get_arg(args, 3).ok();
-            tracing::info!(tab_id = %tab_id, source_ws = %source_ws_id, dest_ws = %dest_ws_id, insert_index = ?insert_index, "[dnd:svc] MoveTabToWorkspace");
-            match wcore::move_tab_to_workspace(store, &tab_id, &source_ws_id, &dest_ws_id, insert_index) {
-                Ok(()) => {
-                    let mut updates = Vec::new();
-                    if let Ok(src_ws) = store.must_get::<Workspace>(&source_ws_id) {
-                        updates.push(WaveObjUpdate {
-                            updatetype: "update".into(),
-                            otype: OTYPE_WORKSPACE.to_string(),
-                            oid: source_ws_id.clone(),
-                            obj: Some(wave_obj_to_value(&src_ws)),
-                        });
-                    }
-                    if let Ok(dst_ws) = store.must_get::<Workspace>(&dest_ws_id) {
-                        updates.push(WaveObjUpdate {
-                            updatetype: "update".into(),
-                            otype: OTYPE_WORKSPACE.to_string(),
-                            oid: dest_ws_id.clone(),
-                            obj: Some(wave_obj_to_value(&dst_ws)),
-                        });
-                    }
-                    WebReturnType::success_with_updates(updates)
-                }
-                Err(e) => WebReturnType::error(e.to_string()),
+            let insert_index: Option<u32> = service::get_arg::<usize>(args, 3)
+                .ok()
+                .map(|v| v.try_into().unwrap_or(u32::MAX));
+            tracing::info!(tab_id = %tab_id, source_ws = %source_ws_id, dest_ws = %dest_ws_id, insert_index = ?insert_index, "[dnd:svc] MoveTabToWorkspace via reducer");
+            // Same-workspace short-circuit matches wcore behaviour.
+            // The reducer rejects same-workspace moves outright (use
+            // ReorderTab instead); for the RPC contract, treat it as
+            // a no-op success so existing callers don't see a
+            // behavioural regression.
+            if source_ws_id == dest_ws_id {
+                return WebReturnType::success_empty();
             }
+            // Last-tab guard mirrors wcore::move_tab_to_workspace —
+            // the reducer's MoveTab doesn't enforce this (intentionally,
+            // for sagas that legitimately drain a workspace to delete
+            // it). Keep the guard at the RPC layer where the policy
+            // belongs. **Read SQLite, not reducer state** — during the
+            // migration window, wcore-direct tab paths
+            // (PromoteBlockToTab, etc.) leave reducer.tab_ids stale,
+            // so a reducer-state guard would falsely reject valid
+            // moves. SQLite is the source of truth (codex P1 round-2
+            // #621).
+            match store.get::<Workspace>(&source_ws_id) {
+                Ok(Some(src_ws)) => {
+                    let total_tabs = src_ws.tabids.len() + src_ws.pinnedtabids.len();
+                    if total_tabs <= 1 {
+                        return WebReturnType::error(
+                            "cannot move last tab out of workspace".to_string(),
+                        );
+                    }
+                }
+                Ok(None) => {
+                    return WebReturnType::error(format!(
+                        "MoveTabToWorkspace: source workspace not found: {}",
+                        source_ws_id
+                    ));
+                }
+                Err(e) => {
+                    return WebReturnType::error(format!(
+                        "MoveTabToWorkspace: workspace read failed: {}",
+                        e
+                    ));
+                }
+            }
+            let dst_index = insert_index.unwrap_or(u32::MAX);
+            let events = dispatch_to_reducer(
+                state,
+                agentmux_common::ipc::Command::MoveTab {
+                    tab_id: tab_id.clone(),
+                    src_workspace_id: source_ws_id.clone(),
+                    dst_workspace_id: dest_ws_id.clone(),
+                    dst_index,
+                },
+            )
+            .await;
+            if let Some(err_msg) = events.iter().find_map(|e| match e {
+                agentmux_common::ipc::Event::Error { message, .. } => Some(message.clone()),
+                _ => None,
+            }) {
+                return WebReturnType::error(err_msg);
+            }
+            for ev in &events {
+                if let Err(e) = crate::persist_subscriber::apply_event_to_wstore(ev, store) {
+                    return WebReturnType::error(format!(
+                        "MoveTabToWorkspace: SQLite write failed: {}",
+                        e
+                    ));
+                }
+            }
+            publish_events(state, &events);
+            let mut updates = Vec::new();
+            if let Ok(src_ws) = store.must_get::<Workspace>(&source_ws_id) {
+                updates.push(WaveObjUpdate {
+                    updatetype: "update".into(),
+                    otype: OTYPE_WORKSPACE.to_string(),
+                    oid: source_ws_id.clone(),
+                    obj: Some(wave_obj_to_value(&src_ws)),
+                });
+            }
+            if let Ok(dst_ws) = store.must_get::<Workspace>(&dest_ws_id) {
+                updates.push(WaveObjUpdate {
+                    updatetype: "update".into(),
+                    otype: OTYPE_WORKSPACE.to_string(),
+                    oid: dest_ws_id.clone(),
+                    obj: Some(wave_obj_to_value(&dst_ws)),
+                });
+            }
+            WebReturnType::success_with_updates(updates)
         }
+        // Phase E.5.6 — RestoreTornOffTab migrated to saga (MoveTab
+        // back + conditional DeleteWorkspaceCascade if source becomes
+        // empty). The legacy `was_pinned` arg is ignored — pinning
+        // was removed from AgentMux in E.2c.3b; restored tabs always
+        // land in `tab_ids`.
         ("workspace", "RestoreTornOffTab") => {
             let tab_id: String = match service::get_arg(args, 0) {
                 Ok(v) => v,
@@ -1226,20 +1300,21 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
                 Ok(v) => v,
                 Err(e) => return WebReturnType::error(e),
             };
-            let insert_index: Option<usize> = service::get_arg(args, 3).ok();
-            // arg 4 is `wasPinned: bool`. Default false — older clients
-            // and the merge path (which always restores into the target's
-            // tabids regardless of source pin status) don't need to pass
-            // it. Pinned-status preservation is a cancel-back-only feature.
-            let was_pinned: bool = service::get_arg(args, 4).unwrap_or(false);
-            tracing::info!(tab_id = %tab_id, source_ws = %source_ws_id, dest_ws = %dest_ws_id, insert_index = ?insert_index, was_pinned = %was_pinned, "[dnd:svc] RestoreTornOffTab");
-            match wcore::restore_torn_off_tab(store, &tab_id, &source_ws_id, &dest_ws_id, insert_index, was_pinned) {
-                Ok(()) => {
+            let insert_index: Option<u32> = service::get_arg::<usize>(args, 3)
+                .ok()
+                .map(|v| v.try_into().unwrap_or(u32::MAX));
+            tracing::info!(tab_id = %tab_id, source_ws = %source_ws_id, dest_ws = %dest_ws_id, insert_index = ?insert_index, "[dnd:svc] RestoreTornOffTab via saga");
+            let saga_result = crate::sagas::restore_torn_off_tab::run(
+                state,
+                tab_id,
+                source_ws_id.clone(),
+                dest_ws_id.clone(),
+                insert_index,
+            )
+            .await;
+            match saga_result {
+                Ok(_) => {
                     let mut updates = Vec::new();
-                    // Source workspace: emit a delete update if we deleted
-                    // it; otherwise an update with current state. Frontends
-                    // listening on the dragged window's workspace can react
-                    // to either.
                     match store.get::<Workspace>(&source_ws_id) {
                         Ok(Some(src_ws)) => {
                             updates.push(WaveObjUpdate {
@@ -1269,9 +1344,20 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
                     }
                     WebReturnType::success_with_updates(updates)
                 }
-                Err(e) => WebReturnType::error(e.to_string()),
+                Err(reason) => WebReturnType::error(reason),
             }
         }
+        // Phase E.5.5 — TearOffBlock migrated to saga (reducer-state
+        // portion: CreateWorkspace + CreateTab + MoveBlock). Layout
+        // tree setup on the new tab + queueing the source tab's
+        // layout-delete action stay wcore-direct here — layout state
+        // is E.4 work, separately scoped. The saga's atomicity is
+        // limited to the reducer-state portion; layout writes are
+        // best-effort and can leave a torn-off block with a malformed
+        // layout if the post-saga step fails. Acceptable trade-off
+        // for the smoke regression fix; full atomicity is a Phase F+
+        // gap (see saga-coordinator-location-analysis-2026-04-30.md
+        // §4.2).
         ("workspace", "TearOffBlock") => {
             let block_id: String = match service::get_arg(args, 0) {
                 Ok(v) => v,
@@ -1286,44 +1372,111 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
                 Err(e) => return WebReturnType::error(e),
             };
             let auto_close: bool = service::get_arg(args, 3).unwrap_or(true);
-            tracing::info!(block_id = %block_id, source_tab = %source_tab_id, source_ws = %source_ws_id, "[dnd:svc] TearOffBlock");
-            match wcore::tear_off_block(store, &block_id, &source_tab_id, &source_ws_id, auto_close) {
-                Ok(new_ws) => {
-                    let new_ws_oid = new_ws.oid.clone();
-                    let mut updates = Vec::new();
-                    // Source tab update
-                    if let Ok(src_tab) = store.must_get::<Tab>(&source_tab_id) {
-                        updates.push(WaveObjUpdate {
-                            updatetype: "update".into(),
-                            otype: OTYPE_TAB.to_string(),
-                            oid: source_tab_id.clone(),
-                            obj: Some(wave_obj_to_value(&src_tab)),
-                        });
-                    }
-                    // Source workspace update
-                    if let Ok(src_ws) = store.must_get::<Workspace>(&source_ws_id) {
-                        updates.push(WaveObjUpdate {
-                            updatetype: "update".into(),
-                            otype: OTYPE_WORKSPACE.to_string(),
-                            oid: source_ws_id.clone(),
-                            obj: Some(wave_obj_to_value(&src_ws)),
-                        });
-                    }
-                    // New workspace update
-                    updates.push(WaveObjUpdate {
-                        updatetype: "update".into(),
-                        otype: OTYPE_WORKSPACE.to_string(),
-                        oid: new_ws_oid.clone(),
-                        obj: Some(wave_obj_to_value(&new_ws)),
-                    });
-                    WebReturnType::success_data_updates(
-                        serde_json::to_value(&new_ws_oid).unwrap_or_default(),
-                        updates,
-                    )
+            tracing::info!(block_id = %block_id, source_tab = %source_tab_id, source_ws = %source_ws_id, "[dnd:svc] TearOffBlock via saga");
+            let saga_result = crate::sagas::tear_off_block::run(
+                state,
+                block_id.clone(),
+                source_tab_id.clone(),
+                source_ws_id.clone(),
+            )
+            .await;
+            let (new_ws_oid, new_tab_oid) = match saga_result {
+                Ok(value) => {
+                    let new_ws_oid = value
+                        .get("new_workspace_id")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or_default()
+                        .to_string();
+                    let new_tab_oid = value
+                        .get("new_tab_id")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or_default()
+                        .to_string();
+                    (new_ws_oid, new_tab_oid)
                 }
-                Err(e) => WebReturnType::error(e.to_string()),
+                Err(reason) => return WebReturnType::error(reason),
+            };
+
+            // Layout setup for the new tab — make the moved block its
+            // single root node so the frontend renders it. Mirrors
+            // wcore::tear_off_block. Best-effort; layout migration is
+            // E.4 territory and not yet reducer-routed.
+            if let Err(e) = setup_torn_off_block_layout(store, &new_tab_oid, &block_id) {
+                tracing::warn!(new_tab = %new_tab_oid, "TearOffBlock: layout setup failed: {} (block in tab but layout malformed)", e);
             }
+            // Source tab: queue a layout-delete action so the source
+            // window's frontend removes the node from its tree.
+            if let Err(e) = queue_source_layout_delete(store, &source_tab_id, &block_id) {
+                tracing::warn!(source_tab = %source_tab_id, "TearOffBlock: source layout delete-action enqueue failed: {}", e);
+            }
+
+            // Auto-close empty source tab. Route through the reducer
+            // (DeleteTab cascade is built in; the tab has no blocks
+            // at this point — we just moved the only one out). Skip
+            // when source workspace would become empty.
+            if auto_close {
+                let should_close = match store.must_get::<Tab>(&source_tab_id) {
+                    Ok(t) => t.blockids.is_empty(),
+                    Err(_) => false,
+                };
+                if should_close {
+                    let total_tabs = match store.must_get::<Workspace>(&source_ws_id) {
+                        Ok(ws) => ws.tabids.len() + ws.pinnedtabids.len(),
+                        Err(_) => 0,
+                    };
+                    if total_tabs > 1 {
+                        tracing::info!(source_tab = %source_tab_id, "[dnd:svc] auto-closing empty source tab after TearOffBlock");
+                        let close_events = dispatch_to_reducer(
+                            state,
+                            agentmux_common::ipc::Command::DeleteTab {
+                                workspace_id: source_ws_id.clone(),
+                                tab_id: source_tab_id.clone(),
+                            },
+                        )
+                        .await;
+                        for ev in &close_events {
+                            let _ = crate::persist_subscriber::apply_event_to_wstore(ev, store);
+                        }
+                        publish_events(state, &close_events);
+                    }
+                }
+            }
+
+            let mut updates = Vec::new();
+            if let Ok(src_tab) = store.must_get::<Tab>(&source_tab_id) {
+                updates.push(WaveObjUpdate {
+                    updatetype: "update".into(),
+                    otype: OTYPE_TAB.to_string(),
+                    oid: source_tab_id.clone(),
+                    obj: Some(wave_obj_to_value(&src_tab)),
+                });
+            }
+            if let Ok(src_ws) = store.must_get::<Workspace>(&source_ws_id) {
+                updates.push(WaveObjUpdate {
+                    updatetype: "update".into(),
+                    otype: OTYPE_WORKSPACE.to_string(),
+                    oid: source_ws_id.clone(),
+                    obj: Some(wave_obj_to_value(&src_ws)),
+                });
+            }
+            if let Ok(new_ws) = store.must_get::<Workspace>(&new_ws_oid) {
+                updates.push(WaveObjUpdate {
+                    updatetype: "update".into(),
+                    otype: OTYPE_WORKSPACE.to_string(),
+                    oid: new_ws_oid.clone(),
+                    obj: Some(wave_obj_to_value(&new_ws)),
+                });
+            }
+            WebReturnType::success_data_updates(
+                serde_json::to_value(&new_ws_oid).unwrap_or_default(),
+                updates,
+            )
         }
+        // Phase E.5.5 — TearOffTab migrated to saga. Closes the
+        // smoke regression where wcore::tear_off_tab created the new
+        // workspace bypassing the reducer, leaving the new window's
+        // CreateTab/etc. calls failing on "workspace not found"
+        // checks against the reducer's stale view.
         ("workspace", "TearOffTab") => {
             let tab_id: String = match service::get_arg(args, 0) {
                 Ok(v) => v,
@@ -1333,12 +1486,15 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
                 Ok(v) => v,
                 Err(e) => return WebReturnType::error(e),
             };
-            tracing::info!(tab_id = %tab_id, source_ws = %source_ws_id, "[dnd:svc] TearOffTab");
-            match wcore::tear_off_tab(store, &tab_id, &source_ws_id) {
-                Ok(new_ws) => {
-                    let new_ws_oid = new_ws.oid.clone();
+            tracing::info!(tab_id = %tab_id, source_ws = %source_ws_id, "[dnd:svc] TearOffTab via saga");
+            match crate::sagas::tear_off_tab::run(state, tab_id, source_ws_id.clone()).await {
+                Ok(saga_result) => {
+                    let new_ws_oid = saga_result
+                        .get("new_workspace_id")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or_default()
+                        .to_string();
                     let mut updates = Vec::new();
-                    // Source workspace update
                     if let Ok(src_ws) = store.must_get::<Workspace>(&source_ws_id) {
                         updates.push(WaveObjUpdate {
                             updatetype: "update".into(),
@@ -1347,19 +1503,20 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
                             obj: Some(wave_obj_to_value(&src_ws)),
                         });
                     }
-                    // New workspace update
-                    updates.push(WaveObjUpdate {
-                        updatetype: "update".into(),
-                        otype: OTYPE_WORKSPACE.to_string(),
-                        oid: new_ws_oid.clone(),
-                        obj: Some(wave_obj_to_value(&new_ws)),
-                    });
+                    if let Ok(new_ws) = store.must_get::<Workspace>(&new_ws_oid) {
+                        updates.push(WaveObjUpdate {
+                            updatetype: "update".into(),
+                            otype: OTYPE_WORKSPACE.to_string(),
+                            oid: new_ws_oid.clone(),
+                            obj: Some(wave_obj_to_value(&new_ws)),
+                        });
+                    }
                     WebReturnType::success_data_updates(
                         serde_json::to_value(&new_ws_oid).unwrap_or_default(),
                         updates,
                     )
                 }
-                Err(e) => WebReturnType::error(e.to_string()),
+                Err(reason) => WebReturnType::error(reason),
             }
         }
         // ---- UserInputService ----
@@ -1564,7 +1721,7 @@ pub(crate) fn update_object_meta(
 /// events. Locks the reducer mutex briefly; the lock is released
 /// before any I/O (caller is responsible for publishing the events
 /// to the broadcast bus).
-async fn dispatch_to_reducer(
+pub(crate) async fn dispatch_to_reducer(
     state: &AppState,
     cmd: agentmux_common::ipc::Command,
 ) -> Vec<agentmux_common::ipc::Event> {
@@ -1581,7 +1738,7 @@ async fn dispatch_to_reducer(
 
 /// Publish each event on the srv broadcast bus. Failures (no
 /// subscribers) are non-fatal.
-fn publish_events(state: &AppState, events: &[agentmux_common::ipc::Event]) {
+pub(crate) fn publish_events(state: &AppState, events: &[agentmux_common::ipc::Event]) {
     for event in events {
         let _ = state.srv_events_tx.send(event.clone());
     }
@@ -1609,6 +1766,69 @@ async fn compensate_via_reducer(
             );
         }
     }
+}
+
+/// Phase E.5.5 — set up the layout tree for a tab that just received
+/// its first block via the TearOffBlock saga. Called from the
+/// TearOffBlock RPC handler after the saga's reducer-state portion
+/// (CreateTab + MoveBlock) completes. Mirrors the layout-rootnode
+/// + leaforder construction that `wcore::tear_off_block` previously
+/// embedded in its single function.
+///
+/// Layout state migration is E.4 — until then layout writes are
+/// wcore-direct and not reducer-routed. Best-effort: a failure here
+/// leaves the new tab with the moved block but a malformed layout;
+/// the user-visible symptom is an empty render in the new window.
+fn setup_torn_off_block_layout(
+    store: &WaveStore,
+    new_tab_id: &str,
+    block_id: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let new_tab = store.must_get::<Tab>(new_tab_id)?;
+    let mut layout = store.must_get::<LayoutState>(&new_tab.layoutstate)?;
+    let node_id = uuid::Uuid::new_v4().to_string();
+    layout.rootnode = Some(serde_json::json!({
+        "id": node_id,
+        "data": { "blockId": block_id },
+        "flexDirection": "row",
+        "size": 1
+    }));
+    layout.leaforder = Some(vec![LeafOrderEntry {
+        nodeid: node_id,
+        blockid: block_id.to_string(),
+    }]);
+    store.update(&mut layout)?;
+    Ok(())
+}
+
+/// Phase E.5.5 — append a layout-delete action to the source tab's
+/// `LayoutState.pendingbackendactions` so the source window's
+/// frontend tears the moved block out of its layout tree on next
+/// poll. Mirrors the action-queueing portion of
+/// `wcore::tear_off_block`. Layout migration is E.4.
+fn queue_source_layout_delete(
+    store: &WaveStore,
+    source_tab_id: &str,
+    block_id: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let source_tab = store.must_get::<Tab>(source_tab_id)?;
+    let mut source_layout = store.must_get::<LayoutState>(&source_tab.layoutstate)?;
+    let mut actions = source_layout.pendingbackendactions.take().unwrap_or_default();
+    actions.push(LayoutActionData {
+        actiontype: "delete".to_string(),
+        actionid: uuid::Uuid::new_v4().to_string(),
+        blockid: block_id.to_string(),
+        nodesize: None,
+        indexarr: None,
+        focused: false,
+        magnified: false,
+        ephemeral: false,
+        targetblockid: String::new(),
+        position: String::new(),
+    });
+    source_layout.pendingbackendactions = Some(actions);
+    store.update(&mut source_layout)?;
+    Ok(())
 }
 
 /// Existence check used by `DeleteWorkspace` to decide whether to

@@ -93,6 +93,18 @@ pub fn update(state: &mut State, cmd: Command, ctx: &Ctx) -> Vec<Event> {
             block_id,
             meta_patch,
         } => handle_update_block_meta(state, block_id, meta_patch),
+        Command::MoveTab {
+            tab_id,
+            src_workspace_id,
+            dst_workspace_id,
+            dst_index,
+        } => handle_move_tab(state, tab_id, src_workspace_id, dst_workspace_id, dst_index),
+        Command::MoveBlock {
+            block_id,
+            src_tab_id,
+            dst_tab_id,
+            dst_index,
+        } => handle_move_block(state, block_id, src_tab_id, dst_tab_id, dst_index),
         // Anything else is a non-fatal protocol error. Future
         // phases (E.2b tabs, E.3 blocks, E.4 layouts) extend this
         // match by adding new arms above.
@@ -677,38 +689,213 @@ fn handle_reorder_tabs_bulk(
     workspace_id: String,
     tab_ids: Vec<String>,
 ) -> Vec<Event> {
-    // Validate using `&` borrow first so we can call `bump_version`
-    // (which needs `&mut state`) on error paths without borrow conflict.
-    let validation_error: Option<String> = {
-        let Some(workspace) = state.workspaces.get(&workspace_id) else {
-            let v = state.bump_version();
-            return vec![Event::Error {
-                code: ErrorCode::InvalidCommand,
-                message: format!("ReorderTabsBulk: workspace not found: {}", workspace_id),
-                fatal: false,
-                version: v,
-            }];
-        };
-        if workspace.tab_ids == tab_ids {
-            return Vec::new();
+    // codex P1 #620 carryover: relax membership validation until tab
+    // moves are migrated through the reducer. `MoveTabToWorkspace`
+    // and `PromoteBlockToTab` (planned for PR 4) still write through
+    // wcore without dispatching reducer commands, so the reducer's
+    // view of `workspace.tab_ids` can be stale relative to SQLite.
+    // A subsequent `UpdateTabIds` (now routed through this command)
+    // must not refuse the canonical order just because the reducer
+    // hasn't seen the upstream move yet — that would be a
+    // user-visible regression vs. the prior wcore-direct path.
+    //
+    // Treat the caller's `tab_ids` as authoritative. The remaining
+    // checks are basic sanity: the workspace must exist in the
+    // reducer, and `tab_ids` must not contain duplicates (which would
+    // produce a corrupt persisted ordering with no way for the
+    // subscriber to recover). Length / set comparison against the
+    // reducer's stale view is dropped here; PR 4 reinstates strict
+    // validation once tab moves go through the reducer.
+    if !state.workspaces.contains_key(&workspace_id) {
+        let v = state.bump_version();
+        return vec![Event::Error {
+            code: ErrorCode::InvalidCommand,
+            message: format!("ReorderTabsBulk: workspace not found: {}", workspace_id),
+            fatal: false,
+            version: v,
+        }];
+    }
+    {
+        let mut seen: std::collections::HashSet<&String> =
+            std::collections::HashSet::with_capacity(tab_ids.len());
+        for id in &tab_ids {
+            if !seen.insert(id) {
+                let v = state.bump_version();
+                return vec![Event::Error {
+                    code: ErrorCode::InvalidCommand,
+                    message: format!(
+                        "ReorderTabsBulk: tab_ids contains duplicate entry: {}",
+                        id
+                    ),
+                    fatal: false,
+                    version: v,
+                }];
+            }
         }
-        if workspace.tab_ids.len() != tab_ids.len() {
-            Some(format!(
-                "ReorderTabsBulk: new tab_ids has {} entries; workspace has {}",
-                tab_ids.len(),
-                workspace.tab_ids.len()
-            ))
+    }
+    if state.workspaces.get(&workspace_id).expect("checked").tab_ids == tab_ids {
+        return Vec::new();
+    }
+    state.workspaces.get_mut(&workspace_id).expect("checked").tab_ids = tab_ids.clone();
+    let v = state.bump_version();
+    vec![Event::TabsReorderedBulk {
+        workspace_id,
+        tab_ids,
+        version: v,
+    }]
+}
+
+/// Phase E.5.5 — move a tab from `src_workspace_id` to
+/// `dst_workspace_id`, inserting at `dst_index` (clamped to dst's
+/// length). Updates the tab's `workspace_id`, removes it from src's
+/// `tab_ids`, inserts into dst's `tab_ids`. If the tab was src's
+/// `active_tab_id`, src's active reverts to its first remaining
+/// tab (or `None` when empty).
+///
+/// Errors when:
+/// * source / dest workspace not found,
+/// * tab not found,
+/// * `tab.workspace_id != src_workspace_id` (caller-side bug),
+/// * `src_workspace_id == dst_workspace_id` (use `ReorderTab` for
+///   intra-workspace reorders — same-workspace moves through this
+///   path would create ambiguity around `dst_index` semantics).
+fn handle_move_tab(
+    state: &mut State,
+    tab_id: String,
+    src_workspace_id: String,
+    dst_workspace_id: String,
+    dst_index: u32,
+) -> Vec<Event> {
+    if src_workspace_id == dst_workspace_id {
+        let v = state.bump_version();
+        return vec![Event::Error {
+            code: ErrorCode::InvalidCommand,
+            message: "MoveTab: src and dst workspaces are identical; use ReorderTab".into(),
+            fatal: false,
+            version: v,
+        }];
+    }
+    // **Migration-tolerant validation** (codex P1 round-2 #621):
+    // tab existence + workspace_id checks are dropped during the
+    // migration window. Some tab-creating/moving paths
+    // (`PromoteBlockToTab`, etc.) are still wcore-direct — their
+    // writes don't flow into reducer state, so `state.tabs` and
+    // `state.workspaces[*].tab_ids` can lag SQLite. The saga / RPC
+    // handler that called us has already validated against SQLite
+    // (the source of truth); here we only enforce that both
+    // workspaces exist in the reducer (so we can mutate them) and
+    // trust the caller for the tab. If the tab isn't in
+    // `state.tabs`, lazy-insert a synthetic record stamped with the
+    // dst workspace_id (name unset — refilled when later events
+    // touch the tab). PR 4 reinstates strict validation once the
+    // remaining wcore-direct paths migrate.
+    if !state.workspaces.contains_key(&src_workspace_id) {
+        let v = state.bump_version();
+        return vec![Event::Error {
+            code: ErrorCode::InvalidCommand,
+            message: format!("MoveTab: src workspace not found: {}", src_workspace_id),
+            fatal: false,
+            version: v,
+        }];
+    }
+    if !state.workspaces.contains_key(&dst_workspace_id) {
+        let v = state.bump_version();
+        return vec![Event::Error {
+            code: ErrorCode::InvalidCommand,
+            message: format!("MoveTab: dst workspace not found: {}", dst_workspace_id),
+            fatal: false,
+            version: v,
+        }];
+    }
+
+    // Remove from src. Even if the reducer's view shows the tab
+    // isn't in src.tab_ids (stale state), the persist subscriber's
+    // apply_tab_moved reads SQLite and removes from there, so the
+    // disk-side ordering ends up correct.
+    let new_src_active_tab_id: Option<String> = {
+        let src = state.workspaces.get_mut(&src_workspace_id).expect("checked");
+        src.tab_ids.retain(|id| id != &tab_id);
+        if src.active_tab_id.as_deref() == Some(tab_id.as_str()) {
+            src.active_tab_id = src.tab_ids.first().cloned();
+        }
+        src.active_tab_id.clone()
+    };
+
+    // Insert into dst at clamped index. Set the moved tab as dst's
+    // new active tab — mirrors wcore::move_tab_to_workspace
+    // behaviour and addresses codex P2 #621 (dst.active_tab_id was
+    // previously left untouched, so a saga-driven tear-off could
+    // produce a destination workspace with no active tab selected).
+    let final_dst_index: u32 = {
+        let dst = state.workspaces.get_mut(&dst_workspace_id).expect("checked");
+        let clamped = (dst_index as usize).min(dst.tab_ids.len());
+        dst.tab_ids.insert(clamped, tab_id.clone());
+        dst.active_tab_id = Some(tab_id.clone());
+        clamped as u32
+    };
+
+    // Update the tab's parent. If the reducer's view didn't have
+    // this tab (a wcore-direct creation/move slipped past), lazy-
+    // insert a TabRecord. Name is left empty — subsequent events
+    // (TabRenamed, etc.) will refill it. The launcher's snapshot
+    // view tolerates empty names (renderer reads names from SQLite
+    // -sourced events).
+    match state.tabs.get_mut(&tab_id) {
+        Some(tab) => {
+            tab.workspace_id = dst_workspace_id.clone();
+        }
+        None => {
+            state.tabs.insert(
+                tab_id.clone(),
+                crate::state::TabRecord {
+                    tab_id: tab_id.clone(),
+                    workspace_id: dst_workspace_id.clone(),
+                    name: String::new(),
+                    block_ids: Vec::new(),
+                },
+            );
+        }
+    }
+
+    let v = state.bump_version();
+    vec![Event::TabMoved {
+        tab_id: tab_id.clone(),
+        src_workspace_id,
+        dst_workspace_id,
+        dst_index: final_dst_index,
+        new_src_active_tab_id,
+        new_dst_active_tab_id: Some(tab_id),
+        version: v,
+    }]
+}
+
+/// Phase E.5.5 — move a block from `src_tab_id` to `dst_tab_id` at
+/// `dst_index` (clamped). Updates `block.tab_id`. Cross-tab moves
+/// AND intra-tab repositioning both go through this command (the
+/// caller specifies the destination index regardless).
+///
+/// Errors when source / dest tab missing, block missing, or
+/// `block.tab_id != src_tab_id`.
+fn handle_move_block(
+    state: &mut State,
+    block_id: String,
+    src_tab_id: String,
+    dst_tab_id: String,
+    dst_index: u32,
+) -> Vec<Event> {
+    let validation_error: Option<String> = {
+        if !state.tabs.contains_key(&src_tab_id) {
+            Some(format!("MoveBlock: src tab not found: {}", src_tab_id))
+        } else if !state.tabs.contains_key(&dst_tab_id) {
+            Some(format!("MoveBlock: dst tab not found: {}", dst_tab_id))
         } else {
-            let current_set: std::collections::HashSet<&String> =
-                workspace.tab_ids.iter().collect();
-            let new_set: std::collections::HashSet<&String> = tab_ids.iter().collect();
-            if current_set != new_set {
-                Some(
-                    "ReorderTabsBulk: new tab_ids must be a permutation of the workspace's current set"
-                        .to_string(),
-                )
-            } else {
-                None
+            match state.blocks.get(&block_id) {
+                None => Some(format!("MoveBlock: block not found: {}", block_id)),
+                Some(block) if block.tab_id != src_tab_id => Some(format!(
+                    "MoveBlock: block {} belongs to tab {}, not {}",
+                    block_id, block.tab_id, src_tab_id
+                )),
+                _ => None,
             }
         }
     };
@@ -721,11 +908,40 @@ fn handle_reorder_tabs_bulk(
             version: v,
         }];
     }
-    state.workspaces.get_mut(&workspace_id).expect("checked").tab_ids = tab_ids.clone();
+
+    // Special-case intra-tab move: remove and re-insert in the same
+    // tab. The clamp is computed AFTER the removal so dst_index
+    // refers to the post-removal list (matches the spec's "position
+    // in dst.tab_ids AFTER insertion" semantics for cross-tab moves).
+    let final_dst_index: u32 = if src_tab_id == dst_tab_id {
+        let tab = state.tabs.get_mut(&src_tab_id).expect("checked");
+        tab.block_ids.retain(|id| id != &block_id);
+        let clamped = (dst_index as usize).min(tab.block_ids.len());
+        tab.block_ids.insert(clamped, block_id.clone());
+        clamped as u32
+    } else {
+        // Remove from src.
+        state
+            .tabs
+            .get_mut(&src_tab_id)
+            .expect("checked")
+            .block_ids
+            .retain(|id| id != &block_id);
+        // Insert into dst.
+        let dst = state.tabs.get_mut(&dst_tab_id).expect("checked");
+        let clamped = (dst_index as usize).min(dst.block_ids.len());
+        dst.block_ids.insert(clamped, block_id.clone());
+        // Update parent.
+        state.blocks.get_mut(&block_id).expect("checked").tab_id = dst_tab_id.clone();
+        clamped as u32
+    };
+
     let v = state.bump_version();
-    vec![Event::TabsReorderedBulk {
-        workspace_id,
-        tab_ids,
+    vec![Event::BlockMoved {
+        block_id,
+        src_tab_id,
+        dst_tab_id,
+        dst_index: final_dst_index,
         version: v,
     }]
 }
@@ -918,6 +1134,8 @@ mod tests {
             | Event::WorkspaceMetaUpdated { version, .. }
             | Event::TabMetaUpdated { version, .. }
             | Event::BlockMetaUpdated { version, .. }
+            | Event::TabMoved { version, .. }
+            | Event::BlockMoved { version, .. }
             | Event::Error { version, .. } => *version,
         }
     }
@@ -1564,6 +1782,84 @@ mod tests {
         assert!(matches!(&events[0], Event::Error { .. }));
     }
 
+    /// codex P1 #620 carryover: `ReorderTabsBulk` must accept a list
+    /// containing tab_ids the reducer hasn't seen yet (because they
+    /// arrived via wcore-direct paths like `MoveTabToWorkspace`).
+    /// Strict permutation validation against the reducer's stale view
+    /// would falsely reject the canonical SQLite ordering during the
+    /// migration window.
+    #[test]
+    fn reorder_tabs_bulk_accepts_unknown_ids_during_migration() {
+        let mut state = State::default();
+        let ws_id = create_workspace(&mut state, "w");
+        let known = create_tab(&mut state, &ws_id, "known");
+        // Simulate a wcore-direct move that landed a new tab in this
+        // workspace's SQLite list without going through the reducer.
+        // The reducer's `workspace.tab_ids` is now stale: it knows
+        // about `known` only, but SQLite has both `known` and
+        // `imported` (and the latter belongs to an entirely different
+        // workspace from the reducer's perspective).
+        let imported = "imported-tab".to_string();
+        let events = update(
+            &mut state,
+            Command::ReorderTabsBulk {
+                workspace_id: ws_id.clone(),
+                tab_ids: vec![imported.clone(), known.clone()],
+            },
+            &ctx(99),
+        );
+        assert!(
+            matches!(&events[0], Event::TabsReorderedBulk { .. }),
+            "expected TabsReorderedBulk, got {:?}",
+            events.first()
+        );
+        let ws = state.workspaces.get(&ws_id).expect("ws still present");
+        assert_eq!(ws.tab_ids, vec![imported, known]);
+    }
+
+    /// codex P1 #620 carryover: a duplicate tab_id in the new list
+    /// is still rejected — that would corrupt the persisted ordering
+    /// in a way the subscriber can't recover from.
+    #[test]
+    fn reorder_tabs_bulk_rejects_duplicates() {
+        let mut state = State::default();
+        let ws_id = create_workspace(&mut state, "w");
+        let t1 = create_tab(&mut state, &ws_id, "t1");
+        let events = update(
+            &mut state,
+            Command::ReorderTabsBulk {
+                workspace_id: ws_id,
+                tab_ids: vec![t1.clone(), t1.clone()],
+            },
+            &ctx(2),
+        );
+        match &events[0] {
+            Event::Error { code, message, .. } => {
+                assert_eq!(*code, ErrorCode::InvalidCommand);
+                assert!(
+                    message.contains("duplicate"),
+                    "error should mention duplicate, got: {}",
+                    message
+                );
+            }
+            other => panic!("expected Error event, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn reorder_tabs_bulk_validates_workspace() {
+        let mut state = State::default();
+        let events = update(
+            &mut state,
+            Command::ReorderTabsBulk {
+                workspace_id: "no-such-ws".into(),
+                tab_ids: vec!["a".into()],
+            },
+            &ctx(1),
+        );
+        assert!(matches!(&events[0], Event::Error { .. }));
+    }
+
     #[test]
     fn delete_workspace_cascades_tabs() {
         let mut state = State::default();
@@ -2020,5 +2316,368 @@ mod tests {
             state.processes[&100].state,
             ProcessState::Exited { code: 0 }
         ));
+    }
+
+    // ---- Phase E.5.5 — MoveTab tests ----
+
+    #[test]
+    fn move_tab_cross_workspace_updates_lists_and_parent() {
+        let mut state = State::default();
+        let src = create_workspace(&mut state, "src");
+        let dst = create_workspace(&mut state, "dst");
+        let t1 = create_tab(&mut state, &src, "t1");
+        let t2 = create_tab(&mut state, &src, "t2");
+        let dst_existing = create_tab(&mut state, &dst, "existing");
+        let events = update(
+            &mut state,
+            Command::MoveTab {
+                tab_id: t1.clone(),
+                src_workspace_id: src.clone(),
+                dst_workspace_id: dst.clone(),
+                dst_index: 0,
+            },
+            &ctx(99),
+        );
+        match &events[0] {
+            Event::TabMoved {
+                tab_id,
+                src_workspace_id,
+                dst_workspace_id,
+                dst_index,
+                new_src_active_tab_id,
+                ..
+            } => {
+                assert_eq!(tab_id, &t1);
+                assert_eq!(src_workspace_id, &src);
+                assert_eq!(dst_workspace_id, &dst);
+                assert_eq!(*dst_index, 0);
+                assert_eq!(new_src_active_tab_id, &Some(t2.clone()));
+            }
+            other => panic!("expected TabMoved, got {:?}", other),
+        }
+        assert_eq!(state.workspaces[&src].tab_ids, vec![t2.clone()]);
+        assert_eq!(state.workspaces[&dst].tab_ids, vec![t1.clone(), dst_existing]);
+        assert_eq!(state.tabs[&t1].workspace_id, dst);
+        assert_eq!(state.workspaces[&src].active_tab_id, Some(t2));
+    }
+
+    #[test]
+    fn move_tab_clamps_dst_index_to_dst_length() {
+        let mut state = State::default();
+        let src = create_workspace(&mut state, "src");
+        let dst = create_workspace(&mut state, "dst");
+        let t1 = create_tab(&mut state, &src, "t1");
+        let _ = create_tab(&mut state, &src, "filler");
+        let events = update(
+            &mut state,
+            Command::MoveTab {
+                tab_id: t1.clone(),
+                src_workspace_id: src,
+                dst_workspace_id: dst.clone(),
+                dst_index: 999,
+            },
+            &ctx(2),
+        );
+        match &events[0] {
+            Event::TabMoved { dst_index, .. } => assert_eq!(*dst_index, 0),
+            other => panic!("expected TabMoved, got {:?}", other),
+        }
+        assert_eq!(state.workspaces[&dst].tab_ids, vec![t1]);
+    }
+
+    #[test]
+    fn move_tab_src_active_clears_when_workspace_empties() {
+        let mut state = State::default();
+        let src = create_workspace(&mut state, "src");
+        let dst = create_workspace(&mut state, "dst");
+        let only_tab = create_tab(&mut state, &src, "only");
+        let events = update(
+            &mut state,
+            Command::MoveTab {
+                tab_id: only_tab,
+                src_workspace_id: src.clone(),
+                dst_workspace_id: dst,
+                dst_index: 0,
+            },
+            &ctx(2),
+        );
+        match &events[0] {
+            Event::TabMoved {
+                new_src_active_tab_id,
+                ..
+            } => assert_eq!(new_src_active_tab_id, &None),
+            other => panic!("expected TabMoved, got {:?}", other),
+        }
+        assert_eq!(state.workspaces[&src].active_tab_id, None);
+        assert!(state.workspaces[&src].tab_ids.is_empty());
+    }
+
+    #[test]
+    fn move_tab_rejects_same_workspace() {
+        let mut state = State::default();
+        let ws = create_workspace(&mut state, "w");
+        let t1 = create_tab(&mut state, &ws, "t1");
+        let events = update(
+            &mut state,
+            Command::MoveTab {
+                tab_id: t1,
+                src_workspace_id: ws.clone(),
+                dst_workspace_id: ws,
+                dst_index: 0,
+            },
+            &ctx(2),
+        );
+        assert!(matches!(&events[0], Event::Error { .. }));
+    }
+
+    #[test]
+    fn move_tab_rejects_unknown_src_or_dst_or_tab() {
+        let mut state = State::default();
+        let src = create_workspace(&mut state, "src");
+        let dst = create_workspace(&mut state, "dst");
+        let t1 = create_tab(&mut state, &src, "t1");
+
+        let events = update(
+            &mut state,
+            Command::MoveTab {
+                tab_id: t1.clone(),
+                src_workspace_id: "no-such-src".into(),
+                dst_workspace_id: dst.clone(),
+                dst_index: 0,
+            },
+            &ctx(2),
+        );
+        assert!(matches!(&events[0], Event::Error { .. }));
+
+        let events = update(
+            &mut state,
+            Command::MoveTab {
+                tab_id: t1.clone(),
+                src_workspace_id: src.clone(),
+                dst_workspace_id: "no-such-dst".into(),
+                dst_index: 0,
+            },
+            &ctx(3),
+        );
+        assert!(matches!(&events[0], Event::Error { .. }));
+
+        // codex P1 round-2 #621: unknown tabs are now ACCEPTED
+        // (lazy-imported into state.tabs), since wcore-direct paths
+        // can create tabs the reducer hasn't seen. Pre-checks live
+        // in the saga / RPC layer (against SQLite). The reducer
+        // here only validates that both workspaces exist.
+        let events = update(
+            &mut state,
+            Command::MoveTab {
+                tab_id: "ghost-tab".into(),
+                src_workspace_id: src.clone(),
+                dst_workspace_id: dst,
+                dst_index: 0,
+            },
+            &ctx(4),
+        );
+        assert!(
+            matches!(&events[0], Event::TabMoved { .. }),
+            "unknown tab should be lazy-imported, got {:?}",
+            events.first()
+        );
+    }
+
+    /// codex P1 round-2 #621: handle_move_tab tolerates a tab whose
+    /// reducer-state workspace_id mismatches `src_workspace_id`. The
+    /// reducer's view can lag SQLite during the migration window
+    /// (wcore-direct paths create/move tabs without dispatching),
+    /// so a strict check would reject valid moves. The saga/RPC
+    /// reads SQLite (the source of truth) for the membership check;
+    /// the reducer here just performs the move.
+    #[test]
+    fn move_tab_tolerates_workspace_id_mismatch_during_migration() {
+        let mut state = State::default();
+        let real_src = create_workspace(&mut state, "src");
+        let dst = create_workspace(&mut state, "dst");
+        let t1 = create_tab(&mut state, &real_src, "t1");
+        let other = create_workspace(&mut state, "other");
+        let _ = create_tab(&mut state, &other, "filler");
+        // Move with src_workspace_id = "other" even though the tab
+        // technically belongs to real_src per reducer state.
+        let events = update(
+            &mut state,
+            Command::MoveTab {
+                tab_id: t1.clone(),
+                src_workspace_id: other,
+                dst_workspace_id: dst.clone(),
+                dst_index: 0,
+            },
+            &ctx(2),
+        );
+        assert!(matches!(&events[0], Event::TabMoved { .. }));
+        // Tab's workspace_id should now point at dst.
+        assert_eq!(state.tabs[&t1].workspace_id, dst);
+    }
+
+    /// codex P1 round-2 #621: lazy-import populates state.tabs for
+    /// a tab the reducer hadn't seen. After the move, state.tabs
+    /// has an entry with workspace_id = dst.
+    #[test]
+    fn move_tab_lazy_imports_unknown_tab() {
+        let mut state = State::default();
+        let src = create_workspace(&mut state, "src");
+        let dst = create_workspace(&mut state, "dst");
+        let unknown_id = "unknown-tab-xyz".to_string();
+        assert!(!state.tabs.contains_key(&unknown_id));
+        let events = update(
+            &mut state,
+            Command::MoveTab {
+                tab_id: unknown_id.clone(),
+                src_workspace_id: src,
+                dst_workspace_id: dst.clone(),
+                dst_index: 0,
+            },
+            &ctx(2),
+        );
+        assert!(matches!(&events[0], Event::TabMoved { .. }));
+        let tab = state
+            .tabs
+            .get(&unknown_id)
+            .expect("unknown tab should be lazy-imported");
+        assert_eq!(tab.workspace_id, dst);
+    }
+
+    // ---- Phase E.5.5 — MoveBlock tests ----
+
+    fn create_block(state: &mut State, tab_id: &str) -> String {
+        let events = update(
+            state,
+            Command::CreateBlock {
+                tab_id: tab_id.into(),
+                meta: serde_json::Value::Null,
+            },
+            &ctx(1),
+        );
+        match &events[0] {
+            Event::BlockCreated { block_id, .. } => block_id.clone(),
+            _ => panic!("expected BlockCreated"),
+        }
+    }
+
+    #[test]
+    fn move_block_cross_tab_updates_lists_and_parent() {
+        let mut state = State::default();
+        let ws = create_workspace(&mut state, "w");
+        let src_tab = create_tab(&mut state, &ws, "src");
+        let dst_tab = create_tab(&mut state, &ws, "dst");
+        let block = create_block(&mut state, &src_tab);
+        let dst_existing = create_block(&mut state, &dst_tab);
+        let events = update(
+            &mut state,
+            Command::MoveBlock {
+                block_id: block.clone(),
+                src_tab_id: src_tab.clone(),
+                dst_tab_id: dst_tab.clone(),
+                dst_index: 0,
+            },
+            &ctx(2),
+        );
+        assert!(matches!(&events[0], Event::BlockMoved { .. }));
+        assert_eq!(state.tabs[&src_tab].block_ids, Vec::<String>::new());
+        assert_eq!(state.tabs[&dst_tab].block_ids, vec![block.clone(), dst_existing]);
+        assert_eq!(state.blocks[&block].tab_id, dst_tab);
+    }
+
+    #[test]
+    fn move_block_intra_tab_repositions() {
+        let mut state = State::default();
+        let ws = create_workspace(&mut state, "w");
+        let tab = create_tab(&mut state, &ws, "t");
+        let b1 = create_block(&mut state, &tab);
+        let b2 = create_block(&mut state, &tab);
+        let b3 = create_block(&mut state, &tab);
+        // Move b1 to position 2 (end after removal).
+        let events = update(
+            &mut state,
+            Command::MoveBlock {
+                block_id: b1.clone(),
+                src_tab_id: tab.clone(),
+                dst_tab_id: tab.clone(),
+                dst_index: 2,
+            },
+            &ctx(2),
+        );
+        match &events[0] {
+            Event::BlockMoved { dst_index, .. } => assert_eq!(*dst_index, 2),
+            other => panic!("expected BlockMoved, got {:?}", other),
+        }
+        assert_eq!(state.tabs[&tab].block_ids, vec![b2, b3, b1]);
+    }
+
+    #[test]
+    fn move_block_rejects_unknown_src_or_dst_or_block() {
+        let mut state = State::default();
+        let ws = create_workspace(&mut state, "w");
+        let tab = create_tab(&mut state, &ws, "t");
+        let other_tab = create_tab(&mut state, &ws, "other");
+        let block = create_block(&mut state, &tab);
+
+        let events = update(
+            &mut state,
+            Command::MoveBlock {
+                block_id: block.clone(),
+                src_tab_id: "ghost-src".into(),
+                dst_tab_id: other_tab.clone(),
+                dst_index: 0,
+            },
+            &ctx(2),
+        );
+        assert!(matches!(&events[0], Event::Error { .. }));
+
+        let events = update(
+            &mut state,
+            Command::MoveBlock {
+                block_id: block.clone(),
+                src_tab_id: tab.clone(),
+                dst_tab_id: "ghost-dst".into(),
+                dst_index: 0,
+            },
+            &ctx(3),
+        );
+        assert!(matches!(&events[0], Event::Error { .. }));
+
+        let events = update(
+            &mut state,
+            Command::MoveBlock {
+                block_id: "ghost-block".into(),
+                src_tab_id: tab,
+                dst_tab_id: other_tab,
+                dst_index: 0,
+            },
+            &ctx(4),
+        );
+        assert!(matches!(&events[0], Event::Error { .. }));
+    }
+
+    #[test]
+    fn move_block_rejects_when_block_belongs_to_different_tab() {
+        let mut state = State::default();
+        let ws = create_workspace(&mut state, "w");
+        let real_src = create_tab(&mut state, &ws, "real");
+        let other = create_tab(&mut state, &ws, "other");
+        let dst = create_tab(&mut state, &ws, "dst");
+        let block = create_block(&mut state, &real_src);
+        let events = update(
+            &mut state,
+            Command::MoveBlock {
+                block_id: block,
+                src_tab_id: other,
+                dst_tab_id: dst,
+                dst_index: 0,
+            },
+            &ctx(2),
+        );
+        match &events[0] {
+            Event::Error { message, .. } => {
+                assert!(message.contains("belongs to tab"), "got: {}", message);
+            }
+            other => panic!("expected Error, got {:?}", other),
+        }
     }
 }

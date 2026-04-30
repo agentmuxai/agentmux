@@ -724,6 +724,15 @@ async fn enforce_register_first(
             "DeleteBlock is a srv-pipe command; sent to launcher pipe by mistake".to_string(),
             false,
         ),
+        // Phase E.5.5 — saga-driven move commands are srv-pipe.
+        Command::MoveTab { .. } => (
+            "MoveTab is a srv-pipe command; sent to launcher pipe by mistake".to_string(),
+            false,
+        ),
+        Command::MoveBlock { .. } => (
+            "MoveBlock is a srv-pipe command; sent to launcher pipe by mistake".to_string(),
+            false,
+        ),
     };
     // Phase E.1b — connection-private error; sentinel version=0
     // (codex P2 #610). See parse-error path for rationale.

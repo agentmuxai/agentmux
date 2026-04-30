@@ -281,6 +281,8 @@ fn event_version(e: &Event) -> u64 {
         | Event::WorkspaceMetaUpdated { version, .. }
         | Event::TabMetaUpdated { version, .. }
         | Event::BlockMetaUpdated { version, .. }
+        | Event::TabMoved { version, .. }
+        | Event::BlockMoved { version, .. }
         | Event::BlockCreated { version, .. }
         | Event::BlockDeleted { version, .. }
         | Event::Error { version, .. } => *version,

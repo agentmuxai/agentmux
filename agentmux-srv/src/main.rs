@@ -4,6 +4,7 @@ mod event_log;
 mod persist;
 mod persist_subscriber;
 mod reducer;
+mod sagas;
 mod server;
 mod srv_ipc;
 mod state;
@@ -552,6 +553,10 @@ async fn main() {
         // subscriber writes back to SQLite asynchronously.
         srv_state: std::sync::Arc::clone(&srv_state),
         srv_events_tx: srv_events_tx.clone(),
+        // Phase E.5.5 — saga-id allocator. Starts at 0; every
+        // `sagas::run_saga` invocation `fetch_add(1)`s. First
+        // saga gets id 1.
+        saga_id_alloc: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0)),
     };
 
     // Phase E.1b — srv pipe IPC server. Bound when launcher passes
