@@ -479,10 +479,25 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
             }
             publish_events(state, &events);
             if events.iter().any(|e| matches!(e, agentmux_common::ipc::Event::Error { .. })) {
-                WebReturnType::error(format!("DeleteWorkspace failed: {}", ws_id))
-            } else {
-                WebReturnType::success_empty()
+                return WebReturnType::error(format!("DeleteWorkspace failed: {}", ws_id));
             }
+            // Phase E.2c.2 — empty event list means the reducer
+            // didn't know about this workspace, but the workspace
+            // may still exist in SQLite (e.g., created via the
+            // still-wcore-direct window flow `CreateWindow` →
+            // `wcore::create_window_full`). Fall back to
+            // `wcore::delete_workspace` so the disk row is removed.
+            // Idempotent: if the workspace is also absent from
+            // SQLite, surface the NotFound error to the caller —
+            // matches the prior all-wcore behaviour and avoids
+            // silently succeeding on a no-op delete. (codex P1 #615.)
+            if events.is_empty() {
+                return match wcore::delete_workspace(store, &ws_id) {
+                    Ok(()) => WebReturnType::success_empty(),
+                    Err(e) => WebReturnType::error(e.to_string()),
+                };
+            }
+            WebReturnType::success_empty()
         }
         ("workspace", "ListWorkspaces") => match wcore::list_workspaces(store) {
             Ok(list) => WebReturnType::success(serde_json::to_value(&list).unwrap_or_default()),
@@ -1192,28 +1207,9 @@ fn publish_events(state: &AppState, events: &[agentmux_common::ipc::Event]) {
     }
 }
 
-/// Build a `Workspace` (the persistent object shape) from the
-/// reducer's `WorkspaceRecord` for synchronous RPC responses.
-/// Returns `None` if the reducer doesn't know the id.
-///
-/// E.2c.2 status: NOT YET USED at call sites — the reducer's
-/// WorkspaceRecord doesn't carry `pinnedtabids`, and its
-/// `tabids`/`activetabid` go stale relative to wstore-direct tab
-/// operations. Reads stay on wstore (which the synchronous
-/// apply-after-dispatch keeps in sync). Once tab RPC migrates in
-/// E.2c.3 — making tabs live in the reducer — this helper becomes
-/// the read path for `GetWorkspace`. (reagent + codex P1 #615.)
-#[allow(dead_code)]
-async fn build_workspace_from_state(
-    state: &AppState,
-    workspace_id: &str,
-) -> Option<Workspace> {
-    let s = state.srv_state.lock().await;
-    s.workspaces.get(workspace_id).map(|record| Workspace {
-        oid: record.workspace_id.clone(),
-        name: record.name.clone(),
-        tabids: record.tab_ids.clone(),
-        activetabid: record.active_tab_id.clone().unwrap_or_default(),
-        ..Default::default()
-    })
-}
+// `build_workspace_from_state` removed in E.2c.2. The reducer's
+// WorkspaceRecord can't faithfully render a Workspace during the
+// migration window (no pinnedtabids; tabids/activetabid go stale
+// vs wcore-direct tab ops). It will be reintroduced in E.2c.3
+// when tabs migrate into the reducer and pinned/active state is
+// authoritative there. (reagent + codex P1 #615.)
