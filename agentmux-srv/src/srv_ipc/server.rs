@@ -138,11 +138,17 @@ async fn handle_connection(stream: NamedPipeServer, ctx: Arc<ServerCtx>) {
             Ok(Some(l)) => l,
             Ok(None) => {
                 tracing::info!(target: "srv-ipc", "[srv-ipc] connection conn_id={} closed (kind={:?}, pid={:?})", conn_id, registered_kind, registered_pid);
+                // Phase E.1b — synthetic Goodbye on ungraceful
+                // disconnect so the reducer marks the PID Exited;
+                // otherwise reconnect-from-same-PID hits
+                // AlreadyRegistered. (codex P1 #610.)
+                dispatch_synthetic_goodbye(&ctx, conn_id, registered_pid).await;
                 fanout_handle.abort();
                 return;
             }
             Err(e) => {
                 tracing::warn!(target: "srv-ipc", "[srv-ipc] read error conn_id={}: {}", conn_id, e);
+                dispatch_synthetic_goodbye(&ctx, conn_id, registered_pid).await;
                 fanout_handle.abort();
                 return;
             }
@@ -293,6 +299,50 @@ async fn handle_connection(stream: NamedPipeServer, ctx: Arc<ServerCtx>) {
             fanout_handle.abort();
             return;
         }
+    }
+}
+
+/// Phase E.1b — synthetic Goodbye dispatch for ungraceful disconnects
+/// (EOF / read error before the client sent an explicit Goodbye).
+/// Without this, the reducer's process record stays Running and a
+/// reconnect from the same live PID hits AlreadyRegistered. Goodbye
+/// transitions the record to Exited so re-Register is accepted.
+/// (codex P1 #610.)
+///
+/// Idempotent: handle_goodbye is a no-op if no PID is registered or
+/// the record is already Exited. Errors during the synthetic dispatch
+/// are logged but non-fatal — we're already on a disconnect path.
+#[cfg(target_os = "windows")]
+async fn dispatch_synthetic_goodbye(
+    ctx: &Arc<ServerCtx>,
+    conn_id: u64,
+    registered_pid: Option<u32>,
+) {
+    let Some(pid) = registered_pid else {
+        return;
+    };
+    let now_rfc3339 = chrono::Utc::now().to_rfc3339();
+    let events = {
+        let mut state = ctx.state.lock().await;
+        let rctx = reducer::Ctx {
+            now_rfc3339,
+            conn_id,
+            registered_pid: Some(pid),
+        };
+        reducer::update(&mut state, Command::Goodbye, &rctx)
+    };
+    for event in events {
+        let event = patch_srv_identity(event, ctx);
+        if !matches!(
+            event,
+            Event::Snapshot { .. }
+                | Event::EventList { .. }
+                | Event::SrvSnapshot { .. }
+                | Event::Error { .. }
+        ) {
+            ctx.event_log.append(event.clone());
+        }
+        let _ = ctx.events_tx.send(event);
     }
 }
 
