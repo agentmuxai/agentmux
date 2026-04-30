@@ -595,6 +595,18 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
                 },
             )
             .await;
+            // Surface reducer Error events (e.g., workspace not
+            // found) before any persistence work — they're not
+            // bug events, they're caller-visible failures, and the
+            // generic "did not emit TabCreated" message below would
+            // mask the real reason. Matches the SetActiveTab pattern.
+            // (reagent P1 #616.)
+            if let Some(err_msg) = events.iter().find_map(|e| match e {
+                agentmux_common::ipc::Event::Error { message, .. } => Some(message.clone()),
+                _ => None,
+            }) {
+                return WebReturnType::error(err_msg);
+            }
             let tab_id = events.iter().find_map(|e| match e {
                 agentmux_common::ipc::Event::TabCreated { tab_id, .. } => Some(tab_id.clone()),
                 _ => None,
