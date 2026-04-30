@@ -229,6 +229,22 @@ pub enum Command {
     /// E.1b reply is sparse (lifecycle + version only — no domain
     /// state yet). E.2+ adds workspaces / tabs / blocks / etc.
     GetSrvSnapshot,
+    /// Phase E.2 — create a new workspace. The reducer assigns the
+    /// `oid` (UUID) and emits `Event::WorkspaceCreated`. The
+    /// persist-subscriber then writes the new workspace to SQLite
+    /// (idempotent via version-check). Migrating from the legacy
+    /// RPC `workspace.CreateWorkspace`.
+    CreateWorkspace {
+        name: String,
+    },
+    /// Phase E.2 — delete a workspace. Reducer removes from canonical
+    /// state and emits `Event::WorkspaceDeleted`. Persist-subscriber
+    /// cascades to SQLite (workspace's tabs are also removed by srv's
+    /// existing `wcore::delete_workspace`; cascade migration is E.2b
+    /// when tab arms land).
+    DeleteWorkspace {
+        workspace_id: String,
+    },
     /// Phase D.3 — request an `Event::EventList` reply containing the
     /// events the launcher has emitted with version > `since`. Used
     /// by subscribers that hold a snapshot at version V and want to
@@ -552,9 +568,9 @@ pub enum Event {
         reason: String,
         version: u64,
     },
-    /// Phase E.1b — srv-side snapshot reply. Sparse for E.1b
-    /// (lifecycle only); E.2+ populates with `workspaces`, `tabs`,
-    /// `blocks`, `layouts`, etc.
+    /// Phase E.1b — srv-side snapshot reply. Phase E.2 populates
+    /// `workspaces` (canonical Vec); subsequent sub-phases add
+    /// `tabs`, `blocks`, `layouts`, etc.
     ///
     /// `version` is the srv reducer's `event_version` at snapshot
     /// time, monotonically distinct from prior srv events so
@@ -562,8 +578,24 @@ pub enum Event {
     SrvSnapshot {
         version: u64,
         lifecycle: LifecyclePhase,
-        // Domain state placeholders — populated in Phase E.2+.
-        // Empty in E.1b (skeleton only).
+        /// Phase E.2 — sorted list of workspaces in the reducer's
+        /// canonical state. (id, name) pairs for compactness; full
+        /// state available via per-event subscription. Empty before
+        /// E.2 lands.
+        workspaces: Vec<(String, String)>,
+    },
+    /// Phase E.2 — workspace was created. Carries the assigned
+    /// `oid` and `name` so subscribers (renderer, persist) can
+    /// apply the change without further round-trips.
+    WorkspaceCreated {
+        workspace_id: String,
+        name: String,
+        version: u64,
+    },
+    /// Phase E.2 — workspace was deleted.
+    WorkspaceDeleted {
+        workspace_id: String,
+        version: u64,
     },
 }
 

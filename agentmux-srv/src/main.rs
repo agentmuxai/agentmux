@@ -1,6 +1,7 @@
 mod backend;
 mod config;
 mod event_log;
+mod persist;
 mod reducer;
 mod server;
 mod srv_ipc;
@@ -495,6 +496,11 @@ async fn main() {
     backend::process_tracker::registry::set_global(process_tracker.clone());
     backend::process_tracker::registry::spawn_poller(process_tracker.clone());
 
+    // Phase E.2 — keep an extra Arc<WaveStore> clone for the
+    // srv-pipe / persist subscriber path which lives outside
+    // AppState (and is initialized further below).
+    let wstore_for_persist = Arc::clone(&wstore);
+
     let state = AppState {
         auth_key: config.auth_key.clone(),
         version: version.clone(),
@@ -517,8 +523,10 @@ async fn main() {
 
     // Phase E.1b — srv pipe IPC server. Bound when launcher passes
     // `AGENTMUX_SRV_PIPE_PATH`; absent in `task dev` mode (no
-    // launcher in the loop). Reducer is currently plumbing-only;
-    // E.2+ adds workspace/tab/block command arms.
+    // launcher in the loop).
+    //
+    // Phase E.2 — bootstrap reducer state from SQLite + spawn the
+    // persist subscriber so workspace events flow back to disk.
     //
     // Bind happens BEFORE the AGENTMUXSRV-ESTART line so the
     // launcher knows the pipe is ready when host starts. Non-fatal
@@ -540,6 +548,27 @@ async fn main() {
 
                     let srv_state =
                         std::sync::Arc::new(tokio::sync::Mutex::new(state::State::default()));
+
+                    // Phase E.2 — bootstrap workspaces from SQLite
+                    // BEFORE the IPC server starts accepting commands.
+                    // Subsequent reducer transitions flow through
+                    // update; persist subscriber mirrors back to
+                    // SQLite.
+                    persist::bootstrap_state_from_wstore(&srv_state, &wstore_for_persist).await;
+
+                    // Phase E.2 — persist subscriber (subscribe BEFORE
+                    // spawning, same pattern as disk writer + saga
+                    // coordinator to avoid losing events between
+                    // construction and first recv).
+                    let persist_rx = events_tx.subscribe();
+                    let persist_state = std::sync::Arc::clone(&srv_state);
+                    let persist_wstore = std::sync::Arc::clone(&wstore_for_persist);
+                    tokio::spawn(persist::run_persist_subscriber(
+                        persist_wstore,
+                        persist_state,
+                        persist_rx,
+                    ));
+
                     let srv_ctx = srv_ipc::ServerCtx {
                         srv_pid: std::process::id(),
                         srv_version: version.clone(),

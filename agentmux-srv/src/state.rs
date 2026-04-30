@@ -39,12 +39,34 @@ pub struct ProcessRecord {
     pub version: String,
 }
 
+/// Phase E.2 — workspace as held by the srv reducer's canonical
+/// state. Mirrors the persistent `Workspace` struct in
+/// `agentmux_srv::backend::obj::Workspace` but with the reducer-
+/// canonical fields the cross-process events care about. Tabs
+/// are tracked separately in E.2b.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkspaceRecord {
+    pub workspace_id: String,
+    pub name: String,
+}
+
 #[derive(Debug)]
 pub struct State {
     pub lifecycle: LifecyclePhase,
     pub processes: HashMap<u32, ProcessRecord>,
     pub event_version: u64,
     pub next_client_id: u64,
+    /// Phase E.2 — workspaces canonical to the srv reducer.
+    /// Bootstrapped from SQLite at startup; subsequent transitions
+    /// flow through `update`. Persist-subscriber mirrors changes
+    /// back to SQLite (idempotent, version-gated).
+    pub workspaces: HashMap<String, WorkspaceRecord>,
+    /// Phase E.2 — persistence high-water mark. Tracks the highest
+    /// `event_version` whose effects have been written to SQLite.
+    /// On restart, bootstrap loads SQLite then replays events from
+    /// the on-disk event log with `version > persistence_hwm` to
+    /// recover events emitted-but-not-yet-persisted at crash time.
+    pub persistence_hwm: u64,
 }
 
 impl Default for State {
@@ -54,6 +76,8 @@ impl Default for State {
             processes: HashMap::new(),
             event_version: 0,
             next_client_id: 0,
+            workspaces: HashMap::new(),
+            persistence_hwm: 0,
         }
     }
 }

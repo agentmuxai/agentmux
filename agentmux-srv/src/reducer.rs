@@ -18,7 +18,7 @@
 
 use agentmux_common::ipc::{ClientKind, Command, ErrorCode, Event, LifecyclePhase};
 
-use crate::state::{ProcessRecord, ProcessState, State};
+use crate::state::{ProcessRecord, ProcessState, State, WorkspaceRecord};
 
 /// Per-dispatch context. Currently just an RFC3339 timestamp + the
 /// originating connection's `conn_id` for log correlation.
@@ -39,6 +39,8 @@ pub fn update(state: &mut State, cmd: Command, ctx: &Ctx) -> Vec<Event> {
         }
         Command::GetSrvSnapshot => handle_get_srv_snapshot(state),
         Command::GetEvents { .. } => Vec::new(), // intercepted by server; unreachable
+        Command::CreateWorkspace { name } => handle_create_workspace(state, name),
+        Command::DeleteWorkspace { workspace_id } => handle_delete_workspace(state, workspace_id),
         // E.1b accepts only the above; everything else is a non-fatal
         // protocol error. E.2+ adds domain commands as new arms.
         other => {
@@ -147,9 +149,55 @@ fn handle_goodbye(state: &mut State, ctx: &Ctx) -> Vec<Event> {
 
 fn handle_get_srv_snapshot(state: &mut State) -> Vec<Event> {
     let v = state.bump_version();
+    let mut workspaces: Vec<(String, String)> = state
+        .workspaces
+        .values()
+        .map(|w| (w.workspace_id.clone(), w.name.clone()))
+        .collect();
+    // Stable ordering for diffability — reducer state is HashMap so
+    // iteration order is non-deterministic.
+    workspaces.sort_by(|a, b| a.0.cmp(&b.0));
     vec![Event::SrvSnapshot {
         version: v,
         lifecycle: state.lifecycle,
+        workspaces,
+    }]
+}
+
+/// Phase E.2 — create a new workspace. Reducer assigns the OID
+/// (UUID), inserts into canonical state, emits WorkspaceCreated.
+/// Idempotent w.r.t. the assigned OID: if a saga or retry fires
+/// CreateWorkspace twice, the second insertion overwrites the
+/// first (with a different OID — no collision possible since OIDs
+/// are UUIDs).
+fn handle_create_workspace(state: &mut State, name: String) -> Vec<Event> {
+    let workspace_id = uuid::Uuid::new_v4().to_string();
+    state.workspaces.insert(
+        workspace_id.clone(),
+        WorkspaceRecord {
+            workspace_id: workspace_id.clone(),
+            name: name.clone(),
+        },
+    );
+    let v = state.bump_version();
+    vec![Event::WorkspaceCreated {
+        workspace_id,
+        name,
+        version: v,
+    }]
+}
+
+/// Phase E.2 — delete a workspace from canonical state. Idempotent:
+/// deleting a missing workspace is a silent no-op. Cascade to the
+/// workspace's tabs is E.2b territory (tab arms not yet present).
+fn handle_delete_workspace(state: &mut State, workspace_id: String) -> Vec<Event> {
+    if state.workspaces.remove(&workspace_id).is_none() {
+        return Vec::new();
+    }
+    let v = state.bump_version();
+    vec![Event::WorkspaceDeleted {
+        workspace_id,
+        version: v,
     }]
 }
 
@@ -198,6 +246,8 @@ mod tests {
             | Event::SagaStarted { version, .. }
             | Event::SagaCompleted { version, .. }
             | Event::SagaFailed { version, .. }
+            | Event::WorkspaceCreated { version, .. }
+            | Event::WorkspaceDeleted { version, .. }
             | Event::Error { version, .. } => *version,
         }
     }
@@ -331,7 +381,7 @@ mod tests {
         let v0 = state.event_version;
         let events = update(&mut state, Command::GetSrvSnapshot, &ctx(1));
         assert_eq!(events.len(), 1);
-        let Event::SrvSnapshot { version, lifecycle } = events[0] else {
+        let Event::SrvSnapshot { version, lifecycle, .. } = events[0].clone() else {
             panic!("expected SrvSnapshot, got {:?}", events[0]);
         };
         assert_eq!(lifecycle, LifecyclePhase::Starting);
@@ -379,6 +429,92 @@ mod tests {
         for w in versions.windows(2) {
             assert!(w[1] > w[0], "version regression: {} -> {}", w[0], w[1]);
         }
+    }
+
+    #[test]
+    fn create_workspace_inserts_record_and_emits_event() {
+        let mut state = State::default();
+        let events = update(
+            &mut state,
+            Command::CreateWorkspace {
+                name: "myws".into(),
+            },
+            &ctx(1),
+        );
+        assert_eq!(events.len(), 1);
+        let Event::WorkspaceCreated {
+            workspace_id, name, ..
+        } = &events[0]
+        else {
+            panic!("expected WorkspaceCreated, got {:?}", events[0]);
+        };
+        assert_eq!(name, "myws");
+        assert!(state.workspaces.contains_key(workspace_id));
+        assert_eq!(state.workspaces[workspace_id].name, "myws");
+    }
+
+    #[test]
+    fn delete_workspace_removes_record_and_emits_event() {
+        let mut state = State::default();
+        let events = update(
+            &mut state,
+            Command::CreateWorkspace {
+                name: "to-delete".into(),
+            },
+            &ctx(1),
+        );
+        let Event::WorkspaceCreated { workspace_id, .. } = &events[0] else {
+            panic!();
+        };
+        let ws_id = workspace_id.clone();
+        let events = update(
+            &mut state,
+            Command::DeleteWorkspace {
+                workspace_id: ws_id.clone(),
+            },
+            &ctx(2),
+        );
+        assert_eq!(events.len(), 1);
+        assert!(matches!(
+            &events[0],
+            Event::WorkspaceDeleted { workspace_id, .. } if workspace_id == &ws_id
+        ));
+        assert!(!state.workspaces.contains_key(&ws_id));
+    }
+
+    #[test]
+    fn delete_workspace_unknown_is_silent_no_op() {
+        let mut state = State::default();
+        let events = update(
+            &mut state,
+            Command::DeleteWorkspace {
+                workspace_id: "does-not-exist".into(),
+            },
+            &ctx(1),
+        );
+        assert!(events.is_empty());
+    }
+
+    #[test]
+    fn snapshot_includes_workspaces_sorted_by_id() {
+        let mut state = State::default();
+        let _ = update(
+            &mut state,
+            Command::CreateWorkspace { name: "a".into() },
+            &ctx(1),
+        );
+        let _ = update(
+            &mut state,
+            Command::CreateWorkspace { name: "b".into() },
+            &ctx(2),
+        );
+        let events = update(&mut state, Command::GetSrvSnapshot, &ctx(3));
+        let Event::SrvSnapshot { workspaces, .. } = &events[0] else {
+            panic!();
+        };
+        assert_eq!(workspaces.len(), 2);
+        // Sorted by id; verify ordering deterministic (ascending).
+        assert!(workspaces[0].0 < workspaces[1].0);
     }
 
     #[test]
