@@ -428,11 +428,12 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
             }
             if let Some(err) = apply_err {
                 if let Some(id) = workspace_id.as_ref() {
-                    let _ = dispatch_to_reducer(
+                    compensate_via_reducer(
                         state,
                         agentmux_common::ipc::Command::DeleteWorkspace {
                             workspace_id: id.clone(),
                         },
+                        store,
                     )
                     .await;
                 }
@@ -485,7 +486,15 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
             // untouched (no divergence). If wcore succeeds, the
             // reducer dispatch + bus publish keep the rest of the
             // system in sync. (codex P2 #615 — divergence-on-failure.)
-            let exists_in_wstore = wstore_workspace_exists(store, &ws_id);
+            let exists_in_wstore = match wstore_workspace_exists(store, &ws_id) {
+                Ok(v) => v,
+                Err(e) => {
+                    return WebReturnType::error(format!(
+                        "DeleteWorkspace: SQLite read failed: {}",
+                        e
+                    ))
+                }
+            };
             if exists_in_wstore {
                 if let Err(e) = wcore::delete_workspace(store, &ws_id) {
                     return WebReturnType::error(format!(
@@ -532,6 +541,14 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
             Ok(list) => WebReturnType::success(serde_json::to_value(&list).unwrap_or_default()),
             Err(e) => WebReturnType::error(e.to_string()),
         },
+        // Phase E.2c.3 — CreateTab routes through the reducer for
+        // regular (unpinned) tabs. Pinned tabs (`pinned=true` in
+        // args[3]) stay on the wcore-direct path until E.2c.3b adds
+        // pinned-tab support to the reducer. The split is necessary
+        // because the reducer's WorkspaceRecord doesn't yet track
+        // `pinned_tab_ids` separately — adding that is structural
+        // (state shape + bootstrap split + subscriber routing) and
+        // doesn't fit cleanly into this PR.
         ("workspace", "CreateTab") => {
             let ws_id: String = match service::get_arg(args, 0) {
                 Ok(v) => v,
@@ -540,20 +557,151 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
             let tab_name: String = service::get_arg(args, 1).unwrap_or_default();
             let activate: bool = service::get_arg(args, 2).unwrap_or(true);
             let pinned: bool = service::get_arg(args, 3).unwrap_or(false);
-            match wcore::create_tab_with_opts(store, &ws_id, &tab_name, pinned) {
-                Ok(tab) => {
-                    // If activate requested, set active tab
-                    if activate {
-                        let _ = wcore::set_active_tab(store, &ws_id, &tab.oid);
+            if pinned {
+                // Pinned-tab path: wcore-direct (unchanged from E.2c.2).
+                match wcore::create_tab_with_opts(store, &ws_id, &tab_name, true) {
+                    Ok(tab) => {
+                        if activate {
+                            let _ = wcore::set_active_tab(store, &ws_id, &tab.oid);
+                        }
+                        let tab_oid = tab.oid.clone();
+                        let mut updates = vec![WaveObjUpdate {
+                            updatetype: "update".into(),
+                            otype: OTYPE_TAB.to_string(),
+                            oid: tab.oid.clone(),
+                            obj: Some(wave_obj_to_value(&tab)),
+                        }];
+                        if let Ok(ws) = store.must_get::<Workspace>(&ws_id) {
+                            updates.push(WaveObjUpdate {
+                                updatetype: "update".into(),
+                                otype: OTYPE_WORKSPACE.to_string(),
+                                oid: ws_id.clone(),
+                                obj: Some(wave_obj_to_value(&ws)),
+                            });
+                        }
+                        return WebReturnType::success_data_updates(
+                            serde_json::to_value(&tab_oid).unwrap_or_default(),
+                            updates,
+                        );
                     }
-                    let tab_oid = tab.oid.clone();
-                    let tab_update = WaveObjUpdate {
-                        updatetype: "update".into(),
-                        otype: OTYPE_TAB.to_string(),
-                        oid: tab.oid.clone(),
-                        obj: Some(wave_obj_to_value(&tab)),
-                    };
-                    let mut updates = vec![tab_update];
+                    Err(e) => return WebReturnType::error(e.to_string()),
+                }
+            }
+            // Regular tab: dispatch through reducer. Auto-generate
+            // a `tab{N}` name when the caller passed empty so the
+            // reducer path matches the wcore behaviour
+            // (wcore::create_tab_with_opts auto-names empties from
+            // `ws.tabids.len() + ws.pinnedtabids.len()`). Without
+            // this, regular reducer-routed tabs got blank titles
+            // while pinned wcore-routed tabs auto-named — UX
+            // inconsistency. (reagent + codex P1 #616.)
+            let resolved_name = if tab_name.is_empty() {
+                match store.get::<Workspace>(&ws_id) {
+                    Ok(Some(ws)) => {
+                        format!("tab{}", ws.tabids.len() + ws.pinnedtabids.len() + 1)
+                    }
+                    _ => "tab1".to_string(),
+                }
+            } else {
+                tab_name.clone()
+            };
+            let events = dispatch_to_reducer(
+                state,
+                agentmux_common::ipc::Command::CreateTab {
+                    workspace_id: ws_id.clone(),
+                    name: resolved_name,
+                },
+            )
+            .await;
+            // Surface reducer Error events (e.g., workspace not
+            // found) before any persistence work — they're not
+            // bug events, they're caller-visible failures, and the
+            // generic "did not emit TabCreated" message below would
+            // mask the real reason. Matches the SetActiveTab pattern.
+            // (reagent P1 #616.)
+            if let Some(err_msg) = events.iter().find_map(|e| match e {
+                agentmux_common::ipc::Event::Error { message, .. } => Some(message.clone()),
+                _ => None,
+            }) {
+                return WebReturnType::error(err_msg);
+            }
+            let tab_id = events.iter().find_map(|e| match e {
+                agentmux_common::ipc::Event::TabCreated { tab_id, .. } => Some(tab_id.clone()),
+                _ => None,
+            });
+            // Apply synchronously to wstore (forward+compensate on
+            // failure — same pattern as CreateWorkspace in E.2c.2).
+            let mut apply_err: Option<String> = None;
+            for ev in &events {
+                if let Err(e) = crate::persist_subscriber::apply_event_to_wstore(ev, store) {
+                    apply_err = Some(e.to_string());
+                    break;
+                }
+            }
+            if let Some(err) = apply_err {
+                if let Some(tid) = tab_id.as_ref() {
+                    compensate_via_reducer(
+                        state,
+                        agentmux_common::ipc::Command::DeleteTab {
+                            workspace_id: ws_id.clone(),
+                            tab_id: tid.clone(),
+                        },
+                        store,
+                    )
+                    .await;
+                }
+                return WebReturnType::error(format!("CreateTab: SQLite write failed: {}", err));
+            }
+            publish_events(state, &events);
+            // If `activate=true` and the reducer didn't auto-activate
+            // this as the first tab, dispatch SetActiveTab.
+            let auto_activated = events
+                .iter()
+                .any(|e| matches!(e, agentmux_common::ipc::Event::ActiveTabChanged { .. }));
+            if activate && !auto_activated {
+                if let Some(tid) = tab_id.as_ref() {
+                    let active_events = dispatch_to_reducer(
+                        state,
+                        agentmux_common::ipc::Command::SetActiveTab {
+                            workspace_id: ws_id.clone(),
+                            tab_id: tid.clone(),
+                        },
+                    )
+                    .await;
+                    let mut active_err: Option<String> = None;
+                    for ev in &active_events {
+                        if let Err(e) =
+                            crate::persist_subscriber::apply_event_to_wstore(ev, store)
+                        {
+                            active_err = Some(e.to_string());
+                            break;
+                        }
+                    }
+                    if active_err.is_none() {
+                        publish_events(state, &active_events);
+                    }
+                    // SetActiveTab failure is non-fatal here — the
+                    // tab exists; activation can be retried by the
+                    // caller. Log if it happened.
+                    if let Some(err) = active_err {
+                        tracing::warn!(
+                            "CreateTab: post-create activate failed: {}",
+                            err
+                        );
+                    }
+                }
+            }
+            match tab_id {
+                Some(id) => {
+                    let mut updates = vec![];
+                    if let Ok(tab) = store.must_get::<Tab>(&id) {
+                        updates.push(WaveObjUpdate {
+                            updatetype: "update".into(),
+                            otype: OTYPE_TAB.to_string(),
+                            oid: id.clone(),
+                            obj: Some(wave_obj_to_value(&tab)),
+                        });
+                    }
                     if let Ok(ws) = store.must_get::<Workspace>(&ws_id) {
                         updates.push(WaveObjUpdate {
                             updatetype: "update".into(),
@@ -563,13 +711,19 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
                         });
                     }
                     WebReturnType::success_data_updates(
-                        serde_json::to_value(&tab_oid).unwrap_or_default(),
+                        serde_json::to_value(&id).unwrap_or_default(),
                         updates,
                     )
                 }
-                Err(e) => WebReturnType::error(e.to_string()),
+                None => WebReturnType::error(
+                    "CreateTab: reducer did not emit TabCreated".to_string(),
+                ),
             }
         }
+        // Phase E.2c.3 — SetActiveTab routes through the reducer.
+        // Read-through reads (e.g., GetWorkspace) still hit wstore
+        // during the migration window, so the synchronous
+        // apply-to-wstore keeps them consistent.
         ("workspace", "SetActiveTab") => {
             let ws_id: String = match service::get_arg(args, 0) {
                 Ok(v) => v,
@@ -579,25 +733,97 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
                 Ok(v) => v,
                 Err(e) => return WebReturnType::error(e),
             };
-            // Self-heal the layout before activating — remove any orphaned
-            // block nodes that would render as blank panes.
+            // Self-heal the layout before activating — remove any
+            // orphaned block nodes that would render as blank panes.
             let _ = wcore::heal_layout(store, &tab_id);
 
-            match wcore::set_active_tab(store, &ws_id, &tab_id) {
-                Ok(()) => {
-                    if let Ok(ws) = store.must_get::<Workspace>(&ws_id) {
-                        let update = WaveObjUpdate {
-                            updatetype: "update".into(),
-                            otype: OTYPE_WORKSPACE.to_string(),
-                            oid: ws_id.clone(),
-                            obj: Some(wave_obj_to_value(&ws)),
-                        };
-                        WebReturnType::success_with_updates(vec![update])
-                    } else {
-                        WebReturnType::success_empty()
+            // Pinned tabs aren't tracked in the reducer yet — dispatch
+            // would emit Error("tab not in workspace's tab list").
+            // Detect and fall through to wcore for those.
+            let is_pinned = match store.get::<Workspace>(&ws_id) {
+                Ok(Some(ws)) => ws.pinnedtabids.iter().any(|t| t == &tab_id),
+                _ => false,
+            };
+            if is_pinned {
+                return match wcore::set_active_tab(store, &ws_id, &tab_id) {
+                    Ok(()) => {
+                        // Pinned tabs aren't in the reducer's
+                        // WorkspaceRecord.tab_ids (E.2c.3 doesn't yet
+                        // model them). Clear the reducer's
+                        // active_tab_id so the next SetActiveTab on a
+                        // regular tab isn't a no-op (would happen if
+                        // the reducer still pointed at a previously-
+                        // active regular tab — bouncing between
+                        // pinned and regular would lose user switch
+                        // requests). Direct mutation outside the
+                        // reducer is a transitional hack; E.2c.3b
+                        // adds pinned-tab support and unifies the
+                        // path. (codex P1 #616.)
+                        {
+                            let mut s = state.srv_state.lock().await;
+                            if let Some(ws_record) = s.workspaces.get_mut(&ws_id) {
+                                ws_record.active_tab_id = None;
+                            }
+                        }
+                        if let Ok(ws) = store.must_get::<Workspace>(&ws_id) {
+                            let update = WaveObjUpdate {
+                                updatetype: "update".into(),
+                                otype: OTYPE_WORKSPACE.to_string(),
+                                oid: ws_id.clone(),
+                                obj: Some(wave_obj_to_value(&ws)),
+                            };
+                            WebReturnType::success_with_updates(vec![update])
+                        } else {
+                            WebReturnType::success_empty()
+                        }
                     }
+                    Err(e) => WebReturnType::error(e.to_string()),
+                };
+            }
+
+            let events = dispatch_to_reducer(
+                state,
+                agentmux_common::ipc::Command::SetActiveTab {
+                    workspace_id: ws_id.clone(),
+                    tab_id: tab_id.clone(),
+                },
+            )
+            .await;
+            // Reducer emits Event::Error on unknown workspace/tab —
+            // surface as RPC error.
+            if let Some(err_msg) = events.iter().find_map(|e| match e {
+                agentmux_common::ipc::Event::Error { message, .. } => Some(message.clone()),
+                _ => None,
+            }) {
+                return WebReturnType::error(err_msg);
+            }
+            // Apply synchronously. SetActiveTab is reversible at the
+            // reducer level (just write back the previous active id),
+            // but we don't track the previous id here; if SQLite
+            // fails, return the error and accept short-lived
+            // divergence on this RPC path. (Acceptable: SetActiveTab
+            // is a UI-driven action; the user can retry.)
+            let mut apply_err: Option<String> = None;
+            for ev in &events {
+                if let Err(e) = crate::persist_subscriber::apply_event_to_wstore(ev, store) {
+                    apply_err = Some(e.to_string());
+                    break;
                 }
-                Err(e) => WebReturnType::error(e.to_string()),
+            }
+            if let Some(err) = apply_err {
+                return WebReturnType::error(format!("SetActiveTab: SQLite write failed: {}", err));
+            }
+            publish_events(state, &events);
+            if let Ok(ws) = store.must_get::<Workspace>(&ws_id) {
+                let update = WaveObjUpdate {
+                    updatetype: "update".into(),
+                    otype: OTYPE_WORKSPACE.to_string(),
+                    oid: ws_id.clone(),
+                    obj: Some(wave_obj_to_value(&ws)),
+                };
+                WebReturnType::success_with_updates(vec![update])
+            } else {
+                WebReturnType::success_empty()
             }
         }
         ("workspace", "CloseTab") => {
@@ -1236,12 +1462,43 @@ fn publish_events(state: &AppState, events: &[agentmux_common::ipc::Event]) {
     }
 }
 
+/// Compensation helper: dispatch a command into the reducer and
+/// apply its emitted events to wstore best-effort. Used when an
+/// earlier sync apply partially wrote SQLite and we need to undo
+/// the leaked rows. SQLite errors during compensation are logged
+/// but ignored — the caller is already returning an error to the
+/// client; throwing on the cleanup just hides the original cause.
+/// (codex P1 + reagent P2 #616 — partial-write cleanup.)
+async fn compensate_via_reducer(
+    state: &AppState,
+    cmd: agentmux_common::ipc::Command,
+    store: &WaveStore,
+) {
+    let events = dispatch_to_reducer(state, cmd).await;
+    for ev in &events {
+        if let Err(e) = crate::persist_subscriber::apply_event_to_wstore(ev, store) {
+            tracing::warn!(
+                "compensation: SQLite cleanup failed for event {:?}: {}",
+                std::mem::discriminant(ev),
+                e
+            );
+        }
+    }
+}
+
 /// Existence check used by `DeleteWorkspace` to decide whether to
-/// run the wcore delete path. `wstore.get` returns `Ok(None)` for
-/// missing rows; treat any error as "doesn't exist" so we don't
-/// double-fail when the caller would've gotten a clean 404.
-fn wstore_workspace_exists(store: &WaveStore, workspace_id: &str) -> bool {
-    matches!(store.get::<Workspace>(workspace_id), Ok(Some(_)))
+/// run the wcore delete path. Propagates `StoreError` so the caller
+/// can surface real I/O / corruption failures instead of
+/// misclassifying them as "not found" (codex P2 #615 carryover —
+/// the prior `bool` return collapsed `Err(_)` into `false`, which
+/// led to silent successes when SQLite was unhealthy: reducer would
+/// delete its own copy and report success while the disk row was
+/// never touched).
+fn wstore_workspace_exists(
+    store: &WaveStore,
+    workspace_id: &str,
+) -> Result<bool, crate::backend::storage::StoreError> {
+    Ok(store.get::<Workspace>(workspace_id)?.is_some())
 }
 
 // `build_workspace_from_state` removed in E.2c.2. The reducer's
