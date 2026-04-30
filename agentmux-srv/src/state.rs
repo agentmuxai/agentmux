@@ -7,16 +7,18 @@
 // pipe IPC server; mutex held only during reducer dispatch
 // (sub-millisecond).
 //
-// What's here in E.1b:
-//   * `LifecyclePhase` (re-exported from agentmux-common::ipc)
-//   * `ProcessRecord` — pid, kind, state, spawned_at
-//   * `ProcessState` — Spawning / Running / Exited
-//   * `State` — top-level: lifecycle + process map + monotonic counters
+// What's here:
+//   * `LifecyclePhase` (re-exported from agentmux-common::ipc) — E.1b
+//   * `ProcessRecord` — pid, kind, state, spawned_at — E.1b
+//   * `ProcessState` — Spawning / Running / Exited — E.1b
+//   * `WorkspaceRecord` — workspace_id, name — E.2
+//   * `State` — top-level: lifecycle + process map + workspaces +
+//     monotonic counters
 //
 // What's intentionally NOT here yet:
-//   * Domain state (workspaces, tabs, blocks, layouts) — E.2+
-//   * SQLite-bootstrap path / persistence HWM — E.2 (when there's
-//     domain state to persist)
+//   * Tab / Block / Layout domain state — E.2b+
+//   * `persistence_hwm` field — E.2c (lands with the persist
+//     subscriber that mirrors pipe-event effects back to SQLite)
 
 use std::collections::HashMap;
 
@@ -39,12 +41,33 @@ pub struct ProcessRecord {
     pub version: String,
 }
 
+/// Phase E.2 — workspace as held by the srv reducer's canonical
+/// state. Mirrors the persistent `Workspace` struct in
+/// `agentmux_srv::backend::obj::Workspace` but with the reducer-
+/// canonical fields the cross-process events care about. Tabs
+/// are tracked separately in E.2b.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkspaceRecord {
+    pub workspace_id: String,
+    pub name: String,
+}
+
 #[derive(Debug)]
 pub struct State {
     pub lifecycle: LifecyclePhase,
     pub processes: HashMap<u32, ProcessRecord>,
     pub event_version: u64,
     pub next_client_id: u64,
+    /// Phase E.2 — workspaces canonical to the srv reducer.
+    /// Bootstrapped from SQLite at startup; subsequent transitions
+    /// flow through `update`. In E.2 the reducer is a session-only
+    /// projection — pipe-originated mutations live only in this
+    /// map until the process restarts. E.2c adds the persist
+    /// subscriber that mirrors changes back to SQLite (idempotent,
+    /// version-gated) and migrates HTTP/WS RPC through the reducer.
+    pub workspaces: HashMap<String, WorkspaceRecord>,
+    // `persistence_hwm` deferred to E.2c when the persist subscriber
+    // lands and there's actually something to track.
 }
 
 impl Default for State {
@@ -54,6 +77,7 @@ impl Default for State {
             processes: HashMap::new(),
             event_version: 0,
             next_client_id: 0,
+            workspaces: HashMap::new(),
         }
     }
 }

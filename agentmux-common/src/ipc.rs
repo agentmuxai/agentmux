@@ -226,9 +226,26 @@ pub enum Command {
     /// reducer is canonical for its domain and replies on its own
     /// pipe.
     ///
-    /// E.1b reply is sparse (lifecycle + version only — no domain
-    /// state yet). E.2+ adds workspaces / tabs / blocks / etc.
+    /// Reply contents grow with each phase: E.1b had lifecycle +
+    /// version only; E.2 added `workspaces`; E.2b+ will add tabs /
+    /// blocks / layouts. See `Event::SrvSnapshot` for the current
+    /// shape.
     GetSrvSnapshot,
+    /// Phase E.2 — create a new workspace. The reducer assigns the
+    /// `oid` (UUID) and emits `Event::WorkspaceCreated`. In E.2 the
+    /// reducer is a session-only projection (no persist subscriber);
+    /// E.2c adds the persist subscriber + migrates HTTP/WS RPC
+    /// to flow through the reducer.
+    CreateWorkspace {
+        name: String,
+    },
+    /// Phase E.2 — delete a workspace. Reducer removes from canonical
+    /// state and emits `Event::WorkspaceDeleted`. Cascade-to-tabs +
+    /// SQLite write happen via wcore today (RPC path); migrating to
+    /// reducer-driven persistence is E.2c.
+    DeleteWorkspace {
+        workspace_id: String,
+    },
     /// Phase D.3 — request an `Event::EventList` reply containing the
     /// events the launcher has emitted with version > `since`. Used
     /// by subscribers that hold a snapshot at version V and want to
@@ -552,9 +569,9 @@ pub enum Event {
         reason: String,
         version: u64,
     },
-    /// Phase E.1b — srv-side snapshot reply. Sparse for E.1b
-    /// (lifecycle only); E.2+ populates with `workspaces`, `tabs`,
-    /// `blocks`, `layouts`, etc.
+    /// Phase E.1b — srv-side snapshot reply. Phase E.2 populates
+    /// `workspaces` (canonical Vec); subsequent sub-phases add
+    /// `tabs`, `blocks`, `layouts`, etc.
     ///
     /// `version` is the srv reducer's `event_version` at snapshot
     /// time, monotonically distinct from prior srv events so
@@ -562,8 +579,32 @@ pub enum Event {
     SrvSnapshot {
         version: u64,
         lifecycle: LifecyclePhase,
-        // Domain state placeholders — populated in Phase E.2+.
-        // Empty in E.1b (skeleton only).
+        /// Phase E.2 — sorted list of workspaces in the reducer's
+        /// canonical state. (id, name) pairs for compactness; full
+        /// state available via per-event subscription. Empty before
+        /// E.2 lands.
+        ///
+        /// `#[serde(default)]` so old `srv-events.log` entries
+        /// written by E.1b (which had no `workspaces` field) still
+        /// deserialize when later sub-phases add bootstrap-replay
+        /// from the on-disk log. Same forward-compat treatment will
+        /// apply to E.2b's `tabs`, E.3's `blocks`, etc.
+        /// (reagent P2 #611.)
+        #[serde(default)]
+        workspaces: Vec<(String, String)>,
+    },
+    /// Phase E.2 — workspace was created. Carries the assigned
+    /// `oid` and `name` so subscribers (renderer, persist) can
+    /// apply the change without further round-trips.
+    WorkspaceCreated {
+        workspace_id: String,
+        name: String,
+        version: u64,
+    },
+    /// Phase E.2 — workspace was deleted.
+    WorkspaceDeleted {
+        workspace_id: String,
+        version: u64,
     },
 }
 
