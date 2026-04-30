@@ -9,7 +9,7 @@ mod tool_handlers;
 mod websocket;
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 
 use std::sync::Arc;
 
@@ -77,6 +77,13 @@ pub struct AppState {
     /// subscriber writes them back to SQLite. Pipe IPC server (when
     /// bound) shares the same bus.
     pub srv_events_tx: tokio::sync::broadcast::Sender<agentmux_common::ipc::Event>,
+    /// Phase E.5.5 — monotonic saga-id allocator. Each saga
+    /// (TearOffTab, TearOffBlock, RestoreTornOffTab, etc.) calls
+    /// `fetch_add` to claim a unique id; the id is stamped onto
+    /// `Event::SagaStarted/Completed/Failed` so subscribers can
+    /// correlate. Per-instance scope (no cross-process sharing — see
+    /// `docs/retro/saga-coordinator-location-analysis-2026-04-30.md`).
+    pub saga_id_alloc: std::sync::Arc<std::sync::atomic::AtomicU64>,
 }
 
 /// Build the Axum router with all routes, auth middleware, and CORS.
