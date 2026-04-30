@@ -148,11 +148,28 @@ async fn apply_event_to_wstore(
             workspace_id,
             version,
         } => {
-            // wstore::delete is naturally idempotent (no-op on
-            // missing rows).
-            wstore
-                .delete::<Workspace>(workspace_id)
-                .map_err(|e| format!("workspace delete: {}", e))?;
+            // Phase E.2 (codex P1 #611) — use wcore::delete_workspace
+            // for cascading semantics (deletes child tabs+blocks).
+            // Plain wstore::delete<Workspace> would leave orphan
+            // tab/block rows in SQLite; the legacy RPC path
+            // (wcore::delete_workspace) handles the cascade and
+            // we mirror that behavior here.
+            //
+            // Idempotent: wcore::delete_workspace returns
+            // StoreError::NotFound on a missing workspace, which we
+            // swallow as a no-op (the reducer already checked
+            // existence before emitting the event).
+            match crate::backend::wcore::delete_workspace(wstore, workspace_id) {
+                Ok(()) => {}
+                Err(crate::backend::storage::StoreError::NotFound) => {
+                    tracing::debug!(
+                        target: "srv-persist",
+                        "[srv-persist] workspace {} already absent at delete time — idempotent no-op",
+                        workspace_id
+                    );
+                }
+                Err(e) => return Err(format!("workspace cascade delete: {}", e)),
+            }
             advance_hwm(state, *version).await;
             Ok(())
         }
