@@ -555,19 +555,10 @@ async fn main() {
                     // update; persist subscriber mirrors back to
                     // SQLite.
                     persist::bootstrap_state_from_wstore(&srv_state, &wstore_for_persist).await;
-
-                    // Phase E.2 — persist subscriber (subscribe BEFORE
-                    // spawning, same pattern as disk writer + saga
-                    // coordinator to avoid losing events between
-                    // construction and first recv).
-                    let persist_rx = events_tx.subscribe();
-                    let persist_state = std::sync::Arc::clone(&srv_state);
-                    let persist_wstore = std::sync::Arc::clone(&wstore_for_persist);
-                    tokio::spawn(persist::run_persist_subscriber(
-                        persist_wstore,
-                        persist_state,
-                        persist_rx,
-                    ));
+                    // Phase E.2 — no persist subscriber yet. RPC
+                    // continues writing to SQLite via wcore; pipe
+                    // commands only update reducer state. Persist
+                    // subscriber lands in E.2c with RPC migration.
 
                     let srv_ctx = srv_ipc::ServerCtx {
                         srv_pid: std::process::id(),

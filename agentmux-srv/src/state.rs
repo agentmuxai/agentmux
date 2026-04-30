@@ -61,12 +61,8 @@ pub struct State {
     /// flow through `update`. Persist-subscriber mirrors changes
     /// back to SQLite (idempotent, version-gated).
     pub workspaces: HashMap<String, WorkspaceRecord>,
-    /// Phase E.2 — persistence high-water mark. Tracks the highest
-    /// `event_version` whose effects have been written to SQLite.
-    /// On restart, bootstrap loads SQLite then replays events from
-    /// the on-disk event log with `version > persistence_hwm` to
-    /// recover events emitted-but-not-yet-persisted at crash time.
-    pub persistence_hwm: u64,
+    // `persistence_hwm` deferred to E.2c when persist subscriber
+    // lands and there's actually something to track.
 }
 
 impl Default for State {
@@ -77,7 +73,6 @@ impl Default for State {
             event_version: 0,
             next_client_id: 0,
             workspaces: HashMap::new(),
-            persistence_hwm: 0,
         }
     }
 }
