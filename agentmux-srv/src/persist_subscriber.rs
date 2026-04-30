@@ -543,8 +543,12 @@ fn apply_srv_window_workspace_changed(
 }
 
 /// Phase E.5.3 — replace the workspace's `tabids` with the new
-/// list. `pinnedtabids` is left alone (pinning is Waveterm legacy
-/// and not in the reorder scope). No-op if already matching.
+/// list and drain any legacy `pinnedtabids` rows. Pinning was a
+/// Waveterm feature removed from AgentMux; bootstrap merges legacy
+/// pinned tabs into the reducer's `tab_ids`, so the next reorder
+/// is the canonical full ordering. Leaving stale `pinnedtabids`
+/// in SQLite would cause UI double-insertion (`workspace.tsx`
+/// builds the displayed tab list as `[...pinnedtabids, ...tabids]`).
 fn apply_tabs_reordered_bulk(
     wstore: &WaveStore,
     workspace_id: &str,
@@ -553,10 +557,13 @@ fn apply_tabs_reordered_bulk(
     let Some(mut ws) = wstore.get::<Workspace>(workspace_id)? else {
         return Ok(());
     };
-    if ws.tabids == tab_ids {
+    let tabids_match = ws.tabids == tab_ids;
+    let pinned_clear = ws.pinnedtabids.is_empty();
+    if tabids_match && pinned_clear {
         return Ok(());
     }
     ws.tabids = tab_ids.to_vec();
+    ws.pinnedtabids.clear();
     wstore.update(&mut ws)?;
     Ok(())
 }
@@ -645,7 +652,14 @@ fn apply_block_meta_updated(
 }
 
 /// Phase E.5.3 — shallow merge a JSON object patch into a
-/// `MetaMapType`. `null` patch values delete the corresponding key.
+/// `MetaMapType`. Mirrors `backend::obj::merge_meta` semantics so
+/// `UpdateObjectMeta` keeps behaving the same way after the reducer
+/// migration:
+/// - Keys ending in `:*` with a `true` value clear all keys with
+///   that prefix (e.g. `{"term:*": true}` removes every `term*`
+///   key) before regular merging.
+/// - `null` patch values delete the corresponding key.
+/// - Other values replace the key.
 /// Returns `true` if anything actually changed.
 fn merge_meta_patch(
     meta: &mut crate::backend::obj::MetaMapType,
@@ -655,18 +669,41 @@ fn merge_meta_patch(
         return false;
     };
     let mut changed = false;
+    // First pass: section-clear keys (`prefix:*` with `true`).
     for (k, v) in patch_map {
+        if !k.ends_with(":*") {
+            continue;
+        }
+        if !matches!(v, serde_json::Value::Bool(true)) {
+            continue;
+        }
+        let prefix = k.trim_end_matches(":*");
+        if prefix.is_empty() {
+            continue;
+        }
+        let prefix_colon = format!("{prefix}:");
+        let before = meta.len();
+        meta.retain(|k2, _| k2 != prefix && !k2.starts_with(&prefix_colon));
+        if meta.len() != before {
+            changed = true;
+        }
+    }
+    // Second pass: regular merges and null deletes.
+    for (k, v) in patch_map {
+        if k.ends_with(":*") {
+            continue;
+        }
         if v.is_null() {
             if meta.remove(k).is_some() {
                 changed = true;
             }
-        } else {
-            match meta.get(k) {
-                Some(existing) if existing == v => {}
-                _ => {
-                    meta.insert(k.clone(), v.clone());
-                    changed = true;
-                }
+            continue;
+        }
+        match meta.get(k) {
+            Some(existing) if existing == v => {}
+            _ => {
+                meta.insert(k.clone(), v.clone());
+                changed = true;
             }
         }
     }
@@ -1015,5 +1052,103 @@ mod tests {
         assert!(s.get::<Block>("block-1").unwrap().is_none());
         let tab = s.get::<Tab>("tab-1").unwrap().unwrap();
         assert!(tab.blockids.is_empty());
+    }
+
+    /// codex P1 #620: a workspace with legacy `pinnedtabids` rows must
+    /// have those drained the first time `TabsReorderedBulk` writes
+    /// the workspace; otherwise the UI's
+    /// `[...pinnedtabids, ...tabids]` combine duplicates the pinned
+    /// tab IDs once they have been merged into the reducer's
+    /// `tab_ids` at bootstrap.
+    #[test]
+    fn tabs_reordered_bulk_drains_legacy_pinned_tabids() {
+        let s = store();
+        let ws = wcore::create_workspace(&s, "Alpha").unwrap();
+        let pinned_tab =
+            wcore::create_tab_with_opts(&s, &ws.oid, "Pinned", true).unwrap();
+        let regular_tab =
+            wcore::create_tab_with_opts(&s, &ws.oid, "Regular", false).unwrap();
+        // Sanity: pinned tab is in `pinnedtabids` on disk.
+        let ws_before = s.get::<Workspace>(&ws.oid).unwrap().unwrap();
+        assert!(ws_before.pinnedtabids.contains(&pinned_tab.oid));
+
+        // Reducer-driven bulk reorder treating the pinned tab as a
+        // regular tab (mirrors what bootstrap-merge produces).
+        apply_event_to_wstore(
+            &Event::TabsReorderedBulk {
+                workspace_id: ws.oid.clone(),
+                tab_ids: vec![pinned_tab.oid.clone(), regular_tab.oid.clone()],
+                version: ws_before.version as u64 + 1,
+            },
+            &s,
+        )
+        .unwrap();
+        let ws_after = s.get::<Workspace>(&ws.oid).unwrap().unwrap();
+        assert_eq!(
+            ws_after.tabids,
+            vec![pinned_tab.oid.clone(), regular_tab.oid.clone()]
+        );
+        assert!(
+            ws_after.pinnedtabids.is_empty(),
+            "pinnedtabids must be drained, was {:?}",
+            ws_after.pinnedtabids
+        );
+    }
+
+    /// codex P2 #620: `merge_meta_patch` must honour the existing
+    /// `section:*` clear-prefix semantics so `UpdateObjectMeta`
+    /// behaviour stays the same after the reducer migration.
+    #[test]
+    fn meta_updated_clears_section_prefix() {
+        let s = store();
+        apply_event_to_wstore(
+            &Event::TabCreated {
+                workspace_id: "ws-1".into(),
+                tab_id: "tab-1".into(),
+                name: "Tab".into(),
+                version: 1,
+            },
+            &s,
+        )
+        .unwrap();
+        apply_event_to_wstore(
+            &Event::WorkspaceCreated {
+                workspace_id: "ws-1".into(),
+                name: "Alpha".into(),
+                version: 1,
+            },
+            &s,
+        )
+        .unwrap();
+        // Seed the tab with grouped meta entries.
+        let mut tab = s.get::<Tab>("tab-1").unwrap().unwrap();
+        tab.meta
+            .insert("term:fontsize".into(), serde_json::json!(14));
+        tab.meta
+            .insert("term:theme".into(), serde_json::json!("solarized"));
+        tab.meta.insert("name".into(), serde_json::json!("keep"));
+        s.update(&mut tab).unwrap();
+        // Patch with `term:*` clear plus a single replacement key.
+        apply_event_to_wstore(
+            &Event::TabMetaUpdated {
+                tab_id: "tab-1".into(),
+                meta_patch: serde_json::json!({
+                    "term:*": true,
+                    "term:fontsize": 18,
+                }),
+                version: 2,
+            },
+            &s,
+        )
+        .unwrap();
+        let after = s.get::<Tab>("tab-1").unwrap().unwrap();
+        assert!(!after.meta.contains_key("term:theme"),
+            "term:theme should be cleared by `term:*` patch");
+        assert_eq!(
+            after.meta.get("term:fontsize"),
+            Some(&serde_json::json!(18)),
+            "term:fontsize replacement must take effect after the section clear"
+        );
+        assert_eq!(after.meta.get("name"), Some(&serde_json::json!("keep")));
     }
 }

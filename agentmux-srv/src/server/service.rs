@@ -961,9 +961,10 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
         // AgentMux. Bootstrap merged any legacy `pinnedtabids` into
         // the reducer's `tab_ids`. The subscriber's
         // `apply_tabs_reordered_bulk` rewrites `Workspace.tabids`
-        // only — leaves any pre-existing `pinnedtabids` rows alone
-        // (legacy data persists harmlessly until the next user-driven
-        // workspace mutation that touches that field).
+        // and drains any leftover `Workspace.pinnedtabids` so the
+        // UI's `[...pinnedtabids, ...tabids]` combine never
+        // double-counts a tab once a workspace's tabs are
+        // reordered through the reducer.
         ("workspace", "UpdateTabIds") => {
             let ws_id: String = match service::get_arg(args, 0) {
                 Ok(v) => v,
