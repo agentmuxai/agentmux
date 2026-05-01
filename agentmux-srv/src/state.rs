@@ -65,7 +65,7 @@ pub struct WorkspaceRecord {
 /// Tabs are owned by exactly one workspace; the workspace's
 /// `tab_ids` field gives the ordering. E.3 adds `block_ids` so the
 /// tab tracks which blocks live inside it.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct TabRecord {
     pub tab_id: String,
     pub workspace_id: String,
@@ -73,6 +73,18 @@ pub struct TabRecord {
     /// Phase E.3 — ordered list of block ids in this tab. Mirrors
     /// the persistent `Tab.blockids` field.
     pub block_ids: Vec<String>,
+    /// Phase E.4 (Option A) — focused layout node id. Empty when no
+    /// pane in this tab is focused. Mirrors
+    /// `LayoutState.focusednodeid` for the tab's layout row. Mutated
+    /// by `Command::SetFocusedNode` and bootstrap-loaded from the
+    /// LayoutState row at startup. The remaining LayoutState fields
+    /// (rootnode/leaforder/pendingbackendactions) stay on the
+    /// existing wcore-direct path until Option B.
+    pub focused_node_id: String,
+    /// Phase E.4 (Option A) — magnified layout node id. Empty when
+    /// no pane is magnified (toggle-off). Mirrors
+    /// `LayoutState.magnifiednodeid`.
+    pub magnified_node_id: String,
 }
 
 /// Phase E.3 — block as held by the srv reducer's canonical state.

@@ -381,6 +381,27 @@ pub fn update(state: &mut State, cmd: Command, ctx: &Ctx) -> Vec<Event> {
                 version: v,
             }]
         }
+        // Phase E.4 (Option A) — layout-focused/magnified setters are
+        // srv-pipe commands. Misrouted to the launcher pipe, return
+        // a non-fatal error so the client knows the dispatch was wrong.
+        Command::SetFocusedNode { .. } => {
+            let v = state.bump_version();
+            vec![Event::Error {
+                code: agentmux_common::ipc::ErrorCode::InvalidCommand,
+                message: "SetFocusedNode is a srv-pipe command; sent to launcher pipe by mistake".into(),
+                fatal: false,
+                version: v,
+            }]
+        }
+        Command::SetMagnifiedNode { .. } => {
+            let v = state.bump_version();
+            vec![Event::Error {
+                code: agentmux_common::ipc::ErrorCode::InvalidCommand,
+                message: "SetMagnifiedNode is a srv-pipe command; sent to launcher pipe by mistake".into(),
+                fatal: false,
+                version: v,
+            }]
+        }
         // Phase E.1b — `GetSrvSnapshot` is a srv-pipe command. If a
         // registered client misroutes it to the launcher pipe, return
         // an explicit error so the client knows the dispatch was
