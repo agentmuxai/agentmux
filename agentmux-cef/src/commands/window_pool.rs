@@ -502,6 +502,18 @@ pub fn promote_pool_window(
         }
     };
 
+    // Phase F.5 — explicit promote signal sent BETWEEN the matching
+    // `report_pool_window_removed` (above) and `report_window_opened`
+    // (next). The launcher's pool-respawn saga starts on the
+    // resulting `Event::PoolWindowPromoted` and bracket the
+    // subsequent refill in `SagaStarted`/`SagaCompleted` so the
+    // renderer can buffer "you got a tear-off + the pool is
+    // refilling" atomically. Sent only on the validated-HWND path
+    // (mirrors `report_window_opened`'s contract); pre-promote
+    // destroy paths emit only `report_pool_window_removed` with no
+    // promote signal so the saga doesn't fire on non-promote drains.
+    crate::launcher_ipc::report_pool_window_promoted(label.clone());
+
     // HWND validated — the label IS becoming a real user-visible
     // window. NOW report the open to the launcher mirror so a
     // failure path above can't leave the mirror with a phantom

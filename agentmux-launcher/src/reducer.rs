@@ -117,6 +117,33 @@ pub fn update(state: &mut State, cmd: Command, ctx: &Ctx) -> Vec<Event> {
             }
             handle_report_pool_window_removed(state, label)
         }
+        // Phase F.5 — host-only signal that a pool→window promote is
+        // happening. Sent BETWEEN the matching `ReportPoolWindowRemoved`
+        // and `ReportWindowOpened` so the launcher can disambiguate
+        // promote from pre-promote destroy. Pure-reducer arm: emits
+        // the typed event; saga side-effect (start the pool-respawn
+        // saga) lives in the saga coordinator's bus subscription.
+        Command::ReportPoolWindowPromoted { label } => {
+            if let Some(err) = enforce_host_only(state, ctx, "ReportPoolWindowPromoted") {
+                return vec![err];
+            }
+            handle_report_pool_window_promoted(state, label)
+        }
+        // Phase F.5 — `SpawnPoolWindow` is a launcher→host direction
+        // command, NOT a host→launcher report. If a registered client
+        // sends it to the launcher pipe by mistake, return a non-fatal
+        // error so the client knows the dispatch was wrong (vs silently
+        // appearing successful with no reply). Same misrouted-error
+        // pattern as the srv-pipe commands below.
+        Command::SpawnPoolWindow => {
+            let v = state.bump_version();
+            vec![Event::Error {
+                code: agentmux_common::ipc::ErrorCode::InvalidCommand,
+                message: "SpawnPoolWindow is a launcher→host command; sent to launcher pipe by mistake".into(),
+                fatal: false,
+                version: v,
+            }]
+        }
         Command::ReportHostCounts { windows, pool } => {
             if let Some(err) = enforce_host_only(state, ctx, "ReportHostCounts") {
                 return vec![err];
@@ -535,6 +562,24 @@ fn handle_report_pool_window_removed(state: &mut State, label: String) -> Vec<Ev
     }
     let v = state.bump_version();
     vec![Event::PoolWindowRemoved { label, version: v }]
+}
+
+/// Phase F.5 — host-emitted promote signal. The reducer doesn't mutate
+/// state for this command (the windows/pool transitions are carried by
+/// the surrounding `ReportPoolWindowRemoved` + `ReportWindowOpened`
+/// pair); it just translates the wire command into the corresponding
+/// typed event so subscribers — most importantly the launcher saga
+/// coordinator — can react.
+///
+/// Idempotent / context-free: we don't validate the label is in the
+/// mirror because the host's own ordering may have the
+/// `ReportPoolWindowRemoved` arrive before this command, after this
+/// command, or in either order; the typed event is "host says a
+/// promote happened" — subscribers correlate with the surrounding
+/// add/remove pair if they need stronger invariants.
+fn handle_report_pool_window_promoted(state: &mut State, label: String) -> Vec<Event> {
+    let v = state.bump_version();
+    vec![Event::PoolWindowPromoted { label, version: v }]
 }
 
 /// Phase B.4 — gate window-mirror reports to Host clients only. The
@@ -1047,6 +1092,7 @@ mod tests {
             | Event::WindowClosed { version, .. }
             | Event::PoolWindowAdded { version, .. }
             | Event::PoolWindowRemoved { version, .. }
+            | Event::PoolWindowPromoted { version, .. }
             | Event::WindowInstanceAssigned { version, .. }
             | Event::WindowInstanceReleased { version, .. }
             | Event::BackendWindowIdRegistered { version, .. }
@@ -1076,8 +1122,12 @@ mod tests {
             | Event::WorkspaceMetaUpdated { version, .. }
             | Event::TabMetaUpdated { version, .. }
             | Event::BlockMetaUpdated { version, .. }
+            | Event::TabMoved { version, .. }
+            | Event::BlockMoved { version, .. }
             | Event::BlockCreated { version, .. }
             | Event::BlockDeleted { version, .. }
+            | Event::FocusedNodeChanged { version, .. }
+            | Event::MagnifiedNodeChanged { version, .. }
             | Event::Error { version, .. } => *version,
         }
     }
