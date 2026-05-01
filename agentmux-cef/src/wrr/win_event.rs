@@ -266,9 +266,12 @@ unsafe extern "system" fn win_event_callback(
             // window we're seeing. Pool windows that don't push a
             // pending entry get `None` and rely on the launcher
             // reducer's drain-on-WindowOpened fallback.
+            // Phase F.1 — peek through the host reducer's snapshot
+            // helper. Same back-of-queue read as before; lock is
+            // held only long enough to clone the back entry.
             let label_hint = app_state()
                 .get()
-                .and_then(|s| s.pending_window_creations.lock().back().cloned())
+                .and_then(|s| s.peek_back_pending_window_creation())
                 .map(|p| p.label);
             launcher_ipc::report_hwnd_opened(raw_hwnd, class, title, label_hint);
 
