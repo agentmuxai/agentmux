@@ -24,6 +24,7 @@ mod data_dir;
 mod diag;
 mod event_log;
 mod hash;
+mod host_pipe;
 mod ipc;
 mod reducer;
 mod saga;
@@ -322,6 +323,19 @@ async fn run_windows(
         saga_rx,
     ));
 
+    // CPD-2 — launcher → host pipe wrapper. Owns the writer half of
+    // the host's IPC connection (installed by the per-connection
+    // handler in `ipc::server` once the host registers) and exposes
+    // `send_command` / `send_event` to the rest of the launcher.
+    // CPD-2 wires the wrapper + refactors event fanout for the host
+    // connection to flow through here. CPD-3 will swap saga
+    // coordinator's `IssueCmd::Host` log-only branch for a real
+    // `host_pipe.send_command()` call.
+    let host_pipe = std::sync::Arc::new(host_pipe::HostPipe::new(
+        events_tx.clone(),
+        std::sync::Arc::clone(&state),
+    ));
+
     let _ipc_handle = ipc::run_ipc_server(
         pipe_path.clone(),
         first_pipe,
@@ -331,6 +345,7 @@ async fn run_windows(
             state,
             events_tx,
             event_log,
+            host_pipe: std::sync::Arc::clone(&host_pipe),
         },
     );
     log(&format!("IPC server started on {}", pipe_path));
