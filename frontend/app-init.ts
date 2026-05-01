@@ -42,6 +42,7 @@ import { isHostApp } from "@/app/init/host-detect";
 import { showStartupError } from "@/app/init/error-display";
 import { withTimeout } from "@/app/init/timeout";
 import { installLauncherEventBridge } from "@/util/launcher-events";
+import { installSrvEventBridge } from "@/util/srv-events";
 import {
     seedKnownEntriesFromSnapshot,
     startLauncherEventReducer,
@@ -308,6 +309,11 @@ export async function initApp() {
     // start dispatching as soon as the renderer's V8 context is ready;
     // registering early guarantees no events are dropped on the floor.
     installLauncherEventBridge();
+    // Phase E.2c.5b — same discipline for srv events. The host's
+    // `srv_event_bridge.rs` (PR #618) starts forwarding srv reducer
+    // events as soon as the srv pipe is connected; install before
+    // any host-touching call so early events aren't dropped.
+    installSrvEventBridge();
 
     // Register context menu click handler now that window.api exists.
     ContextMenuModel.init();
