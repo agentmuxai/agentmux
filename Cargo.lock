@@ -82,6 +82,7 @@ dependencies = [
  "notify",
  "parking_lot",
  "portable-pty",
+ "proptest",
  "reqwest",
  "rusqlite",
  "serde",
