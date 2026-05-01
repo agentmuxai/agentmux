@@ -119,15 +119,15 @@ async fn host_pipe_send_failure_terminates_saga() {
         version: 1,
     });
 
-    // Drain the bus until we see SagaFailed for this saga, or time
-    // out. Two acceptable failure surfaces:
-    //   1. `host pipe send failed: ...` (apply_action's Err arm)
-    //   2. `evicted: ...` (very unlikely here — only one saga)
-    // We assert on the saga_id, not the reason, so the test stays
-    // robust if the wording changes.
+    // Round 7: host-send-failure no longer terminates the saga
+    // immediately (round 4 design — the buffered retry path or the
+    // saga's own timeout handles definitive failure to avoid
+    // double-SagaFailed emission per reagent P1 round 6). PoolRespawn
+    // uses the default 5s saga timeout; wait past that for the
+    // deadline-task SagaFailed to fire.
     let mut saw_started: Option<u64> = None;
     let mut saw_failed_for: Option<u64> = None;
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(7);
     while std::time::Instant::now() < deadline {
         match tokio::time::timeout(std::time::Duration::from_millis(100), witness.recv()).await {
             Ok(Ok(Event::SagaStarted { saga_id, name, .. })) => {

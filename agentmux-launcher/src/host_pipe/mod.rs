@@ -614,14 +614,13 @@ impl HostPipe {
 
 /// Pull the saga_id off a Command if its variant carries one.
 ///
-/// Today (pre-CPD-1) the host-bound Command variants don't have
-/// `saga_id` fields — that's the schema-addition work in CPD-1. So
-/// every variant returns `None`, which means CPD-2's drop semantics
-/// don't actually fail a saga yet. CPD-1 + CPD-3 together will start
-/// returning Some(id) for the relevant variants and the drop
-/// machinery becomes saga-correctness-relevant. Keeping the
-/// indirection here means CPD-3's diff against the saga coordinator
-/// stays narrow.
+/// Used by `send_frame`'s pending-buffer machinery: when a buffered
+/// command is dropped (overflow or 30s host-disconnect timeout),
+/// `emit_drop_failure` emits `Event::SagaFailed { saga_id }` so the
+/// saga's bracket closes cleanly instead of waiting forever.
+/// CPD-1 added `saga_id` fields on host-bound variants; CPD-3 made
+/// `send_command` live from the saga coordinator, so the drop
+/// machinery is now saga-correctness-relevant.
 fn saga_id_of(cmd: &Command) -> Option<u64> {
     // CPD-1 added saga_id fields to host-bound Commands; CPD-3 made
     // send_command live from the saga coordinator. Returning the real

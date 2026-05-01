@@ -39,18 +39,16 @@
 // the appropriate pipe, and emits `SagaStarted` / `SagaCompleted`
 // / `SagaFailed` so subscribers (renderer) can buffer-until-complete.
 //
-// **Cross-process dispatch — F.5 caveat.** Today the launcher's
-// named-pipe IPC is host→launcher only (host sends Commands up;
-// launcher broadcasts Events back). A launcher→host command pipe
-// doesn't exist yet. F.5's `pool_respawn` saga issues
-// `Command::SpawnPoolWindow` with `target = PipeTarget::Host`, but
-// the coordinator's IssueCmd handler currently logs the dispatch
-// without transmitting it — the host's existing implicit
-// `spawn_pool_window` call inside `promote_pool_window` produces
-// the matching `Event::PoolWindowAdded` the saga waits for. F.6
-// (or the cross-process-dispatch follow-up) replaces the log with
-// a real wire-level send. See `pool_respawn.rs` module docstring
-// for the full rationale and scope decision.
+// **Cross-process dispatch — CPD-3 LIVE.** The launcher → host
+// command pipe is now wired via `HostPipe::send_command()` (CPD-2
+// + CPD-3). F.5's `pool_respawn` and F.6's `window_cleanup_cascade`
+// sagas issue `IssueCmd::Host` actions; the coordinator dispatches
+// them through the wire instead of merely logging. Per-saga
+// timeouts (`Saga::timeout()`, default 5s, F.6 overrides 30s)
+// + per-saga deadline tasks fire `SagaFailed` if a host action
+// stays unresolved past its budget. Host-emitted
+// `Command::ReportSagaActionFailed` translates into
+// `Event::SagaActionFailed` and terminates the matching saga.
 //
 // Per-variant `saga_id` tagging on existing Command/Event variants
 // is deferred; F.5's coordinator doesn't yet need it because:
@@ -453,35 +451,33 @@ impl SagaCoordinator {
                                 ApplyOutcome::in_flight_awaiting(step_index)
                             }
                             Err(e) => {
-                                // Same claim_terminal guard as the
-                                // Done/Failed paths — host-send-failure
-                                // is a terminal transition and must not
-                                // race against the timeout task or the
-                                // SagaActionFailed listener emitting
-                                // their own terminal events for the same
-                                // saga_id (codex P1 PR #644 round 2).
-                                if self.claim_terminal(saga_id).await {
-                                    crate::log(&format!(
-                                        "[saga] saga_id={} name={} host pipe send failed: {} — emitting SagaFailed",
-                                        saga_id, name, e
-                                    ));
-                                    let reason = format!("host pipe send failed: {}", e);
-                                    if let Some(log) = self.log.as_ref() {
-                                        if let Err(le) = log.terminate_saga(
-                                            saga_id,
-                                            SagaOutcome::Failed {
-                                                reason: reason.clone(),
-                                            },
-                                        ) {
-                                            crate::log(&format!(
-                                                "[saga] saga_id={} terminate_saga(Failed) log write failed: {}",
-                                                saga_id, le
-                                            ));
-                                        }
-                                    }
-                                    self.emit_failed(saga_id, reason).await;
-                                }
-                                ApplyOutcome::terminated()
+                                // CRITICAL: do NOT terminate the saga
+                                // here. send_command's send_frame already
+                                // re-buffered the failed frame for retry
+                                // on reconnect (with the real saga_id).
+                                // If we ALSO emit SagaFailed now:
+                                //   - 30s later expire_pending_if_timed_out
+                                //     drains the buffer + emit_drop_failure
+                                //     emits a SECOND SagaFailed for the
+                                //     same saga_id (double-emit), OR
+                                //   - host reconnects in <30s and the
+                                //     buffered command executes as an
+                                //     orphaned side effect after the saga
+                                //     bracket is already closed.
+                                // (reagent P1 PR #644 round 6.)
+                                //
+                                // Round 7 design: keep the saga in_flight.
+                                // The retry path resolves it (Report*
+                                // arrives → on_event drives forward) OR
+                                // the saga's own timeout (5s default,
+                                // 30s for F.6) fires + claim_terminal'd
+                                // SagaFailed. Either way, exactly one
+                                // terminal event is emitted.
+                                crate::log(&format!(
+                                    "[saga] saga_id={} name={} host pipe send transient err: {} — frame buffered for retry; saga stays in-flight (round 7 fix)",
+                                    saga_id, name, e
+                                ));
+                                ApplyOutcome::in_flight_awaiting(step_index)
                             }
                         }
                     }
