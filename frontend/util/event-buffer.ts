@@ -289,10 +289,28 @@ export class PerSourceTracker<E extends VersionedEvent = VersionedEvent> {
                 return;
             }
             // Terminal without matching start (resync mid-saga, or
-            // server-side bug). Dispatch directly — bypass
-            // routeIdleOrBuffered so the terminal isn't buried inside
-            // an unrelated in-flight saga's buffer waiting on its own
-            // terminal that may never come. (reagent P1, PR #630.)
+            // server-side bug). Two constraints to honor:
+            //   1. (reagent P1, PR #630) don't bury the terminal in
+            //      an unrelated in-flight saga's buffer — its own
+            //      terminal may never come.
+            //   2. (codex P1, PR #630 round 2) preserve source
+            //      ordering — the mismatched terminal carries a
+            //      higher version than the in-flight saga's buffered
+            //      events, so dispatching it first would make
+            //      `setVersion` go backwards when the buffer flushes.
+            // Resolution: flush the in-flight buffer first (treating
+            // the buffered saga as terminated-without-completion —
+            // that's the failure mode this case represents), THEN
+            // dispatch the mismatched terminal. Order preserved,
+            // nothing buried.
+            if (this.sagaBuffer) {
+                console.warn(
+                    `[${this.source}-events] terminal for saga ${sagaId} arrived while saga ${this.sagaBuffer.saga_id} was in flight; flushing prior buffer first to preserve ordering`,
+                );
+                const buf = this.sagaBuffer;
+                this.sagaBuffer = null;
+                this.flushSagaBuffer(buf);
+            }
             this.dispatch(evt);
             return;
         }

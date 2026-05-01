@@ -221,19 +221,33 @@ describe("PerSourceTracker — saga buffering", () => {
         expect(onTerminal).not.toHaveBeenCalled();
     });
 
-    it("dispatches mismatched terminal directly even when another saga is in flight (reagent P1)", () => {
-        // Regression: terminal for saga 88 must NOT be buried inside
-        // saga 99's buffer when 99 is the in-flight saga.
-        const seen: string[] = [];
-        tracker.subscribe((e) => seen.push(`${e.event}@${e.saga_id ?? "?"}`));
+    it("flushes prior buffer before mismatched terminal (reagent P1 + codex P1 round 2)", () => {
+        // Regression — both P1s on PR #630:
+        //   1. Mismatched terminal must NOT be buried inside the
+        //      unrelated in-flight saga's buffer (reagent).
+        //   2. AND it must NOT be dispatched before the buffered
+        //      events (codex round 2: violates source ordering /
+        //      monotonic version contract).
+        // Resolution: flush prior buffer first, then dispatch
+        // mismatched terminal. Order preserved, nothing buried.
+        vi.spyOn(console, "warn").mockImplementation(() => {});
+        const seen: { event: string; saga_id: unknown; version: number }[] = [];
+        tracker.subscribe((e) =>
+            seen.push({ event: e.event, saga_id: e.saga_id, version: e.version }),
+        );
         tracker.deliver(evt("saga_started", 1, { saga_id: 99 }));
-        // saga 88 terminal arrives mid-99 — must dispatch immediately,
-        // not get queued into 99's buffer.
-        tracker.deliver(evt("saga_completed", 2, { saga_id: 88 }));
-        expect(seen).toEqual(["saga_completed@88"]);
-        // 99's buffer still in flight, holding saga_started.
-        expect(tracker.stats().inSaga).toBe(99);
-        expect(tracker.stats().bufferedCount).toBe(1);
+        tracker.deliver(evt("step_a", 2)); // buffered
+        // Mismatched terminal at version 3 arrives mid-99
+        tracker.deliver(evt("saga_completed", 3, { saga_id: 88 }));
+
+        // Prior buffer flushed in source order, then mismatched
+        // terminal delivered last.
+        expect(seen.map((e) => e.event)).toEqual(["saga_started", "step_a", "saga_completed"]);
+        expect(seen.map((e) => e.version)).toEqual([1, 2, 3]); // monotonic
+        expect(seen[0].saga_id).toBe(99);
+        expect(seen[2].saga_id).toBe(88);
+        // Saga 99's buffer drained; tracker idle.
+        expect(tracker.stats().inSaga).toBeNull();
     });
 
     it("emergency-flushes on overflow", () => {
