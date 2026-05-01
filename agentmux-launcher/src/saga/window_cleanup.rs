@@ -201,6 +201,15 @@ impl Saga for WindowCleanupCascade {
         "window_cleanup_cascade"
     }
 
+    /// LSD-2 — record the closing window's label for `--diag sagas`.
+    /// `drained_pool` is None at start (only known after Step 2)
+    /// so we don't include it; the durable log captures the inputs
+    /// the saga was constructed with, not its evolving state — that
+    /// lives in step rows.
+    fn input_snapshot(&self) -> serde_json::Value {
+        serde_json::json!({ "closed_label": self.closed_label })
+    }
+
     fn start(&mut self, _ctx: &SagaCtx) -> SagaAction {
         // Step 1 — issue the ReapPanes command, transition into the
         // wait state. F.6 routes the action to `PipeTarget::Host`
