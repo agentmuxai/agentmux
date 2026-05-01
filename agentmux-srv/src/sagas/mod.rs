@@ -250,15 +250,22 @@ pub fn alloc_saga_id(state: &AppState) -> u64 {
 /// see the start record before any per-step events.
 ///
 /// Also writes a `running` row to the durable saga log (PR 1 of
-/// SPEC_SAGA_DURABILITY_2026-05-01.md). Log-write failures are
-/// non-fatal — the in-memory saga path is still authoritative for
-/// THIS srv run.
-pub async fn emit_saga_started(state: &AppState, saga_id: u64, name: &'static str) {
-    if let Err(e) =
-        state
-            .saga_log
-            .start_saga(saga_id, name, &serde_json::Value::Null)
-    {
+/// SPEC_SAGA_DURABILITY_2026-05-01.md), recording `input` as the
+/// saga's arguments serialized to JSON. PR 2's `compensate_unresolved`
+/// + `--diag sagas` rely on this for crash-recovery provenance, so
+/// callers should pass a structured representation of their inputs
+/// (typically `serde_json::json!({...})`). (reagent P1 PR #631 —
+/// `Value::Null` placeholder erased provenance.)
+///
+/// Log-write failures are non-fatal — the in-memory saga path is
+/// still authoritative for THIS srv run.
+pub async fn emit_saga_started(
+    state: &AppState,
+    saga_id: u64,
+    name: &'static str,
+    input: serde_json::Value,
+) {
+    if let Err(e) = state.saga_log.start_saga(saga_id, name, &input) {
         tracing::warn!(
             saga_id,
             name,
@@ -274,24 +281,53 @@ pub async fn emit_saga_started(state: &AppState, saga_id: u64, name: &'static st
     });
 }
 
-/// Emit the saga's terminal lifecycle event. Pass `Ok(())` for
-/// success (emits `SagaCompleted`) or `Err(reason)` for failure
-/// (emits `SagaFailed`).
+/// Outcome a saga's inner future hands back to `emit_terminal`.
 ///
-/// Also writes the terminal row to the durable saga log. The
-/// distinction between `Failed` and `Compensated` (spec §2.2) is
-/// not visible to in-memory sagas today — the inner future drives
-/// compensation before returning `Err`, so by the time we reach
-/// here, compensation has already run. We default a non-Ok outcome
-/// to `Compensated` since the existing sagas (`tear_off_tab`,
-/// `restore_torn_off_tab`, etc.) all emit compensating dispatches
-/// before returning errors. Sagas that genuinely fail without
-/// compensation can be distinguished in PR 2 once the saga author
-/// API exposes the post-compensation outcome explicitly.
-pub async fn emit_terminal(state: &AppState, saga_id: u64, outcome: Result<(), &str>) {
-    let log_outcome = match outcome {
-        Ok(()) => SagaOutcome::Completed,
-        Err(reason) => SagaOutcome::Compensated {
+/// (codex P1 PR #631) The original PR 1 implementation mapped every
+/// `Err` to `SagaOutcome::Compensated`, which is wrong for timeout/
+/// abort paths: `run_saga` wraps the inner future in
+/// `tokio::time::timeout`, and a timeout cancels the future *before*
+/// it can run its compensation block. Recording "compensated" when
+/// nothing was compensated would hide partially-applied state from
+/// PR 2's `compensate_unresolved` resume scan — exactly the failure
+/// mode this log exists to catch.
+///
+/// `Compensated` should only be recorded when compensation actually
+/// completed; everything else (timeout, panic-converted-to-error,
+/// pre-compensation early-return) records `Failed`, which leaves the
+/// saga visible to PR 2's resume scan.
+#[derive(Debug)]
+pub enum SagaTerminal<'a> {
+    /// All steps applied successfully.
+    Completed,
+    /// Compensation block ran to completion. Caller asserts this only
+    /// after every compensating dispatch returned without error.
+    Compensated { reason: &'a str },
+    /// Saga aborted before/during compensation: timeout, panic,
+    /// pre-compensation early-return, or any other path where
+    /// compensation can't be assumed to have run. Default for the
+    /// "I don't know if compensation completed" case.
+    Failed { reason: &'a str },
+}
+
+/// Emit the saga's terminal lifecycle event + durable log row.
+///
+/// Maps `SagaTerminal` to:
+/// - `Completed` → `Event::SagaCompleted` + log state `completed`.
+/// - `Compensated { reason }` → `Event::SagaFailed { reason }` + log state `compensated`.
+/// - `Failed { reason }` → `Event::SagaFailed { reason }` + log state `failed`.
+///
+/// The renderer-facing event is the same `SagaFailed` for both
+/// non-success paths (the renderer doesn't currently distinguish).
+/// The durable log distinguishes — PR 2's resume scan picks up
+/// `failed` rows where compensation may not have run.
+pub async fn emit_terminal(state: &AppState, saga_id: u64, terminal: SagaTerminal<'_>) {
+    let log_outcome = match &terminal {
+        SagaTerminal::Completed => SagaOutcome::Completed,
+        SagaTerminal::Compensated { reason } => SagaOutcome::Compensated {
+            reason: reason.to_string(),
+        },
+        SagaTerminal::Failed { reason } => SagaOutcome::Failed {
             reason: reason.to_string(),
         },
     };
@@ -303,18 +339,42 @@ pub async fn emit_terminal(state: &AppState, saga_id: u64, outcome: Result<(), &
         );
     }
     let v = state.srv_state.lock().await.bump_version();
-    let event = match outcome {
-        Ok(()) => Event::SagaCompleted {
+    let event = match terminal {
+        SagaTerminal::Completed => Event::SagaCompleted {
             saga_id,
             version: v,
         },
-        Err(reason) => Event::SagaFailed {
-            saga_id,
-            reason: reason.to_string(),
-            version: v,
-        },
+        SagaTerminal::Compensated { reason } | SagaTerminal::Failed { reason } => {
+            Event::SagaFailed {
+                saga_id,
+                reason: reason.to_string(),
+                version: v,
+            }
+        }
     };
     let _ = state.srv_events_tx.send(event);
+}
+
+/// Convenience: classify the standard `run_saga` `Result<Value, String>`
+/// outcome into a `SagaTerminal`.
+///
+/// - `Ok(_)` → `Completed`.
+/// - `Err(reason)` containing `"timed out"` (the substring `run_saga`
+///   produces on `tokio::time::timeout` expiry) → `Failed` —
+///   compensation can't be assumed to have run.
+/// - `Err(reason)` otherwise → `Compensated` — by convention, our
+///   sagas drive compensation in their inner future before returning
+///   `Err`, so non-timeout errors mean compensation completed.
+///
+/// Sagas that need finer-grained control (e.g. distinguishing
+/// pre-compensation early-returns from post-compensation errors) can
+/// build a `SagaTerminal` directly without going through this helper.
+pub fn classify_run_saga_result(result: &Result<serde_json::Value, String>) -> SagaTerminal<'_> {
+    match result {
+        Ok(_) => SagaTerminal::Completed,
+        Err(reason) if reason.contains("timed out") => SagaTerminal::Failed { reason },
+        Err(reason) => SagaTerminal::Compensated { reason },
+    }
 }
 
 /// Run a saga's inner future under a 5 s timeout. The inner future
@@ -327,13 +387,10 @@ pub async fn emit_terminal(state: &AppState, saga_id: u64, outcome: Result<(), &
 /// ```ignore
 /// pub async fn run(state: &AppState, ...) -> Result<Value, String> {
 ///     let saga_id = alloc_saga_id(state);
-///     emit_saga_started(state, saga_id, "tear_off_tab").await;
+///     emit_saga_started(state, saga_id, "tear_off_tab", serde_json::json!({})).await;
 ///     let ctx = SagaCtx::new(state, saga_id);
 ///     let result = run_saga(run_inner(ctx, ...)).await;
-///     emit_terminal(state, saga_id, match &result {
-///         Ok(_) => Ok(()),
-///         Err(r) => Err(r.as_str()),
-///     }).await;
+///     emit_terminal(state, saga_id, classify_run_saga_result(&result)).await;
 ///     result
 /// }
 /// ```

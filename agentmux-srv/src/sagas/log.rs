@@ -106,6 +106,10 @@ pub struct SagaSnapshot {
     pub terminal_at: Option<i64>,
     pub failure_reason: Option<String>,
     pub step_count: u32,
+    /// JSON serialization of the saga's input args, captured by the
+    /// caller in `emit_saga_started` (reagent P1 PR #631 — was being
+    /// stubbed `null`). Operator-readable provenance for `--diag sagas`.
+    pub input_json: String,
 }
 
 /// SQLite-backed saga log. Owned by `AppState` as `Arc<SagaLog>`;
@@ -132,16 +136,36 @@ impl SagaLog {
     }
 
     fn configure_and_migrate(conn: Connection) -> Result<Self, StoreError> {
+        // `foreign_keys=ON` enforces the `saga_step.saga_id REFERENCES
+        // saga(saga_id)` declaration; SQLite defaults this to OFF
+        // (codex P2 PR #631). Without it, orphan step rows can be
+        // written silently — corrupts diagnostics + PR 2's resume
+        // logic which reconstructs state from saga + saga_step joins.
         conn.execute_batch(
             "PRAGMA journal_mode=WAL;
              PRAGMA busy_timeout=5000;
              PRAGMA synchronous=NORMAL;
-             PRAGMA temp_store=MEMORY;",
+             PRAGMA temp_store=MEMORY;
+             PRAGMA foreign_keys=ON;",
         )?;
         run_saga_log_migrations(&conn)?;
         Ok(Self {
             conn: Mutex::new(conn),
         })
+    }
+
+    /// Highest existing `saga_id` in the durable log, or 0 if the log
+    /// is empty. Used at startup to seed `state.saga_id_alloc` so new
+    /// sagas don't reuse IDs from prior srv-process runs (reagent P1
+    /// PR #631 — `INSERT` would fail on collision but the saga itself
+    /// would have already started, so we seed defensively).
+    pub fn max_saga_id(&self) -> Result<u64, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let max: Option<i64> = conn
+            .query_row("SELECT MAX(saga_id) FROM saga", [], |r| r.get(0))
+            .ok()
+            .flatten();
+        Ok(max.unwrap_or(0).max(0) as u64)
     }
 
     /// Insert a fresh saga row in `running` state. Called by the
@@ -156,8 +180,14 @@ impl SagaLog {
         let now = now_ms();
         let input_json = serde_json::to_string(input)?;
         let conn = self.conn.lock().unwrap();
+        // Plain INSERT (not OR REPLACE) so saga_id collisions surface
+        // as errors instead of silently overwriting prior runs'
+        // history. The allocator is seeded from MAX(saga_id) at
+        // startup (see `max_saga_id` + `main.rs`), so collisions
+        // shouldn't happen in practice — if they do, that's a bug
+        // worth surfacing. (codex P1 + reagent P1 PR #631.)
         conn.execute(
-            "INSERT OR REPLACE INTO saga
+            "INSERT INTO saga
              (saga_id, name, state, started_at, terminal_at, failure_reason, input_json)
              VALUES (?1, ?2, 'running', ?3, NULL, NULL, ?4)",
             params![saga_id as i64, name, now, input_json],
@@ -178,8 +208,9 @@ impl SagaLog {
         let now = now_ms();
         let cmd_json = serde_json::to_string(cmd)?;
         let conn = self.conn.lock().unwrap();
+        // Plain INSERT — same rationale as `start_saga`.
         conn.execute(
-            "INSERT OR REPLACE INTO saga_step
+            "INSERT INTO saga_step
              (saga_id, step_index, name, state, cmd_json, output_json, started_at, ended_at)
              VALUES (?1, ?2, ?3, 'pending', ?4, NULL, ?5, NULL)",
             params![saga_id as i64, step_index, name, cmd_json, now],
@@ -341,12 +372,12 @@ impl SagaLog {
     pub fn snapshot_recent(&self, limit: u32) -> Result<Vec<SagaSnapshot>, StoreError> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT saga_id, name, state, started_at, terminal_at, failure_reason
+            "SELECT saga_id, name, state, started_at, terminal_at, failure_reason, input_json
              FROM saga
              ORDER BY COALESCE(terminal_at, started_at) DESC
              LIMIT ?1",
         )?;
-        let rows: Vec<(i64, String, String, i64, Option<i64>, Option<String>)> = stmt
+        let rows: Vec<(i64, String, String, i64, Option<i64>, Option<String>, String)> = stmt
             .query_map(params![limit], |row| {
                 Ok((
                     row.get::<_, i64>(0)?,
@@ -355,13 +386,14 @@ impl SagaLog {
                     row.get::<_, i64>(3)?,
                     row.get::<_, Option<i64>>(4)?,
                     row.get::<_, Option<String>>(5)?,
+                    row.get::<_, String>(6)?,
                 ))
             })?
             .collect::<Result<Vec<_>, _>>()?;
         drop(stmt);
 
         let mut out = Vec::with_capacity(rows.len());
-        for (saga_id, name, state, started_at, terminal_at, failure_reason) in rows {
+        for (saga_id, name, state, started_at, terminal_at, failure_reason, input_json) in rows {
             let count: Option<i64> = conn
                 .query_row(
                     "SELECT COUNT(*) FROM saga_step
@@ -378,6 +410,7 @@ impl SagaLog {
                 terminal_at,
                 failure_reason,
                 step_count: count.unwrap_or(0) as u32,
+                input_json,
             });
         }
         Ok(out)
@@ -593,5 +626,73 @@ mod tests {
     #[test]
     fn imports_are_live() {
         let _ = ErrorCode::InvalidCommand;
+    }
+
+    // codex P1 PR #631 — start_saga must NOT silently overwrite an
+    // existing saga_id row. With the seed-from-MAX(saga_id) startup
+    // logic, collisions should never happen in practice; if one ever
+    // does, it's a bug worth surfacing.
+    #[test]
+    fn start_saga_rejects_duplicate_id() {
+        let (_tmp, log) = temp_log();
+        log.start_saga(42, "tear_off_tab", &serde_json::json!({"a": 1}))
+            .unwrap();
+        // A second start_saga with the same id must fail (no OR REPLACE).
+        let err = log
+            .start_saga(42, "tear_off_tab", &serde_json::json!({"a": 2}))
+            .unwrap_err();
+        // Surfaces as a SQLite UNIQUE constraint violation.
+        let msg = format!("{}", err);
+        assert!(
+            msg.to_lowercase().contains("unique") || msg.to_lowercase().contains("constraint"),
+            "expected unique-constraint error, got: {msg}",
+        );
+    }
+
+    // reagent P1 + codex P1 PR #631 — max_saga_id seeds the
+    // allocator at startup; without this, restarts would reuse
+    // saga_ids 1, 2, 3... and silently overwrite prior runs.
+    #[test]
+    fn max_saga_id_returns_highest_persisted() {
+        let (_tmp, log) = temp_log();
+        assert_eq!(log.max_saga_id().unwrap(), 0); // empty
+        log.start_saga(7, "a", &serde_json::Value::Null).unwrap();
+        log.start_saga(42, "b", &serde_json::Value::Null).unwrap();
+        log.start_saga(13, "c", &serde_json::Value::Null).unwrap();
+        assert_eq!(log.max_saga_id().unwrap(), 42);
+    }
+
+    // codex P2 PR #631 — foreign keys enabled means a saga_step
+    // referencing a non-existent saga_id is rejected.
+    #[test]
+    fn foreign_keys_enforced_on_saga_step() {
+        let (_tmp, log) = temp_log();
+        // Try to insert a step for a saga that was never started.
+        let err = log
+            .start_step(999, 0, "MoveTab", &ping(1))
+            .unwrap_err();
+        let msg = format!("{}", err);
+        assert!(
+            msg.to_lowercase().contains("foreign key")
+                || msg.to_lowercase().contains("constraint"),
+            "expected foreign-key error, got: {msg}",
+        );
+    }
+
+    // reagent P1 PR #631 — input_json must round-trip the saga's
+    // actual input args (was being stubbed with Value::Null).
+    #[test]
+    fn start_saga_persists_input_json() {
+        let (_tmp, log) = temp_log();
+        let input = serde_json::json!({
+            "tab_id": "tab-abc",
+            "source_workspace_id": "ws-1",
+        });
+        log.start_saga(1, "tear_off_tab", &input).unwrap();
+        let snapshot = log.snapshot_recent(1).unwrap();
+        assert_eq!(snapshot.len(), 1);
+        let parsed: serde_json::Value =
+            serde_json::from_str(&snapshot[0].input_json).unwrap();
+        assert_eq!(parsed, input);
     }
 }
