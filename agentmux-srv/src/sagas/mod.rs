@@ -359,21 +359,27 @@ pub async fn emit_terminal(state: &AppState, saga_id: u64, terminal: SagaTermina
 /// outcome into a `SagaTerminal`.
 ///
 /// - `Ok(_)` → `Completed`.
-/// - `Err(reason)` containing `"timed out"` (the substring `run_saga`
-///   produces on `tokio::time::timeout` expiry) → `Failed` —
-///   compensation can't be assumed to have run.
-/// - `Err(reason)` otherwise → `Compensated` — by convention, our
-///   sagas drive compensation in their inner future before returning
-///   `Err`, so non-timeout errors mean compensation completed.
+/// - `Err(_)` → `Failed`.
 ///
-/// Sagas that need finer-grained control (e.g. distinguishing
-/// pre-compensation early-returns from post-compensation errors) can
-/// build a `SagaTerminal` directly without going through this helper.
+/// (codex P1 PR #631 round 2.) The earlier round mapped non-timeout
+/// `Err` to `Compensated` on the assumption that "our sagas drive
+/// compensation in their inner future before returning `Err`."
+/// That's true for the *forward* dispatch failures, but
+/// `SagaCtx::compensate` is **best-effort** — if a compensating
+/// dispatch is itself rejected by the reducer, `compensate` logs a
+/// warning and returns without signaling failure. Marking those as
+/// `Compensated` would hide partially-applied state from PR 2's
+/// restart recovery (which scans for `running`/`failed` to know what
+/// to compensate).
+///
+/// Conservative default: classify all errors as `Failed`. Sagas that
+/// can *prove* compensation succeeded (e.g. a future per-step
+/// compensation-success log) construct `SagaTerminal::Compensated`
+/// directly without going through this helper.
 pub fn classify_run_saga_result(result: &Result<serde_json::Value, String>) -> SagaTerminal<'_> {
     match result {
         Ok(_) => SagaTerminal::Completed,
-        Err(reason) if reason.contains("timed out") => SagaTerminal::Failed { reason },
-        Err(reason) => SagaTerminal::Compensated { reason },
+        Err(reason) => SagaTerminal::Failed { reason },
     }
 }
 

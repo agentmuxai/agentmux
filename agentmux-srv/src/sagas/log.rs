@@ -161,10 +161,16 @@ impl SagaLog {
     /// would have already started, so we seed defensively).
     pub fn max_saga_id(&self) -> Result<u64, StoreError> {
         let conn = self.conn.lock().unwrap();
-        let max: Option<i64> = conn
-            .query_row("SELECT MAX(saga_id) FROM saga", [], |r| r.get(0))
-            .ok()
-            .flatten();
+        // Propagate query errors. (codex P2 PR #631 round 2.) The
+        // earlier `.ok().flatten()` swallowed SQLite errors and
+        // returned 0 as if the log were empty — a transient read
+        // failure would then reseed `saga_id_alloc=0` on the next
+        // restart, sagas would reuse IDs 1, 2, 3..., and `start_saga`
+        // would reject them (no OR REPLACE), leaving live sagas with
+        // no durable lifecycle row. Better to surface the error and
+        // let the startup hook log the explicit warning + accept the
+        // collision risk knowingly.
+        let max: Option<i64> = conn.query_row("SELECT MAX(saga_id) FROM saga", [], |r| r.get(0))?;
         Ok(max.unwrap_or(0).max(0) as u64)
     }
 
