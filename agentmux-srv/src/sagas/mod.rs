@@ -418,22 +418,22 @@ pub async fn emit_terminal(state: &AppState, saga_id: u64, terminal: SagaTermina
             reason: reason.to_string(),
         },
     };
-    // (codex P1 PR #636 round 5/6.) Bulk-mark every remaining
-    // `succeeded` forward step as `compensated` when the saga
-    // terminates non-Completed. Round 5 only ran this for
-    // SagaTerminal::Compensated, but `classify_run_saga_result`
-    // maps every Err to Failed (not Compensated), making the bulk
-    // path unreachable for normal compensated-on-error flows.
-    // Round 6 extends to Failed too — the per-step stack pop in
-    // SagaCtx::compensate already marks each compensation 1:1; this
-    // bulk call only catches the residual case where one
-    // compensating command undoes multiple forward steps (e.g.
-    // tear_off_block uses a single DeleteWorkspace to undo both
-    // CreateWorkspace and CreateTab). For Failed sagas where
-    // compensation didn't fully run, recovery picks up the
-    // remaining `succeeded` rows; bulk-marking the ones that DID
-    // get undone is still correct.
-    if !matches!(terminal, SagaTerminal::Completed) {
+    // (codex P1 PR #636 round 7 — reverted from round 6.)
+    // Bulk-mark only on Compensated. Round 6 extended to Failed too,
+    // but BOTH bots flagged that as data-loss: timeout/abort paths
+    // classify as Failed and never run compensation, but the bulk-
+    // mark would relabel forward steps as `compensated`, hiding
+    // them from recovery and leaving side effects permanently
+    // applied.
+    //
+    // Sagas that DO unwind via inner-future ctx.compensate calls
+    // should classify as Compensated (the per-step pop already
+    // marks 1:1; this bulk call catches residual 1:N cases like
+    // tear_off_block's single DeleteWorkspace undoing both
+    // CreateWorkspace + CreateTab). `classify_run_saga_result`
+    // maps non-timeout Err → Compensated to support this; timeouts
+    // → Failed so recovery picks up un-undone rows.
+    if matches!(terminal, SagaTerminal::Compensated { .. }) {
         if let Err(e) = state.saga_log.mark_all_succeeded_steps_compensated(saga_id) {
             tracing::warn!(
                 saga_id,
@@ -490,7 +490,22 @@ pub async fn emit_terminal(state: &AppState, saga_id: u64, terminal: SagaTermina
 pub fn classify_run_saga_result(result: &Result<serde_json::Value, String>) -> SagaTerminal<'_> {
     match result {
         Ok(_) => SagaTerminal::Completed,
-        Err(reason) => SagaTerminal::Failed { reason },
+        // Timeouts/aborts: compensation never ran (run_saga's
+        // tokio::time::timeout cancels the inner future before it
+        // can compensate). Classify as Failed so recovery picks up
+        // the un-undone forward steps.
+        Err(reason) if reason.contains("timed out") => SagaTerminal::Failed { reason },
+        // Other Err: by convention, our sagas drive compensation
+        // in their inner future before returning Err (each
+        // ctx.compensate call already marked its target). Classify
+        // as Compensated so emit_terminal's bulk-mark cleans up any
+        // residual succeeded rows from 1:N compensation patterns
+        // (e.g. tear_off_block's single DeleteWorkspace undoing
+        // multiple CreateX steps). Sagas that abort without
+        // compensating should explicitly construct
+        // SagaTerminal::Failed instead of using this helper.
+        // (codex round 7 reversal of round 1's blanket-Failed.)
+        Err(reason) => SagaTerminal::Compensated { reason },
     }
 }
 
