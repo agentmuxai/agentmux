@@ -69,6 +69,7 @@ use std::sync::Arc;
 use agentmux_common::ipc::{Command, Event};
 
 pub mod pool_respawn;
+pub mod window_cleanup;
 
 /// Where a `SagaAction::IssueCmd` should be dispatched.
 ///
@@ -306,17 +307,25 @@ impl SagaCoordinator {
 /// Inspect a bus event for "should this start a fresh saga?" Returns
 /// the constructed saga (boxed) on a hit; `None` otherwise.
 ///
-/// F.5 wires one trigger: `Event::PoolWindowPromoted` →
-/// `pool_respawn::PoolRespawn`. Future sagas extend this match.
+/// Triggers wired to date:
+/// * F.5: `Event::PoolWindowPromoted` → `pool_respawn::PoolRespawn`
+/// * F.6: `Event::WindowClosed` →
+///   `window_cleanup::WindowCleanupCascade`
+///
+/// Future sagas extend this match.
 ///
 /// Note: this returns a *candidate* saga. The coordinator may still
-/// reject it via the same-kind-in-flight serialization gate before
-/// `spawn_saga` (codex P1 PR #634 round 2 — see `run_coordinator`).
+/// evict a same-kind in-flight saga via the evict-and-replace
+/// serialization gate before `spawn_saga` (codex P1 PR #634 round 3
+/// — see `run_coordinator`).
 fn match_trigger(event: &Event) -> Option<Box<dyn Saga>> {
     match event {
         Event::PoolWindowPromoted { label, .. } => {
             Some(Box::new(pool_respawn::PoolRespawn::new(label.clone())))
         }
+        Event::WindowClosed { label, .. } => Some(Box::new(
+            window_cleanup::WindowCleanupCascade::new(label.clone()),
+        )),
         _ => None,
     }
 }
@@ -499,6 +508,19 @@ mod tests {
         assert_eq!(saga.name(), "pool_respawn_on_promote");
     }
 
+    /// F.6 — verify the trigger table picks up `WindowClosed`. The
+    /// end-to-end coordinator test lives in
+    /// `window_cleanup::tests::coordinator_brackets_close_with_saga_lifecycle_events`.
+    #[test]
+    fn match_trigger_window_closed_starts_window_cleanup_cascade() {
+        let event = Event::WindowClosed {
+            label: "main".into(),
+            version: 1,
+        };
+        let saga = match_trigger(&event).expect("WindowClosed should trigger a saga");
+        assert_eq!(saga.name(), "window_cleanup_cascade");
+    }
+
     #[test]
     fn match_trigger_returns_none_for_non_trigger_events() {
         let cases = vec![
@@ -519,6 +541,21 @@ mod tests {
             Event::LifecyclePhaseChanged {
                 from: LifecyclePhase::Starting,
                 to: LifecyclePhase::Running,
+                version: 1,
+            },
+            // F.6 step-1/step-2 terminal events are NOT triggers
+            // themselves — the saga consumes them, but receiving one
+            // when no saga is in flight should be a no-op.
+            Event::PanesReaped {
+                label: "main".into(),
+                version: 1,
+            },
+            Event::PoolDrained {
+                label: "main".into(),
+                version: 1,
+            },
+            Event::PoolNotLast {
+                label: "main".into(),
                 version: 1,
             },
         ];

@@ -144,6 +144,54 @@ pub fn update(state: &mut State, cmd: Command, ctx: &Ctx) -> Vec<Event> {
                 version: v,
             }]
         }
+        // Phase F.6 — host-only signal that all browser-pane HWNDs
+        // belonging to a closing top-level window have been reaped.
+        // Pure-reducer arm: emits the typed event so the
+        // window-cleanup-cascade saga can advance from Step 1
+        // (ReapingPanes) to Step 2 (DrainingPool). State is
+        // unchanged — pane bookkeeping lives in the host's session
+        // structures (lifecycle entries, pane HWND map), not the
+        // launcher's mirror; the launcher just narrates the
+        // transition for subscribers.
+        Command::ReportPanesReaped { label } => {
+            if let Some(err) = enforce_host_only(state, ctx, "ReportPanesReaped") {
+                return vec![err];
+            }
+            handle_report_panes_reaped(state, label)
+        }
+        // Phase F.6 — host reports the result of the post-close
+        // drain-pool-if-last decision. `was_last == true` →
+        // `Event::PoolDrained`; `was_last == false` →
+        // `Event::PoolNotLast`. Both are terminal alternatives for
+        // the window-cleanup-cascade saga's Step 2.
+        Command::ReportPoolDrainDecision { label, was_last } => {
+            if let Some(err) = enforce_host_only(state, ctx, "ReportPoolDrainDecision") {
+                return vec![err];
+            }
+            handle_report_pool_drain_decision(state, label, was_last)
+        }
+        // Phase F.6 — `ReapPanes` and `DrainPoolIfLast` are
+        // launcher→host direction commands, NOT host→launcher
+        // reports. Same misrouted-error pattern as `SpawnPoolWindow`
+        // above.
+        Command::ReapPanes { .. } => {
+            let v = state.bump_version();
+            vec![Event::Error {
+                code: agentmux_common::ipc::ErrorCode::InvalidCommand,
+                message: "ReapPanes is a launcher→host command; sent to launcher pipe by mistake".into(),
+                fatal: false,
+                version: v,
+            }]
+        }
+        Command::DrainPoolIfLast { .. } => {
+            let v = state.bump_version();
+            vec![Event::Error {
+                code: agentmux_common::ipc::ErrorCode::InvalidCommand,
+                message: "DrainPoolIfLast is a launcher→host command; sent to launcher pipe by mistake".into(),
+                fatal: false,
+                version: v,
+            }]
+        }
         Command::ReportHostCounts { windows, pool } => {
             if let Some(err) = enforce_host_only(state, ctx, "ReportHostCounts") {
                 return vec![err];
@@ -580,6 +628,43 @@ fn handle_report_pool_window_removed(state: &mut State, label: String) -> Vec<Ev
 fn handle_report_pool_window_promoted(state: &mut State, label: String) -> Vec<Event> {
     let v = state.bump_version();
     vec![Event::PoolWindowPromoted { label, version: v }]
+}
+
+/// Phase F.6 — host-emitted signal that browser-pane HWNDs for a
+/// closing top-level window have been reaped. Pure pass-through:
+/// state stays untouched (the host owns pane bookkeeping); the
+/// reducer just translates the wire command into the typed event so
+/// the window-cleanup-cascade saga can advance.
+///
+/// Idempotent / context-free: the saga matches the `label` against
+/// its own `closed_label`, so a stray report for a label that no
+/// in-flight saga is tracking is a harmless broadcast.
+fn handle_report_panes_reaped(state: &mut State, label: String) -> Vec<Event> {
+    let v = state.bump_version();
+    vec![Event::PanesReaped { label, version: v }]
+}
+
+/// Phase F.6 — host-emitted signal carrying the result of the
+/// post-close drain-pool-if-last decision. Maps `was_last` directly
+/// to the corresponding terminal event for Step 2 of the
+/// window-cleanup-cascade saga:
+/// * `true` → `Event::PoolDrained` (last user-visible window
+///   closed; warm-pool drain initiated)
+/// * `false` → `Event::PoolNotLast` (other windows remain; pool
+///   stays warm)
+///
+/// Pure pass-through (same reasoning as `handle_report_panes_reaped`).
+fn handle_report_pool_drain_decision(
+    state: &mut State,
+    label: String,
+    was_last: bool,
+) -> Vec<Event> {
+    let v = state.bump_version();
+    if was_last {
+        vec![Event::PoolDrained { label, version: v }]
+    } else {
+        vec![Event::PoolNotLast { label, version: v }]
+    }
 }
 
 /// Phase B.4 — gate window-mirror reports to Host clients only. The
@@ -1093,6 +1178,9 @@ mod tests {
             | Event::PoolWindowAdded { version, .. }
             | Event::PoolWindowRemoved { version, .. }
             | Event::PoolWindowPromoted { version, .. }
+            | Event::PanesReaped { version, .. }
+            | Event::PoolDrained { version, .. }
+            | Event::PoolNotLast { version, .. }
             | Event::WindowInstanceAssigned { version, .. }
             | Event::WindowInstanceReleased { version, .. }
             | Event::BackendWindowIdRegistered { version, .. }

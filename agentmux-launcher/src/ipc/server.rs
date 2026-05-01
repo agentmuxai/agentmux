@@ -595,6 +595,22 @@ async fn enforce_register_first(
         Command::SpawnPoolWindow => {
             ("SpawnPoolWindow is a launcher→host command; sent to launcher pipe by mistake".to_string(), false)
         }
+        // Phase F.6 — host-only reports; same fatal-before-Register
+        // treatment as the other window-mirror reports above.
+        Command::ReportPanesReaped { .. } => {
+            ("ReportPanesReaped before Register".to_string(), true)
+        }
+        Command::ReportPoolDrainDecision { .. } => {
+            ("ReportPoolDrainDecision before Register".to_string(), true)
+        }
+        // Phase F.6 — launcher→host direction commands. Same
+        // soft-error treatment as `SpawnPoolWindow` above.
+        Command::ReapPanes { .. } => {
+            ("ReapPanes is a launcher→host command; sent to launcher pipe by mistake".to_string(), false)
+        }
+        Command::DrainPoolIfLast { .. } => {
+            ("DrainPoolIfLast is a launcher→host command; sent to launcher pipe by mistake".to_string(), false)
+        }
         Command::ReportHostCounts { .. } => {
             ("ReportHostCounts before Register".to_string(), true)
         }
