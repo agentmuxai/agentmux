@@ -45,23 +45,17 @@
 //     `Event::PoolWindowPromoted`.
 //
 // F.5 does NOT ship:
-//   - The actual cross-process dispatch of `Command::SpawnPoolWindow`
-//     to the host. Today the launcher's named-pipe IPC is host→
-//     launcher only (host sends Commands up; launcher broadcasts
-//     Events back). A launcher→host command pipe doesn't exist yet.
-//     Step 2's `SagaAction::IssueCmd` is logged-only; the saga
-//     relies on the host's existing implicit `spawn_pool_window`
-//     call inside `promote_pool_window` to produce the
-//     `Event::PoolWindowAdded` it waits for. **This is acceptable
-//     scope per the F-spec § 7.1 final paragraph** ("If the cross-
-//     process plumbing is too heavy a lift for one PR, scope down:
-//     implement the saga shape + the launcher-side coordinator
-//     entry, even if the actual cross-process dispatch is initially
-//     in-process"). The follow-up PR replaces the log with a real
-//     wire-level send.
 //   - F.6 window-cleanup cascade saga.
 //   - Launcher-side saga durability (separate concern; srv-side
 //     durability already shipped).
+//
+// **CPD-3 update.** Step 2's `SagaAction::IssueCmd` is now LIVE: the
+// coordinator dispatches `Command::SpawnPoolWindow { saga_id }`
+// through `HostPipe::send_command()` (see
+// `agentmux-launcher/src/saga/mod.rs::apply_action`). The saga is
+// structurally identical — what changed is the coordinator's
+// `IssueCmd::Host` arm. The saga is no longer a passive narrator of
+// the host's implicit refill: it now causally drives it.
 //
 // **Why a saga at all if Step 2 is currently passive?**
 //

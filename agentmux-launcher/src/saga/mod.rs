@@ -39,18 +39,16 @@
 // the appropriate pipe, and emits `SagaStarted` / `SagaCompleted`
 // / `SagaFailed` so subscribers (renderer) can buffer-until-complete.
 //
-// **Cross-process dispatch — F.5 caveat.** Today the launcher's
-// named-pipe IPC is host→launcher only (host sends Commands up;
-// launcher broadcasts Events back). A launcher→host command pipe
-// doesn't exist yet. F.5's `pool_respawn` saga issues
-// `Command::SpawnPoolWindow` with `target = PipeTarget::Host`, but
-// the coordinator's IssueCmd handler currently logs the dispatch
-// without transmitting it — the host's existing implicit
-// `spawn_pool_window` call inside `promote_pool_window` produces
-// the matching `Event::PoolWindowAdded` the saga waits for. F.6
-// (or the cross-process-dispatch follow-up) replaces the log with
-// a real wire-level send. See `pool_respawn.rs` module docstring
-// for the full rationale and scope decision.
+// **Cross-process dispatch — CPD-3 LIVE.** The launcher → host
+// command pipe is now wired via `HostPipe::send_command()` (CPD-2
+// + CPD-3). F.5's `pool_respawn` and F.6's `window_cleanup_cascade`
+// sagas issue `IssueCmd::Host` actions; the coordinator dispatches
+// them through the wire instead of merely logging. Per-saga
+// timeouts (`Saga::timeout()`, default 5s, F.6 overrides 30s)
+// + per-saga deadline tasks fire `SagaFailed` if a host action
+// stays unresolved past its budget. Host-emitted
+// `Command::ReportSagaActionFailed` translates into
+// `Event::SagaActionFailed` and terminates the matching saga.
 //
 // Per-variant `saga_id` tagging on existing Command/Event variants
 // is deferred; F.5's coordinator doesn't yet need it because:
@@ -65,11 +63,17 @@
 // sagas; renderer-side timeouts cover the visible consequence.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use agentmux_common::ipc::{Command, Event};
 
+use crate::host_pipe::HostPipe;
+
 pub mod pool_respawn;
 pub mod window_cleanup;
+
+#[cfg(test)]
+mod integration_tests;
 
 // LSD-1 (PR LSD-1) — durable launcher saga log + API. Foundations
 // only: the coordinator does NOT call any of these methods yet.
@@ -87,9 +91,10 @@ use log::SagaOutcome;
 /// reducer" (in-process); `Host` and `Srv` mean "forward to the
 /// peer's pipe."
 ///
-/// **F.5 status:** `Host` is wired only as a log target — the
-/// launcher→host command pipe doesn't exist yet. Follow-up PRs
-/// replace the log with the actual transport.
+/// **CPD-3 status:** `Host` is now LIVE — the saga coordinator's
+/// `apply_action` dispatches `IssueCmd::Host` actions through
+/// `HostPipe::send_command()` over the launcher → host wire.
+/// `LauncherSelf` and `Srv` remain reserved for class-D/E sagas.
 ///
 /// F.7 cleanup audit: only `Host` is constructed today (F.5/F.6 saga
 /// IssueCmds). `LauncherSelf` and `Srv` are framework slots reserved
@@ -183,6 +188,20 @@ pub trait Saga: Send {
     fn input_snapshot(&self) -> serde_json::Value {
         serde_json::Value::Null
     }
+
+    /// CPD-3 — per-saga deadline budget for completing all
+    /// `IssueCmd`+wait cycles. Coordinator arms a timer when the saga
+    /// registers; if the saga is still in_flight when `timeout()`
+    /// elapses, it is force-failed (`SagaFailed { reason: "saga
+    /// timeout" }`) and removed from the registry.
+    ///
+    /// Default 5s — fits class-C single-step host dispatch (e.g.
+    /// pool respawn). `WindowCleanupCascade` overrides to 30s
+    /// because pane drain on a workspace with many panes can
+    /// legitimately take that long. Per spec §3.10.
+    fn timeout(&self) -> Duration {
+        Duration::from_secs(5)
+    }
 }
 
 /// Saga coordinator task.
@@ -238,6 +257,11 @@ pub struct SagaCoordinator {
     /// `Done` → `terminate_saga(Completed)`, `Failed` / evicted →
     /// `terminate_saga(Failed)`) writes to this log.
     log: Option<Arc<LauncherSagaLog>>,
+    /// CPD-3 — launcher → host pipe wrapper. `apply_action` for
+    /// `IssueCmd::Host` dispatches via `host_pipe.send_command()` when
+    /// installed. `None` in tests that don't exercise host dispatch
+    /// (those drive sagas via synthetic terminal events on the bus).
+    host_pipe: Option<Arc<HostPipe>>,
 }
 
 impl SagaCoordinator {
@@ -251,7 +275,18 @@ impl SagaCoordinator {
             events_tx,
             state,
             log: None,
+            host_pipe: None,
         }
+    }
+
+    /// CPD-3 — install the host pipe so `IssueCmd::Host` actions are
+    /// dispatched live (instead of log-only). Builder-style setter so
+    /// existing tests + the `next_id_is_monotonic` smoke don't have to
+    /// construct a HostPipe. Production wiring (`main.rs`) calls this
+    /// once before `run_coordinator` is spawned.
+    pub fn with_host_pipe(mut self, host_pipe: Arc<HostPipe>) -> Self {
+        self.host_pipe = Some(host_pipe);
+        self
     }
 
     /// LSD-2 — install the durable saga log so saga lifecycle
@@ -345,13 +380,12 @@ impl SagaCoordinator {
     ///     the InFlightSaga so the next non-`Wait` `on_event` return
     ///     can call `LauncherSagaLog::finish_step(saga_id, idx, ev)`.
     ///
-    /// **F.5 IssueCmd dispatch is logged-only for `Host` target.** No
-    /// launcher→host command pipe exists yet; the saga relies on the
-    /// host's existing implicit `spawn_pool_window` to produce the
-    /// terminal `PoolWindowAdded`. `LauncherSelf` and `Srv` targets
-    /// also fall back to log-only for now (no sagas use them yet —
-    /// future work). CPD-3 replaces the log with a real wire-level
-    /// send.
+    /// CPD-3 — `IssueCmd::Host` dispatches live through `HostPipe`
+    /// when one is installed. Tests without a host_pipe (the existing
+    /// F.5/F.6 unit + integration tests) fall back to log-only so
+    /// synthetic-terminal-event drivers continue to work.
+    /// `LauncherSelf` and `Srv` targets remain log-only — reserved
+    /// for class-D/E sagas, no consumer today.
     ///
     /// LSD-2 — every state transition writes to `LauncherSagaLog`
     /// when one is installed: `IssueCmd` → `start_step`, `Done` →
@@ -362,6 +396,12 @@ impl SagaCoordinator {
     /// On the first dispatch in `spawn_saga`, the caller passes 0;
     /// on subsequent dispatches from the event loop, the caller pulls
     /// + bumps the per-InFlightSaga counter.
+    ///
+    /// Terminal paths (`Done`, `Failed`, host-send-error) all go
+    /// through `claim_terminal` so only one of {normal Done/Failed,
+    /// timeout-task, SagaActionFailed listener, host-send-error}
+    /// can win the terminal-event race for a given saga_id.
+    /// (reagent P1 PR #644 round 1 + 2.)
     async fn apply_action(
         &self,
         saga_id: u64,
@@ -387,14 +427,85 @@ impl SagaCoordinator {
                     }
                 }
 
-                crate::log(&format!(
-                    "[saga] saga_id={} name={} IssueCmd target={:?} cmd={:?} (F.5: dispatch is log-only; awaiting cross-process pipe)",
-                    saga_id, name, target, cmd
-                ));
-                ApplyOutcome::in_flight_awaiting(step_index)
+                match target {
+                    PipeTarget::Host => {
+                        // CPD-3 — dispatch live through the host pipe
+                        // when installed. Tests without a host_pipe
+                        // (most existing F.5/F.6 unit + integration
+                        // tests) fall back to log-only so synthetic-
+                        // terminal-event drivers continue to work.
+                        let Some(host_pipe) = self.host_pipe.as_ref() else {
+                            crate::log(&format!(
+                                "[saga] saga_id={} name={} IssueCmd target=Host cmd={:?} (no host_pipe installed — log-only)",
+                                saga_id, name, cmd
+                            ));
+                            return ApplyOutcome::in_flight_awaiting(step_index);
+                        };
+                        let cmd_with_id = inject_saga_id(cmd, saga_id);
+                        match host_pipe.send_command(&cmd_with_id).await {
+                            Ok(()) => {
+                                crate::log(&format!(
+                                    "[saga] saga_id={} name={} IssueCmd::Host dispatched cmd={:?}",
+                                    saga_id, name, cmd_with_id
+                                ));
+                                ApplyOutcome::in_flight_awaiting(step_index)
+                            }
+                            Err(e) => {
+                                // CRITICAL: do NOT terminate the saga
+                                // here. send_command's send_frame already
+                                // re-buffered the failed frame for retry
+                                // on reconnect (with the real saga_id).
+                                // If we ALSO emit SagaFailed now:
+                                //   - 30s later expire_pending_if_timed_out
+                                //     drains the buffer + emit_drop_failure
+                                //     emits a SECOND SagaFailed for the
+                                //     same saga_id (double-emit), OR
+                                //   - host reconnects in <30s and the
+                                //     buffered command executes as an
+                                //     orphaned side effect after the saga
+                                //     bracket is already closed.
+                                // (reagent P1 PR #644 round 6.)
+                                //
+                                // Round 7 design: keep the saga in_flight.
+                                // The retry path resolves it (Report*
+                                // arrives → on_event drives forward) OR
+                                // the saga's own timeout (5s default,
+                                // 30s for F.6) fires + claim_terminal'd
+                                // SagaFailed. Either way, exactly one
+                                // terminal event is emitted.
+                                crate::log(&format!(
+                                    "[saga] saga_id={} name={} host pipe send transient err: {} — frame buffered for retry; saga stays in-flight (round 7 fix)",
+                                    saga_id, name, e
+                                ));
+                                ApplyOutcome::in_flight_awaiting(step_index)
+                            }
+                        }
+                    }
+                    PipeTarget::LauncherSelf | PipeTarget::Srv => {
+                        // Reserved for class-D/E sagas; out of scope
+                        // per SPEC_CROSS_PROCESS_DISPATCH §3.6. Log-
+                        // only retains framework shape until a
+                        // consumer arrives.
+                        crate::log(&format!(
+                            "[saga] saga_id={} name={} IssueCmd target={:?} cmd={:?} (target not yet wired; log-only)",
+                            saga_id, name, target, cmd
+                        ));
+                        ApplyOutcome::in_flight_awaiting(step_index)
+                    }
+                }
             }
             SagaAction::Wait => ApplyOutcome::in_flight_no_change(),
             SagaAction::Done => {
+                // Atomic claim: only one of {normal Done, timeout-task,
+                // SagaActionFailed listener, host-send-error} can win
+                // the terminal-event race. Without this guard a Done
+                // could fire SagaCompleted while the timeout task
+                // simultaneously fires SagaFailed, producing duplicate
+                // terminal events for the same saga (reagent P1 PR
+                // #644 round 1).
+                if !self.claim_terminal(saga_id).await {
+                    return ApplyOutcome::terminated();
+                }
                 crate::log(&format!(
                     "[saga] saga_id={} name={} Done — emitting SagaCompleted",
                     saga_id, name
@@ -411,6 +522,9 @@ impl SagaCoordinator {
                 ApplyOutcome::terminated()
             }
             SagaAction::Failed { reason } => {
+                if !self.claim_terminal(saga_id).await {
+                    return ApplyOutcome::terminated();
+                }
                 crate::log(&format!(
                     "[saga] saga_id={} name={} Failed reason={} — emitting SagaFailed",
                     saga_id, name, reason
@@ -434,6 +548,34 @@ impl SagaCoordinator {
         }
     }
 
+    /// Atomically remove `saga_id` from `in_flight` and return whether
+    /// the caller was the one who removed it (i.e. has the right to
+    /// emit the terminal `SagaCompleted` / `SagaFailed`). Idempotent:
+    /// a second caller for the same saga_id sees `false`. Used by the
+    /// `SagaAction::Done` and `SagaAction::Failed` paths in
+    /// `apply_action`, by the per-saga timeout task in `spawn_saga`,
+    /// by the `Event::SagaActionFailed` listener in `run_coordinator`,
+    /// by the host-send-failure path in `apply_action::IssueCmd::Host`,
+    /// and by the eviction path in `run_coordinator`.
+    /// (reagent P1 PR #644 round 1.)
+    async fn claim_terminal(&self, saga_id: u64) -> bool {
+        let claimed = {
+            let mut registry = self.in_flight.lock().await;
+            registry.remove(&saga_id).is_some()
+        };
+        // Purge any host-pipe pending frames tagged with this saga_id
+        // so a host reconnect post-terminal doesn't drain them as
+        // orphan side effects, and the 30s expiry path doesn't emit
+        // a second SagaFailed for the same saga_id.
+        // (codex + reagent P1 PR #644 round 7.)
+        if claimed {
+            if let Some(pipe) = self.host_pipe.as_ref() {
+                pipe.cancel_saga(saga_id).await;
+            }
+        }
+        claimed
+    }
+
     /// Register a fresh saga, calling `start` and applying its first
     /// action. The caller has already determined that the saga
     /// should fire (e.g. matched a trigger event). Returns the saga's
@@ -442,10 +584,19 @@ impl SagaCoordinator {
     /// LSD-2 — also writes a `running` row to the durable saga log
     /// before invoking `saga.start()`, and (via `apply_action`)
     /// records the saga's first dispatched step.
-    async fn spawn_saga(&self, mut saga: Box<dyn Saga>) -> u64 {
+    ///
+    /// CPD-3 — also arms a per-saga deadline timer. If the saga is
+    /// still in_flight when `saga.timeout()` elapses, a background
+    /// task force-fails it (`SagaFailed { reason: "saga timeout" }`)
+    /// and removes it from the registry. Per spec §3.10. Insert-then-
+    /// start ordering is required so `apply_action`'s `claim_terminal`
+    /// guard can succeed for immediate-completion sagas (codex P2 PR
+    /// #644 round 2).
+    async fn spawn_saga(self: &Arc<Self>, saga: Box<dyn Saga>) -> u64 {
         let saga_id = self.next_id();
         let name = saga.name();
         let input = saga.input_snapshot();
+        let saga_timeout = saga.timeout();
         crate::log(&format!(
             "[saga] starting saga_id={} name={}",
             saga_id, name
@@ -468,11 +619,17 @@ impl SagaCoordinator {
         // saga_id sees the bracket open before any per-step events.
         // Mirrors `agentmux-srv::sagas::emit_saga_started` ordering.
         self.emit_started(saga_id, name).await;
-        let ctx = SagaCtx { saga_id };
-        let action = saga.start(&ctx);
-        // First step on a fresh saga is index 0.
-        let outcome = self.apply_action(saga_id, name, action, 0).await;
-        if outcome.in_flight {
+
+        // CPD-3 — insert the saga into in_flight BEFORE calling
+        // start(), so that if start() returns SagaAction::Done or
+        // SagaAction::Failed immediately, apply_action's terminal
+        // paths can claim_terminal successfully and emit the matching
+        // SagaCompleted/SagaFailed bracket. Pre-round-3 we started
+        // saga.start() before insertion, which broke immediate-
+        // completion sagas (claim_terminal returned false → no
+        // terminal event → dangling SagaStarted bracket).
+        // (codex P2 PR #644 round 2.)
+        let action = {
             let mut registry = self.in_flight.lock().await;
             // (codex P1 PR #634) Observability for the known
             // concurrent-correlation limitation. With more than one
@@ -480,8 +637,7 @@ impl SagaCoordinator {
             // routing mis-correlates: the first matching event
             // completes ALL of them. Logged here so operators can
             // spot the pattern in `--diag wrr` output. Closed when
-            // F.6/F.7 adds proper FIFO routing or saga-id event
-            // correlation.
+            // CPD-4 adds saga-id event correlation.
             let same_kind_count = registry
                 .values()
                 .filter(|s| s.saga.name() == name)
@@ -492,20 +648,73 @@ impl SagaCoordinator {
                     name, saga_id, same_kind_count,
                 ));
             }
-            // If the first action allocated step 0, the saga is now
-            // parked awaiting that step's echo event; next allocation
-            // is index 1. Otherwise (Wait — saga has no first
-            // dispatch yet; nothing in F.5/F.6 sagas does this), keep
-            // the counter at 0.
-            let next_step_index = if outcome.awaiting_step.is_some() { 1 } else { 0 };
             registry.insert(
                 saga_id,
                 InFlightSaga {
                     saga,
-                    awaiting_step: outcome.awaiting_step,
-                    next_step_index,
+                    awaiting_step: None,
+                    next_step_index: 0,
                 },
             );
+            // Drive start() while still under the registry lock so
+            // we have a mutable reference to the just-inserted saga.
+            // start() is non-async and does no I/O — bounded hold time.
+            let in_flight_saga = registry.get_mut(&saga_id).expect("just inserted");
+            let ctx = SagaCtx { saga_id };
+            in_flight_saga.saga.start(&ctx)
+        };
+
+        // First step on a fresh saga is index 0. apply_action may
+        // remove the saga via claim_terminal (Done/Failed/host-send-
+        // error) without re-locking the registry from here.
+        let outcome = self.apply_action(saga_id, name, action, 0).await;
+        if outcome.in_flight {
+            // Update the bookkeeping for the freshly-issued step.
+            // If the first action allocated step 0, the saga is now
+            // parked awaiting that step's echo event; next allocation
+            // is index 1. Otherwise (Wait — saga has no first
+            // dispatch yet), keep the counter at 0.
+            let mut registry = self.in_flight.lock().await;
+            if let Some(in_flight_saga) = registry.get_mut(&saga_id) {
+                in_flight_saga.awaiting_step = outcome.awaiting_step;
+                in_flight_saga.next_step_index =
+                    if outcome.awaiting_step.is_some() { 1 } else { 0 };
+            }
+            drop(registry);
+
+            // CPD-3 — arm the per-saga deadline timer. If the saga
+            // is still in_flight when `saga_timeout` elapses, fail
+            // it out. Spawned task captures an Arc clone of the
+            // coordinator so it can outlive the saga's deadline.
+            // Uses `claim_terminal` so it doesn't race with the
+            // normal Done/Failed path. (reagent P1 PR #644 round 1.)
+            let coord_for_timeout = Arc::clone(self);
+            tokio::spawn(async move {
+                tokio::time::sleep(saga_timeout).await;
+                if coord_for_timeout.claim_terminal(saga_id).await {
+                    crate::log(&format!(
+                        "[saga] saga_id={} name={} timed out after {:?} — emitting SagaFailed",
+                        saga_id, name, saga_timeout
+                    ));
+                    let reason = "saga timeout".to_string();
+                    if let Some(log) = coord_for_timeout.log.as_ref() {
+                        if let Err(e) = log.terminate_saga(
+                            saga_id,
+                            SagaOutcome::Failed {
+                                reason: reason.clone(),
+                            },
+                        ) {
+                            crate::log(&format!(
+                                "[saga] saga_id={} timeout terminate_saga(Failed) log write failed: {}",
+                                saga_id, e
+                            ));
+                        }
+                    }
+                    coord_for_timeout
+                        .emit_failed(saga_id, reason)
+                        .await;
+                }
+            });
         }
         saga_id
     }
@@ -569,6 +778,36 @@ fn derive_step_name(cmd: &Command, target: PipeTarget) -> String {
         _ => "unknown".to_string(),
     };
     format!("issue_cmd_{}_{}", target_str, discriminant)
+}
+
+/// CPD-3 — fill in the `saga_id` field on a host-bound `Command`
+/// before dispatch. Sagas construct their `IssueCmd` actions with a
+/// placeholder `saga_id: 0` (they don't know their coordinator-
+/// allocated id at action-construction time); the coordinator
+/// rewrites the field at dispatch time so the host can echo it back
+/// on the matching `Report*`.
+///
+/// Exhaustive match: any host-bound Command variant added later that
+/// forgets to plumb `saga_id` will refuse to compile here. Non-host-
+/// bound variants (Report*, Identify, etc.) panic loudly because
+/// sagas only emit `IssueCmd::Host` for the three host-bound
+/// command kinds covered below.
+fn inject_saga_id(cmd: Command, saga_id: u64) -> Command {
+    match cmd {
+        Command::SpawnPoolWindow { .. } => Command::SpawnPoolWindow { saga_id },
+        Command::ReapPanes { label, .. } => Command::ReapPanes { label, saga_id },
+        Command::DrainPoolIfLast { label, .. } => {
+            Command::DrainPoolIfLast { label, saga_id }
+        }
+        // Defense-in-depth: every non-host-dispatched Command variant
+        // (Report*, Identify, etc.) is a coding bug if it reaches
+        // this point — the F.5/F.6 sagas only emit IssueCmd::Host
+        // for the three command kinds above.
+        other => panic!(
+            "inject_saga_id called on non-host-bound Command variant: {:?}",
+            other
+        ),
+    }
 }
 
 /// Inspect a bus event for "should this start a fresh saga?" Returns
@@ -642,6 +881,43 @@ pub async fn run_coordinator(
                     continue;
                 }
 
+                // CPD-3 — host reported via `Command::ReportSagaActionFailed`
+                // that a saga-issued action failed. Launcher reducer
+                // translates this into `Event::SagaActionFailed`
+                // (CPD-1 schema). Terminate the matching saga
+                // immediately rather than waiting for a Report* that
+                // won't come.
+                if let Event::SagaActionFailed { saga_id, reason, .. } = &event {
+                    let saga_id = *saga_id;
+                    let reason = reason.clone();
+                    // claim_terminal: atomic take-ownership of the
+                    // terminal-event slot, preventing duplicate-emission
+                    // races with the saga's own Done/Failed path or its
+                    // timeout task. (reagent P1 PR #644 round 1.)
+                    if coord.claim_terminal(saga_id).await {
+                        crate::log(&format!(
+                            "[saga] saga_id={} terminating from host SagaActionFailed reason={}",
+                            saga_id, reason
+                        ));
+                        let full_reason = format!("host action failed: {}", reason);
+                        if let Some(log) = coord.log.as_ref() {
+                            if let Err(e) = log.terminate_saga(
+                                saga_id,
+                                SagaOutcome::Failed {
+                                    reason: full_reason.clone(),
+                                },
+                            ) {
+                                crate::log(&format!(
+                                    "[saga] saga_id={} SagaActionFailed terminate_saga(Failed) log write failed: {}",
+                                    saga_id, e
+                                ));
+                            }
+                        }
+                        coord.emit_failed(saga_id, full_reason).await;
+                    }
+                    continue;
+                }
+
                 // Step 1 — start any new sagas this event triggers.
                 // (codex P1 PR #634 round 3.) Evict-and-replace: if a
                 // saga of the same kind is already in flight, EVICT
@@ -673,6 +949,16 @@ pub async fn run_coordinator(
                             .collect()
                     };
                     for evict_id in evict_ids {
+                        // claim_terminal removes from in_flight AND
+                        // ensures the timeout task / SagaActionFailed
+                        // listener can't double-emit a terminal event
+                        // for this saga_id. (reagent P1 PR #644
+                        // round 1.)
+                        if !coord.claim_terminal(evict_id).await {
+                            // Lost the race — another path (timeout,
+                            // SagaActionFailed) already terminated.
+                            continue;
+                        }
                         crate::log(&format!(
                             "[saga] evicting prior {} saga_id={} to make room for new trigger (codex P1 #634 round 3 evict-and-replace)",
                             new_kind, evict_id,
@@ -695,7 +981,6 @@ pub async fn run_coordinator(
                             }
                         }
                         coord.emit_failed(evict_id, evict_reason.to_string()).await;
-                        coord.in_flight.lock().await.remove(&evict_id);
                     }
                     coord.spawn_saga(saga).await;
                 }
