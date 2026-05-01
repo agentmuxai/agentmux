@@ -132,7 +132,7 @@ pub struct PoolRespawn {
     /// new pool label against this one. Kept on the struct so future
     /// failure-mode logging (timeout / explicit fail) can include
     /// "which promote did this saga belong to?" without rethreading.
-    #[allow(dead_code)]
+    /// LSD-2 — also surfaces in `--diag sagas` via `input_snapshot`.
     promoted_label: String,
     /// New pool label observed in `Event::PoolWindowAdded` (Step 2's
     /// output). `None` until refill is observed.
@@ -163,6 +163,15 @@ impl PoolRespawn {
 impl Saga for PoolRespawn {
     fn name(&self) -> &'static str {
         "pool_respawn_on_promote"
+    }
+
+    /// LSD-2 — record the promote's source label for `--diag sagas`.
+    /// `refilled_label` is None at start (only known after Step 2's
+    /// echo lands) so we don't include it; the durable log captures
+    /// the inputs the saga was constructed with, not its evolving
+    /// state — that lives in step rows.
+    fn input_snapshot(&self) -> serde_json::Value {
+        serde_json::json!({ "promoted_label": self.promoted_label })
     }
 
     fn start(&mut self, _ctx: &SagaCtx) -> SagaAction {

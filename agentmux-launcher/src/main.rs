@@ -306,17 +306,39 @@ async fn run_windows(
     // owner, multiple readers via Arc.
     let state = std::sync::Arc::new(tokio::sync::Mutex::new(state::State::default()));
 
+    // LSD-2 — open the durable launcher saga log at
+    // `<data-dir>/launcher-sagas.db` (separate file from
+    // `launcher-events.log`; the saga log is structured SQLite, the
+    // event log is append-only JSONL). Failure to open is a launcher
+    // startup error — without the log, sagas have no crash-recovery
+    // story (LSD-3 walks `unresolved_sagas` to mark interrupted
+    // sagas `failed_compensation`). Spec
+    // `docs/specs/SPEC_LAUNCHER_SAGA_DURABILITY_2026-05-01.md` §3.1.
+    let saga_log_path = paths.data_dir.join("launcher-sagas.db");
+    let saga_log = match saga::LauncherSagaLog::open(&saga_log_path) {
+        Ok(l) => std::sync::Arc::new(l),
+        Err(e) => {
+            log(&format!(
+                "FATAL: failed to open launcher saga log at {:?}: {}",
+                saga_log_path, e
+            ));
+            std::process::exit(2);
+        }
+    };
+
     // Phase E.1a — saga coordinator task. Subscribes to the broadcast
     // bus, drives in-flight sagas. E.1a registry is empty — framework
     // only. E.5 adds the first concrete saga consumer (tear-off).
+    // LSD-2 — durable saga log is now installed; every lifecycle
+    // transition is persisted.
     //
     // Subscribe BEFORE spawning so the race window between construction
     // and first `recv()` doesn't drop early events. (reagent P2 PR #609.)
     // Same pattern as the disk writer above.
-    let saga_coord = std::sync::Arc::new(saga::SagaCoordinator::new(
-        events_tx.clone(),
-        std::sync::Arc::clone(&state),
-    ));
+    let saga_coord = std::sync::Arc::new(
+        saga::SagaCoordinator::new(events_tx.clone(), std::sync::Arc::clone(&state))
+            .with_log(std::sync::Arc::clone(&saga_log)),
+    );
     let saga_rx = events_tx.subscribe();
     tokio::spawn(saga::run_coordinator(
         std::sync::Arc::clone(&saga_coord),

@@ -78,8 +78,8 @@ pub mod window_cleanup;
 // transition. See `docs/specs/SPEC_LAUNCHER_SAGA_DURABILITY_2026-05-01.md`
 // §4 PR1 for the staged-rollout rationale.
 mod log;
-#[allow(unused_imports)] // re-export consumed by PR LSD-2; keeps import path stable.
 pub use log::LauncherSagaLog;
+use log::SagaOutcome;
 
 /// Where a `SagaAction::IssueCmd` should be dispatched.
 ///
@@ -169,6 +169,20 @@ pub trait Saga: Send {
     fn start(&mut self, ctx: &SagaCtx) -> SagaAction;
     fn on_event(&mut self, event: &Event, ctx: &SagaCtx) -> SagaAction;
     fn name(&self) -> &'static str;
+    /// LSD-2 — saga's input arguments serialized for the durable log's
+    /// `input_json` column. The coordinator calls this once at
+    /// `spawn_saga` time (before `start`) and writes the result via
+    /// `LauncherSagaLog::start_saga`. Operators see this in
+    /// `--diag sagas` output (e.g. `{"closed_label":"win-3"}`) so they
+    /// can tell which window's cleanup a recovered-failed saga
+    /// belonged to.
+    ///
+    /// Default `Value::Null` — sagas with no input fields can ignore
+    /// it. Concrete sagas should override with a `serde_json::json!`
+    /// of their constructor args.
+    fn input_snapshot(&self) -> serde_json::Value {
+        serde_json::Value::Null
+    }
 }
 
 /// Saga coordinator task.
@@ -181,17 +195,49 @@ pub trait Saga: Send {
 /// F.5 adds the first real consumer (`pool_respawn`). The
 /// `in_flight` registry is now actually populated; the bus loop
 /// dispatches events into it.
+/// LSD-2 — coordinator's per-saga book-keeping. Wraps the boxed saga
+/// with the durable-log step bookkeeping the coordinator needs to call
+/// `LauncherSagaLog::finish_step` when the awaited bus event lands.
+///
+/// `awaiting_step` is `Some(idx)` when the saga is parked on a
+/// `Wait`-then-event pivot (the most recent `IssueCmd` allocated step
+/// `idx`); `None` between dispatches and after termination. Tracking
+/// it on the in-flight record (rather than inside each saga impl) keeps
+/// the durability concern out of saga authors' hands — they only deal
+/// with `SagaAction`.
+///
+/// `next_step_index` is the monotonic counter the coordinator
+/// `fetch_add(1)`s on every `IssueCmd` for this saga. Mirrors srv's
+/// `SagaCtx::step_index`. Lives per-saga (not coordinator-global) so
+/// concurrent sagas don't interleave indices in the log.
+struct InFlightSaga {
+    saga: Box<dyn Saga>,
+    awaiting_step: Option<u32>,
+    next_step_index: u32,
+}
+
 pub struct SagaCoordinator {
     /// Monotonic saga-id allocator.
     next_saga_id: std::sync::atomic::AtomicU64,
-    /// In-flight sagas keyed by saga_id.
-    in_flight: tokio::sync::Mutex<std::collections::HashMap<u64, Box<dyn Saga>>>,
+    /// In-flight sagas keyed by saga_id, each wrapped with the
+    /// durable-log bookkeeping (LSD-2: `awaiting_step` +
+    /// `next_step_index`).
+    in_flight: tokio::sync::Mutex<std::collections::HashMap<u64, InFlightSaga>>,
     /// Reference to the broadcast bus so the coordinator can emit
     /// `SagaStarted` / `SagaCompleted` / `SagaFailed`.
     events_tx: tokio::sync::broadcast::Sender<Event>,
     /// Reference to the launcher's reducer state for `bump_version`
     /// when emitting saga lifecycle events.
     state: Arc<tokio::sync::Mutex<crate::state::State>>,
+    /// LSD-2 — durable saga log. `None` in tests that don't exercise
+    /// the durability path (the saga then logs + remains in flight,
+    /// preserving the pre-LSD-2 behavior tests rely on for end-to-end
+    /// bracket assertions). When `Some`, every saga lifecycle
+    /// transition (`spawn_saga` → `start_saga`, `IssueCmd` →
+    /// `start_step`, awaited-event consumed → `finish_step`,
+    /// `Done` → `terminate_saga(Completed)`, `Failed` / evicted →
+    /// `terminate_saga(Failed)`) writes to this log.
+    log: Option<Arc<LauncherSagaLog>>,
 }
 
 impl SagaCoordinator {
@@ -204,7 +250,19 @@ impl SagaCoordinator {
             in_flight: tokio::sync::Mutex::new(std::collections::HashMap::new()),
             events_tx,
             state,
+            log: None,
         }
+    }
+
+    /// LSD-2 — install the durable saga log so saga lifecycle
+    /// transitions are persisted to `~/.agentmux/launcher-sagas.db`.
+    /// Builder-style setter rather than a constructor parameter so
+    /// existing tests + the `next_id_is_monotonic` smoke don't have
+    /// to construct an in-memory log. Production wiring (in
+    /// `main.rs`) calls this once before `run_coordinator` is spawned.
+    pub fn with_log(mut self, log: Arc<LauncherSagaLog>) -> Self {
+        self.log = Some(log);
+        self
     }
 
     /// Allocate the next saga_id. Monotonic per launcher run.
@@ -255,40 +313,100 @@ impl SagaCoordinator {
     }
 
     /// Apply a `SagaAction` returned by `start` or `on_event`. Returns
-    /// `true` if the saga remains in flight (caller keeps it in
-    /// `in_flight`); `false` if it terminated (caller removes it).
+    /// an `ApplyOutcome` carrying:
+    ///   - `in_flight`: true → caller keeps the saga in `in_flight`,
+    ///     false → caller removes it.
+    ///   - `awaiting_step`: `Some(idx)` if the action was an
+    ///     `IssueCmd` that allocated step `idx` and the saga is now
+    ///     parked waiting for the echo event. Caller stores this on
+    ///     the InFlightSaga so the next non-`Wait` `on_event` return
+    ///     can call `LauncherSagaLog::finish_step(saga_id, idx, ev)`.
     ///
     /// **F.5 IssueCmd dispatch is logged-only for `Host` target.** No
     /// launcher→host command pipe exists yet; the saga relies on the
     /// host's existing implicit `spawn_pool_window` to produce the
     /// terminal `PoolWindowAdded`. `LauncherSelf` and `Srv` targets
     /// also fall back to log-only for now (no sagas use them yet —
-    /// future work).
-    async fn apply_action(&self, saga_id: u64, name: &'static str, action: SagaAction) -> bool {
+    /// future work). CPD-3 replaces the log with a real wire-level
+    /// send.
+    ///
+    /// LSD-2 — every state transition writes to `LauncherSagaLog`
+    /// when one is installed: `IssueCmd` → `start_step`, `Done` →
+    /// `terminate_saga(Completed)`, `Failed` →
+    /// `terminate_saga(Failed)`.
+    ///
+    /// `step_index` is the caller-allocated index for THIS dispatch.
+    /// On the first dispatch in `spawn_saga`, the caller passes 0;
+    /// on subsequent dispatches from the event loop, the caller pulls
+    /// + bumps the per-InFlightSaga counter.
+    async fn apply_action(
+        &self,
+        saga_id: u64,
+        name: &'static str,
+        action: SagaAction,
+        step_index: u32,
+    ) -> ApplyOutcome {
         match action {
             SagaAction::IssueCmd { target, cmd } => {
+                // LSD-2 — write the durable `pending` step row BEFORE
+                // dispatch so a crash mid-dispatch leaves a recoverable
+                // breadcrumb (LSD-3's walker upgrades this saga to
+                // `failed_compensation` on next launcher startup).
+                let step_name = derive_step_name(&cmd, target);
+                if let Some(log) = self.log.as_ref() {
+                    if let Err(e) =
+                        log.start_step(saga_id, step_index, &step_name, target, &cmd)
+                    {
+                        crate::log(&format!(
+                            "[saga] saga_id={} name={} start_step log write failed: {} — continuing (in-memory path remains authoritative for this run)",
+                            saga_id, name, e
+                        ));
+                    }
+                }
+
                 crate::log(&format!(
                     "[saga] saga_id={} name={} IssueCmd target={:?} cmd={:?} (F.5: dispatch is log-only; awaiting cross-process pipe)",
                     saga_id, name, target, cmd
                 ));
-                true
+                ApplyOutcome::in_flight_awaiting(step_index)
             }
-            SagaAction::Wait => true,
+            SagaAction::Wait => ApplyOutcome::in_flight_no_change(),
             SagaAction::Done => {
                 crate::log(&format!(
                     "[saga] saga_id={} name={} Done — emitting SagaCompleted",
                     saga_id, name
                 ));
+                if let Some(log) = self.log.as_ref() {
+                    if let Err(e) = log.terminate_saga(saga_id, SagaOutcome::Completed) {
+                        crate::log(&format!(
+                            "[saga] saga_id={} terminate_saga(Completed) log write failed: {}",
+                            saga_id, e
+                        ));
+                    }
+                }
                 self.emit_completed(saga_id).await;
-                false
+                ApplyOutcome::terminated()
             }
             SagaAction::Failed { reason } => {
                 crate::log(&format!(
                     "[saga] saga_id={} name={} Failed reason={} — emitting SagaFailed",
                     saga_id, name, reason
                 ));
+                if let Some(log) = self.log.as_ref() {
+                    if let Err(e) = log.terminate_saga(
+                        saga_id,
+                        SagaOutcome::Failed {
+                            reason: reason.clone(),
+                        },
+                    ) {
+                        crate::log(&format!(
+                            "[saga] saga_id={} terminate_saga(Failed) log write failed: {}",
+                            saga_id, e
+                        ));
+                    }
+                }
                 self.emit_failed(saga_id, reason).await;
-                false
+                ApplyOutcome::terminated()
             }
         }
     }
@@ -297,21 +415,41 @@ impl SagaCoordinator {
     /// action. The caller has already determined that the saga
     /// should fire (e.g. matched a trigger event). Returns the saga's
     /// allocated id (logged + bracketed in `SagaStarted`).
+    ///
+    /// LSD-2 — also writes a `running` row to the durable saga log
+    /// before invoking `saga.start()`, and (via `apply_action`)
+    /// records the saga's first dispatched step.
     async fn spawn_saga(&self, mut saga: Box<dyn Saga>) -> u64 {
         let saga_id = self.next_id();
         let name = saga.name();
+        let input = saga.input_snapshot();
         crate::log(&format!(
             "[saga] starting saga_id={} name={}",
             saga_id, name
         ));
+        // LSD-2 — write the durable `running` row BEFORE
+        // `emit_started` so a crash between this point and
+        // `apply_action` still leaves a recoverable breadcrumb
+        // (LSD-3's walker will upgrade it to `failed_compensation` on
+        // next launcher startup). Mirrors srv's `emit_saga_started`
+        // ordering: durable log before bus.
+        if let Some(log) = self.log.as_ref() {
+            if let Err(e) = log.start_saga(saga_id, name, &input) {
+                crate::log(&format!(
+                    "[saga] saga_id={} start_saga log write failed: {} — continuing (in-memory path remains authoritative for this run)",
+                    saga_id, e
+                ));
+            }
+        }
         // Emit SagaStarted FIRST so any subscriber buffering by
         // saga_id sees the bracket open before any per-step events.
         // Mirrors `agentmux-srv::sagas::emit_saga_started` ordering.
         self.emit_started(saga_id, name).await;
         let ctx = SagaCtx { saga_id };
         let action = saga.start(&ctx);
-        let in_flight = self.apply_action(saga_id, name, action).await;
-        if in_flight {
+        // First step on a fresh saga is index 0.
+        let outcome = self.apply_action(saga_id, name, action, 0).await;
+        if outcome.in_flight {
             let mut registry = self.in_flight.lock().await;
             // (codex P1 PR #634) Observability for the known
             // concurrent-correlation limitation. With more than one
@@ -323,7 +461,7 @@ impl SagaCoordinator {
             // correlation.
             let same_kind_count = registry
                 .values()
-                .filter(|s| s.name() == name)
+                .filter(|s| s.saga.name() == name)
                 .count();
             if same_kind_count >= 1 {
                 crate::log(&format!(
@@ -331,10 +469,83 @@ impl SagaCoordinator {
                     name, saga_id, same_kind_count,
                 ));
             }
-            registry.insert(saga_id, saga);
+            // If the first action allocated step 0, the saga is now
+            // parked awaiting that step's echo event; next allocation
+            // is index 1. Otherwise (Wait — saga has no first
+            // dispatch yet; nothing in F.5/F.6 sagas does this), keep
+            // the counter at 0.
+            let next_step_index = if outcome.awaiting_step.is_some() { 1 } else { 0 };
+            registry.insert(
+                saga_id,
+                InFlightSaga {
+                    saga,
+                    awaiting_step: outcome.awaiting_step,
+                    next_step_index,
+                },
+            );
         }
         saga_id
     }
+}
+
+/// LSD-2 — outcome of `apply_action`. Combines the prior `bool` (is
+/// the saga still in flight?) with the new `awaiting_step` book-
+/// keeping the coordinator needs to call `LauncherSagaLog::finish_step`
+/// when the awaited bus event lands.
+#[derive(Debug, Clone, Copy)]
+struct ApplyOutcome {
+    in_flight: bool,
+    /// If the action was an `IssueCmd`, the step index it allocated;
+    /// the coordinator parks this on the InFlightSaga. `None` for
+    /// `Wait` / `Done` / `Failed`.
+    awaiting_step: Option<u32>,
+}
+
+impl ApplyOutcome {
+    fn in_flight_awaiting(step_index: u32) -> Self {
+        Self {
+            in_flight: true,
+            awaiting_step: Some(step_index),
+        }
+    }
+    fn in_flight_no_change() -> Self {
+        Self {
+            in_flight: true,
+            awaiting_step: None,
+        }
+    }
+    fn terminated() -> Self {
+        Self {
+            in_flight: false,
+            awaiting_step: None,
+        }
+    }
+}
+
+/// LSD-2 — short, greppable name for a `Command` dispatched as part
+/// of a saga step. Mirrors srv's `command_discriminant_name` in spirit
+/// (snake_case strings rather than `Debug` formatting) but prefixes
+/// with `issue_cmd_<target>_<discriminant>` so `--diag sagas` output
+/// makes the dispatch target obvious without a separate column lookup.
+///
+/// Falls back to `issue_cmd_<target>_unknown` for variants serde can't
+/// stringify (shouldn't happen for the snake_case-tagged Command enum;
+/// defensive default).
+fn derive_step_name(cmd: &Command, target: PipeTarget) -> String {
+    let target_str = match target {
+        PipeTarget::LauncherSelf => "launcher_self",
+        PipeTarget::Host => "host",
+        PipeTarget::Srv => "srv",
+    };
+    let discriminant = match serde_json::to_value(cmd) {
+        Ok(serde_json::Value::Object(map)) => map
+            .get("cmd")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| "unknown".to_string()),
+        _ => "unknown".to_string(),
+    };
+    format!("issue_cmd_{}_{}", target_str, discriminant)
 }
 
 /// Inspect a bus event for "should this start a fresh saga?" Returns
@@ -434,7 +645,7 @@ pub async fn run_coordinator(
                         let registry = coord.in_flight.lock().await;
                         registry
                             .iter()
-                            .filter(|(_, s)| s.name() == new_kind)
+                            .filter(|(_, s)| s.saga.name() == new_kind)
                             .map(|(id, _)| *id)
                             .collect()
                     };
@@ -443,12 +654,24 @@ pub async fn run_coordinator(
                             "[saga] evicting prior {} saga_id={} to make room for new trigger (codex P1 #634 round 3 evict-and-replace)",
                             new_kind, evict_id,
                         ));
-                        coord
-                            .emit_failed(
+                        let evict_reason =
+                            "evicted: same-kind saga restarted (codex P1 #634 round 3)";
+                        // LSD-2 — record the eviction in the durable
+                        // saga row so `--diag sagas` shows it.
+                        if let Some(log) = coord.log.as_ref() {
+                            if let Err(e) = log.terminate_saga(
                                 evict_id,
-                                "evicted: same-kind saga restarted (codex P1 #634 round 3)".to_string(),
-                            )
-                            .await;
+                                SagaOutcome::Failed {
+                                    reason: evict_reason.to_string(),
+                                },
+                            ) {
+                                crate::log(&format!(
+                                    "[saga] saga_id={} evict terminate_saga(Failed) log write failed: {}",
+                                    evict_id, e
+                                ));
+                            }
+                        }
+                        coord.emit_failed(evict_id, evict_reason.to_string()).await;
                         coord.in_flight.lock().await.remove(&evict_id);
                     }
                     coord.spawn_saga(saga).await;
@@ -458,20 +681,92 @@ pub async fn run_coordinator(
                 // Two-pass to avoid holding the registry lock across
                 // `apply_action` (which itself locks state to bump
                 // version when emitting SagaCompleted/Failed).
-                let actions: Vec<(u64, &'static str, SagaAction)> = {
+                //
+                // LSD-2 — when a saga's `on_event` returns anything
+                // OTHER than `Wait`, it has consumed its awaited bus
+                // event; record the step's success in the durable log
+                // (`finish_step(saga_id, awaiting_step, &event)`) before
+                // dispatching the next action. The new action then
+                // either parks the saga on a fresh step (next index
+                // pulled from `next_step_index`) or terminates it.
+                struct PendingAction {
+                    saga_id: u64,
+                    name: &'static str,
+                    action: SagaAction,
+                    /// Awaited step index that this on_event return
+                    /// "consumed" — `Some` only when on_event returned
+                    /// non-`Wait`. Caller will `finish_step` on it
+                    /// before invoking `apply_action` for the new
+                    /// action.
+                    consumed_step: Option<u32>,
+                    /// Next free step index for this saga; if the new
+                    /// action is `IssueCmd`, `apply_action` writes to
+                    /// this index.
+                    next_idx: u32,
+                }
+                let actions: Vec<PendingAction> = {
                     let mut in_flight = coord.in_flight.lock().await;
                     let mut out = Vec::new();
-                    for (saga_id, saga) in in_flight.iter_mut() {
+                    for (saga_id, in_flight_saga) in in_flight.iter_mut() {
                         let ctx = SagaCtx { saga_id: *saga_id };
-                        let action = saga.on_event(&event, &ctx);
-                        out.push((*saga_id, saga.name(), action));
+                        let action = in_flight_saga.saga.on_event(&event, &ctx);
+                        // If the saga consumed its awaited event,
+                        // capture the awaited index now and clear it.
+                        // `Wait` keeps awaiting_step unchanged.
+                        let consumed_step = if matches!(action, SagaAction::Wait) {
+                            None
+                        } else {
+                            in_flight_saga.awaiting_step.take()
+                        };
+                        let next_idx = in_flight_saga.next_step_index;
+                        out.push(PendingAction {
+                            saga_id: *saga_id,
+                            name: in_flight_saga.saga.name(),
+                            action,
+                            consumed_step,
+                            next_idx,
+                        });
                     }
                     out
                 };
-                for (saga_id, name, action) in actions {
-                    let still_in_flight = coord.apply_action(saga_id, name, action).await;
-                    if !still_in_flight {
+                for pending in actions {
+                    let PendingAction {
+                        saga_id,
+                        name,
+                        action,
+                        consumed_step,
+                        next_idx,
+                    } = pending;
+                    // LSD-2 — record the awaited step's success in
+                    // the durable log. `event` is the event that
+                    // caused the saga to advance.
+                    if let Some(idx) = consumed_step {
+                        if let Some(log) = coord.log.as_ref() {
+                            if let Err(e) = log.finish_step(saga_id, idx, &event) {
+                                crate::log(&format!(
+                                    "[saga] saga_id={} finish_step log write failed: {}",
+                                    saga_id, e
+                                ));
+                            }
+                        }
+                    }
+                    let issued_cmd = matches!(action, SagaAction::IssueCmd { .. });
+                    let outcome = coord.apply_action(saga_id, name, action, next_idx).await;
+                    if !outcome.in_flight {
                         coord.in_flight.lock().await.remove(&saga_id);
+                    } else if let Some(awaited) = outcome.awaiting_step {
+                        // Update the saga's bookkeeping to reflect
+                        // the freshly-issued step.
+                        let mut registry = coord.in_flight.lock().await;
+                        if let Some(in_flight_saga) = registry.get_mut(&saga_id) {
+                            in_flight_saga.awaiting_step = Some(awaited);
+                            // Bump only if this dispatch consumed the
+                            // pre-allocated index (always true for
+                            // IssueCmd; defensive guard).
+                            if issued_cmd {
+                                in_flight_saga.next_step_index = awaited + 1;
+                            }
+                        }
                     }
                 }
             }
@@ -864,7 +1159,7 @@ mod tests {
             let registry = coord.in_flight.lock().await;
             let mut counts = std::collections::HashMap::<&str, u32>::new();
             for s in registry.values() {
-                *counts.entry(s.name()).or_insert(0) += 1;
+                *counts.entry(s.saga.name()).or_insert(0) += 1;
             }
             for (name, count) in &counts {
                 assert!(
@@ -995,5 +1290,190 @@ mod tests {
                 id,
             );
         }
+    }
+
+    // ---------- LSD-2 — coordinator <-> LauncherSagaLog wiring ------
+    //
+    // Three end-to-end tests that drive the coordinator with a real
+    // in-memory `LauncherSagaLog` and assert lifecycle rows land in
+    // the expected state. Mirror the test inventory pinned in
+    // `docs/specs/SPEC_LAUNCHER_SAGA_DURABILITY_2026-05-01.md` §4 PR2.
+    //
+    // The tests use `pool_respawn::PoolRespawn` because its single-
+    // step shape (one IssueCmd, one terminal echo) keeps assertions
+    // tight; the `window_cleanup_cascade` two-step shape is exercised
+    // implicitly by the existing F.6 coordinator tests + adds a
+    // multi-step example in `saga_step_finish_records_event_payload`.
+
+    use crate::saga::log::LauncherSagaLog;
+    use std::sync::Arc as StdArc;
+
+    /// Helper: spin up coordinator + in-memory log.
+    fn spawn_coord_with_log()
+        -> (StdArc<SagaCoordinator>, StdArc<LauncherSagaLog>, tokio::sync::broadcast::Sender<Event>)
+    {
+        let (events_tx, _) = tokio::sync::broadcast::channel::<Event>(256);
+        let state = Arc::new(tokio::sync::Mutex::new(crate::state::State::default()));
+        let log = StdArc::new(LauncherSagaLog::open_in_memory().expect("in-memory log"));
+        let coord = StdArc::new(
+            SagaCoordinator::new(events_tx.clone(), Arc::clone(&state))
+                .with_log(StdArc::clone(&log)),
+        );
+        (coord, log, events_tx)
+    }
+
+    /// LSD-2 — drive a saga (PoolRespawn) through to completion and
+    /// verify the durable log records:
+    ///   - `launcher_saga` row with state='completed', non-null
+    ///     ended_at, no failure_reason, input_json round-trips the
+    ///     `promoted_label`.
+    ///   - one step row in 'succeeded' state with output_json
+    ///     populated.
+    #[tokio::test]
+    async fn saga_completes_writes_lifecycle_to_log() {
+        let (coord, log, events_tx) = spawn_coord_with_log();
+        let coord_rx = events_tx.subscribe();
+        let _handle = tokio::spawn(run_coordinator(StdArc::clone(&coord), coord_rx));
+        tokio::task::yield_now().await;
+
+        // Trigger the saga + give it the awaited terminal event.
+        let _ = events_tx.send(Event::PoolWindowPromoted {
+            label: "window-pool-abc".into(),
+            version: 1,
+        });
+        let _ = events_tx.send(Event::PoolWindowAdded {
+            label: "window-pool-xyz".into(),
+            version: 2,
+            saga_id: None,
+        });
+
+        // Settle: coordinator runs apply_action which awaits state
+        // mutex + bus send. 200ms is generous for the in-process loop.
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+
+        let snapshots = log.snapshot_recent(10).expect("snapshot_recent");
+        assert_eq!(snapshots.len(), 1, "expected exactly one saga row");
+        let s = &snapshots[0];
+        assert_eq!(s.name, "pool_respawn_on_promote");
+        assert_eq!(s.state, "completed");
+        assert!(s.ended_at.is_some(), "ended_at must be set on completion");
+        assert!(s.failure_reason.is_none());
+        assert_eq!(s.step_count, 1, "expected exactly one succeeded step");
+        // Input snapshot round-trips the saga's constructor arg.
+        let parsed: serde_json::Value = serde_json::from_str(&s.input_json).unwrap();
+        assert_eq!(parsed["promoted_label"], "window-pool-abc");
+    }
+
+    /// LSD-2 — when a saga is evicted by the same-kind concurrent
+    /// gate (codex P1 PR #634), the durable log records its terminal
+    /// state as 'failed' with a failure_reason. The replacement saga
+    /// gets its own row.
+    #[tokio::test]
+    async fn saga_fails_writes_failed_state() {
+        let (coord, log, events_tx) = spawn_coord_with_log();
+        let coord_rx = events_tx.subscribe();
+        let _handle = tokio::spawn(run_coordinator(StdArc::clone(&coord), coord_rx));
+        tokio::task::yield_now().await;
+
+        // First promote — kicks off saga A.
+        let _ = events_tx.send(Event::PoolWindowPromoted {
+            label: "window-pool-a".into(),
+            version: 1,
+        });
+        // Second promote BEFORE A's terminal arrives — evicts A,
+        // starts saga B. Saga A's durable row must transition to
+        // 'failed' with the eviction reason.
+        let _ = events_tx.send(Event::PoolWindowPromoted {
+            label: "window-pool-b".into(),
+            version: 2,
+        });
+        // Saga B's terminal so it completes (don't leave it dangling
+        // — guards against the test's cleanup masking a real bug).
+        let _ = events_tx.send(Event::PoolWindowAdded {
+            label: "window-pool-c".into(),
+            version: 3,
+            saga_id: None,
+        });
+
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+
+        let snapshots = log.snapshot_recent(10).expect("snapshot_recent");
+        assert_eq!(snapshots.len(), 2, "expected two saga rows (evicted + replacement)");
+        // One must be 'failed' (evicted), the other 'completed' (B).
+        let states: Vec<_> = snapshots.iter().map(|s| s.state.as_str()).collect();
+        assert!(states.contains(&"failed"), "missing 'failed' row: {:?}", states);
+        assert!(states.contains(&"completed"), "missing 'completed' row: {:?}", states);
+        let failed_row = snapshots.iter().find(|s| s.state == "failed").unwrap();
+        assert!(
+            failed_row
+                .failure_reason
+                .as_deref()
+                .map(|r| r.contains("evicted"))
+                .unwrap_or(false),
+            "evicted saga's failure_reason should mention 'evicted', got {:?}",
+            failed_row.failure_reason,
+        );
+    }
+
+    /// LSD-2 — when a saga's `on_event` consumes its awaited bus
+    /// event, the coordinator calls `LauncherSagaLog::finish_step`
+    /// with the event payload. To inspect `output_json` directly via
+    /// the public LSD-1 API, we drive a saga only PART of the way —
+    /// the cleanup cascade's Step 1 lands its echo (`PanesReaped`)
+    /// but Step 2 is left in `pending` so the saga stays unresolved.
+    /// `unresolved_sagas` then exposes the full step list including
+    /// Step 0's `output_json`.
+    #[tokio::test]
+    async fn saga_step_finish_records_event_payload() {
+        let (coord, log, events_tx) = spawn_coord_with_log();
+        let coord_rx = events_tx.subscribe();
+        let _handle = tokio::spawn(run_coordinator(StdArc::clone(&coord), coord_rx));
+        tokio::task::yield_now().await;
+
+        // Trigger the cascade. Window-cleanup has two steps; we feed
+        // only the first echo (`PanesReaped`) so Step 0 transitions
+        // pending→succeeded but Step 1 (`DrainPoolIfLast`) stays
+        // pending — the saga remains in_flight + queryable as
+        // unresolved.
+        let _ = events_tx.send(Event::WindowClosed {
+            label: "main".into(),
+            version: 1,
+            crash_detected: false,
+        });
+        let _ = events_tx.send(Event::PanesReaped {
+            label: "main".into(),
+            version: 2,
+            saga_id: None,
+        });
+        // INTENTIONALLY no `PoolDrained` / `PoolNotLast`.
+
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+
+        let unresolved = log.unresolved_sagas().expect("unresolved_sagas");
+        assert_eq!(unresolved.len(), 1, "expected one unresolved saga");
+        let saga = &unresolved[0];
+        assert_eq!(saga.name, "window_cleanup_cascade");
+        assert_eq!(saga.state, "running");
+        // Two step rows: Step 0 succeeded (PanesReaped echo), Step 1
+        // pending (DrainPoolIfLast dispatched but no echo arrived).
+        assert_eq!(saga.steps.len(), 2, "expected 2 step rows");
+        let step0 = &saga.steps[0];
+        assert_eq!(step0.step_index, 0);
+        assert_eq!(step0.state, "succeeded");
+        assert!(step0.ended_at.is_some(), "succeeded step needs ended_at");
+        let output_json = step0
+            .output_json
+            .as_ref()
+            .expect("output_json must be set after finish_step");
+        // Round-trip — the JSON should deserialize to the awaited Event.
+        let parsed: Event = serde_json::from_str(output_json).expect("event round-trips");
+        match parsed {
+            Event::PanesReaped { label, .. } => assert_eq!(label, "main"),
+            other => panic!("expected PanesReaped, got {:?}", other),
+        }
+        let step1 = &saga.steps[1];
+        assert_eq!(step1.step_index, 1);
+        assert_eq!(step1.state, "pending");
+        assert!(step1.output_json.is_none(), "pending step has no output");
     }
 }
