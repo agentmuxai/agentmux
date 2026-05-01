@@ -55,7 +55,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use agentmux_common::ipc::{Command, Event};
-use serde::{Deserialize, Serialize};
+pub use agentmux_common::ipc::HostFrame;
 use tokio::io::{AsyncWrite, AsyncWriteExt};
 use tokio::sync::Mutex;
 
@@ -73,21 +73,6 @@ pub const PENDING_BUFFER_CAP: usize = 64;
 /// After this, every buffered Command's saga is failed with
 /// `"host unreachable"`. See spec §3.9.
 pub const DISCONNECT_TIMEOUT: Duration = Duration::from_secs(30);
-
-/// CPD-1/CPD-2 envelope for the launcher → host pipe. Every wire line
-/// the launcher writes to the host pipe is a `HostFrame` serialized as
-/// newline-delimited JSON.
-///
-/// **Frame discriminator:** externally tagged via `kind` so the host
-/// can dispatch `event` frames into its existing event-handling code
-/// and `command` frames into the new (CPD-3+) saga-driven command
-/// handlers without a separate channel.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum HostFrame {
-    Event(Event),
-    Command(Command),
-}
 
 /// Reasons `send_command` / `send_event` can fail synchronously.
 ///

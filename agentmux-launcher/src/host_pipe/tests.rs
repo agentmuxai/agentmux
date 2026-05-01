@@ -100,7 +100,7 @@ async fn connected_send_command_writes_line() {
     let (writer, reader) = make_duplex();
     pipe.set_writer(writer).await;
 
-    let cmd = Command::SpawnPoolWindow;
+    let cmd = Command::SpawnPoolWindow { saga_id: 0 };
     pipe.send_command(&cmd).await.expect("send_command ok");
 
     let frames = read_n_frames(reader, 1).await;
@@ -120,9 +120,10 @@ async fn disconnected_send_command_buffers() {
     assert!(!pipe.is_connected().await);
     assert_eq!(pipe.pending_len().await, 0);
 
-    pipe.send_command(&Command::SpawnPoolWindow).await.unwrap();
+    pipe.send_command(&Command::SpawnPoolWindow { saga_id: 0 }).await.unwrap();
     pipe.send_command(&Command::ReapPanes {
         label: "main".into(),
+        saga_id: 0,
     })
     .await
     .unwrap();
@@ -137,10 +138,11 @@ async fn disconnected_send_command_buffers() {
 async fn reconnect_drains_in_fifo_order() {
     let (pipe, _) = make_pipe();
     // Three buffered frames (mix of Command + Event).
-    pipe.send_command(&Command::SpawnPoolWindow).await.unwrap();
+    pipe.send_command(&Command::SpawnPoolWindow { saga_id: 0 }).await.unwrap();
     pipe.send_event(&lifecycle_event(11)).await.unwrap();
     pipe.send_command(&Command::ReapPanes {
         label: "main".into(),
+        saga_id: 0,
     })
     .await
     .unwrap();
@@ -155,7 +157,7 @@ async fn reconnect_drains_in_fifo_order() {
     assert_eq!(frames.len(), 3);
     // FIFO: SpawnPoolWindow, lifecycle event, ReapPanes
     match &frames[0] {
-        HostFrame::Command(Command::SpawnPoolWindow) => {}
+        HostFrame::Command(Command::SpawnPoolWindow { saga_id: 0 }) => {}
         other => panic!("frame[0] mismatch: {:?}", other),
     }
     match &frames[1] {
@@ -163,7 +165,7 @@ async fn reconnect_drains_in_fifo_order() {
         other => panic!("frame[1] mismatch: {:?}", other),
     }
     match &frames[2] {
-        HostFrame::Command(Command::ReapPanes { label }) => assert_eq!(label, "main"),
+        HostFrame::Command(Command::ReapPanes { label, .. }) => assert_eq!(label, "main"),
         other => panic!("frame[2] mismatch: {:?}", other),
     }
 }
@@ -180,13 +182,14 @@ async fn overflow_drops_oldest_command_emits_failed() {
     let (pipe, _events_rx) = make_pipe();
 
     for _ in 0..PENDING_BUFFER_CAP {
-        pipe.send_command(&Command::SpawnPoolWindow).await.unwrap();
+        pipe.send_command(&Command::SpawnPoolWindow { saga_id: 0 }).await.unwrap();
     }
     assert_eq!(pipe.pending_len().await, PENDING_BUFFER_CAP);
 
     // 65th — should evict oldest. Buffer length stays at cap.
     pipe.send_command(&Command::ReapPanes {
         label: "overflow-trigger".into(),
+        saga_id: 0,
     })
     .await
     .unwrap();
@@ -200,7 +203,7 @@ async fn overflow_drops_oldest_command_emits_failed() {
     let frames = read_n_frames(reader, PENDING_BUFFER_CAP).await;
     assert_eq!(frames.len(), PENDING_BUFFER_CAP);
     match frames.last().unwrap() {
-        HostFrame::Command(Command::ReapPanes { label }) => {
+        HostFrame::Command(Command::ReapPanes { label, .. }) => {
             assert_eq!(label, "overflow-trigger");
         }
         other => panic!("expected ReapPanes overflow-trigger at tail, got {:?}", other),
@@ -219,9 +222,10 @@ async fn disconnect_timeout_drops_all_pending() {
     assert!(!pipe.is_connected().await);
 
     // Buffer some frames.
-    pipe.send_command(&Command::SpawnPoolWindow).await.unwrap();
+    pipe.send_command(&Command::SpawnPoolWindow { saga_id: 0 }).await.unwrap();
     pipe.send_command(&Command::ReapPanes {
         label: "a".into(),
+        saga_id: 0,
     })
     .await
     .unwrap();
@@ -232,7 +236,7 @@ async fn disconnect_timeout_drops_all_pending() {
     // the expiry check.
     pipe.rewind_disconnect_timer(DISCONNECT_TIMEOUT + Duration::from_secs(1))
         .await;
-    pipe.send_command(&Command::SpawnPoolWindow).await.unwrap();
+    pipe.send_command(&Command::SpawnPoolWindow { saga_id: 0 }).await.unwrap();
 
     // After expiry: prior 3 are dropped; fresh send is rebuffered
     // (timer was cleared by expire path; subsequent send sees a
@@ -263,11 +267,11 @@ async fn write_failure_clears_writer_and_rebuffers() {
 
 #[test]
 fn host_frame_roundtrip_command_and_event() {
-    let cmd_frame = HostFrame::Command(Command::SpawnPoolWindow);
+    let cmd_frame = HostFrame::Command(Command::SpawnPoolWindow { saga_id: 0 });
     let json = serde_json::to_string(&cmd_frame).unwrap();
     assert!(json.contains("\"kind\":\"command\""));
     let back: HostFrame = serde_json::from_str(&json).unwrap();
-    assert!(matches!(back, HostFrame::Command(Command::SpawnPoolWindow)));
+    assert!(matches!(back, HostFrame::Command(Command::SpawnPoolWindow { saga_id: 0 })));
 
     let evt_frame = HostFrame::Event(ping_event(42));
     let json = serde_json::to_string(&evt_frame).unwrap();
