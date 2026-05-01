@@ -41,7 +41,7 @@ use std::sync::Arc;
 use agentmux_common::ipc::Event;
 use tokio::sync::{broadcast, Mutex};
 
-use crate::backend::obj::{Block, LayoutState as PersistedLayoutState, Tab, Window, Workspace};
+use crate::backend::obj::{Block, Client, LayoutState as PersistedLayoutState, Tab, Window, Workspace};
 use crate::backend::storage::wstore::WaveStore;
 use crate::backend::wcore;
 use crate::state::State;
@@ -321,41 +321,48 @@ fn apply_tab_created(
     tab_id: &str,
     name: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    if wstore.get::<Tab>(tab_id)?.is_none() {
-        // Phase E.2c.2 — create a LayoutState row alongside the Tab
-        // so downstream flows that hard-require `Tab.layoutstate`
-        // (e.g., `wcore::tear_off_block`'s
-        // `must_get::<LayoutState>(&tab.layoutstate)`) work for
-        // reducer-originated tabs. Mirrors the wcore::create_tab
-        // pattern. (codex P2 #614.)
-        let mut layout = PersistedLayoutState {
-            oid: uuid::Uuid::new_v4().to_string(),
-            rootnode: None,
-            magnifiednodeid: String::new(),
-            focusednodeid: String::new(),
-            leaforder: None,
-            pendingbackendactions: None,
-            meta: None,
-            ..Default::default()
-        };
-        wstore.insert(&mut layout)?;
-        let mut tab = Tab {
-            oid: tab_id.to_string(),
-            name: name.to_string(),
-            layoutstate: layout.oid.clone(),
-            ..Default::default()
-        };
-        wstore.insert(&mut tab)?;
-    }
-    // Idempotently link tab into the workspace's tabids.
-    if let Some(mut ws) = wstore.get::<Workspace>(workspace_id)? {
-        let already_present =
-            ws.tabids.iter().any(|t| t == tab_id) || ws.pinnedtabids.iter().any(|t| t == tab_id);
-        if !already_present {
-            ws.tabids.push(tab_id.to_string());
-            wstore.update(&mut ws)?;
+    // F1.A — wrap the insert-layout + insert-tab + update-workspace
+    // sequence in a single SQLite transaction so a partial failure
+    // can't leave a tab without a layout or a workspace whose
+    // tab_ids points at a tab that doesn't exist on disk.
+    wstore.with_tx(|tx| {
+        if tx.get::<Tab>(tab_id)?.is_none() {
+            // Phase E.2c.2 — create a LayoutState row alongside the
+            // Tab so downstream flows that hard-require
+            // `Tab.layoutstate` (e.g., `wcore::tear_off_block`'s
+            // `must_get::<LayoutState>(&tab.layoutstate)`) work for
+            // reducer-originated tabs. Mirrors the wcore::create_tab
+            // pattern. (codex P2 #614.)
+            let mut layout = PersistedLayoutState {
+                oid: uuid::Uuid::new_v4().to_string(),
+                rootnode: None,
+                magnifiednodeid: String::new(),
+                focusednodeid: String::new(),
+                leaforder: None,
+                pendingbackendactions: None,
+                meta: None,
+                ..Default::default()
+            };
+            tx.insert(&mut layout)?;
+            let mut tab = Tab {
+                oid: tab_id.to_string(),
+                name: name.to_string(),
+                layoutstate: layout.oid.clone(),
+                ..Default::default()
+            };
+            tx.insert(&mut tab)?;
         }
-    }
+        // Idempotently link tab into the workspace's tabids.
+        if let Some(mut ws) = tx.get::<Workspace>(workspace_id)? {
+            let already_present = ws.tabids.iter().any(|t| t == tab_id)
+                || ws.pinnedtabids.iter().any(|t| t == tab_id);
+            if !already_present {
+                ws.tabids.push(tab_id.to_string());
+                tx.update(&mut ws)?;
+            }
+        }
+        Ok(())
+    })?;
     Ok(())
 }
 
@@ -440,31 +447,36 @@ fn apply_block_created(
     block_id: &str,
     meta: &serde_json::Value,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    if wstore.get::<Block>(block_id)?.is_none() {
-        // Phase E.2c.4 — write the meta map carried in the event
-        // (`view`, layout hints, etc.) so reducer-routed CreateBlock
-        // RPC produces blocks with valid view/meta in SQLite. Without
-        // this, the frontend sees a block with empty meta and renders
-        // a blank pane.
-        let meta_map: crate::backend::obj::MetaMapType = match meta {
-            serde_json::Value::Object(_) => serde_json::from_value(meta.clone())
-                .unwrap_or_default(),
-            _ => Default::default(),
-        };
-        let mut block = Block {
-            oid: block_id.to_string(),
-            parentoref: format!("tab:{}", tab_id),
-            meta: meta_map,
-            ..Default::default()
-        };
-        wstore.insert(&mut block)?;
-    }
-    if let Some(mut tab) = wstore.get::<Tab>(tab_id)? {
-        if !tab.blockids.iter().any(|b| b == block_id) {
-            tab.blockids.push(block_id.to_string());
-            wstore.update(&mut tab)?;
+    // F1.A — block insert + tab.blockids update wrapped in one tx.
+    let meta_map: crate::backend::obj::MetaMapType = match meta {
+        serde_json::Value::Object(_) => {
+            serde_json::from_value(meta.clone()).unwrap_or_default()
         }
-    }
+        _ => Default::default(),
+    };
+    wstore.with_tx(|tx| {
+        if tx.get::<Block>(block_id)?.is_none() {
+            // Phase E.2c.4 — write the meta map carried in the event
+            // (`view`, layout hints, etc.) so reducer-routed
+            // CreateBlock RPC produces blocks with valid view/meta in
+            // SQLite. Without this, the frontend sees a block with
+            // empty meta and renders a blank pane.
+            let mut block = Block {
+                oid: block_id.to_string(),
+                parentoref: format!("tab:{}", tab_id),
+                meta: meta_map,
+                ..Default::default()
+            };
+            tx.insert(&mut block)?;
+        }
+        if let Some(mut tab) = tx.get::<Tab>(tab_id)? {
+            if !tab.blockids.iter().any(|b| b == block_id) {
+                tab.blockids.push(block_id.to_string());
+                tx.update(&mut tab)?;
+            }
+        }
+        Ok(())
+    })?;
     Ok(())
 }
 
@@ -497,31 +509,41 @@ fn apply_srv_window_opened(
     window_id: &str,
     workspace_id: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let was_new = match wstore.get::<Window>(window_id)? {
-        Some(existing) if existing.workspaceid == workspace_id => false,
-        Some(mut existing) => {
-            existing.workspaceid = workspace_id.to_string();
-            wstore.update(&mut existing)?;
-            false
-        }
-        None => {
-            let mut window = Window {
-                oid: window_id.to_string(),
-                workspaceid: workspace_id.to_string(),
-                ..Default::default()
-            };
-            wstore.insert(&mut window)?;
-            true
-        }
-    };
-    if was_new {
-        if let Ok(mut client) = wcore::get_client(wstore) {
-            if !client.windowids.iter().any(|id| id == window_id) {
-                client.windowids.push(window_id.to_string());
-                wstore.update(&mut client)?;
+    // F1.A — Window upsert + Client.windowids update wrapped in one
+    // tx so a partial failure can't leave a Window row that
+    // `GetClientData` doesn't see (or a `windowids` entry pointing
+    // at a Window row that wasn't written).
+    wstore.with_tx(|tx| {
+        let was_new = match tx.get::<Window>(window_id)? {
+            Some(existing) if existing.workspaceid == workspace_id => false,
+            Some(mut existing) => {
+                existing.workspaceid = workspace_id.to_string();
+                tx.update(&mut existing)?;
+                false
+            }
+            None => {
+                let mut window = Window {
+                    oid: window_id.to_string(),
+                    workspaceid: workspace_id.to_string(),
+                    ..Default::default()
+                };
+                tx.insert(&mut window)?;
+                true
+            }
+        };
+        if was_new {
+            // Inline `wcore::get_client` against the tx-handle to keep
+            // the Client.windowids update in the same transaction.
+            let clients = tx.get_all::<Client>()?;
+            if let Some(mut client) = clients.into_iter().next() {
+                if !client.windowids.iter().any(|id| id == window_id) {
+                    client.windowids.push(window_id.to_string());
+                    tx.update(&mut client)?;
+                }
             }
         }
-    }
+        Ok(())
+    })?;
     Ok(())
 }
 
@@ -534,24 +556,26 @@ fn apply_srv_window_closed(
     wstore: &WaveStore,
     window_id: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    if wstore.get::<Window>(window_id)?.is_none() {
-        // Window already gone, but the client list might still have
-        // the id from an earlier divergence — prune defensively.
-        if let Ok(mut client) = wcore::get_client(wstore) {
+    // F1.A — Client.windowids prune + Window-row delete in one tx.
+    // Order matters (mirrors `wcore::close_window`): prune client
+    // FIRST so any read between the two ops doesn't see a dangling
+    // id pointing at a Window row that's already been removed.
+    wstore.with_tx(|tx| {
+        let window_exists = tx.get::<Window>(window_id)?.is_some();
+        // Always defensively prune the client list — handles the
+        // already-gone case where divergence left a stale entry.
+        let clients = tx.get_all::<Client>()?;
+        if let Some(mut client) = clients.into_iter().next() {
             if client.windowids.iter().any(|id| id == window_id) {
                 client.windowids.retain(|id| id != window_id);
-                wstore.update(&mut client)?;
+                tx.update(&mut client)?;
             }
         }
-        return Ok(());
-    }
-    if let Ok(mut client) = wcore::get_client(wstore) {
-        if client.windowids.iter().any(|id| id == window_id) {
-            client.windowids.retain(|id| id != window_id);
-            wstore.update(&mut client)?;
+        if window_exists {
+            tx.delete::<Window>(window_id)?;
         }
-    }
-    wstore.delete::<Window>(window_id)?;
+        Ok(())
+    })?;
     Ok(())
 }
 
@@ -698,50 +722,53 @@ fn apply_tab_moved(
     new_src_active_tab_id: Option<&str>,
     new_dst_active_tab_id: Option<&str>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    // Source workspace: remove the tab and update activetabid.
-    if let Some(mut src_ws) = wstore.get::<Workspace>(src_workspace_id)? {
-        let len_before_tabids = src_ws.tabids.len();
-        let len_before_pinned = src_ws.pinnedtabids.len();
-        src_ws.tabids.retain(|id| id != tab_id);
-        src_ws.pinnedtabids.retain(|id| id != tab_id);
-        let new_active = new_src_active_tab_id.unwrap_or("").to_string();
-        let active_changed = src_ws.activetabid != new_active;
-        if src_ws.tabids.len() != len_before_tabids
-            || src_ws.pinnedtabids.len() != len_before_pinned
-            || active_changed
-        {
-            src_ws.activetabid = new_active;
-            wstore.update(&mut src_ws)?;
-        }
-    }
-
-    // Dest workspace: insert at clamped index + update active_tab_id
-    // if the event carries one (codex P2 #621). Skip insert if the
-    // tab is already present (idempotent on duplicate delivery).
-    if let Some(mut dst_ws) = wstore.get::<Workspace>(dst_workspace_id)? {
-        let mut changed = false;
-        if !dst_ws.tabids.iter().any(|id| id == tab_id) {
-            let clamped = (dst_index as usize).min(dst_ws.tabids.len());
-            dst_ws.tabids.insert(clamped, tab_id.to_string());
-            changed = true;
-        }
-        if let Some(new_active) = new_dst_active_tab_id {
-            if dst_ws.activetabid != new_active {
-                dst_ws.activetabid = new_active.to_string();
-                changed = true;
+    // F1.A — both workspaces' updates wrapped in one tx so a partial
+    // failure can't leave the tab in both src.tabids and dst.tabids
+    // simultaneously, or in neither.
+    wstore.with_tx(|tx| {
+        // Source workspace: remove the tab and update activetabid.
+        if let Some(mut src_ws) = tx.get::<Workspace>(src_workspace_id)? {
+            let len_before_tabids = src_ws.tabids.len();
+            let len_before_pinned = src_ws.pinnedtabids.len();
+            src_ws.tabids.retain(|id| id != tab_id);
+            src_ws.pinnedtabids.retain(|id| id != tab_id);
+            let new_active = new_src_active_tab_id.unwrap_or("").to_string();
+            let active_changed = src_ws.activetabid != new_active;
+            if src_ws.tabids.len() != len_before_tabids
+                || src_ws.pinnedtabids.len() != len_before_pinned
+                || active_changed
+            {
+                src_ws.activetabid = new_active;
+                tx.update(&mut src_ws)?;
             }
         }
-        if changed {
-            wstore.update(&mut dst_ws)?;
+
+        // Dest workspace: insert at clamped index + update
+        // active_tab_id if the event carries one (codex P2 #621).
+        // Skip insert if the tab is already present (idempotent on
+        // duplicate delivery).
+        if let Some(mut dst_ws) = tx.get::<Workspace>(dst_workspace_id)? {
+            let mut changed = false;
+            if !dst_ws.tabids.iter().any(|id| id == tab_id) {
+                let clamped = (dst_index as usize).min(dst_ws.tabids.len());
+                dst_ws.tabids.insert(clamped, tab_id.to_string());
+                changed = true;
+            }
+            if let Some(new_active) = new_dst_active_tab_id {
+                if dst_ws.activetabid != new_active {
+                    dst_ws.activetabid = new_active.to_string();
+                    changed = true;
+                }
+            }
+            if changed {
+                tx.update(&mut dst_ws)?;
+            }
         }
-    }
 
-    // No per-Tab parent ref to update — the workspace owns the
-    // parentage relationship via its `tabids` list (no `Tab.workspaceid`
-    // or `Tab.parentoref` field exists). Removing from the source
-    // workspace's `tabids` and inserting into the dest's is the
-    // entirety of the parent change.
-
+        // No per-Tab parent ref to update — the workspace owns the
+        // parentage relationship via its `tabids` list.
+        Ok(())
+    })?;
     Ok(())
 }
 
@@ -755,44 +782,51 @@ fn apply_block_moved(
     dst_tab_id: &str,
     dst_index: u32,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    if src_tab_id == dst_tab_id {
-        // Intra-tab reposition: remove + re-insert in the same tab.
-        if let Some(mut tab) = wstore.get::<Tab>(src_tab_id)? {
-            tab.blockids.retain(|id| id != block_id);
-            let clamped = (dst_index as usize).min(tab.blockids.len());
-            tab.blockids.insert(clamped, block_id.to_string());
-            wstore.update(&mut tab)?;
+    // F1.A — src.blockids + dst.blockids + block.parentoref updates
+    // wrapped in one tx so a partial failure can't leave the block in
+    // both tabs' blockids or with parentoref pointing at the wrong
+    // tab.
+    wstore.with_tx(|tx| {
+        if src_tab_id == dst_tab_id {
+            // Intra-tab reposition: remove + re-insert in the same tab.
+            if let Some(mut tab) = tx.get::<Tab>(src_tab_id)? {
+                tab.blockids.retain(|id| id != block_id);
+                let clamped = (dst_index as usize).min(tab.blockids.len());
+                tab.blockids.insert(clamped, block_id.to_string());
+                tx.update(&mut tab)?;
+            }
+            return Ok(());
         }
-        return Ok(());
-    }
 
-    // Cross-tab: remove from src.
-    if let Some(mut src_tab) = wstore.get::<Tab>(src_tab_id)? {
-        let before = src_tab.blockids.len();
-        src_tab.blockids.retain(|id| id != block_id);
-        if src_tab.blockids.len() != before {
-            wstore.update(&mut src_tab)?;
+        // Cross-tab: remove from src.
+        if let Some(mut src_tab) = tx.get::<Tab>(src_tab_id)? {
+            let before = src_tab.blockids.len();
+            src_tab.blockids.retain(|id| id != block_id);
+            if src_tab.blockids.len() != before {
+                tx.update(&mut src_tab)?;
+            }
         }
-    }
 
-    // Insert into dst (skip if already there).
-    if let Some(mut dst_tab) = wstore.get::<Tab>(dst_tab_id)? {
-        if !dst_tab.blockids.iter().any(|id| id == block_id) {
-            let clamped = (dst_index as usize).min(dst_tab.blockids.len());
-            dst_tab.blockids.insert(clamped, block_id.to_string());
-            wstore.update(&mut dst_tab)?;
+        // Insert into dst (skip if already there).
+        if let Some(mut dst_tab) = tx.get::<Tab>(dst_tab_id)? {
+            if !dst_tab.blockids.iter().any(|id| id == block_id) {
+                let clamped = (dst_index as usize).min(dst_tab.blockids.len());
+                dst_tab.blockids.insert(clamped, block_id.to_string());
+                tx.update(&mut dst_tab)?;
+            }
         }
-    }
 
-    // Block row: update parent.
-    if let Some(mut block) = wstore.get::<Block>(block_id)? {
-        let new_parent = format!("tab:{}", dst_tab_id);
-        if block.parentoref != new_parent {
-            block.parentoref = new_parent;
-            wstore.update(&mut block)?;
+        // Block row: update parent.
+        if let Some(mut block) = tx.get::<Block>(block_id)? {
+            let new_parent = format!("tab:{}", dst_tab_id);
+            if block.parentoref != new_parent {
+                block.parentoref = new_parent;
+                tx.update(&mut block)?;
+            }
         }
-    }
 
+        Ok(())
+    })?;
     Ok(())
 }
 
