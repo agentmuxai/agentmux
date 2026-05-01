@@ -153,7 +153,14 @@ impl AgentMuxHandler {
                 parent_instance_id: None,
             }
         } else {
-            self.state.pending_window_creations.lock().pop_front().unwrap_or_else(|| {
+            // Phase F.1 — dequeue via the host reducer. The reducer
+            // emits PendingWindowQueueEmpty on miss; the fallback
+            // (synthesize a UUID-labelled FullInstance entry) lives
+            // in the legacy code path it always has.
+            let out = self
+                .state
+                .host_dispatch(crate::reducer::HostCommand::DequeuePendingWindowCreation);
+            out.dequeued.unwrap_or_else(|| {
                 let lbl = format!("window-{}", uuid::Uuid::new_v4());
                 tracing::warn!(label = %lbl, "[on_after_created] no pending creation entry — defaulting to FullInstance");
                 crate::state::PendingWindowCreation {

@@ -222,19 +222,16 @@ pub struct AppState {
     /// for why step e ≠ delete here.
     pub window_meta: Mutex<HashMap<String, WindowMeta>>,
 
-    /// Phase B.5 (window_meta step d) — FIFO queue of pre-create
-    /// handoff entries. Pushed by callers
-    /// (`drag.rs::tear_off`, `commands/window.rs::open_new_window`,
-    /// `window_pool.rs::spawn_pool_window`, `pane/creation.rs`)
-    /// before `post_create_window`; popped by
-    /// `client.rs::on_after_created`. Each entry carries the label
-    /// AND the kind/parent so on_after_created can apply the
-    /// Subwindow taskbar-hide, emit `ReportWindowOpened`, and
-    /// populate the synchronous `window_meta` cache from a single
-    /// canonical site — replacing the pre-step-d parallel-channel
-    /// pattern (separate `window_meta.insert` from each caller +
-    /// label-only `pending_window_labels` queue).
-    pub pending_window_creations: Mutex<VecDeque<PendingWindowCreation>>,
+    /// Phase F.1 — host reducer state.
+    ///
+    /// Owns `pending_window_creations` (formerly a top-level
+    /// `Mutex<VecDeque<PendingWindowCreation>>` field on AppState).
+    /// All mutations go through `host_dispatch`; reads use the
+    /// `peek_back_pending_window_creation` snapshot helper.
+    /// Future PRs will migrate `active_drag` and tear-off-hook state
+    /// here too. See `agentmux-cef/src/reducer.rs` and
+    /// `docs/specs/SPEC_PHASE_F_HOST_REDUCER_2026-05-01.md`.
+    pub host_state: Mutex<crate::reducer::HostState>,
 
     /// Tear-off Phase 6 — pre-warmed pool of hidden CEF windows ready for
     /// instant promotion on tear-off. Each entry is a label of a window
@@ -353,7 +350,7 @@ impl Default for AppState {
             ipc_token: uuid::Uuid::new_v4().to_string(),
             browsers: Mutex::new(HashMap::new()),
             window_meta: Mutex::new(HashMap::new()),
-            pending_window_creations: Mutex::new(VecDeque::new()),
+            host_state: Mutex::new(crate::reducer::HostState::default()),
             window_pool: Mutex::new(VecDeque::new()),
             unpromoted_pool_labels: Mutex::new(std::collections::HashSet::new()),
             window_pool_respawn_in_flight: std::sync::atomic::AtomicBool::new(false),
@@ -370,6 +367,44 @@ impl Default for AppState {
 }
 
 impl AppState {
+    /// Phase F.1 — dispatch a command through the host reducer.
+    ///
+    /// Locks `host_state`, applies the command via `reducer::update`,
+    /// logs emitted events via tracing, and returns the dispatch
+    /// output (which contains the events plus the dequeued entry for
+    /// `DequeuePendingWindowCreation`).
+    ///
+    /// Lock-hold time: pure-function reducer call, no I/O — typically
+    /// sub-microsecond. Never held across a `SendMessage`, CEF
+    /// callback, or any blocking call (snapshot-and-drop discipline,
+    /// see `docs/specs/SPEC_PHASE_F_HOST_REDUCER_2026-05-01.md` §6).
+    pub fn host_dispatch(&self, cmd: crate::reducer::HostCommand) -> crate::reducer::DispatchOutput {
+        let out = {
+            let mut state = self.host_state.lock();
+            crate::reducer::update(&mut state, cmd)
+        };
+        for ev in &out.events {
+            log_host_event(ev);
+        }
+        out
+    }
+
+    /// Phase F.1 — non-mutating peek at the back of the
+    /// `pending_window_creations` queue.
+    ///
+    /// Used by `wrr/win_event.rs::handle_event` to label OS-level
+    /// `WM_CREATE` events with the upcoming window's label. CEF's
+    /// `OnAfterCreated` (which becomes the dequeue) fires AFTER this
+    /// OS event, but the host pushed the entry BEFORE calling
+    /// `post_create_window`, so back-of-queue is the right answer at
+    /// this moment.
+    ///
+    /// Snapshot-and-drop: takes the lock, clones the entry, drops
+    /// the lock. Callers never hold the lock past this call.
+    pub fn peek_back_pending_window_creation(&self) -> Option<PendingWindowCreation> {
+        self.host_state.lock().pending_window_creations.back().cloned()
+    }
+
     /// Phase B.5e — authoritative instance-number lookup. Reads
     /// the launcher-fed `shadow_instance_registry`, which is the
     /// sole source of truth post-B.5e (host's
@@ -447,5 +482,51 @@ impl AppState {
             }
         }
         out.into_iter().collect()
+    }
+}
+
+/// Phase F.1 — observability hook for host-reducer events.
+///
+/// Called by `AppState::host_dispatch` after every `update()` call.
+/// F.1 logs via tracing only; future PRs may add a broadcast channel
+/// here when an event consumer (cross-process saga, frontend
+/// dispatcher) appears.
+fn log_host_event(ev: &crate::reducer::HostEvent) {
+    use crate::reducer::HostEvent;
+    match ev {
+        HostEvent::PendingWindowEnqueued {
+            label,
+            queue_len_after,
+            version,
+        } => tracing::debug!(
+            target: "host-reducer",
+            event = "PendingWindowEnqueued",
+            label = %label,
+            queue_len_after,
+            version,
+        ),
+        HostEvent::PendingWindowDequeued {
+            label,
+            queue_len_after,
+            version,
+        } => tracing::debug!(
+            target: "host-reducer",
+            event = "PendingWindowDequeued",
+            label = %label,
+            queue_len_after,
+            version,
+        ),
+        HostEvent::PendingWindowQueueEmpty { version } => tracing::warn!(
+            target: "host-reducer",
+            event = "PendingWindowQueueEmpty",
+            version,
+            "[host-reducer] dequeue on empty queue — caller will fall back",
+        ),
+        HostEvent::Error { message, version } => tracing::warn!(
+            target: "host-reducer",
+            event = "Error",
+            version,
+            "[host-reducer] {}", message,
+        ),
     }
 }
