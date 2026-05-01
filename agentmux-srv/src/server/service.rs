@@ -242,17 +242,24 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
             // (rootnode/leaforder/pendingbackendactions) keep the
             // wcore-direct write below per the deferred Option B
             // decision in `SPEC_PHASE_E4_LAYOUT_REDUCER_2026-05-01.md`.
-            // Best-effort: dispatch failures here do NOT block the
-            // wcore write — wstore stays the durable source until the
-            // full layout migration ships.
-            if wave_obj_value
+            //
+            // (codex P2 PR #632) Capture the slice now but DO NOT
+            // dispatch yet — reducer + subscriber updates must happen
+            // ONLY AFTER update_object succeeds. Otherwise an
+            // UpdateObject failure would leave reducer state and
+            // FocusedNodeChanged/MagnifiedNodeChanged events fired for
+            // a request that returned an error, breaking failure
+            // atomicity.
+            let layout_slice: Option<(String, String, String)> = if wave_obj_value
                 .get("otype")
                 .and_then(|v| v.as_str())
                 == Some(OTYPE_LAYOUT)
             {
-                if let Some(layout_oid) = wave_obj_value.get("oid").and_then(|v| v.as_str()) {
-                    let owning_tab_id = find_tab_for_layout(store, layout_oid);
-                    if let Some(tab_id) = owning_tab_id {
+                wave_obj_value
+                    .get("oid")
+                    .and_then(|v| v.as_str())
+                    .and_then(|layout_oid| find_tab_for_layout(store, layout_oid))
+                    .map(|tab_id| {
                         let new_focused = wave_obj_value
                             .get("focusednodeid")
                             .and_then(|v| v.as_str())
@@ -263,6 +270,18 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
                             .and_then(|v| v.as_str())
                             .unwrap_or("")
                             .to_string();
+                        (tab_id, new_focused, new_magnified)
+                    })
+            } else {
+                None
+            };
+            match update_object(store, wave_obj_value) {
+                Ok((otype, oid, obj_val)) => {
+                    // DB write succeeded — now dispatch the layout
+                    // reducer updates so reducer state and persist-
+                    // subscriber events stay aligned with the
+                    // committed wstore state. (codex P2 PR #632)
+                    if let Some((tab_id, new_focused, new_magnified)) = layout_slice {
                         let focus_events = dispatch_to_reducer(
                             state,
                             agentmux_common::ipc::Command::SetFocusedNode {
@@ -282,10 +301,6 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
                         .await;
                         publish_events(state, &mag_events);
                     }
-                }
-            }
-            match update_object(store, wave_obj_value) {
-                Ok((otype, oid, obj_val)) => {
                     let update = WaveObjUpdate {
                         updatetype: "update".into(),
                         otype,
