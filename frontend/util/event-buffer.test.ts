@@ -271,6 +271,197 @@ describe("PerSourceTracker — saga buffering", () => {
     });
 });
 
+// Step 7 — E.7 cross-pipe ordering tests.
+//
+// Each renderer holds ONE PerSourceTracker per pipe (srv, launcher,
+// future host). They share no state and track their own monotonic
+// version independently. These scenario tests pin the cross-pipe
+// invariants: per-pipe ordering is preserved even when the other
+// pipe is mid-saga, and saga buffer overflow during a long-running
+// saga doesn't black-hole subsequent events.
+describe("PerSourceTracker — cross-pipe scenarios (E.7)", () => {
+    it("interleaved srv + launcher pipes track versions independently", () => {
+        // Two trackers, one per source — what `srv-events.ts` and
+        // `launcher-events.ts` each construct at startup. Versions
+        // are per-pipe; both can carry the same numeric value
+        // simultaneously without interfering.
+        const srvSetters = mockSetters();
+        const launcherSetters = mockSetters();
+        const srvTracker = new PerSourceTracker<TestEvent>(
+            { source: "srv" },
+            srvSetters,
+        );
+        const launcherTracker = new PerSourceTracker<TestEvent>(
+            { source: "launcher" },
+            launcherSetters,
+        );
+        const seen: { source: string; event: string; version: number }[] = [];
+        srvTracker.subscribe((e) =>
+            seen.push({ source: "srv", event: e.event, version: e.version }),
+        );
+        launcherTracker.subscribe((e) =>
+            seen.push({ source: "launcher", event: e.event, version: e.version }),
+        );
+
+        // Interleave events from both pipes — same numeric versions.
+        srvTracker.deliver(evt("srv_a", 1));
+        launcherTracker.deliver(evt("launcher_a", 1));
+        srvTracker.deliver(evt("srv_b", 2));
+        launcherTracker.deliver(evt("launcher_b", 2));
+        srvTracker.deliver(evt("srv_c", 3));
+
+        // Each tracker's lastVersion reflects ONLY its source.
+        expect(srvTracker.stats().lastVersion).toBe(3);
+        expect(launcherTracker.stats().lastVersion).toBe(2);
+        expect(srvTracker.stats().droppedCount).toBe(0);
+        expect(launcherTracker.stats().droppedCount).toBe(0);
+
+        // Subscribers see arrival order regardless of source.
+        expect(seen).toEqual([
+            { source: "srv", event: "srv_a", version: 1 },
+            { source: "launcher", event: "launcher_a", version: 1 },
+            { source: "srv", event: "srv_b", version: 2 },
+            { source: "launcher", event: "launcher_b", version: 2 },
+            { source: "srv", event: "srv_c", version: 3 },
+        ]);
+    });
+
+    it("saga in one pipe does not block delivery on the other pipe", () => {
+        // Critical invariant: a saga buffering on srv must NOT delay
+        // launcher events. If a long srv-side saga ran concurrently
+        // with a launcher event burst, the launcher tracker is
+        // independent — its events flow through immediately.
+        const srvSetters = mockSetters();
+        const launcherSetters = mockSetters();
+        const srvTracker = new PerSourceTracker<TestEvent>(
+            { source: "srv" },
+            srvSetters,
+        );
+        const launcherTracker = new PerSourceTracker<TestEvent>(
+            { source: "launcher" },
+            launcherSetters,
+        );
+        const seenLauncher: string[] = [];
+        const seenSrv: string[] = [];
+        launcherTracker.subscribe((e) => seenLauncher.push(`${e.event}@${e.version}`));
+        srvTracker.subscribe((e) => seenSrv.push(`${e.event}@${e.version}`));
+
+        // srv saga in flight, buffering events.
+        srvTracker.deliver(evt("saga_started", 10, { saga_id: 5 }));
+        srvTracker.deliver(evt("step_a", 11));
+        srvTracker.deliver(evt("step_b", 12));
+        // srv subscriber sees nothing yet (buffered).
+        expect(seenSrv).toEqual([]);
+
+        // Launcher events flow through immediately, not blocked.
+        launcherTracker.deliver(evt("launcher_evt_1", 1));
+        launcherTracker.deliver(evt("launcher_evt_2", 2));
+        expect(seenLauncher).toEqual(["launcher_evt_1@1", "launcher_evt_2@2"]);
+
+        // srv saga completes; only NOW does srv subscriber drain.
+        srvTracker.deliver(evt("saga_completed", 13, { saga_id: 5 }));
+        expect(seenSrv).toEqual([
+            "saga_started@10",
+            "step_a@11",
+            "step_b@12",
+            "saga_completed@13",
+        ]);
+        // Launcher tracker untouched by srv saga lifecycle.
+        expect(launcherTracker.stats().lastVersion).toBe(2);
+        expect(launcherTracker.stats().inSaga).toBeNull();
+    });
+
+    it("saga buffer with version gap on same pipe still preserves in-order delivery on flush", () => {
+        // Scenario from the brief: start a saga (v=10), buffer some
+        // events (v=11, 12), apply a non-saga event from the OTHER
+        // source mid-buffer, complete saga (v=13). Subscribers on
+        // each tracker see in-order delivery.
+        const srvSetters = mockSetters();
+        const launcherSetters = mockSetters();
+        const srv = new PerSourceTracker<TestEvent>({ source: "srv" }, srvSetters);
+        const launcher = new PerSourceTracker<TestEvent>(
+            { source: "launcher" },
+            launcherSetters,
+        );
+        const interleaved: { source: string; event: string; version: number }[] = [];
+        srv.subscribe((e) =>
+            interleaved.push({ source: "srv", event: e.event, version: e.version }),
+        );
+        launcher.subscribe((e) =>
+            interleaved.push({ source: "launcher", event: e.event, version: e.version }),
+        );
+
+        srv.deliver(evt("saga_started", 10, { saga_id: 99 }));
+        srv.deliver(evt("step_a", 11));
+        srv.deliver(evt("step_b", 12));
+        // Mid-saga: a launcher event lands. NOT buffered; delivered
+        // to launcher subscribers immediately.
+        launcher.deliver(evt("ping", 7));
+        // Up to here, only the launcher event has been delivered.
+        expect(interleaved).toEqual([
+            { source: "launcher", event: "ping", version: 7 },
+        ]);
+        // Saga completes — drains srv buffer.
+        srv.deliver(evt("saga_completed", 13, { saga_id: 99 }));
+
+        // Final order: launcher ping FIRST (was dispatched immediately
+        // when received), then srv batch (drained on saga_completed).
+        expect(interleaved).toEqual([
+            { source: "launcher", event: "ping", version: 7 },
+            { source: "srv", event: "saga_started", version: 10 },
+            { source: "srv", event: "step_a", version: 11 },
+            { source: "srv", event: "step_b", version: 12 },
+            { source: "srv", event: "saga_completed", version: 13 },
+        ]);
+        // srv saga's buffered events all delivered in monotonic order.
+        const srvVersions = interleaved
+            .filter((e) => e.source === "srv")
+            .map((e) => e.version);
+        expect(srvVersions).toEqual([10, 11, 12, 13]);
+    });
+
+    it("saga buffer overflow during in-flight saga fires safeguard at default threshold", () => {
+        // The `maxSagaBufferSize` default is 1000 — verify the
+        // overflow safeguard uses it (no custom override) so a
+        // production-like saga that emits 1001+ events in a single
+        // burst doesn't permanently buffer.
+        vi.spyOn(console, "warn").mockImplementation(() => {});
+        const setters = mockSetters();
+        const tracker = new PerSourceTracker<TestEvent>(
+            { source: "srv" },
+            setters,
+        );
+        const seen: string[] = [];
+        tracker.subscribe((e) => seen.push(e.event));
+
+        // Open saga.
+        tracker.deliver(evt("saga_started", 1, { saga_id: 100 }));
+        expect(tracker.stats().inSaga).toBe(100);
+        // Pump 1000 step events — should remain buffered (saga_started
+        // counts toward the buffer, so 999 steps + 1 saga_started =
+        // 1000 events; overflow triggers when length > 1000, so the
+        // 1001st event flushes).
+        for (let v = 2; v <= 1000; v++) {
+            tracker.deliver(evt(`step_${v}`, v));
+        }
+        // Still in saga — under threshold.
+        expect(tracker.stats().inSaga).toBe(100);
+        // The 1001st event tips length > 1000 — overflow safeguard
+        // fires, buffer is flushed, subsequent events deliver
+        // immediately.
+        tracker.deliver(evt("step_1001", 1001));
+        expect(tracker.stats().inSaga).toBeNull();
+        // All 1001 events landed at the subscriber after the flush.
+        expect(seen.length).toBe(1001);
+        expect(seen[0]).toBe("saga_started");
+        expect(seen[seen.length - 1]).toBe("step_1001");
+
+        // Subsequent events bypass buffering since saga is closed.
+        tracker.deliver(evt("post_overflow", 1002));
+        expect(seen[seen.length - 1]).toBe("post_overflow");
+    });
+});
+
 describe("PerSourceTracker — defensive paths", () => {
     let setters: MockSetters;
     let tracker: PerSourceTracker<TestEvent>;

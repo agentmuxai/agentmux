@@ -49,6 +49,16 @@ pub mod restore_torn_off_tab;
 pub mod tear_off_block;
 pub mod tear_off_tab;
 
+// Step 7 — E.7 integration tests. Cross-saga end-to-end coverage
+// that exercises reducer + saga coordinator + persist subscriber +
+// saga log together against a real `AppState` (in-memory wstore +
+// sagalog). Per-saga unit tests under each saga module already cover
+// happy + reject paths in isolation; this module focuses on
+// multi-surface consistency (reducer/wstore/saga-log) that PR 2's
+// `compensate_unresolved` will rely on.
+#[cfg(test)]
+mod integration_tests;
+
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use agentmux_common::ipc::{Command, Event};
