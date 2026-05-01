@@ -365,6 +365,32 @@ impl SagaLog {
         Ok(())
     }
 
+    /// Mark an *original* forward step as `compensated`. (codex P1
+    /// PR #636 round 2.) Without this, a second crash-recovery
+    /// startup re-reads the still-`succeeded` original steps and
+    /// replays their inverses again — flipping a previously-recovered
+    /// saga into `failed_compensation` (or worse, applying duplicate
+    /// side effects like a second delete). The recovery rows
+    /// (`append_recovery_step`) live at fresh indices and don't
+    /// affect the original step's state on their own; this update
+    /// is the explicit "this forward step has been compensated"
+    /// marker that the next recovery scan needs to see.
+    pub fn mark_step_compensated(
+        &self,
+        saga_id: u64,
+        step_index: u32,
+    ) -> Result<(), StoreError> {
+        let now = now_ms();
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE saga_step
+             SET state = 'compensated', ended_at = ?1
+             WHERE saga_id = ?2 AND step_index = ?3 AND state = 'succeeded'",
+            params![now, saga_id as i64, step_index],
+        )?;
+        Ok(())
+    }
+
     /// Mark a saga as `failed_compensation` — used by PR 2's resume-
     /// on-startup when at least one compensating dispatch errored. The
     /// saga is left in this terminal state for operator review;

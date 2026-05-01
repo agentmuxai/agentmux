@@ -167,14 +167,44 @@ async fn recover_saga(state: &AppState, saga: &UnresolvedSaga) -> Result<(), Str
         let inverse = match derive_inverse_command(&forward_cmd, step) {
             Some(inv) => inv,
             None => {
-                tracing::warn!(
+                // (codex P1 PR #636 round 2.) A succeeded forward
+                // step with no derivable inverse is a *failure to
+                // compensate*, not a no-op: the side effect remains
+                // on disk while the saga lifecycle would otherwise
+                // be marked `compensated`. That hides unresolved
+                // state from operators (and from `--diag sagas`,
+                // which keys on terminal state). Treat as a hard
+                // error: log a recovery step with state='failed' for
+                // operator visibility, push to errors so the outer
+                // loop ends in `failed_compensation`.
+                let msg = format!(
+                    "step {} ({}): no inverse derivable from saga log — operator review needed",
+                    step.step_index, step.name,
+                );
+                tracing::error!(
                     saga_id = saga.saga_id,
                     step_index = step.step_index,
                     forward = %step.name,
-                    "[saga] no inverse derivable for forward command — skipping (operator review)"
+                    "[saga] {}",
+                    msg,
                 );
-                // Not a hard error: the operator's recovery options
-                // are documented in `--diag sagas`. Recovery moves on.
+                if let Err(log_err) = state.saga_log.append_recovery_step(
+                    saga.saga_id,
+                    next_idx,
+                    &format!("no_inverse_for_{}", step.name),
+                    &forward_cmd,
+                    &[],
+                    Some("no inverse derivable from saga log"),
+                ) {
+                    tracing::warn!(
+                        saga_id = saga.saga_id,
+                        step_index = next_idx,
+                        "[saga] append_recovery_step (no-inverse) log write failed: {}",
+                        log_err
+                    );
+                }
+                next_idx += 1;
+                errors.push(msg);
                 continue;
             }
         };
@@ -193,6 +223,22 @@ async fn recover_saga(state: &AppState, saga: &UnresolvedSaga) -> Result<(), Str
                         saga_id = saga.saga_id,
                         step_index = next_idx,
                         "[saga] append_recovery_step (success) log write failed: {}",
+                        e
+                    );
+                }
+                // (codex P1 PR #636 round 2.) Mark the ORIGINAL
+                // forward step as compensated so a second crash-
+                // recovery startup doesn't re-replay its inverse.
+                // Idempotent — UPDATE only fires on rows currently
+                // in `succeeded` state.
+                if let Err(e) = state
+                    .saga_log
+                    .mark_step_compensated(saga.saga_id, step.step_index)
+                {
+                    tracing::warn!(
+                        saga_id = saga.saga_id,
+                        step_index = step.step_index,
+                        "[saga] mark_step_compensated log write failed: {} — second restart may re-replay this inverse",
                         e
                     );
                 }
