@@ -671,8 +671,8 @@ fn format_event(e: &Event) -> String {
             "v={:>3} WindowOpened       label={} kind={:?} parent={:?}",
             version, label, kind, parent_label
         ),
-        Event::WindowClosed { label, version } => format!(
-            "v={:>3} WindowClosed       label={}", version, label
+        Event::WindowClosed { label, version, crash_detected } => format!(
+            "v={:>3} WindowClosed       label={} crash_detected={}", version, label, crash_detected
         ),
         Event::WindowInstanceAssigned { label, num, version } => format!(
             "v={:>3} InstanceAssigned   label={} num={}", version, label, num

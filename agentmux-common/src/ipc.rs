@@ -656,6 +656,19 @@ pub enum Event {
     WindowClosed {
         label: String,
         version: u64,
+        /// (codex P1 PR #637.) `true` when the close was detected by
+        /// `wrr::apply_hwnd_destroyed` after a host/renderer crash —
+        /// no clean `on_before_close` ran, so the host did NOT send
+        /// the `ReportPanesReaped` / `ReportPoolDrainDecision` reports
+        /// the F.6 saga waits for. Subscribers that drive
+        /// cleanup-cascade sagas must filter on `!crash_detected` to
+        /// avoid spawning an in-flight saga that can never reach a
+        /// terminal state.
+        ///
+        /// `#[serde(default)]` so pre-existing producers default to
+        /// `false` (clean close).
+        #[serde(default)]
+        crash_detected: bool,
     },
     /// Phase B.4 follow-up — pool inventory transitioned. Emitted in
     /// response to `ReportPoolWindow{Added,Removed}`. Subscribers

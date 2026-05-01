@@ -813,6 +813,9 @@ fn handle_report_window_closed(state: &mut State, label: String) -> Vec<Event> {
     out.push(Event::WindowClosed {
         label: label.clone(),
         version: v,
+        // Clean close — host ran on_before_close before sending
+        // ReportWindowClosed. F.6 saga is safe to trigger.
+        crash_detected: false,
     });
     if let Some(num) = state.instance_registry.remove(&label) {
         let v = state.bump_version();

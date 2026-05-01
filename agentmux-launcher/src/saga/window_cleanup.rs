@@ -407,6 +407,7 @@ mod tests {
             &Event::WindowClosed {
                 label: "main".into(),
                 version: 53,
+                crash_detected: false,
             },
             &ctx(7),
         );
@@ -470,6 +471,7 @@ mod tests {
         let _ = events_tx.send(Event::WindowClosed {
             label: "main".into(),
             version: 1,
+            crash_detected: false,
         });
         // Step 1 terminal.
         let _ = events_tx.send(Event::PanesReaped {
@@ -544,12 +546,14 @@ mod tests {
         let _ = events_tx.send(Event::WindowClosed {
             label: "main".into(),
             version: 1,
+            crash_detected: false,
         });
         // Second close BEFORE saga A's terminals arrive → evicts A,
         // starts saga B.
         let _ = events_tx.send(Event::WindowClosed {
             label: "secondary".into(),
             version: 2,
+            crash_detected: false,
         });
         // Saga B's terminals.
         let _ = events_tx.send(Event::PanesReaped {

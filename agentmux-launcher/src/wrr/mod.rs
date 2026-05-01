@@ -205,6 +205,11 @@ pub fn apply_hwnd_destroyed(state: &mut State, hwnd: u64) -> Vec<Event> {
         let closed = Event::WindowClosed {
             label: label.clone(),
             version: v_closed,
+            // crash-detected close: host's on_before_close didn't
+            // run, so the F.6 cleanup saga must skip this trigger
+            // (it would never receive the panes-reaped / pool-drain
+            // terminal reports).
+            crash_detected: true,
         };
         let mut out = vec![drift, closed];
         if let Some(num) = released_num {

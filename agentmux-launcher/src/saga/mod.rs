@@ -323,7 +323,15 @@ fn match_trigger(event: &Event) -> Option<Box<dyn Saga>> {
         Event::PoolWindowPromoted { label, .. } => {
             Some(Box::new(pool_respawn::PoolRespawn::new(label.clone())))
         }
-        Event::WindowClosed { label, .. } => Some(Box::new(
+        // (codex P1 PR #637.) Only fire the cleanup cascade on
+        // CLEAN closes. `Event::WindowClosed { crash_detected: true }`
+        // comes from `wrr::apply_hwnd_destroyed` after a host/renderer
+        // crash; the host never sent `ReportPanesReaped` /
+        // `ReportPoolDrainDecision`, so the saga would stay
+        // in-flight indefinitely (only cleared by a later same-kind
+        // eviction or launcher restart) leaving a SagaStarted
+        // bracket dangling for subscribers that buffer on lifecycle.
+        Event::WindowClosed { label, crash_detected: false, .. } => Some(Box::new(
             window_cleanup::WindowCleanupCascade::new(label.clone()),
         )),
         _ => None,
@@ -516,9 +524,27 @@ mod tests {
         let event = Event::WindowClosed {
             label: "main".into(),
             version: 1,
+            crash_detected: false,
         };
         let saga = match_trigger(&event).expect("WindowClosed should trigger a saga");
         assert_eq!(saga.name(), "window_cleanup_cascade");
+    }
+
+    /// (codex P1 PR #637 round 2.) Crash-detected closes (originating
+    /// from `wrr::apply_hwnd_destroyed`) must NOT trigger the saga —
+    /// the host never sent the cleanup reports, so the saga would
+    /// stay in-flight forever.
+    #[test]
+    fn match_trigger_skips_crash_detected_window_closed() {
+        let event = Event::WindowClosed {
+            label: "crashed-window".into(),
+            version: 1,
+            crash_detected: true,
+        };
+        assert!(
+            match_trigger(&event).is_none(),
+            "crash-detected close should NOT spawn a saga",
+        );
     }
 
     #[test]
