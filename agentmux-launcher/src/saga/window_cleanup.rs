@@ -55,23 +55,16 @@
 //     `Event::WindowClosed`.
 //
 // F.6 does NOT ship:
-//   - The actual cross-process dispatch of `Command::ReapPanes` /
-//     `Command::DrainPoolIfLast` to the host. Today the launcher's
-//     named-pipe IPC is host→launcher only (host sends Commands up;
-//     launcher broadcasts Events back). A launcher→host command
-//     pipe doesn't exist yet. Both `IssueCmd::Host` actions are
-//     logged-only; the saga relies on the host's existing implicit
-//     cleanup flow inside `on_before_close` to produce the
-//     `Event::PanesReaped` + `Event::PoolDrained`/`PoolNotLast` it
-//     waits for. **This is acceptable scope per the F-spec § 7
-//     ("If the cross-process plumbing is too heavy a lift for one
-//     PR, scope down: implement the saga shape + the launcher-side
-//     coordinator entry, even if the actual cross-process dispatch
-//     is initially in-process").** The follow-up PR replaces the
-//     log with a real wire-level send — same trajectory as F.5's
-//     `SpawnPoolWindow`.
 //   - F.7 (cleanup audit + property tests).
 //   - Launcher-side saga durability — separate concern.
+//
+// **CPD-3 update.** Both `IssueCmd::Host` actions
+// (`Command::ReapPanes` and `Command::DrainPoolIfLast`) are now LIVE:
+// the coordinator dispatches them through `HostPipe::send_command()`
+// (see `agentmux-launcher/src/saga/mod.rs::apply_action`). This saga
+// also overrides `Saga::timeout()` to 30s (vs. 5s default) since
+// pane drain on a workspace with many panes can legitimately take
+// that long — see SPEC_CROSS_PROCESS_DISPATCH §3.10.
 //
 // **Why a saga at all if the IssueCmds are currently passive?**
 //
@@ -208,6 +201,14 @@ impl Saga for WindowCleanupCascade {
     /// lives in step rows.
     fn input_snapshot(&self) -> serde_json::Value {
         serde_json::json!({ "closed_label": self.closed_label })
+    }
+
+    /// CPD-3 — override the default 5s saga timeout. Pane drain
+    /// (Stage 1 of wrr's two-stage close cascade) on a workspace
+    /// with many panes can legitimately take longer than 5s. Per
+    /// SPEC_CROSS_PROCESS_DISPATCH §3.10.
+    fn timeout(&self) -> std::time::Duration {
+        std::time::Duration::from_secs(30)
     }
 
     fn start(&mut self, _ctx: &SagaCtx) -> SagaAction {

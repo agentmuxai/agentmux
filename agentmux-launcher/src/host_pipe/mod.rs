@@ -291,6 +291,32 @@ impl HostPipe {
         }
     }
 
+    /// Remove every buffered frame whose `saga_id` matches `saga_id`.
+    /// Returns the count of removed frames.
+    ///
+    /// Called from `SagaCoordinator::claim_terminal` when a saga
+    /// terminates (Done / Failed / timeout / eviction / etc.) — the
+    /// terminal event closes the saga bracket, so any frames the
+    /// saga left in the pending buffer would, if drained on reconnect,
+    /// produce orphan side effects after the bracket is already
+    /// closed (and risk a second `SagaFailed` via the 30s expiry
+    /// path's `emit_drop_failure`). Purging here keeps the saga's
+    /// terminal slot atomic across both the bus and the wire.
+    /// (codex + reagent P1 PR #644 round 7.)
+    pub async fn cancel_saga(&self, saga_id: u64) -> usize {
+        let mut inner = self.inner.lock().await;
+        let before = inner.pending_buffer.len();
+        inner.pending_buffer.retain(|f| f.saga_id != Some(saga_id));
+        let removed = before - inner.pending_buffer.len();
+        if removed > 0 {
+            crate::log(&format!(
+                "[host_pipe] cancel_saga(saga_id={}) purged {} buffered frame(s)",
+                saga_id, removed
+            ));
+        }
+        removed
+    }
+
     /// Drain `pending_buffer` through the given writer in FIFO order.
     /// Used by `send_frame`'s ptr_eq-mismatch path to flush a frame
     /// that landed in the buffer after a writer-replacement race
@@ -331,9 +357,8 @@ impl HostPipe {
     /// `PENDING_BUFFER_CAP`; on overflow or 30s timeout, drops + emits
     /// `Event::SagaFailed` for the dropped Command's saga.
     ///
-    /// CPD-2 wires this method but does NOT call it from the saga
-    /// coordinator yet — that's CPD-3.
-    #[allow(dead_code)] // CPD-3 wires this into the saga coordinator
+    /// CPD-3 — called from the saga coordinator's `apply_action` when
+    /// dispatching `IssueCmd::Host` actions.
     pub async fn send_command(&self, cmd: &Command) -> Result<(), HostPipeError> {
         let saga_id = saga_id_of(cmd);
         let frame = HostFrame::Command(cmd.clone());
@@ -615,19 +640,25 @@ impl HostPipe {
 
 /// Pull the saga_id off a Command if its variant carries one.
 ///
-/// Today (pre-CPD-1) the host-bound Command variants don't have
-/// `saga_id` fields — that's the schema-addition work in CPD-1. So
-/// every variant returns `None`, which means CPD-2's drop semantics
-/// don't actually fail a saga yet. CPD-1 + CPD-3 together will start
-/// returning Some(id) for the relevant variants and the drop
-/// machinery becomes saga-correctness-relevant. Keeping the
-/// indirection here means CPD-3's diff against the saga coordinator
-/// stays narrow.
-fn saga_id_of(_cmd: &Command) -> Option<u64> {
-    // CPD-1 will replace the body of this match with per-variant
-    // returns of `Some(*saga_id)` for SpawnPoolWindow / ReapPanes /
-    // DrainPoolIfLast etc. once those variants gain the field.
-    None
+/// Used by `send_frame`'s pending-buffer machinery: when a buffered
+/// command is dropped (overflow or 30s host-disconnect timeout),
+/// `emit_drop_failure` emits `Event::SagaFailed { saga_id }` so the
+/// saga's bracket closes cleanly instead of waiting forever.
+/// CPD-1 added `saga_id` fields on host-bound variants; CPD-3 made
+/// `send_command` live from the saga coordinator, so the drop
+/// machinery is now saga-correctness-relevant.
+fn saga_id_of(cmd: &Command) -> Option<u64> {
+    // CPD-1 added saga_id fields to host-bound Commands; CPD-3 made
+    // send_command live from the saga coordinator. Returning the real
+    // id here means HostPipe's drop-on-overflow + 30s-timeout-flush
+    // paths can emit `Event::SagaFailed` for the right saga, instead
+    // of orphaning the buffered command. (reagent P1 PR #644 round 5.)
+    match cmd {
+        Command::SpawnPoolWindow { saga_id } => Some(*saga_id),
+        Command::ReapPanes { saga_id, .. } => Some(*saga_id),
+        Command::DrainPoolIfLast { saga_id, .. } => Some(*saga_id),
+        _ => None,
+    }
 }
 
 /// Serialize a `HostFrame` as newline-delimited JSON and write it
