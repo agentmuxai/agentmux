@@ -594,7 +594,7 @@ async fn enforce_register_first(
         // command. Sent to the launcher pipe before Register: same
         // soft-error treatment as the srv-pipe misroutes (the client
         // can recover by registering or routing correctly).
-        Command::SpawnPoolWindow => {
+        Command::SpawnPoolWindow { .. } => {
             ("SpawnPoolWindow is a launcher→host command; sent to launcher pipe by mistake".to_string(), false)
         }
         // Phase F.6 — host-only reports; same fatal-before-Register
@@ -612,6 +612,12 @@ async fn enforce_register_first(
         }
         Command::DrainPoolIfLast { .. } => {
             ("DrainPoolIfLast is a launcher→host command; sent to launcher pipe by mistake".to_string(), false)
+        }
+        // Phase CPD-1 — host-only saga-action-failed report. Same
+        // fatal-before-Register treatment as the other Report*
+        // commands above.
+        Command::ReportSagaActionFailed { .. } => {
+            ("ReportSagaActionFailed before Register".to_string(), true)
         }
         Command::ReportHostCounts { .. } => {
             ("ReportHostCounts before Register".to_string(), true)

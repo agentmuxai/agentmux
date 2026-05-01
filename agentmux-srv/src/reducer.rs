@@ -1254,6 +1254,7 @@ mod tests {
             | Event::BlockMoved { version, .. }
             | Event::FocusedNodeChanged { version, .. }
             | Event::MagnifiedNodeChanged { version, .. }
+            | Event::SagaActionFailed { version, .. }
             | Event::Error { version, .. } => *version,
         }
     }

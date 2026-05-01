@@ -420,7 +420,11 @@ pub fn report_pool_window_added(label: String) {
     let Some(tx) = COMMAND_TX.get() else {
         return;
     };
-    let cmd = Command::ReportPoolWindowAdded { label };
+    // CPD-1 (schema-only): host's existing `report_pool_window_added`
+    // call sites are organic refills (not yet saga-driven); pass
+    // `saga_id: None` per spec §3.3. CPD-3 wires the saga-driven
+    // path that will pass `Some(N)` through here.
+    let cmd = Command::ReportPoolWindowAdded { label, saga_id: None };
     if let Err(e) = tx.send(cmd) {
         tracing::warn!("[launcher-ipc] report_pool_window_added: channel closed ({})", e);
     }
@@ -481,7 +485,9 @@ pub fn report_panes_reaped(label: String) {
     let Some(tx) = COMMAND_TX.get() else {
         return;
     };
-    let cmd = Command::ReportPanesReaped { label };
+    // CPD-1 (schema-only): existing call sites are organic; CPD-3
+    // adds the saga-driven path that fills `saga_id`.
+    let cmd = Command::ReportPanesReaped { label, saga_id: None };
     if let Err(e) = tx.send(cmd) {
         tracing::warn!("[launcher-ipc] report_panes_reaped: channel closed ({})", e);
     }
@@ -505,7 +511,13 @@ pub fn report_pool_drain_decision(label: String, was_last: bool) {
     let Some(tx) = COMMAND_TX.get() else {
         return;
     };
-    let cmd = Command::ReportPoolDrainDecision { label, was_last };
+    // CPD-1 (schema-only): existing call sites are organic; CPD-3
+    // adds the saga-driven path that fills `saga_id`.
+    let cmd = Command::ReportPoolDrainDecision {
+        label,
+        was_last,
+        saga_id: None,
+    };
     if let Err(e) = tx.send(cmd) {
         tracing::warn!(
             "[launcher-ipc] report_pool_drain_decision: channel closed ({})",

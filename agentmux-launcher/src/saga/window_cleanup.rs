@@ -210,10 +210,14 @@ impl Saga for WindowCleanupCascade {
         // such pipe exists yet — see module docstring).
         debug_assert_eq!(self.phase, Phase::Initial);
         self.phase = Phase::ReapingPanes;
+        // CPD-1 schema-only: saga_id placeholder (0) — coordinator's
+        // `apply_action` for `IssueCmd::Host` remains log-only;
+        // CPD-3 will inject the live saga's id at dispatch time.
         SagaAction::IssueCmd {
             target: PipeTarget::Host,
             cmd: Command::ReapPanes {
                 label: self.closed_label.clone(),
+                saga_id: 0,
             },
         }
     }
@@ -229,10 +233,13 @@ impl Saga for WindowCleanupCascade {
                 if label == &self.closed_label =>
             {
                 self.phase = Phase::DrainingPool;
+                // CPD-1 schema-only: saga_id placeholder (0); CPD-3
+                // injects the live saga's id at dispatch time.
                 SagaAction::IssueCmd {
                     target: PipeTarget::Host,
                     cmd: Command::DrainPoolIfLast {
                         label: self.closed_label.clone(),
+                        saga_id: 0,
                     },
                 }
             }
@@ -278,7 +285,7 @@ mod tests {
             SagaAction::IssueCmd { target, cmd } => {
                 assert_eq!(target, PipeTarget::Host);
                 match cmd {
-                    Command::ReapPanes { label } => assert_eq!(label, "main"),
+                    Command::ReapPanes { label, .. } => assert_eq!(label, "main"),
                     other => panic!("expected ReapPanes, got {:?}", other),
                 }
             }
@@ -298,6 +305,7 @@ mod tests {
             &Event::PanesReaped {
                 label: "main".into(),
                 version: 100,
+                saga_id: None,
             },
             &ctx(7),
         );
@@ -305,7 +313,7 @@ mod tests {
             SagaAction::IssueCmd { target, cmd } => {
                 assert_eq!(target, PipeTarget::Host);
                 match cmd {
-                    Command::DrainPoolIfLast { label } => assert_eq!(label, "main"),
+                    Command::DrainPoolIfLast { label, .. } => assert_eq!(label, "main"),
                     other => panic!("expected DrainPoolIfLast, got {:?}", other),
                 }
             }
@@ -326,6 +334,7 @@ mod tests {
             &Event::PanesReaped {
                 label: "main".into(),
                 version: 100,
+                saga_id: None,
             },
             &ctx(7),
         );
@@ -333,6 +342,7 @@ mod tests {
             &Event::PoolDrained {
                 label: "main".into(),
                 version: 101,
+                saga_id: None,
             },
             &ctx(7),
         );
@@ -348,6 +358,7 @@ mod tests {
             &Event::PanesReaped {
                 label: "secondary".into(),
                 version: 100,
+                saga_id: None,
             },
             &ctx(7),
         );
@@ -355,6 +366,7 @@ mod tests {
             &Event::PoolNotLast {
                 label: "secondary".into(),
                 version: 101,
+                saga_id: None,
             },
             &ctx(7),
         );
@@ -383,6 +395,7 @@ mod tests {
             &Event::PanesReaped {
                 label: "different-window".into(),
                 version: 51,
+                saga_id: None,
             },
             &ctx(7),
         );
@@ -394,6 +407,7 @@ mod tests {
             &Event::PoolDrained {
                 label: "main".into(),
                 version: 52,
+                saga_id: None,
             },
             &ctx(7),
         );
@@ -422,6 +436,7 @@ mod tests {
             &Event::PanesReaped {
                 label: "main".into(),
                 version: 100,
+                saga_id: None,
             },
             &ctx(7),
         );
@@ -431,6 +446,7 @@ mod tests {
             &Event::PoolDrained {
                 label: "other".into(),
                 version: 101,
+                saga_id: None,
             },
             &ctx(7),
         );
@@ -439,6 +455,7 @@ mod tests {
             &Event::PoolNotLast {
                 label: "other".into(),
                 version: 102,
+                saga_id: None,
             },
             &ctx(7),
         );
@@ -477,11 +494,13 @@ mod tests {
         let _ = events_tx.send(Event::PanesReaped {
             label: "main".into(),
             version: 2,
+            saga_id: None,
         });
         // Step 2 terminal — pick the "drained" branch.
         let _ = events_tx.send(Event::PoolDrained {
             label: "main".into(),
             version: 3,
+            saga_id: None,
         });
 
         let mut saw_started = false;
@@ -559,10 +578,12 @@ mod tests {
         let _ = events_tx.send(Event::PanesReaped {
             label: "secondary".into(),
             version: 3,
+            saga_id: None,
         });
         let _ = events_tx.send(Event::PoolNotLast {
             label: "secondary".into(),
             version: 4,
+            saga_id: None,
         });
 
         let mut started_count = 0u32;

@@ -291,6 +291,7 @@ fn event_version(e: &Event) -> u64 {
         | Event::BlockDeleted { version, .. }
         | Event::FocusedNodeChanged { version, .. }
         | Event::MagnifiedNodeChanged { version, .. }
+        | Event::SagaActionFailed { version, .. }
         | Event::Error { version, .. } => *version,
     }
 }

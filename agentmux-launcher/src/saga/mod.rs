@@ -586,6 +586,7 @@ mod tests {
             Event::PoolWindowAdded {
                 label: "window-pool-abc".into(),
                 version: 1,
+                saga_id: None,
             },
             Event::PoolWindowRemoved {
                 label: "window-pool-abc".into(),
@@ -608,14 +609,17 @@ mod tests {
             Event::PanesReaped {
                 label: "main".into(),
                 version: 1,
+                saga_id: None,
             },
             Event::PoolDrained {
                 label: "main".into(),
                 version: 1,
+                saga_id: None,
             },
             Event::PoolNotLast {
                 label: "main".into(),
                 version: 1,
+                saga_id: None,
             },
         ];
         for event in cases {
@@ -907,10 +911,12 @@ mod tests {
         let _ = events_tx.send(Event::PanesReaped {
             label: "main".into(),
             version: 2,
+            saga_id: None,
         });
         let _ = events_tx.send(Event::PoolDrained {
             label: "main".into(),
             version: 3,
+            saga_id: None,
         });
         // And ONE pool-respawn saga to completion.
         let _ = events_tx.send(Event::PoolWindowPromoted {
@@ -920,6 +926,7 @@ mod tests {
         let _ = events_tx.send(Event::PoolWindowAdded {
             label: "pool-2".into(),
             version: 5,
+            saga_id: None,
         });
 
         // Drain the bus with a deadline. Count one terminal event

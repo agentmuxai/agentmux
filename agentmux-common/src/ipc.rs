@@ -93,6 +93,21 @@ pub enum Command {
     /// `ReportPoolWindowRemoved` on pre-promote destroy.
     ReportPoolWindowAdded {
         label: String,
+        /// Phase CPD-1 (cross-process dispatch) — saga correlation
+        /// echo. `Some(N)` when the host is replying to a saga-issued
+        /// `Command::SpawnPoolWindow { saga_id: N }`; `None` for
+        /// organic refills (e.g. host's implicit `spawn_pool_window`
+        /// inside `promote_pool_window`). The launcher reducer
+        /// passes the value through to `Event::PoolWindowAdded` so
+        /// per-saga correlation (CPD-4) can match the response to
+        /// the originating saga.
+        ///
+        /// `#[serde(default)]` for forward-compat with hosts running
+        /// pre-CPD-1 builds — they emit no `saga_id` field, which
+        /// deserializes as `None` (organic). Removed once CPD-1+CPD-3
+        /// have soaked one release cycle.
+        #[serde(default)]
+        saga_id: Option<u64>,
     },
     /// Phase B.4 follow-up — host reports a pool window leaving the
     /// pool (promote, destroy, or app exit).
@@ -510,7 +525,19 @@ pub enum Command {
     /// produce the `Event::PoolWindowAdded` it waits for. F.6 (or
     /// the cross-process command dispatch follow-up) replaces the
     /// log with a real wire-level send.
-    SpawnPoolWindow,
+    ///
+    /// Phase CPD-1 (cross-process dispatch) — `saga_id` is mandatory
+    /// on the wire (every host-bound command carries the originating
+    /// saga's id so the host can echo it on the corresponding
+    /// `Report*` reply). Defaults to `0` via `#[serde(default)]` for
+    /// forward-compat with launchers running pre-CPD-1 builds; the
+    /// soak default is removed in a later PR (CPD-3) once the wire
+    /// has shipped a release cycle. `0` is reserved as "no saga"
+    /// and is treated by the host as a non-saga-driven dispatch.
+    SpawnPoolWindow {
+        #[serde(default)]
+        saga_id: u64,
+    },
     /// Phase F.6 — host reports that all browser-pane HWNDs belonging
     /// to a closing top-level window have been reaped. Emitted from
     /// `client.rs::on_before_close` after the subwindow cascade and
@@ -528,6 +555,16 @@ pub enum Command {
     /// Host-only — same gate as `ReportWindowClosed`.
     ReportPanesReaped {
         label: String,
+        /// Phase CPD-1 — saga correlation echo. `Some(N)` when the
+        /// host is replying to a saga-issued
+        /// `Command::ReapPanes { saga_id: N }`; `None` for organic
+        /// reports (e.g. host's existing implicit pane drain inside
+        /// `on_before_close` that wasn't saga-driven).
+        ///
+        /// `#[serde(default)]` for forward-compat with pre-CPD-1
+        /// hosts.
+        #[serde(default)]
+        saga_id: Option<u64>,
     },
     /// Phase F.6 — host reports the result of the post-close
     /// drain-pool-if-last decision. `was_last == true` when the
@@ -544,6 +581,15 @@ pub enum Command {
     ReportPoolDrainDecision {
         label: String,
         was_last: bool,
+        /// Phase CPD-1 — saga correlation echo. `Some(N)` when the
+        /// host is replying to a saga-issued
+        /// `Command::DrainPoolIfLast { saga_id: N }`; `None` for
+        /// organic reports.
+        ///
+        /// `#[serde(default)]` for forward-compat with pre-CPD-1
+        /// hosts.
+        #[serde(default)]
+        saga_id: Option<u64>,
     },
     /// Phase F.6 — launcher-side saga coordinator asks the host to
     /// reap all browser-pane HWNDs for a window that just closed.
@@ -556,8 +602,14 @@ pub enum Command {
     /// pane drain inside `on_before_close` produces the
     /// `Event::PanesReaped` the saga waits for. F.7 / cross-process
     /// dispatch follow-up replaces the log with a real wire send.
+    ///
+    /// Phase CPD-1 — `saga_id` is mandatory on the wire (host echoes
+    /// back on `ReportPanesReaped`). `#[serde(default)]` returning `0`
+    /// for forward-compat soak; removed in CPD-3.
     ReapPanes {
         label: String,
+        #[serde(default)]
+        saga_id: u64,
     },
     /// Phase F.6 — launcher-side saga coordinator asks the host to
     /// drain the warm pool if the just-closed window was the last
@@ -569,8 +621,29 @@ pub enum Command {
     /// inline check; the saga relies on the resulting
     /// `Event::PoolDrained` / `Event::PoolNotLast` to close its
     /// bracket.
+    ///
+    /// Phase CPD-1 — `saga_id` is mandatory on the wire.
+    /// `#[serde(default)]` for forward-compat soak; removed in CPD-3.
     DrainPoolIfLast {
         label: String,
+        #[serde(default)]
+        saga_id: u64,
+    },
+    /// Phase CPD-1 — host-emitted report that a saga-issued action
+    /// failed (e.g. window not found, IPC error). Carries the
+    /// originating `saga_id` and a human-readable `reason`. The
+    /// launcher reducer translates this into `Event::SagaActionFailed`
+    /// so the saga coordinator can terminate the matching saga as
+    /// `SagaFailed`.
+    ///
+    /// Schema-only in CPD-1: hosts don't yet read commands from the
+    /// pipe (CPD-2 wires that), so no producer for this command
+    /// exists yet. The shape is added now so launcher reducer arms
+    /// + saga coordinator wiring can soak before CPD-3 makes the
+    /// dispatch live.
+    ReportSagaActionFailed {
+        saga_id: u64,
+        reason: String,
     },
 }
 
@@ -696,6 +769,17 @@ pub enum Event {
     PoolWindowAdded {
         label: String,
         version: u64,
+        /// Phase CPD-1 — saga correlation. Mirrors the `saga_id` that
+        /// arrived on the originating
+        /// `Command::ReportPoolWindowAdded { saga_id }`. `None` for
+        /// organic refills (no saga in flight). Subscribers (CPD-4
+        /// per-saga correlation) match on this to scope events to the
+        /// originating saga.
+        ///
+        /// `#[serde(default)]` for forward-compat with old
+        /// `launcher-events.log` entries that pre-date CPD-1.
+        #[serde(default)]
+        saga_id: Option<u64>,
     },
     PoolWindowRemoved {
         label: String,
@@ -724,6 +808,14 @@ pub enum Event {
     PanesReaped {
         label: String,
         version: u64,
+        /// Phase CPD-1 — saga correlation. Mirrors `saga_id` from the
+        /// originating `ReportPanesReaped`. `None` for organic
+        /// reports (non-saga-driven pane drains).
+        ///
+        /// `#[serde(default)]` for forward-compat with pre-CPD-1
+        /// log entries.
+        #[serde(default)]
+        saga_id: Option<u64>,
     },
     /// Phase F.6 — emitted by the launcher when the host reports it
     /// kicked off Stage 1 of the close-cascade pool drain (i.e. the
@@ -740,6 +832,11 @@ pub enum Event {
     PoolDrained {
         label: String,
         version: u64,
+        /// Phase CPD-1 — saga correlation. Mirrors `saga_id` from the
+        /// originating `ReportPoolDrainDecision`. `None` for organic
+        /// reports.
+        #[serde(default)]
+        saga_id: Option<u64>,
     },
     /// Phase F.6 — emitted by the launcher when the host reports a
     /// close that did NOT trigger a pool drain (other user-visible
@@ -749,6 +846,11 @@ pub enum Event {
     PoolNotLast {
         label: String,
         version: u64,
+        /// Phase CPD-1 — saga correlation. Mirrors `saga_id` from the
+        /// originating `ReportPoolDrainDecision`. `None` for organic
+        /// reports.
+        #[serde(default)]
+        saga_id: Option<u64>,
     },
     /// Phase B.5 (window_id_map step a) — launcher recorded the
     /// label → backend window ID mapping. Subscribers (host's
@@ -1159,6 +1261,49 @@ pub enum Event {
         node_id: String,
         version: u64,
     },
+    /// Phase CPD-1 (cross-process dispatch) — emitted by the launcher
+    /// when the host reports that a saga-issued action failed
+    /// (`Command::ReportSagaActionFailed { saga_id, reason }`). The
+    /// saga coordinator's bus loop will (in CPD-3) treat this as a
+    /// terminal signal for the matching saga, emitting
+    /// `Event::SagaFailed` and removing it from the in-flight
+    /// registry. CPD-1 ships the wire shape only; no producer
+    /// (host) and no consumer (saga coordinator) are wired yet.
+    SagaActionFailed {
+        saga_id: u64,
+        reason: String,
+        version: u64,
+    },
+}
+
+/// Phase CPD-1 (cross-process dispatch) — envelope enum for frames
+/// sent over the launcher → host pipe direction. Today the host's
+/// read loop only expects `Event` JSON; CPD-2 extends the read loop
+/// to recognize this tagged union and dispatch by `kind`:
+///
+/// * `event` → existing event-handling code (state sync from
+///   launcher reducer broadcasts).
+/// * `command` → new command-handling code (saga-issued actions).
+///
+/// Newline-delimited JSON, one frame per line. `#[serde(tag = "kind",
+/// rename_all = "snake_case")]` so the wire shape is e.g.
+/// `{"kind":"event","event":"pool_window_added",...}` or
+/// `{"kind":"command","cmd":"spawn_pool_window","saga_id":42}`.
+///
+/// Schema-only in CPD-1: introduced now so the launcher's host-pipe
+/// writer (CPD-2) and the host's read loop (CPD-2/CPD-3) can be
+/// built against a stable wire envelope without further schema
+/// churn.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum HostFrame {
+    /// Wraps a launcher-emitted Event being pushed down to the host
+    /// (existing fanout path; CPD-2 refactors the writer to go
+    /// through this envelope).
+    Event(Event),
+    /// Wraps a saga-issued Command being dispatched from the launcher
+    /// to the host. Carries `saga_id` inside the Command payload.
+    Command(Command),
 }
 
 /// Phase D.1 — serializable view of one window in the launcher
@@ -1319,6 +1464,344 @@ mod tests {
     fn unknown_cmd_fails_to_deserialize() {
         let json = r#"{"cmd":"banana"}"#;
         let r: Result<Command, _> = serde_json::from_str(json);
+        assert!(r.is_err());
+    }
+
+    // ---------- Phase CPD-1 — saga_id schema additions ----------
+
+    #[test]
+    fn cpd1_spawn_pool_window_round_trip_with_saga_id() {
+        let c = Command::SpawnPoolWindow { saga_id: 42 };
+        let json = serde_json::to_string(&c).unwrap();
+        assert!(json.contains("\"cmd\":\"spawn_pool_window\""));
+        assert!(json.contains("\"saga_id\":42"));
+        let back: Command = serde_json::from_str(&json).unwrap();
+        match back {
+            Command::SpawnPoolWindow { saga_id } => assert_eq!(saga_id, 42),
+            other => panic!("wrong variant: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn cpd1_spawn_pool_window_forward_compat_default_zero() {
+        // Pre-CPD-1 hosts emit the bare command with no `saga_id`
+        // field; serde_default fills in 0.
+        let json = r#"{"cmd":"spawn_pool_window"}"#;
+        let back: Command = serde_json::from_str(json).unwrap();
+        match back {
+            Command::SpawnPoolWindow { saga_id } => assert_eq!(saga_id, 0),
+            other => panic!("wrong variant: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn cpd1_reap_panes_round_trip_with_saga_id() {
+        let c = Command::ReapPanes {
+            label: "main".into(),
+            saga_id: 7,
+        };
+        let json = serde_json::to_string(&c).unwrap();
+        assert!(json.contains("\"cmd\":\"reap_panes\""));
+        assert!(json.contains("\"saga_id\":7"));
+        let back: Command = serde_json::from_str(&json).unwrap();
+        match back {
+            Command::ReapPanes { label, saga_id } => {
+                assert_eq!(label, "main");
+                assert_eq!(saga_id, 7);
+            }
+            other => panic!("wrong variant: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn cpd1_reap_panes_forward_compat_default_zero() {
+        let json = r#"{"cmd":"reap_panes","label":"main"}"#;
+        let back: Command = serde_json::from_str(json).unwrap();
+        match back {
+            Command::ReapPanes { label, saga_id } => {
+                assert_eq!(label, "main");
+                assert_eq!(saga_id, 0);
+            }
+            other => panic!("wrong variant: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn cpd1_drain_pool_if_last_round_trip_with_saga_id() {
+        let c = Command::DrainPoolIfLast {
+            label: "main".into(),
+            saga_id: 13,
+        };
+        let json = serde_json::to_string(&c).unwrap();
+        assert!(json.contains("\"cmd\":\"drain_pool_if_last\""));
+        assert!(json.contains("\"saga_id\":13"));
+        let back: Command = serde_json::from_str(&json).unwrap();
+        match back {
+            Command::DrainPoolIfLast { label, saga_id } => {
+                assert_eq!(label, "main");
+                assert_eq!(saga_id, 13);
+            }
+            other => panic!("wrong variant: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn cpd1_drain_pool_if_last_forward_compat_default_zero() {
+        let json = r#"{"cmd":"drain_pool_if_last","label":"main"}"#;
+        let back: Command = serde_json::from_str(json).unwrap();
+        match back {
+            Command::DrainPoolIfLast { label, saga_id } => {
+                assert_eq!(label, "main");
+                assert_eq!(saga_id, 0);
+            }
+            other => panic!("wrong variant: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn cpd1_report_pool_window_added_round_trip_with_some() {
+        let c = Command::ReportPoolWindowAdded {
+            label: "pool-xyz".into(),
+            saga_id: Some(99),
+        };
+        let json = serde_json::to_string(&c).unwrap();
+        assert!(json.contains("\"saga_id\":99"));
+        let back: Command = serde_json::from_str(&json).unwrap();
+        match back {
+            Command::ReportPoolWindowAdded { label, saga_id } => {
+                assert_eq!(label, "pool-xyz");
+                assert_eq!(saga_id, Some(99));
+            }
+            other => panic!("wrong variant: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn cpd1_report_pool_window_added_forward_compat_default_none() {
+        // Pre-CPD-1 hosts omit `saga_id` entirely; deserializes to
+        // `None`. JSON with explicit null is also valid.
+        let json = r#"{"cmd":"report_pool_window_added","label":"pool-xyz"}"#;
+        let back: Command = serde_json::from_str(json).unwrap();
+        match back {
+            Command::ReportPoolWindowAdded { label, saga_id } => {
+                assert_eq!(label, "pool-xyz");
+                assert_eq!(saga_id, None);
+            }
+            other => panic!("wrong variant: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn cpd1_report_panes_reaped_round_trip_with_some() {
+        let c = Command::ReportPanesReaped {
+            label: "main".into(),
+            saga_id: Some(11),
+        };
+        let json = serde_json::to_string(&c).unwrap();
+        let back: Command = serde_json::from_str(&json).unwrap();
+        match back {
+            Command::ReportPanesReaped { label, saga_id } => {
+                assert_eq!(label, "main");
+                assert_eq!(saga_id, Some(11));
+            }
+            other => panic!("wrong variant: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn cpd1_report_panes_reaped_forward_compat_default_none() {
+        let json = r#"{"cmd":"report_panes_reaped","label":"main"}"#;
+        let back: Command = serde_json::from_str(json).unwrap();
+        match back {
+            Command::ReportPanesReaped { label, saga_id } => {
+                assert_eq!(label, "main");
+                assert_eq!(saga_id, None);
+            }
+            other => panic!("wrong variant: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn cpd1_report_pool_drain_decision_round_trip_with_some() {
+        let c = Command::ReportPoolDrainDecision {
+            label: "main".into(),
+            was_last: true,
+            saga_id: Some(101),
+        };
+        let json = serde_json::to_string(&c).unwrap();
+        let back: Command = serde_json::from_str(&json).unwrap();
+        match back {
+            Command::ReportPoolDrainDecision {
+                label,
+                was_last,
+                saga_id,
+            } => {
+                assert_eq!(label, "main");
+                assert!(was_last);
+                assert_eq!(saga_id, Some(101));
+            }
+            other => panic!("wrong variant: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn cpd1_report_pool_drain_decision_forward_compat_default_none() {
+        let json = r#"{"cmd":"report_pool_drain_decision","label":"main","was_last":false}"#;
+        let back: Command = serde_json::from_str(json).unwrap();
+        match back {
+            Command::ReportPoolDrainDecision {
+                label,
+                was_last,
+                saga_id,
+            } => {
+                assert_eq!(label, "main");
+                assert!(!was_last);
+                assert_eq!(saga_id, None);
+            }
+            other => panic!("wrong variant: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn cpd1_report_saga_action_failed_round_trip() {
+        let c = Command::ReportSagaActionFailed {
+            saga_id: 55,
+            reason: "window not found".into(),
+        };
+        let json = serde_json::to_string(&c).unwrap();
+        assert!(json.contains("\"cmd\":\"report_saga_action_failed\""));
+        assert!(json.contains("\"saga_id\":55"));
+        let back: Command = serde_json::from_str(&json).unwrap();
+        match back {
+            Command::ReportSagaActionFailed { saga_id, reason } => {
+                assert_eq!(saga_id, 55);
+                assert_eq!(reason, "window not found");
+            }
+            other => panic!("wrong variant: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn cpd1_event_pool_window_added_round_trip_with_saga_id() {
+        let e = Event::PoolWindowAdded {
+            label: "pool-xyz".into(),
+            version: 7,
+            saga_id: Some(42),
+        };
+        let json = serde_json::to_string(&e).unwrap();
+        assert!(json.contains("\"saga_id\":42"));
+        let back: Event = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, e);
+    }
+
+    #[test]
+    fn cpd1_event_panes_reaped_forward_compat_default_none() {
+        // Pre-CPD-1 launcher-events.log entries lack `saga_id`.
+        let json = r#"{"event":"panes_reaped","label":"main","version":1}"#;
+        let back: Event = serde_json::from_str(json).unwrap();
+        match back {
+            Event::PanesReaped {
+                label,
+                version,
+                saga_id,
+            } => {
+                assert_eq!(label, "main");
+                assert_eq!(version, 1);
+                assert_eq!(saga_id, None);
+            }
+            other => panic!("wrong variant: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn cpd1_event_pool_drained_round_trip_with_saga_id() {
+        let e = Event::PoolDrained {
+            label: "main".into(),
+            version: 9,
+            saga_id: Some(3),
+        };
+        let json = serde_json::to_string(&e).unwrap();
+        let back: Event = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, e);
+    }
+
+    #[test]
+    fn cpd1_event_pool_not_last_forward_compat_default_none() {
+        let json = r#"{"event":"pool_not_last","label":"main","version":3}"#;
+        let back: Event = serde_json::from_str(json).unwrap();
+        match back {
+            Event::PoolNotLast {
+                label,
+                version,
+                saga_id,
+            } => {
+                assert_eq!(label, "main");
+                assert_eq!(version, 3);
+                assert_eq!(saga_id, None);
+            }
+            other => panic!("wrong variant: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn cpd1_event_saga_action_failed_round_trip() {
+        let e = Event::SagaActionFailed {
+            saga_id: 12,
+            reason: "host pipe broken".into(),
+            version: 100,
+        };
+        let json = serde_json::to_string(&e).unwrap();
+        assert!(json.contains("\"event\":\"saga_action_failed\""));
+        assert!(json.contains("\"saga_id\":12"));
+        let back: Event = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, e);
+    }
+
+    #[test]
+    fn cpd1_host_frame_event_round_trip() {
+        let frame = HostFrame::Event(Event::PoolWindowAdded {
+            label: "pool-xyz".into(),
+            version: 5,
+            saga_id: Some(7),
+        });
+        let json = serde_json::to_string(&frame).unwrap();
+        assert!(json.contains("\"kind\":\"event\""));
+        assert!(json.contains("\"event\":\"pool_window_added\""));
+        let back: HostFrame = serde_json::from_str(&json).unwrap();
+        match back {
+            HostFrame::Event(Event::PoolWindowAdded {
+                label,
+                version,
+                saga_id,
+            }) => {
+                assert_eq!(label, "pool-xyz");
+                assert_eq!(version, 5);
+                assert_eq!(saga_id, Some(7));
+            }
+            other => panic!("wrong frame: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn cpd1_host_frame_command_round_trip() {
+        let frame = HostFrame::Command(Command::SpawnPoolWindow { saga_id: 31 });
+        let json = serde_json::to_string(&frame).unwrap();
+        assert!(json.contains("\"kind\":\"command\""));
+        assert!(json.contains("\"cmd\":\"spawn_pool_window\""));
+        assert!(json.contains("\"saga_id\":31"));
+        let back: HostFrame = serde_json::from_str(&json).unwrap();
+        match back {
+            HostFrame::Command(Command::SpawnPoolWindow { saga_id }) => {
+                assert_eq!(saga_id, 31);
+            }
+            other => panic!("wrong frame: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn cpd1_host_frame_unknown_kind_fails() {
+        let json = r#"{"kind":"banana"}"#;
+        let r: Result<HostFrame, _> = serde_json::from_str(json);
         assert!(r.is_err());
     }
 }
