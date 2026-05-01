@@ -874,20 +874,13 @@ fn handle_move_tab(
             version: v,
         }];
     }
-    // **Migration-tolerant validation** (codex P1 round-2 #621):
-    // tab existence + workspace_id checks are dropped during the
-    // migration window. Some tab-creating/moving paths
-    // (`PromoteBlockToTab`, etc.) are still wcore-direct — their
-    // writes don't flow into reducer state, so `state.tabs` and
-    // `state.workspaces[*].tab_ids` can lag SQLite. The saga / RPC
-    // handler that called us has already validated against SQLite
-    // (the source of truth); here we only enforce that both
-    // workspaces exist in the reducer (so we can mutate them) and
-    // trust the caller for the tab. If the tab isn't in
-    // `state.tabs`, lazy-insert a synthetic record stamped with the
-    // dst workspace_id (name unset — refilled when later events
-    // touch the tab). PR 4 reinstates strict validation once the
-    // remaining wcore-direct paths migrate.
+    // Strict validation (Phase E.4 strict-mode flip): the
+    // migration-tolerant lazy-import fallback (codex P1 round-2
+    // #621) was removed once the soak window closed with no
+    // `lazy-import` warnings observed in production. All reducer-
+    // routed paths now keep `state.tabs` and
+    // `state.workspaces[*].tab_ids` consistent with SQLite, so we
+    // can reject unknown tabs and workspace_id mismatches outright.
     if !state.workspaces.contains_key(&src_workspace_id) {
         let v = state.bump_version();
         return vec![Event::Error {
@@ -906,11 +899,34 @@ fn handle_move_tab(
             version: v,
         }];
     }
+    let tab_workspace_id: Option<String> =
+        state.tabs.get(&tab_id).map(|t| t.workspace_id.clone());
+    match tab_workspace_id {
+        None => {
+            let v = state.bump_version();
+            return vec![Event::Error {
+                code: ErrorCode::InvalidCommand,
+                message: format!("MoveTab: tab not found in state: {}", tab_id),
+                fatal: false,
+                version: v,
+            }];
+        }
+        Some(actual_ws) if actual_ws != src_workspace_id => {
+            let v = state.bump_version();
+            return vec![Event::Error {
+                code: ErrorCode::InvalidCommand,
+                message: format!(
+                    "MoveTab: workspace_id mismatch — tab {} belongs to {}, not {}",
+                    tab_id, actual_ws, src_workspace_id
+                ),
+                fatal: false,
+                version: v,
+            }];
+        }
+        Some(_) => {}
+    }
 
-    // Remove from src. Even if the reducer's view shows the tab
-    // isn't in src.tab_ids (stale state), the persist subscriber's
-    // apply_tab_moved reads SQLite and removes from there, so the
-    // disk-side ordering ends up correct.
+    // Remove from src.
     let new_src_active_tab_id: Option<String> = {
         let src = state.workspaces.get_mut(&src_workspace_id).expect("checked");
         src.tab_ids.retain(|id| id != &tab_id);
@@ -933,30 +949,12 @@ fn handle_move_tab(
         clamped as u32
     };
 
-    // Update the tab's parent. If the reducer's view didn't have
-    // this tab (a wcore-direct creation/move slipped past), lazy-
-    // insert a TabRecord. Name is left empty — subsequent events
-    // (TabRenamed, etc.) will refill it. The launcher's snapshot
-    // view tolerates empty names (renderer reads names from SQLite
-    // -sourced events).
-    match state.tabs.get_mut(&tab_id) {
-        Some(tab) => {
-            tab.workspace_id = dst_workspace_id.clone();
-        }
-        None => {
-            state.tabs.insert(
-                tab_id.clone(),
-                crate::state::TabRecord {
-                    tab_id: tab_id.clone(),
-                    workspace_id: dst_workspace_id.clone(),
-                    name: String::new(),
-                    block_ids: Vec::new(),
-                    focused_node_id: String::new(),
-                    magnified_node_id: String::new(),
-                },
-            );
-        }
-    }
+    // Update the tab's parent.
+    state
+        .tabs
+        .get_mut(&tab_id)
+        .expect("checked")
+        .workspace_id = dst_workspace_id.clone();
 
     let v = state.bump_version();
     vec![Event::TabMoved {
@@ -2806,65 +2804,30 @@ mod tests {
         );
         assert!(matches!(&events[0], Event::Error { .. }));
 
-        // codex P1 round-2 #621: unknown tabs are now ACCEPTED
-        // (lazy-imported into state.tabs), since wcore-direct paths
-        // can create tabs the reducer hasn't seen. Pre-checks live
-        // in the saga / RPC layer (against SQLite). The reducer
-        // here only validates that both workspaces exist.
+        // Phase E.4 strict-mode flip: unknown tabs are now REJECTED.
+        // The migration-tolerant lazy-import fallback was removed once
+        // the soak window closed without `lazy-import` warnings being
+        // observed in production. See `move_tab_unknown_tab_rejects`
+        // for the dedicated test.
         let events = update(
             &mut state,
             Command::MoveTab {
                 tab_id: "ghost-tab".into(),
-                src_workspace_id: src.clone(),
+                src_workspace_id: src,
                 dst_workspace_id: dst,
                 dst_index: 0,
             },
             &ctx(4),
         );
-        assert!(
-            matches!(&events[0], Event::TabMoved { .. }),
-            "unknown tab should be lazy-imported, got {:?}",
-            events.first()
-        );
+        assert!(matches!(&events[0], Event::Error { .. }));
     }
 
-    /// codex P1 round-2 #621: handle_move_tab tolerates a tab whose
-    /// reducer-state workspace_id mismatches `src_workspace_id`. The
-    /// reducer's view can lag SQLite during the migration window
-    /// (wcore-direct paths create/move tabs without dispatching),
-    /// so a strict check would reject valid moves. The saga/RPC
-    /// reads SQLite (the source of truth) for the membership check;
-    /// the reducer here just performs the move.
+    /// Phase E.4 strict-mode flip: an unknown tab id (not present in
+    /// `state.tabs`) is rejected with a clear "tab not found" error
+    /// rather than being lazy-imported. Replaces the migration-window
+    /// `move_tab_lazy_imports_unknown_tab` test.
     #[test]
-    fn move_tab_tolerates_workspace_id_mismatch_during_migration() {
-        let mut state = State::default();
-        let real_src = create_workspace(&mut state, "src");
-        let dst = create_workspace(&mut state, "dst");
-        let t1 = create_tab(&mut state, &real_src, "t1");
-        let other = create_workspace(&mut state, "other");
-        let _ = create_tab(&mut state, &other, "filler");
-        // Move with src_workspace_id = "other" even though the tab
-        // technically belongs to real_src per reducer state.
-        let events = update(
-            &mut state,
-            Command::MoveTab {
-                tab_id: t1.clone(),
-                src_workspace_id: other,
-                dst_workspace_id: dst.clone(),
-                dst_index: 0,
-            },
-            &ctx(2),
-        );
-        assert!(matches!(&events[0], Event::TabMoved { .. }));
-        // Tab's workspace_id should now point at dst.
-        assert_eq!(state.tabs[&t1].workspace_id, dst);
-    }
-
-    /// codex P1 round-2 #621: lazy-import populates state.tabs for
-    /// a tab the reducer hadn't seen. After the move, state.tabs
-    /// has an entry with workspace_id = dst.
-    #[test]
-    fn move_tab_lazy_imports_unknown_tab() {
+    fn move_tab_unknown_tab_rejects() {
         let mut state = State::default();
         let src = create_workspace(&mut state, "src");
         let dst = create_workspace(&mut state, "dst");
@@ -2875,17 +2838,68 @@ mod tests {
             Command::MoveTab {
                 tab_id: unknown_id.clone(),
                 src_workspace_id: src,
+                dst_workspace_id: dst,
+                dst_index: 0,
+            },
+            &ctx(2),
+        );
+        match &events[0] {
+            Event::Error { code, message, .. } => {
+                assert_eq!(*code, ErrorCode::InvalidCommand);
+                assert!(
+                    message.contains("tab not found"),
+                    "error should mention `tab not found`, got: {}",
+                    message
+                );
+            }
+            other => panic!("expected Error event, got {:?}", other),
+        }
+        // No lazy import side-effect.
+        assert!(!state.tabs.contains_key(&unknown_id));
+    }
+
+    /// Phase E.4 strict-mode flip: a known tab whose reducer-state
+    /// `workspace_id` doesn't match `src_workspace_id` is rejected.
+    /// Replaces the migration-window
+    /// `move_tab_tolerates_workspace_id_mismatch_during_migration`
+    /// test.
+    #[test]
+    fn move_tab_wrong_workspace_rejects() {
+        let mut state = State::default();
+        let real_src = create_workspace(&mut state, "real_src");
+        let dst = create_workspace(&mut state, "dst");
+        let other = create_workspace(&mut state, "other");
+        let t1 = create_tab(&mut state, &real_src, "t1");
+        let filler = create_tab(&mut state, &other, "filler");
+        // Claim the tab lives in `other` even though it actually
+        // belongs to `real_src` per reducer state.
+        let events = update(
+            &mut state,
+            Command::MoveTab {
+                tab_id: t1.clone(),
+                src_workspace_id: other.clone(),
                 dst_workspace_id: dst.clone(),
                 dst_index: 0,
             },
             &ctx(2),
         );
-        assert!(matches!(&events[0], Event::TabMoved { .. }));
-        let tab = state
-            .tabs
-            .get(&unknown_id)
-            .expect("unknown tab should be lazy-imported");
-        assert_eq!(tab.workspace_id, dst);
+        match &events[0] {
+            Event::Error { code, message, .. } => {
+                assert_eq!(*code, ErrorCode::InvalidCommand);
+                assert!(
+                    message.contains("workspace_id mismatch"),
+                    "error should mention `workspace_id mismatch`, got: {}",
+                    message
+                );
+            }
+            other => panic!("expected Error event, got {:?}", other),
+        }
+        // Reducer state untouched: t1 still in real_src, filler still
+        // in other, dst empty.
+        assert_eq!(state.tabs[&t1].workspace_id, real_src);
+        assert_eq!(state.workspaces[&real_src].tab_ids, vec![t1]);
+        assert_eq!(state.workspaces[&other].tab_ids, vec![filler]);
+        assert!(state.workspaces[&dst].tab_ids.is_empty());
     }
 
     // ---- Phase E.5.5 — MoveBlock tests ----
