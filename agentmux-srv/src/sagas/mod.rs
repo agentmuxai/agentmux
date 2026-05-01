@@ -41,6 +41,8 @@
 //   (gap; Phase F).
 // * Saga state across srv restart (gap; Phase F+).
 
+pub mod delete_block;
+pub mod delete_tab;
 pub mod log;
 pub mod promote_block_to_tab;
 pub mod restore_torn_off_tab;
