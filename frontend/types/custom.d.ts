@@ -663,6 +663,12 @@ declare global {
         // by the host's CEF JS bridge once per top-level renderer
         // per launcher event.
         __agentmux_launcher_event?: (evt: { event: string; version: number; [k: string]: unknown }) => void;
+
+        // Phase E.2c.5b — srv typed-event dispatcher.
+        // Installed by `frontend/util/srv-events.ts`; called by the
+        // host's CEF JS bridge (`agentmux-cef/src/srv_event_bridge.rs`)
+        // once per top-level renderer per srv event.
+        __agentmux_srv_event?: (evt: { event: string; version: number; [k: string]: unknown }) => void;
     }
 }
 
