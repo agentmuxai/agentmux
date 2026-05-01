@@ -338,15 +338,21 @@ pub fn derive_inverse_command(forward: &Command, step: &UnresolvedStep) -> Optio
             dst_tab_id: src_tab_id.clone(),
             dst_index: 0,
         }),
-        // CreateWindow / CloseWindowInternal / SwitchWorkspace: no
-        // recovery-derivable inverse today. CreateWindow's inverse
-        // (CloseWindowInternal) needs the saga to record the
-        // window_id; SwitchWorkspace's inverse needs the prior
-        // workspace_id which the saga log doesn't capture.
+        // CreateWindow's inverse is CloseWindowInternal — the
+        // saga's recorded `cmd_json` carries the window_id directly,
+        // so the inverse is derivable.
         Command::CreateWindow { window_id, .. } => Some(Command::CloseWindowInternal {
             window_id: window_id.clone(),
         }),
-        // Everything else: not invertible from the saga log alone.
+        // CloseWindowInternal / SwitchWorkspace / DeleteX / RenameX /
+        // UpdateXMeta / SetActiveTab: not invertible from the saga
+        // log alone. CloseWindowInternal's inverse would require
+        // reconstructing the window's prior workspace + state;
+        // SwitchWorkspace's inverse needs the prior workspace_id
+        // which we don't capture; DeleteX is destructive; the meta
+        // / rename / set-active commands need a snapshot of the
+        // prior value. These end up logged with "skipped — no
+        // inverse derivable" during recovery.
         _ => None,
     }
 }
