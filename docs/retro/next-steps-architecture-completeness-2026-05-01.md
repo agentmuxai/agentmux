@@ -24,17 +24,25 @@ The decision the user made (2026-05-01): we want the entire reducer architecture
 
 ## The ordering, at a glance
 
+PR counts below reflect the **tightened plan** (2026-05-01 review): PRs that share infrastructure are merged into single PRs to reduce review surface. The commentary in each step section is the original (more granular) breakdown — keep it for scope-of-work reference; ship per the tightened count.
+
 | # | Step | Closes (gap-doc §) | Estimate | Sub-PRs | Visible to users? |
 |---|---|---|---|---|---|
-| 1 | F1 — host reducer minimum | §2 (partial), §3 host-pool-promote, §5 (host pipe) | ~850 LOC | 3 | No (backend-only) |
-| 2 | E.6 — renderer multi-source + saga buffering | §1 (E.6), §5 cross-pipe order/version | ~400 LOC | 1-2 | No (until F1 lights it up) |
-| 3 | E.4 — layout reducer migration | §1 (E.4), §4 `handle_move_tab` tolerance | ~700 LOC (minimal slice) – ~1500 LOC (full) | 2-3 | No |
-| 4 | §3 saga durability — durable saga log | §3 saga-state-durability | ~1000 LOC | 2 | No (unblocks remote-agent sagas) |
-| 5 | §4 SQLite-first deletes → sagas | §4 three-deletes-compromise | ~600 LOC | 3 (one per delete) | No |
-| 6 | F2, F3 — full host reducer per spec | §2 remainder, §3 renderer-registration-as-saga-step | ~1250 LOC | 4 (per F-spec §9) | Yes (drag UX unblocked) |
-| 7 | E.7 — integration tests | §1 (E.7) | ~600 LOC | 1 | No |
+| 1 | F1 — host reducer minimum | §2 (partial), §3 host-pool-promote, §5 (host pipe) | ~850 LOC | **2** (skeleton+pending merged; drag separate) | No (backend-only) |
+| 2 | E.6 — renderer multi-source + saga buffering | §1 (E.6), §5 cross-pipe order/version | ~400 LOC | **1** | No (until F1 lights it up) |
+| 3 | E.4 — layout reducer migration (Option A) | §1 (E.4), §4 `handle_move_tab` tolerance | ~700 LOC | **2** (Option A; strict-mode flip rides separately) | No |
+| 4 | §3 saga durability — durable saga log | §3 saga-state-durability | ~1000 LOC | **1-2** (per spec) | No (unblocks remote-agent sagas) |
+| 5 | §4 SQLite-first deletes → sagas | §4 three-deletes-compromise | ~600 LOC | **2** (Block+Tab merged; Workspace separate) | No |
+| 6 | F2, F3 — full host reducer per spec | §2 remainder, §3 renderer-registration-as-saga-step | ~1250 LOC | **2** (F.5 + F.6; F.4 folds into tear-off spec) | Yes (drag UX unblocked) |
+| 7 | E.7 — integration tests | §1 (E.7) | ~600 LOC | **1** | No |
 
-**Rough total: ~5400 LOC across 16-18 PRs.** Multi-week to multi-month depending on cadence.
+**Rough total: ~5400 LOC across ~11 PRs.** Multi-week to multi-month depending on cadence.
+
+**Specs to write before code:**
+- ✅ `SPEC_PHASE_F_HOST_REDUCER_2026-05-01.md` — Phase F (already written, covers steps 1 + 6).
+- 🆕 `SPEC_PHASE_E4_LAYOUT_REDUCER_2026-05-01.md` — granularity decision (step 3).
+- 🆕 `SPEC_SAGA_DURABILITY_2026-05-01.md` — durable saga log (step 4).
+- ❌ Steps 2, 5, 7 — ship from PR-description-grade design notes; no separate spec.
 
 After all 7: Phase G (event-sourced, drop SQLite) remains the long-term ceiling — separate planning effort.
 
