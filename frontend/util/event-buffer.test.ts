@@ -117,6 +117,44 @@ describe("PerSourceTracker — version checking", () => {
         expect(setters.setLatest).toHaveBeenCalledTimes(1);
         expect(tracker.stats().lastVersion).toBe(5);
     });
+
+    it("resets state when source restarts (codex P1: version=1 after lastVersion>0)", () => {
+        // Regression: srv/launcher reset event_version=0 on process
+        // restart. After restart, version=1 events were being dropped
+        // as stale (1 <= lastVersion=42), permanently black-holing
+        // the stream until page reload.
+        tracker.deliver(evt("a", 40));
+        tracker.deliver(evt("b", 41));
+        tracker.deliver(evt("c", 42));
+        expect(tracker.stats().lastVersion).toBe(42);
+
+        // Source restart — first post-restart event is version=1.
+        tracker.deliver(evt("post_restart_first", 1));
+        expect(setters.setLatest).toHaveBeenCalledTimes(4);
+        expect(tracker.stats().lastVersion).toBe(1);
+        expect(tracker.stats().droppedCount).toBe(0); // reset by restart
+
+        // Subsequent events after restart should flow normally.
+        tracker.deliver(evt("post_restart_second", 2));
+        expect(setters.setLatest).toHaveBeenCalledTimes(5);
+        expect(tracker.stats().lastVersion).toBe(2);
+    });
+
+    it("drops stale saga buffer on source restart", () => {
+        // If we were buffering a saga when the source restarted, the
+        // buffer is part of the dead source's history. Drop it.
+        tracker.deliver(evt("a", 40));
+        tracker.deliver(evt("saga_started", 41, { saga_id: 7 }));
+        tracker.deliver(evt("step", 42));
+        expect(tracker.stats().inSaga).toBe(7);
+        expect(tracker.stats().bufferedCount).toBe(2);
+
+        // Source restart.
+        tracker.deliver(evt("fresh_event", 1));
+        expect(tracker.stats().inSaga).toBeNull();
+        expect(tracker.stats().bufferedCount).toBe(0);
+        expect(tracker.stats().lastVersion).toBe(1);
+    });
 });
 
 describe("PerSourceTracker — saga buffering", () => {
@@ -181,6 +219,21 @@ describe("PerSourceTracker — saga buffering", () => {
         tracker.deliver(evt("saga_completed", 1, { saga_id: 99 })); // no matching start
         expect(seen).toEqual(["saga_completed"]);
         expect(onTerminal).not.toHaveBeenCalled();
+    });
+
+    it("dispatches mismatched terminal directly even when another saga is in flight (reagent P1)", () => {
+        // Regression: terminal for saga 88 must NOT be buried inside
+        // saga 99's buffer when 99 is the in-flight saga.
+        const seen: string[] = [];
+        tracker.subscribe((e) => seen.push(`${e.event}@${e.saga_id ?? "?"}`));
+        tracker.deliver(evt("saga_started", 1, { saga_id: 99 }));
+        // saga 88 terminal arrives mid-99 — must dispatch immediately,
+        // not get queued into 99's buffer.
+        tracker.deliver(evt("saga_completed", 2, { saga_id: 88 }));
+        expect(seen).toEqual(["saga_completed@88"]);
+        // 99's buffer still in flight, holding saga_started.
+        expect(tracker.stats().inSaga).toBe(99);
+        expect(tracker.stats().bufferedCount).toBe(1);
     });
 
     it("emergency-flushes on overflow", () => {

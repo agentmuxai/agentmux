@@ -201,6 +201,36 @@ export class PerSourceTracker<E extends VersionedEvent = VersionedEvent> {
             return;
         }
 
+        // Source-restart detection. Both srv and launcher reducers
+        // reset `event_version` to 0 on process restart (see
+        // `agentmux-srv/src/state.rs::default` and
+        // `agentmux-launcher/src/state.rs::default`); after a restart
+        // the next emitted event is `version=1`. Without resetting
+        // here, every post-restart event would fail the stale gate
+        // (`version <= lastVersion`) and be dropped permanently until
+        // a full page reload. (codex P1, PR #630.)
+        //
+        // Heuristic: `version === 1 && lastVersion > 0`. Version=1 is
+        // unambiguous — only the source's first event after start
+        // bumps the counter from 0 to 1, and we'd only see it now if
+        // we'd already processed events from a prior incarnation.
+        if (evt.version === 1 && this.lastVersion > 0) {
+            console.warn(
+                `[${this.source}-events] source restart detected (lastVersion=${this.lastVersion}, new event v=1); resetting tracker state`,
+            );
+            this.lastVersion = 0;
+            this.droppedCount = 0;
+            // Discard any in-flight saga buffer — the saga it was
+            // tracking is part of the dead source's history; the
+            // restart will re-emit fresh state via Snapshot+Resync.
+            if (this.sagaBuffer) {
+                console.warn(
+                    `[${this.source}-events] dropping stale saga buffer for saga ${this.sagaBuffer.saga_id} during restart`,
+                );
+                this.sagaBuffer = null;
+            }
+        }
+
         // Stale: lower-or-equal version than last seen. Drop.
         if (this.lastVersion > 0 && evt.version <= this.lastVersion) {
             console.warn(
@@ -259,8 +289,12 @@ export class PerSourceTracker<E extends VersionedEvent = VersionedEvent> {
                 return;
             }
             // Terminal without matching start (resync mid-saga, or
-            // server-side bug). Pass through — better to deliver than
-            // silently swallow.
+            // server-side bug). Dispatch directly — bypass
+            // routeIdleOrBuffered so the terminal isn't buried inside
+            // an unrelated in-flight saga's buffer waiting on its own
+            // terminal that may never come. (reagent P1, PR #630.)
+            this.dispatch(evt);
+            return;
         }
 
         this.routeIdleOrBuffered(evt);
