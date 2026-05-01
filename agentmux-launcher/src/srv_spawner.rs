@@ -45,7 +45,13 @@ pub struct SrvSpawnResult {
     pub web_endpoint: String,
     pub instance_id: String,
     pub auth_key: String,
-    pub started_at: String, // RFC3339
+    /// RFC3339 timestamp captured when ESTART arrived. Carried on the
+    /// result for `--diag` / debug observability; not currently
+    /// propagated into env. F.7 cleanup audit: keep with allow + this
+    /// note rather than delete — a future `--diag srv` printer is the
+    /// natural reader.
+    #[allow(dead_code)]
+    pub started_at: String,
 }
 
 /// Errors during srv spawn — granular enough that the launcher can

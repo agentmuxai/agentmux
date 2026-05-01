@@ -309,7 +309,7 @@ async fn handle_connection(stream: NamedPipeServer, ctx: Arc<ServerCtx>) {
         // recover by sending Register next), Goodbye-before-Register
         // is fatal (can't recover from a closed-by-them connection).
         // (reagent P1 + codex P1 PR #574 round-1.)
-        if let Some(reply) = enforce_register_first(&cmd, &registered_kind, &ctx).await {
+        if let Some(reply) = enforce_register_first(&cmd, &registered_kind).await {
             let close = matches!(&reply, Event::Error { fatal: true, .. });
             let _ = send_event(&writer, reply).await;
             if close {
@@ -562,8 +562,10 @@ fn launcher_start_ms() -> u64 {
 async fn enforce_register_first(
     cmd: &Command,
     registered_kind: &Option<ClientKind>,
-    ctx: &Arc<ServerCtx>,
 ) -> Option<Event> {
+    // F.7 cleanup audit: prior signature accepted `ctx: &Arc<ServerCtx>`
+    // for symmetry with neighboring helpers, but no body site read it.
+    // Dropped to silence the unused-variable warning without an allow.
     if registered_kind.is_some() {
         return None;
     }
