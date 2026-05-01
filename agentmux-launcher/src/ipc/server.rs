@@ -32,6 +32,7 @@ use tokio::net::windows::named_pipe::{NamedPipeServer, ServerOptions};
 
 use agentmux_common::ipc::{ClientKind, Command, ErrorCode, Event};
 
+use crate::host_pipe::HostPipe;
 use crate::reducer;
 use crate::state::State;
 
@@ -68,6 +69,15 @@ pub struct ServerCtx {
     /// dispatch; the disk writer is a separate task spawned in
     /// main.rs that subscribes to the broadcast bus.
     pub event_log: std::sync::Arc<crate::event_log::EventLog>,
+    /// CPD-2 — launcher → host pipe wrapper. The per-connection
+    /// handler hands the host's writer half to `HostPipe::set_writer`
+    /// once the connecting client registers as `ClientKind::Host`,
+    /// and clears it on disconnect. The host's per-connection event
+    /// fanout task routes events through `HostPipe::send_event`
+    /// instead of `send_event` direct (so frames carry the
+    /// `HostFrame` envelope and traverse the pending-buffer path
+    /// when the host reconnects).
+    pub host_pipe: std::sync::Arc<HostPipe>,
 }
 
 /// Bind the first named-pipe instance synchronously.
@@ -192,7 +202,17 @@ pub fn run_ipc_server(
 #[cfg(target_os = "windows")]
 async fn handle_connection(stream: NamedPipeServer, ctx: Arc<ServerCtx>) {
     let (read_half, write_half) = tokio::io::split(stream);
-    let writer = Arc::new(Mutex::new(write_half));
+    // CPD-2 — wrap the writer in the HostPipe-compatible
+    // `Arc<Mutex<Box<dyn AsyncWrite + Unpin + Send>>>` shape so the
+    // SAME writer is reachable by:
+    //   1. The per-connection main loop (connection-private error
+    //      replies via `send_event_shared`).
+    //   2. The per-connection fanout task (broadcast-bus events).
+    //   3. (For the host connection only) `HostPipe::send_command` /
+    //      `HostPipe::send_event` after the host registers.
+    // The Mutex serializes writes, so frames can't interleave.
+    let boxed: crate::host_pipe::BoxedWriter = Box::new(write_half);
+    let writer: crate::host_pipe::SharedWriter = crate::host_pipe::make_shared_writer(boxed);
     let reader = BufReader::new(read_half);
     let mut lines = reader.lines();
 
@@ -212,6 +232,24 @@ async fn handle_connection(stream: NamedPipeServer, ctx: Arc<ServerCtx>) {
     // before any commands are processed so a registered client can
     // start receiving events from concurrent activity immediately.
     // Aborted when the connection's read loop returns (below).
+    //
+    // CPD-2 design (round 4): events are written DIRECTLY to this
+    // connection's per-connection writer — NOT routed through
+    // `HostPipe`. HostPipe exists for *commands* (saga-issued
+    // launcher → host actions, which CPD-3 will wire). Events stay
+    // on the existing direct-write path because:
+    //   1. Wire format compat — host's parser expects raw `Event`
+    //      JSON, not `HostFrame::Event` envelopes (codex P1 round 3).
+    //      CPD-3 will update host's parser AND swap the fanout to
+    //      HostFrame envelopes together.
+    //   2. No need for HostPipe's pending-buffer / 30s-timeout
+    //      semantics on events: events are broadcast-driven, every
+    //      subscriber gets them, and stale events post-reconnect
+    //      would be wrong anyway.
+    //   3. Each per-connection fanout writes to its OWN writer —
+    //      no global-writer race / stale-fanout issue (which is
+    //      what `host_session_id` would have guarded against, but
+    //      isn't needed when fanouts are connection-local).
     let fanout_handle = {
         let writer = Arc::clone(&writer);
         let ctx = Arc::clone(&ctx);
@@ -227,7 +265,7 @@ async fn handle_connection(stream: NamedPipeServer, ctx: Arc<ServerCtx>) {
                         // iteration. Swallow + continue to drain
                         // any remaining buffered events so we don't
                         // accidentally hold onto channel slots.
-                        if send_event(&writer, event).await.is_err() {
+                        if send_event_shared(&writer, event).await.is_err() {
                             return;
                         }
                     }
@@ -256,6 +294,13 @@ async fn handle_connection(stream: NamedPipeServer, ctx: Arc<ServerCtx>) {
                     "[ipc] connection conn_id={} closed (kind={:?}, pid={:?})",
                     conn_id, registered_kind, registered_pid
                 ));
+                // CPD-2 — clear HostPipe writer if this was the host
+                // connection so subsequent saga commands buffer
+                // (up to 64) until the host reconnects (or fail at
+                // the 30s timeout). Idempotent if not the host.
+                if matches!(registered_kind, Some(ClientKind::Host)) {
+                    ctx.host_pipe.clear_writer().await;
+                }
                 // Phase E.1b — synthetic Goodbye on ungraceful
                 // disconnect so the reducer marks the PID Exited;
                 // otherwise reconnect-from-same-PID hits
@@ -269,6 +314,9 @@ async fn handle_connection(stream: NamedPipeServer, ctx: Arc<ServerCtx>) {
                     "[ipc] read error conn_id={}: {}",
                     conn_id, e
                 ));
+                if matches!(registered_kind, Some(ClientKind::Host)) {
+                    ctx.host_pipe.clear_writer().await;
+                }
                 dispatch_synthetic_goodbye(&ctx, conn_id, registered_pid).await;
                 fanout_handle.abort();
                 return;
@@ -289,7 +337,7 @@ async fn handle_connection(stream: NamedPipeServer, ctx: Arc<ServerCtx>) {
                 // gaps and treat them as missed events. Use 0 as a
                 // sentinel for "not part of the ordered stream."
                 // (codex P2 #610.)
-                let _ = send_event(
+                let _ = send_event_shared(
                     &writer,
                     Event::Error {
                         code: ErrorCode::InvalidCommand,
@@ -311,7 +359,7 @@ async fn handle_connection(stream: NamedPipeServer, ctx: Arc<ServerCtx>) {
         // (reagent P1 + codex P1 PR #574 round-1.)
         if let Some(reply) = enforce_register_first(&cmd, &registered_kind).await {
             let close = matches!(&reply, Event::Error { fatal: true, .. });
-            let _ = send_event(&writer, reply).await;
+            let _ = send_event_shared(&writer, reply).await;
             if close {
                 fanout_handle.abort();
                 return;
@@ -323,7 +371,7 @@ async fn handle_connection(stream: NamedPipeServer, ctx: Arc<ServerCtx>) {
                 // Phase E.1b — connection-private error; same
                 // version-sentinel rationale as parse-error path
                 // above. (codex P2 #610.)
-                let _ = send_event(
+                let _ = send_event_shared(
                     &writer,
                     Event::Error {
                         code: ErrorCode::AlreadyRegistered,
@@ -381,7 +429,7 @@ async fn handle_connection(stream: NamedPipeServer, ctx: Arc<ServerCtx>) {
                     conn_id, since
                 ));
             }
-            let _ = send_event(
+            let _ = send_event_shared(
                 &writer,
                 Event::EventList {
                     events: replay,
@@ -422,6 +470,31 @@ async fn handle_connection(stream: NamedPipeServer, ctx: Arc<ServerCtx>) {
             if !rejected {
                 registered_kind = Some(kind);
                 registered_pid = Some(pid);
+                // CPD-2 — host registration: install this connection's
+                // writer into the launcher's HostPipe wrapper and flip
+                // the fanout task to route through it. Subsequent
+                // events for this connection traverse
+                // `HostPipe::send_event` (HostFrame::Event envelope +
+                // pending-buffer-on-disconnect semantics) instead of
+                // the legacy direct write. Drains any frames buffered
+                // since the prior host disconnect (FIFO).
+                if kind == ClientKind::Host {
+                    // Install the host's writer half into HostPipe so
+                    // saga-issued commands (CPD-3+) can be transmitted
+                    // and so any pending Command frames buffered during
+                    // a prior host disconnect drain in FIFO order.
+                    // Returns a session_id we don't need today (events
+                    // bypass HostPipe — see fanout task above), but the
+                    // counter is in place for future code that does.
+                    let session = ctx
+                        .host_pipe
+                        .set_writer(std::sync::Arc::clone(&writer))
+                        .await;
+                    crate::log(&format!(
+                        "[ipc] conn_id={} host registered (session={}) — HostPipe writer installed",
+                        conn_id, session
+                    ));
+                }
             }
         }
 
@@ -493,6 +566,12 @@ async fn handle_connection(stream: NamedPipeServer, ctx: Arc<ServerCtx>) {
                 "[ipc] goodbye from conn_id={} kind={:?} pid={:?}",
                 conn_id, registered_kind, registered_pid
             ));
+            // CPD-2 — clear HostPipe writer on graceful goodbye too
+            // so a host that re-registers via a fresh connection can
+            // re-install cleanly. Idempotent if not host.
+            if matches!(registered_kind, Some(ClientKind::Host)) {
+                ctx.host_pipe.clear_writer().await;
+            }
             fanout_handle.abort();
             return;
         }
@@ -813,9 +892,20 @@ fn patch_launcher_identity(event: Event, ctx: &Arc<ServerCtx>) -> Event {
 /// Serialize an Event as one JSON line + `\n` and write atomically
 /// (under the per-connection writer mutex). Returns Err if the
 /// connection died mid-write.
+///
+/// CPD-2 — generalized from `Arc<Mutex<WriteHalf<NamedPipeServer>>>`
+/// to `crate::host_pipe::SharedWriter` so the launcher's IPC server
+/// + the host_pipe wrapper share one writer-handle representation.
+/// Wire shape is unchanged: a non-host client sees a raw `Event` JSON
+/// line (legacy schema), a host client sees a `HostFrame::Event`
+/// envelope only when the frame goes through `HostPipe::send_event`.
+/// Connection-private error replies in this file still emit raw
+/// `Event` JSON to preserve backwards compat with existing host
+/// versions that haven't adopted the envelope yet — CPD-1 lands the
+/// host-side schema migration.
 #[cfg(target_os = "windows")]
-async fn send_event(
-    writer: &Arc<Mutex<tokio::io::WriteHalf<NamedPipeServer>>>,
+async fn send_event_shared(
+    writer: &crate::host_pipe::SharedWriter,
     event: Event,
 ) -> std::io::Result<()> {
     let mut buf = serde_json::to_vec(&event).map_err(|e| {
