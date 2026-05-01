@@ -331,9 +331,8 @@ impl HostPipe {
     /// `PENDING_BUFFER_CAP`; on overflow or 30s timeout, drops + emits
     /// `Event::SagaFailed` for the dropped Command's saga.
     ///
-    /// CPD-2 wires this method but does NOT call it from the saga
-    /// coordinator yet — that's CPD-3.
-    #[allow(dead_code)] // CPD-3 wires this into the saga coordinator
+    /// CPD-3 — called from the saga coordinator's `apply_action` when
+    /// dispatching `IssueCmd::Host` actions.
     pub async fn send_command(&self, cmd: &Command) -> Result<(), HostPipeError> {
         let saga_id = saga_id_of(cmd);
         let frame = HostFrame::Command(cmd.clone());
@@ -623,11 +622,18 @@ impl HostPipe {
 /// machinery becomes saga-correctness-relevant. Keeping the
 /// indirection here means CPD-3's diff against the saga coordinator
 /// stays narrow.
-fn saga_id_of(_cmd: &Command) -> Option<u64> {
-    // CPD-1 will replace the body of this match with per-variant
-    // returns of `Some(*saga_id)` for SpawnPoolWindow / ReapPanes /
-    // DrainPoolIfLast etc. once those variants gain the field.
-    None
+fn saga_id_of(cmd: &Command) -> Option<u64> {
+    // CPD-1 added saga_id fields to host-bound Commands; CPD-3 made
+    // send_command live from the saga coordinator. Returning the real
+    // id here means HostPipe's drop-on-overflow + 30s-timeout-flush
+    // paths can emit `Event::SagaFailed` for the right saga, instead
+    // of orphaning the buffered command. (reagent P1 PR #644 round 5.)
+    match cmd {
+        Command::SpawnPoolWindow { saga_id } => Some(*saga_id),
+        Command::ReapPanes { saga_id, .. } => Some(*saga_id),
+        Command::DrainPoolIfLast { saga_id, .. } => Some(*saga_id),
+        _ => None,
+    }
 }
 
 /// Serialize a `HostFrame` as newline-delimited JSON and write it

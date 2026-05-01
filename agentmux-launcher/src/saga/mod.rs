@@ -93,9 +93,10 @@ use log::SagaOutcome;
 /// reducer" (in-process); `Host` and `Srv` mean "forward to the
 /// peer's pipe."
 ///
-/// **F.5 status:** `Host` is wired only as a log target — the
-/// launcher→host command pipe doesn't exist yet. Follow-up PRs
-/// replace the log with the actual transport.
+/// **CPD-3 status:** `Host` is now LIVE — the saga coordinator's
+/// `apply_action` dispatches `IssueCmd::Host` actions through
+/// `HostPipe::send_command()` over the launcher → host wire.
+/// `LauncherSelf` and `Srv` remain reserved for class-D/E sagas.
 ///
 /// F.7 cleanup audit: only `Host` is constructed today (F.5/F.6 saga
 /// IssueCmds). `LauncherSelf` and `Srv` are framework slots reserved
