@@ -309,6 +309,35 @@ async fn main() {
         tracing::error!("Failed to open file store: {}", e);
         std::process::exit(1);
     }));
+    // Saga durability — see SPEC_SAGA_DURABILITY_2026-05-01.md.
+    // Backed by its own SQLite file (`sagas.db`) so saga writes
+    // commit independently of the wstore connection. Failure here
+    // is fatal: without the log, a srv crash mid-saga leaves
+    // unrecoverable state divergence.
+    let saga_log = Arc::new(
+        crate::sagas::log::SagaLog::open(&db_dir.join("sagas.db")).unwrap_or_else(|e| {
+            tracing::error!("Failed to open saga log: {}", e);
+            std::process::exit(1);
+        }),
+    );
+    // Seed `saga_id_alloc` from the highest persisted saga_id so
+    // restarts don't reuse IDs from prior runs (reagent P1 + codex
+    // P1 PR #631). With this seed + the plain INSERT (no OR REPLACE)
+    // in `start_saga`, ID collisions become impossible by
+    // construction.
+    let saga_id_seed = saga_log.max_saga_id().unwrap_or_else(|e| {
+        tracing::warn!(
+            "[saga] failed to read MAX(saga_id) for allocator seed: {} — defaulting to 0; ID collisions on restart possible until next successful query",
+            e
+        );
+        0
+    });
+    if saga_id_seed > 0 {
+        tracing::info!(
+            "[saga] seeded saga_id_alloc from durable log: next saga_id = {}",
+            saga_id_seed + 1
+        );
+    }
 
     // Bootstrap data (creates Client/Window/Workspace/Tab on first launch)
     let first_launch = wcore::ensure_initial_data(&wstore).unwrap_or_else(|e| {
@@ -553,10 +582,12 @@ async fn main() {
         // subscriber writes back to SQLite asynchronously.
         srv_state: std::sync::Arc::clone(&srv_state),
         srv_events_tx: srv_events_tx.clone(),
-        // Phase E.5.5 — saga-id allocator. Starts at 0; every
-        // `sagas::run_saga` invocation `fetch_add(1)`s. First
-        // saga gets id 1.
-        saga_id_alloc: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0)),
+        // Phase E.5.5 — saga-id allocator. Seeded from
+        // `SagaLog::max_saga_id()` so restarts don't collide with
+        // prior runs' IDs. First new saga after restart gets
+        // `seed + 1`; on a fresh DB seed=0, first saga gets id 1.
+        saga_id_alloc: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(saga_id_seed)),
+        saga_log: Arc::clone(&saga_log),
     };
 
     // Phase E.1b — srv pipe IPC server. Bound when launcher passes

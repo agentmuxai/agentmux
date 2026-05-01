@@ -29,7 +29,9 @@
 use agentmux_common::ipc::Command;
 use serde_json::{json, Value};
 
-use super::{alloc_saga_id, emit_saga_started, emit_terminal, run_saga, SagaCtx};
+use super::{
+    alloc_saga_id, classify_run_saga_result, emit_saga_started, emit_terminal, run_saga, SagaCtx,
+};
 use crate::server::AppState;
 
 /// Run the RestoreTornOffTab saga. On success, returns
@@ -86,22 +88,28 @@ pub async fn run(
     let dst_index = insert_index.unwrap_or(u32::MAX);
 
     let saga_id = alloc_saga_id(state);
-    emit_saga_started(state, saga_id, "restore_torn_off_tab").await;
-    let ctx = SagaCtx { state, saga_id };
+    if let Err(e) = emit_saga_started(
+        state,
+        saga_id,
+        "restore_torn_off_tab",
+        serde_json::json!({
+            "tab_id": &tab_id,
+            "source_workspace_id": &source_workspace_id,
+            "dest_workspace_id": &dest_workspace_id,
+            "insert_index": dst_index,
+        }),
+    )
+    .await
+    {
+        return Err(e);
+    }
+    let ctx = SagaCtx::new(state, saga_id);
     let result = run_saga(
         "restore_torn_off_tab",
         run_inner(ctx, tab_id, source_workspace_id, dest_workspace_id, dst_index),
     )
     .await;
-    emit_terminal(
-        state,
-        saga_id,
-        match &result {
-            Ok(_) => Ok(()),
-            Err(r) => Err(r.as_str()),
-        },
-    )
-    .await;
+    emit_terminal(state, saga_id, classify_run_saga_result(&result)).await;
     result
 }
 
