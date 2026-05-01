@@ -89,6 +89,20 @@ pub struct SagaCtx<'a> {
     /// futures may parallelise dispatches in the future (today they
     /// don't, but the cost is one cache line).
     pub(crate) step_index: AtomicU32,
+    /// (codex P1 PR #636 round 4.) Stack of forward-step indices that
+    /// have completed successfully and are eligible to be undone by
+    /// the next `compensate` call. `dispatch` pushes on success;
+    /// `compensate` pops to determine which original forward step
+    /// it's reversing, and marks that step `compensated` in the log.
+    /// Without this, in-process compensation only writes new
+    /// `compensated` rows at fresh indices; the original `succeeded`
+    /// rows stay `succeeded`, so resume-on-restart re-replays them
+    /// and either no-ops or worse double-applies the inverse.
+    ///
+    /// `Mutex<Vec>` (rather than a lock-free counter) because saga
+    /// inner futures could in theory parallelize compensations; in
+    /// practice they're serial today, so contention is zero.
+    pub(crate) forward_step_stack: tokio::sync::Mutex<Vec<u32>>,
 }
 
 impl<'a> SagaCtx<'a> {
@@ -99,6 +113,7 @@ impl<'a> SagaCtx<'a> {
             state,
             saga_id,
             step_index: AtomicU32::new(0),
+            forward_step_stack: tokio::sync::Mutex::new(Vec::new()),
         }
     }
 
@@ -196,6 +211,12 @@ impl<'a> SagaCtx<'a> {
                 e
             );
         }
+        // (codex P1 PR #636 round 4.) Track this idx as a successful
+        // forward step eligible for compensation. The next
+        // `compensate` call will pop this and mark the original step
+        // `compensated`, preventing resume-on-restart from re-replaying
+        // an inverse that already ran in-process.
+        self.forward_step_stack.lock().await.push(idx);
         crate::server::service::publish_events(self.state, &events);
         Ok(events)
     }
@@ -268,6 +289,26 @@ impl<'a> SagaCtx<'a> {
                 "[saga] compensate_step log write failed: {}",
                 e
             );
+        }
+        // (codex P1 PR #636 round 4.) Pop the most-recent successful
+        // forward step from the stack and mark its original log row
+        // as compensated. This prevents resume-on-restart from
+        // double-replaying the inverse of a step that already had
+        // in-process compensation. Idempotent — UPDATE only matches
+        // rows still in `succeeded` state.
+        if let Some(forward_idx) = self.forward_step_stack.lock().await.pop() {
+            if let Err(e) = self
+                .state
+                .saga_log
+                .mark_step_compensated(self.saga_id, forward_idx)
+            {
+                tracing::warn!(
+                    saga_id = self.saga_id,
+                    forward_step_index = forward_idx,
+                    "[saga] mark_step_compensated (live) log write failed: {} — restart may re-replay this inverse",
+                    e
+                );
+            }
         }
         crate::server::service::publish_events(self.state, &events);
     }
