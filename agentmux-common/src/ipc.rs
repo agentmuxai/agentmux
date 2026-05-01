@@ -245,6 +245,26 @@ pub enum Command {
     /// reducer-driven persistence is E.2c.
     DeleteWorkspace {
         workspace_id: String,
+        /// Step 5 PR 2 — provenance marker for the `delete_workspace`
+        /// saga. `true` means the dispatch is being driven by the
+        /// saga coordinator (per-tab DeleteTab dispatches already
+        /// happened in saga steps; this final cascade is just the
+        /// workspace row + window mappings). `false` for legacy /
+        /// internal compensation paths (e.g. `tear_off_tab` /
+        /// `tear_off_block` rolling back a freshly-created empty
+        /// workspace) which keep the existing cascade behaviour.
+        ///
+        /// The reducer's `handle_delete_workspace` cascades regardless
+        /// of `force` — the reducer is a pure mutator and the cascade
+        /// must always execute to keep state consistent. The flag is
+        /// recorded in the saga log purely for provenance, mirroring
+        /// the saga-as-narrator pattern documented in
+        /// `docs/retro/phase-fg-roadmap-2026-05-01.md`.
+        ///
+        /// Defaults to `false` via `#[serde(default)]` so all existing
+        /// producers (RPC, internal compensation) keep working.
+        #[serde(default)]
+        force: bool,
     },
     /// Phase E.2b — create a tab inside an existing workspace. The
     /// reducer assigns the `tab_id` (UUID), appends to the workspace's

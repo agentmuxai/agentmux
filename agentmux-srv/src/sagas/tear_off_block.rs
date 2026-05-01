@@ -131,8 +131,10 @@ async fn run_inner(
     {
         Ok(evs) => evs,
         Err(reason) => {
+            // `force: false` — internal compensation (Step 5 PR 2).
             ctx.compensate(Command::DeleteWorkspace {
                 workspace_id: new_workspace_id.clone(),
+                force: false,
             })
             .await;
             return Err(format!("TearOffBlock step 2 (CreateTab): {}", reason));
@@ -159,8 +161,10 @@ async fn run_inner(
         .await
     {
         // Compensate: delete the workspace (cascades the empty tab).
+        // `force: false` — internal compensation (Step 5 PR 2).
         ctx.compensate(Command::DeleteWorkspace {
             workspace_id: new_workspace_id.clone(),
+            force: false,
         })
         .await;
         return Err(format!("TearOffBlock step 3 (MoveBlock): {}", reason));

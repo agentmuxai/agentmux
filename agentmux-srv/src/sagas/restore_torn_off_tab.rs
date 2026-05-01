@@ -146,6 +146,11 @@ async fn run_inner(
         match ctx
             .dispatch(Command::DeleteWorkspace {
                 workspace_id: source_workspace_id.clone(),
+                // `force: false` — sub-step within restore_torn_off_tab,
+                // not the dedicated `delete_workspace` saga (Step 5 PR 2).
+                // The workspace is already empty here so cascade-vs-saga
+                // distinction is moot; the flag is provenance-only.
+                force: false,
             })
             .await
         {

@@ -361,6 +361,10 @@ pub fn derive_inverse_command(forward: &Command, step: &UnresolvedStep) -> Optio
             let new_id = extract_workspace_id_from_output(step)?;
             Some(Command::DeleteWorkspace {
                 workspace_id: new_id,
+                // `force: false` — recovery-time inverse of a
+                // CreateWorkspace, not driven by the `delete_workspace`
+                // saga itself (Step 5 PR 2).
+                force: false,
             })
         }
         Command::CreateTab { workspace_id, .. } => {
@@ -483,7 +487,10 @@ mod tests {
         let step = dummy_step("succeeded", "{}", Some(&output));
         let inv = derive_inverse_command(&cmd, &step).expect("should derive");
         match inv {
-            Command::DeleteWorkspace { workspace_id } => assert_eq!(workspace_id, "ws-1"),
+            Command::DeleteWorkspace { workspace_id, force } => {
+                assert_eq!(workspace_id, "ws-1");
+                assert!(!force, "recovery-time inverse should not be saga-flagged");
+            }
             other => panic!("expected DeleteWorkspace, got {:?}", other),
         }
     }
@@ -624,6 +631,7 @@ mod tests {
         // requires reconstruction we don't have). Operator review path.
         let cmd = Command::DeleteWorkspace {
             workspace_id: "ws-1".into(),
+            force: false,
         };
         let step = dummy_step("succeeded", "{}", None);
         assert!(derive_inverse_command(&cmd, &step).is_none());

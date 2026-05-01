@@ -152,8 +152,12 @@ async fn run_inner(
         .await
     {
         // Compensate: delete the empty workspace we just created.
+        // `force: false` — internal compensation, not a saga-driven
+        // cascade. (Step 5 PR 2 added the `force` flag for
+        // `delete_workspace` saga provenance.)
         ctx.compensate(Command::DeleteWorkspace {
             workspace_id: new_workspace_id.clone(),
+            force: false,
         })
         .await;
         return Err(format!("TearOffTab step 2 (MoveTab): {}", reason));
