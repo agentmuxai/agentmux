@@ -2,39 +2,31 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // Phase B.7.3.1 — renderer-side subscriber for launcher typed events.
+// Phase E.6 — multi-source dispatcher with version tracking + saga buffering.
 //
 // Mirrors `agentmux_common::ipc::Event` on the wire. The host's CEF
 // JS bridge (`agentmux-cef/src/launcher_event_bridge.rs`) calls
 // `window.__agentmux_launcher_event(<json>)` once per top-level
-// renderer per launcher event. We feed those into a SolidJS signal
-// so block-level subscribers can `createEffect()` on them.
+// renderer per launcher event.
 //
 // Phase B.7.3.3 — typed events are the SOLE path for InstancePanel
 // state. The bespoke `window-instances-changed` channel and its 4
-// sync emit sites in the host are gone. `task dev` mode (no
-// launcher in the loop) currently leaves the InstancePanel atoms
-// at their seeded values from the init RPC; live updates require
-// the launcher. Phase E folds srv into the same reducer pattern;
-// the no-launcher mode goes away then.
+// sync emit sites in the host are gone.
+//
+// Phase E.6 — dispatcher backed by the shared `PerSourceTracker`.
+// Same version-monotonicity + saga-buffer semantics as the srv pipe.
+// See `util/event-buffer.ts` for the contract.
 //
 // See `docs/specs/SPEC_B_7_3_LAUNCHER_EVENTS_TO_RENDERER_2026_04_29.md`.
 
 import { createSignal } from "solid-js";
+import { PerSourceTracker, type EventCallback, type VersionedEvent, type PerSourceStats } from "./event-buffer";
 
 /**
  * Wire-format launcher event. Matches the JSON serialization of
  * `agentmux_common::ipc::Event` (`#[serde(tag = "event", rename_all = "snake_case")]`).
- *
- * Every event carries `event` (discriminant, snake_case) and
- * `version` (monotonic per launcher run, used for de-dup / echo-loop
- * guard). Other fields are variant-specific; downstream subscribers
- * narrow on `event` and read fields by name.
  */
-export interface LauncherEvent {
-    event: string;
-    version: number;
-    [field: string]: unknown;
-}
+export type LauncherEvent = VersionedEvent;
 
 const [latestEvent, setLatestEvent] = createSignal<LauncherEvent | null>(null);
 const [eventVersion, setEventVersion] = createSignal<number>(0);
@@ -50,10 +42,32 @@ export const launcherEventVersion = eventVersion;
  * True once we've received at least one typed event. Kept as a
  * forward-compat utility — B.7.3.3 retired its only consumer (the
  * bespoke-channel gate in `app-init.ts`), but Phase D's `GetSnapshot`
- * resync flow may need it again to detect "have we resynced?" vs
- * "fresh launcher / first events not seen yet."
+ * resync flow may need it again.
  */
 export const launcherEventsActive = seenAnyEvent;
+
+const tracker = new PerSourceTracker<LauncherEvent>(
+    { source: "launcher" },
+    {
+        setLatest: setLatestEvent,
+        setVersion: setEventVersion,
+        setSawAny: setSeenAnyEvent,
+    },
+);
+
+/**
+ * Per-event subscriber for the launcher pipe. Same contract as
+ * `subscribeSrvEvent`: every event in source order, even during
+ * saga buffer flushes. Returns an unsubscribe function.
+ */
+export function subscribeLauncherEvent(cb: EventCallback<LauncherEvent>): () => void {
+    return tracker.subscribe(cb);
+}
+
+/** Diagnostic snapshot. Used by `--diag launcher` / tests. */
+export function launcherEventStats(): PerSourceStats {
+    return tracker.stats();
+}
 
 let installed = false;
 
@@ -66,16 +80,6 @@ let installed = false;
 export function installLauncherEventBridge(): void {
     if (installed) return;
     installed = true;
-    (window as any).__agentmux_launcher_event = (evt: LauncherEvent) => {
-        if (!evt || typeof evt.version !== "number" || typeof evt.event !== "string") {
-            console.warn("[launcher-events] received malformed event", evt);
-            return;
-        }
-        setLatestEvent(evt);
-        setEventVersion(evt.version);
-        if (!seenAnyEvent()) {
-            setSeenAnyEvent(true);
-        }
-    };
+    (window as any).__agentmux_launcher_event = (evt: LauncherEvent) => tracker.deliver(evt);
     console.log("[launcher-events] bridge installed; window.__agentmux_launcher_event ready");
 }
