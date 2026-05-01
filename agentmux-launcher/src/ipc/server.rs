@@ -583,6 +583,18 @@ async fn enforce_register_first(
         Command::ReportPoolWindowRemoved { .. } => {
             ("ReportPoolWindowRemoved before Register".to_string(), true)
         }
+        // Phase F.5 — host-only report; gate matches the other pool-
+        // mirror reports above.
+        Command::ReportPoolWindowPromoted { .. } => {
+            ("ReportPoolWindowPromoted before Register".to_string(), true)
+        }
+        // Phase F.5 — `SpawnPoolWindow` is a launcher→host direction
+        // command. Sent to the launcher pipe before Register: same
+        // soft-error treatment as the srv-pipe misroutes (the client
+        // can recover by registering or routing correctly).
+        Command::SpawnPoolWindow => {
+            ("SpawnPoolWindow is a launcher→host command; sent to launcher pipe by mistake".to_string(), false)
+        }
         Command::ReportHostCounts { .. } => {
             ("ReportHostCounts before Register".to_string(), true)
         }

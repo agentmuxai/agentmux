@@ -462,6 +462,35 @@ pub enum Command {
         /// returned, in ascending order.
         since: u64,
     },
+    /// Phase F.5 — host explicitly reports that a pool window was
+    /// promoted to a user-visible top-level window (the
+    /// `promote_pool_window` flow in `agentmux-cef`). Sent BETWEEN the
+    /// `ReportPoolWindowRemoved` + `ReportWindowOpened` pair so the
+    /// launcher reducer has unambiguous evidence the transition was a
+    /// promote (vs a destroy followed by an unrelated open) and can
+    /// emit `Event::PoolWindowPromoted`. The pool-respawn saga
+    /// consumes the event to bracket the implicit refill in
+    /// `SagaStarted`/`SagaCompleted`.
+    ///
+    /// Host-only — same gate as `ReportPoolWindowRemoved`.
+    ReportPoolWindowPromoted {
+        label: String,
+    },
+    /// Phase F.5 — launcher-side saga coordinator asks the host to
+    /// spawn a fresh pool window (refill after promote).
+    ///
+    /// **F.5 status: framework-only.** Today the launcher's saga
+    /// coordinator does not yet have a launcher→host command pipe
+    /// (host's `launcher_ipc.rs` is wired to send Commands up but
+    /// not receive them down on the same connection). The
+    /// pool-respawn saga issues this command via `SagaAction::IssueCmd`
+    /// for state-machine completeness, but the dispatch is currently a
+    /// no-op LOG and the saga relies on the host's existing implicit
+    /// `spawn_pool_window` call inside `promote_pool_window` to
+    /// produce the `Event::PoolWindowAdded` it waits for. F.6 (or
+    /// the cross-process command dispatch follow-up) replaces the
+    /// log with a real wire-level send.
+    SpawnPoolWindow,
 }
 
 /// Phase B.9.1 — rectangle in Win32 screen coordinates (pixels).
@@ -575,6 +604,22 @@ pub enum Event {
         version: u64,
     },
     PoolWindowRemoved {
+        label: String,
+        version: u64,
+    },
+    /// Phase F.5 — emitted by the launcher when the host explicitly
+    /// reports a pool window was promoted to a user-visible
+    /// top-level window (i.e. the pool→window handoff inside
+    /// `agentmux-cef::commands::window_pool::promote_pool_window`).
+    /// The pool-respawn saga (launcher-side coordinator) starts on
+    /// this event, brackets the implicit refill in
+    /// `SagaStarted`/`SagaCompleted`, and waits for the matching
+    /// `PoolWindowAdded` for a fresh pool label.
+    ///
+    /// Distinct from `PoolWindowRemoved` because that event also
+    /// fires on pre-promote destroy (closing without promoting), where
+    /// no refill saga should run.
+    PoolWindowPromoted {
         label: String,
         version: u64,
     },
