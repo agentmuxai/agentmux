@@ -135,11 +135,31 @@ async fn recover_saga(state: &AppState, saga: &UnresolvedSaga) -> Result<(), Str
         .filter(|s| s.state == "succeeded")
         .collect();
 
+    // (codex P1 PR #636 round 6.) Pending steps mean a step started
+    // but never reached succeeded/failed/compensated — usually a
+    // crash between dispatch and finish_step, AFTER the reducer +
+    // wstore-apply already committed. We CANNOT safely auto-mark
+    // such a saga as `compensated` because side effects may still
+    // be applied. Surface as `failed_compensation` for operator
+    // review; the saga's pending step + forward state remain in
+    // the log for manual reconciliation.
+    let pending_steps: Vec<&UnresolvedStep> = saga
+        .steps
+        .iter()
+        .filter(|s| s.state == "pending")
+        .collect();
+    if !pending_steps.is_empty() {
+        return Err(format!(
+            "saga has {} pending step(s) (crashed mid-dispatch); cannot auto-recover — operator review needed",
+            pending_steps.len()
+        ));
+    }
+
     if succeeded_steps.is_empty() {
-        // No forward state to undo (saga reached `start_saga` but
-        // either crashed before any step succeeded, or every step
-        // failed). Mark `compensated` to clear it from the
-        // unresolved set.
+        // No forward state to undo AND no pending steps. Saga reached
+        // `start_saga` but either crashed before any step succeeded,
+        // or every step failed cleanly. Mark `compensated` to clear
+        // it from the unresolved set.
         let reason = format!(
             "no succeeded steps to compensate (saga state at restart: {})",
             saga.state

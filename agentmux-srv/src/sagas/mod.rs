@@ -418,17 +418,22 @@ pub async fn emit_terminal(state: &AppState, saga_id: u64, terminal: SagaTermina
             reason: reason.to_string(),
         },
     };
-    // (codex P1 PR #636 round 5.) When the saga author asserts they
-    // fully unwound (Compensated), bulk-mark every remaining
-    // `succeeded` forward step as `compensated`. The per-step stack
-    // pop in SagaCtx::compensate only marks ONE step per call, but
-    // some sagas (e.g. tear_off_block uses a single DeleteWorkspace
-    // to undo both CreateWorkspace and CreateTab) compensate
-    // multiple forward steps via one command. Without the bulk-mark,
-    // those orphaned `succeeded` rows trigger a redundant inverse
-    // dispatch on restart, often flipping a healthy saga into
-    // `failed_compensation`.
-    if matches!(terminal, SagaTerminal::Compensated { .. }) {
+    // (codex P1 PR #636 round 5/6.) Bulk-mark every remaining
+    // `succeeded` forward step as `compensated` when the saga
+    // terminates non-Completed. Round 5 only ran this for
+    // SagaTerminal::Compensated, but `classify_run_saga_result`
+    // maps every Err to Failed (not Compensated), making the bulk
+    // path unreachable for normal compensated-on-error flows.
+    // Round 6 extends to Failed too — the per-step stack pop in
+    // SagaCtx::compensate already marks each compensation 1:1; this
+    // bulk call only catches the residual case where one
+    // compensating command undoes multiple forward steps (e.g.
+    // tear_off_block uses a single DeleteWorkspace to undo both
+    // CreateWorkspace and CreateTab). For Failed sagas where
+    // compensation didn't fully run, recovery picks up the
+    // remaining `succeeded` rows; bulk-marking the ones that DID
+    // get undone is still correct.
+    if !matches!(terminal, SagaTerminal::Completed) {
         if let Err(e) = state.saga_log.mark_all_succeeded_steps_compensated(saga_id) {
             tracing::warn!(
                 saga_id,
