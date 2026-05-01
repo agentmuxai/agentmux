@@ -326,11 +326,27 @@ async fn run_windows(
         }
     };
 
+    // CPD-2 — launcher → host pipe wrapper. Owns the writer half of
+    // the host's IPC connection (installed by the per-connection
+    // handler in `ipc::server` once the host registers) and exposes
+    // `send_command` / `send_event` to the rest of the launcher.
+    // CPD-2 wires the wrapper + refactors event fanout for the host
+    // connection to flow through here. CPD-3 wires this into the
+    // saga coordinator's `apply_action` so `IssueCmd::Host` actions
+    // dispatch live (no longer log-only).
+    let host_pipe = std::sync::Arc::new(host_pipe::HostPipe::new(
+        events_tx.clone(),
+        std::sync::Arc::clone(&state),
+    ));
+
     // Phase E.1a — saga coordinator task. Subscribes to the broadcast
     // bus, drives in-flight sagas. E.1a registry is empty — framework
     // only. E.5 adds the first concrete saga consumer (tear-off).
     // LSD-2 — durable saga log is now installed; every lifecycle
     // transition is persisted.
+    // CPD-3 — install `host_pipe` so saga `IssueCmd::Host` actions
+    // dispatch through the launcher → host wire instead of being
+    // log-only.
     //
     // Subscribe BEFORE spawning so the race window between construction
     // and first `recv()` doesn't drop early events. (reagent P2 PR #609.)
@@ -348,25 +364,13 @@ async fn run_windows(
                 e
             ));
             std::process::exit(1);
-        });
+        })
+        .with_host_pipe(std::sync::Arc::clone(&host_pipe));
     let saga_coord = std::sync::Arc::new(saga_coord_inner);
     let saga_rx = events_tx.subscribe();
     tokio::spawn(saga::run_coordinator(
         std::sync::Arc::clone(&saga_coord),
         saga_rx,
-    ));
-
-    // CPD-2 — launcher → host pipe wrapper. Owns the writer half of
-    // the host's IPC connection (installed by the per-connection
-    // handler in `ipc::server` once the host registers) and exposes
-    // `send_command` / `send_event` to the rest of the launcher.
-    // CPD-2 wires the wrapper + refactors event fanout for the host
-    // connection to flow through here. CPD-3 will swap saga
-    // coordinator's `IssueCmd::Host` log-only branch for a real
-    // `host_pipe.send_command()` call.
-    let host_pipe = std::sync::Arc::new(host_pipe::HostPipe::new(
-        events_tx.clone(),
-        std::sync::Arc::clone(&state),
     ));
 
     let _ipc_handle = ipc::run_ipc_server(
