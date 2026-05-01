@@ -522,18 +522,17 @@ impl AgentMuxHandler {
         // `Event::WindowClosed`, which only fires for non-pane
         // top-level windows; emitting `PanesReaped` for pane labels
         // would be a stray report (no in-flight saga to consume it).
-        // Same gate as `report_window_closed` above.
-        // (codex P2 PR #637 round 3.) Also exclude `window-pool-*` —
-        // unpromoted pool windows are not mirrored as windows
-        // (`report_window_opened` skips them at client.rs:276) and
-        // `ReportWindowClosed` for unknown labels is intentionally
-        // dropped by the launcher reducer. Without this gate, F.6
-        // would broadcast `PanesReaped` (and `PoolDrained|PoolNotLast`
-        // below) for pool drain with no matching `WindowClosed`
-        // trigger, producing stray cleanup-terminal events outside
-        // any saga bracket.
+        // Same gate as `report_window_closed` above. Pool-window
+        // discrimination (unpromoted pool drain vs promoted tear-off
+        // close) is done LAUNCHER-side — see
+        // `handle_report_panes_reaped` in `agentmux-launcher/src/reducer.rs`,
+        // which gates the typed event emission on whether the label
+        // is in `state.windows`. Filtering here on prefix would
+        // wrongly suppress promoted pool windows (which keep the
+        // `window-pool-*` prefix but ARE tracked windows; codex P1
+        // PR #637 round 3).
         if let Some(ref lbl) = label {
-            if !lbl.starts_with("browser-pane-") && !lbl.starts_with("window-pool-") {
+            if !lbl.starts_with("browser-pane-") {
                 crate::launcher_ipc::report_panes_reaped(lbl.clone());
             }
         }
@@ -612,9 +611,10 @@ impl AgentMuxHandler {
         // not have started yet by the time the report is sent, but
         // the decision itself is final.
         if let Some(ref lbl) = label {
-            // Also exclude `window-pool-*` per codex P2 PR #637 round 3
-            // — same rationale as report_panes_reaped above.
-            if !lbl.starts_with("browser-pane-") && !lbl.starts_with("window-pool-") {
+            // Pool-window discrimination is launcher-side (see
+            // report_panes_reaped above); filtering on prefix here
+            // would suppress promoted pool windows.
+            if !lbl.starts_with("browser-pane-") {
                 let was_last = user_browser_count == 0 && !self.is_pane;
                 crate::launcher_ipc::report_pool_drain_decision(lbl.clone(), was_last);
             }

@@ -640,6 +640,21 @@ fn handle_report_pool_window_promoted(state: &mut State, label: String) -> Vec<E
 /// its own `closed_label`, so a stray report for a label that no
 /// in-flight saga is tracking is a harmless broadcast.
 fn handle_report_panes_reaped(state: &mut State, label: String) -> Vec<Event> {
+    // (codex P1 PR #637 round 3.) Discriminate promoted pool windows
+    // (tracked in `state.windows`, F.6 saga ran on their WindowClosed)
+    // from unpromoted pool drains (NOT in `state.windows`, no saga
+    // started). For untracked labels, emit nothing — the typed event
+    // would otherwise appear outside any SagaStarted bracket and
+    // confuse subscribers. Mirrors the silent-drop pattern in
+    // `handle_report_window_closed` for unknown labels.
+    if !state.windows.contains_key(&label) {
+        tracing::debug!(
+            target: "saga.f6",
+            label = %label,
+            "[saga] panes_reaped: dropping report for untracked label (unpromoted pool)"
+        );
+        return Vec::new();
+    }
     let v = state.bump_version();
     vec![Event::PanesReaped { label, version: v }]
 }
@@ -659,6 +674,16 @@ fn handle_report_pool_drain_decision(
     label: String,
     was_last: bool,
 ) -> Vec<Event> {
+    // Same gating as `handle_report_panes_reaped` — drop reports for
+    // untracked labels (unpromoted pool drains).
+    if !state.windows.contains_key(&label) {
+        tracing::debug!(
+            target: "saga.f6",
+            label = %label,
+            "[saga] pool_drain_decision: dropping report for untracked label (unpromoted pool)"
+        );
+        return Vec::new();
+    }
     let v = state.bump_version();
     if was_last {
         vec![Event::PoolDrained { label, version: v }]
