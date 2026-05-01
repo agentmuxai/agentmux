@@ -440,6 +440,28 @@ pub fn report_pool_window_removed(label: String) {
     }
 }
 
+/// Phase F.5 — sync API: tell the launcher that a pool window is
+/// promoting to a user-visible top-level window. Sent BETWEEN
+/// `report_pool_window_removed` and `report_window_opened` so the
+/// launcher's pool-respawn saga (state-machine bracket around the
+/// implicit refill) can correlate the promote event with the
+/// subsequent `PoolWindowAdded` for the freshly-spawned replacement
+/// pool slot.
+///
+/// Same no-op-if-disconnected semantics as the other `report_*`
+/// helpers — `task dev` mode (no launcher in the loop) silently
+/// drops; the host's authoritative state and refill mechanism are
+/// unaffected.
+pub fn report_pool_window_promoted(label: String) {
+    let Some(tx) = COMMAND_TX.get() else {
+        return;
+    };
+    let cmd = Command::ReportPoolWindowPromoted { label };
+    if let Err(e) = tx.send(cmd) {
+        tracing::warn!("[launcher-ipc] report_pool_window_promoted: channel closed ({})", e);
+    }
+}
+
 /// Phase B.4 follow-up — sync API: report the host's current
 /// authoritative counts so the launcher reducer can compare against
 /// its mirror and emit `Event::DriftDetected` on mismatch. Callers
