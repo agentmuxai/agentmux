@@ -105,11 +105,11 @@ pub fn update(state: &mut State, cmd: Command, ctx: &Ctx) -> Vec<Event> {
             }
             handle_report_window_closed(state, label)
         }
-        Command::ReportPoolWindowAdded { label } => {
+        Command::ReportPoolWindowAdded { label, saga_id } => {
             if let Some(err) = enforce_host_only(state, ctx, "ReportPoolWindowAdded") {
                 return vec![err];
             }
-            handle_report_pool_window_added(state, label)
+            handle_report_pool_window_added(state, label, saga_id)
         }
         Command::ReportPoolWindowRemoved { label } => {
             if let Some(err) = enforce_host_only(state, ctx, "ReportPoolWindowRemoved") {
@@ -135,7 +135,7 @@ pub fn update(state: &mut State, cmd: Command, ctx: &Ctx) -> Vec<Event> {
         // error so the client knows the dispatch was wrong (vs silently
         // appearing successful with no reply). Same misrouted-error
         // pattern as the srv-pipe commands below.
-        Command::SpawnPoolWindow => {
+        Command::SpawnPoolWindow { .. } => {
             let v = state.bump_version();
             vec![Event::Error {
                 code: agentmux_common::ipc::ErrorCode::InvalidCommand,
@@ -153,22 +153,26 @@ pub fn update(state: &mut State, cmd: Command, ctx: &Ctx) -> Vec<Event> {
         // structures (lifecycle entries, pane HWND map), not the
         // launcher's mirror; the launcher just narrates the
         // transition for subscribers.
-        Command::ReportPanesReaped { label } => {
+        Command::ReportPanesReaped { label, saga_id } => {
             if let Some(err) = enforce_host_only(state, ctx, "ReportPanesReaped") {
                 return vec![err];
             }
-            handle_report_panes_reaped(state, label)
+            handle_report_panes_reaped(state, label, saga_id)
         }
         // Phase F.6 — host reports the result of the post-close
         // drain-pool-if-last decision. `was_last == true` →
         // `Event::PoolDrained`; `was_last == false` →
         // `Event::PoolNotLast`. Both are terminal alternatives for
         // the window-cleanup-cascade saga's Step 2.
-        Command::ReportPoolDrainDecision { label, was_last } => {
+        Command::ReportPoolDrainDecision {
+            label,
+            was_last,
+            saga_id,
+        } => {
             if let Some(err) = enforce_host_only(state, ctx, "ReportPoolDrainDecision") {
                 return vec![err];
             }
-            handle_report_pool_drain_decision(state, label, was_last)
+            handle_report_pool_drain_decision(state, label, was_last, saga_id)
         }
         // Phase F.6 — `ReapPanes` and `DrainPoolIfLast` are
         // launcher→host direction commands, NOT host→launcher
@@ -191,6 +195,18 @@ pub fn update(state: &mut State, cmd: Command, ctx: &Ctx) -> Vec<Event> {
                 fatal: false,
                 version: v,
             }]
+        }
+        // Phase CPD-1 — host-emitted report that a saga-issued action
+        // failed. Pure pass-through arm: translates the wire command
+        // into `Event::SagaActionFailed`. The saga coordinator's bus
+        // loop (CPD-3) will treat this as a terminal signal for the
+        // matching `saga_id` and emit `Event::SagaFailed`. Host-only
+        // gate same as other Report* arms.
+        Command::ReportSagaActionFailed { saga_id, reason } => {
+            if let Some(err) = enforce_host_only(state, ctx, "ReportSagaActionFailed") {
+                return vec![err];
+            }
+            handle_report_saga_action_failed(state, saga_id, reason)
         }
         Command::ReportHostCounts { windows, pool } => {
             if let Some(err) = enforce_host_only(state, ctx, "ReportHostCounts") {
@@ -589,10 +605,18 @@ fn handle_report_host_counts(state: &mut State, host_windows: u32, host_pool: u3
 /// Phase B.4 follow-up — record pool inventory growth. Idempotent
 /// on duplicate labels (HashSet semantics) but the event still fires
 /// so subscribers can track add-attempts even if redundant.
-fn handle_report_pool_window_added(state: &mut State, label: String) -> Vec<Event> {
+fn handle_report_pool_window_added(
+    state: &mut State,
+    label: String,
+    saga_id: Option<u64>,
+) -> Vec<Event> {
     state.pool.insert(label.clone());
     let v = state.bump_version();
-    vec![Event::PoolWindowAdded { label, version: v }]
+    vec![Event::PoolWindowAdded {
+        label,
+        version: v,
+        saga_id,
+    }]
 }
 
 /// Phase B.4 follow-up — record pool inventory shrink (promote or
@@ -639,7 +663,11 @@ fn handle_report_pool_window_promoted(state: &mut State, label: String) -> Vec<E
 /// Idempotent / context-free: the saga matches the `label` against
 /// its own `closed_label`, so a stray report for a label that no
 /// in-flight saga is tracking is a harmless broadcast.
-fn handle_report_panes_reaped(state: &mut State, label: String) -> Vec<Event> {
+fn handle_report_panes_reaped(
+    state: &mut State,
+    label: String,
+    saga_id: Option<u64>,
+) -> Vec<Event> {
     // No state.windows gate — round 4's gate had an ordering bug:
     // host sends ReportWindowClosed BEFORE ReportPanesReaped on the
     // same channel, so by the time the reducer processes this, the
@@ -650,8 +678,15 @@ fn handle_report_panes_reaped(state: &mut State, label: String) -> Vec<Event> {
     // unpromoted-pool drains where no saga is in flight, the event
     // appears stray on the bus but is harmless (no subscriber acts
     // on it). Cosmetic only; correct saga lifecycle restored.
+    //
+    // CPD-1: `saga_id` flows through unchanged (None for organic
+    // reports, Some(N) once CPD-3 hosts echo back the saga's id).
     let v = state.bump_version();
-    vec![Event::PanesReaped { label, version: v }]
+    vec![Event::PanesReaped {
+        label,
+        version: v,
+        saga_id,
+    }]
 }
 
 /// Phase F.6 — host-emitted signal carrying the result of the
@@ -668,15 +703,44 @@ fn handle_report_pool_drain_decision(
     state: &mut State,
     label: String,
     was_last: bool,
+    saga_id: Option<u64>,
 ) -> Vec<Event> {
     // Same rationale as handle_report_panes_reaped: round 4's gate
     // had an ordering bug; round 5 reverts to emit-unconditionally.
+    //
+    // CPD-1: `saga_id` flows through unchanged.
     let v = state.bump_version();
     if was_last {
-        vec![Event::PoolDrained { label, version: v }]
+        vec![Event::PoolDrained {
+            label,
+            version: v,
+            saga_id,
+        }]
     } else {
-        vec![Event::PoolNotLast { label, version: v }]
+        vec![Event::PoolNotLast {
+            label,
+            version: v,
+            saga_id,
+        }]
     }
+}
+
+/// Phase CPD-1 — host reported a saga-issued action failed. Pure
+/// pass-through translation into `Event::SagaActionFailed`. The
+/// saga coordinator's bus loop will (CPD-3) treat the event as a
+/// terminal signal for the matching `saga_id` and emit
+/// `Event::SagaFailed`, dropping the saga from in-flight.
+fn handle_report_saga_action_failed(
+    state: &mut State,
+    saga_id: u64,
+    reason: String,
+) -> Vec<Event> {
+    let v = state.bump_version();
+    vec![Event::SagaActionFailed {
+        saga_id,
+        reason,
+        version: v,
+    }]
 }
 
 /// Phase B.4 — gate window-mirror reports to Host clients only. The
@@ -1231,6 +1295,7 @@ mod tests {
             | Event::BlockDeleted { version, .. }
             | Event::FocusedNodeChanged { version, .. }
             | Event::MagnifiedNodeChanged { version, .. }
+            | Event::SagaActionFailed { version, .. }
             | Event::Error { version, .. } => *version,
         }
     }
@@ -1503,6 +1568,7 @@ mod tests {
             &mut state,
             Command::ReportPoolWindowAdded {
                 label: "window-pool-abc".into(),
+                saga_id: None,
             },
             &host_ctx,
         );
@@ -1526,6 +1592,143 @@ mod tests {
             Event::PoolWindowRemoved { label, .. } if label == "window-pool-abc"
         ));
         assert!(!state.pool.contains("window-pool-abc"));
+    }
+
+    /// Phase CPD-1 — saga_id from the Report* commands is plumbed
+    /// unchanged into the resulting Events. Pass-through invariant for
+    /// the reducer arms; per-saga correlation in CPD-4 relies on this.
+    #[test]
+    fn cpd1_report_panes_reaped_passes_saga_id_through() {
+        let mut state = State::default();
+        let host_ctx = register_host_and_get_ctx(&mut state, 1234);
+        let evs = update(
+            &mut state,
+            Command::ReportPanesReaped {
+                label: "main".into(),
+                saga_id: Some(42),
+            },
+            &host_ctx,
+        );
+        assert_eq!(evs.len(), 1);
+        match &evs[0] {
+            Event::PanesReaped {
+                label,
+                saga_id,
+                ..
+            } => {
+                assert_eq!(label, "main");
+                assert_eq!(*saga_id, Some(42));
+            }
+            other => panic!("expected Event::PanesReaped, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn cpd1_report_panes_reaped_with_none_saga_id_passes_through() {
+        let mut state = State::default();
+        let host_ctx = register_host_and_get_ctx(&mut state, 1234);
+        let evs = update(
+            &mut state,
+            Command::ReportPanesReaped {
+                label: "main".into(),
+                saga_id: None,
+            },
+            &host_ctx,
+        );
+        assert_eq!(evs.len(), 1);
+        match &evs[0] {
+            Event::PanesReaped { saga_id, .. } => {
+                assert_eq!(*saga_id, None);
+            }
+            other => panic!("expected Event::PanesReaped, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn cpd1_report_pool_drain_decision_passes_saga_id_through() {
+        let mut state = State::default();
+        let host_ctx = register_host_and_get_ctx(&mut state, 1234);
+        let evs = update(
+            &mut state,
+            Command::ReportPoolDrainDecision {
+                label: "main".into(),
+                was_last: true,
+                saga_id: Some(7),
+            },
+            &host_ctx,
+        );
+        assert_eq!(evs.len(), 1);
+        match &evs[0] {
+            Event::PoolDrained { label, saga_id, .. } => {
+                assert_eq!(label, "main");
+                assert_eq!(*saga_id, Some(7));
+            }
+            other => panic!("expected Event::PoolDrained, got {:?}", other),
+        }
+
+        let evs = update(
+            &mut state,
+            Command::ReportPoolDrainDecision {
+                label: "secondary".into(),
+                was_last: false,
+                saga_id: Some(8),
+            },
+            &host_ctx,
+        );
+        assert_eq!(evs.len(), 1);
+        match &evs[0] {
+            Event::PoolNotLast { label, saga_id, .. } => {
+                assert_eq!(label, "secondary");
+                assert_eq!(*saga_id, Some(8));
+            }
+            other => panic!("expected Event::PoolNotLast, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn cpd1_report_pool_window_added_passes_saga_id_through() {
+        let mut state = State::default();
+        let host_ctx = register_host_and_get_ctx(&mut state, 1234);
+        let evs = update(
+            &mut state,
+            Command::ReportPoolWindowAdded {
+                label: "pool-1".into(),
+                saga_id: Some(99),
+            },
+            &host_ctx,
+        );
+        assert_eq!(evs.len(), 1);
+        match &evs[0] {
+            Event::PoolWindowAdded { label, saga_id, .. } => {
+                assert_eq!(label, "pool-1");
+                assert_eq!(*saga_id, Some(99));
+            }
+            other => panic!("expected Event::PoolWindowAdded, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn cpd1_report_saga_action_failed_emits_saga_action_failed_event() {
+        let mut state = State::default();
+        let host_ctx = register_host_and_get_ctx(&mut state, 1234);
+        let evs = update(
+            &mut state,
+            Command::ReportSagaActionFailed {
+                saga_id: 21,
+                reason: "host pipe closed".into(),
+            },
+            &host_ctx,
+        );
+        assert_eq!(evs.len(), 1);
+        match &evs[0] {
+            Event::SagaActionFailed {
+                saga_id, reason, ..
+            } => {
+                assert_eq!(*saga_id, 21);
+                assert_eq!(reason, "host pipe closed");
+            }
+            other => panic!("expected Event::SagaActionFailed, got {:?}", other),
+        }
     }
 
     #[test]
@@ -1620,6 +1823,7 @@ mod tests {
             &mut state,
             Command::ReportPoolWindowAdded {
                 label: "window-pool-xyz".into(),
+                saga_id: None,
             },
             &host_ctx,
         );
@@ -1718,6 +1922,7 @@ mod tests {
             &mut state,
             Command::ReportPoolWindowAdded {
                 label: "window-pool-a".into(),
+                saga_id: None,
             },
             &host_ctx,
         );
@@ -1750,6 +1955,7 @@ mod tests {
             &mut state,
             Command::ReportPoolWindowAdded {
                 label: "window-pool-x".into(),
+                saga_id: None,
             },
             &host_ctx,
         );
@@ -1848,6 +2054,7 @@ mod tests {
             &mut state,
             Command::ReportPoolWindowAdded {
                 label: "spoof-pool".into(),
+                saga_id: None,
             },
             &ctx_with_pid(1, 9999),
         );
@@ -2767,7 +2974,7 @@ mod tests {
                     Command::ReportWindowOpened { label, kind, parent_label }
                 }),
             3 => "[a-c]{1,3}".prop_map(|label| Command::ReportWindowClosed { label }),
-            2 => "pool-[a-c]{1,2}".prop_map(|label| Command::ReportPoolWindowAdded { label }),
+            2 => "pool-[a-c]{1,2}".prop_map(|label| Command::ReportPoolWindowAdded { label, saga_id: None }),
             2 => "pool-[a-c]{1,2}".prop_map(|label| Command::ReportPoolWindowRemoved { label }),
             2 => ("[a-c]{1,3}", "[0-9a-f]{4}").prop_map(|(label, window_id)| {
                 Command::ReportBackendWindowIdRegistered { label, window_id }
@@ -2926,6 +3133,7 @@ mod tests {
         for label in &["pool-1", "pool-2", "pool-3"] {
             let _ = update(&mut state, Command::ReportPoolWindowAdded {
                 label: (*label).into(),
+                saga_id: None,
             }, &host_ctx);
         }
 
@@ -2999,6 +3207,7 @@ mod tests {
         }, &host_ctx);
         let _ = update(&mut state, Command::ReportPoolWindowAdded {
             label: "pool-x".into(),
+            saga_id: None,
         }, &host_ctx);
         let _ = update(&mut state, Command::ReportBackendWindowIdRegistered {
             label: "main".into(),
@@ -3168,7 +3377,7 @@ mod tests {
             }
             F7HostOp::PoolAdd => update(
                 state,
-                Command::ReportPoolWindowAdded { label },
+                Command::ReportPoolWindowAdded { label, saga_id: None },
                 host_ctx,
             ),
             F7HostOp::PoolRemove => update(
@@ -3182,11 +3391,11 @@ mod tests {
                 host_ctx,
             ),
             F7HostOp::PanesReaped => {
-                update(state, Command::ReportPanesReaped { label }, host_ctx)
+                update(state, Command::ReportPanesReaped { label, saga_id: None }, host_ctx)
             }
             F7HostOp::PoolDrainDecision { was_last } => update(
                 state,
-                Command::ReportPoolDrainDecision { label, was_last },
+                Command::ReportPoolDrainDecision { label, was_last, saga_id: None },
                 host_ctx,
             ),
         }
@@ -3316,7 +3525,7 @@ mod tests {
             // PanesReaped: must emit exactly one Event::PanesReaped.
             let evs = update(
                 &mut state,
-                Command::ReportPanesReaped { label: label.clone() },
+                Command::ReportPanesReaped { label: label.clone(), saga_id: None },
                 &host_ctx,
             );
             prop_assert_eq!(evs.len(), 1);
@@ -3332,7 +3541,7 @@ mod tests {
             // PoolDrainDecision: maps cleanly to one terminal event.
             let evs = update(
                 &mut state,
-                Command::ReportPoolDrainDecision { label, was_last },
+                Command::ReportPoolDrainDecision { label, was_last, saga_id: None },
                 &host_ctx,
             );
             prop_assert_eq!(evs.len(), 1);
