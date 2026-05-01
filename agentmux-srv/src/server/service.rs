@@ -1038,6 +1038,11 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
                         agentmux_common::ipc::Command::DeleteTab {
                             workspace_id: ws_id.clone(),
                             tab_id: tid.clone(),
+                            // Compensation must bypass the last-tab
+                            // guard to roll back a just-created sole
+                            // tab when its persist failed (codex P1
+                            // round 2 + P2 round 4 PR #633).
+                            force: true,
                         },
                         store,
                     )
@@ -1433,6 +1438,11 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
                             agentmux_common::ipc::Command::DeleteTab {
                                 workspace_id: ws_id.clone(),
                                 tab_id: source_tab_id.clone(),
+                                // Auto-close already gated on
+                                // `total_tabs > 1` above; reducer's
+                                // last-tab guard is defense-in-depth
+                                // for the race window.
+                                force: false,
                             },
                         )
                         .await;
@@ -1548,6 +1558,11 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
                             agentmux_common::ipc::Command::DeleteTab {
                                 workspace_id: ws_id.clone(),
                                 tab_id: source_tab_id.clone(),
+                                // Auto-close already gated on
+                                // `total_tabs > 1` above; reducer's
+                                // last-tab guard is defense-in-depth
+                                // for the race window.
+                                force: false,
                             },
                         )
                         .await;
@@ -1911,6 +1926,9 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
                             agentmux_common::ipc::Command::DeleteTab {
                                 workspace_id: source_ws_id.clone(),
                                 tab_id: source_tab_id.clone(),
+                                // Auto-close already gated on
+                                // total_tabs > 1.
+                                force: false,
                             },
                         )
                         .await;

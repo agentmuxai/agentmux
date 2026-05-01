@@ -166,6 +166,9 @@ async fn run_inner(
         .dispatch(Command::DeleteTab {
             workspace_id: workspace_id.clone(),
             tab_id: tab_id.clone(),
+            // User-facing flow — reducer enforces last-tab guard
+            // atomically (codex P2 round 4 PR #633).
+            force: false,
         })
         .await
     {
