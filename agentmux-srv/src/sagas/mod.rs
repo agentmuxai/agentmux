@@ -45,6 +45,7 @@ pub mod delete_block;
 pub mod delete_tab;
 pub mod log;
 pub mod promote_block_to_tab;
+pub mod recovery;
 pub mod restore_torn_off_tab;
 pub mod tear_off_block;
 pub mod tear_off_tab;
@@ -88,6 +89,20 @@ pub struct SagaCtx<'a> {
     /// futures may parallelise dispatches in the future (today they
     /// don't, but the cost is one cache line).
     pub(crate) step_index: AtomicU32,
+    /// (codex P1 PR #636 round 4.) Stack of forward-step indices that
+    /// have completed successfully and are eligible to be undone by
+    /// the next `compensate` call. `dispatch` pushes on success;
+    /// `compensate` pops to determine which original forward step
+    /// it's reversing, and marks that step `compensated` in the log.
+    /// Without this, in-process compensation only writes new
+    /// `compensated` rows at fresh indices; the original `succeeded`
+    /// rows stay `succeeded`, so resume-on-restart re-replays them
+    /// and either no-ops or worse double-applies the inverse.
+    ///
+    /// `Mutex<Vec>` (rather than a lock-free counter) because saga
+    /// inner futures could in theory parallelize compensations; in
+    /// practice they're serial today, so contention is zero.
+    pub(crate) forward_step_stack: tokio::sync::Mutex<Vec<u32>>,
 }
 
 impl<'a> SagaCtx<'a> {
@@ -98,6 +113,7 @@ impl<'a> SagaCtx<'a> {
             state,
             saga_id,
             step_index: AtomicU32::new(0),
+            forward_step_stack: tokio::sync::Mutex::new(Vec::new()),
         }
     }
 
@@ -195,6 +211,12 @@ impl<'a> SagaCtx<'a> {
                 e
             );
         }
+        // (codex P1 PR #636 round 4.) Track this idx as a successful
+        // forward step eligible for compensation. The next
+        // `compensate` call will pop this and mark the original step
+        // `compensated`, preventing resume-on-restart from re-replaying
+        // an inverse that already ran in-process.
+        self.forward_step_stack.lock().await.push(idx);
         crate::server::service::publish_events(self.state, &events);
         Ok(events)
     }
@@ -267,6 +289,26 @@ impl<'a> SagaCtx<'a> {
                 "[saga] compensate_step log write failed: {}",
                 e
             );
+        }
+        // (codex P1 PR #636 round 4.) Pop the most-recent successful
+        // forward step from the stack and mark its original log row
+        // as compensated. This prevents resume-on-restart from
+        // double-replaying the inverse of a step that already had
+        // in-process compensation. Idempotent — UPDATE only matches
+        // rows still in `succeeded` state.
+        if let Some(forward_idx) = self.forward_step_stack.lock().await.pop() {
+            if let Err(e) = self
+                .state
+                .saga_log
+                .mark_step_compensated(self.saga_id, forward_idx)
+            {
+                tracing::warn!(
+                    saga_id = self.saga_id,
+                    forward_step_index = forward_idx,
+                    "[saga] mark_step_compensated (live) log write failed: {} — restart may re-replay this inverse",
+                    e
+                );
+            }
         }
         crate::server::service::publish_events(self.state, &events);
     }
@@ -376,6 +418,30 @@ pub async fn emit_terminal(state: &AppState, saga_id: u64, terminal: SagaTermina
             reason: reason.to_string(),
         },
     };
+    // (codex P1 PR #636 round 7 — reverted from round 6.)
+    // Bulk-mark only on Compensated. Round 6 extended to Failed too,
+    // but BOTH bots flagged that as data-loss: timeout/abort paths
+    // classify as Failed and never run compensation, but the bulk-
+    // mark would relabel forward steps as `compensated`, hiding
+    // them from recovery and leaving side effects permanently
+    // applied.
+    //
+    // Sagas that DO unwind via inner-future ctx.compensate calls
+    // should classify as Compensated (the per-step pop already
+    // marks 1:1; this bulk call catches residual 1:N cases like
+    // tear_off_block's single DeleteWorkspace undoing both
+    // CreateWorkspace + CreateTab). `classify_run_saga_result`
+    // maps non-timeout Err → Compensated to support this; timeouts
+    // → Failed so recovery picks up un-undone rows.
+    if matches!(terminal, SagaTerminal::Compensated { .. }) {
+        if let Err(e) = state.saga_log.mark_all_succeeded_steps_compensated(saga_id) {
+            tracing::warn!(
+                saga_id,
+                "[saga] mark_all_succeeded_steps_compensated failed: {} — restart may re-replay an inverse",
+                e
+            );
+        }
+    }
     if let Err(e) = state.saga_log.terminate(saga_id, log_outcome) {
         tracing::warn!(
             saga_id,
@@ -424,7 +490,22 @@ pub async fn emit_terminal(state: &AppState, saga_id: u64, terminal: SagaTermina
 pub fn classify_run_saga_result(result: &Result<serde_json::Value, String>) -> SagaTerminal<'_> {
     match result {
         Ok(_) => SagaTerminal::Completed,
-        Err(reason) => SagaTerminal::Failed { reason },
+        // Timeouts/aborts: compensation never ran (run_saga's
+        // tokio::time::timeout cancels the inner future before it
+        // can compensate). Classify as Failed so recovery picks up
+        // the un-undone forward steps.
+        Err(reason) if reason.contains("timed out") => SagaTerminal::Failed { reason },
+        // Other Err: by convention, our sagas drive compensation
+        // in their inner future before returning Err (each
+        // ctx.compensate call already marked its target). Classify
+        // as Compensated so emit_terminal's bulk-mark cleans up any
+        // residual succeeded rows from 1:N compensation patterns
+        // (e.g. tear_off_block's single DeleteWorkspace undoing
+        // multiple CreateX steps). Sagas that abort without
+        // compensating should explicitly construct
+        // SagaTerminal::Failed instead of using this helper.
+        // (codex round 7 reversal of round 1's blanket-Failed.)
+        Err(reason) => SagaTerminal::Compensated { reason },
     }
 }
 
