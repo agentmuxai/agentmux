@@ -174,9 +174,14 @@ impl Saga for PoolRespawn {
         // such pipe exists yet — see module docstring).
         debug_assert_eq!(self.phase, Phase::Initial);
         self.phase = Phase::WaitingForRefill;
+        // CPD-1 schema-only: the wire shape now carries saga_id, but
+        // the saga's `apply_action` for `IssueCmd::Host` is still
+        // log-only (CPD-3 wires real dispatch). We pass `0` here as
+        // a placeholder; CPD-3's `inject_saga_id()` helper rewrites
+        // it to the live saga's id at dispatch time.
         SagaAction::IssueCmd {
             target: PipeTarget::Host,
-            cmd: Command::SpawnPoolWindow,
+            cmd: Command::SpawnPoolWindow { saga_id: 0 },
         }
     }
 
@@ -219,7 +224,7 @@ mod tests {
         match action {
             SagaAction::IssueCmd { target, cmd } => {
                 assert_eq!(target, PipeTarget::Host);
-                assert!(matches!(cmd, Command::SpawnPoolWindow));
+                assert!(matches!(cmd, Command::SpawnPoolWindow { .. }));
             }
             other => panic!(
                 "expected IssueCmd(SpawnPoolWindow) on start, got {:?}",
@@ -236,6 +241,7 @@ mod tests {
             &Event::PoolWindowAdded {
                 label: "window-pool-xyz".into(),
                 version: 100,
+                saga_id: None,
             },
             &ctx(7),
         );
@@ -293,6 +299,7 @@ mod tests {
             &Event::PoolWindowAdded {
                 label: "window-pool-first".into(),
                 version: 100,
+                saga_id: None,
             },
             &ctx(7),
         );
@@ -337,6 +344,7 @@ mod tests {
         let _ = events_tx.send(Event::PoolWindowAdded {
             label: "window-pool-xyz".into(),
             version: 2,
+            saga_id: None,
         });
 
         // Drain witness with a brief budget; we expect at minimum:
