@@ -66,16 +66,20 @@ pub async fn run(
     workspace_id: String,
     tab_id: String,
 ) -> Result<Value, String> {
-    // Pre-conditions: tab exists in workspace.
+    // Pre-conditions: tab exists in workspace; not the last tab.
     //
-    // (reagent P1 PR #633.) The last-tab guard is now ENFORCED IN
-    // THE REDUCER (`reducer::handle_delete_tab`) so check + delete
-    // is atomic with the state lock. The earlier pre-check version
-    // had a TOCTOU window: read state under lock, drop lock,
-    // dispatch re-acquires — two concurrent CloseTab RPCs in a
-    // 2-tab workspace could both pass and both succeed. The reducer
-    // now rejects with `Event::Error` if `tab_ids.len() <= 1`, and
-    // `SagaCtx::dispatch` surfaces that as the saga's Err return.
+    // **Last-tab pre-check is best-effort.** A reducer-level guard
+    // would be atomic but it broke legitimate CreateTab compensation
+    // (codex P1 round 2 #633) and frontend keyboard flow (codex P1
+    // round 1 #633). Round 3 walked back the reducer guard. The
+    // saga keeps a soft pre-check here as a UX guard; the TOCTOU
+    // window (two concurrent CloseTabs on different tabs in a 2-tab
+    // workspace) is reachable in theory but the user-facing call
+    // sites (tabbar close button at `tabbar.tsx:63`, keyboard handler
+    // at `keymodel.ts::simpleCloseStaticTab`) gate with
+    // `if (allTabs.length <= 1) return`, so user-driven concurrent
+    // CloseTabs can't reach this saga. Automated test harnesses
+    // could still race; document the limitation, accept it.
     {
         let s = state.srv_state.lock().await;
         let Some(workspace) = s.workspaces.get(&workspace_id) else {
@@ -88,6 +92,12 @@ pub async fn run(
             return Err(format!(
                 "DeleteTab: tab {} is not in workspace {}",
                 tab_id, workspace_id
+            ));
+        }
+        if workspace.tab_ids.len() <= 1 {
+            return Err(format!(
+                "DeleteTab: cannot delete last tab in workspace {}",
+                workspace_id
             ));
         }
         if !s.tabs.contains_key(&tab_id) {

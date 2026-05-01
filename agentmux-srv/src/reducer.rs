@@ -419,30 +419,26 @@ fn handle_delete_tab(
     let Some(pos) = workspace.tab_ids.iter().position(|t| t == &tab_id) else {
         return Vec::new();
     };
-    // Last-tab guard. (reagent P1 PR #633.) The DeleteTabSaga used
-    // to enforce this in a pre-check that read state under a lock,
-    // dropped the lock, then re-acquired it via dispatch — a TOCTOU
-    // window where two concurrent CloseTab RPCs on different tabs in
-    // a 2-tab workspace could both pass the pre-check and both
-    // succeed, leaving an empty workspace. Enforcing here makes the
-    // check + remove atomic with the reducer's state lock.
-    //
-    // Internal cascade paths (workspace delete, tab cascade from
-    // block delete) come through `handle_delete_workspace` /
-    // implicit cascade — they don't dispatch DeleteTab directly per
-    // tab, so they're unaffected.
-    if workspace.tab_ids.len() <= 1 {
-        let v = state.bump_version();
-        return vec![Event::Error {
-            code: ErrorCode::InvalidCommand,
-            message: format!(
-                "DeleteTab: refusing to delete the last tab in workspace {} (would leave empty workspace)",
-                workspace_id,
-            ),
-            fatal: false,
-            version: v,
-        }];
-    }
+    // No last-tab guard at the reducer level. (Round 2 of PR #633.)
+    // The first round added a saga-level pre-check (TOCTOU race);
+    // round 2 moved it to the reducer (atomic). Both regressed
+    // legitimate flows:
+    //   * codex P1 round 1: Cmd+Shift+W on a 1-tab workspace silently
+    //     fails while frontend's `simpleCloseStaticTab` still calls
+    //     `deleteLayoutModelForTab`, leaving client/server divergence.
+    //     (reagent P1 round 2 explicitly notes the tabbar close button
+    //     already gates with `if (allTabs.length <= 1) return`; the
+    //     keyboard path needs the same gate.)
+    //   * codex P1 round 2: the guard rejects `CreateTab` rollback
+    //     compensation — when creating the *first* tab in a workspace
+    //     fails to persist, the compensating `DeleteTab` is now
+    //     refused, leaving state/DB divergence.
+    // Resolution: the reducer accepts last-tab deletes. User-facing
+    // flows (close button, keyboard) gate at the call site. Internal
+    // compensation paths work as intended. The TOCTOU race that
+    // motivated the guard is a tiny window only reachable by
+    // automated test harnesses; frontend gating prevents user-driven
+    // concurrent CloseTabs.
     workspace.tab_ids.remove(pos);
     let active_changed = if workspace.active_tab_id.as_deref() == Some(tab_id.as_str()) {
         let new_active = workspace
@@ -1657,11 +1653,12 @@ mod tests {
     }
 
     #[test]
-    fn delete_last_tab_rejected_with_error_event() {
-        // (reagent P1 PR #633.) Reducer rejects last-tab deletes
-        // atomically — refusing to leave workspaces empty. Workspace
-        // cleanup happens via DeleteWorkspace cascade (which removes
-        // tabs inline without dispatching DeleteTab per tab).
+    fn delete_last_tab_clears_active_to_none() {
+        // Reducer accepts last-tab delete (round 2 of PR #633 walked
+        // back the guard). User-facing flows gate at the call site
+        // (close button + keymodel both check `tab_ids.len() <= 1`);
+        // internal compensation paths rely on this acceptance to
+        // roll back failed CreateTab persists.
         let mut state = State::default();
         let ws_id = create_workspace(&mut state, "w");
         let _ = update(
@@ -1677,18 +1674,17 @@ mod tests {
             &mut state,
             Command::DeleteTab {
                 workspace_id: ws_id.clone(),
-                tab_id: tab1_id.clone(),
+                tab_id: tab1_id,
             },
             &ctx(2),
         );
-        assert!(
-            matches!(&events[0], Event::Error { message, .. } if message.contains("last tab")),
-            "expected last-tab Error, got: {:?}",
-            events
-        );
-        // Tab is still present; state unchanged.
-        assert_eq!(state.workspaces[&ws_id].tab_ids, vec![tab1_id.clone()]);
-        assert!(state.tabs.contains_key(&tab1_id));
+        assert!(matches!(&events[0], Event::TabDeleted { .. }));
+        assert!(matches!(
+            &events[1],
+            Event::ActiveTabChanged { tab_id: None, .. }
+        ));
+        assert_eq!(state.workspaces[&ws_id].active_tab_id, None);
+        assert!(state.tabs.is_empty());
     }
 
     #[test]
@@ -2310,9 +2306,6 @@ mod tests {
         let mut state = State::default();
         let ws_id = create_workspace(&mut state, "w");
         let tab_id = create_tab(&mut state, &ws_id, "t");
-        // Last-tab guard: create a second tab so the test tab isn't
-        // the only one. (reagent P1 PR #633.)
-        let _keep_tab = create_tab(&mut state, &ws_id, "keep");
         let _ = update(
             &mut state,
             Command::CreateBlock { tab_id: tab_id.clone(), meta: serde_json::Value::Null },

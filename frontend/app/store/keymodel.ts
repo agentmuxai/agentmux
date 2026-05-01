@@ -155,6 +155,15 @@ function simpleCloseStaticTab() {
     debugLog("simpleCloseStaticTab called");
     const ws = atoms.workspace();
     const tabId = atoms.activeTabId();
+    // Guard: don't close the only tab. Mirrors the same check in the
+    // tabbar close button (`tabbar.tsx:63`). Without this gate, the
+    // backend rejects the CloseTab as "last tab" but
+    // `deleteLayoutModelForTab` still runs unconditionally, leaving
+    // client/server diverged. (reagent P1 round 2 PR #633.)
+    const allTabs = (ws.tabids ?? []).concat(ws.pinnedtabids ?? []);
+    if (allTabs.length <= 1) {
+        return;
+    }
     WorkspaceService.CloseTab(ws.oid, tabId).catch((e) => {
         console.error("[closeTab] failed:", e);
     });

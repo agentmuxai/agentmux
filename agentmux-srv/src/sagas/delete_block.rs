@@ -103,17 +103,28 @@ pub async fn run(
     }
     let ctx = SagaCtx::new(state, saga_id);
     let result = run_saga("delete_block", run_inner(ctx, tab_id, block_id.clone())).await;
-    // Kill the controller AFTER the saga's reducer + SQLite writes
-    // succeed. (reagent P2 PR #633.) The earlier round killed the
-    // controller before emit_saga_started, which left an
-    // unrecoverable side-effect leak if start_saga rejected a
-    // collision: PTY dead, block still in reducer + SQLite. Doing
-    // it here means: success → controller gone, block gone, all
-    // consistent; saga failure → controller still alive (we don't
-    // touch it), block stays — also consistent. Idempotent on
-    // missing controller.
-    if result.is_ok() {
-        crate::backend::blockcontroller::delete_controller(&block_id);
+    // Controller-kill ordering. Three rounds of bot review:
+    //   * Round 1 (agent): killed BEFORE emit_saga_started → reagent
+    //     P2: side-effect leak if start_saga collides.
+    //   * Round 2 (this PR): conditional on result.is_ok() → codex P2
+    //     round 2: leaks PTY when reducer succeeds but
+    //     `apply_event_to_wstore` fails inside `SagaCtx::dispatch`
+    //     (block already removed from reducer state, RPC returns
+    //     error, retry pre-check sees "block not found" → controller
+    //     never cleaned up).
+    //   * Round 3 (this fix): kill controller whenever the reducer
+    //     dispatched DeleteBlock — i.e., whenever block was removed
+    //     from reducer state. This includes both success and the
+    //     reducer-succeeded-wstore-failed cases. We approximate this
+    //     by checking reducer state for the block: if it's gone, the
+    //     reducer dispatched (regardless of wstore outcome), so kill
+    //     the controller. Idempotent on missing controller.
+    {
+        let block_still_in_reducer =
+            state.srv_state.lock().await.blocks.contains_key(&block_id);
+        if !block_still_in_reducer {
+            crate::backend::blockcontroller::delete_controller(&block_id);
+        }
     }
     emit_terminal(state, saga_id, classify_run_saga_result(&result)).await;
     result
