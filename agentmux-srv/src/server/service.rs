@@ -1140,7 +1140,40 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
             };
             // Self-heal the layout before activating — remove any
             // orphaned block nodes that would render as blank panes.
-            let _ = wcore::heal_layout(store, &tab_id);
+            // (codex P1 PR #632 round 2) heal_layout clears
+            // focusednodeid in SQLite when rootnode drops to empty,
+            // bypassing the reducer. Sync the post-heal state through
+            // the reducer so its tabs[tab_id].focused_node_id mirror
+            // matches SQLite.
+            let healed = wcore::heal_layout(store, &tab_id).unwrap_or(false);
+            if healed {
+                if let Ok(tab) = store.must_get::<Tab>(&tab_id) {
+                    if !tab.layoutstate.is_empty() {
+                        if let Ok(Some(layout)) = store.get::<LayoutState>(&tab.layoutstate) {
+                            // Best-effort dispatch — failures here
+                            // don't block SetActiveTab.
+                            let focus_events = dispatch_to_reducer(
+                                state,
+                                agentmux_common::ipc::Command::SetFocusedNode {
+                                    tab_id: tab_id.clone(),
+                                    node_id: layout.focusednodeid.clone(),
+                                },
+                            )
+                            .await;
+                            publish_events(state, &focus_events);
+                            let mag_events = dispatch_to_reducer(
+                                state,
+                                agentmux_common::ipc::Command::SetMagnifiedNode {
+                                    tab_id: tab_id.clone(),
+                                    node_id: layout.magnifiednodeid.clone(),
+                                },
+                            )
+                            .await;
+                            publish_events(state, &mag_events);
+                        }
+                    }
+                }
+            }
 
             // Phase E.2c.3b — pinning was removed from AgentMux
             // (Waveterm legacy). All tabs are regular; dispatch
