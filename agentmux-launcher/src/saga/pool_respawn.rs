@@ -83,6 +83,25 @@
 // stays in `in_flight` until the launcher exits. This matches the
 // F-spec compensation strategy ("none — failure to refill is
 // logged + retried on next promote").
+//
+// **Known limitation: concurrent-promote correlation** (codex P1
+// PR #634). If two promotes are in flight simultaneously, the
+// coordinator broadcasts every event to every in-flight saga
+// (`saga::mod.rs::run_coordinator`). The first `PoolWindowAdded`
+// completes BOTH sagas — early `SagaCompleted` for the second
+// promote's bracket, later refill event left unbracketed.
+//
+// Concurrent promotes require the user to tear off two windows
+// in rapid succession (under the host's spawn_pool_window
+// completion latency). The user-visible consequence is a brief
+// renderer-side bracketing inconsistency; reducer + SQLite state
+// remain correct.
+//
+// Proper fix requires coordinator-level FIFO routing or per-saga
+// sequence-number correlation. Both are non-trivial and depend on
+// the cross-process dispatch landing first (so the saga's
+// `IssueCmd` is actually causal). Closed in F.6/F.7 alongside the
+// launcher→host command pipe.
 
 use agentmux_common::ipc::{Command, Event};
 

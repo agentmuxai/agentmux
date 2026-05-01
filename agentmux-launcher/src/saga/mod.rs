@@ -278,7 +278,26 @@ impl SagaCoordinator {
         let action = saga.start(&ctx);
         let in_flight = self.apply_action(saga_id, name, action).await;
         if in_flight {
-            self.in_flight.lock().await.insert(saga_id, saga);
+            let mut registry = self.in_flight.lock().await;
+            // (codex P1 PR #634) Observability for the known
+            // concurrent-correlation limitation. With more than one
+            // saga of the same kind in flight, broadcast event
+            // routing mis-correlates: the first matching event
+            // completes ALL of them. Logged here so operators can
+            // spot the pattern in `--diag wrr` output. Closed when
+            // F.6/F.7 adds proper FIFO routing or saga-id event
+            // correlation.
+            let same_kind_count = registry
+                .values()
+                .filter(|s| s.name() == name)
+                .count();
+            if same_kind_count >= 1 {
+                crate::log(&format!(
+                    "[saga] WARN: starting {} saga_id={} while {} other(s) of same kind in flight; concurrent-correlation limitation may produce premature SagaCompleted events (PR #634 / codex P1 known issue)",
+                    name, saga_id, same_kind_count,
+                ));
+            }
+            registry.insert(saga_id, saga);
         }
         saga_id
     }
