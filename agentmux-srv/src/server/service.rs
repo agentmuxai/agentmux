@@ -554,6 +554,10 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
                             state,
                             agentmux_common::ipc::Command::DeleteWorkspace {
                                 workspace_id: new_ws_id.clone(),
+                                // Internal compensation path — not
+                                // saga-driven (Step 5 PR 2 added the
+                                // `force` flag for saga provenance).
+                                force: false,
                             },
                         )
                         .await;
@@ -617,6 +621,8 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
                         state,
                         agentmux_common::ipc::Command::DeleteWorkspace {
                             workspace_id: ws_id.clone(),
+                            // Internal compensation path (Step 5 PR 2).
+                            force: false,
                         },
                     )
                     .await;
@@ -714,29 +720,31 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
             // Step 2: cascade delete the workspace if no other window
             // points at it. The reducer keeps state.windows updated;
             // check there.
+            //
+            // Step 5 PR 2 — route the user-initiated cascade through
+            // the `delete_workspace` saga instead of dispatching
+            // `Command::DeleteWorkspace` inline. The saga records
+            // lifecycle brackets in the durable saga log so a crash
+            // mid-cascade is recoverable via `recovery::compensate_unresolved`.
+            // The saga also takes a snapshot of the workspace's
+            // tabs+blocks before issuing the cascade, so the durable
+            // log captures what was deleted (provenance for
+            // `--diag sagas`).
             if let Some(ws_id) = ws_id {
                 let any_other_window = {
                     let s = state.srv_state.lock().await;
                     s.windows.values().any(|w| w.workspace_id == ws_id)
                 };
                 if !any_other_window {
-                    let del_events = dispatch_to_reducer(
-                        state,
-                        agentmux_common::ipc::Command::DeleteWorkspace {
-                            workspace_id: ws_id.clone(),
-                        },
-                    )
-                    .await;
-                    for ev in &del_events {
-                        if let Err(e) = crate::persist_subscriber::apply_event_to_wstore(ev, store)
-                        {
-                            tracing::warn!(
-                                "CloseWindow: workspace cascade SQLite write failed: {}",
-                                e
-                            );
-                        }
+                    if let Err(e) =
+                        crate::sagas::delete_workspace::run(state, ws_id.clone()).await
+                    {
+                        tracing::warn!(
+                            workspace_id = %ws_id,
+                            "CloseWindow: delete_workspace saga failed: {}",
+                            e,
+                        );
                     }
-                    publish_events(state, &del_events);
                 }
             }
             // Subscriber's apply_srv_window_closed already pruned
@@ -859,6 +867,10 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
                         state,
                         agentmux_common::ipc::Command::DeleteWorkspace {
                             workspace_id: id.clone(),
+                            // Internal compensation path for failed
+                            // CreateWorkspace SQLite apply — not the
+                            // saga (Step 5 PR 2).
+                            force: false,
                         },
                         store,
                     )
@@ -904,15 +916,29 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
                 Ok(v) => v,
                 Err(e) => return WebReturnType::error(e),
             };
-            // Phase E.2c.2 — DeleteWorkspace applies SQLite FIRST,
-            // THEN dispatches the reducer command. Inverse order
-            // vs CreateWorkspace because Delete cascades touch many
-            // records (tabs, blocks, layouts) and rolling back the
-            // reducer on a partial wcore failure is impractical.
-            // SQLite-first means: if wcore fails, the reducer is
-            // untouched (no divergence). If wcore succeeds, the
-            // reducer dispatch + bus publish keep the rest of the
-            // system in sync. (codex P2 #615 — divergence-on-failure.)
+            // Step 5 PR 2 — route the user-initiated DeleteWorkspace
+            // through the `delete_workspace` saga. The saga:
+            //   1. Snapshots the workspace's tabs+blocks for
+            //      provenance in the durable saga log.
+            //   2. Dispatches per-tab `DeleteTab { force: true }`
+            //      through the reducer (cascades blocks; persist
+            //      subscriber writes SQLite + kills controllers via
+            //      `wcore::delete_tab_inner`).
+            //   3. Dispatches the final
+            //      `DeleteWorkspace { force: true }` which removes
+            //      the (now-empty) workspace + window mappings.
+            //
+            // The legacy SQLite-first path here (wcore::delete_workspace
+            // followed by Command::DeleteWorkspace dispatch) is replaced
+            // by the saga because the durable lifecycle bracket gives
+            // crash-recovery a chance to retry/compensate via
+            // `recovery::compensate_unresolved` if the cascade is
+            // interrupted. Cascade behaviour is preserved 1:1.
+            //
+            // Pre-condition: workspace must exist (in reducer or
+            // SQLite). The saga runs its own existence check; we mirror
+            // the legacy NotFound semantics here for backward-compat
+            // error messages.
             let exists_in_wstore = match wstore_workspace_exists(store, &ws_id) {
                 Ok(v) => v,
                 Err(e) => {
@@ -922,20 +948,7 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
                     ))
                 }
             };
-            if exists_in_wstore {
-                if let Err(e) = wcore::delete_workspace(store, &ws_id) {
-                    return WebReturnType::error(format!(
-                        "DeleteWorkspace: SQLite delete failed: {}",
-                        e
-                    ));
-                }
-            } else {
-                // Not in SQLite — confirm the reducer doesn't know
-                // about it either before surfacing NotFound. (Bootstrap
-                // populates the reducer from SQLite, so a ws absent
-                // from SQLite is normally absent from the reducer too;
-                // this guard handles future races where the orderings
-                // could diverge.)
+            if !exists_in_wstore {
                 let exists_in_state = state
                     .srv_state
                     .lock()
@@ -949,20 +962,10 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
                     ));
                 }
             }
-            // Reducer dispatch is silent on missing — safe to call
-            // unconditionally now that SQLite is consistent.
-            let events = dispatch_to_reducer(
-                state,
-                agentmux_common::ipc::Command::DeleteWorkspace {
-                    workspace_id: ws_id.clone(),
-                },
-            )
-            .await;
-            publish_events(state, &events);
-            if events.iter().any(|e| matches!(e, agentmux_common::ipc::Event::Error { .. })) {
-                return WebReturnType::error(format!("DeleteWorkspace failed: {}", ws_id));
+            match crate::sagas::delete_workspace::run(state, ws_id.clone()).await {
+                Ok(_) => WebReturnType::success_empty(),
+                Err(e) => WebReturnType::error(format!("DeleteWorkspace failed: {}", e)),
             }
-            WebReturnType::success_empty()
         }
         ("workspace", "ListWorkspaces") => match wcore::list_workspaces(store) {
             Ok(list) => WebReturnType::success(serde_json::to_value(&list).unwrap_or_default()),
