@@ -359,31 +359,49 @@ pub async fn run_coordinator(
                 }
 
                 // Step 1 — start any new sagas this event triggers.
-                // (codex P1 PR #634 round 2.) Same-kind serialization
-                // gate: if a saga of this kind is already in flight,
-                // drop the trigger. The coordinator broadcasts events
-                // to all in-flight sagas, so two pool_respawn in
-                // flight would mis-correlate the first PoolWindowAdded
-                // — completing both early. Closed properly by
-                // F.6/F.7's FIFO routing or per-event saga_id
-                // correlation; until then, the second concurrent
-                // promote loses its bracket (falling back to legacy
-                // pre-saga semantics) but reducer + SQLite state stay
-                // correct.
+                // (codex P1 PR #634 round 3.) Evict-and-replace: if a
+                // saga of the same kind is already in flight, EVICT
+                // it (mark Failed + remove from registry) and start
+                // the new one. Round 2's silent-drop fix had a
+                // permanent-deadlock failure mode: a stalled saga
+                // (refill never arrived) would block all future
+                // promote sagas for the rest of the process.
+                //
+                // Trade-offs of evict-and-replace:
+                // - Pros: no permanent block; each new promote gets
+                //   a fresh bracket; reducer + SQLite stay correct.
+                // - Cons: when both promotes are healthy in quick
+                //   succession, the first promote's bracket is cut
+                //   short with SagaFailed (the late refill event for
+                //   that promote completes the new saga instead).
+                //   Renderer-visible: one premature SagaFailed +
+                //   one correct SagaCompleted.
+                // Proper FIFO routing / per-event saga_id correlation
+                // ships in F.6/F.7 alongside cross-process dispatch.
                 if let Some(saga) = match_trigger(&event) {
                     let new_kind = saga.name();
-                    let same_kind_in_flight = {
+                    let evict_ids: Vec<u64> = {
                         let registry = coord.in_flight.lock().await;
-                        registry.values().any(|s| s.name() == new_kind)
+                        registry
+                            .iter()
+                            .filter(|(_, s)| s.name() == new_kind)
+                            .map(|(id, _)| *id)
+                            .collect()
                     };
-                    if same_kind_in_flight {
+                    for evict_id in evict_ids {
                         crate::log(&format!(
-                            "[saga] dropping {} trigger — same-kind saga already in flight (codex P1 #634 serialization fallback)",
-                            new_kind,
+                            "[saga] evicting prior {} saga_id={} to make room for new trigger (codex P1 #634 round 3 evict-and-replace)",
+                            new_kind, evict_id,
                         ));
-                    } else {
-                        coord.spawn_saga(saga).await;
+                        coord
+                            .emit_failed(
+                                evict_id,
+                                "evicted: same-kind saga restarted (codex P1 #634 round 3)".to_string(),
+                            )
+                            .await;
+                        coord.in_flight.lock().await.remove(&evict_id);
                     }
+                    coord.spawn_saga(saga).await;
                 }
 
                 // Step 2 — feed the event into every in-flight saga.
