@@ -49,7 +49,9 @@ pub fn update(state: &mut State, cmd: Command, ctx: &Ctx) -> Vec<Event> {
         Command::GetSrvSnapshot => handle_get_srv_snapshot(state),
         Command::GetEvents { .. } => Vec::new(), // intercepted by server; unreachable
         Command::CreateWorkspace { name } => handle_create_workspace(state, name),
-        Command::DeleteWorkspace { workspace_id } => handle_delete_workspace(state, workspace_id),
+        Command::DeleteWorkspace { workspace_id, force } => {
+            handle_delete_workspace(state, workspace_id, force)
+        }
         Command::CreateTab { workspace_id, name } => handle_create_tab(state, workspace_id, name),
         Command::DeleteTab { workspace_id, tab_id, force } => handle_delete_tab(state, workspace_id, tab_id, force),
         Command::SetActiveTab { workspace_id, tab_id } => {
@@ -295,7 +297,18 @@ fn handle_create_workspace(state: &mut State, name: String) -> Vec<Event> {
 /// events are NOT emitted individually — subscribers observing
 /// `WorkspaceDeleted` are expected to drop dependent state (mirrors
 /// how `wcore::delete_workspace` cascades in SQLite).
-fn handle_delete_workspace(state: &mut State, workspace_id: String) -> Vec<Event> {
+///
+/// The `force` parameter (Step 5 PR 2) is provenance-only: it carries
+/// through to the durable saga log when the saga drives this dispatch
+/// (`force = true`), and is ignored by the reducer's cascade logic.
+/// The reducer is a pure mutator — it must always cascade to keep
+/// in-memory state consistent regardless of whether a saga or a
+/// legacy/internal path is calling.
+fn handle_delete_workspace(
+    state: &mut State,
+    workspace_id: String,
+    _force: bool,
+) -> Vec<Event> {
     let Some(removed) = state.workspaces.remove(&workspace_id) else {
         return Vec::new();
     };
@@ -1464,6 +1477,7 @@ mod tests {
             &mut state,
             Command::DeleteWorkspace {
                 workspace_id: ws_id.clone(),
+                force: false,
             },
             &ctx(2),
         );
@@ -1482,6 +1496,7 @@ mod tests {
             &mut state,
             Command::DeleteWorkspace {
                 workspace_id: "does-not-exist".into(),
+                force: false,
             },
             &ctx(1),
         );
@@ -2003,6 +2018,7 @@ mod tests {
             &mut state,
             Command::DeleteWorkspace {
                 workspace_id: ws_id.clone(),
+                force: false,
             },
             &ctx(3),
         );
@@ -2367,7 +2383,7 @@ mod tests {
         assert_eq!(state.blocks.len(), 2);
         let _ = update(
             &mut state,
-            Command::DeleteWorkspace { workspace_id: ws_id },
+            Command::DeleteWorkspace { workspace_id: ws_id, force: false },
             &ctx(4),
         );
         assert!(state.blocks.is_empty());
@@ -2597,7 +2613,7 @@ mod tests {
         // SrvWindowClosed; win-b survives.
         let events = update(
             &mut state,
-            Command::DeleteWorkspace { workspace_id: ws_a },
+            Command::DeleteWorkspace { workspace_id: ws_a, force: false },
             &ctx(4),
         );
         assert!(matches!(&events[0], Event::WorkspaceDeleted { .. }));
@@ -3160,7 +3176,7 @@ mod tests {
                 if let Some(workspace_id) = state.workspaces.keys().next().cloned() {
                     update(
                         state,
-                        Command::DeleteWorkspace { workspace_id },
+                        Command::DeleteWorkspace { workspace_id, force: false },
                         &ctx(conn_id),
                     )
                 } else {
@@ -3318,7 +3334,7 @@ mod tests {
             // Delete the workspace.
             let _ = update(
                 &mut state,
-                Command::DeleteWorkspace { workspace_id: ws_id.clone() },
+                Command::DeleteWorkspace { workspace_id: ws_id.clone(), force: false },
                 &ctx(4),
             );
             // Cascade — workspaces, tabs, blocks should all be empty.
