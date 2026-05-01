@@ -394,3 +394,44 @@ async fn shared_writer_holds_arbitrary_async_write() {
     let line = std::str::from_utf8(&buf[..n]).unwrap();
     assert!(line.starts_with("{\"kind\":\"event\""));
 }
+
+// ---- P1 round 2: stale session can't write to replacement writer ----------
+
+#[tokio::test]
+async fn send_event_for_session_rejects_stale_session() {
+    let (pipe, _events_rx) = make_pipe();
+    let (writer1, _reader1) = make_duplex();
+    let session1 = pipe.set_writer(writer1).await;
+
+    // Replacement host registers — bumps the session.
+    let (writer2, reader2) = make_duplex();
+    let session2 = pipe.set_writer(writer2).await;
+    assert_ne!(session1, session2, "session_id must change on re-register");
+
+    // Stale fanout (session1) tries to send — must be rejected without
+    // touching writer2.
+    let res = pipe
+        .send_event_for_session(session1, &ping_event(123))
+        .await;
+    assert!(
+        matches!(res, Err(super::HostPipeError::StaleSession)),
+        "expected StaleSession, got {:?}",
+        res
+    );
+
+    // Fresh-session send must succeed and land on writer2.
+    pipe.send_event_for_session(session2, &ping_event(456))
+        .await
+        .expect("fresh session send ok");
+
+    // Read exactly one frame; if the stale send had leaked, two frames
+    // would be on the wire and we'd see the version=123 frame too.
+    let frames = read_n_frames(reader2, 1).await;
+    assert_eq!(frames.len(), 1);
+    match &frames[0] {
+        HostFrame::Event(Event::Pong { version, .. }) => {
+            assert_eq!(*version, 456, "only the fresh-session event should land");
+        }
+        other => panic!("unexpected frame on writer2: {:?}", other),
+    }
+}

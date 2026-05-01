@@ -114,6 +114,12 @@ pub enum HostPipeError {
     /// callers won't see this from the public API today.
     #[allow(dead_code)] // reserved for stricter callers
     BufferOverflow,
+    /// Caller's captured `host_session_id` no longer matches the
+    /// pipe's current session (a new host registered, displacing the
+    /// old one). The caller — typically a per-host fanout task — should
+    /// exit immediately so it doesn't write into the new host's writer.
+    /// (codex P1 PR #642 round 2.)
+    StaleSession,
 }
 
 impl std::fmt::Display for HostPipeError {
@@ -123,6 +129,7 @@ impl std::fmt::Display for HostPipeError {
             HostPipeError::WriteFailed(e) => write!(f, "write to host pipe failed: {}", e),
             HostPipeError::Serialize(e) => write!(f, "frame serialize failed: {}", e),
             HostPipeError::BufferOverflow => write!(f, "host pipe pending buffer overflow"),
+            HostPipeError::StaleSession => write!(f, "host pipe session stale (replaced by new host registration)"),
         }
     }
 }
@@ -182,6 +189,14 @@ struct HostPipeInner {
     /// Set when the writer transitions from Some -> None. Cleared on
     /// reconnect. Used to enforce the 30s disconnect timeout.
     host_disconnected_at: Option<Instant>,
+    /// Monotonic generation incremented on every `set_writer` call.
+    /// Per-host fanout tasks capture this at start and pass it back
+    /// into `send_event_for_session`, which no-ops if it doesn't
+    /// match the current generation. Prevents a stale fanout (from
+    /// an old host connection that hasn't fully torn down yet) from
+    /// writing into a freshly-registered host's writer.
+    /// (codex P1 PR #642 round 2.)
+    host_session_id: u64,
 }
 
 impl HostPipeInner {
@@ -190,6 +205,7 @@ impl HostPipeInner {
             writer: None,
             pending_buffer: VecDeque::with_capacity(PENDING_BUFFER_CAP),
             host_disconnected_at: None,
+            host_session_id: 0,
         }
     }
 }
@@ -251,9 +267,15 @@ impl HostPipe {
     /// perspective. Hold time is bounded by `pending_buffer` size
     /// (cap 64) × per-frame write latency (microseconds on a healthy
     /// pipe), well under the existing `state.lock()` discipline.
-    pub async fn set_writer(&self, writer: SharedWriter) {
+    /// Returns the new `host_session_id`. The caller (IPC server's
+    /// host-connection setup) MUST capture this and pass it to the
+    /// per-connection fanout task; the fanout task uses it as a
+    /// stale-writer guard via `send_event_for_session`.
+    pub async fn set_writer(&self, writer: SharedWriter) -> u64 {
         let mut inner = self.inner.lock().await;
         inner.host_disconnected_at = None;
+        inner.host_session_id = inner.host_session_id.wrapping_add(1);
+        let session_id = inner.host_session_id;
         // Drain pending frames against the new writer in FIFO order.
         while let Some(p) = inner.pending_buffer.pop_front() {
             let mut wlock = writer.lock().await;
@@ -266,10 +288,11 @@ impl HostPipe {
                 ));
                 inner.pending_buffer.push_front(p);
                 inner.host_disconnected_at = Some(Instant::now());
-                return;
+                return session_id;
             }
         }
         inner.writer = Some(writer);
+        session_id
     }
 
     /// Mark the host as disconnected. Arms the 30s timer; subsequent
@@ -301,6 +324,35 @@ impl HostPipe {
     /// the prior direct `send_event` call). Other client kinds keep
     /// the direct path because they're not subject to HostPipe's
     /// pending-buffer / reconnect semantics.
+    ///
+    /// `session_id` is the value captured from `set_writer` when the
+    /// host registered. If the current writer's session_id no longer
+    /// matches (because a new host registered and replaced the
+    /// writer), this returns `Err(HostPipeError::StaleSession)` so the
+    /// fanout task exits cleanly without writing to the new host.
+    /// (codex P1 PR #642 round 2.)
+    pub async fn send_event_for_session(
+        &self,
+        session_id: u64,
+        event: &Event,
+    ) -> Result<(), HostPipeError> {
+        // Snapshot under lock; abort early on session mismatch so
+        // we don't even attempt to acquire the writer.
+        {
+            let inner = self.inner.lock().await;
+            if inner.host_session_id != session_id {
+                return Err(HostPipeError::StaleSession);
+            }
+        }
+        let frame = HostFrame::Event(event.clone());
+        self.send_frame(frame, None).await
+    }
+
+    /// Send an event without a session check — only safe in tests
+    /// or single-session contexts. Production fanout MUST use
+    /// `send_event_for_session` so a stale fanout from a previous
+    /// host connection cannot write into a fresh host's writer.
+    #[cfg(test)]
     pub async fn send_event(&self, event: &Event) -> Result<(), HostPipeError> {
         let frame = HostFrame::Event(event.clone());
         self.send_frame(frame, None).await

@@ -237,6 +237,12 @@ async fn handle_connection(stream: NamedPipeServer, ctx: Arc<ServerCtx>) {
     // writer install (below, on Register) replaces the prior direct-
     // write fanout for the host connection.
     let is_host_route = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    // Captured at host-Register time from `HostPipe::set_writer`. The
+    // fanout task uses it via `send_event_for_session` to drop frames
+    // that would land in a *replacement* host's writer if this fanout
+    // is from an old connection that hasn't fully torn down yet.
+    // (codex P1 PR #642 round 2.)
+    let host_session_id = Arc::new(std::sync::atomic::AtomicU64::new(0));
 
     // Phase B.8 — fanout task: subscribe to the server-wide event
     // bus and write each event to THIS connection's pipe. Started
@@ -248,6 +254,7 @@ async fn handle_connection(stream: NamedPipeServer, ctx: Arc<ServerCtx>) {
         let ctx = Arc::clone(&ctx);
         let host_pipe = Arc::clone(&ctx.host_pipe);
         let is_host_route = Arc::clone(&is_host_route);
+        let host_session_id = Arc::clone(&host_session_id);
         let mut events_rx = ctx.events_tx.subscribe();
         tokio::spawn(async move {
             loop {
@@ -268,7 +275,13 @@ async fn handle_connection(stream: NamedPipeServer, ctx: Arc<ServerCtx>) {
                         // a host-only addition until renderer / srv
                         // proxies adopt the envelope in a later PR).
                         if is_host_route.load(std::sync::atomic::Ordering::Relaxed) {
-                            if host_pipe.send_event(&event).await.is_err() {
+                            let session = host_session_id
+                                .load(std::sync::atomic::Ordering::Relaxed);
+                            if host_pipe
+                                .send_event_for_session(session, &event)
+                                .await
+                                .is_err()
+                            {
                                 return;
                             }
                         } else if send_event_shared(&writer, event).await.is_err() {
@@ -485,13 +498,19 @@ async fn handle_connection(stream: NamedPipeServer, ctx: Arc<ServerCtx>) {
                 // the legacy direct write. Drains any frames buffered
                 // since the prior host disconnect (FIFO).
                 if kind == ClientKind::Host {
-                    ctx.host_pipe
+                    let session = ctx
+                        .host_pipe
                         .set_writer(std::sync::Arc::clone(&writer))
                         .await;
+                    // Order matters: store session_id BEFORE flipping
+                    // is_host_route so the fanout task never reads the
+                    // routing flag without a valid session captured.
+                    // (codex P1 PR #642 round 2.)
+                    host_session_id.store(session, std::sync::atomic::Ordering::Relaxed);
                     is_host_route.store(true, std::sync::atomic::Ordering::Relaxed);
                     crate::log(&format!(
-                        "[ipc] conn_id={} host registered — HostPipe writer installed; fanout routing through HostPipe",
-                        conn_id
+                        "[ipc] conn_id={} host registered (session={}) — HostPipe writer installed; fanout routing through HostPipe",
+                        conn_id, session
                     ));
                 }
             }
