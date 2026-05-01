@@ -497,9 +497,16 @@ fn format_srv_event(e: &Event) -> String {
         Event::TabCreated { workspace_id, tab_id, name, version } => {
             format!("v={:>3} TabCreated         tab={} ws={} name={}", version, tab_id, workspace_id, name)
         }
-        Event::TabMoved { tab_id, src_workspace_id, dst_workspace_id, dst_index, .. } => format!(
-            "v=??? TabMoved           tab={} {} → {} idx={}",
-            tab_id, src_workspace_id, dst_workspace_id, dst_index
+        Event::TabMoved {
+            tab_id,
+            src_workspace_id,
+            dst_workspace_id,
+            dst_index,
+            version,
+            ..
+        } => format!(
+            "v={:>3} TabMoved           tab={} {} → {} idx={}",
+            version, tab_id, src_workspace_id, dst_workspace_id, dst_index
         ),
         Event::BlockMoved { block_id, src_tab_id, dst_tab_id, dst_index, version } => format!(
             "v={:>3} BlockMoved         blk={} {} → {} idx={}",
