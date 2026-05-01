@@ -335,10 +335,21 @@ async fn run_windows(
     // Subscribe BEFORE spawning so the race window between construction
     // and first `recv()` doesn't drop early events. (reagent P2 PR #609.)
     // Same pattern as the disk writer above.
-    let saga_coord = std::sync::Arc::new(
-        saga::SagaCoordinator::new(events_tx.clone(), std::sync::Arc::clone(&state))
-            .with_log(std::sync::Arc::clone(&saga_log)),
-    );
+    // with_log() can fail if max_saga_id() fails (e.g. corrupted SQLite
+    // file). Treat as fatal — continuing with a default next_saga_id=1
+    // while the log is attached would let the coordinator silently
+    // mutate prior saga history on restart. Better to crash loudly so
+    // operators see + investigate. (codex P1 PR #645 round 2.)
+    let saga_coord_inner = saga::SagaCoordinator::new(events_tx.clone(), std::sync::Arc::clone(&state))
+        .with_log(std::sync::Arc::clone(&saga_log))
+        .unwrap_or_else(|e| {
+            log(&format!(
+                "[main] FATAL: failed to seed saga_id allocator from launcher_saga.max(saga_id): {} — refusing to start with degraded coordinator",
+                e
+            ));
+            std::process::exit(1);
+        });
+    let saga_coord = std::sync::Arc::new(saga_coord_inner);
     let saga_rx = events_tx.subscribe();
     tokio::spawn(saga::run_coordinator(
         std::sync::Arc::clone(&saga_coord),

@@ -260,7 +260,7 @@ impl SagaCoordinator {
     /// existing tests + the `next_id_is_monotonic` smoke don't have
     /// to construct an in-memory log. Production wiring (in
     /// `main.rs`) calls this once before `run_coordinator` is spawned.
-    pub fn with_log(mut self, log: Arc<LauncherSagaLog>) -> Self {
+    pub fn with_log(mut self, log: Arc<LauncherSagaLog>) -> Result<Self, crate::saga::log::LogError> {
         // Seed the saga_id allocator from the highest persisted id
         // so a launcher restart cannot reuse an id that already
         // exists in `launcher_saga`. Reusing would (a) fail new
@@ -268,27 +268,24 @@ impl SagaCoordinator {
         // saga rows via `terminate_saga` / `finish_step` UPDATEs
         // keyed by saga_id — corrupting saga history + recovery
         // diagnostics. (codex P1 PR #645 round 1.)
-        match log.max_saga_id() {
-            Ok(max) => {
-                self.next_saga_id
-                    .store(max + 1, std::sync::atomic::Ordering::Relaxed);
-                if max > 0 {
-                    crate::log(&format!(
-                        "[saga] seeded next_saga_id={} from launcher_saga.max(saga_id)={}",
-                        max + 1,
-                        max
-                    ));
-                }
-            }
-            Err(e) => {
-                crate::log(&format!(
-                    "[saga] WARN: max_saga_id() failed ({}); next_saga_id stays at 1 — duplicate saga_id risk",
-                    e
-                ));
-            }
+        //
+        // On `max_saga_id()` error: return Err so caller (main.rs)
+        // can fail launcher startup loudly. Continuing with a default
+        // next_saga_id=1 while the log is still attached would leave
+        // the coordinator in the exact failure mode this seed is
+        // meant to prevent. (codex P1 PR #645 round 2.)
+        let max = log.max_saga_id()?;
+        self.next_saga_id
+            .store(max + 1, std::sync::atomic::Ordering::Relaxed);
+        if max > 0 {
+            crate::log(&format!(
+                "[saga] seeded next_saga_id={} from launcher_saga.max(saga_id)={}",
+                max + 1,
+                max
+            ));
         }
         self.log = Some(log);
-        self
+        Ok(self)
     }
 
     /// Allocate the next saga_id. Monotonic per launcher run.
@@ -1343,7 +1340,8 @@ mod tests {
         let log = StdArc::new(LauncherSagaLog::open_in_memory().expect("in-memory log"));
         let coord = StdArc::new(
             SagaCoordinator::new(events_tx.clone(), Arc::clone(&state))
-                .with_log(StdArc::clone(&log)),
+                .with_log(StdArc::clone(&log))
+                .expect("with_log on fresh in-memory log should succeed"),
         );
         (coord, log, events_tx)
     }
