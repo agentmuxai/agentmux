@@ -729,4 +729,132 @@ mod tests {
             serde_json::from_str(&snapshot[0].input_json).unwrap();
         assert_eq!(parsed, input);
     }
+
+    // Step 7 — E.7 recovery-from-crash scaffold.
+    //
+    // Asserts the API surface PR 2's `compensate_unresolved` will
+    // need to walk back partially-applied sagas. The full
+    // compensate-on-restart logic ships in PR 2; this test pins the
+    // shape of `unresolved_sagas()` so PR 2 can wire against a
+    // stable contract.
+    //
+    // Scenario: a saga went through TWO succeeded forward steps,
+    // then the srv process crashed mid-third-step (no terminal row).
+    // After restart, `unresolved_sagas()` must:
+    //   1. Return the saga in `running` state.
+    //   2. Surface its succeeded steps in `step_index ASC` order so
+    //      PR 2's reverse walker can iterate `.iter().rev()` and
+    //      dispatch compensation in LIFO order (most-recently-applied
+    //      first, matching standard saga compensation semantics).
+    //   3. Preserve `cmd_json` per step so PR 2 can reconstruct the
+    //      compensating command shape (e.g., `MoveTab src↔dst` swap).
+    //   4. Carry the saga's `input_json` for `--diag sagas` triage.
+    #[test]
+    fn unresolved_saga_exposes_succeeded_steps_in_index_order_for_reverse_walk() {
+        let (_f, log) = temp_log();
+
+        // A saga that got through two forward steps (CreateWorkspace
+        // + MoveTab from a tear_off_tab run), then "crashed" before
+        // terminate(). No fail/compensate writes — the lifecycle row
+        // stays in `running`, the steps stay `succeeded`.
+        let input = serde_json::json!({
+            "tab_id": "tab-abc",
+            "source_workspace_id": "ws-1",
+        });
+        log.start_saga(101, "tear_off_tab", &input).unwrap();
+
+        let create_cmd = Command::Ping { nonce: 1 }; // stand-in: CreateWorkspace
+        let move_cmd = Command::Ping { nonce: 2 }; // stand-in: MoveTab
+        log.start_step(101, 0, "CreateWorkspace", &create_cmd)
+            .unwrap();
+        log.finish_step(101, 0, &[pong(1)]).unwrap();
+        log.start_step(101, 1, "MoveTab", &move_cmd).unwrap();
+        log.finish_step(101, 1, &[pong(2)]).unwrap();
+
+        // Imagine srv crashed here — no terminate(). On restart we
+        // open a fresh SagaLog over the same DB; saga 101 should
+        // appear in unresolved_sagas with both succeeded steps.
+        let unresolved = log.unresolved_sagas().unwrap();
+        assert_eq!(unresolved.len(), 1);
+        let saga = &unresolved[0];
+
+        // (1) Saga is in `running` state — PR 2 picks these up first.
+        assert_eq!(saga.saga_id, 101);
+        assert_eq!(saga.name, "tear_off_tab");
+        assert_eq!(saga.state, "running");
+
+        // (2) Steps are returned in ascending step_index order — PR 2's
+        // reverse-walker iterates `.iter().rev()` to compensate LIFO.
+        assert_eq!(saga.steps.len(), 2);
+        assert_eq!(saga.steps[0].step_index, 0);
+        assert_eq!(saga.steps[0].name, "CreateWorkspace");
+        assert_eq!(saga.steps[0].state, "succeeded");
+        assert_eq!(saga.steps[1].step_index, 1);
+        assert_eq!(saga.steps[1].name, "MoveTab");
+        assert_eq!(saga.steps[1].state, "succeeded");
+
+        // (3) cmd_json round-trips so PR 2 can re-deserialize and
+        // construct the compensating command shape.
+        let parsed_create: Command =
+            serde_json::from_str(&saga.steps[0].cmd_json).unwrap();
+        let parsed_move: Command = serde_json::from_str(&saga.steps[1].cmd_json).unwrap();
+        assert!(matches!(parsed_create, Command::Ping { nonce: 1 }));
+        assert!(matches!(parsed_move, Command::Ping { nonce: 2 }));
+
+        // (4) input_json survives the restart for operator triage.
+        let parsed_input: serde_json::Value =
+            serde_json::from_str(&saga.input_json).unwrap();
+        assert_eq!(parsed_input["tab_id"], "tab-abc");
+        assert_eq!(parsed_input["source_workspace_id"], "ws-1");
+
+        // Sanity check: walking succeeded-only in reverse (the actual
+        // PR 2 algorithm) yields step indices [1, 0] — most-recently-
+        // applied first.
+        let reverse_succeeded: Vec<u32> = saga
+            .steps
+            .iter()
+            .rev()
+            .filter(|s| s.state == "succeeded")
+            .map(|s| s.step_index)
+            .collect();
+        assert_eq!(reverse_succeeded, vec![1, 0]);
+    }
+
+    // Step 7 — E.7 recovery scaffold continued.
+    //
+    // Failed-mid-step is a different recovery shape: the lifecycle
+    // is still `running`, but one step is `failed` and earlier steps
+    // are `succeeded`. PR 2's reverse-walker must skip the failed
+    // step (its effects didn't apply by definition) and compensate
+    // the prior succeeded ones.
+    #[test]
+    fn unresolved_saga_with_mid_step_failure_exposes_succeeded_prefix() {
+        let (_f, log) = temp_log();
+        log.start_saga(202, "tear_off_block", &serde_json::json!({})).unwrap();
+        log.start_step(202, 0, "Ping", &ping(1)).unwrap();
+        log.finish_step(202, 0, &[pong(1)]).unwrap();
+        log.start_step(202, 1, "Ping", &ping(2)).unwrap();
+        log.fail_step(202, 1, "reducer rejected").unwrap();
+        // Imagine crash before compensation could finish — saga
+        // lifecycle row stays in `running`.
+
+        let unresolved = log.unresolved_sagas().unwrap();
+        let saga = unresolved.iter().find(|s| s.saga_id == 202).unwrap();
+        assert_eq!(saga.state, "running");
+        // Both step rows present, in index order, with the failure
+        // distinguishable so PR 2's recovery skips it.
+        assert_eq!(saga.steps.len(), 2);
+        assert_eq!(saga.steps[0].state, "succeeded");
+        assert_eq!(saga.steps[1].state, "failed");
+        // PR 2 will iterate succeeded prefix for compensation —
+        // demonstrate the iteration shape.
+        let to_compensate: Vec<u32> = saga
+            .steps
+            .iter()
+            .rev()
+            .filter(|s| s.state == "succeeded")
+            .map(|s| s.step_index)
+            .collect();
+        assert_eq!(to_compensate, vec![0]);
+    }
 }
