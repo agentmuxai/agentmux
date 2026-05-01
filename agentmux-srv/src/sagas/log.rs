@@ -312,17 +312,25 @@ impl SagaLog {
         Ok(())
     }
 
-    /// Return all sagas still in `running` or `compensating` state,
-    /// each with its full step list (for PR 2's compensate-on-restart
-    /// reverse walk). Used at startup before the API server begins
-    /// accepting requests.
+    /// Return all sagas still in `running`, `compensating`, or
+    /// `failed` state, each with its full step list (for PR 2's
+    /// compensate-on-restart reverse walk). Used at startup before
+    /// the API server begins accepting requests.
+    ///
+    /// (codex P1 PR #631 round 2.) `failed` is included because
+    /// `classify_run_saga_result` records timeout/cancel paths as
+    /// `failed` — those are exactly the partial-apply cases this
+    /// durability layer exists to recover. A `failed` saga's step
+    /// list may have `succeeded` rows whose effects need
+    /// compensation; if we filtered them out here, recovery would
+    /// silently leave that state in place.
     #[allow(dead_code)] // Used by PR 2's resume-on-startup; tests exercise it now.
     pub fn unresolved_sagas(&self) -> Result<Vec<UnresolvedSaga>, StoreError> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT saga_id, name, state, started_at, input_json
              FROM saga
-             WHERE state IN ('running', 'compensating')
+             WHERE state IN ('running', 'compensating', 'failed')
              ORDER BY saga_id ASC",
         )?;
         let saga_rows: Vec<(i64, String, String, i64, String)> = stmt
@@ -530,7 +538,10 @@ mod tests {
         log.start_step(2, 0, "Ping", &ping(0)).unwrap();
         log.finish_step(2, 0, &[pong(0)]).unwrap();
 
-        // Saga 3: failed (terminal).
+        // Saga 3: failed (terminal). NOW INCLUDED in unresolved
+        // (codex P1 round 2): classify_run_saga_result records
+        // timeout/cancel paths as `failed`, and those are exactly
+        // the partial-apply cases recovery needs to handle.
         log.start_saga(3, "saga_c", &serde_json::json!({})).unwrap();
         log.terminate(
             3,
@@ -553,9 +564,22 @@ mod tests {
             )
             .unwrap();
 
+        // Saga 5: compensated (terminal — recovery already ran).
+        log.start_saga(5, "saga_e", &serde_json::json!({})).unwrap();
+        log.terminate(
+            5,
+            SagaOutcome::Compensated {
+                reason: "rolled back".to_string(),
+            },
+        )
+        .unwrap();
+
         let unresolved = log.unresolved_sagas().unwrap();
-        let ids: Vec<u64> = unresolved.iter().map(|u| u.saga_id).collect();
-        assert_eq!(ids, vec![2, 4]);
+        let mut ids: Vec<u64> = unresolved.iter().map(|u| u.saga_id).collect();
+        ids.sort();
+        // 2 (running), 3 (failed), 4 (compensating). Excludes 1
+        // (completed) and 5 (compensated).
+        assert_eq!(ids, vec![2, 3, 4]);
 
         // Saga 2 carries its succeeded step.
         let saga2 = unresolved.iter().find(|u| u.saga_id == 2).unwrap();
@@ -563,6 +587,10 @@ mod tests {
         assert_eq!(saga2.steps.len(), 1);
         assert_eq!(saga2.steps[0].state, "succeeded");
         assert_eq!(saga2.steps[0].name, "Ping");
+
+        // Saga 3 is failed but eligible for recovery.
+        let saga3 = unresolved.iter().find(|u| u.saga_id == 3).unwrap();
+        assert_eq!(saga3.state, "failed");
 
         // Saga 4 has no steps yet (started but never dispatched).
         let saga4 = unresolved.iter().find(|u| u.saga_id == 4).unwrap();

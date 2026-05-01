@@ -152,8 +152,28 @@ impl<'a> SagaCtx<'a> {
             return Err(message);
         }
         for ev in &events {
-            crate::persist_subscriber::apply_event_to_wstore(ev, &self.state.wstore)
-                .map_err(|e| e.to_string())?;
+            if let Err(e) = crate::persist_subscriber::apply_event_to_wstore(ev, &self.state.wstore)
+            {
+                // (reagent P1 PR #631 round 2) Mark the step as
+                // failed in the durable log BEFORE returning. Without
+                // this, the step row stays in `pending` state even
+                // though the reducer already applied the command
+                // (line 139); PR 2's compensate-on-restart sees a
+                // `pending` step and can't determine whether the
+                // command was applied.
+                let err_msg = e.to_string();
+                if let Err(log_err) =
+                    self.state.saga_log.fail_step(self.saga_id, idx, &err_msg)
+                {
+                    tracing::warn!(
+                        saga_id = self.saga_id,
+                        step_index = idx,
+                        "[saga] fail_step log write failed during wstore-apply error path: {}",
+                        log_err,
+                    );
+                }
+                return Err(err_msg);
+            }
         }
         if let Err(e) = self.state.saga_log.finish_step(self.saga_id, idx, &events) {
             tracing::warn!(
@@ -257,21 +277,33 @@ pub fn alloc_saga_id(state: &AppState) -> u64 {
 /// (typically `serde_json::json!({...})`). (reagent P1 PR #631 —
 /// `Value::Null` placeholder erased provenance.)
 ///
-/// Log-write failures are non-fatal — the in-memory saga path is
-/// still authoritative for THIS srv run.
+/// **Fail-fast on log error.** (codex P1 PR #631 round 2.) If
+/// `start_saga` fails — most likely a UNIQUE constraint violation
+/// from a saga_id collision — the saga MUST NOT proceed. Otherwise
+/// later `terminate()` calls would `UPDATE saga SET ... WHERE saga_id=?`
+/// against a *different run's* row, mixing lifecycle data across
+/// sagas and silently corrupting the durability log. Returning
+/// `Err` here propagates up to the caller, which records the
+/// failure via `emit_terminal` (with a fresh saga_id allocated by
+/// the caller's `alloc_saga_id` retry path, if any).
 pub async fn emit_saga_started(
     state: &AppState,
     saga_id: u64,
     name: &'static str,
     input: serde_json::Value,
-) {
+) -> Result<(), String> {
     if let Err(e) = state.saga_log.start_saga(saga_id, name, &input) {
-        tracing::warn!(
+        let msg = format!(
+            "saga durable start row insert failed for saga_id={}: {} (likely ID collision; refusing to run)",
+            saga_id, e
+        );
+        tracing::error!(
             saga_id,
             name,
-            "[saga] start_saga log write failed: {} — saga continues without durable record",
-            e
+            "[saga] {} — aborting saga to avoid corrupting prior run's lifecycle row",
+            msg,
         );
+        return Err(msg);
     }
     let v = state.srv_state.lock().await.bump_version();
     let _ = state.srv_events_tx.send(Event::SagaStarted {
@@ -279,6 +311,7 @@ pub async fn emit_saga_started(
         name: name.to_string(),
         version: v,
     });
+    Ok(())
 }
 
 /// Outcome a saga's inner future hands back to `emit_terminal`.

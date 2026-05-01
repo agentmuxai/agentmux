@@ -88,7 +88,7 @@ pub async fn run(
     let dst_index = insert_index.unwrap_or(u32::MAX);
 
     let saga_id = alloc_saga_id(state);
-    emit_saga_started(
+    if let Err(e) = emit_saga_started(
         state,
         saga_id,
         "restore_torn_off_tab",
@@ -99,7 +99,10 @@ pub async fn run(
             "insert_index": dst_index,
         }),
     )
-    .await;
+    .await
+    {
+        return Err(e);
+    }
     let ctx = SagaCtx::new(state, saga_id);
     let result = run_saga(
         "restore_torn_off_tab",

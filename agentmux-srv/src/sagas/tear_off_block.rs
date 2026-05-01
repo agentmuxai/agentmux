@@ -80,7 +80,7 @@ pub async fn run(
     }
 
     let saga_id = alloc_saga_id(state);
-    emit_saga_started(
+    if let Err(e) = emit_saga_started(
         state,
         saga_id,
         "tear_off_block",
@@ -89,7 +89,10 @@ pub async fn run(
             "source_tab_id": &source_tab_id,
         }),
     )
-    .await;
+    .await
+    {
+        return Err(e);
+    }
     let ctx = SagaCtx::new(state, saga_id);
     let result = run_saga("tear_off_block", run_inner(ctx, block_id, source_tab_id)).await;
     emit_terminal(state, saga_id, classify_run_saga_result(&result)).await;
