@@ -62,6 +62,12 @@ pub fn update(state: &mut State, cmd: Command, ctx: &Ctx) -> Vec<Event> {
         } => handle_reorder_tab(state, workspace_id, tab_id, new_index),
         Command::CreateBlock { tab_id, meta } => handle_create_block(state, tab_id, meta),
         Command::DeleteBlock { tab_id, block_id } => handle_delete_block(state, tab_id, block_id),
+        Command::SetFocusedNode { tab_id, node_id } => {
+            handle_set_focused_node(state, tab_id, node_id)
+        }
+        Command::SetMagnifiedNode { tab_id, node_id } => {
+            handle_set_magnified_node(state, tab_id, node_id)
+        }
         Command::CreateWindow {
             window_id,
             workspace_id,
@@ -365,6 +371,8 @@ fn handle_create_tab(state: &mut State, workspace_id: String, name: String) -> V
             workspace_id: workspace_id.clone(),
             name: resolved_name.clone(),
             block_ids: Vec::new(),
+            focused_node_id: String::new(),
+            magnified_node_id: String::new(),
         },
     );
     let workspace = state.workspaces.get_mut(&workspace_id).expect("checked");
@@ -594,6 +602,58 @@ fn handle_delete_block(state: &mut State, tab_id: String, block_id: String) -> V
     vec![Event::BlockDeleted {
         tab_id,
         block_id,
+        version: v,
+    }]
+}
+
+/// Phase E.4 (Option A) — set the focused layout-node id on a tab.
+/// Errors (non-fatal) if the tab is unknown to the reducer; no-op
+/// short-circuit when the value is already current. Empty `node_id`
+/// clears the field. Bumps the version only on real changes so a
+/// burst of identical sets doesn't churn the event stream.
+fn handle_set_focused_node(state: &mut State, tab_id: String, node_id: String) -> Vec<Event> {
+    let Some(tab) = state.tabs.get_mut(&tab_id) else {
+        let v = state.bump_version();
+        return vec![Event::Error {
+            code: ErrorCode::InvalidCommand,
+            message: format!("SetFocusedNode: unknown tab {}", tab_id),
+            fatal: false,
+            version: v,
+        }];
+    };
+    if tab.focused_node_id == node_id {
+        return Vec::new();
+    }
+    tab.focused_node_id = node_id.clone();
+    let v = state.bump_version();
+    vec![Event::FocusedNodeChanged {
+        tab_id,
+        node_id,
+        version: v,
+    }]
+}
+
+/// Phase E.4 (Option A) — set the magnified layout-node id on a tab.
+/// Same shape as `handle_set_focused_node`. Empty `node_id` is the
+/// toggle-off / clear case.
+fn handle_set_magnified_node(state: &mut State, tab_id: String, node_id: String) -> Vec<Event> {
+    let Some(tab) = state.tabs.get_mut(&tab_id) else {
+        let v = state.bump_version();
+        return vec![Event::Error {
+            code: ErrorCode::InvalidCommand,
+            message: format!("SetMagnifiedNode: unknown tab {}", tab_id),
+            fatal: false,
+            version: v,
+        }];
+    };
+    if tab.magnified_node_id == node_id {
+        return Vec::new();
+    }
+    tab.magnified_node_id = node_id.clone();
+    let v = state.bump_version();
+    vec![Event::MagnifiedNodeChanged {
+        tab_id,
+        node_id,
         version: v,
     }]
 }
@@ -863,6 +923,8 @@ fn handle_move_tab(
                     workspace_id: dst_workspace_id.clone(),
                     name: String::new(),
                     block_ids: Vec::new(),
+                    focused_node_id: String::new(),
+                    magnified_node_id: String::new(),
                 },
             );
         }
@@ -1147,6 +1209,8 @@ mod tests {
             | Event::BlockMetaUpdated { version, .. }
             | Event::TabMoved { version, .. }
             | Event::BlockMoved { version, .. }
+            | Event::FocusedNodeChanged { version, .. }
+            | Event::MagnifiedNodeChanged { version, .. }
             | Event::Error { version, .. } => *version,
         }
     }
@@ -2039,6 +2103,177 @@ mod tests {
             &ctx(2),
         );
         assert!(events.is_empty());
+    }
+
+    // ---------------------------------------------------------------
+    // Phase E.4 (Option A) — SetFocusedNode / SetMagnifiedNode
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn set_focused_node_round_trip_emits_event_and_updates_state() {
+        let mut state = State::default();
+        let ws_id = create_workspace(&mut state, "w");
+        let tab_id = create_tab(&mut state, &ws_id, "t1");
+        assert_eq!(state.tabs[&tab_id].focused_node_id, "");
+        let events = update(
+            &mut state,
+            Command::SetFocusedNode {
+                tab_id: tab_id.clone(),
+                node_id: "node-7".into(),
+            },
+            &ctx(2),
+        );
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            Event::FocusedNodeChanged { tab_id: t, node_id, .. } => {
+                assert_eq!(t, &tab_id);
+                assert_eq!(node_id, "node-7");
+            }
+            other => panic!("expected FocusedNodeChanged, got {:?}", other),
+        }
+        assert_eq!(state.tabs[&tab_id].focused_node_id, "node-7");
+    }
+
+    #[test]
+    fn set_focused_node_no_op_when_value_unchanged() {
+        let mut state = State::default();
+        let ws_id = create_workspace(&mut state, "w");
+        let tab_id = create_tab(&mut state, &ws_id, "t1");
+        let _ = update(
+            &mut state,
+            Command::SetFocusedNode {
+                tab_id: tab_id.clone(),
+                node_id: "node-1".into(),
+            },
+            &ctx(2),
+        );
+        let version_before = state.event_version;
+        let events = update(
+            &mut state,
+            Command::SetFocusedNode {
+                tab_id,
+                node_id: "node-1".into(),
+            },
+            &ctx(3),
+        );
+        assert!(events.is_empty(), "no-op should emit no events");
+        assert_eq!(state.event_version, version_before, "no version bump on no-op");
+    }
+
+    #[test]
+    fn set_focused_node_unknown_tab_emits_error() {
+        let mut state = State::default();
+        let events = update(
+            &mut state,
+            Command::SetFocusedNode {
+                tab_id: "ghost-tab".into(),
+                node_id: "node-1".into(),
+            },
+            &ctx(1),
+        );
+        assert_eq!(events.len(), 1);
+        assert!(
+            matches!(&events[0], Event::Error { .. }),
+            "expected Event::Error, got {:?}",
+            events[0]
+        );
+    }
+
+    #[test]
+    fn set_magnified_node_round_trip_emits_event_and_updates_state() {
+        let mut state = State::default();
+        let ws_id = create_workspace(&mut state, "w");
+        let tab_id = create_tab(&mut state, &ws_id, "t1");
+        let events = update(
+            &mut state,
+            Command::SetMagnifiedNode {
+                tab_id: tab_id.clone(),
+                node_id: "node-9".into(),
+            },
+            &ctx(2),
+        );
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            Event::MagnifiedNodeChanged { tab_id: t, node_id, .. } => {
+                assert_eq!(t, &tab_id);
+                assert_eq!(node_id, "node-9");
+            }
+            other => panic!("expected MagnifiedNodeChanged, got {:?}", other),
+        }
+        assert_eq!(state.tabs[&tab_id].magnified_node_id, "node-9");
+    }
+
+    #[test]
+    fn set_magnified_node_no_op_when_value_unchanged() {
+        let mut state = State::default();
+        let ws_id = create_workspace(&mut state, "w");
+        let tab_id = create_tab(&mut state, &ws_id, "t1");
+        let _ = update(
+            &mut state,
+            Command::SetMagnifiedNode {
+                tab_id: tab_id.clone(),
+                node_id: "node-2".into(),
+            },
+            &ctx(2),
+        );
+        let version_before = state.event_version;
+        let events = update(
+            &mut state,
+            Command::SetMagnifiedNode {
+                tab_id,
+                node_id: "node-2".into(),
+            },
+            &ctx(3),
+        );
+        assert!(events.is_empty());
+        assert_eq!(state.event_version, version_before);
+    }
+
+    #[test]
+    fn set_magnified_node_clear_with_empty_node_id() {
+        let mut state = State::default();
+        let ws_id = create_workspace(&mut state, "w");
+        let tab_id = create_tab(&mut state, &ws_id, "t1");
+        // Magnify a node first.
+        let _ = update(
+            &mut state,
+            Command::SetMagnifiedNode {
+                tab_id: tab_id.clone(),
+                node_id: "node-3".into(),
+            },
+            &ctx(2),
+        );
+        assert_eq!(state.tabs[&tab_id].magnified_node_id, "node-3");
+        // Now clear with empty node_id (toggle-off semantics).
+        let events = update(
+            &mut state,
+            Command::SetMagnifiedNode {
+                tab_id: tab_id.clone(),
+                node_id: String::new(),
+            },
+            &ctx(3),
+        );
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            Event::MagnifiedNodeChanged { node_id, .. } => assert_eq!(node_id, ""),
+            other => panic!("expected MagnifiedNodeChanged with empty node_id, got {:?}", other),
+        }
+        assert_eq!(state.tabs[&tab_id].magnified_node_id, "");
+    }
+
+    #[test]
+    fn set_magnified_node_unknown_tab_emits_error() {
+        let mut state = State::default();
+        let events = update(
+            &mut state,
+            Command::SetMagnifiedNode {
+                tab_id: "ghost-tab".into(),
+                node_id: "node-1".into(),
+            },
+            &ctx(1),
+        );
+        assert_eq!(events.len(), 1);
+        assert!(matches!(&events[0], Event::Error { .. }));
     }
 
     #[test]

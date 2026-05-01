@@ -733,6 +733,15 @@ async fn enforce_register_first(
             "MoveBlock is a srv-pipe command; sent to launcher pipe by mistake".to_string(),
             false,
         ),
+        // Phase E.4 (Option A) — layout focused/magnified setters are srv-pipe.
+        Command::SetFocusedNode { .. } => (
+            "SetFocusedNode is a srv-pipe command; sent to launcher pipe by mistake".to_string(),
+            false,
+        ),
+        Command::SetMagnifiedNode { .. } => (
+            "SetMagnifiedNode is a srv-pipe command; sent to launcher pipe by mistake".to_string(),
+            false,
+        ),
     };
     // Phase E.1b — connection-private error; sentinel version=0
     // (codex P2 #610). See parse-error path for rationale.

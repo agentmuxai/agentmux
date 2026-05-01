@@ -408,6 +408,23 @@ pub enum Command {
         tab_id: String,
         block_id: String,
     },
+    /// Phase E.4 (Option A) — set a tab's `focusednodeid`. Errors if
+    /// the tab is unknown to the reducer; no-op short-circuit when the
+    /// value is already current. Empty `node_id` clears the field.
+    /// Routes through the reducer so the persist subscriber writes the
+    /// new value into `LayoutState.focusednodeid` for the tab. The
+    /// rest of `LayoutState` (rootnode/leaforder/pendingbackendactions)
+    /// keeps its existing wcore-direct path until Option B lands.
+    SetFocusedNode {
+        tab_id: String,
+        node_id: String,
+    },
+    /// Phase E.4 (Option A) — set a tab's `magnifiednodeid`. Same
+    /// shape as `SetFocusedNode`; empty `node_id` clears (toggle-off).
+    SetMagnifiedNode {
+        tab_id: String,
+        node_id: String,
+    },
     /// Phase D.3 — request an `Event::EventList` reply containing the
     /// events the launcher has emitted with version > `since`. Used
     /// by subscribers that hold a snapshot at version V and want to
@@ -939,6 +956,22 @@ pub enum Event {
     BlockDeleted {
         tab_id: String,
         block_id: String,
+        version: u64,
+    },
+    /// Phase E.4 (Option A) — a tab's `focusednodeid` changed via the
+    /// reducer. Subscribers (persist, eventually the renderer's E.6
+    /// dispatcher) update the tab's layout view. Empty `node_id`
+    /// reflects a clear.
+    FocusedNodeChanged {
+        tab_id: String,
+        node_id: String,
+        version: u64,
+    },
+    /// Phase E.4 (Option A) — a tab's `magnifiednodeid` changed via
+    /// the reducer. Empty `node_id` reflects a clear (toggle-off).
+    MagnifiedNodeChanged {
+        tab_id: String,
+        node_id: String,
         version: u64,
     },
 }

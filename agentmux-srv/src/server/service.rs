@@ -233,6 +233,57 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
                 Ok(v) => v,
                 Err(e) => return WebReturnType::error(e),
             };
+            // Phase E.4 (Option A) — when a LayoutState update lands,
+            // route the focused/magnified slice through the srv reducer
+            // so its canonical state matches what the frontend just
+            // pushed and the persist subscriber emits the new
+            // FocusedNodeChanged / MagnifiedNodeChanged events for E.6
+            // dispatcher consumption. The remaining LayoutState fields
+            // (rootnode/leaforder/pendingbackendactions) keep the
+            // wcore-direct write below per the deferred Option B
+            // decision in `SPEC_PHASE_E4_LAYOUT_REDUCER_2026-05-01.md`.
+            // Best-effort: dispatch failures here do NOT block the
+            // wcore write — wstore stays the durable source until the
+            // full layout migration ships.
+            if wave_obj_value
+                .get("otype")
+                .and_then(|v| v.as_str())
+                == Some(OTYPE_LAYOUT)
+            {
+                if let Some(layout_oid) = wave_obj_value.get("oid").and_then(|v| v.as_str()) {
+                    let owning_tab_id = find_tab_for_layout(store, layout_oid);
+                    if let Some(tab_id) = owning_tab_id {
+                        let new_focused = wave_obj_value
+                            .get("focusednodeid")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        let new_magnified = wave_obj_value
+                            .get("magnifiednodeid")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        let focus_events = dispatch_to_reducer(
+                            state,
+                            agentmux_common::ipc::Command::SetFocusedNode {
+                                tab_id: tab_id.clone(),
+                                node_id: new_focused,
+                            },
+                        )
+                        .await;
+                        publish_events(state, &focus_events);
+                        let mag_events = dispatch_to_reducer(
+                            state,
+                            agentmux_common::ipc::Command::SetMagnifiedNode {
+                                tab_id,
+                                node_id: new_magnified,
+                            },
+                        )
+                        .await;
+                        publish_events(state, &mag_events);
+                    }
+                }
+            }
             match update_object(store, wave_obj_value) {
                 Ok((otype, oid, obj_val)) => {
                     let update = WaveObjUpdate {
@@ -2012,6 +2063,21 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
             call.service, call.method
         )),
     }
+}
+
+/// Phase E.4 (Option A) — reverse lookup: given a `LayoutState.oid`,
+/// find the `Tab.oid` that owns it (i.e., the tab whose `layoutstate`
+/// field matches). Returns `None` when the layout is unowned (legacy
+/// or partially-migrated row) or the wstore read fails — caller treats
+/// either as "skip the reducer dispatch and fall through to the wcore
+/// write." Linear scan over all tabs; acceptable here because the
+/// layout-update path is low-frequency relative to drag-resize and
+/// the reducer mutex itself is held for sub-millisecond intervals.
+fn find_tab_for_layout(store: &WaveStore, layout_oid: &str) -> Option<String> {
+    let tabs = store.get_all::<Tab>().ok()?;
+    tabs.into_iter()
+        .find(|t| t.layoutstate == layout_oid)
+        .map(|t| t.oid)
 }
 
 /// Resolve an "otype:oid" string to the corresponding wave object JSON.
