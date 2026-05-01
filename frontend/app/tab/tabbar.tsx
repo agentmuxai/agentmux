@@ -603,11 +603,33 @@ async function requestTearOff(
     wasPinned: boolean,
 ): Promise<void> {
     const t0 = performance.now();
+    // F1.B — orphan-cleanup state. We only restore the tab when we
+    // can PROVE the destination window doesn't exist: the
+    // create-window APIs (pool-promote and openWindowAtPosition) post
+    // window creation asynchronously, so neither a successful return
+    // nor a handshake error proves the window won't materialize.
+    //
+    // The single safe signal: `openWindowAtPosition` itself threw.
+    // That means the host couldn't even post the create command —
+    // no window will ever materialize for this tear-off. (Pool-
+    // promote being exhausted is also a host-side rejection, but
+    // we then attempt cold-path; only when cold-path ALSO throws do
+    // we know no create was posted.)
+    //
+    // Anything else (pool-promote succeeded; cold-path returned a
+    // label and the create posted but never registered; handshake
+    // failed for any reason post-create) leaves the window in an
+    // unknown state. Conservatively skip restore in those cases —
+    // the orphan workspace is a smaller harm than the risk of
+    // cascade-deleting a workspace that a delayed window is about
+    // to register against. (codex P1 round-3 #624.)
+    let newWsId: string | undefined;
+    let coldPathFailed = false;
     try {
         const sourceWindowLabel = await getApi().getWindowLabel();
         // Step 1 — sidecar transfers the tab into a new workspace.
         // Returns the new workspace's ID.
-        const newWsId = await WorkspaceService.TearOffTab(tabId, workspaceId);
+        newWsId = await WorkspaceService.TearOffTab(tabId, workspaceId);
         // Step 2 — get the destination window. Phase 6 prefers the
         // pre-warmed pool (0 ms first-paint flash). On pool exhaustion
         // we fall back to the cold-path openWindowAtPosition (~150-300 ms
@@ -622,11 +644,20 @@ async function requestTearOff(
             Logger.warn("dnd", "tear-off pool exhausted, falling back to cold path", {
                 error: String(poolErr),
             });
-            destWindowLabel = await getApi().openWindowAtPosition(
-                cursorX,
-                cursorY,
-                newWsId,
-            );
+            try {
+                destWindowLabel = await getApi().openWindowAtPosition(
+                    cursorX,
+                    cursorY,
+                    newWsId,
+                );
+            } catch (coldErr) {
+                // F1.B safe-restore signal: cold-path API itself
+                // threw. The host couldn't post the create command,
+                // so no window will materialize. Re-throw to outer
+                // catch which will dispatch RestoreTornOffTab.
+                coldPathFailed = true;
+                throw coldErr;
+            }
         }
         // Step 3 — Win32 SC_MOVE handshake. Host waits for the new
         // window's HWND to register, then transfers cursor capture
@@ -651,12 +682,14 @@ async function requestTearOff(
             originalTabIndex,
             wasPinned,
         });
-        // Handshake succeeded — Windows now owns the move loop. Clear
-        // the cross-window drag payload so the legacy dragend pipeline
-        // (CrossWindowDragMonitor) doesn't double-process this gesture
-        // when its dragend fires. Cleared HERE rather than in onDrag so
-        // a failure mid-pipeline (TearOffTab, openWindowAtPosition, or
-        // the handshake itself) leaves the legacy fallback intact.
+        // Handshake confirmed the destination window's HWND
+        // registered + Windows now owns the move loop.
+        // Clear the cross-window drag payload so the legacy dragend
+        // pipeline (CrossWindowDragMonitor) doesn't double-process
+        // this gesture when its dragend fires. Cleared HERE rather
+        // than in onDrag so a failure mid-pipeline (TearOffTab,
+        // openWindowAtPosition, or the handshake itself) leaves the
+        // legacy fallback intact.
         setCurrentDragPayload(null);
         Logger.info("dnd", "tab tear-off complete", {
             tabId,
@@ -666,6 +699,44 @@ async function requestTearOff(
         });
     } catch (e) {
         Logger.error("dnd", "tab tear-off failed", { tabId, error: String(e) });
+        // F1.B — orphan workspace cleanup. Only restore the tab when
+        // we're PROVABLY safe: cold-path window-create threw (no
+        // window will materialize). Any other failure path leaves
+        // the destination window in an unknown state and we
+        // conservatively keep the orphan workspace rather than risk
+        // cascade-deleting a workspace a delayed window is about
+        // to register against. (codex P1 round-3 #624.)
+        if (newWsId && coldPathFailed) {
+            try {
+                await WorkspaceService.RestoreTornOffTab(
+                    tabId,
+                    newWsId,
+                    workspaceId,
+                    originalTabIndex,
+                    wasPinned,
+                );
+                Logger.info("dnd", "tab tear-off restored after window-create failure", {
+                    tabId,
+                    newWsId,
+                });
+            } catch (restoreErr) {
+                Logger.error("dnd", "tab tear-off restore also failed — orphan workspace persists", {
+                    tabId,
+                    newWsId,
+                    error: String(restoreErr),
+                });
+            }
+        } else if (newWsId) {
+            // TearOffTab succeeded but we hit a failure mode where
+            // we can't safely restore (handshake error, post-window-
+            // create timing, etc.). Leave the orphan workspace; the
+            // user will see it in the workspace list and can close
+            // it via the UI.
+            Logger.warn("dnd", "tab tear-off failed post-create — orphan workspace left for user cleanup", {
+                tabId,
+                newWsId,
+            });
+        }
     }
 }
 
