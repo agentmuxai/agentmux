@@ -3,7 +3,21 @@
 **Date:** 2026-04-26 (rewritten to drop the canvas-ghost approach;
            re-revised same day to raise the quality bar)
 **Status:** Spec only (Phase 1 threshold detection shipped in PR #559;
-           Phases 2-7 not started)
+           Phases 2-7 not started — **next priority** post Phase E.5.)
+**State-correctness foundation:** Phase E.5 (PRs #619-#622) routed every
+  workspace/tab/block/window mutation through the srv reducer + sagas.
+  When this spec's Phases 2-7 land, the SC_MOVE-driven flow dispatches
+  the existing `TearOffTabSaga` / `TearOffBlockSaga` / `RestoreTornOffTabSaga`
+  / `MoveTabToWorkspace` reducer command — those don't change with the
+  UX rewrite. Reducer + sagas also subsume the "merge" + "cancel-back"
+  state transitions described in Phases 4-5 below.
+**Smoke status (2026-05-01):** the current half-HTML5 / half-SC_MOVE
+  hybrid was smoke-tested and surfaced a "no drop zone on reconnect"
+  symptom. Diagnosis halted — the offending code path
+  (`start_cross_drag` / `update_cross_drag` / `complete_cross_drag` +
+  `cross-drag-update` / `cross-drag-end` events) is the code this spec
+  replaces wholesale. Fixing under the current pipeline is throwaway
+  work. See `docs/retro/phase-e-status-2026-05-01.md` §11.
 **Trigger:** User feedback —
   > *"chrome tabs don't ghost, you just drag it out, and the
   > entire non-faded window drags around"*

@@ -260,3 +260,31 @@ If smoke is clean, the natural next user-visible work is **E.2c.5b** (renderer d
 ## 10. History of this doc
 
 - **2026-05-01** initial — this doc.
+- **2026-05-01** post-smoke addendum — see §11.
+
+---
+
+## 11. Smoke result + drag-UX deferral (2026-05-01)
+
+Built `0.33.533` portable, ran preliminary automated smoke + handed off for human smoke. Findings:
+
+**State-correctness foundation: ✅ confirmed.** Process tree healthy, zero `ERROR`-level log entries, srv-events log clean, persist-subscriber transactions land idempotently, default tab name `tab1` shows (the codex P2 fix from #622 working as intended), 103 MB stable memory.
+
+**Drag UX: ⚠️ pre-existing limitation, NOT a regression from this session.** User test surfaced "tear-off works, but reconnecting a torn-off tab doesn't show a drop zone." Investigation showed:
+
+- Current behaviour: drag a tab, get an HTML5 ghost-tab, release, *then* the torn window appears and follows the cursor via Win32 `SC_MOVE`.
+- Original requirement (per `docs/specs/SPEC_TAB_TEAR_OFF_SIZE_PRESERVATION_2026_04_26.md`): Chrome-faithful flow where the entire window detaches and follows the cursor from the moment of threshold-cross — no ghost tab.
+- Spec status: Phase 1 (threshold detection) shipped in PR #559; Phases 2-7 unstarted.
+- The current half-HTML5 / half-`SC_MOVE` hybrid is the in-between state the spec replaces wholesale. The cross-window drag mechanism (`start_cross_drag` / `update_cross_drag` / `complete_cross_drag` + `cross-drag-update` / `cross-drag-end` events) is the code path that gets deleted when SC_MOVE drives the drag from threshold-cross.
+
+**Bug observed but not fixed:** `cross-drag-end` fires with empty payload during reconnect attempts, suggesting the source's `handleCrossWindowDragEnd` saw `targetWindow === src` (drop on yourself) and called `cancel_cross_drag` which only emits a minimal payload. Diagnosis is unfinished because the code is marked for deletion. **Do not fix this in the current pipeline** — fixing it would be throwaway work overwritten when the tear-off spec's Phases 2-7 land.
+
+**Smoke deferred for the drag flows** (tear-off, reconnect, cross-window merge, cancel-back). All other smoke matrix items (rename / reorder / promote-block / close-window / switch-workspace) remain valid to run against current code.
+
+What this session DID validate: the reducer/saga foundation is correct under any drag UX. Phase E.5's job was state-correctness; it delivered.
+
+---
+
+## 12. What's next
+
+See `docs/retro/next-steps-2026-05-01.md`.
