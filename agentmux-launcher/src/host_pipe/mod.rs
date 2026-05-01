@@ -291,6 +291,42 @@ impl HostPipe {
         }
     }
 
+    /// Drain `pending_buffer` through the given writer in FIFO order.
+    /// Used by `send_frame`'s ptr_eq-mismatch path to flush a frame
+    /// that landed in the buffer after a writer-replacement race
+    /// (codex P1 PR #642 round 4). Symmetric with `set_writer`'s
+    /// drain logic but operates on an existing writer rather than
+    /// installing a new one. On per-frame failure, re-buffers the
+    /// remaining frames at the front and arms the disconnect timer.
+    async fn drain_pending_to(&self, writer: &SharedWriter) {
+        let mut inner = self.inner.lock().await;
+        while let Some(p) = inner.pending_buffer.pop_front() {
+            let mut wlock = writer.lock().await;
+            let res = write_frame_async(&mut **wlock, &p.frame).await;
+            drop(wlock);
+            if let Err(e) = res {
+                crate::log(&format!(
+                    "[host_pipe] mid-flight drain failed: {} — re-buffering rest",
+                    e
+                ));
+                inner.pending_buffer.push_front(p);
+                // Best-effort: clear the writer slot if it's still ours
+                // (caller is expected to have already raced past clear)
+                // and arm the disconnect timer so the next reconnect
+                // resumes the drain.
+                let same_writer = inner
+                    .writer
+                    .as_ref()
+                    .is_some_and(|cur| Arc::ptr_eq(cur, writer));
+                if same_writer {
+                    inner.writer = None;
+                    inner.host_disconnected_at = Some(Instant::now());
+                }
+                return;
+            }
+        }
+    }
+
     /// Push a Command down to the host. On disconnect, buffers up to
     /// `PENDING_BUFFER_CAP`; on overflow or 30s timeout, drops + emits
     /// `Event::SagaFailed` for the dropped Command's saga.
@@ -463,11 +499,37 @@ impl HostPipe {
                         if same_writer {
                             inner.writer = None;
                             inner.host_disconnected_at = Some(Instant::now());
+                            inner
+                                .pending_buffer
+                                .push_back(PendingFrame { frame, saga_id });
+                            Err(HostPipeError::WriteFailed(e))
+                        } else {
+                            // Writer was concurrently replaced (set_writer
+                            // raced and already drained whatever buffer
+                            // existed at install time). Push to the new
+                            // writer's buffer + immediately retry through
+                            // the new writer; otherwise this frame sits
+                            // until the next reconnect, even though the
+                            // pipe is healthy. (codex P1 PR #642 round 4.)
+                            let new_writer = inner.writer.as_ref().map(Arc::clone);
+                            // Push the failed frame to buffer FIRST so
+                            // the drain below picks it up in FIFO order
+                            // alongside any other in-flight pending.
+                            inner
+                                .pending_buffer
+                                .push_back(PendingFrame { frame, saga_id });
+                            drop(inner);
+                            if let Some(new_w) = new_writer {
+                                self.drain_pending_to(&new_w).await;
+                            }
+                            // We still surface the original write failure
+                            // to the caller — they asked for THIS frame
+                            // to be sent on the pipe they had at call
+                            // time. The drain attempt is best-effort
+                            // recovery; saga-level retry should kick in
+                            // if the drain fails too.
+                            Err(HostPipeError::WriteFailed(e))
                         }
-                        inner
-                            .pending_buffer
-                            .push_back(PendingFrame { frame, saga_id });
-                        Err(HostPipeError::WriteFailed(e))
                     }
                 }
             }
