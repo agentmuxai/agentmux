@@ -291,6 +291,32 @@ impl HostPipe {
         }
     }
 
+    /// Remove every buffered frame whose `saga_id` matches `saga_id`.
+    /// Returns the count of removed frames.
+    ///
+    /// Called from `SagaCoordinator::claim_terminal` when a saga
+    /// terminates (Done / Failed / timeout / eviction / etc.) — the
+    /// terminal event closes the saga bracket, so any frames the
+    /// saga left in the pending buffer would, if drained on reconnect,
+    /// produce orphan side effects after the bracket is already
+    /// closed (and risk a second `SagaFailed` via the 30s expiry
+    /// path's `emit_drop_failure`). Purging here keeps the saga's
+    /// terminal slot atomic across both the bus and the wire.
+    /// (codex + reagent P1 PR #644 round 7.)
+    pub async fn cancel_saga(&self, saga_id: u64) -> usize {
+        let mut inner = self.inner.lock().await;
+        let before = inner.pending_buffer.len();
+        inner.pending_buffer.retain(|f| f.saga_id != Some(saga_id));
+        let removed = before - inner.pending_buffer.len();
+        if removed > 0 {
+            crate::log(&format!(
+                "[host_pipe] cancel_saga(saga_id={}) purged {} buffered frame(s)",
+                saga_id, removed
+            ));
+        }
+        removed
+    }
+
     /// Drain `pending_buffer` through the given writer in FIFO order.
     /// Used by `send_frame`'s ptr_eq-mismatch path to flush a frame
     /// that landed in the buffer after a writer-replacement race

@@ -559,8 +559,21 @@ impl SagaCoordinator {
     /// and by the eviction path in `run_coordinator`.
     /// (reagent P1 PR #644 round 1.)
     async fn claim_terminal(&self, saga_id: u64) -> bool {
-        let mut registry = self.in_flight.lock().await;
-        registry.remove(&saga_id).is_some()
+        let claimed = {
+            let mut registry = self.in_flight.lock().await;
+            registry.remove(&saga_id).is_some()
+        };
+        // Purge any host-pipe pending frames tagged with this saga_id
+        // so a host reconnect post-terminal doesn't drain them as
+        // orphan side effects, and the 30s expiry path doesn't emit
+        // a second SagaFailed for the same saga_id.
+        // (codex + reagent P1 PR #644 round 7.)
+        if claimed {
+            if let Some(pipe) = self.host_pipe.as_ref() {
+                pipe.cancel_saga(saga_id).await;
+            }
+        }
+        claimed
     }
 
     /// Register a fresh saga, calling `start` and applying its first
