@@ -2742,4 +2742,293 @@ mod tests {
             other => panic!("expected Error, got {:?}", other),
         }
     }
+
+    // ---- Phase E.7 — property tests for reducer arm invariants ----
+    //
+    // Drives randomized sequences of valid commands through `update`
+    // and asserts cross-arm invariants the unit tests above only
+    // touch on per-arm. Catches regressions where an individual arm
+    // looks correct in isolation but interacts with sibling arms in
+    // a way that violates the reducer's whole-state contract.
+    //
+    // Invariants asserted:
+    //   1. Version monotonicity: every event's version strictly
+    //      increases across the sequence (no duplicates, no gaps in
+    //      the wrong direction).
+    //   2. Referential integrity: every tab in `state.tabs` has a
+    //      `workspace_id` that exists in `state.workspaces`; every
+    //      block in `state.blocks` has a `tab_id` that exists in
+    //      `state.tabs`; every workspace's `tab_ids` references real
+    //      tabs; every tab's `block_ids` references real blocks.
+    //   3. Cascade integrity: after a `DeleteWorkspace`, no tab
+    //      remains in `state.tabs` with that workspace_id, and no
+    //      block remains in `state.blocks` whose tab was in that
+    //      workspace.
+    //   4. Active-tab validity: every workspace's `active_tab_id`
+    //      is either `None` or points at a tab present in its own
+    //      `tab_ids`.
+
+    use proptest::prelude::*;
+
+    /// Higher-level operations the property tests pick from. Each
+    /// resolves to one or more `Command` invocations against the
+    /// current state. We can't generate `Command`s directly because
+    /// IDs are reducer-generated; pick from existing IDs instead.
+    #[derive(Debug, Clone)]
+    enum PropOp {
+        CreateWorkspace,
+        CreateTab,
+        CreateBlock,
+        DeleteTab,
+        DeleteBlock,
+        DeleteWorkspace,
+    }
+
+    fn op_strategy() -> impl Strategy<Value = PropOp> {
+        // Bias toward "constructive" ops so sequences accumulate
+        // state rather than churn empty. Each Just is one variant;
+        // proptest weights via `prop_oneof![weight => strat, …]`.
+        prop_oneof![
+            4 => Just(PropOp::CreateWorkspace),
+            4 => Just(PropOp::CreateTab),
+            3 => Just(PropOp::CreateBlock),
+            1 => Just(PropOp::DeleteTab),
+            1 => Just(PropOp::DeleteBlock),
+            1 => Just(PropOp::DeleteWorkspace),
+        ]
+    }
+
+    /// Apply one PropOp; returns the events produced (which may be
+    /// empty if the op was a no-op like "delete from empty pool").
+    fn apply_prop_op(state: &mut State, op: PropOp, conn_id: u64) -> Vec<Event> {
+        match op {
+            PropOp::CreateWorkspace => update(
+                state,
+                Command::CreateWorkspace { name: format!("ws-{}", conn_id) },
+                &ctx(conn_id),
+            ),
+            PropOp::CreateTab => {
+                let target_ws = state.workspaces.keys().next().cloned();
+                match target_ws {
+                    Some(workspace_id) => update(
+                        state,
+                        Command::CreateTab {
+                            workspace_id,
+                            name: format!("tab-{}", conn_id),
+                        },
+                        &ctx(conn_id),
+                    ),
+                    None => Vec::new(),
+                }
+            }
+            PropOp::CreateBlock => {
+                let target_tab = state.tabs.keys().next().cloned();
+                match target_tab {
+                    Some(tab_id) => update(
+                        state,
+                        Command::CreateBlock { tab_id, meta: serde_json::Value::Null },
+                        &ctx(conn_id),
+                    ),
+                    None => Vec::new(),
+                }
+            }
+            PropOp::DeleteTab => {
+                if let Some((tab_id, tab)) = state.tabs.iter().next() {
+                    let cmd = Command::DeleteTab {
+                        workspace_id: tab.workspace_id.clone(),
+                        tab_id: tab_id.clone(),
+                    };
+                    update(state, cmd, &ctx(conn_id))
+                } else {
+                    Vec::new()
+                }
+            }
+            PropOp::DeleteBlock => {
+                if let Some((block_id, block)) = state.blocks.iter().next() {
+                    let cmd = Command::DeleteBlock {
+                        tab_id: block.tab_id.clone(),
+                        block_id: block_id.clone(),
+                    };
+                    update(state, cmd, &ctx(conn_id))
+                } else {
+                    Vec::new()
+                }
+            }
+            PropOp::DeleteWorkspace => {
+                if let Some(workspace_id) = state.workspaces.keys().next().cloned() {
+                    update(
+                        state,
+                        Command::DeleteWorkspace { workspace_id },
+                        &ctx(conn_id),
+                    )
+                } else {
+                    Vec::new()
+                }
+            }
+        }
+    }
+
+    /// Verify all four reducer-state invariants at once. Panics
+    /// (proptest catches and shrinks) if any is violated.
+    fn assert_invariants(state: &State) {
+        // (2) Tabs reference real workspaces.
+        for (tab_id, tab) in &state.tabs {
+            assert!(
+                state.workspaces.contains_key(&tab.workspace_id),
+                "tab {} references unknown workspace {}",
+                tab_id,
+                tab.workspace_id
+            );
+        }
+        // (2) Blocks reference real tabs.
+        for (block_id, block) in &state.blocks {
+            assert!(
+                state.tabs.contains_key(&block.tab_id),
+                "block {} references unknown tab {}",
+                block_id,
+                block.tab_id
+            );
+        }
+        // (2) Workspace.tab_ids references real tabs.
+        for (workspace_id, ws) in &state.workspaces {
+            for tab_id in &ws.tab_ids {
+                assert!(
+                    state.tabs.contains_key(tab_id),
+                    "workspace {} tab_ids contains unknown tab {}",
+                    workspace_id,
+                    tab_id
+                );
+            }
+        }
+        // (2) Tab.block_ids references real blocks.
+        for (tab_id, tab) in &state.tabs {
+            for block_id in &tab.block_ids {
+                assert!(
+                    state.blocks.contains_key(block_id),
+                    "tab {} block_ids contains unknown block {}",
+                    tab_id,
+                    block_id
+                );
+            }
+        }
+        // (4) Active-tab validity.
+        for (workspace_id, ws) in &state.workspaces {
+            if let Some(active) = &ws.active_tab_id {
+                assert!(
+                    ws.tab_ids.iter().any(|t| t == active),
+                    "workspace {} active_tab_id {} not in its tab_ids",
+                    workspace_id,
+                    active
+                );
+            }
+        }
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig {
+            cases: 64,
+            ..ProptestConfig::default()
+        })]
+
+        /// Apply a random sequence of valid ops. After each op,
+        /// referential integrity + active-tab validity hold; across
+        /// the whole sequence, version is strictly monotonic for any
+        /// emitted events.
+        #[test]
+        fn invariants_hold_across_random_sequences(ops in prop::collection::vec(op_strategy(), 0..40)) {
+            let mut state = State::default();
+            let mut last_version: u64 = 0;
+            for (i, op) in ops.into_iter().enumerate() {
+                let events = apply_prop_op(&mut state, op, (i + 1) as u64);
+                for ev in &events {
+                    let v = extract_version(ev);
+                    prop_assert!(
+                        v > last_version,
+                        "version {} not strictly greater than previous {} (event {:?})",
+                        v,
+                        last_version,
+                        ev
+                    );
+                    last_version = v;
+                }
+                assert_invariants(&state);
+            }
+        }
+
+        /// Cascade integrity — explicit setup-then-delete pattern.
+        /// Build a non-trivial graph (workspace + tabs + blocks),
+        /// delete the workspace, assert NO surviving entities
+        /// reference the deleted workspace.
+        #[test]
+        fn delete_workspace_cascades_cleanly(
+            tab_count in 1usize..6,
+            blocks_per_tab in 0usize..4,
+        ) {
+            let mut state = State::default();
+            // Create workspace.
+            let ws_events = update(
+                &mut state,
+                Command::CreateWorkspace { name: "ws".into() },
+                &ctx(1),
+            );
+            let ws_id = ws_events
+                .iter()
+                .find_map(|e| match e {
+                    Event::WorkspaceCreated { workspace_id, .. } => Some(workspace_id.clone()),
+                    _ => None,
+                })
+                .unwrap();
+            // Create tabs + blocks under it. We don't keep the tab
+            // IDs around — the cascade-after-delete assertions below
+            // check the WHOLE-state collections (state.tabs.is_empty()
+            // etc.), so per-tab IDs aren't needed. (reagent P2 #627.)
+            for _ in 0..tab_count {
+                let evs = update(
+                    &mut state,
+                    Command::CreateTab {
+                        workspace_id: ws_id.clone(),
+                        name: "t".into(),
+                    },
+                    &ctx(2),
+                );
+                let tid = evs
+                    .iter()
+                    .find_map(|e| match e {
+                        Event::TabCreated { tab_id, .. } => Some(tab_id.clone()),
+                        _ => None,
+                    })
+                    .unwrap();
+                for _ in 0..blocks_per_tab {
+                    let _ = update(
+                        &mut state,
+                        Command::CreateBlock {
+                            tab_id: tid.clone(),
+                            meta: serde_json::Value::Null,
+                        },
+                        &ctx(3),
+                    );
+                }
+            }
+            // Sanity: counts match.
+            prop_assert_eq!(state.workspaces.len(), 1);
+            prop_assert_eq!(state.tabs.len(), tab_count);
+            prop_assert_eq!(state.blocks.len(), tab_count * blocks_per_tab);
+            // Delete the workspace.
+            let _ = update(
+                &mut state,
+                Command::DeleteWorkspace { workspace_id: ws_id.clone() },
+                &ctx(4),
+            );
+            // Cascade — workspaces, tabs, blocks should all be empty.
+            prop_assert!(state.workspaces.is_empty());
+            prop_assert!(state.tabs.is_empty());
+            prop_assert!(
+                state.blocks.is_empty(),
+                "blocks should cascade-delete with their tabs; got {} survivors",
+                state.blocks.len()
+            );
+            // And invariants hold on the empty state.
+            assert_invariants(&state);
+        }
+    }
 }

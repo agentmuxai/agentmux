@@ -1,6 +1,6 @@
 [package]
 name = "agentmux-srv"
-version = "0.33.535"
+version = "0.33.536"
 edition = "2021"
 description = "AgentMux Rust backend server"
 
@@ -69,3 +69,8 @@ tower = { version = "0.5", features = ["util"] }
 serde_json = "1"
 libc = "0.2"
 tempfile = "3"
+# Phase E.7 — property-based testing for reducer arm invariants.
+# `default-features = false` to avoid the timeout-fork machinery
+# that doesn't play nicely with our existing test runner; we only
+# need the strategy combinators + `proptest!` macro.
+proptest = { version = "1", default-features = false, features = ["std"] }
