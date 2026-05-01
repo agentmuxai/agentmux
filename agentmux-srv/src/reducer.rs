@@ -2978,8 +2978,10 @@ mod tests {
                     _ => None,
                 })
                 .unwrap();
-            // Create tabs + blocks under it.
-            let mut tab_ids: Vec<String> = Vec::new();
+            // Create tabs + blocks under it. We don't keep the tab
+            // IDs around — the cascade-after-delete assertions below
+            // check the WHOLE-state collections (state.tabs.is_empty()
+            // etc.), so per-tab IDs aren't needed. (reagent P2 #627.)
             for _ in 0..tab_count {
                 let evs = update(
                     &mut state,
@@ -3006,7 +3008,6 @@ mod tests {
                         &ctx(3),
                     );
                 }
-                tab_ids.push(tid);
             }
             // Sanity: counts match.
             prop_assert_eq!(state.workspaces.len(), 1);
