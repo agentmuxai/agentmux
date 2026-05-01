@@ -523,8 +523,17 @@ impl AgentMuxHandler {
         // top-level windows; emitting `PanesReaped` for pane labels
         // would be a stray report (no in-flight saga to consume it).
         // Same gate as `report_window_closed` above.
+        // (codex P2 PR #637 round 3.) Also exclude `window-pool-*` —
+        // unpromoted pool windows are not mirrored as windows
+        // (`report_window_opened` skips them at client.rs:276) and
+        // `ReportWindowClosed` for unknown labels is intentionally
+        // dropped by the launcher reducer. Without this gate, F.6
+        // would broadcast `PanesReaped` (and `PoolDrained|PoolNotLast`
+        // below) for pool drain with no matching `WindowClosed`
+        // trigger, producing stray cleanup-terminal events outside
+        // any saga bracket.
         if let Some(ref lbl) = label {
-            if !lbl.starts_with("browser-pane-") {
+            if !lbl.starts_with("browser-pane-") && !lbl.starts_with("window-pool-") {
                 crate::launcher_ipc::report_panes_reaped(lbl.clone());
             }
         }
@@ -603,7 +612,9 @@ impl AgentMuxHandler {
         // not have started yet by the time the report is sent, but
         // the decision itself is final.
         if let Some(ref lbl) = label {
-            if !lbl.starts_with("browser-pane-") {
+            // Also exclude `window-pool-*` per codex P2 PR #637 round 3
+            // — same rationale as report_panes_reaped above.
+            if !lbl.starts_with("browser-pane-") && !lbl.starts_with("window-pool-") {
                 let was_last = user_browser_count == 0 && !self.is_pane;
                 crate::launcher_ipc::report_pool_drain_decision(lbl.clone(), was_last);
             }
