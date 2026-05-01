@@ -86,21 +86,30 @@ async fn main() {
     if matches!(args.first().map(String::as_str), Some("--diag")) {
         let topic = args.get(1).map(String::as_str).unwrap_or("");
         match topic {
-            "wrr" => {
-                match diag::run_wrr_diag(exe_dir).await {
-                    Ok(()) => std::process::exit(0),
-                    Err(msg) => {
-                        eprintln!("--diag wrr failed: {}", msg);
-                        std::process::exit(1);
-                    }
+            "wrr" => match diag::run_wrr_diag(exe_dir).await {
+                Ok(()) => std::process::exit(0),
+                Err(msg) => {
+                    eprintln!("--diag wrr failed: {}", msg);
+                    std::process::exit(1);
                 }
-            }
+            },
+            // Phase E.7 — operator visibility into the srv reducer's
+            // canonical state (workspaces / tabs / blocks / sagas) +
+            // recent activity. Same `Tool` IPC pattern as `--diag wrr`,
+            // talks to the srv pipe instead of the launcher pipe.
+            "srv" => match diag::run_srv_diag(exe_dir).await {
+                Ok(()) => std::process::exit(0),
+                Err(msg) => {
+                    eprintln!("--diag srv failed: {}", msg);
+                    std::process::exit(1);
+                }
+            },
             "" => {
-                eprintln!("usage: agentmux.exe --diag <topic>\nknown topics: wrr");
+                eprintln!("usage: agentmux.exe --diag <topic>\nknown topics: wrr, srv");
                 std::process::exit(2);
             }
             other => {
-                eprintln!("unknown --diag topic: {} (known: wrr)", other);
+                eprintln!("unknown --diag topic: {} (known: wrr, srv)", other);
                 std::process::exit(2);
             }
         }
