@@ -127,6 +127,18 @@ pub async fn bootstrap_state_from_wstore(state: &Arc<Mutex<State>>, wstore: &Wav
             .filter(|bid| blocks.iter().any(|b| &b.oid == *bid))
             .cloned()
             .collect();
+        // Phase E.4 (Option A) — bootstrap focused/magnified node from
+        // the tab's LayoutState row so the reducer's view matches what
+        // the user last saw on disk. Empty when the layout row isn't
+        // found or has no value (matches `LayoutState` defaults).
+        let (focused_node_id, magnified_node_id) = if tab.layoutstate.is_empty() {
+            (String::new(), String::new())
+        } else {
+            match wstore.get::<crate::backend::obj::LayoutState>(&tab.layoutstate) {
+                Ok(Some(layout)) => (layout.focusednodeid, layout.magnifiednodeid),
+                _ => (String::new(), String::new()),
+            }
+        };
         state.tabs.insert(
             tab.oid.clone(),
             TabRecord {
@@ -134,6 +146,8 @@ pub async fn bootstrap_state_from_wstore(state: &Arc<Mutex<State>>, wstore: &Wav
                 workspace_id,
                 name: tab.name.clone(),
                 block_ids,
+                focused_node_id,
+                magnified_node_id,
             },
         );
     }

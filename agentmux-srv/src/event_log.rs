@@ -285,6 +285,8 @@ fn event_version(e: &Event) -> u64 {
         | Event::BlockMoved { version, .. }
         | Event::BlockCreated { version, .. }
         | Event::BlockDeleted { version, .. }
+        | Event::FocusedNodeChanged { version, .. }
+        | Event::MagnifiedNodeChanged { version, .. }
         | Event::Error { version, .. } => *version,
     }
 }

@@ -281,6 +281,12 @@ pub(crate) fn apply_event_to_wstore(
             dst_index,
             ..
         } => apply_block_moved(wstore, block_id, src_tab_id, dst_tab_id, *dst_index),
+        Event::FocusedNodeChanged { tab_id, node_id, .. } => {
+            apply_focused_node_changed(wstore, tab_id, node_id)
+        }
+        Event::MagnifiedNodeChanged { tab_id, node_id, .. } => {
+            apply_magnified_node_changed(wstore, tab_id, node_id)
+        }
         // All other event variants are not domain-state mutations
         // (lifecycle, errors, snapshots). The subscriber ignores them.
         _ => Ok(()),
@@ -650,6 +656,60 @@ fn apply_tab_renamed(
     Ok(())
 }
 
+/// Phase E.4 (Option A) — write the reducer-emitted focused node id
+/// onto the tab's `LayoutState.focusednodeid` column. Tab→layout is
+/// a join through `Tab.layoutstate`. Idempotent: silent no-op when the
+/// tab is unknown (deleted concurrently), the layout row is missing
+/// (legacy tab without one), or the value already matches. Other
+/// `LayoutState` fields stay on their existing wcore-direct path until
+/// Option B lands.
+fn apply_focused_node_changed(
+    wstore: &WaveStore,
+    tab_id: &str,
+    node_id: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let Some(tab) = wstore.get::<Tab>(tab_id)? else {
+        return Ok(());
+    };
+    if tab.layoutstate.is_empty() {
+        return Ok(());
+    }
+    let Some(mut layout) = wstore.get::<PersistedLayoutState>(&tab.layoutstate)? else {
+        return Ok(());
+    };
+    if layout.focusednodeid == node_id {
+        return Ok(());
+    }
+    layout.focusednodeid = node_id.to_string();
+    wstore.update(&mut layout)?;
+    Ok(())
+}
+
+/// Phase E.4 (Option A) — write the reducer-emitted magnified node id
+/// onto the tab's `LayoutState.magnifiednodeid` column. Same shape as
+/// `apply_focused_node_changed`.
+fn apply_magnified_node_changed(
+    wstore: &WaveStore,
+    tab_id: &str,
+    node_id: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let Some(tab) = wstore.get::<Tab>(tab_id)? else {
+        return Ok(());
+    };
+    if tab.layoutstate.is_empty() {
+        return Ok(());
+    }
+    let Some(mut layout) = wstore.get::<PersistedLayoutState>(&tab.layoutstate)? else {
+        return Ok(());
+    };
+    if layout.magnifiednodeid == node_id {
+        return Ok(());
+    }
+    layout.magnifiednodeid = node_id.to_string();
+    wstore.update(&mut layout)?;
+    Ok(())
+}
+
 /// Phase E.5.3 — apply a meta-patch to a workspace's `meta` map.
 /// Reducer doesn't track meta in `WorkspaceRecord`; this subscriber
 /// is the sole authority that mutates persisted meta. Patch is a
@@ -911,6 +971,8 @@ fn event_kind(event: &Event) -> &'static str {
         Event::BlockMoved { .. } => "BlockMoved",
         Event::BlockCreated { .. } => "BlockCreated",
         Event::BlockDeleted { .. } => "BlockDeleted",
+        Event::FocusedNodeChanged { .. } => "FocusedNodeChanged",
+        Event::MagnifiedNodeChanged { .. } => "MagnifiedNodeChanged",
         _ => "Other",
     }
 }
