@@ -308,6 +308,10 @@ impl SagaCoordinator {
 ///
 /// F.5 wires one trigger: `Event::PoolWindowPromoted` →
 /// `pool_respawn::PoolRespawn`. Future sagas extend this match.
+///
+/// Note: this returns a *candidate* saga. The coordinator may still
+/// reject it via the same-kind-in-flight serialization gate before
+/// `spawn_saga` (codex P1 PR #634 round 2 — see `run_coordinator`).
 fn match_trigger(event: &Event) -> Option<Box<dyn Saga>> {
     match event {
         Event::PoolWindowPromoted { label, .. } => {
@@ -355,8 +359,31 @@ pub async fn run_coordinator(
                 }
 
                 // Step 1 — start any new sagas this event triggers.
+                // (codex P1 PR #634 round 2.) Same-kind serialization
+                // gate: if a saga of this kind is already in flight,
+                // drop the trigger. The coordinator broadcasts events
+                // to all in-flight sagas, so two pool_respawn in
+                // flight would mis-correlate the first PoolWindowAdded
+                // — completing both early. Closed properly by
+                // F.6/F.7's FIFO routing or per-event saga_id
+                // correlation; until then, the second concurrent
+                // promote loses its bracket (falling back to legacy
+                // pre-saga semantics) but reducer + SQLite state stay
+                // correct.
                 if let Some(saga) = match_trigger(&event) {
-                    coord.spawn_saga(saga).await;
+                    let new_kind = saga.name();
+                    let same_kind_in_flight = {
+                        let registry = coord.in_flight.lock().await;
+                        registry.values().any(|s| s.name() == new_kind)
+                    };
+                    if same_kind_in_flight {
+                        crate::log(&format!(
+                            "[saga] dropping {} trigger — same-kind saga already in flight (codex P1 #634 serialization fallback)",
+                            new_kind,
+                        ));
+                    } else {
+                        coord.spawn_saga(saga).await;
+                    }
                 }
 
                 // Step 2 — feed the event into every in-flight saga.
