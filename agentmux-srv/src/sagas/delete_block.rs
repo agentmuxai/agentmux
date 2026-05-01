@@ -87,13 +87,6 @@ pub async fn run(
         }
     }
 
-    // Drop the controller BEFORE reducer dispatch. The persist
-    // subscriber's `wcore::delete_block` doesn't touch the controller
-    // registry — that was a side-effect of the old RPC handler, and
-    // we preserve it here so the PTY/child process is gone before
-    // SQLite stops referring to the block. Idempotent on missing.
-    crate::backend::blockcontroller::delete_controller(&block_id);
-
     let saga_id = alloc_saga_id(state);
     if let Err(e) = emit_saga_started(
         state,
@@ -109,7 +102,19 @@ pub async fn run(
         return Err(e);
     }
     let ctx = SagaCtx::new(state, saga_id);
-    let result = run_saga("delete_block", run_inner(ctx, tab_id, block_id)).await;
+    let result = run_saga("delete_block", run_inner(ctx, tab_id, block_id.clone())).await;
+    // Kill the controller AFTER the saga's reducer + SQLite writes
+    // succeed. (reagent P2 PR #633.) The earlier round killed the
+    // controller before emit_saga_started, which left an
+    // unrecoverable side-effect leak if start_saga rejected a
+    // collision: PTY dead, block still in reducer + SQLite. Doing
+    // it here means: success → controller gone, block gone, all
+    // consistent; saga failure → controller still alive (we don't
+    // touch it), block stays — also consistent. Idempotent on
+    // missing controller.
+    if result.is_ok() {
+        crate::backend::blockcontroller::delete_controller(&block_id);
+    }
     emit_terminal(state, saga_id, classify_run_saga_result(&result)).await;
     result
 }

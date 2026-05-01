@@ -66,7 +66,16 @@ pub async fn run(
     workspace_id: String,
     tab_id: String,
 ) -> Result<Value, String> {
-    // Pre-conditions: tab exists in workspace; not the last tab.
+    // Pre-conditions: tab exists in workspace.
+    //
+    // (reagent P1 PR #633.) The last-tab guard is now ENFORCED IN
+    // THE REDUCER (`reducer::handle_delete_tab`) so check + delete
+    // is atomic with the state lock. The earlier pre-check version
+    // had a TOCTOU window: read state under lock, drop lock,
+    // dispatch re-acquires — two concurrent CloseTab RPCs in a
+    // 2-tab workspace could both pass and both succeed. The reducer
+    // now rejects with `Event::Error` if `tab_ids.len() <= 1`, and
+    // `SagaCtx::dispatch` surfaces that as the saga's Err return.
     {
         let s = state.srv_state.lock().await;
         let Some(workspace) = s.workspaces.get(&workspace_id) else {
@@ -79,12 +88,6 @@ pub async fn run(
             return Err(format!(
                 "DeleteTab: tab {} is not in workspace {}",
                 tab_id, workspace_id
-            ));
-        }
-        if workspace.tab_ids.len() <= 1 {
-            return Err(format!(
-                "DeleteTab: cannot delete last tab in workspace {}",
-                workspace_id
             ));
         }
         if !s.tabs.contains_key(&tab_id) {
