@@ -645,6 +645,7 @@ fn event_kind_name(e: &Event) -> &'static str {
         Event::WindowInstanceReleased { .. } => "WindowInstanceReleased",
         Event::PoolWindowAdded { .. } => "PoolWindowAdded",
         Event::PoolWindowRemoved { .. } => "PoolWindowRemoved",
+        Event::PoolWindowPromoted { .. } => "PoolWindowPromoted",
         Event::BackendWindowIdRegistered { .. } => "BackendWindowIdRegistered",
         Event::BackendWindowIdUnregistered { .. } => "BackendWindowIdUnregistered",
         Event::DriftDetected { .. } => "DriftDetected",
