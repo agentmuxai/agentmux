@@ -309,6 +309,17 @@ async fn main() {
         tracing::error!("Failed to open file store: {}", e);
         std::process::exit(1);
     }));
+    // Saga durability — see SPEC_SAGA_DURABILITY_2026-05-01.md.
+    // Backed by its own SQLite file (`sagas.db`) so saga writes
+    // commit independently of the wstore connection. Failure here
+    // is fatal: without the log, a srv crash mid-saga leaves
+    // unrecoverable state divergence.
+    let saga_log = Arc::new(
+        crate::sagas::log::SagaLog::open(&db_dir.join("sagas.db")).unwrap_or_else(|e| {
+            tracing::error!("Failed to open saga log: {}", e);
+            std::process::exit(1);
+        }),
+    );
 
     // Bootstrap data (creates Client/Window/Workspace/Tab on first launch)
     let first_launch = wcore::ensure_initial_data(&wstore).unwrap_or_else(|e| {
@@ -557,6 +568,7 @@ async fn main() {
         // `sagas::run_saga` invocation `fetch_add(1)`s. First
         // saga gets id 1.
         saga_id_alloc: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0)),
+        saga_log: Arc::clone(&saga_log),
     };
 
     // Phase E.1b — srv pipe IPC server. Bound when launcher passes

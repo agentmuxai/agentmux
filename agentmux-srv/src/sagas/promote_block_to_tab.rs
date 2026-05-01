@@ -68,7 +68,7 @@ pub async fn run(
 
     let saga_id = alloc_saga_id(state);
     emit_saga_started(state, saga_id, "promote_block_to_tab").await;
-    let ctx = SagaCtx { state, saga_id };
+    let ctx = SagaCtx::new(state, saga_id);
     let result = run_saga(
         "promote_block_to_tab",
         run_inner(ctx, block_id, source_tab_id, workspace_id),

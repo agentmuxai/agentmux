@@ -84,6 +84,13 @@ pub struct AppState {
     /// correlate. Per-instance scope (no cross-process sharing — see
     /// `docs/retro/saga-coordinator-location-analysis-2026-04-30.md`).
     pub saga_id_alloc: std::sync::Arc<std::sync::atomic::AtomicU64>,
+    /// Saga durability — durable on-disk log of saga lifecycle.
+    /// Written by `SagaCtx::dispatch` / `compensate` (per-step) and
+    /// `emit_terminal` (per-saga) so a srv crash mid-saga leaves a
+    /// recoverable trail. PR 1 ships the log + instrumentation; PR 2
+    /// adds resume-on-startup + `--diag sagas`.
+    /// See `docs/specs/SPEC_SAGA_DURABILITY_2026-05-01.md`.
+    pub saga_log: std::sync::Arc<crate::sagas::log::SagaLog>,
 }
 
 /// Build the Axum router with all routes, auth middleware, and CORS.

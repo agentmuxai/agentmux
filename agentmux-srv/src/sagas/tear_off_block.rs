@@ -79,7 +79,7 @@ pub async fn run(
 
     let saga_id = alloc_saga_id(state);
     emit_saga_started(state, saga_id, "tear_off_block").await;
-    let ctx = SagaCtx { state, saga_id };
+    let ctx = SagaCtx::new(state, saga_id);
     let result = run_saga("tear_off_block", run_inner(ctx, block_id, source_tab_id)).await;
     emit_terminal(
         state,

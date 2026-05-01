@@ -54,6 +54,9 @@ pub(crate) fn test_state() -> AppState {
         srv_state: Arc::new(tokio::sync::Mutex::new(crate::state::State::default())),
         srv_events_tx: tokio::sync::broadcast::channel::<agentmux_common::ipc::Event>(64).0,
         saga_id_alloc: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+        // Saga durability (PR 1) — in-memory log so tests stay
+        // hermetic. Production opens a file under the data dir.
+        saga_log: Arc::new(crate::sagas::log::SagaLog::open_in_memory().unwrap()),
     }
 }
 

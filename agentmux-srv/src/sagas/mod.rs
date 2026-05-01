@@ -41,16 +41,18 @@
 //   (gap; Phase F).
 // * Saga state across srv restart (gap; Phase F+).
 
+pub mod log;
 pub mod promote_block_to_tab;
 pub mod restore_torn_off_tab;
 pub mod tear_off_block;
 pub mod tear_off_tab;
 
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use agentmux_common::ipc::{Command, Event};
 use serde_json::Value;
 
+use crate::sagas::log::{command_discriminant_name, SagaOutcome};
 use crate::server::AppState;
 
 /// Maximum wall-clock time a saga is allowed to run before the
@@ -61,12 +63,32 @@ const SAGA_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// Read-only context passed to a saga's inner async function.
 /// Wraps the AppState handle and the saga's allocated id.
+///
+/// Construct via [`SagaCtx::new`] — the durability log requires the
+/// per-step counter to start at zero and be owned by the ctx (so
+/// concurrent sagas don't interleave step indices).
 pub struct SagaCtx<'a> {
     pub(crate) state: &'a AppState,
     pub(crate) saga_id: u64,
+    /// Monotonic step index (0, 1, 2, ...) for this saga. Each
+    /// `dispatch` / `compensate` call `fetch_add(1)`s and writes the
+    /// resulting index into the saga log. Atomic because saga inner
+    /// futures may parallelise dispatches in the future (today they
+    /// don't, but the cost is one cache line).
+    pub(crate) step_index: AtomicU32,
 }
 
 impl<'a> SagaCtx<'a> {
+    /// Construct a fresh context for a saga that has just allocated
+    /// its `saga_id` (via [`alloc_saga_id`]).
+    pub fn new(state: &'a AppState, saga_id: u64) -> Self {
+        Self {
+            state,
+            saga_id,
+            step_index: AtomicU32::new(0),
+        }
+    }
+
     /// Saga-id this context belongs to. Used by sagas that need to
     /// log progress with the saga prefix.
     #[allow(dead_code)]
@@ -92,16 +114,54 @@ impl<'a> SagaCtx<'a> {
     /// SQLite/bus side-effects are skipped — the caller must then
     /// dispatch compensation for the saga's already-applied steps.
     pub async fn dispatch(&self, cmd: Command) -> Result<Vec<Event>, String> {
+        // Saga durability — write a `pending` step row before
+        // dispatch so a crash mid-dispatch leaves a recoverable
+        // breadcrumb (PR 2's compensate-on-restart will see it).
+        let idx = self.step_index.fetch_add(1, Ordering::Relaxed);
+        let step_name = command_discriminant_name(&cmd);
+        if let Err(e) = self
+            .state
+            .saga_log
+            .start_step(self.saga_id, idx, &step_name, &cmd)
+        {
+            // Log-write failure is non-fatal: the in-memory saga
+            // path is still authoritative for THIS srv run; we lose
+            // crash-recovery for this step, but the user's command
+            // shouldn't fail because durability hiccupped.
+            tracing::warn!(
+                saga_id = self.saga_id,
+                step_index = idx,
+                "[saga] start_step log write failed: {} — continuing without durable log for this step",
+                e
+            );
+        }
+
         let events = crate::server::service::dispatch_to_reducer(self.state, cmd).await;
         if let Some(message) = events.iter().find_map(|e| match e {
             Event::Error { message, .. } => Some(message.clone()),
             _ => None,
         }) {
+            if let Err(e) = self.state.saga_log.fail_step(self.saga_id, idx, &message) {
+                tracing::warn!(
+                    saga_id = self.saga_id,
+                    step_index = idx,
+                    "[saga] fail_step log write failed: {}",
+                    e
+                );
+            }
             return Err(message);
         }
         for ev in &events {
             crate::persist_subscriber::apply_event_to_wstore(ev, &self.state.wstore)
                 .map_err(|e| e.to_string())?;
+        }
+        if let Err(e) = self.state.saga_log.finish_step(self.saga_id, idx, &events) {
+            tracing::warn!(
+                saga_id = self.saga_id,
+                step_index = idx,
+                "[saga] finish_step log write failed: {}",
+                e
+            );
         }
         crate::server::service::publish_events(self.state, &events);
         Ok(events)
@@ -113,6 +173,24 @@ impl<'a> SagaCtx<'a> {
     /// the caller; throwing on cleanup hides the original cause and
     /// prevents subsequent compensating commands from running.
     pub async fn compensate(&self, cmd: Command) {
+        // Compensation gets its own step row so the durable log
+        // distinguishes "step that succeeded forward" from "step
+        // that ran in unwind". Index continues monotonically from
+        // forward steps so `--diag sagas` shows the full sequence.
+        let idx = self.step_index.fetch_add(1, Ordering::Relaxed);
+        let step_name = command_discriminant_name(&cmd);
+        if let Err(e) = self
+            .state
+            .saga_log
+            .start_step(self.saga_id, idx, &step_name, &cmd)
+        {
+            tracing::warn!(
+                saga_id = self.saga_id,
+                step_index = idx,
+                "[saga] compensate start_step log write failed: {}",
+                e
+            );
+        }
         let events =
             crate::server::service::dispatch_to_reducer(self.state, cmd.clone()).await;
         if let Some(message) = events.iter().find_map(|e| match e {
@@ -125,6 +203,14 @@ impl<'a> SagaCtx<'a> {
                 message,
                 std::mem::discriminant(&cmd),
             );
+            if let Err(e) = self.state.saga_log.fail_step(self.saga_id, idx, &message) {
+                tracing::warn!(
+                    saga_id = self.saga_id,
+                    step_index = idx,
+                    "[saga] compensate fail_step log write failed: {}",
+                    e
+                );
+            }
             return;
         }
         for ev in &events {
@@ -138,6 +224,18 @@ impl<'a> SagaCtx<'a> {
                 );
             }
         }
+        if let Err(e) = self
+            .state
+            .saga_log
+            .compensate_step(self.saga_id, idx, &events)
+        {
+            tracing::warn!(
+                saga_id = self.saga_id,
+                step_index = idx,
+                "[saga] compensate_step log write failed: {}",
+                e
+            );
+        }
         crate::server::service::publish_events(self.state, &events);
     }
 }
@@ -150,7 +248,24 @@ pub fn alloc_saga_id(state: &AppState) -> u64 {
 /// Emit `Event::SagaStarted` for a freshly-allocated saga_id.
 /// Sagas call this immediately after `alloc_saga_id` so subscribers
 /// see the start record before any per-step events.
+///
+/// Also writes a `running` row to the durable saga log (PR 1 of
+/// SPEC_SAGA_DURABILITY_2026-05-01.md). Log-write failures are
+/// non-fatal — the in-memory saga path is still authoritative for
+/// THIS srv run.
 pub async fn emit_saga_started(state: &AppState, saga_id: u64, name: &'static str) {
+    if let Err(e) =
+        state
+            .saga_log
+            .start_saga(saga_id, name, &serde_json::Value::Null)
+    {
+        tracing::warn!(
+            saga_id,
+            name,
+            "[saga] start_saga log write failed: {} — saga continues without durable record",
+            e
+        );
+    }
     let v = state.srv_state.lock().await.bump_version();
     let _ = state.srv_events_tx.send(Event::SagaStarted {
         saga_id,
@@ -162,7 +277,31 @@ pub async fn emit_saga_started(state: &AppState, saga_id: u64, name: &'static st
 /// Emit the saga's terminal lifecycle event. Pass `Ok(())` for
 /// success (emits `SagaCompleted`) or `Err(reason)` for failure
 /// (emits `SagaFailed`).
+///
+/// Also writes the terminal row to the durable saga log. The
+/// distinction between `Failed` and `Compensated` (spec §2.2) is
+/// not visible to in-memory sagas today — the inner future drives
+/// compensation before returning `Err`, so by the time we reach
+/// here, compensation has already run. We default a non-Ok outcome
+/// to `Compensated` since the existing sagas (`tear_off_tab`,
+/// `restore_torn_off_tab`, etc.) all emit compensating dispatches
+/// before returning errors. Sagas that genuinely fail without
+/// compensation can be distinguished in PR 2 once the saga author
+/// API exposes the post-compensation outcome explicitly.
 pub async fn emit_terminal(state: &AppState, saga_id: u64, outcome: Result<(), &str>) {
+    let log_outcome = match outcome {
+        Ok(()) => SagaOutcome::Completed,
+        Err(reason) => SagaOutcome::Compensated {
+            reason: reason.to_string(),
+        },
+    };
+    if let Err(e) = state.saga_log.terminate(saga_id, log_outcome) {
+        tracing::warn!(
+            saga_id,
+            "[saga] terminate log write failed: {} — saga lifecycle row will look 'running' to PR 2's resume scan, which will then compensate it",
+            e
+        );
+    }
     let v = state.srv_state.lock().await.bump_version();
     let event = match outcome {
         Ok(()) => Event::SagaCompleted {
@@ -189,7 +328,7 @@ pub async fn emit_terminal(state: &AppState, saga_id: u64, outcome: Result<(), &
 /// pub async fn run(state: &AppState, ...) -> Result<Value, String> {
 ///     let saga_id = alloc_saga_id(state);
 ///     emit_saga_started(state, saga_id, "tear_off_tab").await;
-///     let ctx = SagaCtx { state, saga_id };
+///     let ctx = SagaCtx::new(state, saga_id);
 ///     let result = run_saga(run_inner(ctx, ...)).await;
 ///     emit_terminal(state, saga_id, match &result {
 ///         Ok(_) => Ok(()),
