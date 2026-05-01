@@ -648,11 +648,10 @@ fn handle_report_panes_reaped(state: &mut State, label: String) -> Vec<Event> {
     // confuse subscribers. Mirrors the silent-drop pattern in
     // `handle_report_window_closed` for unknown labels.
     if !state.windows.contains_key(&label) {
-        tracing::debug!(
-            target: "saga.f6",
-            label = %label,
-            "[saga] panes_reaped: dropping report for untracked label (unpromoted pool)"
-        );
+        crate::log(&format!(
+            "[saga] panes_reaped: dropping report for untracked label '{}' (unpromoted pool)",
+            label
+        ));
         return Vec::new();
     }
     let v = state.bump_version();
@@ -677,11 +676,10 @@ fn handle_report_pool_drain_decision(
     // Same gating as `handle_report_panes_reaped` — drop reports for
     // untracked labels (unpromoted pool drains).
     if !state.windows.contains_key(&label) {
-        tracing::debug!(
-            target: "saga.f6",
-            label = %label,
-            "[saga] pool_drain_decision: dropping report for untracked label (unpromoted pool)"
-        );
+        crate::log(&format!(
+            "[saga] pool_drain_decision: dropping report for untracked label '{}' (unpromoted pool)",
+            label
+        ));
         return Vec::new();
     }
     let v = state.bump_version();
