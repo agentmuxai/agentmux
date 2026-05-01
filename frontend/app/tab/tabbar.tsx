@@ -603,11 +603,20 @@ async function requestTearOff(
     wasPinned: boolean,
 ): Promise<void> {
     const t0 = performance.now();
+    // F1.B — track whether the destination window has actually been
+    // opened. If TearOffTab succeeded but window-creation later failed
+    // (both pool-promote AND cold-path open), the tab is stuck in an
+    // invisible new workspace. The catch below uses these flags to
+    // restore the tab to its original position (which also cascade-
+    // deletes the orphan workspace via RestoreTornOffTab's saga).
+    // Tracked OUTSIDE the try so the catch can read them.
+    let newWsId: string | undefined;
+    let destWindowOpened = false;
     try {
         const sourceWindowLabel = await getApi().getWindowLabel();
         // Step 1 — sidecar transfers the tab into a new workspace.
         // Returns the new workspace's ID.
-        const newWsId = await WorkspaceService.TearOffTab(tabId, workspaceId);
+        newWsId = await WorkspaceService.TearOffTab(tabId, workspaceId);
         // Step 2 — get the destination window. Phase 6 prefers the
         // pre-warmed pool (0 ms first-paint flash). On pool exhaustion
         // we fall back to the cold-path openWindowAtPosition (~150-300 ms
@@ -628,6 +637,12 @@ async function requestTearOff(
                 newWsId,
             );
         }
+        // Window has been opened (either pool or cold path). From here
+        // on the orphan-cleanup catch below skips the RestoreTornOffTab
+        // — the new window is live and pointing at the new workspace;
+        // restoring would empty + delete the workspace and leave the
+        // open window dangling.
+        destWindowOpened = true;
         // Step 3 — Win32 SC_MOVE handshake. Host waits for the new
         // window's HWND to register, then transfers cursor capture
         // and posts WM_SYSCOMMAND/SC_MOVE so Windows enters its
@@ -666,6 +681,38 @@ async function requestTearOff(
         });
     } catch (e) {
         Logger.error("dnd", "tab tear-off failed", { tabId, error: String(e) });
+        // F1.B — orphan workspace cleanup. If TearOffTab succeeded
+        // (newWsId is set) but no destination window was ever opened
+        // (destWindowOpened is false), the tab is stuck in an
+        // invisible new workspace. Restore it to its original
+        // workspace + index — RestoreTornOffTab's saga also cascade-
+        // deletes the now-empty new workspace. Skip when the window
+        // WAS opened: a handshake-failure leaves the window live, so
+        // restoring would orphan the window pointing at a deleted
+        // workspace. Documented in
+        // docs/retro/saga-coordinator-location-analysis-2026-04-30.md
+        // §6.4.
+        if (newWsId && !destWindowOpened) {
+            try {
+                await WorkspaceService.RestoreTornOffTab(
+                    tabId,
+                    newWsId,
+                    workspaceId,
+                    originalTabIndex,
+                    wasPinned,
+                );
+                Logger.info("dnd", "tab tear-off restored after window-create failure", {
+                    tabId,
+                    newWsId,
+                });
+            } catch (restoreErr) {
+                Logger.error("dnd", "tab tear-off restore also failed — orphan workspace persists", {
+                    tabId,
+                    newWsId,
+                    error: String(restoreErr),
+                });
+            }
+        }
     }
 }
 
