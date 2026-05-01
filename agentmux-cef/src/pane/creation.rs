@@ -57,11 +57,15 @@ wrap_task! {
             // Browser panes are not top-level windows; the kind
             // value here is irrelevant (on_after_created skips the
             // taskbar/report-open logic for browser-pane-* labels).
-            self.state.pending_window_creations.lock().push_back(
-                crate::state::PendingWindowCreation {
-                    label: self.label.clone(),
-                    kind: crate::state::WindowKind::FullInstance,
-                    parent_instance_id: None,
+            //
+            // Phase F.1 — routed through the host reducer.
+            self.state.host_dispatch(
+                crate::reducer::HostCommand::EnqueuePendingWindowCreation {
+                    entry: crate::state::PendingWindowCreation {
+                        label: self.label.clone(),
+                        kind: crate::state::WindowKind::FullInstance,
+                        parent_instance_id: None,
+                    },
                 },
             );
 

@@ -136,11 +136,15 @@ pub fn spawn_pool_window(state: &Arc<AppState>) {
     // Phase B.5 (window_meta step d) — combined pre-create handoff.
     // Pool windows graduate to tear-off destinations, which are
     // FullInstance from the user's perspective.
-    state.pending_window_creations.lock().push_back(
-        crate::state::PendingWindowCreation {
-            label: label.clone(),
-            kind: WindowKind::FullInstance,
-            parent_instance_id: None,
+    //
+    // Phase F.1 — routed through the host reducer.
+    state.host_dispatch(
+        crate::reducer::HostCommand::EnqueuePendingWindowCreation {
+            entry: crate::state::PendingWindowCreation {
+                label: label.clone(),
+                kind: WindowKind::FullInstance,
+                parent_instance_id: None,
+            },
         },
     );
 

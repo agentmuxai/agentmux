@@ -618,11 +618,14 @@ fn open_window_with_kind(
     let (pos_x, pos_y) = get_offset_position();
     let (win_w, win_h) = get_secondary_window_size(pos_x, pos_y);
 
-    state.pending_window_creations.lock().push_back(
-        crate::state::PendingWindowCreation {
-            label: label.clone(),
-            kind,
-            parent_instance_id,
+    // Phase F.1 — routed through the host reducer.
+    state.host_dispatch(
+        crate::reducer::HostCommand::EnqueuePendingWindowCreation {
+            entry: crate::state::PendingWindowCreation {
+                label: label.clone(),
+                kind,
+                parent_instance_id,
+            },
         },
     );
 
