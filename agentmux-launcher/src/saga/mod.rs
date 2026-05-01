@@ -80,8 +80,13 @@ pub mod window_cleanup;
 /// **F.5 status:** `Host` is wired only as a log target — the
 /// launcher→host command pipe doesn't exist yet. Follow-up PRs
 /// replace the log with the actual transport.
+///
+/// F.7 cleanup audit: only `Host` is constructed today (F.5/F.6 saga
+/// IssueCmds). `LauncherSelf` and `Srv` are framework slots reserved
+/// for the cross-process dispatch follow-up phase per
+/// `SPEC_PHASE_F_HOST_REDUCER_2026-05-01.md` §4.3. Allow stays.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(dead_code)] // pub variants used by sagas
+#[allow(dead_code)] // LauncherSelf + Srv reserved for future cross-process sagas
 pub enum PipeTarget {
     LauncherSelf,
     Host,
@@ -91,8 +96,15 @@ pub enum PipeTarget {
 /// What a saga decides to do next, returned from `start` /
 /// `on_event`. The coordinator drives the saga forward by reacting
 /// to this enum.
+///
+/// F.7 cleanup audit: `IssueCmd`, `Done`, `Wait` are all constructed
+/// by F.5 + F.6 sagas. `Failed` is consumed in `apply_action` (and
+/// its corresponding `emit_failed` is now actively called by the
+/// evict-and-replace path), but no shipped saga *constructs*
+/// `Failed` yet — sagas today only succeed or wait. Variant-level
+/// allow scopes the dead-code suppression precisely to that one
+/// reserved variant.
 #[derive(Debug)]
-#[allow(dead_code)] // variants used by sagas
 pub enum SagaAction {
     /// Dispatch a command on the target pipe; saga remains in flight.
     IssueCmd {
@@ -104,7 +116,10 @@ pub enum SagaAction {
     Done,
     /// Saga failed irrecoverably. Coordinator emits `Event::SagaFailed`
     /// after dispatching any compensation IssueCmds the saga issued
-    /// before returning Failed.
+    /// before returning Failed. Reserved for sagas with explicit
+    /// failure conditions (e.g. cross-process dispatch follow-up
+    /// + saga timeouts).
+    #[allow(dead_code)] // reserved for sagas that explicitly fail; F.5/F.6 only succeed or wait
     Failed { reason: String },
     /// Saga is waiting for an event it hasn't seen yet. No-op for
     /// the coordinator until the next bus event.
@@ -114,7 +129,12 @@ pub enum SagaAction {
 /// Read-only context passed to saga callbacks. Currently carries
 /// only the saga_id; kept as a struct (rather than a bare u64) so
 /// future fields can be added without touching every `Saga` impl.
-#[allow(dead_code)] // pub fields used by sagas
+///
+/// F.7 cleanup audit: `saga_id` is unread by the shipped sagas
+/// (F.5/F.6 don't need it — coordinator already routes events
+/// per-registry). Reserved for the per-event saga_id correlation
+/// follow-up; allow stays.
+#[allow(dead_code)] // saga_id reserved for per-event correlation follow-up
 #[derive(Debug, Clone, Copy)]
 pub struct SagaCtx {
     pub saga_id: u64,
@@ -210,8 +230,11 @@ impl SagaCoordinator {
         });
     }
 
-    /// Emit `Event::SagaFailed` after a saga returns `Failed`.
-    #[allow(dead_code)] // F.5 sagas don't fail; future sagas will.
+    /// Emit `Event::SagaFailed` after a saga returns `Failed` or
+    /// after evict-and-replace cancels a same-kind in-flight saga.
+    /// F.7 cleanup audit: prior `#[allow(dead_code)]` removed — F.6
+    /// evict-and-replace policy now actively dispatches this on
+    /// every concurrent same-kind retrigger.
     async fn emit_failed(&self, saga_id: u64, reason: String) {
         let v = self.next_event_version().await;
         let _ = self.events_tx.send(Event::SagaFailed {
@@ -621,5 +644,339 @@ mod tests {
         assert!(coord.in_flight.lock().await.is_empty());
         drop(events_tx);
         let _ = tokio::time::timeout(std::time::Duration::from_secs(1), handle).await;
+    }
+
+    // ---------- Phase F.7 — saga-lifecycle property tests ----------
+    //
+    // Random sequences of `WindowClosed` / `PoolWindowPromoted`
+    // events fed through `match_trigger`. Asserts:
+    //   1. `WindowClosed { crash_detected: true }` NEVER produces a
+    //      saga (F.6 round-2 gate, codex P1 #637).
+    //   2. `WindowClosed { crash_detected: false }` ALWAYS produces
+    //      exactly one window_cleanup_cascade saga.
+    //   3. `PoolWindowPromoted` ALWAYS produces exactly one
+    //      pool_respawn_on_promote saga.
+    //   4. The saga's name (the (kind, key) tuple's "kind" component)
+    //      is one of the two known names — no foreign saga slips
+    //      through the trigger table.
+    //
+    // The end-to-end coordinator-level "exactly one terminal lifecycle
+    // event per saga" assertion lives in
+    // `pool_respawn::tests::coordinator_brackets_promote_with_saga_lifecycle_events`
+    // and `window_cleanup::tests::coordinator_brackets_close_with_saga_lifecycle_events`
+    // (already shipped in F.5 + F.6). The proptests here add the
+    // randomized-input dimension those happy-path tests don't cover.
+    //
+    // Cases capped at 64 (default 1024 too slow for CI). Same bound
+    // the srv reducer's E.7 proptest uses.
+
+    use proptest::prelude::*;
+
+    /// Trigger event variants the F.5/F.6 sagas can be triggered by,
+    /// plus crash-detected close (the negative case).
+    #[derive(Debug, Clone)]
+    enum F7TriggerEvent {
+        /// Should spawn `window_cleanup_cascade`.
+        WindowClosedClean { label: String },
+        /// Should NOT spawn anything (F.6 round-2 gate).
+        WindowClosedCrashed { label: String },
+        /// Should spawn `pool_respawn_on_promote`.
+        PoolWindowPromoted { label: String },
+        /// A non-trigger event — must produce no saga.
+        Unrelated,
+    }
+
+    fn f7_trigger_strategy() -> impl Strategy<Value = F7TriggerEvent> {
+        prop_oneof![
+            3 => "[a-c]{1,3}".prop_map(|label| F7TriggerEvent::WindowClosedClean { label }),
+            1 => "[a-c]{1,3}".prop_map(|label| F7TriggerEvent::WindowClosedCrashed { label }),
+            3 => "[a-c]{1,3}".prop_map(|label| F7TriggerEvent::PoolWindowPromoted { label }),
+            2 => Just(F7TriggerEvent::Unrelated),
+        ]
+    }
+
+    fn make_event(t: F7TriggerEvent, version: u64) -> Event {
+        match t {
+            F7TriggerEvent::WindowClosedClean { label } => Event::WindowClosed {
+                label,
+                version,
+                crash_detected: false,
+            },
+            F7TriggerEvent::WindowClosedCrashed { label } => Event::WindowClosed {
+                label,
+                version,
+                crash_detected: true,
+            },
+            F7TriggerEvent::PoolWindowPromoted { label } => {
+                Event::PoolWindowPromoted { label, version }
+            }
+            F7TriggerEvent::Unrelated => Event::Pong { nonce: 0, version },
+        }
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig {
+            cases: 64,
+            ..ProptestConfig::default()
+        })]
+
+        /// For every event in a random sequence, `match_trigger`
+        /// returns the expected saga (or None for crash / unrelated).
+        /// Exhaustive shape check — catches accidental regressions
+        /// in the trigger table.
+        #[test]
+        fn f7_match_trigger_matches_expected_saga_kind(
+            triggers in prop::collection::vec(f7_trigger_strategy(), 0..40)
+        ) {
+            for (i, t) in triggers.into_iter().enumerate() {
+                let event = make_event(t.clone(), (i + 1) as u64);
+                let saga = match_trigger(&event);
+                match (&t, &saga) {
+                    (F7TriggerEvent::WindowClosedClean { .. }, Some(s)) => {
+                        prop_assert_eq!(s.name(), "window_cleanup_cascade");
+                    }
+                    (F7TriggerEvent::PoolWindowPromoted { .. }, Some(s)) => {
+                        prop_assert_eq!(s.name(), "pool_respawn_on_promote");
+                    }
+                    (F7TriggerEvent::WindowClosedCrashed { .. }, None) => {
+                        // Expected — crash-detected close must never
+                        // spawn a saga (F.6 codex P1 #637).
+                    }
+                    (F7TriggerEvent::Unrelated, None) => {
+                        // Expected — non-trigger event.
+                    }
+                    (other_t, other_s) => {
+                        prop_assert!(
+                            false,
+                            "trigger {:?} produced unexpected saga match: {:?}",
+                            other_t,
+                            other_s.as_ref().map(|s| s.name()),
+                        );
+                    }
+                }
+            }
+        }
+
+        /// Crash-detected `WindowClosed` events NEVER produce a
+        /// saga, regardless of label. Reinforces invariant #1
+        /// independently — a stricter shrinker target.
+        #[test]
+        fn f7_crash_detected_close_never_spawns_saga(
+            label in "[a-c]{1,3}",
+            version in 1u64..1_000_000,
+        ) {
+            let event = Event::WindowClosed { label, version, crash_detected: true };
+            prop_assert!(
+                match_trigger(&event).is_none(),
+                "crash-detected WindowClosed must not spawn a saga",
+            );
+        }
+
+        /// Clean-close `WindowClosed` ALWAYS produces a
+        /// window_cleanup_cascade saga, regardless of label.
+        #[test]
+        fn f7_clean_close_always_spawns_window_cleanup_cascade(
+            label in "[a-c]{1,3}",
+            version in 1u64..1_000_000,
+        ) {
+            let event = Event::WindowClosed { label, version, crash_detected: false };
+            let saga = match_trigger(&event)
+                .expect("clean-close should spawn a saga");
+            prop_assert_eq!(saga.name(), "window_cleanup_cascade");
+        }
+    }
+
+    /// Coordinator-level invariant: under random sequences of
+    /// trigger events, no two same-kind sagas are ever active
+    /// simultaneously — the evict-and-replace policy guarantees at
+    /// most one in-flight saga per kind. Drives the coordinator with
+    /// synthetic events and asserts the `in_flight` registry has at
+    /// most one entry per name (≤2 total: pool_respawn +
+    /// window_cleanup).
+    ///
+    /// Run as a single tokio test (proptest can't drive an async
+    /// closure directly). Iterates several seeded sequences inline —
+    /// enough surface area to catch concurrent-overlap regressions
+    /// without ballooning test time. Uses a hand-rolled LCG so we
+    /// don't pull in `rand` as a dev-dependency for one test.
+    #[tokio::test]
+    async fn f7_evict_and_replace_keeps_one_saga_per_kind() {
+        // Tiny LCG for deterministic per-seed sequences. Glibc's
+        // constants — quality irrelevant; we just need reproducible
+        // bit patterns across CI runs.
+        fn lcg_next(state: &mut u64) -> u64 {
+            *state = state
+                .wrapping_mul(1_103_515_245)
+                .wrapping_add(12_345);
+            *state
+        }
+
+        let seeds: &[u64] = &[1, 7, 42, 99, 1234, 5678, 0xDEADBEEF, 0xC0FFEE];
+        for seed in seeds {
+            let (events_tx, _) = tokio::sync::broadcast::channel::<Event>(256);
+            let state = Arc::new(tokio::sync::Mutex::new(crate::state::State::default()));
+            let coord = Arc::new(SagaCoordinator::new(events_tx.clone(), Arc::clone(&state)));
+            let coord_rx = events_tx.subscribe();
+            let _handle = tokio::spawn(run_coordinator(Arc::clone(&coord), coord_rx));
+            tokio::task::yield_now().await;
+
+            // Build a deterministic sequence from the seed.
+            let mut rng = *seed;
+            let labels = ["a", "b", "c"];
+            for v in 1u64..=20 {
+                let label_idx = (lcg_next(&mut rng) % labels.len() as u64) as usize;
+                let label = labels[label_idx].to_string();
+                let pick = lcg_next(&mut rng) % 3;
+                let event = match pick {
+                    0 => Event::WindowClosed {
+                        label,
+                        version: v,
+                        crash_detected: false,
+                    },
+                    1 => Event::PoolWindowPromoted { label, version: v },
+                    _ => Event::Pong { nonce: v, version: v },
+                };
+                let _ = events_tx.send(event);
+                // Yield so the coordinator processes one event before
+                // we send the next. Tightens the concurrent-overlap
+                // window.
+                tokio::task::yield_now().await;
+            }
+            // Brief settling — give the coordinator time to process
+            // the last few events + emit terminal lifecycles.
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+            // Invariant: at most one saga per name in flight.
+            let registry = coord.in_flight.lock().await;
+            let mut counts = std::collections::HashMap::<&str, u32>::new();
+            for s in registry.values() {
+                *counts.entry(s.name()).or_insert(0) += 1;
+            }
+            for (name, count) in &counts {
+                assert!(
+                    *count <= 1,
+                    "seed {} — saga kind {:?} has {} concurrent in-flight; evict-and-replace policy violated",
+                    seed,
+                    name,
+                    count,
+                );
+            }
+            // And the 2-kind ceiling (we only register two saga kinds).
+            assert!(
+                registry.len() <= 2,
+                "seed {} — registry has {} sagas, expected ≤2 (one per kind)",
+                seed,
+                registry.len(),
+            );
+        }
+    }
+
+    /// Saga forward-path emission contract: every saga that
+    /// terminates emits exactly ONE terminal lifecycle event
+    /// (`SagaCompleted` xor `SagaFailed`). Drives a small batch of
+    /// triggers through the coordinator and counts emitted
+    /// lifecycle events on the bus. Catches regressions where a
+    /// saga's `Done` action somehow fires both `emit_completed`
+    /// and `emit_failed`, or neither.
+    #[tokio::test]
+    async fn f7_each_saga_emits_exactly_one_terminal_event() {
+        let (events_tx, _) = tokio::sync::broadcast::channel::<Event>(256);
+        let state = Arc::new(tokio::sync::Mutex::new(crate::state::State::default()));
+        let coord = Arc::new(SagaCoordinator::new(events_tx.clone(), Arc::clone(&state)));
+        let mut witness = events_tx.subscribe();
+        let coord_rx = events_tx.subscribe();
+        let _handle = tokio::spawn(run_coordinator(Arc::clone(&coord), coord_rx));
+        tokio::task::yield_now().await;
+
+        // Drive ONE clean cleanup-cascade saga to completion.
+        let _ = events_tx.send(Event::WindowClosed {
+            label: "main".into(),
+            version: 1,
+            crash_detected: false,
+        });
+        let _ = events_tx.send(Event::PanesReaped {
+            label: "main".into(),
+            version: 2,
+        });
+        let _ = events_tx.send(Event::PoolDrained {
+            label: "main".into(),
+            version: 3,
+        });
+        // And ONE pool-respawn saga to completion.
+        let _ = events_tx.send(Event::PoolWindowPromoted {
+            label: "pool-1".into(),
+            version: 4,
+        });
+        let _ = events_tx.send(Event::PoolWindowAdded {
+            label: "pool-2".into(),
+            version: 5,
+        });
+
+        // Drain the bus with a deadline. Count one terminal event
+        // (SagaCompleted xor SagaFailed) per saga_id.
+        let mut started_ids = std::collections::HashSet::<u64>::new();
+        let mut terminal_for_id = std::collections::HashMap::<u64, &'static str>::new();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        while std::time::Instant::now() < deadline {
+            match tokio::time::timeout(std::time::Duration::from_millis(50), witness.recv()).await
+            {
+                Ok(Ok(Event::SagaStarted { saga_id, .. })) => {
+                    started_ids.insert(saga_id);
+                }
+                Ok(Ok(Event::SagaCompleted { saga_id, .. })) => {
+                    let prev = terminal_for_id.insert(saga_id, "completed");
+                    assert!(
+                        prev.is_none(),
+                        "saga_id {} got two terminal events: prior={:?} now=completed",
+                        saga_id,
+                        prev,
+                    );
+                }
+                Ok(Ok(Event::SagaFailed { saga_id, .. })) => {
+                    let prev = terminal_for_id.insert(saga_id, "failed");
+                    assert!(
+                        prev.is_none(),
+                        "saga_id {} got two terminal events: prior={:?} now=failed",
+                        saga_id,
+                        prev,
+                    );
+                }
+                Ok(Ok(_)) => {}
+                Ok(Err(_)) => break,
+                Err(_) => {
+                    // No new events for 50ms — we've drained.
+                    if started_ids.len() == 2
+                        && started_ids.iter().all(|id| terminal_for_id.contains_key(id))
+                    {
+                        break;
+                    }
+                }
+            }
+        }
+        // Both sagas started.
+        assert_eq!(
+            started_ids.len(),
+            2,
+            "expected 2 SagaStarted events (one per saga), got {}: {:?}",
+            started_ids.len(),
+            started_ids,
+        );
+        // Each got exactly one terminal event.
+        for id in &started_ids {
+            assert!(
+                terminal_for_id.contains_key(id),
+                "saga_id {} never got a terminal lifecycle event",
+                id,
+            );
+        }
+        // No spurious terminal events for sagas we didn't observe
+        // start.
+        for id in terminal_for_id.keys() {
+            assert!(
+                started_ids.contains(id),
+                "saga_id {} got a terminal event but no SagaStarted observed",
+                id,
+            );
+        }
     }
 }

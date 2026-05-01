@@ -36,7 +36,10 @@ pub enum ProcessState {
     /// confirmed it's alive yet. In B.3 we transition straight to
     /// Running on Register because that's the first authoritative
     /// signal. B.4+ adds intermediate state for "spawned but not
-    /// yet registered."
+    /// yet registered." F.7 cleanup audit: the variant is reserved
+    /// for that future intermediate state; keep with allow rather
+    /// than delete to preserve the documented state machine shape.
+    #[allow(dead_code)]
     Spawning,
     /// Process has registered with the launcher and is doing its
     /// work. Healthy.
@@ -47,16 +50,26 @@ pub enum ProcessState {
 
 /// One process in the launcher's canonical view. Updated by the
 /// reducer; read by IPC handlers + the eventual `--diag` printer.
+///
+/// F.7 cleanup audit: `pid` and `spawned_at` are written by
+/// `handle_register` but never read at runtime. They're carried for
+/// the future `--diag launcher` printer (alongside `version` /
+/// `kind`) and for Debug derivations in tests and crash dumps. Keep
+/// with allow rather than delete — losing them now means rebuilding
+/// the diag printer from scratch.
 #[derive(Debug, Clone)]
 pub struct ProcessRecord {
+    #[allow(dead_code)]
     pub pid: u32,
     pub kind: ClientKind,
     pub state: ProcessState,
     /// RFC3339 timestamp of the spawn (or first-register, whichever
     /// the launcher learned about first).
+    #[allow(dead_code)]
     pub spawned_at: String,
     /// Free-form version string of the registered binary. For log
     /// correlation across version skew during a Phase B rollout.
+    #[allow(dead_code)]
     pub version: String,
 }
 
@@ -179,13 +192,11 @@ pub struct State {
     /// pending HWND by `label_hint`/timing). Anything still here
     /// after a follow-up event is classified as `HwndWithoutBrowser`.
     pub pending_hwnds: HashMap<u64, PendingHwnd>,
-    /// Phase B.9.1 — milliseconds since launcher start, used as the
-    /// monotonic clock for WRR observability timestamps. Set to
-    /// `None` until `Ctx` injects the first now-value; the reducer
-    /// updates it on every dispatch. Distinct from `event_version`
-    /// (causality counter) because operators reading `--diag wrr`
-    /// want wall-clock-ish age, not event count.
-    pub launcher_start_ms: Option<u64>,
+    // F.7 cleanup audit: removed unused `launcher_start_ms: Option<u64>`
+    // field. It was set in Default but no reducer arm or consumer
+    // ever read it — the WRR observability path uses the OnceLock-
+    // backed `launcher_start_ms()` helper in `ipc::server` directly,
+    // not a state field. Genuine leftover from the early B.9.1 sketch.
 }
 
 /// Phase B.9.1 — transient HWND record held until the reducer can
@@ -221,7 +232,6 @@ impl Default for State {
             next_client_id: 1,
             monitors: Vec::new(),
             pending_hwnds: HashMap::new(),
-            launcher_start_ms: None,
         }
     }
 }

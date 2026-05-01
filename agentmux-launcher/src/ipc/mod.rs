@@ -18,9 +18,11 @@
 pub mod server;
 
 // Wire types live in agentmux-common::ipc so the host (client) and
-// launcher (server) compile against one definition. Re-exported
-// here for convenience.
-pub use agentmux_common::ipc::{Command, Event};
+// launcher (server) compile against one definition. Phase F.7
+// cleanup audit: the prior `pub use {Command, Event}` re-exports
+// from this module had no consumers — every reference uses the
+// canonical `agentmux_common::ipc` path directly. Removed to keep
+// the launcher's public surface honest.
 pub use server::run_ipc_server;
 
 /// Construct the named-pipe path for a given data-dir hash.

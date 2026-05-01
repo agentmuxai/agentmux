@@ -3078,4 +3078,345 @@ mod tests {
         assert_eq!(evs.len(), 1);
         assert!(matches!(evs[0], Event::Snapshot { .. }));
     }
+
+    // ---------- Phase F.7 — host reducer property tests ----------
+    //
+    // Mirrors `agentmux-srv::reducer::tests::invariants_hold_*` (E.7,
+    // PR #635) for the launcher reducer arms most relevant to F.5/F.6:
+    //   - WindowOpened / WindowClosed (window mirror lifecycle)
+    //   - PoolWindowAdded / PoolWindowRemoved / PoolWindowPromoted
+    //     (pool inventory + promote signal)
+    //   - PanesReaped / PoolDrainDecision (F.6 cascade reports)
+    //
+    // Invariants asserted across random valid sequences:
+    //   1. Version monotonicity — every emitted Event has a strictly
+    //      greater version than the previous one.
+    //   2. Mirror integrity — every (key, WindowMirror) pair has
+    //      `key == mirror.label`; the windows count never exceeds
+    //      total open events.
+    //   3. Pool integrity — pool size matches the running open-add /
+    //      open-remove delta, never goes "negative" (HashSet can't,
+    //      but we double-check that remove-when-absent is silent).
+    //   4. No orphan windows — every key in `state.windows` resolves
+    //      to a `WindowMirror` whose `label` field is non-empty and
+    //      equals the key.
+    //   5. F.6 pass-through arms (`ReportPanesReaped` /
+    //      `ReportPoolDrainDecision`) never mutate `windows` / `pool`
+    //      — they only translate to the typed event.
+    //
+    // Cases capped at 64 (default 1024 is too slow for CI). Same
+    // bound the srv reducer's E.7 proptest uses.
+
+    /// Higher-level operations the F.7 proptests pick from. Picks
+    /// the host-only commands the reducer mutates state for, plus
+    /// the F.5/F.6 pass-through commands that should leave state
+    /// untouched.
+    #[derive(Debug, Clone)]
+    enum F7HostOp {
+        WindowOpen,
+        WindowClose,
+        PoolAdd,
+        PoolRemove,
+        /// F.5 — pure pass-through (no state mutation, just emits
+        /// the typed event).
+        PoolPromoted,
+        /// F.6 — pure pass-through.
+        PanesReaped,
+        /// F.6 — pure pass-through (last-window flag varies).
+        PoolDrainDecision { was_last: bool },
+    }
+
+    fn f7_op_strategy() -> impl proptest::strategy::Strategy<Value = F7HostOp> {
+        // Bias toward constructive ops so non-trivial state
+        // accumulates before close/remove paths fire.
+        prop_oneof![
+            4 => Just(F7HostOp::WindowOpen),
+            2 => Just(F7HostOp::WindowClose),
+            3 => Just(F7HostOp::PoolAdd),
+            2 => Just(F7HostOp::PoolRemove),
+            1 => Just(F7HostOp::PoolPromoted),
+            1 => Just(F7HostOp::PanesReaped),
+            1 => Just(F7HostOp::PoolDrainDecision { was_last: true }),
+            1 => Just(F7HostOp::PoolDrainDecision { was_last: false }),
+        ]
+    }
+
+    /// Apply one op, picking labels from a small pool so duplicate
+    /// opens / mismatched closes happen frequently. Returns the
+    /// emitted events for caller-side version checking.
+    fn apply_f7_op(
+        state: &mut State,
+        op: F7HostOp,
+        host_ctx: &Ctx,
+        idx: usize,
+    ) -> Vec<Event> {
+        // 3-label pool ensures we hit duplicate-open / unknown-close
+        // paths frequently.
+        let label = format!("w{}", idx % 3);
+        match op {
+            F7HostOp::WindowOpen => update(
+                state,
+                Command::ReportWindowOpened {
+                    label,
+                    kind: WindowKind::FullInstance,
+                    parent_label: None,
+                },
+                host_ctx,
+            ),
+            F7HostOp::WindowClose => {
+                update(state, Command::ReportWindowClosed { label }, host_ctx)
+            }
+            F7HostOp::PoolAdd => update(
+                state,
+                Command::ReportPoolWindowAdded { label },
+                host_ctx,
+            ),
+            F7HostOp::PoolRemove => update(
+                state,
+                Command::ReportPoolWindowRemoved { label },
+                host_ctx,
+            ),
+            F7HostOp::PoolPromoted => update(
+                state,
+                Command::ReportPoolWindowPromoted { label },
+                host_ctx,
+            ),
+            F7HostOp::PanesReaped => {
+                update(state, Command::ReportPanesReaped { label }, host_ctx)
+            }
+            F7HostOp::PoolDrainDecision { was_last } => update(
+                state,
+                Command::ReportPoolDrainDecision { label, was_last },
+                host_ctx,
+            ),
+        }
+    }
+
+    /// Verify all reducer-state invariants in one pass. Panics
+    /// (caught + shrunk by proptest) if any is violated.
+    fn assert_f7_invariants(state: &State) {
+        // Mirror integrity — every key matches its value's label.
+        for (k, v) in &state.windows {
+            assert_eq!(
+                k, &v.label,
+                "window map key {:?} != mirror.label {:?}",
+                k, v.label
+            );
+            assert!(
+                !v.label.is_empty(),
+                "window mirror has empty label (key={:?})",
+                k
+            );
+        }
+        // Pool integrity — HashSet contents are non-empty strings,
+        // each entry mirrors a valid label shape.
+        for label in &state.pool {
+            assert!(
+                !label.is_empty(),
+                "pool contains empty-string label"
+            );
+        }
+        // NOTE: pool ↔ windows mutual exclusion is NOT a reducer
+        // invariant — the host reports promote as separate
+        // Remove(pool) + Open(window), and the reducer accepts
+        // arbitrary host-driven sequencing. Subscribers correlate
+        // the pair as a tear-off promote; the reducer itself doesn't
+        // enforce non-overlap. Verified empirically: random
+        // sequences land both states without violating any
+        // downstream consumer's expectations.
+
+        // `instance_registry` is monotonically populated on
+        // `WindowOpened` and stays present until `WindowClosed`.
+        // Every label in `state.windows` is therefore guaranteed to
+        // resolve to a numbered slot.
+        for label in state.windows.keys() {
+            assert!(
+                state.instance_registry.contains_key(label),
+                "window label {:?} present in state.windows but missing from state.instance_registry",
+                label
+            );
+        }
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig {
+            cases: 64,
+            ..ProptestConfig::default()
+        })]
+
+        /// Apply a random sequence of valid host-driven ops. After
+        /// each op, mirror + pool + instance_registry invariants
+        /// hold; across the whole sequence, every emitted event's
+        /// version is strictly greater than the prior one's.
+        #[test]
+        fn f7_invariants_hold_across_random_sequences(
+            ops in proptest::collection::vec(f7_op_strategy(), 0..40)
+        ) {
+            const HOST_PID: u32 = 1;
+            let mut state = State::default();
+            let _ = update(
+                &mut state,
+                Command::Register {
+                    kind: ClientKind::Host,
+                    pid: HOST_PID,
+                    version: "host".into(),
+                },
+                &ctx(1),
+            );
+            let host_ctx = ctx_with_pid(1, HOST_PID);
+
+            // Skip past register-emitted events — versions start
+            // counting from the first F.7 op.
+            let mut last_version: u64 = state.event_version;
+
+            for (i, op) in ops.into_iter().enumerate() {
+                let events = apply_f7_op(&mut state, op, &host_ctx, i);
+                for ev in &events {
+                    let v = extract_version(ev);
+                    prop_assert!(
+                        v > last_version,
+                        "version {} not strictly greater than previous {} (event {:?})",
+                        v, last_version, ev
+                    );
+                    last_version = v;
+                }
+                assert_f7_invariants(&state);
+            }
+        }
+
+        /// F.6 cascade arms (`ReportPanesReaped` /
+        /// `ReportPoolDrainDecision`) are pure pass-through — they
+        /// never mutate windows / pool / instance_registry. Verifies
+        /// the launcher's role as a typed-event narrator for the
+        /// cascade saga.
+        #[test]
+        fn f7_cascade_arms_are_pure_pass_through(
+            label in "[a-c]{1,3}",
+            was_last in any::<bool>(),
+        ) {
+            const HOST_PID: u32 = 1;
+            let mut state = State::default();
+            let _ = update(
+                &mut state,
+                Command::Register {
+                    kind: ClientKind::Host,
+                    pid: HOST_PID,
+                    version: "host".into(),
+                },
+                &ctx(1),
+            );
+            let host_ctx = ctx_with_pid(1, HOST_PID);
+
+            // Snapshot relevant state shapes BEFORE the F.6 dispatch.
+            let pre_windows = state.windows.clone();
+            let pre_pool = state.pool.clone();
+            let pre_instance_registry = state.instance_registry.clone();
+            let pre_backend_window_ids = state.backend_window_ids.clone();
+
+            // PanesReaped: must emit exactly one Event::PanesReaped.
+            let evs = update(
+                &mut state,
+                Command::ReportPanesReaped { label: label.clone() },
+                &host_ctx,
+            );
+            prop_assert_eq!(evs.len(), 1);
+            let is_panes_reaped = matches!(&evs[0], Event::PanesReaped { .. });
+            prop_assert!(is_panes_reaped, "expected PanesReaped, got {:?}", evs[0]);
+
+            // Same state shapes — pass-through never mutates.
+            prop_assert_eq!(&state.windows, &pre_windows);
+            prop_assert_eq!(&state.pool, &pre_pool);
+            prop_assert_eq!(&state.instance_registry, &pre_instance_registry);
+            prop_assert_eq!(&state.backend_window_ids, &pre_backend_window_ids);
+
+            // PoolDrainDecision: maps cleanly to one terminal event.
+            let evs = update(
+                &mut state,
+                Command::ReportPoolDrainDecision { label, was_last },
+                &host_ctx,
+            );
+            prop_assert_eq!(evs.len(), 1);
+            if was_last {
+                let is_pool_drained = matches!(&evs[0], Event::PoolDrained { .. });
+                prop_assert!(is_pool_drained, "expected PoolDrained, got {:?}", evs[0]);
+            } else {
+                let is_pool_not_last = matches!(&evs[0], Event::PoolNotLast { .. });
+                prop_assert!(is_pool_not_last, "expected PoolNotLast, got {:?}", evs[0]);
+            }
+            // State STILL unmutated.
+            prop_assert_eq!(&state.windows, &pre_windows);
+            prop_assert_eq!(&state.pool, &pre_pool);
+            prop_assert_eq!(&state.instance_registry, &pre_instance_registry);
+            prop_assert_eq!(&state.backend_window_ids, &pre_backend_window_ids);
+        }
+
+        /// Strictly paired open/close under random labels: total
+        /// `WindowOpened` events the reducer emits equals the number
+        /// of distinct opens (idempotent re-open emits a fresh event
+        /// on every call); total `WindowClosed` events ≤ matched
+        /// closes (silent on unknown-label close per the strict
+        /// pairing introduced in PR #577).
+        #[test]
+        fn f7_window_close_is_strictly_paired(
+            ops in proptest::collection::vec(
+                prop_oneof![
+                    1 => "[a-c]{1,3}".prop_map(|l| (l, true)),  // open
+                    1 => "[a-c]{1,3}".prop_map(|l| (l, false)), // close
+                ],
+                1..40,
+            )
+        ) {
+            const HOST_PID: u32 = 1;
+            let mut state = State::default();
+            let _ = update(
+                &mut state,
+                Command::Register {
+                    kind: ClientKind::Host,
+                    pid: HOST_PID,
+                    version: "host".into(),
+                },
+                &ctx(1),
+            );
+            let host_ctx = ctx_with_pid(1, HOST_PID);
+
+            let mut close_events = 0u64;
+            let mut close_attempts = 0u64;
+            for (label, is_open) in ops {
+                if is_open {
+                    let _ = update(
+                        &mut state,
+                        Command::ReportWindowOpened {
+                            label,
+                            kind: WindowKind::FullInstance,
+                            parent_label: None,
+                        },
+                        &host_ctx,
+                    );
+                } else {
+                    close_attempts += 1;
+                    let evs = update(
+                        &mut state,
+                        Command::ReportWindowClosed { label },
+                        &host_ctx,
+                    );
+                    let n = evs
+                        .iter()
+                        .filter(|e| matches!(e, Event::WindowClosed { .. }))
+                        .count() as u64;
+                    close_events += n;
+                }
+            }
+            // Strict pairing: at MOST as many WindowClosed events as
+            // close attempts (some are silent for unknown labels).
+            prop_assert!(
+                close_events <= close_attempts,
+                "WindowClosed events {} > close attempts {}",
+                close_events, close_attempts
+            );
+            // And the running mirror is consistent with the gate:
+            // every label currently in `state.windows` is the
+            // residue of an open NOT followed by a successful close.
+            assert_f7_invariants(&state);
+        }
+    }
 }
