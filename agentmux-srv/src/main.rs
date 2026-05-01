@@ -590,6 +590,34 @@ async fn main() {
         saga_log: Arc::clone(&saga_log),
     };
 
+    // Saga durability PR 2 — resume-on-startup. Walk any sagas the
+    // durable log says are unresolved (running / compensating /
+    // failed) from a prior srv-process run, dispatch their inverse
+    // commands, and mark them compensated. Runs AFTER reducer
+    // bootstrap + persist subscriber spawn so the recovery's reducer
+    // dispatches operate against fully-populated state, BUT BEFORE
+    // the API server starts accepting requests so resumed
+    // compensation can't interleave with new sagas.
+    //
+    // Failure here is non-fatal: the saga log read might be transient,
+    // and starting up without recovery beats refusing to start.
+    // Operator can still inspect via `--diag sagas` (PR 2 part 2).
+    let resumed = sagas::recovery::compensate_unresolved(&state)
+        .await
+        .unwrap_or_else(|e| {
+            tracing::error!(
+                "[saga] resume-on-startup failed: {} — continuing; operator review needed",
+                e
+            );
+            0
+        });
+    if resumed > 0 {
+        tracing::info!(
+            "[saga] resume-on-startup compensated {} unresolved saga(s) from prior run",
+            resumed
+        );
+    }
+
     // Phase E.1b — srv pipe IPC server. Bound when launcher passes
     // `AGENTMUX_SRV_PIPE_PATH`; absent in `task dev` mode (no
     // launcher in the loop).

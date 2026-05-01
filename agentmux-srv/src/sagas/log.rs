@@ -296,6 +296,95 @@ impl SagaLog {
         Ok(())
     }
 
+    /// Highest existing `step_index` for a saga, +1, or 0 if no steps
+    /// exist yet. Used by PR 2's resume-on-startup so recovery
+    /// compensation rows are appended AFTER the saga's original step
+    /// indices (rather than overwriting in place via `compensate_step`,
+    /// which would lose the original step's `output_json` provenance).
+    pub fn next_step_index(&self, saga_id: u64) -> Result<u32, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let max: Option<i64> = conn.query_row(
+            "SELECT MAX(step_index) FROM saga_step WHERE saga_id = ?1",
+            params![saga_id as i64],
+            |r| r.get(0),
+        )?;
+        Ok((max.unwrap_or(-1) + 1) as u32)
+    }
+
+    /// Append a new compensation step row at `step_index`. Distinct
+    /// from `compensate_step()` (which overwrites an existing step row
+    /// by index): used by PR 2's resume-on-startup to record a
+    /// recovery dispatch as a NEW row so the original succeeded
+    /// step's provenance is preserved.
+    ///
+    /// `state='compensated'` if `error.is_none()`, else `'failed'`
+    /// (with the reason in `output_json`).
+    pub fn append_recovery_step(
+        &self,
+        saga_id: u64,
+        step_index: u32,
+        name: &str,
+        cmd: &Command,
+        events: &[Event],
+        error: Option<&str>,
+    ) -> Result<(), StoreError> {
+        let now = now_ms();
+        let cmd_json = serde_json::to_string(cmd)?;
+        let (state, output_json) = match error {
+            None => ("compensated", serde_json::to_string(events)?),
+            Some(err) => (
+                "failed",
+                serde_json::to_string(&serde_json::json!({ "error": err }))?,
+            ),
+        };
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO saga_step
+             (saga_id, step_index, name, state, cmd_json, output_json, started_at, ended_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7)",
+            params![saga_id as i64, step_index, name, state, cmd_json, output_json, now],
+        )?;
+        Ok(())
+    }
+
+    /// Mark a saga as `compensating` — used by PR 2's resume-on-startup
+    /// to flag a saga as undergoing recovery before walking its
+    /// succeeded steps in reverse. After all compensating dispatches
+    /// run, the caller invokes `terminate()` with the appropriate
+    /// outcome (`Compensated` / `Failed`).
+    ///
+    /// (codex follow-up.) Distinct from `terminate(state='compensated')`
+    /// because the saga is only **mid-compensation** here — its
+    /// terminal_at and failure_reason are not known yet.
+    pub fn mark_compensating(&self, saga_id: u64) -> Result<(), StoreError> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE saga SET state = 'compensating' WHERE saga_id = ?1",
+            params![saga_id as i64],
+        )?;
+        Ok(())
+    }
+
+    /// Mark a saga as `failed_compensation` — used by PR 2's resume-
+    /// on-startup when at least one compensating dispatch errored. The
+    /// saga is left in this terminal state for operator review;
+    /// `--diag sagas` surfaces it.
+    pub fn mark_failed_compensation(
+        &self,
+        saga_id: u64,
+        reason: &str,
+    ) -> Result<(), StoreError> {
+        let now = now_ms();
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE saga
+             SET state = 'failed_compensation', terminal_at = ?1, failure_reason = ?2
+             WHERE saga_id = ?3",
+            params![now, reason, saga_id as i64],
+        )?;
+        Ok(())
+    }
+
     /// Write the saga's terminal lifecycle row. Called from
     /// `emit_terminal` after the inner future returns.
     pub fn terminate(&self, saga_id: u64, outcome: SagaOutcome) -> Result<(), StoreError> {
