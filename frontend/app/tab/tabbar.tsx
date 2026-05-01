@@ -603,15 +603,23 @@ async function requestTearOff(
     wasPinned: boolean,
 ): Promise<void> {
     const t0 = performance.now();
-    // F1.B — track whether the destination window has actually been
-    // opened. If TearOffTab succeeded but window-creation later failed
-    // (both pool-promote AND cold-path open), the tab is stuck in an
-    // invisible new workspace. The catch below uses these flags to
-    // restore the tab to its original position (which also cascade-
-    // deletes the orphan workspace via RestoreTornOffTab's saga).
-    // Tracked OUTSIDE the try so the catch can read them.
+    // F1.B — track tear-off progress to drive the orphan-cleanup
+    // catch below. Three states:
+    // * newWsId unset            → TearOffTab hasn't succeeded;
+    //                              nothing to clean up.
+    // * windowCreateAttempted=false → no host window-create call has
+    //                              been issued; safe to restore.
+    // * windowCreateAttempted=true  → host's create-window API
+    //                              returned a label, but the window
+    //                              is created asynchronously and may
+    //                              or may not be live yet. The
+    //                              handshake below confirms HWND
+    //                              registration; only after handshake
+    //                              succeeds is the window definitively
+    //                              live. (codex P1 round-2 #624.)
     let newWsId: string | undefined;
-    let destWindowOpened = false;
+    let windowCreateAttempted = false;
+    let handshakeSucceeded = false;
     try {
         const sourceWindowLabel = await getApi().getWindowLabel();
         // Step 1 — sidecar transfers the tab into a new workspace.
@@ -637,16 +645,14 @@ async function requestTearOff(
                 newWsId,
             );
         }
-        // Note: `destWindowOpened` is NOT set here. Both
-        // tearOffPoolPromote and openWindowAtPosition return a label
-        // EAGERLY (the CEF command is posted asynchronously; the new
-        // window's HWND registration happens later). The handshake
-        // below is what waits for HWND registration; only AFTER it
-        // succeeds do we know the destination window is actually
-        // live. If the handshake fails because HWND never registers,
-        // there's no live window for the user to interact with and
-        // the orphan-cleanup catch below should restore the tab.
-        // (codex P1 #624.)
+        // Mark the create-window attempt. Both APIs return a label
+        // EAGERLY (the CEF command posts asynchronously; HWND
+        // registration happens later). After this point a window
+        // MAY exist; the catch below uses the handshake error
+        // message to distinguish "HWND never registered" (window
+        // doesn't exist) from "registered but post-registration
+        // failure" (window exists). (codex P1 round-2 #624.)
+        windowCreateAttempted = true;
         // Step 3 — Win32 SC_MOVE handshake. Host waits for the new
         // window's HWND to register, then transfers cursor capture
         // and posts WM_SYSCOMMAND/SC_MOVE so Windows enters its
@@ -671,12 +677,8 @@ async function requestTearOff(
             wasPinned,
         });
         // Handshake confirmed the destination window's HWND
-        // registered + Windows now owns the move loop. From here on
-        // the orphan-cleanup catch below skips RestoreTornOffTab.
-        // (codex P1 #624 — moved from immediately-after-create-window
-        // to here, since create-window APIs return eagerly before
-        // HWND registration.)
-        destWindowOpened = true;
+        // registered + Windows now owns the move loop.
+        handshakeSucceeded = true;
         // Clear the cross-window drag payload so the legacy dragend
         // pipeline (CrossWindowDragMonitor) doesn't double-process
         // this gesture when its dragend fires. Cleared HERE rather
@@ -692,18 +694,32 @@ async function requestTearOff(
         });
     } catch (e) {
         Logger.error("dnd", "tab tear-off failed", { tabId, error: String(e) });
-        // F1.B — orphan workspace cleanup. If TearOffTab succeeded
-        // (newWsId is set) but no destination window was ever opened
-        // (destWindowOpened is false), the tab is stuck in an
-        // invisible new workspace. Restore it to its original
-        // workspace + index — RestoreTornOffTab's saga also cascade-
-        // deletes the now-empty new workspace. Skip when the window
-        // WAS opened: a handshake-failure leaves the window live, so
-        // restoring would orphan the window pointing at a deleted
-        // workspace. Documented in
-        // docs/retro/saga-coordinator-location-analysis-2026-04-30.md
-        // §6.4.
-        if (newWsId && !destWindowOpened) {
+        // F1.B — orphan workspace cleanup. Only restore the tab when
+        // we're confident the destination window does NOT exist:
+        //
+        // 1. TearOffTab failed → newWsId unset → nothing to do.
+        // 2. TearOffTab succeeded, no window-create called → restore.
+        // 3. window-create returned a label, handshake threw with
+        //    "not registered within …s" → HWND never registered →
+        //    window doesn't exist → restore.
+        // 4. window-create returned a label, handshake threw any
+        //    other error (hook setup, PostMessageW, etc.) → HWND
+        //    DID register → window exists → SKIP restore. Restoring
+        //    would cascade-delete the workspace and orphan the live
+        //    window. (codex P1 round-2 #624.)
+        //
+        // Match-string is brittle but the host-side error is
+        // produced verbatim by `tear_off_sc_move_handshake` at
+        // `agentmux-cef/src/commands/drag.rs:491`. If that string
+        // changes, this guard becomes too conservative (skips
+        // restore where it could have safely fired) but never the
+        // other way (restore + orphan window). Acceptable failure mode.
+        const errStr = String(e);
+        const handshakeRegistrationTimeout = errStr.includes("not registered within");
+        const safeToRestore =
+            newWsId && !handshakeSucceeded
+            && (!windowCreateAttempted || handshakeRegistrationTimeout);
+        if (safeToRestore) {
             try {
                 await WorkspaceService.RestoreTornOffTab(
                     tabId,
@@ -715,6 +731,7 @@ async function requestTearOff(
                 Logger.info("dnd", "tab tear-off restored after window-create failure", {
                     tabId,
                     newWsId,
+                    handshakeRegistrationTimeout,
                 });
             } catch (restoreErr) {
                 Logger.error("dnd", "tab tear-off restore also failed — orphan workspace persists", {
@@ -723,6 +740,12 @@ async function requestTearOff(
                     error: String(restoreErr),
                 });
             }
+        } else if (newWsId && windowCreateAttempted && !handshakeSucceeded) {
+            // Window may exist; conservatively leave the orphan.
+            Logger.warn("dnd", "tab tear-off failed post-window-create — leaving workspace + window for user cleanup", {
+                tabId,
+                newWsId,
+            });
         }
     }
 }
