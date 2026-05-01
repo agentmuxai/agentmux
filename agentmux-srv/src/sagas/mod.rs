@@ -418,6 +418,25 @@ pub async fn emit_terminal(state: &AppState, saga_id: u64, terminal: SagaTermina
             reason: reason.to_string(),
         },
     };
+    // (codex P1 PR #636 round 5.) When the saga author asserts they
+    // fully unwound (Compensated), bulk-mark every remaining
+    // `succeeded` forward step as `compensated`. The per-step stack
+    // pop in SagaCtx::compensate only marks ONE step per call, but
+    // some sagas (e.g. tear_off_block uses a single DeleteWorkspace
+    // to undo both CreateWorkspace and CreateTab) compensate
+    // multiple forward steps via one command. Without the bulk-mark,
+    // those orphaned `succeeded` rows trigger a redundant inverse
+    // dispatch on restart, often flipping a healthy saga into
+    // `failed_compensation`.
+    if matches!(terminal, SagaTerminal::Compensated { .. }) {
+        if let Err(e) = state.saga_log.mark_all_succeeded_steps_compensated(saga_id) {
+            tracing::warn!(
+                saga_id,
+                "[saga] mark_all_succeeded_steps_compensated failed: {} — restart may re-replay an inverse",
+                e
+            );
+        }
+    }
     if let Err(e) = state.saga_log.terminate(saga_id, log_outcome) {
         tracing::warn!(
             saga_id,

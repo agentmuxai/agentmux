@@ -365,6 +365,32 @@ impl SagaLog {
         Ok(())
     }
 
+    /// Mark ALL of a saga's remaining `succeeded` forward steps as
+    /// `compensated` in one shot. (codex P1 PR #636 round 5.) Used
+    /// at `emit_terminal` time when the outcome is `Compensated` —
+    /// the saga author is asserting "I've unwound everything," so
+    /// any forward step still in `succeeded` is by definition done.
+    /// Catches the case where one compensating command undoes
+    /// multiple forward steps (e.g. `tear_off_block`'s single
+    /// `DeleteWorkspace` undoes both `CreateWorkspace` and
+    /// `CreateTab`) — `SagaCtx::compensate`'s per-call stack pop
+    /// only marks one, leaving the other as still-`succeeded` and
+    /// triggering double-compensation on restart.
+    pub fn mark_all_succeeded_steps_compensated(
+        &self,
+        saga_id: u64,
+    ) -> Result<(), StoreError> {
+        let now = now_ms();
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE saga_step
+             SET state = 'compensated', ended_at = ?1
+             WHERE saga_id = ?2 AND state = 'succeeded'",
+            params![now, saga_id as i64],
+        )?;
+        Ok(())
+    }
+
     /// Mark an *original* forward step as `compensated`. (codex P1
     /// PR #636 round 2.) Without this, a second crash-recovery
     /// startup re-reads the still-`succeeded` original steps and
