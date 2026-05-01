@@ -511,6 +511,30 @@ impl AgentMuxHandler {
             }
         }
 
+        // Phase F.6 — narrate the pane-reap step for the launcher's
+        // window-cleanup-cascade saga. By the time we reach here, the
+        // pane lifecycle drain (`on_before_close_pane` for browser-
+        // pane labels) and the subwindow cascade above have run for
+        // this label. The saga uses this signal as the Step 1
+        // terminal so it can advance to Step 2 (drain-pool decision).
+        //
+        // Skip for browser-pane labels: the saga is triggered by
+        // `Event::WindowClosed`, which only fires for non-pane
+        // top-level windows; emitting `PanesReaped` for pane labels
+        // would be a stray report (no in-flight saga to consume it).
+        // Same gate as `report_window_closed` above — skip
+        // browser-pane-* labels (sub-views, not top-level windows).
+        // Don't filter window-pool-* here: filtering on prefix would
+        // wrongly suppress promoted pool windows (which keep the
+        // `window-pool-*` prefix but ARE tracked windows). Stray
+        // events for unpromoted-pool drains are emitted but harmless
+        // — no F.6 saga is in flight to consume them.
+        if let Some(ref lbl) = label {
+            if !lbl.starts_with("browser-pane-") {
+                crate::launcher_ipc::report_panes_reaped(lbl.clone());
+            }
+        }
+
         dlog(&format!("backend_window_id: {:?}", backend_window_id));
 
         if let Some(index) = self
@@ -562,6 +586,37 @@ impl AgentMuxHandler {
             "[trace] app-exit gate: closing_label={:?} user_count={} is_pane={} browsers={:?} unpromoted_pool={:?}",
             label, user_browser_count, self.is_pane, browsers_keys, pool_keys
         );
+
+        // Phase F.6 — narrate the post-close pool-drain decision for
+        // the launcher's window-cleanup-cascade saga. The saga's
+        // Step 2 terminal: `was_last == true` → `Event::PoolDrained`
+        // (the wrr two-stage cascade below kicked off Stage 1's
+        // pool drain); `was_last == false` → `Event::PoolNotLast`
+        // (other windows remain; pool stays warm). Both close the
+        // saga's `SagaStarted` bracket successfully — the saga's job
+        // is to narrate the decision, not enforce a particular
+        // outcome.
+        //
+        // Same skip-pane gate as `report_panes_reaped` above: the
+        // saga is triggered by `Event::WindowClosed`, which only
+        // fires for non-pane top-level windows. Pane closes don't
+        // start a saga, so the report would be a no-op stray on the
+        // bus.
+        //
+        // Computed here (BEFORE the wrr two-stage cascade below) so
+        // the same condition the cascade gates on is what gets
+        // reported. The boolean flag captures intent — Stage 1 may
+        // not have started yet by the time the report is sent, but
+        // the decision itself is final.
+        if let Some(ref lbl) = label {
+            // Same gate as report_panes_reaped above: skip
+            // browser-pane-* only. window-pool-* labels (promoted)
+            // are tracked windows and need their cleanup events.
+            if !lbl.starts_with("browser-pane-") {
+                let was_last = user_browser_count == 0 && !self.is_pane;
+                crate::launcher_ipc::report_pool_drain_decision(lbl.clone(), was_last);
+            }
+        }
 
         // ── Phase B.9.3 — two-stage close cascade ─────────────────
         //

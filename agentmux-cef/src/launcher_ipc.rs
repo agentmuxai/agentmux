@@ -462,6 +462,58 @@ pub fn report_pool_window_promoted(label: String) {
     }
 }
 
+/// Phase F.6 — sync API: tell the launcher that all browser-pane
+/// HWNDs belonging to a closing top-level window have been reaped
+/// (lifecycle entries drained, pane HWND map cleared, subwindow
+/// cascade closes initiated). Sent from `client.rs::on_before_close`
+/// AFTER the pane drain step, BEFORE the post-close pool-drain
+/// decision is reported.
+///
+/// The launcher's window-cleanup-cascade saga uses this as the
+/// Step 1 → Step 2 transition signal: it marks the implicit pane
+/// reap as observed and lets the saga issue its `DrainPoolIfLast`
+/// IssueCmd (currently log-only — see `saga/window_cleanup.rs`
+/// module docstring for the saga-as-narrator scope decision).
+///
+/// Same no-op-if-disconnected semantics as the other `report_*`
+/// helpers; `task dev` mode silently drops.
+pub fn report_panes_reaped(label: String) {
+    let Some(tx) = COMMAND_TX.get() else {
+        return;
+    };
+    let cmd = Command::ReportPanesReaped { label };
+    if let Err(e) = tx.send(cmd) {
+        tracing::warn!("[launcher-ipc] report_panes_reaped: channel closed ({})", e);
+    }
+}
+
+/// Phase F.6 — sync API: tell the launcher the result of the
+/// post-close drain-pool-if-last decision. `was_last == true` when
+/// the closing window was the last user-visible window (Stage 1 of
+/// the wrr two-stage close cascade just kicked off in
+/// `client.rs::on_before_close`); `false` when other windows
+/// remain and the warm pool stays warm.
+///
+/// Step 2 terminal signal for the launcher's
+/// window-cleanup-cascade saga. Both branches close the
+/// `SagaStarted` bracket successfully — the saga's job is to
+/// narrate the decision, not enforce a particular outcome.
+///
+/// Same no-op-if-disconnected semantics as the other `report_*`
+/// helpers.
+pub fn report_pool_drain_decision(label: String, was_last: bool) {
+    let Some(tx) = COMMAND_TX.get() else {
+        return;
+    };
+    let cmd = Command::ReportPoolDrainDecision { label, was_last };
+    if let Err(e) = tx.send(cmd) {
+        tracing::warn!(
+            "[launcher-ipc] report_pool_drain_decision: channel closed ({})",
+            e
+        );
+    }
+}
+
 /// Phase B.4 follow-up — sync API: report the host's current
 /// authoritative counts so the launcher reducer can compare against
 /// its mirror and emit `Event::DriftDetected` on mismatch. Callers
