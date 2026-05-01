@@ -637,12 +637,16 @@ async function requestTearOff(
                 newWsId,
             );
         }
-        // Window has been opened (either pool or cold path). From here
-        // on the orphan-cleanup catch below skips the RestoreTornOffTab
-        // — the new window is live and pointing at the new workspace;
-        // restoring would empty + delete the workspace and leave the
-        // open window dangling.
-        destWindowOpened = true;
+        // Note: `destWindowOpened` is NOT set here. Both
+        // tearOffPoolPromote and openWindowAtPosition return a label
+        // EAGERLY (the CEF command is posted asynchronously; the new
+        // window's HWND registration happens later). The handshake
+        // below is what waits for HWND registration; only AFTER it
+        // succeeds do we know the destination window is actually
+        // live. If the handshake fails because HWND never registers,
+        // there's no live window for the user to interact with and
+        // the orphan-cleanup catch below should restore the tab.
+        // (codex P1 #624.)
         // Step 3 — Win32 SC_MOVE handshake. Host waits for the new
         // window's HWND to register, then transfers cursor capture
         // and posts WM_SYSCOMMAND/SC_MOVE so Windows enters its
@@ -666,12 +670,19 @@ async function requestTearOff(
             originalTabIndex,
             wasPinned,
         });
-        // Handshake succeeded — Windows now owns the move loop. Clear
-        // the cross-window drag payload so the legacy dragend pipeline
-        // (CrossWindowDragMonitor) doesn't double-process this gesture
-        // when its dragend fires. Cleared HERE rather than in onDrag so
-        // a failure mid-pipeline (TearOffTab, openWindowAtPosition, or
-        // the handshake itself) leaves the legacy fallback intact.
+        // Handshake confirmed the destination window's HWND
+        // registered + Windows now owns the move loop. From here on
+        // the orphan-cleanup catch below skips RestoreTornOffTab.
+        // (codex P1 #624 — moved from immediately-after-create-window
+        // to here, since create-window APIs return eagerly before
+        // HWND registration.)
+        destWindowOpened = true;
+        // Clear the cross-window drag payload so the legacy dragend
+        // pipeline (CrossWindowDragMonitor) doesn't double-process
+        // this gesture when its dragend fires. Cleared HERE rather
+        // than in onDrag so a failure mid-pipeline (TearOffTab,
+        // openWindowAtPosition, or the handshake itself) leaves the
+        // legacy fallback intact.
         setCurrentDragPayload(null);
         Logger.info("dnd", "tab tear-off complete", {
             tabId,
