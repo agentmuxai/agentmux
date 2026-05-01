@@ -491,6 +491,67 @@ pub enum Command {
     /// the cross-process command dispatch follow-up) replaces the
     /// log with a real wire-level send.
     SpawnPoolWindow,
+    /// Phase F.6 — host reports that all browser-pane HWNDs belonging
+    /// to a closing top-level window have been reaped. Emitted from
+    /// `client.rs::on_before_close` after the subwindow cascade and
+    /// pane lifecycle drain finish for the closing window.
+    ///
+    /// Distinct from `ReportWindowClosed` — that event marks the
+    /// CEF browser leaving the host's `browsers` map; this one marks
+    /// the host's pane bookkeeping (lifecycle entries, pane HWND map)
+    /// for that label being fully drained. Today both happen in the
+    /// same `on_before_close` body so the events arrive back-to-back,
+    /// but the saga distinguishes them so future fine-grained
+    /// reapers (e.g. async pane teardown for embedded browsers) can
+    /// land without rewriting the saga.
+    ///
+    /// Host-only — same gate as `ReportWindowClosed`.
+    ReportPanesReaped {
+        label: String,
+    },
+    /// Phase F.6 — host reports the result of the post-close
+    /// drain-pool-if-last decision. `was_last == true` when the
+    /// closing window was the last user-visible window and the host
+    /// just kicked off the warm-pool drain (Stage 1 of the two-stage
+    /// close cascade in `client.rs::on_before_close`); `false` when
+    /// other user-visible windows remain and the pool stays warm.
+    ///
+    /// The launcher's window-cleanup-cascade saga uses this to close
+    /// out its bracket regardless of which branch fires (both are
+    /// terminal for the saga).
+    ///
+    /// Host-only.
+    ReportPoolDrainDecision {
+        label: String,
+        was_last: bool,
+    },
+    /// Phase F.6 — launcher-side saga coordinator asks the host to
+    /// reap all browser-pane HWNDs for a window that just closed.
+    ///
+    /// **F.6 status: framework-only.** Same as `SpawnPoolWindow` in
+    /// F.5: no launcher→host command pipe exists yet. The saga
+    /// issues this with `target = PipeTarget::Host` for forward
+    /// compatibility; the coordinator's IssueCmd handler logs the
+    /// dispatch without transmitting. The host's existing implicit
+    /// pane drain inside `on_before_close` produces the
+    /// `Event::PanesReaped` the saga waits for. F.7 / cross-process
+    /// dispatch follow-up replaces the log with a real wire send.
+    ReapPanes {
+        label: String,
+    },
+    /// Phase F.6 — launcher-side saga coordinator asks the host to
+    /// drain the warm pool if the just-closed window was the last
+    /// user-visible window (i.e. trigger Stage 1 of the close
+    /// cascade).
+    ///
+    /// **F.6 status: framework-only** (same caveat as `ReapPanes`).
+    /// Today the host's `on_before_close` already runs the equivalent
+    /// inline check; the saga relies on the resulting
+    /// `Event::PoolDrained` / `Event::PoolNotLast` to close its
+    /// bracket.
+    DrainPoolIfLast {
+        label: String,
+    },
 }
 
 /// Phase B.9.1 — rectangle in Win32 screen coordinates (pixels).
@@ -595,6 +656,19 @@ pub enum Event {
     WindowClosed {
         label: String,
         version: u64,
+        /// (codex P1 PR #637.) `true` when the close was detected by
+        /// `wrr::apply_hwnd_destroyed` after a host/renderer crash —
+        /// no clean `on_before_close` ran, so the host did NOT send
+        /// the `ReportPanesReaped` / `ReportPoolDrainDecision` reports
+        /// the F.6 saga waits for. Subscribers that drive
+        /// cleanup-cascade sagas must filter on `!crash_detected` to
+        /// avoid spawning an in-flight saga that can never reach a
+        /// terminal state.
+        ///
+        /// `#[serde(default)]` so pre-existing producers default to
+        /// `false` (clean close).
+        #[serde(default)]
+        crash_detected: bool,
     },
     /// Phase B.4 follow-up — pool inventory transitioned. Emitted in
     /// response to `ReportPoolWindow{Added,Removed}`. Subscribers
@@ -620,6 +694,39 @@ pub enum Event {
     /// fires on pre-promote destroy (closing without promoting), where
     /// no refill saga should run.
     PoolWindowPromoted {
+        label: String,
+        version: u64,
+    },
+    /// Phase F.6 — emitted by the launcher when the host reports that
+    /// all browser-pane HWNDs belonging to a closing top-level window
+    /// have been reaped (`Command::ReportPanesReaped`). Step-1
+    /// terminal signal for the window-cleanup-cascade saga.
+    PanesReaped {
+        label: String,
+        version: u64,
+    },
+    /// Phase F.6 — emitted by the launcher when the host reports it
+    /// kicked off Stage 1 of the close-cascade pool drain (i.e. the
+    /// just-closed window was the last user-visible window).
+    /// Step-2 terminal signal (success branch) for the
+    /// window-cleanup-cascade saga.
+    ///
+    /// "Drained" here means "drain initiated"; the actual pool
+    /// teardown is async and surfaces as a series of
+    /// `PoolWindowRemoved` events as each pool browser's
+    /// `on_before_close` fires. The saga doesn't wait for those —
+    /// the bracket closes when drain is *decided*, not when it
+    /// completes.
+    PoolDrained {
+        label: String,
+        version: u64,
+    },
+    /// Phase F.6 — emitted by the launcher when the host reports a
+    /// close that did NOT trigger a pool drain (other user-visible
+    /// windows remain). Step-2 terminal signal (no-op branch) for
+    /// the window-cleanup-cascade saga; the bracket closes
+    /// successfully because nothing further is needed.
+    PoolNotLast {
         label: String,
         version: u64,
     },

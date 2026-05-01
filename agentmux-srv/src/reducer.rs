@@ -1205,6 +1205,9 @@ mod tests {
             | Event::PoolWindowAdded { version, .. }
             | Event::PoolWindowRemoved { version, .. }
             | Event::PoolWindowPromoted { version, .. }
+            | Event::PanesReaped { version, .. }
+            | Event::PoolDrained { version, .. }
+            | Event::PoolNotLast { version, .. }
             | Event::WindowInstanceAssigned { version, .. }
             | Event::WindowInstanceReleased { version, .. }
             | Event::BackendWindowIdRegistered { version, .. }
