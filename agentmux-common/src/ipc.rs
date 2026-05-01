@@ -264,6 +264,19 @@ pub enum Command {
     DeleteTab {
         workspace_id: String,
         tab_id: String,
+        /// (codex P2 PR #633 round 4 + codex P1 round 2.) Bypass the
+        /// reducer's atomic last-tab guard. `false` for user-facing
+        /// flows (close button, keyboard shortcut) — reducer rejects
+        /// last-tab deletes to keep workspaces non-empty. `true` for
+        /// internal compensation paths (`CreateTab` rollback,
+        /// `PromoteBlockToTab` compensation) where rolling back a
+        /// just-created tab requires deleting the only tab.
+        ///
+        /// Defaults to `false` via `#[serde(default)]` for backwards
+        /// compatibility — pre-existing producers that don't set the
+        /// field get the safe (guarded) behavior.
+        #[serde(default)]
+        force: bool,
     },
     /// Phase E.2b — set a workspace's active tab. No-op if already
     /// active. Errors if the workspace doesn't exist or the tab isn't

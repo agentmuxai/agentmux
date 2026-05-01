@@ -128,9 +128,13 @@ async fn run_inner(
         .await
     {
         // Compensate: delete the empty new tab.
+        // force=true so the last-tab guard doesn't reject when the
+        // workspace ends up with this single just-created tab
+        // (codex P1 round 2 PR #633).
         ctx.compensate(Command::DeleteTab {
             workspace_id: workspace_id.clone(),
             tab_id: new_tab_id.clone(),
+            force: true,
         })
         .await;
         return Err(format!("PromoteBlockToTab step 2 (MoveBlock): {}", reason));

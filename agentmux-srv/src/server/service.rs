@@ -192,9 +192,12 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
                 ),
             }
         }
-        // Phase E.2c.4 — DeleteBlock SQLite-first via wcore (cascades
-        // for PTY/controller already handled before the wcore call),
-        // then dispatch reducer's DeleteBlock to keep state in sync.
+        // Phase E.5.7 (Step 5 PR 1) — DeleteBlock saga. The legacy
+        // SQLite-first pattern (wcore::delete_block + reducer-sync
+        // dispatch) is replaced by `sagas::delete_block::run`, which
+        // routes through the reducer + persist subscriber. The saga
+        // also handles the controller-kill cascade (matches the old
+        // ordering: controller down → reducer dispatch → SQLite).
         ("object", "DeleteBlock") => {
             let tab_id = match call
                 .uicontext
@@ -208,24 +211,9 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
                 Ok(v) => v,
                 Err(e) => return WebReturnType::error(e),
             };
-            // Stop and remove the block controller before removing from DB so the PTY
-            // and child process are torn down and the registry entry is cleared
-            // regardless of DB outcome.
-            blockcontroller::delete_controller(&block_id);
-            if let Err(e) = wcore::delete_block(store, &tab_id, &block_id) {
-                return WebReturnType::error(e.to_string());
+            if let Err(reason) = crate::sagas::delete_block::run(state, tab_id, block_id).await {
+                return WebReturnType::error(reason);
             }
-            // Reducer dispatch is silent on missing — safe to call
-            // unconditionally now that SQLite is consistent.
-            let events = dispatch_to_reducer(
-                state,
-                agentmux_common::ipc::Command::DeleteBlock {
-                    tab_id: tab_id.clone(),
-                    block_id: block_id.clone(),
-                },
-            )
-            .await;
-            publish_events(state, &events);
             WebReturnType::success_empty()
         }
         ("object", "UpdateObject") => {
@@ -1050,6 +1038,11 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
                         agentmux_common::ipc::Command::DeleteTab {
                             workspace_id: ws_id.clone(),
                             tab_id: tid.clone(),
+                            // Compensation must bypass the last-tab
+                            // guard to roll back a just-created sole
+                            // tab when its persist failed (codex P1
+                            // round 2 + P2 round 4 PR #633).
+                            force: true,
                         },
                         store,
                     )
@@ -1225,12 +1218,15 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
                 WebReturnType::success_empty()
             }
         }
-        // Phase E.2c.3b — CloseTab applies SQLite first via wcore
-        // (cascades to blocks + layouts), then dispatches the
-        // reducer's DeleteTab to keep state in sync. Same SQLite-
-        // first pattern as DeleteWorkspace — Delete cascades touch
-        // many records and rolling back the reducer on a partial
-        // wcore failure is impractical.
+        // Phase E.5.7 (Step 5 PR 1) — CloseTab via DeleteTab saga.
+        // Replaces the legacy SQLite-first pattern (wcore::delete_tab
+        // followed by reducer-sync dispatch) with a saga-driven
+        // reducer + persist-subscriber flow. The saga also enforces
+        // the not-the-last-tab pre-condition mirrored from
+        // TearOffTab; user-facing CloseTab now refuses to drain a
+        // workspace to zero tabs (callers wanting full teardown
+        // should issue DeleteWorkspace instead — that path migrates
+        // in Step 5 PR 2).
         ("workspace", "CloseTab") => {
             let ws_id: String = match service::get_arg(args, 0) {
                 Ok(v) => v,
@@ -1240,20 +1236,11 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
                 Ok(v) => v,
                 Err(e) => return WebReturnType::error(e),
             };
-            if let Err(e) = wcore::delete_tab(store, &ws_id, &tab_id) {
-                return WebReturnType::error(e.to_string());
+            if let Err(reason) =
+                crate::sagas::delete_tab::run(state, ws_id.clone(), tab_id.clone()).await
+            {
+                return WebReturnType::error(reason);
             }
-            // Reducer dispatch is silent on missing — safe to call
-            // unconditionally now that SQLite is consistent.
-            let events = dispatch_to_reducer(
-                state,
-                agentmux_common::ipc::Command::DeleteTab {
-                    workspace_id: ws_id.clone(),
-                    tab_id: tab_id.clone(),
-                },
-            )
-            .await;
-            publish_events(state, &events);
             let rtn = CloseTabRtnType {
                 closewindow: false,
                 newactivetabid: String::new(),
@@ -1451,6 +1438,11 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
                             agentmux_common::ipc::Command::DeleteTab {
                                 workspace_id: ws_id.clone(),
                                 tab_id: source_tab_id.clone(),
+                                // Auto-close already gated on
+                                // `total_tabs > 1` above; reducer's
+                                // last-tab guard is defense-in-depth
+                                // for the race window.
+                                force: false,
                             },
                         )
                         .await;
@@ -1566,6 +1558,11 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
                             agentmux_common::ipc::Command::DeleteTab {
                                 workspace_id: ws_id.clone(),
                                 tab_id: source_tab_id.clone(),
+                                // Auto-close already gated on
+                                // `total_tabs > 1` above; reducer's
+                                // last-tab guard is defense-in-depth
+                                // for the race window.
+                                force: false,
                             },
                         )
                         .await;
@@ -1929,6 +1926,9 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
                             agentmux_common::ipc::Command::DeleteTab {
                                 workspace_id: source_ws_id.clone(),
                                 tab_id: source_tab_id.clone(),
+                                // Auto-close already gated on
+                                // total_tabs > 1.
+                                force: false,
                             },
                         )
                         .await;
