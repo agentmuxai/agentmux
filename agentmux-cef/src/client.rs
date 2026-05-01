@@ -522,15 +522,13 @@ impl AgentMuxHandler {
         // `Event::WindowClosed`, which only fires for non-pane
         // top-level windows; emitting `PanesReaped` for pane labels
         // would be a stray report (no in-flight saga to consume it).
-        // Same gate as `report_window_closed` above. Pool-window
-        // discrimination (unpromoted pool drain vs promoted tear-off
-        // close) is done LAUNCHER-side — see
-        // `handle_report_panes_reaped` in `agentmux-launcher/src/reducer.rs`,
-        // which gates the typed event emission on whether the label
-        // is in `state.windows`. Filtering here on prefix would
+        // Same gate as `report_window_closed` above — skip
+        // browser-pane-* labels (sub-views, not top-level windows).
+        // Don't filter window-pool-* here: filtering on prefix would
         // wrongly suppress promoted pool windows (which keep the
-        // `window-pool-*` prefix but ARE tracked windows; codex P1
-        // PR #637 round 3).
+        // `window-pool-*` prefix but ARE tracked windows). Stray
+        // events for unpromoted-pool drains are emitted but harmless
+        // — no F.6 saga is in flight to consume them.
         if let Some(ref lbl) = label {
             if !lbl.starts_with("browser-pane-") {
                 crate::launcher_ipc::report_panes_reaped(lbl.clone());
@@ -611,9 +609,9 @@ impl AgentMuxHandler {
         // not have started yet by the time the report is sent, but
         // the decision itself is final.
         if let Some(ref lbl) = label {
-            // Pool-window discrimination is launcher-side (see
-            // report_panes_reaped above); filtering on prefix here
-            // would suppress promoted pool windows.
+            // Same gate as report_panes_reaped above: skip
+            // browser-pane-* only. window-pool-* labels (promoted)
+            // are tracked windows and need their cleanup events.
             if !lbl.starts_with("browser-pane-") {
                 let was_last = user_browser_count == 0 && !self.is_pane;
                 crate::launcher_ipc::report_pool_drain_decision(lbl.clone(), was_last);
