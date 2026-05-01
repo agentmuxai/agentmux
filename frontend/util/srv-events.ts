@@ -2,40 +2,41 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // Phase E.2c.5b — renderer-side subscriber for srv reducer typed events.
+// Phase E.6 — multi-source dispatcher with version tracking + saga buffering.
 //
 // Mirrors the `launcher-events.ts` pattern from Phase B.7.3.1, but
 // for the srv reducer's broadcast bus (workspace / tab / block / window
 // / saga lifecycle). The host's CEF JS bridge
 // (`agentmux-cef/src/srv_event_bridge.rs`, shipped in Phase E.2c.5a /
 // PR #618) calls `window.__agentmux_srv_event(<json>)` once per
-// top-level renderer per srv event. We feed those into a SolidJS
-// signal so block-level subscribers can `createEffect()` on them.
+// top-level renderer per srv event.
 //
-// **Initial scope (this PR — E.2c.5b):** scaffolding only. Install
-// the dispatcher, expose the latest event signal, log a one-line
-// debug summary on first event arrival. **No atom mutation** — the
-// existing RPC + WaveObjUpdate pipeline remains the authoritative
-// path for workspace/tab/block atom state. Atom-routing flips to
-// event-driven in a follow-up (likely E.6 alongside the per-source
-// version tracking + saga buffer).
+// **Phase E.6 additions:** the dispatcher now lives in
+// `util/event-buffer.ts::PerSourceTracker`. Behavior:
+//   - Per-source version monotonicity check: gaps log a warning + bump
+//     `droppedCount` (visible via `srvEventStats()`).
+//   - Saga buffering: events between `saga_started`/`saga_completed`
+//     coalesce into a single SolidJS-effect tick (so atom-router
+//     consumers see the saga as one atomic update). Per-event
+//     subscriber callbacks still fire in source order.
+//   - Stale events (version <= last seen) are dropped.
 //
-// **Saga events** (`saga_started` / `saga_completed` / `saga_failed`)
-// arrive on this channel too. Future renderer-side correlation /
-// buffering (E.6 §9.2) consumes them via the same signal.
+// **Atom routing (still pending — TODO PR after E.6):** we expose a
+// `subscribeSrvEvent(cb)` API. The first atom-router consumer ships
+// in a follow-up; today the existing RPC + WaveObjUpdate pipeline
+// remains authoritative.
 //
-// See `docs/specs/SPEC_PHASE_E_SRV_REDUCER_2026_04_29.md` §6.6 + §9.
+// See `docs/specs/SPEC_PHASE_E_SRV_REDUCER_2026_04_29.md` §6.6 + §9
+// and `docs/retro/next-steps-architecture-completeness-2026-05-01.md`
+// step 2 for the broader plan.
 
 import { createSignal } from "solid-js";
+import { PerSourceTracker, type EventCallback, type VersionedEvent, type PerSourceStats } from "./event-buffer";
 
 /**
  * Wire-format srv event. Matches the JSON serialization of
  * `agentmux_common::ipc::Event`
  * (`#[serde(tag = "event", rename_all = "snake_case")]`).
- *
- * Every event carries `event` (discriminant, snake_case) and
- * `version` (monotonic per srv-process run, used for de-dup /
- * resync ordering). Other fields are variant-specific; downstream
- * subscribers narrow on `event` and read fields by name.
  *
  * Discriminator examples (non-exhaustive — see
  * `agentmux-common/src/ipc.rs::Event`):
@@ -48,11 +49,7 @@ import { createSignal } from "solid-js";
  *   - `workspace_meta_updated` / `tab_meta_updated` / `block_meta_updated`
  *   - `saga_started` / `saga_completed` / `saga_failed`
  */
-export interface SrvEvent {
-    event: string;
-    version: number;
-    [field: string]: unknown;
-}
+export type SrvEvent = VersionedEvent;
 
 const [latestEvent, setLatestEvent] = createSignal<SrvEvent | null>(null);
 const [eventVersion, setEventVersion] = createSignal<number>(0);
@@ -71,6 +68,36 @@ export const srvEventVersion = eventVersion;
  */
 export const srvEventsActive = seenAnyEvent;
 
+const tracker = new PerSourceTracker<SrvEvent>(
+    { source: "srv" },
+    {
+        setLatest: setLatestEvent,
+        setVersion: setEventVersion,
+        setSawAny: setSeenAnyEvent,
+    },
+);
+
+/**
+ * Per-event subscriber. Called once per srv event in source order,
+ * including events delivered as part of a saga buffer flush. Returns
+ * an unsubscribe function.
+ *
+ * Use this for atom routers — every event matters for correct atom
+ * state. Use the `srvEvent` signal for "what's the latest event?"
+ * style consumers (which see one tick per saga, not one per step).
+ */
+export function subscribeSrvEvent(cb: EventCallback<SrvEvent>): () => void {
+    return tracker.subscribe(cb);
+}
+
+/**
+ * Diagnostic snapshot of the srv pipe's tracker state. Used by
+ * `--diag srv` (renderer-side) and by tests.
+ */
+export function srvEventStats(): PerSourceStats {
+    return tracker.stats();
+}
+
 let installed = false;
 
 /**
@@ -84,17 +111,6 @@ export function installSrvEventBridge(): void {
     installed = true;
     (window as unknown as { __agentmux_srv_event?: (evt: SrvEvent) => void }).__agentmux_srv_event = (
         evt: SrvEvent,
-    ) => {
-        if (!evt || typeof evt.version !== "number" || typeof evt.event !== "string") {
-            console.warn("[srv-events] received malformed event", evt);
-            return;
-        }
-        setLatestEvent(evt);
-        setEventVersion(evt.version);
-        if (!seenAnyEvent()) {
-            setSeenAnyEvent(true);
-            console.log("[srv-events] first event received", { event: evt.event, version: evt.version });
-        }
-    };
+    ) => tracker.deliver(evt);
     console.log("[srv-events] bridge installed; window.__agentmux_srv_event ready");
 }
