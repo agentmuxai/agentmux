@@ -227,34 +227,32 @@ async fn handle_connection(stream: NamedPipeServer, ctx: Arc<ServerCtx>) {
     // client_id (returned in Registered) is the wire-visible one.
     let conn_id = NEXT_CONN_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
-    // CPD-2 — flag flipped to `true` when this connection's client
-    // registers as `ClientKind::Host`. The fanout task checks it on
-    // each iteration: while false → write directly (Event-only path,
-    // existing behavior); while true → route through
-    // `HostPipe::send_event` so the frame goes out as a
-    // `HostFrame::Event` envelope and participates in the pending-
-    // buffer / 30s-disconnect semantics. The toggle plus the host_pipe
-    // writer install (below, on Register) replaces the prior direct-
-    // write fanout for the host connection.
-    let is_host_route = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    // Captured at host-Register time from `HostPipe::set_writer`. The
-    // fanout task uses it via `send_event_for_session` to drop frames
-    // that would land in a *replacement* host's writer if this fanout
-    // is from an old connection that hasn't fully torn down yet.
-    // (codex P1 PR #642 round 2.)
-    let host_session_id = Arc::new(std::sync::atomic::AtomicU64::new(0));
-
     // Phase B.8 — fanout task: subscribe to the server-wide event
     // bus and write each event to THIS connection's pipe. Started
     // before any commands are processed so a registered client can
     // start receiving events from concurrent activity immediately.
     // Aborted when the connection's read loop returns (below).
+    //
+    // CPD-2 design (round 4): events are written DIRECTLY to this
+    // connection's per-connection writer — NOT routed through
+    // `HostPipe`. HostPipe exists for *commands* (saga-issued
+    // launcher → host actions, which CPD-3 will wire). Events stay
+    // on the existing direct-write path because:
+    //   1. Wire format compat — host's parser expects raw `Event`
+    //      JSON, not `HostFrame::Event` envelopes (codex P1 round 3).
+    //      CPD-3 will update host's parser AND swap the fanout to
+    //      HostFrame envelopes together.
+    //   2. No need for HostPipe's pending-buffer / 30s-timeout
+    //      semantics on events: events are broadcast-driven, every
+    //      subscriber gets them, and stale events post-reconnect
+    //      would be wrong anyway.
+    //   3. Each per-connection fanout writes to its OWN writer —
+    //      no global-writer race / stale-fanout issue (which is
+    //      what `host_session_id` would have guarded against, but
+    //      isn't needed when fanouts are connection-local).
     let fanout_handle = {
         let writer = Arc::clone(&writer);
         let ctx = Arc::clone(&ctx);
-        let host_pipe = Arc::clone(&ctx.host_pipe);
-        let is_host_route = Arc::clone(&is_host_route);
-        let host_session_id = Arc::clone(&host_session_id);
         let mut events_rx = ctx.events_tx.subscribe();
         tokio::spawn(async move {
             loop {
@@ -267,24 +265,7 @@ async fn handle_connection(stream: NamedPipeServer, ctx: Arc<ServerCtx>) {
                         // iteration. Swallow + continue to drain
                         // any remaining buffered events so we don't
                         // accidentally hold onto channel slots.
-                        // CPD-2 — host connection routes through
-                        // HostPipe so the frame becomes a
-                        // `HostFrame::Event` envelope. Other clients
-                        // keep the legacy direct-write path (their
-                        // events are NOT yet HostFrame-wrapped — that's
-                        // a host-only addition until renderer / srv
-                        // proxies adopt the envelope in a later PR).
-                        if is_host_route.load(std::sync::atomic::Ordering::Relaxed) {
-                            let session = host_session_id
-                                .load(std::sync::atomic::Ordering::Relaxed);
-                            if host_pipe
-                                .send_event_for_session(session, &event)
-                                .await
-                                .is_err()
-                            {
-                                return;
-                            }
-                        } else if send_event_shared(&writer, event).await.is_err() {
+                        if send_event_shared(&writer, event).await.is_err() {
                             return;
                         }
                     }
@@ -498,18 +479,19 @@ async fn handle_connection(stream: NamedPipeServer, ctx: Arc<ServerCtx>) {
                 // the legacy direct write. Drains any frames buffered
                 // since the prior host disconnect (FIFO).
                 if kind == ClientKind::Host {
+                    // Install the host's writer half into HostPipe so
+                    // saga-issued commands (CPD-3+) can be transmitted
+                    // and so any pending Command frames buffered during
+                    // a prior host disconnect drain in FIFO order.
+                    // Returns a session_id we don't need today (events
+                    // bypass HostPipe — see fanout task above), but the
+                    // counter is in place for future code that does.
                     let session = ctx
                         .host_pipe
                         .set_writer(std::sync::Arc::clone(&writer))
                         .await;
-                    // Order matters: store session_id BEFORE flipping
-                    // is_host_route so the fanout task never reads the
-                    // routing flag without a valid session captured.
-                    // (codex P1 PR #642 round 2.)
-                    host_session_id.store(session, std::sync::atomic::Ordering::Relaxed);
-                    is_host_route.store(true, std::sync::atomic::Ordering::Relaxed);
                     crate::log(&format!(
-                        "[ipc] conn_id={} host registered (session={}) — HostPipe writer installed; fanout routing through HostPipe",
+                        "[ipc] conn_id={} host registered (session={}) — HostPipe writer installed",
                         conn_id, session
                     ));
                 }

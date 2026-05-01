@@ -316,31 +316,88 @@ impl HostPipe {
     /// writer), this returns `Err(HostPipeError::StaleSession)` so the
     /// fanout task exits cleanly without writing to the new host.
     /// (codex P1 PR #642 round 2.)
+    ///
+    /// **Wire format:** writes RAW `Event` JSON (no `HostFrame` envelope).
+    /// The host's existing parser (`agentmux-cef/src/launcher_ipc.rs`)
+    /// expects raw Event lines; CPD-3 will update host to handle
+    /// `HostFrame` and flip events to envelope form. Until then events
+    /// stay raw to preserve compat. Commands (sent via `send_command`)
+    /// already use `HostFrame::Command` because they're new and not
+    /// yet read by host. (codex P1 PR #642 round 3.)
+    ///
+    /// **Atomicity:** session check + writer fetch happen under a
+    /// single inner-lock acquisition to close the session-bypass
+    /// TOCTOU window. (codex P1 + reagent P1 PR #642 round 3.)
+    ///
+    /// **No pending buffer for events.** If the host is disconnected,
+    /// events are dropped silently. They're broadcast-bus-driven —
+    /// stale events post-reconnect would be incorrect anyway, and the
+    /// renderer/srv subscribers still get them. The pending buffer is
+    /// reserved for `send_command` (saga-issued, duty-cycle critical).
     pub async fn send_event_for_session(
         &self,
         session_id: u64,
         event: &Event,
     ) -> Result<(), HostPipeError> {
-        // Snapshot under lock; abort early on session mismatch so
-        // we don't even attempt to acquire the writer.
-        {
+        // Atomic: hold inner lock for the entire session-check +
+        // writer-clone window so a concurrent set_writer can't slip
+        // a fresh writer in between.
+        let writer = {
             let inner = self.inner.lock().await;
             if inner.host_session_id != session_id {
                 return Err(HostPipeError::StaleSession);
             }
-        }
-        let frame = HostFrame::Event(event.clone());
-        self.send_frame(frame, None).await
+            match inner.writer.as_ref() {
+                Some(w) => Arc::clone(w),
+                None => return Ok(()), // disconnected; events drop (not buffered)
+            }
+        };
+
+        // Serialize raw Event (NOT HostFrame::Event — see fn doc).
+        let mut bytes =
+            serde_json::to_vec(event).map_err(HostPipeError::Serialize)?;
+        bytes.push(b'\n');
+
+        let mut wlock = writer.lock().await;
+        wlock
+            .write_all(&bytes)
+            .await
+            .map_err(HostPipeError::WriteFailed)?;
+        wlock
+            .flush()
+            .await
+            .map_err(HostPipeError::WriteFailed)?;
+        Ok(())
     }
 
     /// Send an event without a session check — only safe in tests
     /// or single-session contexts. Production fanout MUST use
     /// `send_event_for_session` so a stale fanout from a previous
     /// host connection cannot write into a fresh host's writer.
+    /// Mirrors `send_event_for_session`'s raw-Event wire format
+    /// (no HostFrame wrap).
     #[cfg(test)]
     pub async fn send_event(&self, event: &Event) -> Result<(), HostPipeError> {
-        let frame = HostFrame::Event(event.clone());
-        self.send_frame(frame, None).await
+        let writer = {
+            let inner = self.inner.lock().await;
+            match inner.writer.as_ref() {
+                Some(w) => Arc::clone(w),
+                None => return Ok(()),
+            }
+        };
+        let mut bytes =
+            serde_json::to_vec(event).map_err(HostPipeError::Serialize)?;
+        bytes.push(b'\n');
+        let mut wlock = writer.lock().await;
+        wlock
+            .write_all(&bytes)
+            .await
+            .map_err(HostPipeError::WriteFailed)?;
+        wlock
+            .flush()
+            .await
+            .map_err(HostPipeError::WriteFailed)?;
+        Ok(())
     }
 
     async fn send_frame(
@@ -353,52 +410,74 @@ impl HostPipe {
         // queue a fresh frame on top.
         self.expire_pending_if_timed_out().await;
 
-        // Take a clone of the writer Arc under the inner lock, then
-        // release the inner lock before doing I/O. This avoids
-        // serializing inner-state access (pending buffer, timer)
-        // behind the wire write — multiple concurrent send_frame
-        // calls then queue at the writer's mutex, not the inner's.
-        let writer_clone = {
-            let inner = self.inner.lock().await;
-            inner.writer.clone()
-        };
-        if let Some(w) = writer_clone {
-            let mut wlock = w.lock().await;
-            match write_frame_async(&mut **wlock, &frame).await {
-                Ok(()) => Ok(()),
-                Err(e) => {
-                    drop(wlock);
-                    crate::log(&format!(
-                        "[host_pipe] direct write failed: {} — clearing writer + buffering",
-                        e
-                    ));
-                    let mut inner = self.inner.lock().await;
-                    inner.writer = None;
-                    inner.host_disconnected_at = Some(Instant::now());
+        // Atomic decision: under the inner lock, either pull a writer
+        // clone (then release lock and write) OR push to pending buffer
+        // (lock held to keep the buffer-vs-writer state consistent).
+        // Splitting this into two lock acquisitions creates the TOCTOU
+        // window where set_writer can land between "see None" and
+        // "push to buffer", causing frames to wedge in the buffer
+        // while the pipe is actually connected. (codex P1 + reagent P1
+        // PR #642 round 3.)
+        enum Decision {
+            Write(SharedWriter),
+            Buffered { dropped: Option<PendingFrame> },
+        }
+        let decision = {
+            let mut inner = self.inner.lock().await;
+            match inner.writer.as_ref() {
+                Some(w) => Decision::Write(Arc::clone(w)),
+                None => {
+                    let dropped = if inner.pending_buffer.len() >= PENDING_BUFFER_CAP {
+                        inner.pending_buffer.pop_front()
+                    } else {
+                        None
+                    };
                     inner
                         .pending_buffer
-                        .push_back(PendingFrame { frame, saga_id });
-                    Err(HostPipeError::WriteFailed(e))
+                        .push_back(PendingFrame { frame: frame.clone(), saga_id });
+                    Decision::Buffered { dropped }
                 }
             }
-        } else {
-            // Disconnected — buffer. Overflow drops oldest + emits
-            // SagaFailed if it was a tagged Command.
-            let mut inner = self.inner.lock().await;
-            let to_drop = if inner.pending_buffer.len() >= PENDING_BUFFER_CAP {
-                inner.pending_buffer.pop_front()
-            } else {
-                None
-            };
-            inner
-                .pending_buffer
-                .push_back(PendingFrame { frame, saga_id });
-            drop(inner);
-            if let Some(dropped) = to_drop {
-                self.emit_drop_failure(dropped, "host pipe backpressure overflow")
-                    .await;
+        };
+
+        match decision {
+            Decision::Write(writer) => {
+                let mut wlock = writer.lock().await;
+                match write_frame_async(&mut **wlock, &frame).await {
+                    Ok(()) => Ok(()),
+                    Err(e) => {
+                        drop(wlock);
+                        crate::log(&format!(
+                            "[host_pipe] direct write failed: {} — clearing writer + buffering",
+                            e
+                        ));
+                        // Arc::ptr_eq guards against clobbering a freshly-
+                        // installed writer if set_writer raced in between
+                        // the failed write and this clear. (reagent P1
+                        // PR #642 round 3.)
+                        let mut inner = self.inner.lock().await;
+                        let same_writer = inner
+                            .writer
+                            .as_ref()
+                            .is_some_and(|cur| Arc::ptr_eq(cur, &writer));
+                        if same_writer {
+                            inner.writer = None;
+                            inner.host_disconnected_at = Some(Instant::now());
+                        }
+                        inner
+                            .pending_buffer
+                            .push_back(PendingFrame { frame, saga_id });
+                        Err(HostPipeError::WriteFailed(e))
+                    }
+                }
             }
-            Ok(())
+            Decision::Buffered { dropped } => {
+                if let Some(dropped) = dropped {
+                    self.emit_drop_failure(dropped, "host pipe backpressure overflow")
+                        .await;
+                }
+                Ok(())
+            }
         }
     }
 

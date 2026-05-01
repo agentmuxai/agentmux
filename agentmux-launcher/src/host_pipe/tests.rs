@@ -11,7 +11,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use agentmux_common::ipc::{Command, Event, LifecyclePhase};
+use agentmux_common::ipc::{Command, Event};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::sync::{broadcast, Mutex};
 
@@ -39,8 +39,10 @@ fn make_duplex() -> (SharedWriter, tokio::io::DuplexStream) {
     (make_shared_writer(boxed), b)
 }
 
-/// Read up to `n` newline-delimited frames from a duplex read half.
-/// Returns the parsed `HostFrame`s.
+/// Read up to `n` newline-delimited lines and parse each as a
+/// `HostFrame` if it has the `kind` discriminator, else as a raw
+/// `Event` (round-4 wire format: events bypass HostFrame for host
+/// parser compat).
 async fn read_n_frames(reader: tokio::io::DuplexStream, n: usize) -> Vec<HostFrame> {
     let mut bufr = BufReader::new(reader);
     let mut out = Vec::with_capacity(n);
@@ -53,8 +55,16 @@ async fn read_n_frames(reader: tokio::io::DuplexStream, n: usize) -> Vec<HostFra
         if read == 0 {
             break;
         }
-        let frame: HostFrame =
-            serde_json::from_str(line.trim_end()).expect("frame parses as HostFrame");
+        let trimmed = line.trim_end();
+        // Try HostFrame envelope (commands) first; on failure parse
+        // as raw Event (events go raw post-round-4).
+        let frame = match serde_json::from_str::<HostFrame>(trimmed) {
+            Ok(f) => f,
+            Err(_) => match serde_json::from_str::<Event>(trimmed) {
+                Ok(e) => HostFrame::Event(e),
+                Err(e) => panic!("line {:?} parses as neither HostFrame nor Event: {}", trimmed, e),
+            },
+        };
         out.push(frame);
     }
     out
@@ -62,14 +72,6 @@ async fn read_n_frames(reader: tokio::io::DuplexStream, n: usize) -> Vec<HostFra
 
 fn ping_event(version: u64) -> Event {
     Event::Pong { nonce: 1, version }
-}
-
-fn lifecycle_event(version: u64) -> Event {
-    Event::LifecyclePhaseChanged {
-        from: LifecyclePhase::Starting,
-        to: LifecyclePhase::Running,
-        version,
-    }
 }
 
 // ---- happy: connected → send_event writes JSON line ------------------------
@@ -133,40 +135,37 @@ async fn disconnected_send_command_buffers() {
 }
 
 // ---- reconnect → drain in FIFO order --------------------------------------
+// Round 4: events bypass HostPipe (raw wire format, no pending buffer);
+// only Commands participate in pending_buffer drain on reconnect.
 
 #[tokio::test]
 async fn reconnect_drains_in_fifo_order() {
     let (pipe, _) = make_pipe();
-    // Three buffered frames (mix of Command + Event).
+    // Two buffered Command frames.
     pipe.send_command(&Command::SpawnPoolWindow { saga_id: 0 }).await.unwrap();
-    pipe.send_event(&lifecycle_event(11)).await.unwrap();
     pipe.send_command(&Command::ReapPanes {
         label: "main".into(),
         saga_id: 0,
     })
     .await
     .unwrap();
-    assert_eq!(pipe.pending_len().await, 3);
+    assert_eq!(pipe.pending_len().await, 2);
 
     let (writer, reader) = make_duplex();
     pipe.set_writer(writer).await;
     assert_eq!(pipe.pending_len().await, 0);
     assert!(pipe.is_connected().await);
 
-    let frames = read_n_frames(reader, 3).await;
-    assert_eq!(frames.len(), 3);
-    // FIFO: SpawnPoolWindow, lifecycle event, ReapPanes
+    let frames = read_n_frames(reader, 2).await;
+    assert_eq!(frames.len(), 2);
+    // FIFO: SpawnPoolWindow, ReapPanes
     match &frames[0] {
         HostFrame::Command(Command::SpawnPoolWindow { saga_id: 0 }) => {}
         other => panic!("frame[0] mismatch: {:?}", other),
     }
     match &frames[1] {
-        HostFrame::Event(Event::LifecyclePhaseChanged { version: 11, .. }) => {}
-        other => panic!("frame[1] mismatch: {:?}", other),
-    }
-    match &frames[2] {
         HostFrame::Command(Command::ReapPanes { label, .. }) => assert_eq!(label, "main"),
-        other => panic!("frame[2] mismatch: {:?}", other),
+        other => panic!("frame[1] mismatch: {:?}", other),
     }
 }
 
@@ -221,7 +220,7 @@ async fn disconnect_timeout_drops_all_pending() {
     pipe.clear_writer().await;
     assert!(!pipe.is_connected().await);
 
-    // Buffer some frames.
+    // Buffer some Command frames (events bypass HostPipe — round 4).
     pipe.send_command(&Command::SpawnPoolWindow { saga_id: 0 }).await.unwrap();
     pipe.send_command(&Command::ReapPanes {
         label: "a".into(),
@@ -229,8 +228,7 @@ async fn disconnect_timeout_drops_all_pending() {
     })
     .await
     .unwrap();
-    pipe.send_event(&lifecycle_event(99)).await.unwrap();
-    assert_eq!(pipe.pending_len().await, 3);
+    assert_eq!(pipe.pending_len().await, 2);
 
     // Rewind the timer past 30s, then trigger a fresh send to invoke
     // the expiry check.
@@ -238,7 +236,7 @@ async fn disconnect_timeout_drops_all_pending() {
         .await;
     pipe.send_command(&Command::SpawnPoolWindow { saga_id: 0 }).await.unwrap();
 
-    // After expiry: prior 3 are dropped; fresh send is rebuffered
+    // After expiry: prior 2 are dropped; fresh send is rebuffered
     // (timer was cleared by expire path; subsequent send sees a
     // None disconnected_at and proceeds to buffer normally).
     assert_eq!(pipe.pending_len().await, 1);
@@ -255,8 +253,12 @@ async fn write_failure_clears_writer_and_rebuffers() {
     drop(reader);
     pipe.set_writer(writer).await;
 
-    let result = pipe.send_event(&ping_event(1)).await;
-    assert!(result.is_err(), "send_event should fail when peer dropped");
+    // Round 4: events bypass HostPipe pending-buffer semantics, so use
+    // a Command to exercise the rebuffer-on-write-failure path.
+    let result = pipe
+        .send_command(&Command::SpawnPoolWindow { saga_id: 0 })
+        .await;
+    assert!(result.is_err(), "send_command should fail when peer dropped");
     // After a write failure the pipe should have flipped to
     // disconnected and re-buffered the frame.
     assert!(!pipe.is_connected().await);
@@ -289,8 +291,9 @@ fn host_frame_roundtrip_command_and_event() {
 #[tokio::test]
 async fn send_event_via_connected_writer_completes_writeflushed() {
     // Sanity: send_event drives flush() so a slow reader can still
-    // pick up the frame on its next read. Concrete shape: write,
-    // close write half, read all to EOF, count frames.
+    // pick up the frame on its next read. Round 4: events go on the
+    // wire as raw Event JSON (no HostFrame envelope) for host-parser
+    // compat — verify each line parses directly as Event.
     let (pipe, _) = make_pipe();
     let (writer, reader) = make_duplex();
     pipe.set_writer(writer).await;
@@ -302,19 +305,19 @@ async fn send_event_via_connected_writer_completes_writeflushed() {
     // Drop the writer (clear) to close the read side cleanly.
     pipe.clear_writer().await;
 
-    let frames = collect_until_eof(reader).await;
-    assert_eq!(frames.len(), 3);
-    for (i, f) in frames.iter().enumerate() {
-        match f {
-            HostFrame::Event(Event::Pong { version, .. }) => {
+    let events = collect_events_until_eof(reader).await;
+    assert_eq!(events.len(), 3);
+    for (i, e) in events.iter().enumerate() {
+        match e {
+            Event::Pong { version, .. } => {
                 assert_eq!(*version, (i + 1) as u64);
             }
-            other => panic!("unexpected frame at index {}: {:?}", i, other),
+            other => panic!("unexpected event at index {}: {:?}", i, other),
         }
     }
 }
 
-async fn collect_until_eof(reader: tokio::io::DuplexStream) -> Vec<HostFrame> {
+async fn collect_events_until_eof(reader: tokio::io::DuplexStream) -> Vec<Event> {
     let mut bufr = BufReader::new(reader);
     let mut out = Vec::new();
     loop {
@@ -323,8 +326,8 @@ async fn collect_until_eof(reader: tokio::io::DuplexStream) -> Vec<HostFrame> {
         if n == 0 {
             break;
         }
-        if let Ok(f) = serde_json::from_str::<HostFrame>(line.trim_end()) {
-            out.push(f);
+        if let Ok(e) = serde_json::from_str::<Event>(line.trim_end()) {
+            out.push(e);
         }
     }
     out
@@ -350,15 +353,22 @@ async fn clear_writer_idempotent() {
 
 #[tokio::test]
 async fn frames_buffered_during_disconnect_arrive_after_reconnect() {
+    // Round 4: events bypass HostPipe pending-buffer semantics; only
+    // Commands buffer + drain on reconnect. Test the reconnect-drain
+    // path with two distinct Commands.
     let (pipe, _) = make_pipe();
     // Connect, disconnect.
     let (w1, _r1) = make_duplex();
     pipe.set_writer(w1).await;
     pipe.clear_writer().await;
 
-    // Buffer two events.
-    pipe.send_event(&ping_event(10)).await.unwrap();
-    pipe.send_event(&ping_event(11)).await.unwrap();
+    // Buffer two Commands.
+    pipe.send_command(&Command::SpawnPoolWindow { saga_id: 10 })
+        .await
+        .unwrap();
+    pipe.send_command(&Command::SpawnPoolWindow { saga_id: 11 })
+        .await
+        .unwrap();
 
     // Reconnect with a fresh duplex.
     let (w2, r2) = make_duplex();
@@ -368,13 +378,13 @@ async fn frames_buffered_during_disconnect_arrive_after_reconnect() {
     assert_eq!(frames.len(), 2);
     match (&frames[0], &frames[1]) {
         (
-            HostFrame::Event(Event::Pong { version: v1, .. }),
-            HostFrame::Event(Event::Pong { version: v2, .. }),
+            HostFrame::Command(Command::SpawnPoolWindow { saga_id: s1 }),
+            HostFrame::Command(Command::SpawnPoolWindow { saga_id: s2 }),
         ) => {
-            assert_eq!(*v1, 10);
-            assert_eq!(*v2, 11);
+            assert_eq!(*s1, 10);
+            assert_eq!(*s2, 11);
         }
-        other => panic!("expected two Pong frames, got {:?}", other),
+        other => panic!("expected two SpawnPoolWindow frames, got {:?}", other),
     }
 }
 
@@ -395,8 +405,16 @@ async fn shared_writer_holds_arbitrary_async_write() {
         .await
         .unwrap();
     assert!(n > 0, "expected at least one frame on the wire");
-    let line = std::str::from_utf8(&buf[..n]).unwrap();
-    assert!(line.starts_with("{\"kind\":\"event\""));
+    let line = std::str::from_utf8(&buf[..n]).unwrap().trim_end();
+    // Round 4: events are written as raw Event JSON (no HostFrame
+    // envelope) for host parser compat. Either format must parse.
+    let parsed_as_event = serde_json::from_str::<Event>(line).is_ok();
+    let parsed_as_host_frame = serde_json::from_str::<HostFrame>(line).is_ok();
+    assert!(
+        parsed_as_event || parsed_as_host_frame,
+        "line should parse as Event or HostFrame: {:?}",
+        line
+    );
 }
 
 // ---- P1 round 2: stale session can't write to replacement writer ----------
