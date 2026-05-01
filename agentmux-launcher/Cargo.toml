@@ -1,6 +1,6 @@
 [package]
 name = "agentmux-launcher"
-version = "0.33.560"
+version = "0.33.562"
 description = "AgentMux Launcher — tiny exe that sets DLL path then spawns the CEF host"
 authors = ["AgentMux Corp"]
 edition = "2021"
@@ -34,7 +34,16 @@ tokio = { version = "1", features = [
 dirs = "5"
 # RFC3339 timestamps for backend_started_at logs, kept stable for
 # log-format compatibility with the host's existing format.
-chrono = { version = "0.4", default-features = false, features = ["clock"] }
+# LSD-1: also used by the launcher saga log for RFC3339 started_at /
+# ended_at columns; `serde` feature lets DateTime<Utc> participate in
+# serde_json round-trips for the vacuum cutoff parameter and for any
+# future structured-log integration.
+chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
+# LSD-1 (PR #LSD-1) — durable SQLite-backed launcher saga log. Mirrors
+# the srv saga log's `rusqlite = "0.31"` pin so both halves of the
+# saga durability story stay schema-compatible. `bundled` ships
+# SQLite with the binary; no system-libs assumption.
+rusqlite = { version = "0.31", features = ["bundled"] }
 # UUID v4 for the shared auth key launcher generates and gives to
 # both srv (env var) and host (env var). Same generation method the
 # host uses today (uuid::Uuid::new_v4) so the format is identical.
@@ -45,6 +54,10 @@ uuid = { version = "1", features = ["v4"] }
 agentmux-common = { path = "../agentmux-common" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# LSD-1: `#[derive(thiserror::Error)]` on the saga log's `LogError`
+# enum keeps the SQLite + serde_json + io error wrapping clean. Same
+# pin as srv so any cross-crate refactor stays trivial.
+thiserror = "1"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-sys = { version = "0.59", features = [
@@ -71,3 +84,7 @@ winres = "0.1"
 # hold across all of them — catches edge cases unit tests miss.
 # Dev-only: zero impact on release binary size.
 proptest = "1"
+# LSD-1: NamedTempFile lets the saga log tests round-trip via a real
+# on-disk SQLite file (in addition to the `open_in_memory()` path) so
+# WAL-mode + busy-timeout pragmas exercise their real code paths.
+tempfile = "3"

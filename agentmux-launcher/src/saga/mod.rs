@@ -71,6 +71,16 @@ use agentmux_common::ipc::{Command, Event};
 pub mod pool_respawn;
 pub mod window_cleanup;
 
+// LSD-1 (PR LSD-1) — durable launcher saga log + API. Foundations
+// only: the coordinator does NOT call any of these methods yet.
+// Module is declared here so it compiles + tests run; PR LSD-2 wires
+// the coordinator to write through `LauncherSagaLog` on every state
+// transition. See `docs/specs/SPEC_LAUNCHER_SAGA_DURABILITY_2026-05-01.md`
+// §4 PR1 for the staged-rollout rationale.
+mod log;
+#[allow(unused_imports)] // re-export consumed by PR LSD-2; keeps import path stable.
+pub use log::LauncherSagaLog;
+
 /// Where a `SagaAction::IssueCmd` should be dispatched.
 ///
 /// `LauncherSelf` means "feed this command to the launcher's own
