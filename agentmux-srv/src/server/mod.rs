@@ -154,6 +154,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/docsite/*path", get(files::handle_docsite))
         .route("/schema/*path", get(files::handle_schema))
         .route("/api/lan-instances", get(handle_lan_instances))
+        .route("/agentmux/diag/sagas", get(handle_diag_sagas))
         .merge(bus_routes)
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
@@ -177,6 +178,64 @@ async fn health_handler(State(state): State<AppState>) -> Json<serde_json::Value
     Json(json!({
         "status": "ok",
         "version": state.version,
+    }))
+}
+
+/// Saga durability PR 2 — operator visibility into the durable saga
+/// log. Returns the most-recent 50 saga lifecycle rows + an in-flight
+/// count derived from `unresolved_sagas`.
+///
+/// **Why a JSON HTTP endpoint and not a launcher `--diag sagas`
+/// pipe-IPC client.** The `--diag srv` pipe transport (see
+/// `agentmux-launcher/src/diag.rs`) routes through `Tool` registration
+/// + a 2 s observation window with `GetSrvSnapshot` + `GetEvents`.
+/// Adding `GetSagaLogSnapshot` to the IPC `Command` enum + an
+/// `Event::SagaLogSnapshot` variant with a Vec of `SagaSnapshot`
+/// triples the touched-files surface for one operator command.
+/// JSON HTTP is the precedent for raw operator queries (cf
+/// `/api/lan-instances`) and matches the spec §9 PR 2 phrasing
+/// "tightened scope". Promoting to first-class `--diag sagas` via
+/// pipe IPC is a follow-up if anyone asks.
+///
+/// Operator workflow today:
+/// ```text
+/// curl -s -H "X-AuthKey: $KEY" http://127.0.0.1:$PORT/agentmux/diag/sagas | jq .
+/// ```
+/// Response shape:
+/// ```json
+/// {
+///   "recent": [ { "saga_id": ..., "name": ..., "state": ..., ... }, ... ],
+///   "in_flight_count": 1,
+///   "recently_failed_count": 0,
+///   "total_returned": 50
+/// }
+/// ```
+async fn handle_diag_sagas(State(state): State<AppState>) -> Json<serde_json::Value> {
+    const LIMIT: u32 = 50;
+    let recent = match state.saga_log.snapshot_recent(LIMIT) {
+        Ok(rows) => rows,
+        Err(e) => {
+            return Json(json!({
+                "error": format!("snapshot_recent failed: {}", e),
+            }));
+        }
+    };
+    let in_flight = match state.saga_log.unresolved_sagas() {
+        Ok(rows) => rows.len(),
+        Err(e) => {
+            tracing::warn!("[diag/sagas] unresolved_sagas failed: {}", e);
+            0
+        }
+    };
+    let recently_failed = recent
+        .iter()
+        .filter(|s| s.state == "failed" || s.state == "failed_compensation")
+        .count();
+    Json(json!({
+        "recent": recent,
+        "in_flight_count": in_flight,
+        "recently_failed_count": recently_failed,
+        "total_returned": recent.len(),
     }))
 }
 
