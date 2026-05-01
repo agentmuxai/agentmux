@@ -59,6 +59,7 @@ dependencies = [
  "tempfile",
  "thiserror 1.0.69",
  "tokio",
+ "toml",
  "uuid",
  "windows-sys 0.59.0",
  "winres",

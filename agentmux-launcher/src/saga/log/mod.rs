@@ -538,7 +538,7 @@ impl LauncherSagaLog {
     /// `ON DELETE CASCADE` on `launcher_saga_step.saga_id` ensures
     /// the corresponding step rows go with the saga in a single
     /// SQLite transaction — no manual cleanup needed.
-    #[allow(dead_code)] // wired in PR LSD-4 (startup retention task)
+    // LSD-4: wired by `main.rs::run_windows` startup retention task.
     pub fn vacuum_older_than(&self, cutoff: DateTime<Utc>) -> Result<usize, LogError> {
         let cutoff_str = cutoff.to_rfc3339();
         let conn = self.conn.lock().unwrap();
