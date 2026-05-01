@@ -36,6 +36,50 @@ pub fn run_wstore_migrations(conn: &Connection) -> Result<(), StoreError> {
     Ok(())
 }
 
+/// Initialize the saga durability schema.
+/// Creates the `saga` + `saga_step` tables and their indexes.
+///
+/// See `docs/specs/SPEC_SAGA_DURABILITY_2026-05-01.md` §2.2 — the
+/// durable on-disk record of every saga's lifecycle. The coordinator
+/// writes here from `SagaCtx::dispatch` / `compensate` (per-step) and
+/// `emit_terminal` (per-saga) so that a srv crash mid-saga leaves a
+/// recoverable trail.
+///
+/// PR 1 (this migration) only ships the schema + log API + ctx
+/// instrumentation. Resume-on-startup + `--diag sagas` + crash-
+/// recovery integration tests follow in PR 2.
+pub fn run_saga_log_migrations(conn: &Connection) -> Result<(), StoreError> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS saga (
+            saga_id        INTEGER PRIMARY KEY,
+            name           TEXT NOT NULL,
+            state          TEXT NOT NULL,
+            started_at     INTEGER NOT NULL,
+            terminal_at    INTEGER,
+            failure_reason TEXT,
+            input_json     TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS saga_step (
+            saga_id     INTEGER NOT NULL REFERENCES saga(saga_id),
+            step_index  INTEGER NOT NULL,
+            name        TEXT NOT NULL,
+            state       TEXT NOT NULL,
+            cmd_json    TEXT NOT NULL,
+            output_json TEXT,
+            started_at  INTEGER NOT NULL,
+            ended_at    INTEGER,
+            PRIMARY KEY (saga_id, step_index)
+        );
+
+        CREATE INDEX IF NOT EXISTS saga_state_idx
+            ON saga(state) WHERE state IN ('running', 'compensating');
+        CREATE INDEX IF NOT EXISTS saga_terminal_idx
+            ON saga(terminal_at);",
+    )?;
+    Ok(())
+}
+
 /// Initialize the FileStore schema.
 /// Creates the wave_file and file_data tables.
 pub fn run_filestore_migrations(conn: &Connection) -> Result<(), StoreError> {

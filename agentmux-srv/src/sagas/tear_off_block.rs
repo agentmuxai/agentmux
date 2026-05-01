@@ -31,7 +31,9 @@
 use agentmux_common::ipc::{Command, Event};
 use serde_json::{json, Value};
 
-use super::{alloc_saga_id, emit_saga_started, emit_terminal, run_saga, SagaCtx};
+use super::{
+    alloc_saga_id, classify_run_saga_result, emit_saga_started, emit_terminal, run_saga, SagaCtx,
+};
 use crate::server::AppState;
 
 /// Run the TearOffBlock saga. On success, returns
@@ -78,18 +80,22 @@ pub async fn run(
     }
 
     let saga_id = alloc_saga_id(state);
-    emit_saga_started(state, saga_id, "tear_off_block").await;
-    let ctx = SagaCtx { state, saga_id };
-    let result = run_saga("tear_off_block", run_inner(ctx, block_id, source_tab_id)).await;
-    emit_terminal(
+    if let Err(e) = emit_saga_started(
         state,
         saga_id,
-        match &result {
-            Ok(_) => Ok(()),
-            Err(r) => Err(r.as_str()),
-        },
+        "tear_off_block",
+        serde_json::json!({
+            "block_id": &block_id,
+            "source_tab_id": &source_tab_id,
+        }),
     )
-    .await;
+    .await
+    {
+        return Err(e);
+    }
+    let ctx = SagaCtx::new(state, saga_id);
+    let result = run_saga("tear_off_block", run_inner(ctx, block_id, source_tab_id)).await;
+    emit_terminal(state, saga_id, classify_run_saga_result(&result)).await;
     result
 }
 
