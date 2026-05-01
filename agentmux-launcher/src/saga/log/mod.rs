@@ -93,6 +93,13 @@ pub enum LogError {
 /// because recovery wants to be idempotent across repeated
 /// crash-restart cycles (the row may already be in
 /// `failed_compensation` from a prior recovery).
+///
+/// Note: launcher sagas have no `Compensated` terminal state today
+/// (per LSD spec §3.2 + §7 open question). F.5/F.6 sagas don't
+/// auto-compensate; the schema CHECK constraint on `launcher_saga.state`
+/// intentionally omits `'compensated'`. If a future class-D/E saga
+/// needs compensation, add the variant + matching CHECK constraint
+/// migration together — never one without the other.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[allow(dead_code)] // every variant wired by PR LSD-2 / LSD-3; pinned today by tests.rs
 pub enum SagaOutcome {
@@ -100,10 +107,6 @@ pub enum SagaOutcome {
     Completed,
     /// Saga failed with no compensation having run.
     Failed { reason: String },
-    /// Saga failed and compensation completed cleanly. Reserved for
-    /// future class-D/E launcher sagas; F.5/F.6 don't construct this
-    /// today (LSD spec §3.5).
-    Compensated { reason: String },
     /// Saga was unresolved at launcher restart and the recovery walker
     /// marked it as such. Distinct from `Failed` so operators can
     /// filter for "interesting" cases via `--diag sagas`.
@@ -118,7 +121,6 @@ impl SagaOutcome {
         match self {
             SagaOutcome::Completed => "completed",
             SagaOutcome::Failed { .. } => "failed",
-            SagaOutcome::Compensated { .. } => "compensated",
             SagaOutcome::FailedCompensation { .. } => "failed_compensation",
         }
     }
@@ -127,7 +129,6 @@ impl SagaOutcome {
         match self {
             SagaOutcome::Completed => None,
             SagaOutcome::Failed { reason }
-            | SagaOutcome::Compensated { reason }
             | SagaOutcome::FailedCompensation { reason } => Some(reason.as_str()),
         }
     }
@@ -529,11 +530,10 @@ impl LauncherSagaLog {
     }
 
     /// Delete saga rows whose `ended_at` is before `cutoff` AND whose
-    /// state is terminal (`completed`, `failed`, `compensated`,
-    /// `failed_compensation`). Returns the number of rows deleted.
-    /// In-flight sagas (`running`, `compensating`) are NEVER vacuumed
-    /// — that would mask crashed-mid-saga incidents from the recovery
-    /// walker (LSD spec §3.6).
+    /// state is terminal (`completed`, `failed`, `failed_compensation`).
+    /// Returns the number of rows deleted. In-flight sagas (`running`,
+    /// `compensating`) are NEVER vacuumed — that would mask
+    /// crashed-mid-saga incidents from the recovery walker (LSD spec §3.6).
     ///
     /// `ON DELETE CASCADE` on `launcher_saga_step.saga_id` ensures
     /// the corresponding step rows go with the saga in a single
@@ -544,7 +544,7 @@ impl LauncherSagaLog {
         let conn = self.conn.lock().unwrap();
         let removed = conn.execute(
             "DELETE FROM launcher_saga
-             WHERE state IN ('completed', 'failed', 'compensated', 'failed_compensation')
+             WHERE state IN ('completed', 'failed', 'failed_compensation')
                AND ended_at IS NOT NULL
                AND ended_at < ?1",
             params![cutoff_str],
