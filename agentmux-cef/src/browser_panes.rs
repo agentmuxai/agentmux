@@ -188,6 +188,16 @@ impl BrowserPaneManager {
                 ))
             }
             RegisterResult::Fresh(label) => {
+                // Phase H.1.a — parallel write: mirror the new pane entry
+                // into the host reducer's `panes` map. PaneStateMachine
+                // remains authoritative until step e (PR #2 final commit)
+                // deletes it.
+                state.host_dispatch(
+                    crate::reducer::HostCommand::EnqueuePaneCreate {
+                        block_id: block_id.to_string(),
+                        label: label.clone(),
+                    },
+                );
                 let mut task = CreatePaneTask::new(
                     state.clone(),
                     block_id.to_string(),
@@ -266,8 +276,22 @@ impl BrowserPaneManager {
     /// user expects to persist across close). If beforeunload becomes
     /// important, revisit.
     pub fn close(&self, block_id: &str, state: &Arc<AppState>) {
+        // Phase H.1.a — parallel write: mirror the close request into the
+        // host reducer's `panes` map. EnqueuePaneClose flips entry to
+        // Closing; CompletePaneClose (after `close_with` returns) removes
+        // it. PaneStateMachine remains authoritative until step e.
+        state.host_dispatch(
+            crate::reducer::HostCommand::EnqueuePaneClose {
+                block_id: block_id.to_string(),
+            },
+        );
         let ops = AppStateCloseOps(state);
         self.close_with(block_id, &ops);
+        state.host_dispatch(
+            crate::reducer::HostCommand::CompletePaneClose {
+                block_id: block_id.to_string(),
+            },
+        );
     }
 
     /// The testable body of `close()`. See `PaneCloseOps` for the seam.
@@ -295,9 +319,15 @@ impl BrowserPaneManager {
     /// so this is a no-op in that case — but `on_before_close` may still
     /// fire async as Chromium's refcount hits zero, and `drain_by_label`
     /// is idempotent so the callback is safe.
-    pub fn drain_closed_label(&self, label: &str) {
-        if self.lifecycle.drain_by_label(label) {
-            tracing::info!(label, "browser pane drained from lifecycle map");
+    pub fn drain_closed_label(&self, state: &Arc<AppState>, label: &str) {
+        if let Some(block_id) = self.lifecycle.drain_by_label(label) {
+            tracing::info!(label, block_id = %block_id, "browser pane drained from lifecycle map");
+            // Phase H.1.a — parallel write: ensure the host reducer's
+            // `panes` map is also cleaned up. Idempotent on the reducer
+            // side (CompletePaneClose returns no-op if entry already gone).
+            state.host_dispatch(
+                crate::reducer::HostCommand::CompletePaneClose { block_id },
+            );
         }
     }
 
