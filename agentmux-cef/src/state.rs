@@ -480,18 +480,13 @@ pub struct AppState {
     /// Verified on every IPC request to prevent unauthorized local access.
     pub ipc_token: String,
 
-    /// CEF Browser handles keyed by window label (multi-window support).
-    /// "main" is the primary window; tear-off windows get "window-{UUID}" labels.
-    ///
-    /// **Phase B / multi-reducer status**: this map is intentionally NOT
-    /// migrated to launcher under the standard B.5 a→b→c→d→e ratchet because
-    /// `cef::Browser` is an FFI handle to a Chromium browser object in this
-    /// process — it can't serialize over IPC and must stay co-located with
-    /// the CEF runtime. The KEY-SET role (label set queries) is already
-    /// covered by the launcher's `state.windows` mirror (B.4) +
-    /// `shadow_window_meta`. This field will be retired into a host-side
-    /// reducer in Phase F (see `docs/retro/multi-reducer-proposal-2026-04-28.md`).
-    pub browsers: Mutex<HashMap<String, Browser>>,
+    // Phase H.2.e (PR #4) — `pub browsers: Mutex<HashMap<String, Browser>>`
+    // deleted. Authoritative storage is now `HostState.browsers` (the host
+    // reducer's map). Read access goes through `AppState::get_browser`,
+    // `list_browsers`, etc. (state.rs:704-742). The H.2 ratchet
+    // (a → parallel writes, b → reads with fallback, c → flip reads,
+    // d → drop legacy writes, e → delete) is complete for browsers.
+    // Pane lifecycle (`PaneStateMachine`) follows in PR #5.
 
     /// Per-window metadata (kind, parent linkage).
     ///
@@ -632,7 +627,7 @@ impl Default for AppState {
             cli_login_stdin: Mutex::new(None),
             ipc_port: Mutex::new(0),
             ipc_token: uuid::Uuid::new_v4().to_string(),
-            browsers: Mutex::new(HashMap::new()),
+            // browsers field removed in H.2.e — see comment near struct decl.
             window_meta: Mutex::new(HashMap::new()),
             host_state: Mutex::new(crate::reducer::HostState::default()),
             window_pool: Mutex::new(VecDeque::new()),
