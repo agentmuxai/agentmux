@@ -14,11 +14,12 @@ import { createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js"
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { waveEventSubscribe } from "@/app/store/wps";
+import { useTabModal } from "@/app/tab/tab-modal";
 import type { AgentViewModel } from "../agent-model";
 import { AgentCard } from "./AgentCard";
 import { AgentCardSettingsPanel } from "./AgentCardSettingsPanel";
 import { AgentActionBar } from "./AgentActionBar";
-import { AgentLaunchModal, type LaunchOverrides } from "./AgentLaunchModal";
+import type { LaunchOverrides } from "./AgentLaunchModal";
 import { ConfirmModal } from "@/element/modal-v2";
 
 // ── useForgeAgents hook ───────────────────────────────────────────────────────
@@ -67,42 +68,41 @@ interface AgentPickerProps {
 export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
     const [launching, setLaunching] = createSignal<string | null>(null);
     const [nodejsError, setNodejsError] = createSignal<string | null>(null);
-    const [launchModalAgent, setLaunchModalAgent] = createSignal<ForgeAgent | null>(null);
     const [deleteCandidate, setDeleteCandidate] = createSignal<ForgeAgent | null>(null);
     const [deleteError, setDeleteError] = createSignal<string | null>(null);
     const agents = useForgeAgents();
+    const tabModal = useTabModal();
 
     // Inline Forge-settings panel: which definition is expanded.
     // Session-local only — not persisted to block meta.
     const [expandedId, setExpandedId] = createSignal<string | null>(null);
 
-    // Clicking the card opens the Launch modal. The actual launch
-    // happens on modal submit.
+    // Clicking the card opens the launch modal in the tab-scoped layer.
+    // The picker no longer owns the modal's open/closed signal — that
+    // lives on TabModalLayer. We pass an `onSubmit` callback in the
+    // request; the layer closes the modal when it resolves.
     const handleSelect = (agent: ForgeAgent) => {
         setNodejsError(null);
-        setLaunchModalAgent(agent);
-    };
-
-    const handleLaunchSubmit = async (overrides: LaunchOverrides) => {
-        const agent = launchModalAgent();
-        if (!agent) return;
-        setLaunching(agent.id);
-        try {
-            await props.model.launchForgeAgent(agent, overrides);
-            if (props.model.nodejsError) {
-                setNodejsError(props.model.nodejsError);
-                props.model.nodejsError = null;
-            }
-            // Close the modal only on the happy path. If
-            // `launchForgeAgent` ever throws (it currently logs-and-
-            // swallows, but that can change), letting the error
-            // propagate lets the modal's own try/catch surface the
-            // message to the user instead of the modal silently
-            // disappearing under a `finally` close.
-            setLaunchModalAgent(null);
-        } finally {
-            setLaunching(null);
-        }
+        tabModal.open({
+            kind: "launch-agent",
+            agent,
+            originBlockId: props.model.blockId,
+            onSubmit: async (overrides: LaunchOverrides) => {
+                setLaunching(agent.id);
+                try {
+                    await props.model.launchForgeAgent(agent, overrides);
+                    if (props.model.nodejsError) {
+                        // Surface the missing-Node banner inside the
+                        // picker after the layer closes the modal —
+                        // matches the pre-refactor behaviour.
+                        setNodejsError(props.model.nodejsError);
+                        props.model.nodejsError = null;
+                    }
+                } finally {
+                    setLaunching(null);
+                }
+            },
+        });
     };
 
     const openForgeFor = (agent: ForgeAgent) => {
@@ -201,15 +201,6 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                     </div>
                     <AgentActionBar />
                 </div>
-            </Show>
-            <Show when={launchModalAgent()}>
-                {(agent) => (
-                    <AgentLaunchModal
-                        agent={agent()}
-                        onCancel={() => setLaunchModalAgent(null)}
-                        onSubmit={handleLaunchSubmit}
-                    />
-                )}
             </Show>
             <Show when={deleteCandidate()}>
                 {(agent) => (
