@@ -70,6 +70,37 @@ pub fn spawn_pool_window(state: &Arc<AppState>) {
         return;
     }
 
+    // PR #6 H.7 — refuse pool refill while any pane is mid-close. Pool
+    // windows are CEF top-levels just like user-visible ones; the v146
+    // deadlock fires regardless of whether the new window is on-screen.
+    // See `commands/window.rs::open_window_with_kind` for rationale.
+    if state.any_pane_closing() {
+        tracing::warn!(
+            target: "wfr:gate",
+            "[wfr:gate] spawn_pool_window deferred — pane is mid-close (H.7 invariant)"
+        );
+        return;
+    }
+
+    // PR #6 codex P1 — capacity check. The semaphore (PoolWindowSpawnStart)
+    // only single-flights; it does not enforce the target size. Without
+    // this guard, the new H.7 always-on-pane-close kick (in
+    // `BrowserPaneManager::close` / `drain_closed_label`) would add a
+    // pool window on every pane close once no spawn is in flight, growing
+    // `pool.queue` indefinitely past `POOL_TARGET_SIZE`. The legacy
+    // callers (`mark_pool_window_renderer_ready`,
+    // `on_pool_window_destroyed`) already gate on the same check; this
+    // moves it inside spawn_pool_window so every entry point is covered.
+    if state.pool_queue_size() >= POOL_TARGET_SIZE {
+        tracing::debug!(
+            target: "dnd:tearoff:pool",
+            current = %state.pool_queue_size(),
+            target = %POOL_TARGET_SIZE,
+            "[pool] spawn skipped — pool already at target size"
+        );
+        return;
+    }
+
     let window_id = uuid::Uuid::new_v4();
     // Use the `window-pool-` prefix so existing `is_instance_label`
     // checks (tear_off_hook.rs, app-init.ts) pass naturally — they

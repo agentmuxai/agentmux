@@ -297,6 +297,14 @@ impl BrowserPaneManager {
             },
         );
         tracing::info!(block_id, label, "browser pane closed");
+
+        // PR #6 H.7 kick — the pane is fully closed; if any pool refill
+        // was deferred by `any_pane_closing()` while we were mid-close,
+        // top up now. `spawn_pool_window` is internally idempotent
+        // (single-flight semaphore + below-target check via reducer), so
+        // calling it always-on-pane-close is safe even when no refill is
+        // needed.
+        crate::commands::window_pool::spawn_pool_window(state);
     }
 
     /// The testable side-effect body of `close()`. Given a pane's `label`,
@@ -324,6 +332,10 @@ impl BrowserPaneManager {
         );
         if let Some(block_id) = out.drained_block_id {
             tracing::info!(label, block_id = %block_id, "browser pane drained via on_before_close");
+            // PR #6 H.7 kick — see `close()` for rationale. The
+            // on_before_close path is the async drain; pool refill that
+            // was deferred while the pane was Closing should now resume.
+            crate::commands::window_pool::spawn_pool_window(state);
         }
     }
 

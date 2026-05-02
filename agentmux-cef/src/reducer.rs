@@ -1856,6 +1856,31 @@ mod tests {
     }
 
     #[test]
+    fn pane_lifecycle_supports_h7_invariant_check() {
+        // PR #6 H.7 — `AppState::any_pane_closing()` reads
+        // `state.panes.values()` and matches `PaneLifecycle::Closing`.
+        // This test verifies the reducer's pane state transitions in
+        // the way that helper relies on: Live entries don't trip the
+        // gate; Closing entries do; drained (removed) entries don't.
+        let mut state = HostState::default();
+
+        // baseline: no panes → no closing
+        assert!(!state.panes.values().any(|e| matches!(e.lifecycle, PaneLifecycle::Closing { .. })));
+
+        update(&mut state, HostCommand::TryRegisterPaneLive { block_id: "b1".into() });
+        // Live pane present → gate is OPEN (not closing)
+        assert!(!state.panes.values().any(|e| matches!(e.lifecycle, PaneLifecycle::Closing { .. })));
+
+        update(&mut state, HostCommand::EnqueuePaneClose { block_id: "b1".into() });
+        // Closing pane present → gate is CLOSED
+        assert!(state.panes.values().any(|e| matches!(e.lifecycle, PaneLifecycle::Closing { .. })));
+
+        update(&mut state, HostCommand::CompletePaneClose { block_id: "b1".into() });
+        // Drained → gate is OPEN again
+        assert!(!state.panes.values().any(|e| matches!(e.lifecycle, PaneLifecycle::Closing { .. })));
+    }
+
+    #[test]
     fn drain_after_close_recreate_does_not_evict_new_entry() {
         // The exact bug PANE_LABEL_SEQ defends against: register → close →
         // drain by OLD label → register again → drain by OLD label must
