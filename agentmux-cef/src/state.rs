@@ -107,6 +107,290 @@ pub struct PendingWindowCreation {
     pub parent_instance_id: Option<String>,
 }
 
+// ── Phase H — host reducer buildout ──────────────────────────────────────
+//
+// All types below are reducer-only state. PR #1 (h1-foundations) declares
+// them; subsequent PRs (#2-#5) wire callers through the reducer per the
+// a→b→c→d→e migration ratchet. See:
+//   docs/specs/SPEC_HOST_REDUCER_5PR_PLAN_2026-05-02.md
+//   docs/specs/SPEC_HOST_REDUCER_PHASE_H_2026-05-02.md
+//
+// These types intentionally have `#[allow(dead_code)]` because PR #1 ships
+// the scaffolding without callers — fields are populated by reducer arms but
+// no production code reads them yet. Subsequent PRs lift the allow as they
+// wire each migration.
+
+// ── Pane lifecycle (H.1) ─────────────────────────────────────────────────
+
+/// Lifecycle state of a browser pane (the `defwidget@browser` widget). Held
+/// inside `HostState.panes` keyed by `block_id`. Mirrors the existing
+/// `PaneStateMachine::PaneLifecycle` (pane/lifecycle.rs:28); the existing
+/// type stays during PR #2's a→e migration. PR #2 step e deletes the
+/// pane/lifecycle.rs version and migrates all readers to this one.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[allow(dead_code)]
+pub enum PaneLifecycle {
+    /// Pane is alive and accepting operations (focus, resize, navigate).
+    Live,
+    /// Close requested; awaiting CEF on_before_close to fully tear down.
+    /// `since` carries the request timestamp for diagnostic purposes only;
+    /// nothing in the reducer is timer-driven.
+    Closing { since: std::time::Instant },
+}
+
+/// Per-pane reducer-managed entry. Replaces `pane::lifecycle::PaneEntry`
+/// (lifecycle.rs:42) at PR #2 step e.
+#[derive(Clone, Debug)]
+#[allow(dead_code)]
+pub struct PaneEntry {
+    pub block_id: String,
+    pub label: String,
+    pub lifecycle: PaneLifecycle,
+}
+
+// ── Browser handle registry (H.2) ────────────────────────────────────────
+
+/// Wrapped CEF Browser handle stored in `HostState.browsers`. Replaces the
+/// raw `Mutex<HashMap<String, Browser>>` at `state.rs::AppState.browsers`
+/// at PR #2 step e.
+///
+/// `cef::Browser` is `Clone` (refcounted FFI handle) and safe to store
+/// inside the reducer's mutex-guarded state. Doesn't impl Debug, hence
+/// the manual `impl Debug` below for `BrowserHandle`.
+#[derive(Clone)]
+#[allow(dead_code)]
+pub struct BrowserHandle {
+    pub label: String,
+    pub browser: Browser,
+    pub kind: BrowserKind,
+    pub registered_at: std::time::Instant,
+}
+
+impl std::fmt::Debug for BrowserHandle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BrowserHandle")
+            .field("label", &self.label)
+            .field("kind", &self.kind)
+            .field("registered_at", &self.registered_at)
+            .field("browser", &"<cef::Browser>")
+            .finish()
+    }
+}
+
+/// Distinguishes top-level CEF Browsers (full-instance windows + pool
+/// windows) from pane CEF Browsers (children of a top-level). Determines
+/// taskbar treatment, lifecycle ownership, etc.
+#[derive(Clone, Debug)]
+#[allow(dead_code)]
+pub enum BrowserKind {
+    /// Top-level window. `is_pool=true` while the window is in the warm
+    /// pool; cleared on promote.
+    TopLevel { is_pool: bool },
+    /// Browser pane child window. `block_id` correlates with the
+    /// `HostState.panes` entry.
+    Pane { block_id: String },
+}
+
+// ── Pool state (H.4) ─────────────────────────────────────────────────────
+
+/// Pre-warmed window pool state. Replaces three separate fields on
+/// `AppState`: `window_pool: Mutex<VecDeque<String>>`,
+/// `unpromoted_pool_labels: Mutex<HashSet<String>>`, and
+/// `window_pool_respawn_in_flight: AtomicBool`. PR #3 migrates each
+/// caller through the a→e ratchet.
+#[derive(Default, Clone, Debug)]
+#[allow(dead_code)]
+pub struct PoolState {
+    /// Labels of pool windows whose renderer signaled ready (eligible
+    /// for promotion).
+    pub queue: std::collections::VecDeque<String>,
+    /// Labels spawned but not yet renderer-ready (and therefore not yet
+    /// in `queue`). Used for taskbar/exclusion filters during the spawn
+    /// → ready window.
+    pub unpromoted: std::collections::HashSet<String>,
+    /// Single-flight semaphore: true while a respawn task is in flight,
+    /// preventing stacked refills.
+    pub respawn_in_flight: bool,
+}
+
+// ── Quit state (H.5) ─────────────────────────────────────────────────────
+
+/// Host process quit lifecycle. Replaces `is_quitting: AtomicBool` at
+/// `state.rs::AppState`. Three states; transitions are monotonic
+/// (Running → Draining → Quit, no regression).
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[allow(dead_code)]
+pub enum QuitState {
+    /// Normal operation. All commands accepted (subject to per-arm rules).
+    Running,
+    /// `BeginDrain` dispatched. Pool refills suppressed; awaiting pool +
+    /// browsers to drain.
+    Draining { reason: QuitReason },
+    /// `ConfirmDrained` dispatched. Host quitting; no further commands.
+    Quit,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[allow(dead_code)]
+pub enum QuitReason {
+    /// User closed the last user-visible top-level window. Standard exit.
+    LastWindowClosed,
+    /// Launcher signaled HostShouldQuit (cross-process shutdown).
+    LauncherRequested,
+    /// External force-quit (Win32 WM_QUIT, signal, etc.).
+    External,
+}
+
+impl Default for QuitState {
+    fn default() -> Self { QuitState::Running }
+}
+
+// ── Top-level window creation runner (H.6) ───────────────────────────────
+
+/// A request to create a top-level window. Pushed to
+/// `HostState.top_level_creation.queue` via `EnqueueTopLevelWindow`.
+/// Carries the full spec the effect handler needs to call
+/// `ui_tasks::post_create_window`.
+#[derive(Clone, Debug)]
+#[allow(dead_code)]
+pub struct TopLevelCreationRequest {
+    pub label: String,
+    pub kind: WindowKind,
+    pub parent_instance_id: Option<String>,
+    pub url: String,
+    pub pos: (i32, i32),
+    pub size: (i32, i32),
+    pub frameless: bool,
+    /// `User`-initiated (fail-fast on contention) vs `Background` (pool
+    /// refill — may queue silently).
+    pub source: TopLevelSource,
+}
+
+/// Distinguishes user-facing creation requests (which fail-fast on
+/// contention) from background ones (pool refill — may queue indefinitely).
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[allow(dead_code)]
+pub enum TopLevelSource {
+    /// Triggered by a user action (click "open new window", tear off a
+    /// tab, etc.). Reducer rejects with error if in-flight slot is
+    /// occupied — caller propagates a visible error to the frontend.
+    User,
+    /// Triggered by the runner itself (pool refill, recovery). Queues
+    /// behind in-flight; no caller waiting on completion.
+    Background,
+}
+
+/// The single in-flight top-level creation. Singleton invariant enforced
+/// by the reducer (at most one Some across all action sequences).
+///
+/// **No `deadline` field. No watchdog.** The reducer reacts only to
+/// observable CEF callbacks: `on_after_created` (success),
+/// `on_render_process_terminated` (renderer crash), `on_before_close`
+/// (cancel mid-create). If none fire, the slot stays occupied
+/// permanently — user-initiated creates fail-fast with visible error
+/// per the no-timer directive.
+#[derive(Clone, Debug)]
+#[allow(dead_code)]
+pub struct InFlightCreation {
+    pub creation_id: u64,
+    pub label: String,
+    pub started_at: std::time::Instant,
+    pub phase: CreationPhase,
+}
+
+/// Phase progression of an in-flight top-level creation. Monotonic;
+/// `AdvanceCreationPhase` (if added later) refuses regression.
+#[derive(Clone, Debug, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[repr(u8)]
+#[allow(dead_code)]
+pub enum CreationPhase {
+    /// Effect handler has dispatched `post_create_window`; CEF has not
+    /// yet fired any callback.
+    Started = 0,
+    /// CEF `on_after_created` fired — Browser exists, renderer alive.
+    BrowserCallbackFired = 1,
+}
+
+/// Archived completion record for the runner's history ring buffer.
+/// Bounded at `TOP_LEVEL_CREATION_HISTORY_CAP` (50); oldest evicted FIFO.
+#[derive(Clone, Debug)]
+#[allow(dead_code)]
+pub struct CompletedCreation {
+    pub creation_id: u64,
+    pub label: String,
+    pub outcome: TopLevelCreationOutcome,
+    pub started_at: std::time::Instant,
+    pub finished_at: std::time::Instant,
+    pub last_phase: CreationPhase,
+}
+
+/// Why a top-level creation completed. `Completed` is happy-path; the
+/// other variants are observable failure modes.
+#[derive(Clone, Debug)]
+#[allow(dead_code)]
+pub enum TopLevelCreationOutcome {
+    /// CEF `on_after_created` fired; browser registered. Normal completion.
+    Completed,
+    /// CEF `on_render_process_terminated` fired during creation. Renderer
+    /// process died (crash, OOM, killed).
+    RendererTerminated { status: String },
+    /// CEF `on_before_close` fired during creation. Browser closed
+    /// externally (user action, parent close, etc.).
+    ExternallyClosed,
+}
+
+/// Reducer-managed runner state. Owns the queue, in-flight slot, history,
+/// and id allocator.
+#[derive(Default, Clone, Debug)]
+#[allow(dead_code)]
+pub struct TopLevelCreationState {
+    pub queue: std::collections::VecDeque<TopLevelCreationRequest>,
+    pub in_flight: Option<InFlightCreation>,
+    pub history: std::collections::VecDeque<CompletedCreation>,
+    pub next_creation_id: u64,
+}
+
+// ── Effects (carrier for side-effect-bearing events) ─────────────────────
+
+/// Side-effect descriptor emitted by reducer arms. Carried inside
+/// `HostEvent::Effect(EffectKind)`. The effects executor in
+/// `AppState::host_dispatch_with_effects` dispatches each kind to the
+/// appropriate imperative handler (e.g., posting a CEF UI task).
+///
+/// Reducer arms emit effects but never execute them; this preserves the
+/// pure-functional discipline of `update()`. Manual Debug impl below
+/// because `cef::Browser` doesn't impl Debug.
+#[derive(Clone)]
+#[allow(dead_code)]
+pub enum EffectKind {
+    /// Begin top-level window creation by posting `ui_tasks::post_create_window`.
+    /// Carried by `HostEvent::TopLevelCreationStarted`'s effect path.
+    PostCreateWindow { request: TopLevelCreationRequest, creation_id: u64 },
+    /// Spawn a pool window (PR #3 wires this when pool drops below TARGET_SIZE).
+    SpawnPoolWindow,
+    /// Close an orphan CEF browser whose label doesn't match any in-flight
+    /// or registered entry. Used by H.6's mismatched-callback handler to
+    /// prevent label collision.
+    CloseOrphanBrowser { browser: Browser },
+}
+
+impl std::fmt::Debug for EffectKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            EffectKind::PostCreateWindow { request, creation_id } => f
+                .debug_struct("PostCreateWindow")
+                .field("creation_id", creation_id)
+                .field("label", &request.label)
+                .finish(),
+            EffectKind::SpawnPoolWindow => f.write_str("SpawnPoolWindow"),
+            EffectKind::CloseOrphanBrowser { .. } => f
+                .debug_struct("CloseOrphanBrowser")
+                .field("browser", &"<cef::Browser>")
+                .finish(),
+        }
+    }
+}
+
 /// Shared application state for the CEF host.
 ///
 /// Unlike the Tauri version, this uses `Arc<AppState>` directly instead of
@@ -521,6 +805,121 @@ fn log_host_event(ev: &crate::reducer::HostEvent) {
             event = "PendingWindowQueueEmpty",
             version,
             "[host-reducer] dequeue on empty queue — caller will fall back",
+        ),
+        // ── H.1 panes ────────────────────────────────────────────────────
+        HostEvent::PaneCreateRequested { block_id, label, version } => tracing::info!(
+            target: "host-reducer",
+            event = "PaneCreateRequested",
+            block_id = %block_id, label = %label, version,
+        ),
+        HostEvent::PaneLive { block_id, label, version } => tracing::info!(
+            target: "host-reducer",
+            event = "PaneLive",
+            block_id = %block_id, label = %label, version,
+        ),
+        HostEvent::PaneClosing { block_id, version } => tracing::info!(
+            target: "host-reducer",
+            event = "PaneClosing",
+            block_id = %block_id, version,
+        ),
+        HostEvent::PaneClosed { block_id, version } => tracing::info!(
+            target: "host-reducer",
+            event = "PaneClosed",
+            block_id = %block_id, version,
+        ),
+        HostEvent::PaneCreationFailed { block_id, reason, version } => tracing::warn!(
+            target: "host-reducer",
+            event = "PaneCreationFailed",
+            block_id = %block_id, reason = %reason, version,
+        ),
+        // ── H.2 browsers ─────────────────────────────────────────────────
+        HostEvent::BrowserRegistered { label, kind, version } => tracing::info!(
+            target: "host-reducer",
+            event = "BrowserRegistered",
+            label = %label, kind = ?kind, version,
+        ),
+        HostEvent::BrowserUnregistered { label, version } => tracing::info!(
+            target: "host-reducer",
+            event = "BrowserUnregistered",
+            label = %label, version,
+        ),
+        // ── H.3 drag ─────────────────────────────────────────────────────
+        HostEvent::DragStarted { drag_id, source_window, version } => tracing::info!(
+            target: "host-reducer",
+            event = "DragStarted",
+            drag_id = %drag_id, source_window = %source_window, version,
+        ),
+        HostEvent::DragEnded { drag_id, outcome, version } => tracing::info!(
+            target: "host-reducer",
+            event = "DragEnded",
+            drag_id = %drag_id, outcome = ?outcome, version,
+        ),
+        // ── H.4 pool ─────────────────────────────────────────────────────
+        HostEvent::PoolWindowEntered { label, queue_len_after, version } => tracing::info!(
+            target: "host-reducer",
+            event = "PoolWindowEntered",
+            label = %label, queue_len_after, version,
+        ),
+        HostEvent::PoolWindowLeft { label, queue_len_after, reason, version } => tracing::info!(
+            target: "host-reducer",
+            event = "PoolWindowLeft",
+            label = %label, queue_len_after, reason = ?reason, version,
+        ),
+        HostEvent::PoolEmpty { version } => tracing::info!(
+            target: "host-reducer",
+            event = "PoolEmpty",
+            version,
+        ),
+        // ── H.5 quit ─────────────────────────────────────────────────────
+        HostEvent::QuitDraining { reason, version } => tracing::warn!(
+            target: "host-reducer",
+            event = "QuitDraining",
+            reason = ?reason, version,
+            "[host-reducer] entering drain mode",
+        ),
+        HostEvent::QuitReady { version } => tracing::warn!(
+            target: "host-reducer",
+            event = "QuitReady",
+            version,
+            "[host-reducer] drain complete; host quitting",
+        ),
+        // ── H.6 top-level runner ─────────────────────────────────────────
+        HostEvent::TopLevelCreationRequested {
+            creation_id, source, label, version,
+        } => tracing::info!(
+            target: "host-reducer",
+            event = "TopLevelCreationRequested",
+            creation_id, source = ?source, label = %label, version,
+        ),
+        HostEvent::TopLevelCreationStarted { creation_id, label, version } => tracing::info!(
+            target: "host-reducer",
+            event = "TopLevelCreationStarted",
+            creation_id, label = %label, version,
+        ),
+        HostEvent::TopLevelCreationCompleted {
+            creation_id, label, latency_ms, version,
+        } => tracing::info!(
+            target: "host-reducer",
+            event = "TopLevelCreationCompleted",
+            creation_id, label = %label, latency_ms, version,
+        ),
+        HostEvent::TopLevelCreationFailed {
+            creation_id, label, outcome, version,
+        } => tracing::error!(
+            target: "host-reducer",
+            event = "TopLevelCreationFailed",
+            creation_id, label = %label, outcome = ?outcome, version,
+        ),
+        HostEvent::TopLevelQueueLengthChanged { len, version } => tracing::debug!(
+            target: "host-reducer",
+            event = "TopLevelQueueLengthChanged",
+            len, version,
+        ),
+        // ── Effect carrier ───────────────────────────────────────────────
+        HostEvent::Effect { effect, version } => tracing::debug!(
+            target: "host-reducer",
+            event = "Effect",
+            effect = ?effect, version,
         ),
         HostEvent::Error { message, version } => tracing::warn!(
             target: "host-reducer",
