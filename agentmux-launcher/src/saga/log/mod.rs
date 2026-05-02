@@ -448,6 +448,39 @@ impl LauncherSagaLog {
         Ok(out)
     }
 
+    /// Fetch the step rows for a single saga regardless of saga state.
+    /// `unresolved_sagas` filters out `failed_compensation` (and other
+    /// terminal states), but `--diag sagas` needs to surface step rows
+    /// for sagas the recovery walker just marked `failed_compensation`
+    /// — operators triaging a recovered crash need to see what was
+    /// pending when the launcher exited. (codex P1 PR #647 round 1.)
+    pub fn get_saga_steps(&self, saga_id: u64) -> Result<Vec<UnresolvedLauncherStep>, LogError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT step_index, name, state, target, cmd_json,
+                    output_json, started_at, ended_at, failure_reason
+             FROM launcher_saga_step
+             WHERE saga_id = ?1
+             ORDER BY step_index ASC",
+        )?;
+        let steps: Vec<UnresolvedLauncherStep> = stmt
+            .query_map(params![saga_id as i64], |row| {
+                Ok(UnresolvedLauncherStep {
+                    step_index: row.get::<_, i64>(0)? as u32,
+                    name: row.get::<_, String>(1)?,
+                    state: row.get::<_, String>(2)?,
+                    target: row.get::<_, Option<String>>(3)?,
+                    cmd_json: row.get::<_, Option<String>>(4)?,
+                    output_json: row.get::<_, Option<String>>(5)?,
+                    started_at: row.get::<_, String>(6)?,
+                    ended_at: row.get::<_, Option<String>>(7)?,
+                    failure_reason: row.get::<_, Option<String>>(8)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(steps)
+    }
+
     /// Mark a saga as `failed_compensation` — the recovery walker's
     /// terminal write. Idempotent across repeated calls (the saga
     /// stays in `failed_compensation`; only `ended_at` and

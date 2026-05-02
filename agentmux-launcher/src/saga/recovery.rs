@@ -45,10 +45,14 @@ use super::LauncherSagaLog;
 /// `failed_compensation`. Returns the count of sagas touched.
 ///
 /// Errors propagate from `LauncherSagaLog::unresolved_sagas` (read
-/// failure: corrupt SQLite, schema mismatch). A failure here should
-/// be fatal at the caller — without recovery, sagas left over from a
-/// prior crash stay in `running` state forever and the next restart
-/// would do the same dance.
+/// failure: corrupt SQLite, schema mismatch). The caller (`main.rs`)
+/// treats a walker failure as **non-fatal** — the launcher logs a
+/// WARN and continues. Rationale: the saga log is open (open()
+/// succeeded), so the schema is intact; a transient SELECT failure
+/// is best-surfaced as a launcher-log warning so the saga
+/// coordinator still spawns. Prior crashed sagas stay in `running`
+/// for one more restart cycle in that case (and get cleaned up
+/// next time). (reagent P2 PR #647 round 1: doc/contract sync.)
 ///
 /// Per-saga `mark_failed_compensation` failures are logged but NOT
 /// fatal — the walker continues to subsequent sagas. Stopping on one

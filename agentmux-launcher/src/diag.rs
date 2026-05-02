@@ -781,41 +781,47 @@ async fn run_sagas_diag_impl(launcher_exe_dir: &std::path::Path) -> Result<(), S
             println!("    input: {}", s.input_json);
         }
 
-        // Step rows. unresolved_sagas carries the full step list; for
-        // terminal sagas we don't have steps in the snapshot view
-        // (snapshot_recent doesn't return step rows — by design, to
-        // keep summary output bounded). We surface step detail only
-        // for unresolved sagas, which is where it matters most:
-        // operator review of `failed_compensation` sagas to see what
-        // was attempted before the crash.
-        if let Some(u) = unresolved.iter().find(|u| u.saga_id == s.saga_id) {
-            if !u.steps.is_empty() {
-                println!("    steps:");
-                for step in &u.steps {
-                    let target = step.target.as_deref().unwrap_or("—");
-                    let cmd_snippet = step
-                        .cmd_json
-                        .as_deref()
-                        .map(|c| truncate_for_display(c, 120))
-                        .unwrap_or_else(|| "—".into());
-                    println!(
-                        "      {:>3}  {:30} target={:<14} state={:<10} cmd={}",
-                        step.step_index, step.name, target, step.state, cmd_snippet
-                    );
-                    if let Some(reason) = &step.failure_reason {
-                        println!("           failure: {}", reason);
-                    }
+        // Step rows. Surface step detail for both `unresolved` sagas
+        // AND `failed_compensation` sagas (recovered crashes) — the
+        // latter is the operator triage flow per LSD spec §3.5.
+        // (codex P1 PR #647 round 1: unresolved_sagas() filters
+        // out failed_compensation, so we fall back to a direct
+        // get_saga_steps query for those.)
+        let steps: Vec<crate::saga::log::UnresolvedLauncherStep> = if let Some(u) =
+            unresolved.iter().find(|u| u.saga_id == s.saga_id)
+        {
+            u.steps.clone()
+        } else if s.state == "failed_compensation" {
+            log.get_saga_steps(s.saga_id).unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+        if !steps.is_empty() {
+            println!("    steps:");
+            for step in &steps {
+                let target = step.target.as_deref().unwrap_or("—");
+                let cmd_snippet = step
+                    .cmd_json
+                    .as_deref()
+                    .map(|c| truncate_for_display(c, 120))
+                    .unwrap_or_else(|| "—".into());
+                println!(
+                    "      {:>3}  {:30} target={:<14} state={:<10} cmd={}",
+                    step.step_index, step.name, target, step.state, cmd_snippet
+                );
+                if let Some(reason) = &step.failure_reason {
+                    println!("           failure: {}", reason);
                 }
-                // Pinpoint the in-flight step at crash time, mirroring
-                // the example in spec §3.5: "[step 2 was in-flight when
-                // launcher exited]". The step in `pending` state at the
-                // highest index is the one the saga was waiting on.
-                if let Some(in_flight) = u.steps.iter().rev().find(|st| st.state == "pending") {
-                    println!(
-                        "      [step {} was in-flight when launcher exited]",
-                        in_flight.step_index
-                    );
-                }
+            }
+            // Pinpoint the in-flight step at crash time, mirroring
+            // the example in spec §3.5: "[step 2 was in-flight when
+            // launcher exited]". The step in `pending` state at the
+            // highest index is the one the saga was waiting on.
+            if let Some(in_flight) = steps.iter().rev().find(|st| st.state == "pending") {
+                println!(
+                    "      [step {} was in-flight when launcher exited]",
+                    in_flight.step_index
+                );
             }
         }
         println!();
