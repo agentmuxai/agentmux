@@ -4,23 +4,18 @@
 /**
  * TabModalLayer — per-tab modal host.
  *
- * Wraps a tab's tile layout, provides a context for opening tab-scoped
- * modals, and renders the overlay + panel inline (no Portal). Because
- * it lives inside `<TabContent>`, switching tabs hides the modal via
- * the existing `display:none` on inactive tab content. The top tab bar
- * is outside this layer and stays interactive.
+ * Provides a context for opening tab-scoped modals and renders the
+ * overlay as a sibling of `<TileLayout>` inside `<TabContent>`. No
+ * extra DOM wrappers are added around the tile layout — `<Context.Provider>`
+ * emits no DOM node, so the existing flex layout in TabContent is
+ * completely undisturbed. The overlay uses `position:absolute; inset:0`
+ * against TabContent's `position:relative` root div.
  *
- * Rationale:
- *   - Form input lag in the original launch modal came largely from a
- *     Portal-mounted full-window backdrop blur and from the modal
- *     sharing a reactive scope with the agent picker. Both are gone:
- *     the backdrop is scoped to the tab area, and the modal renders in
- *     a sibling slot of the tile layout, isolated from the picker tree.
- *   - The user's mental model is "the modal is bound to the tab I
- *     opened it from"; rendering inside `<TabContent>` matches that.
- *   - The legacy global `Modal` (modal-v2) stays for window-level
- *     dialogs (command palette, about, backend prompts). This layer is
- *     additive, not a replacement.
+ * Switching tabs hides the modal via the existing `display:none` on
+ * inactive tab content. The top tab bar stays interactive.
+ *
+ * The legacy global `Modal` (modal-v2) stays for window-level dialogs
+ * (command palette, about, backend prompts). This layer is additive.
  *
  * See docs/specs/launch-modal-rearchitecture-2026-05-01.md.
  */
@@ -46,52 +41,51 @@ export const TabModalLayer: Component<TabModalLayerProps> = (props) => {
     };
 
     // Backdrop click closes. Panel click is stopped from bubbling so a
-    // click inside the form doesn't reach the backdrop. ESC closes via
-    // the layer's keyDown handler — caught here so unrelated ESC users
-    // in the tile layout aren't pre-empted by a global listener.
+    // click inside the form doesn't reach the backdrop. ESC is handled
+    // on the overlay itself so we don't need a wrapper div around
+    // TileLayout (which would break its flex layout).
     const handleBackdropClick = (e: MouseEvent) => {
         if (e.target === e.currentTarget) {
             api.close();
         }
     };
 
-    const handleKeyDown = (e: KeyboardEvent) => {
-        if (e.key === "Escape" && current() != null) {
+    const handleOverlayKeyDown = (e: KeyboardEvent) => {
+        if (e.key === "Escape") {
             e.stopPropagation();
             api.close();
         }
     };
 
+    // Context.Provider emits no DOM node, so TileLayout (props.children)
+    // remains a direct child of TabContent's flex container. The overlay
+    // is a sibling rendered after it; `position:absolute; inset:0` on
+    // .tab-modal-overlay pins it to TabContent's `position:relative` root.
     return (
         <TabModalContext.Provider value={api}>
-            <div
-                class="tab-modal-layer"
-                data-modal-open={current() != null ? "true" : undefined}
-                onKeyDown={handleKeyDown}
-            >
-                <div
-                    class="tab-modal-content"
-                    inert={current() != null || undefined}
-                    aria-hidden={current() != null ? "true" : undefined}
-                >
-                    {props.children}
-                </div>
-                <Show when={current()}>
-                    {(req) => (
-                        <div class="tab-modal-overlay" role="presentation" onClick={handleBackdropClick}>
-                            <div class="tab-modal-backdrop" />
-                            <div
-                                class="tab-modal-panel"
-                                role="dialog"
-                                aria-modal="true"
-                                onClick={(e) => e.stopPropagation()}
-                            >
-                                {renderRequest(req(), api)}
-                            </div>
+            {props.children}
+            <Show when={current()}>
+                {(req) => (
+                    <div
+                        class="tab-modal-overlay"
+                        role="presentation"
+                        // eslint-disable-next-line jsx-a11y/no-autofocus
+                        tabIndex={-1}
+                        onClick={handleBackdropClick}
+                        onKeyDown={handleOverlayKeyDown}
+                    >
+                        <div class="tab-modal-backdrop" />
+                        <div
+                            class="tab-modal-panel"
+                            role="dialog"
+                            aria-modal="true"
+                            onClick={(e) => e.stopPropagation()}
+                        >
+                            {renderRequest(req(), api)}
                         </div>
-                    )}
-                </Show>
-            </div>
+                    </div>
+                )}
+            </Show>
         </TabModalContext.Provider>
     );
 };

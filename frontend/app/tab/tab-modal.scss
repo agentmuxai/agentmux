@@ -3,40 +3,11 @@
 
 // TabModalLayer — per-tab modal scaffolding.
 //
-// The layer is a positioned ancestor of both the tab's tile content and
-// the modal overlay. The overlay uses `position: absolute; inset: 0;`
-// to fill the tab area only — never the tab bar above or anything
-// outside `<TabContent>`. Backdrop is a solid scrim (no `backdrop-filter`)
-// to keep input handling cheap; full-window blur was a major contributor
-// to the original lag.
-
-.tab-modal-layer {
-    position: relative;
-    display: flex;
-    flex-direction: column;
-    flex-grow: 1;
-    min-height: 0;
-    width: 100%;
-}
-
-.tab-modal-content {
-    display: flex;
-    flex-direction: column;
-    flex-grow: 1;
-    min-height: 0;
-    width: 100%;
-
-    // When a modal is open, dim the tile layout and disable pointer
-    // events so the user can't interact with widgets behind the panel.
-    // `inert` would be ideal but its CSS support is uneven; we use
-    // pointer-events + aria-hidden via the parent's data attribute.
-    .tab-modal-layer[data-modal-open="true"] & {
-        pointer-events: none;
-        user-select: none;
-        filter: saturate(0.7) brightness(0.85);
-        transition: filter 120ms ease-out;
-    }
-}
+// No wrapper div is added around TileLayout. The overlay is a sibling
+// of TileLayout inside TabContent's `position:relative` root div.
+// `position: absolute; inset: 0` on .tab-modal-overlay pins it to that
+// ancestor, covering only the tab area (not the tab bar above).
+// Backdrop is a solid scrim — no backdrop-filter — to keep rendering cheap.
 
 .tab-modal-overlay {
     position: absolute;
