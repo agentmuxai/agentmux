@@ -47,39 +47,19 @@ use std::sync::Arc;
 use cef::*;
 
 fn main() {
-    // Set the DLL search path so CEF's runtime LoadLibrary calls (chrome_elf,
-    // libEGL, libGLESv2, d3dcompiler_47, …) resolve against the directory that
-    // actually holds libcef.dll. Two layouts exist:
-    //
-    //   Portable / installed: <root>/runtime/host.exe + libcef.dll alongside.
-    //                         The launcher (agentmux-launcher) already sets
-    //                         the path to <root>/runtime/ before spawning us;
-    //                         this block is a no-op safety net for that mode.
-    //
-    //   Dev (`task dev`):     dist/cef-dev/agentmux-cef.exe + libcef.dll
-    //                         alongside (flat layout). Taskfile launches the
-    //                         host directly with no launcher, so nothing else
-    //                         has set the DLL path. Without it, CEF's internal
-    //                         LoadLibrary chain can fail and `cef::initialize`
-    //                         returns 0 — the empty-chrome_debug.log mode.
-    //
-    // Fall back to the host's own directory whenever a runtime/ subdir isn't
-    // present. Idempotent in portable mode (launcher set it first), correct
-    // in dev mode.
+    // Add runtime/ subdirectory to DLL search path so CEF can find libcef.dll
+    // in the portable layout (agentmux.exe in root, libcef.dll in runtime/).
     #[cfg(target_os = "windows")]
     {
         if let Ok(exe) = std::env::current_exe() {
             if let Some(dir) = exe.parent() {
                 let runtime_dir = dir.join("runtime");
-                let dll_dir = if runtime_dir.exists() {
-                    runtime_dir
-                } else {
-                    dir.to_path_buf()
-                };
-                unsafe {
-                    use std::os::windows::ffi::OsStrExt;
-                    let wide: Vec<u16> = dll_dir.as_os_str().encode_wide().chain(Some(0)).collect();
-                    windows_sys::Win32::System::LibraryLoader::SetDllDirectoryW(wide.as_ptr());
+                if runtime_dir.exists() {
+                    unsafe {
+                        use std::os::windows::ffi::OsStrExt;
+                        let wide: Vec<u16> = runtime_dir.as_os_str().encode_wide().chain(Some(0)).collect();
+                        windows_sys::Win32::System::LibraryLoader::SetDllDirectoryW(wide.as_ptr());
+                    }
                 }
             }
         }
@@ -395,15 +375,6 @@ fn main() {
     // Configure CEF settings.
     let debug_port: u16 = if is_dev { 9223 } else { 9222 };
     *app_state.debug_port.lock() = debug_port;
-
-    // Route CEF's internal Chromium logging into our log dir alongside the
-    // tracing-subscriber file. Without this, init failures leave an empty
-    // chrome_debug.log in the cache dir and we have nothing to read. INFO is
-    // verbose enough to expose load-library / resource problems but quiet
-    // enough not to swamp the file in normal operation.
-    let cef_log_path = log_dir.join("cef-debug.log");
-    let cef_log_file = CefString::from(cef_log_path.to_str().unwrap_or(""));
-
     let settings = Settings {
         no_sandbox: 1,
         background_color: 0xFF000000,
@@ -411,8 +382,6 @@ fn main() {
         root_cache_path: cache_dir,
         resources_dir_path: resources_dir,
         locales_dir_path: locales_dir,
-        log_file: cef_log_file,
-        log_severity: LogSeverity::INFO,
         // CEF subprocess (renderer, GPU) uses the same exe
         browser_subprocess_path: CefString::from(
             std::env::current_exe().unwrap().to_str().unwrap_or("")
@@ -421,43 +390,13 @@ fn main() {
     };
 
     // Initialize CEF.
-    //
-    // CefInitialize returns 1 on success and 0 either on real init failure OR
-    // on "normal early exit" (process singleton, command-line forward, etc).
-    // We can only tell the two apart by calling cef_get_exit_code() and
-    // matching against cef_resultcode_t. Treat NORMAL_EXIT* codes as a clean
-    // exit; everything else is a real failure that we surface via panic.
-    //
-    // Common early-exit codes (cef_resultcode_t):
-    //   0  CEF_RESULT_CODE_NORMAL_EXIT
-    //   24 CEF_RESULT_CODE_NORMAL_EXIT_PROCESS_NOTIFIED  ← singleton relaunch
-    //   36 CEF_RESULT_CODE_NORMAL_EXIT_PACK_EXTENSION_SUCCESS
-    //   38 CEF_RESULT_CODE_NORMAL_EXIT_AUTO_DE_ELEVATED
     let init_result = initialize(
         Some(args.as_main_args()),
         Some(&settings),
         Some(&mut cef_app),
         std::ptr::null_mut(),
     );
-    if init_result != 1 {
-        let exit_code = get_exit_code();
-        match exit_code {
-            0 | 24 | 36 | 38 => {
-                tracing::info!(
-                    exit_code,
-                    "CEF early exit (process singleton or similar) — exiting cleanly"
-                );
-                std::process::exit(0);
-            }
-            _ => {
-                tracing::error!(
-                    exit_code,
-                    "CEF initialization failed; see ~/.agentmux/logs/cef-debug.log for details"
-                );
-                std::process::exit(exit_code);
-            }
-        }
-    }
+    assert_eq!(init_result, 1, "CEF initialization failed");
 
     tracing::info!("CEF initialized, entering message loop");
 
