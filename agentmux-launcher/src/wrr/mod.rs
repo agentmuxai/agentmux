@@ -32,17 +32,22 @@ use crate::state::{PendingHwnd, State};
 
 pub mod rect;
 
-/// Internal — the three branches of `apply_hwnd_opened` against a
+/// Internal — the four branches of `apply_hwnd_opened` against a
 /// known `label_hint`. Lifted into its own enum so the function
 /// can drop the `&mut WindowMirror` borrow before calling
-/// `state.bump_version()` on the `Linked`-double-link path
-/// (rustc E0499).
+/// `state.bump_version()` on the drift-emitting path (rustc E0499).
 enum HwndOpenedOutcome {
     /// Existing mirror was waiting for an HWND; linked successfully.
     Linked,
-    /// Existing mirror was already linked to a different HWND. Carry
-    /// the prior HWND for the drift message.
-    DoubleLinkedWith(u64),
+    /// Existing mirror was already linked to a DIFFERENT HWND. The
+    /// explicit `on_after_created` path is authoritative — REPAIR by
+    /// overwriting the stale link, and emit `HwndWithoutBrowser`
+    /// drift to surface the prior incorrect link for diagnostics.
+    /// Carry the prior HWND for the drift message.
+    /// (PR #664: replaces the no-repair behavior that caused the
+    /// `panel grows but no window appears` user symptom under
+    /// burst creates.)
+    Repaired(u64),
     /// No mirror exists for that label — fall through to pending
     /// stash (caller responsibility).
     NoMatchingLabel,
@@ -103,7 +108,25 @@ pub fn apply_hwnd_opened(
                 HwndOpenedOutcome::Linked
             }
             Some(mirror) => {
-                HwndOpenedOutcome::DoubleLinkedWith(mirror.hwnd.unwrap_or(0))
+                // PR #664 — REPAIR instead of just emitting drift.
+                // The explicit `on_after_created` path is the
+                // authoritative source for label↔HWND linking now
+                // (drain-on-WindowOpened removed in
+                // `handle_report_window_opened`). If we find a stale
+                // link, overwrite it. The orphaned `prior` HWND will
+                // be re-attributed when ITS OWN on_after_created
+                // fires a few ms later — same flow, no special-casing.
+                //
+                // We still emit `HwndWithoutBrowser` drift so the
+                // existence of a stale link is visible in the log
+                // for diagnostic purposes (e.g., partial host
+                // upgrade where the host still sends back-of-queue
+                // peeks). Without the drift event, the silent repair
+                // would mask real bugs.
+                let prior = mirror.hwnd.unwrap_or(0);
+                mirror.hwnd = Some(hwnd);
+                drain_pending = true;
+                HwndOpenedOutcome::Repaired(prior)
             }
             None => HwndOpenedOutcome::NoMatchingLabel,
         };
@@ -112,15 +135,15 @@ pub fn apply_hwnd_opened(
         }
         match outcome {
             HwndOpenedOutcome::Linked => return vec![],
-            HwndOpenedOutcome::DoubleLinkedWith(existing) => {
+            HwndOpenedOutcome::Repaired(existing) => {
                 let v = state.bump_version();
                 return vec![Event::HwndDriftDetected {
                     kind: HwndDriftKind::HwndWithoutBrowser,
                     label: Some(label.to_string()),
                     hwnd: Some(hwnd),
                     detail: format!(
-                        "ReportHwndOpened label_hint={} already linked to a different hwnd={}",
-                        label, existing
+                        "ReportHwndOpened label_hint={} repaired stale link from hwnd={} to hwnd={}",
+                        label, existing, hwnd
                     ),
                     severity: severity_for(HwndDriftKind::HwndWithoutBrowser),
                     version: v,

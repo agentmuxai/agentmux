@@ -26,9 +26,9 @@ That's the alias signature exactly.
 - The drift events fire as `Warn`, not `Error`, for `HiddenSinceOpen` (the most-common downstream symptom). `HwndWithoutBrowser` is `Error` but only fires on the explicit double-link path, not on the more-common silent-alias path.
 - The InstancePanel "list grows" symptom is per-`WindowOpened`-event; the panel can't tell that two rows alias to one HWND until you close one and observe the cascade.
 
-## Fix
+## Fix (host side)
 
-Drop the back-of-queue peek. Pass `label_hint=None` for every WM_CREATE. The launcher's existing drain-on-WindowOpened fallback (originally written for pool windows that don't push pending entries) handles all WM_CREATEs uniformly:
+Drop the back-of-queue peek. Pass `label_hint=None` for every WM_CREATE.
 
 ```diff
 - let label_hint = app_state()
@@ -39,13 +39,33 @@ Drop the back-of-queue peek. Pass `label_hint=None` for every WM_CREATE. The lau
 + launcher_ipc::report_hwnd_opened(raw_hwnd, class, title, None);
 ```
 
-Trade-off: the diagnostic value of the immediate label-hint (correlation in `[wrr]` logs) is lost. The authoritative label still arrives via `on_after_created` → `ReportWindowOpened` → drain fallback within ~50ms typically. Worth it.
+`AppState::peek_back_pending_window_creation` is preserved as-is for potential future diagnostic use.
 
-`AppState::peek_back_pending_window_creation` is preserved as-is (5 lines, no harm) for potential future diagnostic use; it gets a "never used" warning that joins an existing group.
+## Fix (launcher side — codex P1 follow-up on 0.33.590 smoke)
+
+The host-side fix alone wasn't enough. The launcher's `apply_window_opened` had a drain-on-WindowOpened fallback that used `max_by_key(arrived_at_ms)` — picked the MOST RECENT pending HWND. Under burst creates, the FIRST `WindowOpened(A)` would consume window B's pending HWND (the most recent), then `on_after_created`'s authoritative `ReportHwndOpened(actual_hwnd, A, Some(A))` would hit the double-link path and only emit drift — no repair. The mirror stayed linked to the wrong HWND. Codex caught this on 0.33.590 review.
+
+Two additional changes:
+
+1. **Remove the auto-drain in `handle_report_window_opened`.** WindowOpened no longer attempts to link an HWND. The mirror starts with `hwnd: None`. The explicit `ReportHwndOpened` from `on_after_created` (which has the authoritative label + HWND from `browser.host().window_handle()`) is the sole linking path.
+
+2. **Make `apply_hwnd_opened` REPAIR stale links.** If a mirror is already linked to a different HWND when the explicit `ReportHwndOpened` arrives, overwrite the link to the authoritative HWND and emit `HwndWithoutBrowser` drift for diagnostic visibility. The orphaned prior HWND will be re-attributed when ITS OWN `on_after_created` fires.
+
+```diff
+- HwndOpenedOutcome::DoubleLinkedWith(u64),  // emit drift, no state change
++ HwndOpenedOutcome::Repaired(u64),          // overwrite to authoritative + emit drift
+```
+
+Trade-off: the diagnostic value of the immediate WM_CREATE label-hint (correlation in `[wrr]` logs) is lost; pending_hwnds is now diagnostic-only (track strays). The authoritative label still arrives via on_after_created within ~50ms.
 
 ## Tests
 
-Pre-existing reducer tests for `handle_report_window_opened`'s drain-on-WindowOpened fallback already cover the `label_hint=None` path (used by pool windows). All 63 host tests + 150 launcher tests pass on the change.
+Two new launcher reducer tests for the burst-create scenario:
+
+- `wrr_burst_creates_link_correctly_without_aliasing` — two queued WM_CREATEs + interleaved WindowOpened + on_after_created links, verifies no auto-drain and no aliasing
+- `wrr_apply_hwnd_opened_repairs_stale_link` — simulates a stale wrong-HWND link and verifies the explicit on_after_created path repairs it
+
+All 63 host tests + 152 launcher tests pass.
 
 ## Smoke validation
 

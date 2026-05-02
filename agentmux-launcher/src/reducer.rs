@@ -791,30 +791,28 @@ fn handle_report_window_opened(
     kind: WindowKind,
     parent_label: Option<String>,
 ) -> Vec<Event> {
-    // Phase B.9.1 (WRR) — drain-on-WindowOpened fallback. The
-    // host's `EVENT_OBJECT_CREATE` callback fires before its CEF
-    // `OnAfterCreated` (which becomes this Command), so the
-    // matching `ReportHwndOpened` may have already been processed
-    // and stashed in `state.pending_hwnds` (with `label_hint=None`
-    // if the host couldn't determine it from
-    // `pending_window_creations`). Find the most recent pending
-    // HWND that arrived within the last 2 seconds and link it to
-    // the new mirror. The 2s window is generous compared to the
-    // typical < 50ms create→ReportWindowOpened gap, but bounded
-    // enough that a stale pending HWND from a prior open won't
-    // mis-link.
-    const PENDING_AGE_LIMIT_MS: u64 = 2_000;
-    let drained_hwnd: Option<u64> = state
-        .pending_hwnds
-        .iter()
-        .filter(|(_, p)| p.label_hint.is_none())
-        .filter(|(_, p)| ctx.now_ms.saturating_sub(p.arrived_at_ms) <= PENDING_AGE_LIMIT_MS)
-        .max_by_key(|(_, p)| p.arrived_at_ms)
-        .map(|(hwnd, _)| *hwnd);
-    if let Some(hwnd) = drained_hwnd {
-        state.pending_hwnds.remove(&hwnd);
-    }
-
+    // PR — drain-on-WindowOpened fallback REMOVED. Was racy under
+    // burst creates: `max_by_key(arrived_at_ms)` returns the MOST
+    // RECENT pending HWND, but the WindowOpened we're processing may
+    // correspond to an OLDER pending HWND. With multiple WM_CREATEs
+    // in flight, the first `WindowOpened(A)` would consume window B's
+    // pending HWND, then `ReportHwndOpened(actual_hwnd, A, Some(A))`
+    // from on_after_created would hit the double-link path and only
+    // emit drift — no repair. Net: alias bug + HwndWithoutBrowser
+    // errors. (codex P1 PR #664; user-visible "panel grows but no
+    // window appears" symptom.)
+    //
+    // After this change, the explicit `ReportHwndOpened` from
+    // `client.rs::on_after_created` is the SOLE path that links a
+    // mirror to its HWND. That path has authoritative knowledge:
+    // both the label (popped from `pending_window_creations`) and the
+    // actual HWND (from `browser.host().window_handle()`). No race.
+    //
+    // `pending_hwnds` continues to track WM_CREATE events for
+    // diagnostic purposes (stray HWNDs that on_after_created never
+    // claims indicate a renderer crash or non-CEF window). Entries
+    // age out passively when their corresponding mirror is linked
+    // through the explicit path or when destroy events arrive.
     state.windows.insert(
         label.clone(),
         WindowMirror {
@@ -822,14 +820,11 @@ fn handle_report_window_opened(
             kind,
             parent_label: parent_label.clone(),
             opened_at: ctx.now_rfc3339.clone(),
-            // Phase B.9.1 — observability axis. `hwnd` is
-            // populated from the drained pending entry above
-            // (host's WRR hook fired before this Command landed)
-            // OR remains None until the host's
-            // `ReportHwndOpened` with matching `label_hint`
-            // arrives via `apply_hwnd_opened`. Either path
-            // converges on the same linked state.
-            hwnd: drained_hwnd,
+            // hwnd starts None; populated by the host's explicit
+            // `ReportHwndOpened` (with label_hint=Some(label)) from
+            // `on_after_created`, dispatched a few ms after this
+            // WindowOpened arrives. See `apply_hwnd_opened`.
+            hwnd: None,
             visible: false,
             iconic: false,
             last_rect: None,
@@ -2838,6 +2833,119 @@ mod tests {
             evs.iter().any(|e| matches!(e, Event::WindowClosed { .. })),
             "WindowClosed must fire so frontend prunes its atoms, got {:?}",
             evs
+        );
+    }
+
+    #[test]
+    fn wrr_burst_creates_link_correctly_without_aliasing() {
+        // PR #664 regression — burst window creates would alias HWNDs to
+        // wrong labels under the pre-fix dual-source design:
+        //   1. WM_CREATE for HWND_a stashed (label_hint=None, pre-fix
+        //      it was Some(WRONG) due to back-of-queue peek)
+        //   2. WM_CREATE for HWND_b stashed (same problem)
+        //   3. WindowOpened(A) drained-on-open picked the MOST RECENT
+        //      pending HWND (HWND_b) → mirror A linked to HWND_b. WRONG.
+        //   4. on_after_created(A, HWND_a) → DoubleLinked drift, no
+        //      repair → mirror A stayed linked to HWND_b forever.
+        //
+        // Post-fix: drain-on-open removed; on_after_created is the sole
+        // authoritative link path AND repairs stale links it finds.
+        let (mut state, c) = registered_host_state();
+        let _ = update(
+            &mut state,
+            Command::ReportMonitorTopologyChanged {
+                rects: vec![Rect { left: 0, top: 0, right: 1920, bottom: 1080 }],
+            },
+            &c,
+        );
+        // Two WM_CREATEs queue up before any on_after_created or
+        // WindowOpened — the burst pattern.
+        let _ = update(&mut state, Command::ReportHwndOpened {
+            hwnd: 0xAA, class_name: "Chrome_WidgetWin_1".into(),
+            title: "".into(), label_hint: None,
+        }, &c);
+        let _ = update(&mut state, Command::ReportHwndOpened {
+            hwnd: 0xBB, class_name: "Chrome_WidgetWin_1".into(),
+            title: "".into(), label_hint: None,
+        }, &c);
+        assert!(state.pending_hwnds.contains_key(&0xAA));
+        assert!(state.pending_hwnds.contains_key(&0xBB));
+
+        // WindowOpened arrives — must NOT auto-drain a pending HWND.
+        // Pre-fix, this would have linked w1 to HWND_b (most recent).
+        let _ = update(&mut state, Command::ReportWindowOpened {
+            label: "w1".into(), kind: WindowKind::FullInstance,
+            parent_label: None,
+        }, &c);
+        assert_eq!(
+            state.windows["w1"].hwnd, None,
+            "WindowOpened must NOT auto-drain pending HWNDs (was racy)"
+        );
+        assert!(state.pending_hwnds.contains_key(&0xAA));
+        assert!(state.pending_hwnds.contains_key(&0xBB));
+
+        let _ = update(&mut state, Command::ReportWindowOpened {
+            label: "w2".into(), kind: WindowKind::FullInstance,
+            parent_label: None,
+        }, &c);
+        assert_eq!(state.windows["w2"].hwnd, None);
+
+        // Now the explicit on_after_created links arrive.
+        let evs1 = update(&mut state, Command::ReportHwndOpened {
+            hwnd: 0xAA, class_name: "Chrome_WidgetWin_1".into(),
+            title: "".into(), label_hint: Some("w1".into()),
+        }, &c);
+        assert_eq!(state.windows["w1"].hwnd, Some(0xAA));
+        assert!(!state.pending_hwnds.contains_key(&0xAA));
+        assert!(
+            !evs1.iter().any(|e| matches!(e, Event::HwndDriftDetected { .. })),
+            "no drift on clean link, got {:?}", evs1
+        );
+
+        let evs2 = update(&mut state, Command::ReportHwndOpened {
+            hwnd: 0xBB, class_name: "Chrome_WidgetWin_1".into(),
+            title: "".into(), label_hint: Some("w2".into()),
+        }, &c);
+        assert_eq!(state.windows["w2"].hwnd, Some(0xBB));
+        assert!(
+            !evs2.iter().any(|e| matches!(e, Event::HwndDriftDetected { .. })),
+            "no drift on clean link, got {:?}", evs2
+        );
+    }
+
+    #[test]
+    fn wrr_apply_hwnd_opened_repairs_stale_link() {
+        // PR #664 regression — if some prior path (e.g. partial host
+        // upgrade still using back-of-queue peek) linked a wrong HWND
+        // to a label, the explicit on_after_created path must REPAIR
+        // the link, not just emit drift and leave the wrong link in
+        // place.
+        let (mut state, c) = registered_host_state();
+        let _ = update(&mut state, Command::ReportMonitorTopologyChanged {
+            rects: vec![Rect { left: 0, top: 0, right: 1920, bottom: 1080 }],
+        }, &c);
+        let _ = update(&mut state, Command::ReportWindowOpened {
+            label: "w1".into(), kind: WindowKind::FullInstance,
+            parent_label: None,
+        }, &c);
+        // Simulate a stale wrong-HWND link (would happen pre-fix if
+        // back-of-queue peek labeled HWND_b as w1).
+        state.windows.get_mut("w1").unwrap().hwnd = Some(0xBAD);
+
+        // on_after_created arrives with the actual HWND for w1.
+        let evs = update(&mut state, Command::ReportHwndOpened {
+            hwnd: 0xAA, class_name: "Chrome_WidgetWin_1".into(),
+            title: "".into(), label_hint: Some("w1".into()),
+        }, &c);
+        assert_eq!(
+            state.windows["w1"].hwnd, Some(0xAA),
+            "stale link must be REPAIRED to the authoritative HWND"
+        );
+        assert!(
+            evs.iter().any(|e| matches!(e, Event::HwndDriftDetected {
+                kind: HwndDriftKind::HwndWithoutBrowser, ..
+            })),
+            "drift event must be emitted so the repair is visible in logs, got {:?}", evs
         );
     }
 
