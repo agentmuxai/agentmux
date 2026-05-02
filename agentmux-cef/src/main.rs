@@ -485,6 +485,33 @@ fn init_logging(log_dir: &std::path::Path) -> tracing_appender::non_blocking::Wo
     let pointer_name = format!("current-host-v{}.path", version);
     let _ = std::fs::write(log_dir.join(&pointer_name), &current_filename);
 
+    // Synchronous init sentinel: append a single line directly to the
+    // expected log path BEFORE the tracing subscriber is wired up. Without
+    // this, a hang between subscriber-setup and the non-blocking writer's
+    // first flush leaves the pointer file pointing at a never-created log
+    // file (observed 2026-05-02 freeze investigation). The sentinel
+    // guarantees the file exists once init_logging has run past
+    // pointer-write — if the file is missing afterwards, we know
+    // init_logging itself didn't get past this point.
+    let sentinel_path = log_dir.join(&current_filename);
+    let sentinel_line = format!(
+        "{} INIT-SENTINEL agentmux-host v={} pid={} os={} arch={}\n",
+        chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S%.3fZ"),
+        version,
+        std::process::id(),
+        std::env::consts::OS,
+        std::env::consts::ARCH,
+    );
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&sentinel_path)
+    {
+        use std::io::Write;
+        let _ = f.write_all(sentinel_line.as_bytes());
+        let _ = f.flush();
+    }
+
     let subscriber = tracing_subscriber::registry()
         .with(
             EnvFilter::try_from_default_env()

@@ -25,6 +25,14 @@ use crate::state::AppState;
 /// CEF assigns a separate renderer process when the RequestContext has a unique
 /// `cache_path`. We use `<data_dir>/browser-contexts/<label>/` for this.
 pub fn create_isolated_request_context(state: &Arc<AppState>, label: &str) -> Option<cef::RequestContext> {
+    // Phase 1 diagnostic tracing (added 2026-05-02 freeze investigation, see
+    // docs/specs/SPEC_HOST_WINDOW_CREATION_RUNNER_2026-05-02.md). The freeze
+    // wedges the UI thread inside CEF's Chrome profile-init under concurrent
+    // load; we need to find the EXACT line that silences before committing
+    // to the runner-based serialization fix.
+    let t0 = std::time::Instant::now();
+    tracing::info!(label = %label, "[cef-profile-init] entering create_isolated_request_context");
+
     let data_dir = state.version_data_dir.lock().clone()
         .unwrap_or_else(|| {
             std::env::temp_dir()
@@ -46,7 +54,19 @@ pub fn create_isolated_request_context(state: &Arc<AppState>, label: &str) -> Op
         ..Default::default()
     };
 
+    tracing::info!(
+        label = %label,
+        elapsed_us = t0.elapsed().as_micros() as u64,
+        "[cef-profile-init] calling request_context_create_context"
+    );
     let ctx = cef::request_context_create_context(Some(&settings), None);
+    tracing::info!(
+        label = %label,
+        elapsed_us = t0.elapsed().as_micros() as u64,
+        ok = ctx.is_some(),
+        "[cef-profile-init] request_context_create_context returned"
+    );
+
     if ctx.is_some() {
         tracing::info!(label = %label, path = %ctx_path.display(), "[cef] created isolated RequestContext");
     } else {
