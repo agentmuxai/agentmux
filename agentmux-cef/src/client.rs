@@ -151,7 +151,8 @@ impl AgentMuxHandler {
         // their entry; if the queue is empty (legacy paths /
         // unexpected races) fall back to a generated UUID label
         // with FullInstance defaults.
-        let pending = if self.state.browsers.lock().is_empty() {
+        // Phase H.2.b — reducer-aware emptiness check with fallback.
+        let pending = if self.state.browsers_is_empty() {
             crate::state::PendingWindowCreation {
                 label: "main".to_string(),
                 kind: WindowKind::FullInstance,
@@ -564,7 +565,8 @@ impl AgentMuxHandler {
             if meta.kind == WindowKind::FullInstance {
                 let child_labels = self.state.subwindow_children_of(&meta.label);
                 for child_label in child_labels {
-                    if let Some(mut child) = self.state.browsers.lock().get(&child_label).cloned() {
+                    // Phase H.2.b — reducer-aware lookup with fallback.
+                    if let Some(mut child) = self.state.get_browser(&child_label) {
                         if let Some(host) = child.host() {
                             tracing::info!(parent = %meta.label, child = %child_label, "[subwindow-cascade] closing sub-window");
                             host.close_browser(1);
@@ -627,15 +629,16 @@ impl AgentMuxHandler {
         // Promoted pool windows ARE counted: they're removed from
         // `unpromoted_pool_labels` at promote time.
         let (user_browser_count, browsers_keys, pool_keys) = {
+            // Phase H.2.b — reducer-aware label snapshot. Single helper call
+            // replaces an interleaved pool_labels.lock + browsers.lock pair.
             let pool_labels = self.state.unpromoted_pool_labels.lock().clone();
-            let browsers = self.state.browsers.lock();
-            let count = browsers
+            let keys = self.state.list_browser_labels();
+            let count = keys
                 .iter()
-                .filter(|(label, _)| {
-                    !pool_labels.contains(*label) && !label.starts_with("browser-pane-")
+                .filter(|label| {
+                    !pool_labels.contains(label.as_str()) && !label.starts_with("browser-pane-")
                 })
                 .count();
-            let keys: Vec<String> = browsers.keys().cloned().collect();
             let pool: Vec<String> = pool_labels.iter().cloned().collect();
             (count, keys, pool)
         };
@@ -716,14 +719,14 @@ impl AgentMuxHandler {
                 .store(true, std::sync::atomic::Ordering::Release);
             tracing::warn!(target: "wrr", "[wrr] is_quitting=true (drain mode)");
 
-            let pool_browsers: Vec<cef::Browser> = {
-                let browsers = self.state.browsers.lock();
-                browsers
-                    .iter()
-                    .filter(|(label, _)| label.starts_with("window-pool-"))
-                    .map(|(_, b)| b.clone())
-                    .collect()
-            };
+            // Phase H.2.b — reducer-aware iteration with fallback + drift logging.
+            let pool_browsers: Vec<cef::Browser> = self
+                .state
+                .list_browsers()
+                .into_iter()
+                .filter(|(label, _)| label.starts_with("window-pool-"))
+                .map(|(_, b)| b)
+                .collect();
             tracing::warn!(
                 target: "wrr",
                 "[wrr] stage 1: user_count==0; closing {} pool browser(s)",
