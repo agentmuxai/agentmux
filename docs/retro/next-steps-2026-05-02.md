@@ -112,3 +112,26 @@ This unblocks PR #8 (H.8 durability) and PR #9 (H.9 wire-promote events) per the
 - Don't widen the H.7 gate speculatively per spec §5 — that's another untested probe.
 - Don't revert PR #6 reflexively. It's inert, not harmful.
 - Don't add more `wfr:gate` warnings without callers — they pollute log search.
+
+## Deferred items (don't lose track)
+
+### Rename `Pane` → `BrowserPane` in reducer/state types
+
+**Trigger to start:** after the no-op create root cause has shipped to main.
+
+The reducer/state-side abbreviation `Pane` is ambiguous — could mean terminal pane, agent pane, or browser pane to a casual reader. In reality only `defwidget@browser` blocks reach `HostState.panes`, but reducer.rs / state.rs don't say that. The IPC commands (`browser_pane_*`) and `BrowserPaneManager` are already explicit; only the host-internal types abbreviated.
+
+**In scope:**
+- `HostCommand` variants: `TryRegisterPaneLive`, `EnqueuePaneCreate`, `CompletePaneCreate`, `EnqueuePaneClose`, `CompletePaneClose`, `AbortPaneCreate`, `DrainPaneByLabel`
+- `HostEvent` variants: `PaneCreateRequested`, `PaneLive`, `PaneClosing`, `PaneClosed`, `PaneCreationFailed`
+- State types in `state.rs`: `PaneEntry`, `PaneLifecycle`, `HostState.panes` field
+- `DispatchOutput` fields: `pane_register_result`, `closed_pane_label`, `drained_block_id`
+- `AppState` helpers: `live_pane_label`, `live_pane_labels`, `any_pane_closing`
+- `pane/` module — possibly rename to `browser_pane/`
+
+**Out of scope:**
+- `BrowserPaneManager` (already clear)
+- IPC command names `browser_pane_*` (already clear)
+- Label format `browser-pane-<id>-<seq>` (already clear)
+
+**Why deferred:** pure mechanical rename across ~50 sites, no behavior change. Doing it now risks merge conflicts with whatever fix lands for the no-op create bug. Open as its own focused PR after the fix merges.
