@@ -3,6 +3,7 @@
 
 import { Block } from "@/app/block/block";
 import { ContextMenuModel } from "@/app/store/contextmenu";
+import { TabModalLayer } from "@/app/tab/TabModalLayer";
 import { CenteredDiv } from "@/element/quickelems";
 import { ContentRenderer, NodeModel, PreviewRenderer, TileLayout } from "@/layout/index";
 import { TileLayoutContents } from "@/layout/lib/types";
@@ -111,11 +112,13 @@ function TabContent(props: { tabId: string }): JSX.Element {
                 when={tabData() != null}
                 fallback={<CenteredDiv>Tab Not Found</CenteredDiv>}
             >
-                <TileLayout
-                    contents={tileLayoutContents()}
-                    tabAtom={tabAtom()}
-                    getCursorPoint={getApi().getCursorPoint}
-                />
+                <TabModalLayer>
+                    <TileLayout
+                        contents={tileLayoutContents()}
+                        tabAtom={tabAtom()}
+                        getCursorPoint={getApi().getCursorPoint}
+                    />
+                </TabModalLayer>
             </Show>
         </div>
     );
