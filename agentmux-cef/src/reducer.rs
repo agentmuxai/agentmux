@@ -909,11 +909,19 @@ fn handle_pool_destroyed_before_promote(state: &mut HostState, label: String) ->
 }
 
 fn handle_promote_pool_window(state: &mut HostState, label: String) -> DispatchOutput {
-    let in_queue = state.pool.queue.iter().position(|l| l == &label).is_some();
-    if in_queue {
-        state.pool.queue.retain(|l| l != &label);
+    // Idempotent no-op for truly unknown labels (reagent P2 PR #654 round 3).
+    // Symmetric with `handle_pool_destroyed_before_promote`'s pattern: only
+    // emit `PoolWindowLeft` if we actually removed the label from one of
+    // the pool sets. Without this, a stale promote command (e.g., from a
+    // race between PromotePoolWindow and PoolWindowDestroyedBeforePromote)
+    // would emit a phantom `PoolWindowLeft` event that observers might act on.
+    let queue_len_before = state.pool.queue.len();
+    state.pool.queue.retain(|l| l != &label);
+    let was_in_queue = state.pool.queue.len() < queue_len_before;
+    let was_in_unpromoted = state.pool.unpromoted.remove(&label);
+    if !was_in_queue && !was_in_unpromoted {
+        return DispatchOutput::default();
     }
-    state.pool.unpromoted.remove(&label);
     // Mark the corresponding browser handle as no-longer-pool.
     if let Some(handle) = state.browsers.get_mut(&label) {
         if let BrowserKind::TopLevel { is_pool } = &mut handle.kind {
@@ -1710,6 +1718,35 @@ mod tests {
             out.events.iter().any(|e| matches!(e, HostEvent::PoolWindowLeft { reason: PoolLeaveReason::DestroyedBeforePromote, .. })),
             "PoolWindowLeft event must fire for queue-state destroy"
         );
+    }
+
+    /// Regression test for reagent P2 on PR #654 round 3.
+    ///
+    /// `handle_promote_pool_window` should be idempotent for truly unknown
+    /// labels (matching `handle_pool_destroyed_before_promote`'s pattern).
+    /// A stale promote command — e.g., racing with destroy — must not emit
+    /// a phantom `PoolWindowLeft` event that observers might act on.
+    #[test]
+    fn pool_promote_with_unknown_label_is_noop() {
+        let mut state = HostState::default();
+        let out = update(&mut state, HostCommand::PromotePoolWindow { label: "ghost".into() });
+        assert!(out.events.is_empty(), "promote of unknown label must be no-op");
+        assert!(state.pool.queue.is_empty());
+        assert!(state.pool.unpromoted.is_empty());
+    }
+
+    /// Confirms promote DOES emit when the label was in queue (the normal flow).
+    #[test]
+    fn pool_promote_with_known_label_emits_event() {
+        let mut state = HostState::default();
+        update(&mut state, HostCommand::PoolWindowSpawnStart { label: "p1".into() });
+        update(&mut state, HostCommand::PoolWindowReady { label: "p1".into() });
+        let out = update(&mut state, HostCommand::PromotePoolWindow { label: "p1".into() });
+        assert!(state.pool.queue.is_empty());
+        assert!(out.events.iter().any(|e| matches!(
+            e,
+            HostEvent::PoolWindowLeft { reason: PoolLeaveReason::Promoted, .. }
+        )));
     }
 
     /// Sister test: destroy with the label in NEITHER set is still a no-op.
