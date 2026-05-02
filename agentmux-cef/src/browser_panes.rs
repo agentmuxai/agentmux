@@ -4,22 +4,30 @@
 //! BrowserPaneManager: embeds browsers as native OS child windows using
 //! CefBrowserHost::CreateBrowser. All creation runs on the CEF UI thread.
 //!
-//! The Browser instance is owned by `state.browsers` (keyed by label). We only
-//! store the block_id -> label mapping here; look up the browser when needed.
+//! The Browser instance is owned by the host reducer's `browsers` map (keyed
+//! by label, accessed via `AppState::get_browser` etc). We only need the
+//! block_id → label mapping, which also lives in the reducer's `panes` map.
 //!
-//! Lifecycle states are tracked explicitly via `PaneLifecycle`:
+//! Lifecycle states are tracked explicitly via the reducer's `PaneLifecycle`:
 //!   Created → Closing → Closed (removed from `panes`)
 //! Every pane-facing op (focus/resize/navigate/…) short-circuits when the
 //! entry is already in `Closing`. This drops late IPC that the frontend
 //! fires after it has already asked for close but before CEF has destroyed
 //! the Browser — stale IPC against a mid-destruction HWND is the shape of
 //! the crash described in `docs/specs/SPEC_BROWSER_PANE_LIFECYCLE.md` §4c.
+//!
+//! **Phase H.1.d/e (PR #5):** The legacy `pane::lifecycle::PaneStateMachine`
+//! is gone; pane state lives only in `HostState.panes`. All mutations go
+//! through `HostCommand::TryRegisterPaneLive` / `EnqueuePaneClose` /
+//! `CompletePaneClose` / `DrainPaneByLabel` and read back via the reducer's
+//! atomic `DispatchOutput` fields.
 
 use std::sync::Arc;
 
 use cef::*;
 
-use crate::pane::{CreatePaneTask, PaneStateMachine, RegisterResult};
+use crate::pane::CreatePaneTask;
+use crate::reducer::RegisterResult;
 use crate::state::AppState;
 
 /// Abstraction over the CEF-side operations `close()` performs on the host
@@ -121,60 +129,18 @@ impl<'a> PaneCloseOps for AppStateCloseOps<'a> {
     }
 }
 
-pub struct BrowserPaneManager {
-    lifecycle: PaneStateMachine,
-}
+pub struct BrowserPaneManager;
 
 impl BrowserPaneManager {
     pub fn new() -> Self {
-        Self { lifecycle: PaneStateMachine::new() }
-    }
-
-    // test-only delegates — the real state machine has its own unit tests in
-    // pane::lifecycle; these just let this module's close_with tests set up
-    // preconditions without re-implementing the panes map.
-    #[cfg(test)]
-    fn test_insert_live(&self, block_id: &str, label: &str) {
-        self.lifecycle.test_insert_live(block_id, label);
-    }
-
-    #[cfg(test)]
-    fn test_mark_closing(&self, block_id: &str) {
-        self.lifecycle.test_mark_closing(block_id);
-    }
-
-    #[cfg(test)]
-    fn test_has_entry(&self, block_id: &str) -> bool {
-        self.lifecycle.test_has_entry(block_id)
-    }
-
-    #[cfg(test)]
-    fn test_entry_state(&self, block_id: &str) -> Option<crate::pane::PaneLifecycle> {
-        self.lifecycle.test_entry_state(block_id)
+        Self
     }
 
     /// Look up the Browser iff the pane is Live. Returns None when closing
     /// so all ops short-circuit uniformly.
     fn live_browser(&self, state: &Arc<AppState>, block_id: &str) -> Option<Browser> {
-        // Phase H.1.b + H.2.b — route reads through reducer-aware helpers
-        // with fallback + drift logging.
         let label = state.live_pane_label(block_id)?;
         state.get_browser(&label)
-    }
-
-    // ── Phase H.1.b — read passthroughs for AppState helpers ────────────
-    //
-    // Exposes `PaneStateMachine` reads to `AppState::live_pane_label` /
-    // `live_pane_labels` so they can compare reducer vs legacy with drift
-    // logging. PR #4 (H.1.e) deletes `PaneStateMachine`; these passthroughs
-    // disappear at that point.
-
-    pub fn test_live_label_of(&self, block_id: &str) -> Option<String> {
-        self.lifecycle.live_label_of(block_id)
-    }
-
-    pub fn test_live_labels(&self) -> Vec<String> {
-        self.lifecycle.live_labels()
     }
 
     /// Return the current URL of the pane's main frame, if the pane
@@ -195,10 +161,23 @@ impl BrowserPaneManager {
         url: &str,
         rect: Rect,
     ) -> Result<(), String> {
-        match self.lifecycle.try_register_live(block_id) {
+        // Phase H.1.d (PR #5) — sole pane-registration entry point. The
+        // reducer atomically generates the label and inserts the entry,
+        // returning Fresh / AlreadyLive / Closing via DispatchOutput.
+        let out = state.host_dispatch(
+            crate::reducer::HostCommand::TryRegisterPaneLive {
+                block_id: block_id.to_string(),
+            },
+        );
+        let result = out.pane_register_result.ok_or_else(|| {
+            format!(
+                "try_register_pane_live returned no result (block_id={}); host shutting down?",
+                block_id
+            )
+        })?;
+        match result {
             RegisterResult::AlreadyLive(label) => {
                 // Existing Live entry — re-navigate the existing browser.
-                // Phase H.2.b — reducer-aware lookup with fallback.
                 if let Some(browser) = state.get_browser(&label) {
                     if let Some(frame) = browser.main_frame() {
                         frame.load_url(Some(&CefString::from(url)));
@@ -209,7 +188,7 @@ impl BrowserPaneManager {
             RegisterResult::Closing => {
                 // Reject rather than overwrite: the old CEF Browser is
                 // mid-teardown and its on_before_close will call
-                // drain_by_label — if we let create overwrite, drain
+                // DrainPaneByLabel — if we let create overwrite, drain
                 // would evict the NEW entry. Frontend retries on next tick.
                 Err(format!(
                     "browser pane for block_id={} is still closing; retry after on_before_close",
@@ -217,16 +196,6 @@ impl BrowserPaneManager {
                 ))
             }
             RegisterResult::Fresh(label) => {
-                // Phase H.1.a — parallel write: mirror the new pane entry
-                // into the host reducer's `panes` map. PaneStateMachine
-                // remains authoritative until step e (PR #2 final commit)
-                // deletes it.
-                state.host_dispatch(
-                    crate::reducer::HostCommand::EnqueuePaneCreate {
-                        block_id: block_id.to_string(),
-                        label: label.clone(),
-                    },
-                );
                 let mut task = CreatePaneTask::new(
                     state.clone(),
                     block_id.to_string(),
@@ -305,70 +274,56 @@ impl BrowserPaneManager {
     /// user expects to persist across close). If beforeunload becomes
     /// important, revisit.
     pub fn close(&self, block_id: &str, state: &Arc<AppState>) {
-        // Phase H.1.a — parallel write: mirror the close request into the
-        // host reducer's `panes` map. EnqueuePaneClose flips entry to
-        // Closing. CompletePaneClose (which removes the entry) is dispatched
-        // ONLY when close_with actually performed the close transition —
-        // otherwise a duplicate close call would remove the reducer entry
-        // while the original call's teardown is still in progress, creating
-        // reducer/legacy drift (codex P2 PR #655).
-        state.host_dispatch(
+        // Phase H.1.d (PR #5) — sole pane-close entry point. The reducer
+        // flips Live→Closing atomically and returns the entry's label iff
+        // the transition fired. None means missing or already-Closing —
+        // both idempotent no-ops; we don't dispatch CompletePaneClose in
+        // those cases (codex P2 PR #655 race), avoiding the entry removal
+        // while another in-flight close is still tearing down the HWND.
+        let close_out = state.host_dispatch(
             crate::reducer::HostCommand::EnqueuePaneClose {
                 block_id: block_id.to_string(),
             },
         );
+        let label = match close_out.closed_pane_label {
+            Some(l) => l,
+            None => return,
+        };
         let ops = AppStateCloseOps(state);
-        let did_close = self.close_with(block_id, &ops);
-        if did_close {
-            state.host_dispatch(
-                crate::reducer::HostCommand::CompletePaneClose {
-                    block_id: block_id.to_string(),
-                },
-            );
-        }
+        Self::close_with(&label, &ops);
+        state.host_dispatch(
+            crate::reducer::HostCommand::CompletePaneClose {
+                block_id: block_id.to_string(),
+            },
+        );
+        tracing::info!(block_id, label, "browser pane closed");
     }
 
-    /// The testable body of `close()`. See `PaneCloseOps` for the seam.
-    ///
-    /// Returns `true` iff close_with actually performed the close transition
-    /// (`try_mark_closing` succeeded). Returns `false` for already-closing
-    /// or missing entries — duplicate / retry close calls. Caller uses the
-    /// return value to gate `CompletePaneClose` dispatch and avoid the
-    /// reducer-entry removal race documented above (codex P2 PR #655).
-    fn close_with(&self, block_id: &str, ops: &dyn PaneCloseOps) -> bool {
-        let label = match self.lifecycle.try_mark_closing(block_id) {
-            Some(l) => l,
-            None => return false, // missing, or already closing — both no-op
-        };
-
-        // take_browser_hwnd removes from state.browsers and drops the Browser
-        // Arc. Returns the HWND iff one exists, which destroy_hwnd then
-        // destroys via Win32.
-        if let Some(hwnd) = ops.take_browser_hwnd(&label) {
+    /// The testable side-effect body of `close()`. Given a pane's `label`,
+    /// remove its Browser handle and destroy its HWND. The state-machine
+    /// transition (Live→Closing) and the entry removal (CompletePaneClose)
+    /// happen in `close()` via reducer dispatch — `close_with` is purely
+    /// the FFI side-effects that follow.
+    fn close_with(label: &str, ops: &dyn PaneCloseOps) {
+        if let Some(hwnd) = ops.take_browser_hwnd(label) {
             ops.destroy_hwnd(hwnd);
-            tracing::info!(block_id, label, "pane HWND destroyed");
+            tracing::info!(label, "pane HWND destroyed");
         }
-
-        // Drop the lifecycle entry so the block_id can be reused.
-        self.lifecycle.remove(block_id);
-        tracing::info!(block_id, label, "browser pane lifecycle entry cleared");
-        true
     }
 
     /// Called from CEF's `on_before_close` if/when it fires for a pane
-    /// browser. The `close()` path usually clears the lifecycle entry first,
+    /// browser. The explicit `close()` path usually clears the entry first,
     /// so this is a no-op in that case — but `on_before_close` may still
-    /// fire async as Chromium's refcount hits zero, and `drain_by_label`
+    /// fire async as Chromium's refcount hits zero, and `DrainPaneByLabel`
     /// is idempotent so the callback is safe.
     pub fn drain_closed_label(&self, state: &Arc<AppState>, label: &str) {
-        if let Some(block_id) = self.lifecycle.drain_by_label(label) {
-            tracing::info!(label, block_id = %block_id, "browser pane drained from lifecycle map");
-            // Phase H.1.a — parallel write: ensure the host reducer's
-            // `panes` map is also cleaned up. Idempotent on the reducer
-            // side (CompletePaneClose returns no-op if entry already gone).
-            state.host_dispatch(
-                crate::reducer::HostCommand::CompletePaneClose { block_id },
-            );
+        let out = state.host_dispatch(
+            crate::reducer::HostCommand::DrainPaneByLabel {
+                label: label.to_string(),
+            },
+        );
+        if let Some(block_id) = out.drained_block_id {
+            tracing::info!(label, block_id = %block_id, "browser pane drained via on_before_close");
         }
     }
 
@@ -596,12 +551,14 @@ impl BrowserPaneManager {
 
 // ── Tests ───────────────────────────────────────────────────────────────────
 //
-// Covers the non-CEF pieces of `BrowserPaneManager`: the panes map, label
-// sequencing, lifecycle-state transitions, AND `close()` itself via a
-// mock `PaneCloseOps` (the trait introduced in this PR). Other CEF-touching
-// paths (`create`'s browser_host_create_browser, `focus`'s SetFocus) will
-// get the same treatment as their own traits are extracted — see
-// SPEC_BROWSER_PANE_MODULARIZATION.md §6 for the phased plan.
+// Phase H.1.d/e (PR #5): The pane state machine lives in the host reducer
+// (`HostState.panes`). Lifecycle transition tests — Live→Closing, idempotent
+// no-ops for missing or already-Closing entries, label sequence monotonicity,
+// drain-by-label — are now in `crate::reducer::tests`.
+//
+// What remains here: the FFI seam. `close_with` only takes a label and
+// drives `PaneCloseOps`; tests verify it forwards label → take → destroy
+// in order, with a None-returning `take` short-circuiting the destroy.
 
 #[cfg(test)]
 mod tests {
@@ -609,15 +566,10 @@ mod tests {
     use std::collections::HashMap;
 
     /// Recording mock for `PaneCloseOps`. Tests inspect `taken` and
-    /// `destroyed` to assert what close() did with the browsers it
-    /// was supposed to tear down.
+    /// `destroyed` to assert what close_with did.
     struct MockCloseOps {
-        /// label -> fake HWND. Populated before the test to simulate the
-        /// AppState.browsers map.
         registered: parking_lot::Mutex<HashMap<String, usize>>,
-        /// Labels `close()` asked us to take (in call order).
         taken: parking_lot::Mutex<Vec<String>>,
-        /// HWNDs `close()` asked us to destroy (in call order).
         destroyed: parking_lot::Mutex<Vec<usize>>,
     }
 
@@ -654,168 +606,27 @@ mod tests {
         }
     }
 
-    // State-machine-only tests live in `crate::pane::lifecycle::tests` now —
-    // `BrowserPaneManager` delegates to `PaneStateMachine` and those tests
-    // cover register/mark-closing/drain/live_label/label-sequence behavior
-    // directly against the state machine.
-
-    // ── close_with tests — drive close() through the PaneCloseOps seam ──
-
     #[test]
-    fn close_with_live_entry_destroys_hwnd_and_drops_entry() {
-        let m = BrowserPaneManager::new();
-        m.test_insert_live("b1", "browser-pane-b1-1");
-
+    fn close_with_take_then_destroy_in_order() {
         let ops = MockCloseOps::new();
         ops.register("browser-pane-b1-1", 0xABCD);
 
-        m.close_with("b1", &ops);
+        BrowserPaneManager::close_with("browser-pane-b1-1", &ops);
 
         assert_eq!(ops.taken_labels(), vec!["browser-pane-b1-1"]);
         assert_eq!(ops.destroyed_hwnds(), vec![0xABCD]);
-        assert!(!m.test_has_entry("b1"),
-            "entry must be drained after close_with");
     }
 
     #[test]
-    fn close_with_missing_entry_is_noop() {
-        let m = BrowserPaneManager::new();
-
-        let ops = MockCloseOps::new();
-        m.close_with("never-existed", &ops);
-
-        assert!(ops.taken_labels().is_empty(),
-            "take_browser_hwnd must not be called when entry is absent");
-        assert!(ops.destroyed_hwnds().is_empty());
-    }
-
-    /// Regression test for codex P2 on PR #655.
-    ///
-    /// `close_with` returns `true` only when it actually performed the
-    /// close transition (`try_mark_closing` returned Some). Returns
-    /// `false` for missing entries and `false` for already-closing
-    /// entries — duplicate / retry close calls. The caller (`close()`)
-    /// uses this return value to gate `CompletePaneClose` dispatch and
-    /// avoid removing the reducer entry while the original close path
-    /// is still tearing down legacy state.
-    #[test]
-    fn close_with_returns_true_only_when_did_close() {
-        let m = BrowserPaneManager::new();
-        m.test_insert_live("b1", "browser-pane-b1-1");
-        let ops = MockCloseOps::new();
-        ops.register("browser-pane-b1-1", 0xABCD);
-
-        // First call: actual transition. Returns true.
-        assert_eq!(m.close_with("b1", &ops), true);
-
-        // Second call (entry now removed): returns false.
-        assert_eq!(m.close_with("b1", &ops), false);
-
-        // Truly missing entry: returns false.
-        assert_eq!(m.close_with("never-existed", &ops), false);
-    }
-
-    #[test]
-    fn close_with_returns_false_for_already_closing_entry() {
-        let m = BrowserPaneManager::new();
-        m.test_insert_live("b1", "browser-pane-b1-1");
-        m.test_mark_closing("b1");
-        let ops = MockCloseOps::new();
-        // Entry exists but is already Closing — close_with no-ops, returns false.
-        assert_eq!(m.close_with("b1", &ops), false);
-    }
-
-    #[test]
-    fn close_with_already_closing_is_noop() {
-        // Second close call must not re-enter the CEF ops — that would
-        // double-destroy the HWND and panic.
-        let m = BrowserPaneManager::new();
-        m.test_insert_live("b1", "browser-pane-b1-1");
-        m.test_mark_closing("b1");
-
-        let ops = MockCloseOps::new();
-        ops.register("browser-pane-b1-1", 0xABCD);
-
-        m.close_with("b1", &ops);
-
-        assert!(ops.taken_labels().is_empty(),
-            "already-Closing pane must not call take_browser_hwnd again");
-        assert!(ops.destroyed_hwnds().is_empty(),
-            "already-Closing pane must not call destroy_hwnd again");
-    }
-
-    #[test]
-    fn close_with_unregistered_browser_still_drains_entry() {
-        // If the Browser was already gone from state.browsers (creation
-        // failed, or on_before_close got there first), close_with must
-        // still drop the lifecycle entry so future creates can reuse
-        // the block_id.
-        let m = BrowserPaneManager::new();
-        m.test_insert_live("b1", "browser-pane-b1-1");
-
+    fn close_with_no_hwnd_skips_destroy() {
+        // Browser was already gone (rare race — explicit close raced with
+        // an external close). take returns None; destroy must NOT be called.
         let ops = MockCloseOps::new(); // no register() — lookup will miss
 
-        m.close_with("b1", &ops);
+        BrowserPaneManager::close_with("browser-pane-missing", &ops);
 
-        assert_eq!(ops.taken_labels(), vec!["browser-pane-b1-1"],
-            "take_browser_hwnd is still called; returns None");
+        assert_eq!(ops.taken_labels(), vec!["browser-pane-missing"]);
         assert!(ops.destroyed_hwnds().is_empty(),
-            "destroy_hwnd skipped when no HWND to destroy");
-        assert!(!m.test_has_entry("b1"),
-            "entry is always drained, Browser-present or not");
-    }
-
-    #[test]
-    fn close_with_two_panes_independently() {
-        let m = BrowserPaneManager::new();
-        m.test_insert_live("b1", "browser-pane-b1-1");
-        m.test_insert_live("b2", "browser-pane-b2-2");
-
-        let ops = MockCloseOps::new();
-        ops.register("browser-pane-b1-1", 0x1111);
-        ops.register("browser-pane-b2-2", 0x2222);
-
-        m.close_with("b1", &ops);
-
-        assert!(!m.test_has_entry("b1"));
-        assert!(m.test_has_entry("b2"),
-            "closing b1 must not affect b2's entry");
-        assert_eq!(ops.destroyed_hwnds(), vec![0x1111],
-            "only b1's HWND destroyed, b2 untouched");
-
-        m.close_with("b2", &ops);
-
-        assert!(!m.test_has_entry("b2"));
-        assert_eq!(ops.destroyed_hwnds(), vec![0x1111, 0x2222]);
-    }
-
-    #[test]
-    fn close_with_flips_to_closing_before_calling_ops() {
-        // Verifies the state transition happens BEFORE any CEF-side op.
-        // An ops impl could theoretically observe lifecycle state via
-        // a shared reference — this test proves it'd see Closing by then.
-        use crate::pane::PaneLifecycle;
-
-        struct StateSpyingOps<'a> {
-            m: &'a BrowserPaneManager,
-            state_on_take: parking_lot::Mutex<Option<PaneLifecycle>>,
-        }
-        impl<'a> PaneCloseOps for StateSpyingOps<'a> {
-            fn take_browser_hwnd(&self, _label: &str) -> Option<usize> {
-                *self.state_on_take.lock() = self.m.test_entry_state("b1");
-                None
-            }
-            fn destroy_hwnd(&self, _hwnd: usize) {}
-        }
-
-        let m = BrowserPaneManager::new();
-        m.test_insert_live("b1", "browser-pane-b1-1");
-        assert_eq!(m.test_entry_state("b1"), Some(PaneLifecycle::Live));
-
-        let ops = StateSpyingOps { m: &m, state_on_take: parking_lot::Mutex::new(None) };
-        m.close_with("b1", &ops);
-
-        assert_eq!(*ops.state_on_take.lock(), Some(PaneLifecycle::Closing),
-            "state must be Closing by the time take_browser_hwnd runs");
+            "destroy_hwnd must not be called when take_browser_hwnd returns None");
     }
 }

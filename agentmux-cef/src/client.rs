@@ -204,24 +204,31 @@ impl AgentMuxHandler {
 
         let is_top_level_window = !label.starts_with("browser-pane-");
 
-        // Phase H.2.a — parallel write: mirror the new browser into the
-        // host reducer's `browsers` map. Determine BrowserKind from:
-        //   - is_pane (the AgentMuxClient field): pane child window
-        //   - label prefix `window-pool-` + membership in
-        //     `unpromoted_pool_labels`: pool window (TopLevel { is_pool: true })
-        //   - everything else: TopLevel { is_pool: false }
-        // AppState.browsers remains authoritative until step e.
-        let kind = if self.is_pane {
-            // Pane label format: `browser-pane-<block_id>-<seq>` per
-            // pane/lifecycle.rs::next_label. Strip prefix + trailing `-<seq>`
-            // to recover block_id.
-            let block_id = label
-                .strip_prefix("browser-pane-")
-                .and_then(|rest| rest.rfind('-').map(|i| rest[..i].to_string()))
+        // Determine BrowserKind from the LABEL prefix, not the
+        // AgentMuxClient `is_pane` flag. Smoke test on 0.33.586 found
+        // top-level windows misclassified as `Pane { block_id: "" }`
+        // because `CreateWindowTask::execute` reuses an existing
+        // browser's CEF Client via `first_browser()` — if the iteration
+        // happens to pick a pane, the new window inherits `is_pane=true`
+        // and the label-stripping in this branch produces an empty
+        // block_id (since the label starts with `window-` not
+        // `browser-pane-`). LABEL is the source of truth. See
+        // docs/retro/smoke-test-0.33.586-and-pr5-plan-2026-05-02.md.
+        //
+        // Classification:
+        //   - label `browser-pane-<uuid>-<seq>` → Pane { block_id: uuid }
+        //   - label `window-pool-*` + still in unpromoted_pool_labels →
+        //     TopLevel { is_pool: true }
+        //   - everything else (main, window-*, promoted pool windows) →
+        //     TopLevel { is_pool: false }
+        let kind = if let Some(rest) = label.strip_prefix("browser-pane-") {
+            let block_id = rest
+                .rfind('-')
+                .map(|i| rest[..i].to_string())
                 .unwrap_or_default();
             crate::state::BrowserKind::Pane { block_id }
         } else if label.starts_with("window-pool-")
-            && self.state.unpromoted_pool_labels.lock().contains(&label)
+            && self.state.is_unpromoted_pool_label(&label)
         {
             crate::state::BrowserKind::TopLevel { is_pool: true }
         } else {
@@ -631,7 +638,7 @@ impl AgentMuxHandler {
         let (user_browser_count, browsers_keys, pool_keys) = {
             // Phase H.2.b — reducer-aware label snapshot. Single helper call
             // replaces an interleaved pool_labels.lock + browsers.lock pair.
-            let pool_labels = self.state.unpromoted_pool_labels.lock().clone();
+            let pool_labels = self.state.unpromoted_pool_labels_snapshot();
             let keys = self.state.list_browser_labels();
             let count = keys
                 .iter()
@@ -709,15 +716,19 @@ impl AgentMuxHandler {
         // uses X11 WM_DELETE_WINDOW. Same async-close-cascade
         // semantics on all platforms; only the OS API differs.
         if user_browser_count == 0 && !self.is_pane {
-            // Phase B.9.3 — set the drain flag BEFORE collecting
-            // pool browsers. spawn_pool_window will see this and
-            // skip refill on every subsequent on_pool_window_destroyed
-            // → no new pool browsers added → state.browsers can
-            // actually drain.
-            self.state
-                .is_quitting
-                .store(true, std::sync::atomic::Ordering::Release);
-            tracing::warn!(target: "wrr", "[wrr] is_quitting=true (drain mode)");
+            // PR #5 H.5 — flip QuitState Running → Draining via reducer.
+            // Mirrors the pre-PR Phase B.9.3 drain flag: spawn_pool_window
+            // checks `quit_state != Running` (in the reducer's spawn arm)
+            // and skips refill on every subsequent on_pool_window_destroyed
+            // → no new pool browsers added → browsers map can actually
+            // drain. BeginDrain is idempotent — safe if a duplicate
+            // last-close fires.
+            self.state.host_dispatch(
+                crate::reducer::HostCommand::BeginDrain {
+                    reason: crate::state::QuitReason::LastWindowClosed,
+                },
+            );
+            tracing::warn!(target: "wrr", "[wrr] quit_state=Draining (drain mode)");
 
             // Phase H.2.b — reducer-aware iteration with fallback + drift logging.
             let pool_browsers: Vec<cef::Browser> = self

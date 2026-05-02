@@ -28,6 +28,7 @@
 // pipe just to satisfy a pattern that has no current consumer.
 
 use std::collections::{HashMap, VecDeque};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 
 use cef::Browser;
@@ -151,6 +152,38 @@ impl HostState {
     }
 }
 
+// ── Pane label generator (replaces pane/lifecycle.rs::PANE_LABEL_SEQ) ──────
+//
+// Monotonic counter appended to every pane label so a close-then-recreate of
+// the same block_id doesn't collide: if the old browser's `on_before_close`
+// fires after the new pane's create has already run, `DrainPaneByLabel`
+// would otherwise find and wipe the NEW entry.
+static PANE_LABEL_SEQ: AtomicU64 = AtomicU64::new(1);
+
+fn next_pane_label(block_id: &str) -> String {
+    let seq = PANE_LABEL_SEQ.fetch_add(1, Ordering::Relaxed);
+    format!("browser-pane-{}-{}", block_id, seq)
+}
+
+/// Outcome of `TryRegisterPaneLive`. Returned via
+/// `DispatchOutput::pane_register_result`. Same three-way semantics as the
+/// pre-Phase-H `pane::lifecycle::PaneStateMachine::try_register_live` returned
+/// — caller decides whether to start a fresh CEF create, re-navigate the
+/// existing browser, or reject.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum RegisterResult {
+    /// No prior entry; reducer inserted a new `Live` pane under `label`.
+    /// Caller should post `CreatePaneTask` for this label.
+    Fresh(String),
+    /// Entry already existed and is `Live`; caller should re-navigate the
+    /// existing browser at `label`.
+    AlreadyLive(String),
+    /// Entry exists and is `Closing`; caller must reject the re-create
+    /// because the old browser's `on_before_close` will drain the entry,
+    /// and overwriting now would lose the new entry instead of the old.
+    Closing,
+}
+
 /// Commands handled by the host reducer.
 ///
 /// Manual `Debug` impl below because `RegisterBrowser` carries a
@@ -175,15 +208,39 @@ pub enum HostCommand {
     /// Reducer inserts with `Live`. Reject if `block_id` already present.
     EnqueuePaneCreate { block_id: String, label: String },
 
+    /// PR #5 — sole pane registration entry point post-H.1.d.
+    ///
+    /// Replaces `pane::lifecycle::PaneStateMachine::try_register_live`.
+    /// Reducer generates the label internally (via `next_pane_label`) so
+    /// label assignment is atomic with the entry insert. Returns the
+    /// outcome via `DispatchOutput::pane_register_result`:
+    ///   - `Fresh(label)`: new `Live` entry inserted; caller posts CreatePaneTask
+    ///   - `AlreadyLive(label)`: caller should re-navigate existing browser
+    ///   - `Closing`: caller must reject (old teardown still in flight)
+    TryRegisterPaneLive { block_id: String },
+
     /// CEF on_after_created fired for a pane browser; confirm it's Live.
     /// No-op if already Live or absent (idempotent against late callbacks).
     CompletePaneCreate { block_id: String },
 
-    /// Caller requests pane close. Reducer flips entry to `Closing`.
+    /// Caller requests pane close. Reducer flips entry to `Closing` and
+    /// returns the entry's label via `DispatchOutput::closed_pane_label`
+    /// iff the transition actually fired (was `Live`). Returns `None` for
+    /// missing or already-Closing entries (idempotent).
     EnqueuePaneClose { block_id: String },
 
     /// CEF on_before_close fired for a pane; remove entry from map.
     CompletePaneClose { block_id: String },
+
+    /// PR #5 — sole label-keyed drain entry point post-H.1.d.
+    ///
+    /// Replaces `pane::lifecycle::PaneStateMachine::drain_by_label`. Used
+    /// by `BrowserPaneManager::drain_closed_label` when CEF's
+    /// `on_before_close` fires for a pane. Removes the entry whose `label`
+    /// matches; returns the drained `block_id` via
+    /// `DispatchOutput::drained_block_id` so the caller can also dispatch
+    /// any block_id-keyed cleanup. Idempotent (None if no match).
+    DrainPaneByLabel { label: String },
 
     /// Pane creation failed before reaching Live (e.g., CEF callback
     /// never fired, browser host returned 0). Reducer removes entry.
@@ -231,6 +288,13 @@ pub enum HostCommand {
     /// `queue` and `unpromoted`, marks the corresponding `BrowserHandle`
     /// as `is_pool: false`.
     PromotePoolWindow { label: String },
+
+    /// PR #5 H.4 — atomic pop+promote front of pool queue. Returns the
+    /// popped label via `DispatchOutput::promoted_pool_label`, or None
+    /// if the queue is empty. Replaces the legacy
+    /// `state.window_pool.lock().pop_front() + state.unpromoted_pool_labels.lock().remove`
+    /// pair in `promote_pool_window`.
+    PopAndPromoteFrontPoolWindow,
 
     /// Drain all pool windows on shutdown. Idempotent.
     PoolDrainAll,
@@ -284,6 +348,10 @@ impl std::fmt::Debug for HostCommand {
                 .field("block_id", block_id)
                 .field("label", label)
                 .finish(),
+            HostCommand::TryRegisterPaneLive { block_id } => f
+                .debug_struct("TryRegisterPaneLive")
+                .field("block_id", block_id)
+                .finish(),
             HostCommand::CompletePaneCreate { block_id } => f
                 .debug_struct("CompletePaneCreate")
                 .field("block_id", block_id)
@@ -295,6 +363,10 @@ impl std::fmt::Debug for HostCommand {
             HostCommand::CompletePaneClose { block_id } => f
                 .debug_struct("CompletePaneClose")
                 .field("block_id", block_id)
+                .finish(),
+            HostCommand::DrainPaneByLabel { label } => f
+                .debug_struct("DrainPaneByLabel")
+                .field("label", label)
                 .finish(),
             HostCommand::AbortPaneCreate { block_id, reason } => f
                 .debug_struct("AbortPaneCreate")
@@ -337,6 +409,7 @@ impl std::fmt::Debug for HostCommand {
                 .debug_struct("PromotePoolWindow")
                 .field("label", label)
                 .finish(),
+            HostCommand::PopAndPromoteFrontPoolWindow => f.write_str("PopAndPromoteFrontPoolWindow"),
             HostCommand::PoolDrainAll => f.write_str("PoolDrainAll"),
             HostCommand::BeginDrain { reason } => f
                 .debug_struct("BeginDrain")
@@ -541,7 +614,7 @@ pub enum HostEvent {
 
 /// Output bundle returned from the reducer.
 ///
-/// Most arms communicate via `events` alone, but two arms have callers
+/// Most arms communicate via `events` alone, but several arms have callers
 /// that need an atomic value-returning op alongside the state mutation:
 ///
 /// - `DequeuePendingWindowCreation` → `dequeued: Option<PendingWindowCreation>`
@@ -555,6 +628,42 @@ pub enum HostEvent {
 ///   creates a window where concurrent readers can also resolve the
 ///   label and act on the closing handle).
 ///
+/// - `TryRegisterPaneLive` → `pane_register_result: Option<RegisterResult>`
+///   (PR #5 H.1.d: `BrowserPaneManager::create` branches on
+///   Fresh/AlreadyLive/Closing).
+///
+/// - `EnqueuePaneClose` → `closed_pane_label: Option<String>` (PR #5
+///   H.1.d: the close path needs the label to call `take_browser_hwnd`
+///   without a separate `live_pane_label` query that could race).
+///
+/// - `DrainPaneByLabel` → `drained_block_id: Option<String>` (PR #5
+///   H.1.d: `drain_closed_label` needs the block_id to dispatch
+///   `CompletePaneClose`).
+///
+/// - `EndDrag` → `ended_drag_session: Option<DragSession>` (PR #5
+///   H.3: `complete_cross_drag` / `cancel_cross_drag` need the
+///   session payload to emit the renderer-side cross-drag-end event,
+///   AND need the .is_some() signal to distinguish actual end vs
+///   drag_id mismatch).
+///
+/// - `PoolWindowSpawnStart` → `pool_spawn_proceeding: bool` (PR #5
+///   H.4: spawn_pool_window's single-flight semaphore. true = slot
+///   acquired, caller proceeds with CEF spawn; false = suppressed
+///   (already in flight, or QuitState != Running)).
+///
+/// - `PoolWindowReady` / `PoolWindowDestroyedBeforePromote` /
+///   `PopAndPromoteFrontPoolWindow` → `pool_size_after: Option<usize>`
+///   (PR #5 H.4: caller checks against POOL_TARGET_SIZE to decide
+///   whether to trigger a refill).
+///
+/// - `PoolWindowDestroyedBeforePromote` → `pool_destroyed_was_unpromoted: bool`
+///   (PR #5 H.4: caller gates pool-inventory reports on this — the
+///   post-promote close path doesn't own that update).
+///
+/// - `PopAndPromoteFrontPoolWindow` → `promoted_pool_label: Option<String>`
+///   (PR #5 H.4: caller needs the popped label to drive the CEF
+///   show + emit the pool:promote frontend event).
+///
 /// Default keeps the dispatch return type uniform across arms that
 /// don't populate these fields.
 #[derive(Default)]
@@ -562,6 +671,14 @@ pub struct DispatchOutput {
     pub events: Vec<HostEvent>,
     pub dequeued: Option<PendingWindowCreation>,
     pub removed_browser: Option<Browser>,
+    pub pane_register_result: Option<RegisterResult>,
+    pub closed_pane_label: Option<String>,
+    pub drained_block_id: Option<String>,
+    pub ended_drag_session: Option<DragSession>,
+    pub pool_spawn_proceeding: bool,
+    pub pool_size_after: Option<usize>,
+    pub pool_destroyed_was_unpromoted: bool,
+    pub promoted_pool_label: Option<String>,
 }
 
 // Manual Debug — `cef::Browser` doesn't impl Debug.
@@ -578,6 +695,14 @@ impl std::fmt::Debug for DispatchOutput {
                     &"None"
                 },
             )
+            .field("pane_register_result", &self.pane_register_result)
+            .field("closed_pane_label", &self.closed_pane_label)
+            .field("drained_block_id", &self.drained_block_id)
+            .field("ended_drag_session", &self.ended_drag_session)
+            .field("pool_spawn_proceeding", &self.pool_spawn_proceeding)
+            .field("pool_size_after", &self.pool_size_after)
+            .field("pool_destroyed_was_unpromoted", &self.pool_destroyed_was_unpromoted)
+            .field("promoted_pool_label", &self.promoted_pool_label)
             .finish()
     }
 }
@@ -599,6 +724,9 @@ pub fn update(state: &mut HostState, cmd: HostCommand) -> DispatchOutput {
         HostCommand::EnqueuePaneCreate { block_id, label } => {
             handle_enqueue_pane_create(state, block_id, label)
         }
+        HostCommand::TryRegisterPaneLive { block_id } => {
+            handle_try_register_pane_live(state, block_id)
+        }
         HostCommand::CompletePaneCreate { block_id } => {
             handle_complete_pane_create(state, block_id)
         }
@@ -607,6 +735,9 @@ pub fn update(state: &mut HostState, cmd: HostCommand) -> DispatchOutput {
         }
         HostCommand::CompletePaneClose { block_id } => {
             handle_complete_pane_close(state, block_id)
+        }
+        HostCommand::DrainPaneByLabel { label } => {
+            handle_drain_pane_by_label(state, label)
         }
         HostCommand::AbortPaneCreate { block_id, reason } => {
             handle_abort_pane_create(state, block_id, reason)
@@ -628,6 +759,7 @@ pub fn update(state: &mut HostState, cmd: HostCommand) -> DispatchOutput {
             handle_pool_destroyed_before_promote(state, label)
         }
         HostCommand::PromotePoolWindow { label } => handle_promote_pool_window(state, label),
+        HostCommand::PopAndPromoteFrontPoolWindow => handle_pop_and_promote_front_pool_window(state),
         HostCommand::PoolDrainAll => handle_pool_drain_all(state),
         // H.5 quit
         HostCommand::BeginDrain { reason } => handle_begin_drain(state, reason),
@@ -661,8 +793,7 @@ fn handle_enqueue_pending_window_creation(
                 message: "enqueue_pending_window_creation: host is shutting down".to_string(),
                 version: v,
             }],
-            dequeued: None,
-            removed_browser: None,
+            ..Default::default()
         };
     }
     let label = entry.label.clone();
@@ -675,8 +806,7 @@ fn handle_enqueue_pending_window_creation(
             queue_len_after,
             version: v,
         }],
-        dequeued: None,
-        removed_browser: None,
+        ..Default::default()
     }
 }
 
@@ -693,15 +823,14 @@ fn handle_dequeue_pending_window_creation(state: &mut HostState) -> DispatchOutp
                     version: v,
                 }],
                 dequeued: Some(entry),
-                removed_browser: None,
+                ..Default::default()
             }
         }
         None => {
             let v = state.bump_version();
             DispatchOutput {
                 events: vec![HostEvent::PendingWindowQueueEmpty { version: v }],
-                dequeued: None,
-                removed_browser: None,
+                ..Default::default()
             }
         }
     }
@@ -721,8 +850,7 @@ fn emit_error(state: &mut HostState, message: String) -> DispatchOutput {
     let v = state.bump_version();
     DispatchOutput {
         events: vec![HostEvent::Error { message, version: v }],
-        dequeued: None,
-        removed_browser: None,
+        ..Default::default()
     }
 }
 
@@ -750,8 +878,7 @@ fn handle_enqueue_pane_create(
     let v = state.bump_version();
     DispatchOutput {
         events: vec![HostEvent::PaneCreateRequested { block_id, label, version: v }],
-        dequeued: None,
-        removed_browser: None,
+        ..Default::default()
     }
 }
 
@@ -765,8 +892,7 @@ fn handle_complete_pane_create(state: &mut HostState, block_id: String) -> Dispa
     let v = state.bump_version();
     DispatchOutput {
         events: vec![HostEvent::PaneLive { block_id, label: entry.label, version: v }],
-        dequeued: None,
-        removed_browser: None,
+        ..Default::default()
     }
 }
 
@@ -779,11 +905,86 @@ fn handle_enqueue_pane_close(state: &mut HostState, block_id: String) -> Dispatc
         return DispatchOutput::default(); // already Closing; idempotent
     }
     entry.lifecycle = PaneLifecycle::Closing { since: Instant::now() };
+    let label = entry.label.clone();
     let v = state.bump_version();
     DispatchOutput {
         events: vec![HostEvent::PaneClosing { block_id, version: v }],
-        dequeued: None,
-        removed_browser: None,
+        closed_pane_label: Some(label),
+        ..Default::default()
+    }
+}
+
+/// PR #5 — sole pane registration entry point. Replaces
+/// `pane::lifecycle::PaneStateMachine::try_register_live`.
+///
+/// - Live entry exists → `AlreadyLive(label)`
+/// - Closing entry exists → `Closing`
+/// - No entry → generate label, insert Live, `Fresh(label)` + emit
+///   `PaneCreateRequested`
+fn handle_try_register_pane_live(state: &mut HostState, block_id: String) -> DispatchOutput {
+    if state.lifecycle == HostLifecyclePhase::ShuttingDown {
+        return emit_error(
+            state,
+            format!("try_register_pane_live: shutting down (block_id={})", block_id),
+        );
+    }
+    if let Some(entry) = state.panes.get(&block_id) {
+        let result = match entry.lifecycle {
+            PaneLifecycle::Live => RegisterResult::AlreadyLive(entry.label.clone()),
+            PaneLifecycle::Closing { .. } => RegisterResult::Closing,
+        };
+        return DispatchOutput {
+            pane_register_result: Some(result),
+            ..Default::default()
+        };
+    }
+    let label = next_pane_label(&block_id);
+    state.panes.insert(
+        block_id.clone(),
+        PaneEntry {
+            block_id: block_id.clone(),
+            label: label.clone(),
+            lifecycle: PaneLifecycle::Live,
+        },
+    );
+    let v = state.bump_version();
+    DispatchOutput {
+        events: vec![HostEvent::PaneCreateRequested {
+            block_id,
+            label: label.clone(),
+            version: v,
+        }],
+        pane_register_result: Some(RegisterResult::Fresh(label)),
+        ..Default::default()
+    }
+}
+
+/// PR #5 — sole label-keyed drain entry point. Replaces
+/// `pane::lifecycle::PaneStateMachine::drain_by_label`.
+///
+/// Removes whichever pane entry has `label`. Returns the drained block_id
+/// in `drained_block_id`. Idempotent — `None` if no entry has that label
+/// (e.g., explicit `close()` already cleared it; `on_before_close` arrives
+/// later).
+fn handle_drain_pane_by_label(state: &mut HostState, label: String) -> DispatchOutput {
+    let victim = state
+        .panes
+        .iter()
+        .find(|(_, e)| e.label == label)
+        .map(|(k, _)| k.clone());
+    let block_id = match victim {
+        Some(b) => b,
+        None => return DispatchOutput::default(),
+    };
+    state.panes.remove(&block_id);
+    let v = state.bump_version();
+    DispatchOutput {
+        events: vec![HostEvent::PaneClosed {
+            block_id: block_id.clone(),
+            version: v,
+        }],
+        drained_block_id: Some(block_id),
+        ..Default::default()
     }
 }
 
@@ -794,8 +995,7 @@ fn handle_complete_pane_close(state: &mut HostState, block_id: String) -> Dispat
     let v = state.bump_version();
     DispatchOutput {
         events: vec![HostEvent::PaneClosed { block_id, version: v }],
-        dequeued: None,
-        removed_browser: None,
+        ..Default::default()
     }
 }
 
@@ -808,8 +1008,7 @@ fn handle_abort_pane_create(
     let v = state.bump_version();
     DispatchOutput {
         events: vec![HostEvent::PaneCreationFailed { block_id, reason, version: v }],
-        dequeued: None,
-        removed_browser: None,
+        ..Default::default()
     }
 }
 
@@ -839,8 +1038,7 @@ fn handle_register_browser(
     let v = state.bump_version();
     DispatchOutput {
         events: vec![HostEvent::BrowserRegistered { label, kind, version: v }],
-        dequeued: None,
-        removed_browser: None,
+        ..Default::default()
     }
 }
 
@@ -858,8 +1056,8 @@ fn handle_unregister_browser(state: &mut HostState, label: String) -> DispatchOu
     let v = state.bump_version();
     DispatchOutput {
         events: vec![HostEvent::BrowserUnregistered { label, version: v }],
-        dequeued: None,
         removed_browser,
+        ..Default::default()
     }
 }
 
@@ -875,8 +1073,7 @@ fn handle_start_drag(state: &mut HostState, session: DragSession) -> DispatchOut
     let v = state.bump_version();
     DispatchOutput {
         events: vec![HostEvent::DragStarted { drag_id, source_window, version: v }],
-        dequeued: None,
-        removed_browser: None,
+        ..Default::default()
     }
 }
 
@@ -888,12 +1085,15 @@ fn handle_end_drag(
     let active_id = state.active_drag.as_ref().map(|s| s.drag_id.clone());
     match active_id {
         Some(id) if id == drag_id => {
-            state.active_drag = None;
+            // PR #5 H.3 — return the prior session via output so callers
+            // (cross-drag complete / cancel) can build the renderer-side
+            // event payload without a separate read of state.active_drag.
+            let session = state.active_drag.take();
             let v = state.bump_version();
             DispatchOutput {
                 events: vec![HostEvent::DragEnded { drag_id, outcome, version: v }],
-                dequeued: None,
-                removed_browser: None,
+                ended_drag_session: session,
+                ..Default::default()
             }
         }
         _ => DispatchOutput::default(), // mismatched or no drag; idempotent no-op
@@ -903,32 +1103,52 @@ fn handle_end_drag(
 // ── H.4 — pool state ─────────────────────────────────────────────────────
 
 fn handle_pool_spawn_start(state: &mut HostState, label: String) -> DispatchOutput {
+    // PR #5 H.4 — single-flight semaphore. The legacy
+    // `window_pool_respawn_in_flight.swap(true)` returns the prior
+    // value; if true, caller skips. We replicate that here: prior
+    // in-flight OR non-Running quit state both suppress the spawn.
     if state.quit_state != QuitState::Running {
-        return DispatchOutput::default(); // pool refills suppressed during drain
+        return DispatchOutput {
+            pool_spawn_proceeding: false,
+            ..Default::default()
+        };
+    }
+    if state.pool.respawn_in_flight {
+        return DispatchOutput {
+            pool_spawn_proceeding: false,
+            ..Default::default()
+        };
     }
     state.pool.unpromoted.insert(label);
     state.pool.respawn_in_flight = true;
-    DispatchOutput::default()
+    DispatchOutput {
+        pool_spawn_proceeding: true,
+        ..Default::default()
+    }
 }
 
 fn handle_pool_ready(state: &mut HostState, label: String) -> DispatchOutput {
     if !state.pool.unpromoted.remove(&label) {
         // Not in unpromoted (race or duplicate signal); idempotent.
-        return DispatchOutput::default();
+        return DispatchOutput {
+            pool_size_after: Some(state.pool.queue.len()),
+            ..Default::default()
+        };
     }
     if !state.pool.queue.iter().any(|l| l == &label) {
         state.pool.queue.push_back(label.clone());
     }
     state.pool.respawn_in_flight = false;
+    let queue_len_after = state.pool.queue.len();
     let v = state.bump_version();
     DispatchOutput {
         events: vec![HostEvent::PoolWindowEntered {
             label,
-            queue_len_after: state.pool.queue.len(),
+            queue_len_after,
             version: v,
         }],
-        dequeued: None,
-        removed_browser: None,
+        pool_size_after: Some(queue_len_after),
+        ..Default::default()
     }
 }
 
@@ -944,19 +1164,50 @@ fn handle_pool_destroyed_before_promote(state: &mut HostState, label: String) ->
     state.pool.queue.retain(|l| l != &label);
     let was_in_queue = state.pool.queue.len() < queue_len_before;
     state.pool.respawn_in_flight = false;
+    let queue_len_after = state.pool.queue.len();
     if !was_unpromoted && !was_in_queue {
-        return DispatchOutput::default();
+        return DispatchOutput {
+            pool_size_after: Some(queue_len_after),
+            ..Default::default()
+        };
     }
     let v = state.bump_version();
     DispatchOutput {
         events: vec![HostEvent::PoolWindowLeft {
             label,
-            queue_len_after: state.pool.queue.len(),
+            queue_len_after,
             reason: PoolLeaveReason::DestroyedBeforePromote,
             version: v,
         }],
-        dequeued: None,
-        removed_browser: None,
+        pool_destroyed_was_unpromoted: was_unpromoted,
+        pool_size_after: Some(queue_len_after),
+        ..Default::default()
+    }
+}
+
+fn handle_pop_and_promote_front_pool_window(state: &mut HostState) -> DispatchOutput {
+    let label = match state.pool.queue.pop_front() {
+        Some(l) => l,
+        None => return DispatchOutput::default(),
+    };
+    state.pool.unpromoted.remove(&label);
+    if let Some(handle) = state.browsers.get_mut(&label) {
+        if let BrowserKind::TopLevel { is_pool } = &mut handle.kind {
+            *is_pool = false;
+        }
+    }
+    let queue_len_after = state.pool.queue.len();
+    let v = state.bump_version();
+    DispatchOutput {
+        events: vec![HostEvent::PoolWindowLeft {
+            label: label.clone(),
+            queue_len_after,
+            reason: PoolLeaveReason::Promoted,
+            version: v,
+        }],
+        promoted_pool_label: Some(label),
+        pool_size_after: Some(queue_len_after),
+        ..Default::default()
     }
 }
 
@@ -988,8 +1239,7 @@ fn handle_promote_pool_window(state: &mut HostState, label: String) -> DispatchO
             reason: PoolLeaveReason::Promoted,
             version: v,
         }],
-        dequeued: None,
-        removed_browser: None,
+        ..Default::default()
     }
 }
 
@@ -1015,8 +1265,7 @@ fn handle_pool_drain_all(state: &mut HostState) -> DispatchOutput {
     events.push(HostEvent::PoolEmpty { version: v });
     DispatchOutput {
         events,
-        dequeued: None,
-        removed_browser: None,
+        ..Default::default()
     }
 }
 
@@ -1030,8 +1279,7 @@ fn handle_begin_drain(state: &mut HostState, reason: QuitReason) -> DispatchOutp
     let v = state.bump_version();
     DispatchOutput {
         events: vec![HostEvent::QuitDraining { reason, version: v }],
-        dequeued: None,
-        removed_browser: None,
+        ..Default::default()
     }
 }
 
@@ -1043,8 +1291,7 @@ fn handle_confirm_drained(state: &mut HostState) -> DispatchOutput {
     let v = state.bump_version();
     DispatchOutput {
         events: vec![HostEvent::QuitReady { version: v }],
-        dequeued: None,
-        removed_browser: None,
+        ..Default::default()
     }
 }
 
@@ -1071,8 +1318,7 @@ fn handle_enqueue_top_level_window(
     let v = state.bump_version();
     let mut out = DispatchOutput {
         events: vec![HostEvent::TopLevelQueueLengthChanged { len: queue_len, version: v }],
-        dequeued: None,
-        removed_browser: None,
+        ..Default::default()
     };
     // If idle, start immediately; chain the start arm's events.
     if state.top_level_creation.in_flight.is_none() {
@@ -1139,8 +1385,7 @@ fn start_next_top_level_if_idle(state: &mut HostState) -> DispatchOutput {
             },
             HostEvent::TopLevelQueueLengthChanged { len: queue_len, version: v_qlen },
         ],
-        dequeued: None,
-        removed_browser: None,
+        ..Default::default()
     }
 }
 
@@ -1164,8 +1409,7 @@ fn handle_top_level_callback_fired(state: &mut HostState, label: String) -> Disp
                     effect: EffectKind::CloseOrphanBrowser { browser },
                     version: v,
                 }],
-                dequeued: None,
-                removed_browser: None,
+                ..Default::default()
             };
         }
         return DispatchOutput::default();
@@ -1192,8 +1436,7 @@ fn handle_top_level_callback_fired(state: &mut HostState, label: String) -> Disp
             latency_ms,
             version: v_done,
         }],
-        dequeued: None,
-        removed_browser: None,
+        ..Default::default()
     };
     let next = start_next_top_level_if_idle(state);
     out.events.extend(next.events);
@@ -1236,8 +1479,7 @@ fn handle_top_level_renderer_terminated(
             outcome,
             version: v,
         }],
-        dequeued: None,
-        removed_browser: None,
+        ..Default::default()
     };
     let next = start_next_top_level_if_idle(state);
     out.events.extend(next.events);
@@ -1276,8 +1518,7 @@ fn handle_top_level_externally_closed(state: &mut HostState, label: String) -> D
             outcome,
             version: v,
         }],
-        dequeued: None,
-        removed_browser: None,
+        ..Default::default()
     };
     let next = start_next_top_level_if_idle(state);
     out.events.extend(next.events);
@@ -1487,6 +1728,166 @@ mod tests {
         let mut state = HostState::default();
         let out = update(&mut state, HostCommand::EnqueuePaneClose { block_id: "missing".into() });
         assert!(out.events.is_empty()); // idempotent no-op
+    }
+
+    // ── H.1.d (PR #5) — TryRegisterPaneLive / EnqueuePaneClose return-values
+    //   / DrainPaneByLabel ────────────────────────────────────────────────
+
+    #[test]
+    fn try_register_pane_live_fresh_returns_label_and_inserts_live() {
+        let mut state = HostState::default();
+        let out = update(
+            &mut state,
+            HostCommand::TryRegisterPaneLive { block_id: "b1".into() },
+        );
+        let label = match out.pane_register_result {
+            Some(RegisterResult::Fresh(l)) => l,
+            other => panic!("expected Fresh(_), got {:?}", other),
+        };
+        assert!(label.starts_with("browser-pane-b1-"));
+        assert_eq!(state.panes["b1"].label, label);
+        assert!(matches!(state.panes["b1"].lifecycle, PaneLifecycle::Live));
+        assert!(matches!(out.events[0], HostEvent::PaneCreateRequested { .. }));
+    }
+
+    #[test]
+    fn try_register_pane_live_already_live_returns_existing_label() {
+        let mut state = HostState::default();
+        let first = match update(
+            &mut state,
+            HostCommand::TryRegisterPaneLive { block_id: "b1".into() },
+        ).pane_register_result
+        {
+            Some(RegisterResult::Fresh(l)) => l,
+            _ => unreachable!(),
+        };
+        let out = update(
+            &mut state,
+            HostCommand::TryRegisterPaneLive { block_id: "b1".into() },
+        );
+        match out.pane_register_result {
+            Some(RegisterResult::AlreadyLive(l)) => assert_eq!(l, first),
+            other => panic!("expected AlreadyLive, got {:?}", other),
+        }
+        assert!(out.events.is_empty(), "no event for AlreadyLive — caller just navigates");
+    }
+
+    #[test]
+    fn try_register_pane_live_closing_returns_closing() {
+        let mut state = HostState::default();
+        update(&mut state, HostCommand::TryRegisterPaneLive { block_id: "b1".into() });
+        update(&mut state, HostCommand::EnqueuePaneClose { block_id: "b1".into() });
+        let out = update(
+            &mut state,
+            HostCommand::TryRegisterPaneLive { block_id: "b1".into() },
+        );
+        assert!(matches!(out.pane_register_result, Some(RegisterResult::Closing)));
+    }
+
+    #[test]
+    fn try_register_pane_live_during_shutdown_errors() {
+        let mut state = HostState::default();
+        state.lifecycle = HostLifecyclePhase::ShuttingDown;
+        let out = update(
+            &mut state,
+            HostCommand::TryRegisterPaneLive { block_id: "b1".into() },
+        );
+        assert!(out.pane_register_result.is_none());
+        assert!(matches!(out.events[0], HostEvent::Error { .. }));
+        assert!(!state.panes.contains_key("b1"));
+    }
+
+    #[test]
+    fn enqueue_pane_close_returns_label_for_live_entry() {
+        let mut state = HostState::default();
+        let label = match update(
+            &mut state,
+            HostCommand::TryRegisterPaneLive { block_id: "b1".into() },
+        ).pane_register_result
+        {
+            Some(RegisterResult::Fresh(l)) => l,
+            _ => unreachable!(),
+        };
+        let out = update(
+            &mut state,
+            HostCommand::EnqueuePaneClose { block_id: "b1".into() },
+        );
+        assert_eq!(out.closed_pane_label, Some(label));
+    }
+
+    #[test]
+    fn enqueue_pane_close_returns_none_for_already_closing() {
+        let mut state = HostState::default();
+        update(&mut state, HostCommand::TryRegisterPaneLive { block_id: "b1".into() });
+        update(&mut state, HostCommand::EnqueuePaneClose { block_id: "b1".into() });
+        let out = update(
+            &mut state,
+            HostCommand::EnqueuePaneClose { block_id: "b1".into() },
+        );
+        assert!(out.closed_pane_label.is_none());
+    }
+
+    #[test]
+    fn drain_pane_by_label_removes_entry_and_returns_block_id() {
+        let mut state = HostState::default();
+        let label = match update(
+            &mut state,
+            HostCommand::TryRegisterPaneLive { block_id: "b1".into() },
+        ).pane_register_result
+        {
+            Some(RegisterResult::Fresh(l)) => l,
+            _ => unreachable!(),
+        };
+        let out = update(&mut state, HostCommand::DrainPaneByLabel { label });
+        assert_eq!(out.drained_block_id, Some("b1".to_string()));
+        assert!(!state.panes.contains_key("b1"));
+        assert!(matches!(out.events[0], HostEvent::PaneClosed { .. }));
+    }
+
+    #[test]
+    fn drain_pane_by_label_idempotent_on_miss() {
+        let mut state = HostState::default();
+        let out = update(
+            &mut state,
+            HostCommand::DrainPaneByLabel { label: "no-such-label".into() },
+        );
+        assert!(out.drained_block_id.is_none());
+        assert!(out.events.is_empty());
+    }
+
+    #[test]
+    fn drain_after_close_recreate_does_not_evict_new_entry() {
+        // The exact bug PANE_LABEL_SEQ defends against: register → close →
+        // drain by OLD label → register again → drain by OLD label must
+        // NOT evict the new entry.
+        let mut state = HostState::default();
+        let first = match update(
+            &mut state,
+            HostCommand::TryRegisterPaneLive { block_id: "b1".into() },
+        ).pane_register_result
+        {
+            Some(RegisterResult::Fresh(l)) => l,
+            _ => unreachable!(),
+        };
+        update(&mut state, HostCommand::EnqueuePaneClose { block_id: "b1".into() });
+        update(&mut state, HostCommand::DrainPaneByLabel { label: first.clone() });
+
+        // re-register — gets a different label
+        let second = match update(
+            &mut state,
+            HostCommand::TryRegisterPaneLive { block_id: "b1".into() },
+        ).pane_register_result
+        {
+            Some(RegisterResult::Fresh(l)) => l,
+            _ => unreachable!(),
+        };
+        assert_ne!(first, second);
+
+        // late on_before_close for the OLD browser tries to drain by old label
+        let stale = update(&mut state, HostCommand::DrainPaneByLabel { label: first });
+        assert!(stale.drained_block_id.is_none(), "stale drain must not evict the new entry");
+        assert!(state.panes.contains_key("b1"), "new entry must survive stale drain");
+        assert_eq!(state.panes["b1"].label, second);
     }
 
     // ── H.3 drag (singleton invariant) ───────────────────────────────────
