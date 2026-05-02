@@ -34,30 +34,23 @@
     height: 33px;
     zoom: var(--zoomfactor);
     cursor: default;
-    // Drag is on the explicit .window-drag strip AND the .tab-bar-fill gap.
-    // Previously only .window-drag was drag because right-click on HTCAPTION
-    // was being consumed by the compositor (no contextmenu reached the
-    // renderer). With CEF Patch A (views_caption_rightclick_passthrough,
-    // commit 41802fe60 on agentmux/7680-...) right-clicks on HTCAPTION fall
-    // through to the renderer, so .tab-bar-fill can safely be draggable too.
-    //
-    // This matters on Ubuntu/GNOME because the sidebar dock occludes the
-    // leftmost ~60 logical px — the same area the .window-drag strip lives in.
-    // Without an additional drag area, the user has no clickable drag zone.
+    // Window drag is JS-driven (NOT -webkit-app-region: drag). Chromium
+    // architecturally suppresses ALL events on drag regions before they
+    // enter the renderer (verified 2026-05-02 via document capture-phase
+    // listener), so right-click contextmenu would not fire on the same
+    // element. Instead, .tab-bar-fill stays HTCLIENT and a 4px-threshold
+    // mousedown handler in useWindowDrag.linux.ts sends start_window_drag
+    // IPC → CefWindow::BeginWindowDrag() → xdg_toplevel.move (Wayland) /
+    // _NET_WM_MOVERESIZE (X11). This is the only known way to coexist
+    // drag + contextmenu on the same Chromium element.
 
     .window-drag {
+        // Legacy left-edge drag strip. --default-indent is 0px on Linux
+        // (set above) so this renders as zero width. Kept in the DOM only
+        // because the cross-platform window-header.tsx still mounts it;
+        // platform-specific markup would require structural changes.
         height: 100%;
         width: var(--default-indent);
         flex-shrink: 0;
-        -webkit-app-region: drag;
     }
-
-    // Inter-tab gap — DO NOT mark as -webkit-app-region: drag here.
-    // Chromium architecturally suppresses ALL events on drag regions
-    // before they enter the renderer (verified 2026-05-02 via document
-    // capture-phase listener), so right-click contextmenu would not fire.
-    // Instead, JS-driven drag via mousedown threshold + start_window_drag
-    // IPC handles native window-move; the area stays HTCLIENT so
-    // contextmenu fires normally on right-click.
-    // See: useWindowDrag.linux.ts + agentmux-cef IPC start_window_drag.
 }
