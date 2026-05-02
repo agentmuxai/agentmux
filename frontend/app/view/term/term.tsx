@@ -312,40 +312,10 @@ function TerminalView(props: ViewComponentProps<TermViewModel>): JSX.Element {
         }
     };
 
-    // File drop via Tauri's window-level event (since HTML5 drag events don't fire for OS drops in WebView2)
     const [isDragOver, setIsDragOver] = createSignal(false);
 
     onMount(() => {
-        if (detectHost() === "tauri") {
-            // Tauri: file drop via window-level event (HTML5 drag events don't fire in WebView2)
-            let unlisten: (() => void) | null = null;
-            import("@tauri-apps/api/webview").then(({ getCurrentWebview }) => {
-                getCurrentWebview().onDragDropEvent((event) => {
-                    const type = event.payload.type;
-                    const pos = (event.payload as any).position as { x: number; y: number } | undefined;
-                    const isOverEl = () => {
-                        if (!pos || !viewRef) return false;
-                        const rect = viewRef.getBoundingClientRect();
-                        return pos.x >= rect.left && pos.x <= rect.right && pos.y >= rect.top && pos.y <= rect.bottom;
-                    };
-                    if (type === "over") {
-                        setIsDragOver(isOverEl());
-                    } else if (type === "drop") {
-                        setIsDragOver(false);
-                        if (!isOverEl()) return;
-                        const paths = (event.payload as any).paths as string[] | undefined;
-                        if (paths && paths.length > 0) {
-                            handleFilesDropped(paths);
-                        }
-                    } else if (type === "leave" || (type as string) === "cancel") {
-                        setIsDragOver(false);
-                    }
-                }).then((fn) => {
-                    unlisten = fn;
-                });
-            });
-            onCleanup(() => unlisten?.());
-        } else if (detectHost() === "cef") {
+        if (detectHost() === "cef") {
             // CEF: HTML5 drag events work natively (unlike WebView2)
             if (!viewRef) return;
             const onDragOver = (e: DragEvent) => {
