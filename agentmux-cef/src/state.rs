@@ -783,23 +783,35 @@ impl AppState {
         legacy_empty
     }
 
-    /// Snapshot of all registered browser labels (HashMap iteration order;
-    /// callers must not assume ordering).
+    /// Snapshot of all registered browser labels (HashMap iteration order
+    /// preserved from the legacy map — stable per-HashMap-instance, same
+    /// characteristics as the original `state.browsers.lock().keys()`
+    /// pattern these helpers replaced).
+    ///
+    /// (codex P2 PR #659 round 3): previously routed through a fresh
+    /// `HashSet` per call, which has its own randomized hash seed →
+    /// non-deterministic order even when no windows changed. That caused
+    /// UI jitter in poll-driven views (`InstancePanel`'s window list).
+    /// Now Vec is built directly from legacy keys; HashSets are local to
+    /// the diff-detection logic.
     pub fn list_browser_labels(&self) -> Vec<String> {
         use std::collections::HashSet;
-        let reducer_labels: HashSet<String> = self
+        let reducer_labels: Vec<String> = self
             .host_state
             .lock()
             .browsers
             .keys()
             .cloned()
             .collect();
-        let legacy_labels: HashSet<String> = self.browsers.lock().keys().cloned().collect();
-        if reducer_labels != legacy_labels {
-            let only_reducer: Vec<&String> =
-                reducer_labels.difference(&legacy_labels).collect();
-            let only_legacy: Vec<&String> =
-                legacy_labels.difference(&reducer_labels).collect();
+        let legacy_labels: Vec<String> = self.browsers.lock().keys().cloned().collect();
+        // HashSets only for set-difference; legacy_labels Vec is what we return.
+        let reducer_set: HashSet<&String> = reducer_labels.iter().collect();
+        let legacy_set: HashSet<&String> = legacy_labels.iter().collect();
+        if reducer_set != legacy_set {
+            let only_reducer: Vec<&&String> =
+                reducer_set.difference(&legacy_set).collect();
+            let only_legacy: Vec<&&String> =
+                legacy_set.difference(&reducer_set).collect();
             tracing::warn!(
                 target: "host-reducer:drift",
                 only_reducer = ?only_reducer,
@@ -807,8 +819,9 @@ impl AppState {
                 "browser label set drift",
             );
         }
-        // Use legacy as authoritative until H.2.c flips reads.
-        legacy_labels.into_iter().collect()
+        // Legacy authoritative until PR #4 flips reads. Vec preserves
+        // HashMap iteration order (stable per instance).
+        legacy_labels
     }
 
     /// Snapshot of all registered browsers as (label, Browser) pairs.
@@ -881,9 +894,13 @@ impl AppState {
     }
 
     /// Snapshot of all `Live` pane labels. Used by `defocus_all` etc.
+    /// Order preserved from `PaneStateMachine.live_labels()` (legacy
+    /// HashMap iteration order — stable per instance, same as the
+    /// original code these helpers replaced). HashSets are local to
+    /// the drift-detection logic only.
     pub fn live_pane_labels(&self) -> Vec<String> {
         use std::collections::HashSet;
-        let reducer_labels: HashSet<String> = self
+        let reducer_labels: Vec<String> = self
             .host_state
             .lock()
             .panes
@@ -891,13 +908,14 @@ impl AppState {
             .filter(|e| e.lifecycle == PaneLifecycle::Live)
             .map(|e| e.label.clone())
             .collect();
-        let legacy_labels: HashSet<String> =
-            self.browser_panes.test_live_labels().into_iter().collect();
-        if reducer_labels != legacy_labels {
-            let only_reducer: Vec<&String> =
-                reducer_labels.difference(&legacy_labels).collect();
-            let only_legacy: Vec<&String> =
-                legacy_labels.difference(&reducer_labels).collect();
+        let legacy_labels: Vec<String> = self.browser_panes.test_live_labels();
+        let reducer_set: HashSet<&String> = reducer_labels.iter().collect();
+        let legacy_set: HashSet<&String> = legacy_labels.iter().collect();
+        if reducer_set != legacy_set {
+            let only_reducer: Vec<&&String> =
+                reducer_set.difference(&legacy_set).collect();
+            let only_legacy: Vec<&&String> =
+                legacy_set.difference(&reducer_set).collect();
             tracing::warn!(
                 target: "host-reducer:drift",
                 only_reducer = ?only_reducer,
@@ -905,7 +923,8 @@ impl AppState {
                 "live_pane_labels set drift",
             );
         }
-        legacy_labels.into_iter().collect()
+        // Legacy authoritative until PR #4 flips reads.
+        legacy_labels
     }
 
     /// Phase B.5e — authoritative instance-number lookup. Reads
