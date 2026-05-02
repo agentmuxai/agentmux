@@ -689,6 +689,203 @@ impl AppState {
         self.host_state.lock().pending_window_creations.back().cloned()
     }
 
+    // ── Phase H.2.b — browser read helpers (with fallback) ──────────────
+    //
+    // These wrap reads against `HostState.browsers` (the new reducer-managed
+    // map) with fallback to the legacy `AppState.browsers` mutex. Drift
+    // (entry in one but not the other) is logged via
+    // `target = "host-reducer:drift"` so production smoke can verify the
+    // parallel-write invariant before PR #4 flips reads to reducer-only.
+    //
+    // Snapshot-and-drop: each helper takes the relevant lock(s) briefly,
+    // clones what's needed, drops the lock. Callers never hold either
+    // lock across CEF FFI calls.
+
+    /// Get a browser handle by label. Reducer first; legacy fallback.
+    pub fn get_browser(&self, label: &str) -> Option<Browser> {
+        let from_reducer = self
+            .host_state
+            .lock()
+            .browsers
+            .get(label)
+            .map(|h| h.browser.clone());
+        let from_legacy = self.browsers.lock().get(label).cloned();
+        match (&from_reducer, &from_legacy) {
+            (Some(_), None) => tracing::warn!(
+                target: "host-reducer:drift",
+                label = %label,
+                "browser in reducer but missing from legacy",
+            ),
+            (None, Some(_)) => tracing::warn!(
+                target: "host-reducer:drift",
+                label = %label,
+                "browser in legacy but missing from reducer",
+            ),
+            _ => {}
+        }
+        // Prefer reducer; fall back to legacy. Both should agree post-H.2.a.
+        from_reducer.or(from_legacy)
+    }
+
+    /// Check whether a browser is registered under the given label.
+    pub fn has_browser(&self, label: &str) -> bool {
+        let in_reducer = self.host_state.lock().browsers.contains_key(label);
+        if in_reducer {
+            return true;
+        }
+        let in_legacy = self.browsers.lock().contains_key(label);
+        if in_legacy {
+            tracing::warn!(
+                target: "host-reducer:drift",
+                label = %label,
+                "browser in legacy but missing from reducer",
+            );
+        }
+        in_legacy
+    }
+
+    /// Are there any registered browsers?
+    pub fn browsers_is_empty(&self) -> bool {
+        let reducer_empty = self.host_state.lock().browsers.is_empty();
+        let legacy_empty = self.browsers.lock().is_empty();
+        if reducer_empty != legacy_empty {
+            tracing::warn!(
+                target: "host-reducer:drift",
+                reducer_empty,
+                legacy_empty,
+                "browsers is_empty drift",
+            );
+        }
+        // Conservatively report not-empty if either side has entries
+        // (preserves caller's "no windows exist yet" decisions).
+        reducer_empty && legacy_empty
+    }
+
+    /// Snapshot of all registered browser labels (HashMap iteration order;
+    /// callers must not assume ordering).
+    pub fn list_browser_labels(&self) -> Vec<String> {
+        use std::collections::HashSet;
+        let reducer_labels: HashSet<String> = self
+            .host_state
+            .lock()
+            .browsers
+            .keys()
+            .cloned()
+            .collect();
+        let legacy_labels: HashSet<String> = self.browsers.lock().keys().cloned().collect();
+        if reducer_labels != legacy_labels {
+            let only_reducer: Vec<&String> =
+                reducer_labels.difference(&legacy_labels).collect();
+            let only_legacy: Vec<&String> =
+                legacy_labels.difference(&reducer_labels).collect();
+            tracing::warn!(
+                target: "host-reducer:drift",
+                only_reducer = ?only_reducer,
+                only_legacy = ?only_legacy,
+                "browser label set drift",
+            );
+        }
+        // Use legacy as authoritative until H.2.c flips reads.
+        legacy_labels.into_iter().collect()
+    }
+
+    /// Snapshot of all registered browsers as (label, Browser) pairs.
+    /// Ordering is HashMap iteration order; callers must sort if order
+    /// matters.
+    pub fn list_browsers(&self) -> Vec<(String, Browser)> {
+        let from_reducer: Vec<(String, Browser)> = self
+            .host_state
+            .lock()
+            .browsers
+            .iter()
+            .map(|(k, h)| (k.clone(), h.browser.clone()))
+            .collect();
+        let from_legacy: Vec<(String, Browser)> = self
+            .browsers
+            .lock()
+            .iter()
+            .map(|(k, b)| (k.clone(), b.clone()))
+            .collect();
+        if from_reducer.len() != from_legacy.len() {
+            tracing::warn!(
+                target: "host-reducer:drift",
+                reducer_count = from_reducer.len(),
+                legacy_count = from_legacy.len(),
+                "browser count drift in list_browsers",
+            );
+        }
+        // Legacy is authoritative until flip.
+        from_legacy
+    }
+
+    /// First registered browser (for "any browser" callers like command
+    /// palette routing). Returns the label + Browser pair, or None if
+    /// the registry is empty.
+    pub fn first_browser(&self) -> Option<(String, Browser)> {
+        // Prefer the legacy iteration order (matches existing code's
+        // `.values().next()` semantics) until flip.
+        self.browsers
+            .lock()
+            .iter()
+            .next()
+            .map(|(k, b)| (k.clone(), b.clone()))
+    }
+
+    // ── Phase H.1.b — pane lifecycle read helpers (with fallback) ───────
+
+    /// Returns the pane's label iff entry is `Live`. Used by op gates
+    /// (focus/resize/navigate) — `None` indicates the pane is missing or
+    /// in `Closing`, in which case the caller must short-circuit rather
+    /// than touch the (possibly destroyed) HWND.
+    pub fn live_pane_label(&self, block_id: &str) -> Option<String> {
+        let from_reducer = self
+            .host_state
+            .lock()
+            .panes
+            .get(block_id)
+            .filter(|e| e.lifecycle == PaneLifecycle::Live)
+            .map(|e| e.label.clone());
+        let from_legacy = self.browser_panes.test_live_label_of(block_id);
+        if from_reducer != from_legacy {
+            tracing::warn!(
+                target: "host-reducer:drift",
+                block_id = %block_id,
+                reducer = ?from_reducer,
+                legacy = ?from_legacy,
+                "live_pane_label drift",
+            );
+        }
+        from_legacy.or(from_reducer)
+    }
+
+    /// Snapshot of all `Live` pane labels. Used by `defocus_all` etc.
+    pub fn live_pane_labels(&self) -> Vec<String> {
+        use std::collections::HashSet;
+        let reducer_labels: HashSet<String> = self
+            .host_state
+            .lock()
+            .panes
+            .values()
+            .filter(|e| e.lifecycle == PaneLifecycle::Live)
+            .map(|e| e.label.clone())
+            .collect();
+        let legacy_labels: HashSet<String> =
+            self.browser_panes.test_live_labels().into_iter().collect();
+        if reducer_labels != legacy_labels {
+            let only_reducer: Vec<&String> =
+                reducer_labels.difference(&legacy_labels).collect();
+            let only_legacy: Vec<&String> =
+                legacy_labels.difference(&reducer_labels).collect();
+            tracing::warn!(
+                target: "host-reducer:drift",
+                only_reducer = ?only_reducer,
+                only_legacy = ?only_legacy,
+                "live_pane_labels set drift",
+            );
+        }
+        legacy_labels.into_iter().collect()
+    }
+
     /// Phase B.5e — authoritative instance-number lookup. Reads
     /// the launcher-fed `shadow_instance_registry`, which is the
     /// sole source of truth post-B.5e (host's
