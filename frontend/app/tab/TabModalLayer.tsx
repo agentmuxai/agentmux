@@ -20,8 +20,9 @@
  * See docs/specs/launch-modal-rearchitecture-2026-05-01.md.
  */
 
-import { createSignal, Show, type Component, type JSX } from "solid-js";
+import { createSignal, Show, type Accessor, type Component, type JSX } from "solid-js";
 
+import { usePaneOverlay } from "@/app/platform/pane-overlay";
 import { AgentLaunchModalPanel } from "@/app/view/agent/components/AgentLaunchModal";
 
 import { TabModalContext, type TabModalApi, type TabModalRequest } from "./tab-modal";
@@ -31,72 +32,88 @@ interface TabModalLayerProps {
     children: JSX.Element;
 }
 
+// Registers the overlay element with the backend pane-clip system so
+// native browser-pane HWNDs cut a transparent hole matching the overlay
+// rect. Without this, hardware-windowed panes composite above HTML
+// regardless of CSS z-index and render on top of the modal.
+// Mirrors the ModalPaneOverlayClip pattern in modal-v2.tsx.
+const PaneOverlayClip: Component<{ getEl: Accessor<HTMLElement | null | undefined> }> = (p) => {
+    usePaneOverlay(p.getEl);
+    return null;
+};
+
 export const TabModalLayer: Component<TabModalLayerProps> = (props) => {
     const [current, setCurrent] = createSignal<TabModalRequest | null>(null);
+    const [submitting, setSubmitting] = createSignal(false);
 
-    const api: TabModalApi = {
-        open: (req) => setCurrent(req),
-        close: () => setCurrent(null),
-        current,
+    // Guard close: ESC and backdrop click are blocked while a submit RPC is
+    // in-flight so the user can't lose error feedback or trigger a duplicate launch.
+    const safeClose = () => {
+        if (!submitting()) setCurrent(null);
     };
 
-    // Backdrop click closes. Panel click is stopped from bubbling so a
-    // click inside the form doesn't reach the backdrop. ESC is handled
-    // on the overlay itself so we don't need a wrapper div around
-    // TileLayout (which would break its flex layout).
-    const handleBackdropClick = (e: MouseEvent) => {
-        if (e.target === e.currentTarget) {
-            api.close();
-        }
+    const api: TabModalApi = {
+        open: (req) => { setSubmitting(false); setCurrent(req); },
+        close: safeClose,
+        current,
     };
 
     const handleOverlayKeyDown = (e: KeyboardEvent) => {
         if (e.key === "Escape") {
             e.stopPropagation();
-            api.close();
+            safeClose();
         }
     };
 
-    // Context.Provider emits no DOM node, so TileLayout (props.children)
-    // remains a direct child of TabContent's flex container. The overlay
-    // is a sibling rendered after it; `position:absolute; inset:0` on
-    // .tab-modal-overlay pins it to TabContent's `position:relative` root.
+    // `display:contents` is layout-transparent — TileLayout still sees
+    // TabContent's flex-row container as its parent. `inert` makes the
+    // subtree non-interactive when a modal is open, trapping focus inside
+    // the overlay panel without the layout disruption a normal div would cause.
     return (
         <TabModalContext.Provider value={api}>
-            {props.children}
+            <div style="display:contents" inert={current() != null || undefined}>
+                {props.children}
+            </div>
             <Show when={current()}>
-                {(req) => (
-                    <div
-                        class="tab-modal-overlay"
-                        role="presentation"
-                        // eslint-disable-next-line jsx-a11y/no-autofocus
-                        tabIndex={-1}
-                        onClick={handleBackdropClick}
-                        onKeyDown={handleOverlayKeyDown}
-                    >
-                        <div class="tab-modal-backdrop" />
+                {(req) => {
+                    let overlayRef: HTMLDivElement | undefined;
+                    return (
                         <div
-                            class="tab-modal-panel"
-                            role="dialog"
-                            aria-modal="true"
-                            onClick={(e) => e.stopPropagation()}
+                            class="tab-modal-overlay"
+                            ref={(el) => { overlayRef = el; }}
+                            role="presentation"
+                            tabIndex={-1}
+                            onKeyDown={handleOverlayKeyDown}
                         >
-                            {renderRequest(req(), api)}
+                            <PaneOverlayClip getEl={() => overlayRef} />
+                            {/* Click on backdrop (not panel) closes. Handler is on the
+                                backdrop element itself — the backdrop covers the full
+                                overlay area, so e.target === e.currentTarget on the
+                                overlay would never fire. */}
+                            <div class="tab-modal-backdrop" onClick={safeClose} />
+                            <div
+                                class="tab-modal-panel"
+                                role="dialog"
+                                aria-modal="true"
+                                onClick={(e) => e.stopPropagation()}
+                            >
+                                {renderRequest(req(), api, setSubmitting)}
+                            </div>
                         </div>
-                    </div>
-                )}
+                    );
+                }}
             </Show>
         </TabModalContext.Provider>
     );
 };
 
 // ── Render dispatch ──────────────────────────────────────────────────────────
-//
-// One branch per request `kind`. The panel's `onSubmit` re-throws on
-// failure so the panel can surface the error in its own UI; on success
-// the layer closes itself.
 
-function renderRequest(req: TabModalRequest, api: TabModalApi): JSX.Element {
+function renderRequest(
+    req: TabModalRequest,
+    api: TabModalApi,
+    setSubmitting: (v: boolean) => void,
+): JSX.Element {
     switch (req.kind) {
         case "launch-agent":
             return (
@@ -104,8 +121,15 @@ function renderRequest(req: TabModalRequest, api: TabModalApi): JSX.Element {
                     agent={req.agent}
                     onCancel={api.close}
                     onSubmit={async (overrides) => {
-                        await req.onSubmit(overrides);
-                        api.close();
+                        setSubmitting(true);
+                        try {
+                            await req.onSubmit(overrides);
+                            setSubmitting(false);
+                            api.close();
+                        } catch (e) {
+                            setSubmitting(false);
+                            throw e;
+                        }
                     }}
                 />
             );
