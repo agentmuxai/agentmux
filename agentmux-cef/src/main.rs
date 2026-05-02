@@ -36,6 +36,7 @@ mod srv_ipc;
 mod memory_heartbeat;
 mod pane;
 mod reducer;
+mod saga_dispatch;
 mod sidecar;
 mod state;
 mod ui_tasks;

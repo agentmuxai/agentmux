@@ -18,7 +18,7 @@
 use std::sync::Arc;
 use std::sync::OnceLock;
 
-use agentmux_common::ipc::{ClientKind, Command, Event};
+use agentmux_common::ipc::{ClientKind, Command, Event, HostFrame};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::{mpsc, Mutex};
 
@@ -192,26 +192,91 @@ pub async fn connect_to_launcher(
     // from the launcher's authoritative event stream. Host has no
     // local `WindowInstanceRegistry` post-B.5e — the shadow IS the
     // read path.
+    //
+    // Phase CPD-5 — the reader now accepts `HostFrame` envelopes
+    // (CPD-1) so the launcher can push saga-issued `Command`s down
+    // alongside `Event`s. Each line is parsed as `HostFrame` first;
+    // on parse failure we fall back to raw `Event` JSON for
+    // backward-compatibility with launchers that haven't yet
+    // adopted the envelope shape (the legacy fanout path emits
+    // bare `Event` JSON; CPD-2's `HostPipe::send_event` wraps in
+    // `HostFrame::Event`).
+    //
+    // Saga-issued `Command`s are dispatched via the host-side
+    // idempotency LRU (`saga_dispatch::dispatch_host_command`):
+    // duplicate `(saga_id, kind)` pairs re-emit the same Report
+    // without re-running the action. The reply Commands are pushed
+    // through the existing `COMMAND_TX` channel, which the drain
+    // task spawned above already serializes to the writer.
     let state_for_reader = std::sync::Arc::clone(&state);
+    let saga_lru = std::sync::Arc::new(parking_lot::Mutex::new(
+        crate::saga_dispatch::SagaIdempotencyLru::with_default_cap(),
+    ));
+    // The reply path uses the same `COMMAND_TX` published above.
+    // Snapshot a sender clone NOW so the reader doesn't have to
+    // probe the OnceLock on every command (which would also race
+    // with the unset-OnceLock window during the brief gap between
+    // Register flush and `COMMAND_TX.set`).
+    let reply_tx = COMMAND_TX
+        .get()
+        .expect("COMMAND_TX set before reader task spawn")
+        .clone();
+    let saga_runner = std::sync::Arc::new(crate::saga_dispatch::LiveActionRunner {
+        state: std::sync::Arc::clone(&state),
+    });
     let reader_task = tokio::spawn(async move {
         let reader = BufReader::new(read_half);
         let mut lines = reader.lines();
         loop {
             match lines.next_line().await {
                 Ok(Some(line)) if line.trim().is_empty() => continue,
-                Ok(Some(line)) => match serde_json::from_str::<Event>(&line) {
-                    Ok(event) => {
-                        tracing::info!("[launcher-ipc] received event: {:?}", event);
-                        apply_event_to_shadow(&state_for_reader, &event);
+                Ok(Some(line)) => {
+                    // Try the envelope first.
+                    match serde_json::from_str::<HostFrame>(&line) {
+                        Ok(HostFrame::Event(event)) => {
+                            tracing::info!("[launcher-ipc] received event: {:?}", event);
+                            apply_event_to_shadow(&state_for_reader, &event);
+                        }
+                        Ok(HostFrame::Command(cmd)) => {
+                            tracing::info!(
+                                "[launcher-ipc] received saga command: {:?}",
+                                cmd
+                            );
+                            let outcome = crate::saga_dispatch::dispatch_host_command(
+                                &cmd,
+                                saga_runner.as_ref(),
+                                &saga_lru,
+                                &reply_tx,
+                            );
+                            tracing::debug!(
+                                "[launcher-ipc] saga command outcome: {:?}",
+                                outcome
+                            );
+                        }
+                        Err(_envelope_err) => {
+                            // Backward-compat fallback: pre-CPD-2 launchers
+                            // emit bare `Event` JSON without the `HostFrame`
+                            // wrapper. Parse as raw `Event`; on failure
+                            // log and skip.
+                            match serde_json::from_str::<Event>(&line) {
+                                Ok(event) => {
+                                    tracing::info!(
+                                        "[launcher-ipc] received event (legacy bare-Event): {:?}",
+                                        event
+                                    );
+                                    apply_event_to_shadow(&state_for_reader, &event);
+                                }
+                                Err(e) => {
+                                    tracing::warn!(
+                                        "[launcher-ipc] could not parse line as HostFrame or Event ({}): {}",
+                                        e,
+                                        line
+                                    );
+                                }
+                            }
+                        }
                     }
-                    Err(e) => {
-                        tracing::warn!(
-                            "[launcher-ipc] could not parse event line ({}): {}",
-                            e,
-                            line
-                        );
-                    }
-                },
+                }
                 Ok(None) => {
                     tracing::info!("[launcher-ipc] launcher pipe EOF — connection closed");
                     return;
