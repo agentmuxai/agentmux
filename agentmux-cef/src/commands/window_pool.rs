@@ -537,14 +537,19 @@ pub fn promote_pool_window(
         None,
     );
 
-    // PR #664 codex P2 — explicit HWND link for promoted pool windows.
-    // The launcher's drain-on-WindowOpened fallback was removed in
-    // this PR; without this explicit ReportHwndOpened, the launcher
-    // mirror for the promoted pool window would permanently have
-    // hwnd=None (pool windows skip the report_hwnd_opened branch in
-    // `client.rs::on_after_created` because their initial registration
-    // happens before promotion). That would break visibility/foreground/
-    // orphan-destroy WRR drift detection for every torn-off window.
+    // PR #664 codex P2 — explicit AUTHORITATIVE HWND link for
+    // promoted pool windows. Pool windows skip the explicit
+    // report_hwnd_opened branch in `client.rs::on_after_created`
+    // (gated on `!label.starts_with("window-pool-")`) because their
+    // initial registration happens before promotion. The launcher's
+    // drain-on-WindowOpened fallback (in `handle_report_window_opened`)
+    // would only link a recent pending HWND if one happened to be in
+    // the 2s window — pre-promote pool windows are usually older than
+    // that, leaving the mirror permanently hwnd=None. This explicit
+    // link guarantees the mirror tracks the HWND so WRR
+    // visibility/foreground/orphan-destroy drift detection works for
+    // every torn-off window. The accompanying repair logic in
+    // `apply_hwnd_opened` corrects any wrong drain-pick.
     crate::launcher_ipc::report_hwnd_opened(
         raw_hwnd as u64,
         "Chrome_WidgetWin_1".to_string(),
