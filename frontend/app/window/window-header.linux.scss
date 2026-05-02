@@ -6,7 +6,10 @@
 // so no width compensation is needed — 100vw is correct.
 
 .window-header {
-    --default-indent: 10px;
+    // Was 60px for a dedicated left drag strip; drag now lives on .tab-bar-fill
+    // (JS-driven via useWindowDrag.linux.ts), so the strip is redundant and the
+    // gap on the left of the + add-tab button is removed.
+    --default-indent: 0px;
 }
 
 .config-error-message {
@@ -31,8 +34,21 @@
     height: 33px;
     zoom: var(--zoomfactor);
     cursor: default;
+    // Window drag is JS-driven (NOT -webkit-app-region: drag). Chromium
+    // architecturally suppresses ALL events on drag regions before they
+    // enter the renderer (verified 2026-05-02 via document capture-phase
+    // listener), so right-click contextmenu would not fire on the same
+    // element. Instead, .tab-bar-fill stays HTCLIENT and a 4px-threshold
+    // mousedown handler in useWindowDrag.linux.ts sends start_window_drag
+    // IPC → CefWindow::BeginWindowDrag() → xdg_toplevel.move (Wayland) /
+    // _NET_WM_MOVERESIZE (X11). This is the only known way to coexist
+    // drag + contextmenu on the same Chromium element.
 
     .window-drag {
+        // Legacy left-edge drag strip. --default-indent is 0px on Linux
+        // (set above) so this renders as zero width. Kept in the DOM only
+        // because the cross-platform window-header.tsx still mounts it;
+        // platform-specific markup would require structural changes.
         height: 100%;
         width: var(--default-indent);
         flex-shrink: 0;
