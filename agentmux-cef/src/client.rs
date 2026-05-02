@@ -207,6 +207,37 @@ impl AgentMuxHandler {
 
         let is_top_level_window = !label.starts_with("browser-pane-");
 
+        // Phase H.2.a — parallel write: mirror the new browser into the
+        // host reducer's `browsers` map. Determine BrowserKind from:
+        //   - is_pane (the AgentMuxClient field): pane child window
+        //   - label prefix `window-pool-` + membership in
+        //     `unpromoted_pool_labels`: pool window (TopLevel { is_pool: true })
+        //   - everything else: TopLevel { is_pool: false }
+        // AppState.browsers remains authoritative until step e.
+        let kind = if self.is_pane {
+            // Pane label format: `browser-pane-<block_id>-<seq>` per
+            // pane/lifecycle.rs::next_label. Strip prefix + trailing `-<seq>`
+            // to recover block_id.
+            let block_id = label
+                .strip_prefix("browser-pane-")
+                .and_then(|rest| rest.rfind('-').map(|i| rest[..i].to_string()))
+                .unwrap_or_default();
+            crate::state::BrowserKind::Pane { block_id }
+        } else if label.starts_with("window-pool-")
+            && self.state.unpromoted_pool_labels.lock().contains(&label)
+        {
+            crate::state::BrowserKind::TopLevel { is_pool: true }
+        } else {
+            crate::state::BrowserKind::TopLevel { is_pool: false }
+        };
+        self.state.host_dispatch(
+            crate::reducer::HostCommand::RegisterBrowser {
+                label: label.clone(),
+                browser: browser.clone(),
+                kind,
+            },
+        );
+
         // Phase B.5 (window_meta step d, refined) — write host's
         // local `window_meta` ONCE here, synchronously from the
         // popped pending entry. This is no longer the authoritative
@@ -461,6 +492,14 @@ impl AgentMuxHandler {
             }
             label
         };
+
+        // Phase H.2.a — parallel write: mirror the unregister into the host
+        // reducer. Idempotent on the reducer side (no-op if absent).
+        if let Some(ref lbl) = label {
+            self.state.host_dispatch(
+                crate::reducer::HostCommand::UnregisterBrowser { label: lbl.clone() },
+            );
+        }
 
         // Pane-specific on_before_close work (drain lifecycle entry) lives
         // in `crate::pane::callbacks` after Phase 4.
