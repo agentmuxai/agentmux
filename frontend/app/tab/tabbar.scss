@@ -131,6 +131,10 @@
         flex: 1 1 auto;
         min-width: 0;
         height: 100%;
+        // NOTE: intentionally HTCLIENT (not drag). Making this drag would
+        // cover ~670px of header width with HTCAPTION, absorbing right-clicks.
+        // Window drag happens via the narrow .window-drag strip on the left
+        // of the header.
     }
 
 }

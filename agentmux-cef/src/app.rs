@@ -302,7 +302,7 @@ wrap_browser_process_handler! {
                 windowless_frame_rate: 60,
                 // Dark background to match app theme — prevents white bleed-through
                 // when terminal panes use transparency.
-                background_color: 0xFF000000, // ARGB: opaque black
+                background_color: 0xFF000000, // ARGB: opaque black (matches pre-transparency-experiment baseline)
                 ..Default::default()
             };
 

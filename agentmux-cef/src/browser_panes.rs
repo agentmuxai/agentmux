@@ -219,33 +219,25 @@ impl BrowserPaneManager {
     }
 
     pub fn resize(&self, block_id: &str, rect: Rect, state: &Arc<AppState>) {
+        #[cfg(target_os = "windows")]
         if let Some(browser) = self.live_browser(state, block_id) {
             if let Some(host) = browser.host() {
                 let hwnd = host.window_handle();
                 if !hwnd.0.is_null() {
-                    #[cfg(target_os = "windows")]
                     unsafe {
-                        // HWND_TOP = 0 brings the window to the top of the Z-order
-                        // within its parent. SWP_NOACTIVATE keeps keyboard focus where
-                        // it is. We MUST keep the pane on top of the main browser's
-                        // Chrome_RenderWidgetHostHWND — otherwise mouse-wheel events
-                        // over the visible pane area hit main's widget (higher in
-                        // Z-order) instead of the pane, and scrolling is broken.
                         windows_sys::Win32::UI::WindowsAndMessaging::SetWindowPos(
                             hwnd.0 as _,
-                            std::ptr::null_mut(), // HWND_TOP
+                            std::ptr::null_mut(),
                             rect.x, rect.y, rect.width, rect.height,
                             0x0010, // SWP_NOACTIVATE
                         );
                     }
-                    // Tell Chromium the pane has been moved/resized so its cached
-                    // screen bounds are updated — without this, hit-tests on
-                    // scrollbars and drag operations use stale coordinates and
-                    // drags are rejected / misrouted.
                     host.notify_move_or_resize_started();
                 }
             }
         }
+        #[cfg(not(target_os = "windows"))]
+        { let _ = (block_id, rect, state); }
     }
 
     /// Close a pane by destroying its child HWND directly and dropping the
