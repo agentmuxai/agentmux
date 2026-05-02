@@ -70,6 +70,18 @@ pub fn spawn_pool_window(state: &Arc<AppState>) {
         return;
     }
 
+    // PR #6 H.7 — refuse pool refill while any pane is mid-close. Pool
+    // windows are CEF top-levels just like user-visible ones; the v146
+    // deadlock fires regardless of whether the new window is on-screen.
+    // See `commands/window.rs::open_window_with_kind` for rationale.
+    if state.any_pane_closing() {
+        tracing::warn!(
+            target: "wfr:gate",
+            "[wfr:gate] spawn_pool_window deferred — pane is mid-close (H.7 invariant)"
+        );
+        return;
+    }
+
     let window_id = uuid::Uuid::new_v4();
     // Use the `window-pool-` prefix so existing `is_instance_label`
     // checks (tear_off_hook.rs, app-init.ts) pass naturally — they

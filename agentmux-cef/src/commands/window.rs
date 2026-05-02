@@ -597,6 +597,20 @@ fn open_window_with_kind(
     kind: crate::state::WindowKind,
     parent_instance_id: Option<String>,
 ) -> Result<serde_json::Value, String> {
+    // PR #6 H.7 — refuse top-level creation while any pane is mid-close.
+    // See `SPEC_WINDOW_FLEET_REDUCER_2026-05-02.md` and the smoke retro
+    // at `docs/retro/smoke-test-0.33.586-and-pr5-plan-2026-05-02.md`:
+    // creating a top-level CEF window while a pane is in `Closing` hits
+    // a Chromium v146 deadlock (HiddenSinceOpen + IPC backpressure)
+    // that wedges the message loop. Frontend should retry on next tick.
+    if state.any_pane_closing() {
+        tracing::warn!(
+            target: "wfr:gate",
+            "[wfr:gate] open_window refused — pane is mid-close (H.7 invariant)"
+        );
+        return Err("a pane is currently closing; retry shortly".to_string());
+    }
+
     let window_id = uuid::Uuid::new_v4();
     let label = format!("window-{}", window_id.simple());
 
