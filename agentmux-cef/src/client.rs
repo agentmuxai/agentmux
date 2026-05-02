@@ -133,6 +133,11 @@ impl AgentMuxHandler {
         let browser = browser.cloned().expect("Browser is None");
         tracing::info!("Browser created (total: {})", self.browser_list.len() + 1);
 
+        // Phase 1 diagnostic tracing — find the exact line that silences the
+        // UI thread under concurrent window creation. See
+        // docs/specs/SPEC_HOST_WINDOW_CREATION_RUNNER_2026-05-02.md.
+        let t0 = std::time::Instant::now();
+
         // Phase B.5 (window_meta step d) — pop the pre-create
         // handoff entry. Pre-step-d this was a label-only queue +
         // separate `window_meta.insert` from the caller; now it's
@@ -157,9 +162,18 @@ impl AgentMuxHandler {
             // emits PendingWindowQueueEmpty on miss; the fallback
             // (synthesize a UUID-labelled FullInstance entry) lives
             // in the legacy code path it always has.
+            tracing::info!(
+                elapsed_us = t0.elapsed().as_micros() as u64,
+                "[on-after-created] dispatching DequeuePendingWindowCreation"
+            );
             let out = self
                 .state
                 .host_dispatch(crate::reducer::HostCommand::DequeuePendingWindowCreation);
+            tracing::info!(
+                elapsed_us = t0.elapsed().as_micros() as u64,
+                dequeued_some = out.dequeued.is_some(),
+                "[on-after-created] DequeuePendingWindowCreation returned"
+            );
             out.dequeued.unwrap_or_else(|| {
                 let lbl = format!("window-{}", uuid::Uuid::new_v4());
                 tracing::warn!(label = %lbl, "[on_after_created] no pending creation entry — defaulting to FullInstance");
@@ -174,8 +188,18 @@ impl AgentMuxHandler {
         let pending_kind = pending.kind;
         let pending_parent = pending.parent_instance_id.clone();
 
+        tracing::info!(
+            label = %label,
+            elapsed_us = t0.elapsed().as_micros() as u64,
+            "[on-after-created] acquiring browsers lock"
+        );
         {
             let mut browsers = self.state.browsers.lock();
+            tracing::info!(
+                label = %label,
+                elapsed_us = t0.elapsed().as_micros() as u64,
+                "[on-after-created] browsers lock acquired"
+            );
             tracing::info!("Registered browser: label={} (total: {})", label, browsers.len() + 1);
             dlog(&format!("on_after_created: registered label={} total={}", label, browsers.len() + 1));
             browsers.insert(label.clone(), browser.clone());
