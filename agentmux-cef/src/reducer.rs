@@ -539,18 +539,47 @@ pub enum HostEvent {
     Error { message: String, version: u64 },
 }
 
-/// Output bundle returned from the reducer for the dequeue arm.
+/// Output bundle returned from the reducer.
 ///
-/// The dequeue arm is the only F.1 command whose caller needs the
-/// popped value (an event is not sufficient — `client.rs::on_after_created`
-/// uses the popped `PendingWindowCreation`'s fields to drive
-/// `window_meta.insert` and `ReportWindowOpened`). Other arms can
-/// rely on events alone; this struct keeps the dispatch return type
-/// uniform.
-#[derive(Debug, Default)]
+/// Most arms communicate via `events` alone, but two arms have callers
+/// that need an atomic value-returning op alongside the state mutation:
+///
+/// - `DequeuePendingWindowCreation` → `dequeued: Option<PendingWindowCreation>`
+///   (`client.rs::on_after_created` needs the popped entry's fields to drive
+///   `window_meta.insert` + `ReportWindowOpened`).
+///
+/// - `UnregisterBrowser` → `removed_browser: Option<Browser>` (the close
+///   path in `browser_panes::AppStateCloseOps::take_browser_hwnd` needs
+///   the Browser handle to extract its HWND for `DestroyWindow`. The
+///   atomicity matters: see codex P2 PR #660 — separating get + dispatch
+///   creates a window where concurrent readers can also resolve the
+///   label and act on the closing handle).
+///
+/// Default keeps the dispatch return type uniform across arms that
+/// don't populate these fields.
+#[derive(Default)]
 pub struct DispatchOutput {
     pub events: Vec<HostEvent>,
     pub dequeued: Option<PendingWindowCreation>,
+    pub removed_browser: Option<Browser>,
+}
+
+// Manual Debug — `cef::Browser` doesn't impl Debug.
+impl std::fmt::Debug for DispatchOutput {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DispatchOutput")
+            .field("events", &self.events)
+            .field("dequeued", &self.dequeued)
+            .field(
+                "removed_browser",
+                if self.removed_browser.is_some() {
+                    &"Some(<cef::Browser>)"
+                } else {
+                    &"None"
+                },
+            )
+            .finish()
+    }
 }
 
 /// Pure functional core of the host reducer.
@@ -633,6 +662,7 @@ fn handle_enqueue_pending_window_creation(
                 version: v,
             }],
             dequeued: None,
+            removed_browser: None,
         };
     }
     let label = entry.label.clone();
@@ -646,6 +676,7 @@ fn handle_enqueue_pending_window_creation(
             version: v,
         }],
         dequeued: None,
+        removed_browser: None,
     }
 }
 
@@ -662,6 +693,7 @@ fn handle_dequeue_pending_window_creation(state: &mut HostState) -> DispatchOutp
                     version: v,
                 }],
                 dequeued: Some(entry),
+                removed_browser: None,
             }
         }
         None => {
@@ -669,6 +701,7 @@ fn handle_dequeue_pending_window_creation(state: &mut HostState) -> DispatchOutp
             DispatchOutput {
                 events: vec![HostEvent::PendingWindowQueueEmpty { version: v }],
                 dequeued: None,
+                removed_browser: None,
             }
         }
     }
@@ -689,6 +722,7 @@ fn emit_error(state: &mut HostState, message: String) -> DispatchOutput {
     DispatchOutput {
         events: vec![HostEvent::Error { message, version: v }],
         dequeued: None,
+        removed_browser: None,
     }
 }
 
@@ -717,6 +751,7 @@ fn handle_enqueue_pane_create(
     DispatchOutput {
         events: vec![HostEvent::PaneCreateRequested { block_id, label, version: v }],
         dequeued: None,
+        removed_browser: None,
     }
 }
 
@@ -731,6 +766,7 @@ fn handle_complete_pane_create(state: &mut HostState, block_id: String) -> Dispa
     DispatchOutput {
         events: vec![HostEvent::PaneLive { block_id, label: entry.label, version: v }],
         dequeued: None,
+        removed_browser: None,
     }
 }
 
@@ -747,6 +783,7 @@ fn handle_enqueue_pane_close(state: &mut HostState, block_id: String) -> Dispatc
     DispatchOutput {
         events: vec![HostEvent::PaneClosing { block_id, version: v }],
         dequeued: None,
+        removed_browser: None,
     }
 }
 
@@ -758,6 +795,7 @@ fn handle_complete_pane_close(state: &mut HostState, block_id: String) -> Dispat
     DispatchOutput {
         events: vec![HostEvent::PaneClosed { block_id, version: v }],
         dequeued: None,
+        removed_browser: None,
     }
 }
 
@@ -771,6 +809,7 @@ fn handle_abort_pane_create(
     DispatchOutput {
         events: vec![HostEvent::PaneCreationFailed { block_id, reason, version: v }],
         dequeued: None,
+        removed_browser: None,
     }
 }
 
@@ -801,17 +840,26 @@ fn handle_register_browser(
     DispatchOutput {
         events: vec![HostEvent::BrowserRegistered { label, kind, version: v }],
         dequeued: None,
+        removed_browser: None,
     }
 }
 
 fn handle_unregister_browser(state: &mut HostState, label: String) -> DispatchOutput {
-    if state.browsers.remove(&label).is_none() {
+    // Atomic remove + return the Browser handle in `removed_browser`
+    // (codex P2 PR #660). The pane close path in
+    // `browser_panes::AppStateCloseOps::take_browser_hwnd` uses the
+    // returned Browser to extract its HWND. Any caller that doesn't
+    // need the handle can simply ignore `removed_browser`.
+    let removed = state.browsers.remove(&label);
+    let removed_browser = removed.map(|h| h.browser);
+    if removed_browser.is_none() {
         return DispatchOutput::default(); // idempotent
     }
     let v = state.bump_version();
     DispatchOutput {
         events: vec![HostEvent::BrowserUnregistered { label, version: v }],
         dequeued: None,
+        removed_browser,
     }
 }
 
@@ -828,6 +876,7 @@ fn handle_start_drag(state: &mut HostState, session: DragSession) -> DispatchOut
     DispatchOutput {
         events: vec![HostEvent::DragStarted { drag_id, source_window, version: v }],
         dequeued: None,
+        removed_browser: None,
     }
 }
 
@@ -844,6 +893,7 @@ fn handle_end_drag(
             DispatchOutput {
                 events: vec![HostEvent::DragEnded { drag_id, outcome, version: v }],
                 dequeued: None,
+                removed_browser: None,
             }
         }
         _ => DispatchOutput::default(), // mismatched or no drag; idempotent no-op
@@ -878,6 +928,7 @@ fn handle_pool_ready(state: &mut HostState, label: String) -> DispatchOutput {
             version: v,
         }],
         dequeued: None,
+        removed_browser: None,
     }
 }
 
@@ -905,6 +956,7 @@ fn handle_pool_destroyed_before_promote(state: &mut HostState, label: String) ->
             version: v,
         }],
         dequeued: None,
+        removed_browser: None,
     }
 }
 
@@ -937,6 +989,7 @@ fn handle_promote_pool_window(state: &mut HostState, label: String) -> DispatchO
             version: v,
         }],
         dequeued: None,
+        removed_browser: None,
     }
 }
 
@@ -960,7 +1013,11 @@ fn handle_pool_drain_all(state: &mut HostState) -> DispatchOutput {
     }
     let v = state.bump_version();
     events.push(HostEvent::PoolEmpty { version: v });
-    DispatchOutput { events, dequeued: None }
+    DispatchOutput {
+        events,
+        dequeued: None,
+        removed_browser: None,
+    }
 }
 
 // ── H.5 — quit lifecycle ─────────────────────────────────────────────────
@@ -974,6 +1031,7 @@ fn handle_begin_drain(state: &mut HostState, reason: QuitReason) -> DispatchOutp
     DispatchOutput {
         events: vec![HostEvent::QuitDraining { reason, version: v }],
         dequeued: None,
+        removed_browser: None,
     }
 }
 
@@ -986,6 +1044,7 @@ fn handle_confirm_drained(state: &mut HostState) -> DispatchOutput {
     DispatchOutput {
         events: vec![HostEvent::QuitReady { version: v }],
         dequeued: None,
+        removed_browser: None,
     }
 }
 
@@ -1013,6 +1072,7 @@ fn handle_enqueue_top_level_window(
     let mut out = DispatchOutput {
         events: vec![HostEvent::TopLevelQueueLengthChanged { len: queue_len, version: v }],
         dequeued: None,
+        removed_browser: None,
     };
     // If idle, start immediately; chain the start arm's events.
     if state.top_level_creation.in_flight.is_none() {
@@ -1080,6 +1140,7 @@ fn start_next_top_level_if_idle(state: &mut HostState) -> DispatchOutput {
             HostEvent::TopLevelQueueLengthChanged { len: queue_len, version: v_qlen },
         ],
         dequeued: None,
+        removed_browser: None,
     }
 }
 
@@ -1104,6 +1165,7 @@ fn handle_top_level_callback_fired(state: &mut HostState, label: String) -> Disp
                     version: v,
                 }],
                 dequeued: None,
+                removed_browser: None,
             };
         }
         return DispatchOutput::default();
@@ -1131,6 +1193,7 @@ fn handle_top_level_callback_fired(state: &mut HostState, label: String) -> Disp
             version: v_done,
         }],
         dequeued: None,
+        removed_browser: None,
     };
     let next = start_next_top_level_if_idle(state);
     out.events.extend(next.events);
@@ -1174,6 +1237,7 @@ fn handle_top_level_renderer_terminated(
             version: v,
         }],
         dequeued: None,
+        removed_browser: None,
     };
     let next = start_next_top_level_if_idle(state);
     out.events.extend(next.events);
@@ -1213,6 +1277,7 @@ fn handle_top_level_externally_closed(state: &mut HostState, label: String) -> D
             version: v,
         }],
         dequeued: None,
+        removed_browser: None,
     };
     let next = start_next_top_level_if_idle(state);
     out.events.extend(next.events);

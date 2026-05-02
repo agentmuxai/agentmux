@@ -189,22 +189,18 @@ impl AgentMuxHandler {
         let pending_kind = pending.kind;
         let pending_parent = pending.parent_instance_id.clone();
 
+        // Phase H.2.d — legacy `state.browsers.insert` removed. Reducer's
+        // `RegisterBrowser` (dispatched below) is now the sole canonical
+        // mutation site. Smoke test on 0.33.585 verified parallel-write
+        // parity (zero drift across 18 RegisterBrowser/Unregister pairs).
+        let total = self.state.host_state.lock().browsers.len() + 1;
         tracing::info!(
             label = %label,
             elapsed_us = t0.elapsed().as_micros() as u64,
-            "[on-after-created] acquiring browsers lock"
+            total,
+            "[on-after-created] registering browser via reducer",
         );
-        {
-            let mut browsers = self.state.browsers.lock();
-            tracing::info!(
-                label = %label,
-                elapsed_us = t0.elapsed().as_micros() as u64,
-                "[on-after-created] browsers lock acquired"
-            );
-            tracing::info!("Registered browser: label={} (total: {})", label, browsers.len() + 1);
-            dlog(&format!("on_after_created: registered label={} total={}", label, browsers.len() + 1));
-            browsers.insert(label.clone(), browser.clone());
-        }
+        dlog(&format!("on_after_created: registered label={} total={}", label, total));
 
         let is_top_level_window = !label.starts_with("browser-pane-");
 
@@ -478,27 +474,31 @@ impl AgentMuxHandler {
 
         let mut browser = browser.cloned().expect("Browser is None");
 
-        // Unregister browser from the multi-window map and get its label.
-        let label = {
-            let mut browsers = self.state.browsers.lock();
-            let keys: Vec<String> = browsers.keys().cloned().collect();
-            dlog(&format!("browsers map keys: {:?}", keys));
-            let label = browsers.iter()
-                .find(|(_, b)| b.is_same(Some(&mut browser)) != 0)
-                .map(|(k, _)| k.clone());
-            dlog(&format!("label found: {:?}", label));
-            if let Some(ref lbl) = label {
-                browsers.remove(lbl);
-                tracing::info!("Unregistered browser: label={} (remaining: {})", lbl, browsers.len());
-            }
-            label
-        };
-
-        // Phase H.2.a — parallel write: mirror the unregister into the host
-        // reducer. Idempotent on the reducer side (no-op if absent).
+        // Unregister browser from the reducer's `browsers` map and get its
+        // label. Phase H.2.d — legacy `state.browsers.lock().remove` removed;
+        // reducer is sole source of truth (see PR #4 commit 2 H.2.c flip).
+        // Find-by-identity loop now iterates reducer-backed snapshot via
+        // `state.list_browsers()`, then dispatches `UnregisterBrowser`.
+        let snapshot = self.state.list_browsers();
+        let keys: Vec<&String> = snapshot.iter().map(|(k, _)| k).collect();
+        dlog(&format!("browsers map keys: {:?}", keys));
+        let label = snapshot
+            .iter()
+            .find(|(_, b)| {
+                let mut b = b.clone();
+                b.is_same(Some(&mut browser)) != 0
+            })
+            .map(|(k, _)| k.clone());
+        dlog(&format!("label found: {:?}", label));
         if let Some(ref lbl) = label {
             self.state.host_dispatch(
                 crate::reducer::HostCommand::UnregisterBrowser { label: lbl.clone() },
+            );
+            let remaining = self.state.host_state.lock().browsers.len();
+            tracing::info!(
+                "Unregistered browser: label={} (remaining: {})",
+                lbl,
+                remaining
             );
         }
 

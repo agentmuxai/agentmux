@@ -480,18 +480,13 @@ pub struct AppState {
     /// Verified on every IPC request to prevent unauthorized local access.
     pub ipc_token: String,
 
-    /// CEF Browser handles keyed by window label (multi-window support).
-    /// "main" is the primary window; tear-off windows get "window-{UUID}" labels.
-    ///
-    /// **Phase B / multi-reducer status**: this map is intentionally NOT
-    /// migrated to launcher under the standard B.5 a→b→c→d→e ratchet because
-    /// `cef::Browser` is an FFI handle to a Chromium browser object in this
-    /// process — it can't serialize over IPC and must stay co-located with
-    /// the CEF runtime. The KEY-SET role (label set queries) is already
-    /// covered by the launcher's `state.windows` mirror (B.4) +
-    /// `shadow_window_meta`. This field will be retired into a host-side
-    /// reducer in Phase F (see `docs/retro/multi-reducer-proposal-2026-04-28.md`).
-    pub browsers: Mutex<HashMap<String, Browser>>,
+    // Phase H.2.e (PR #4) — `pub browsers: Mutex<HashMap<String, Browser>>`
+    // deleted. Authoritative storage is now `HostState.browsers` (the host
+    // reducer's map). Read access goes through `AppState::get_browser`,
+    // `list_browsers`, etc. (state.rs:704-742). The H.2 ratchet
+    // (a → parallel writes, b → reads with fallback, c → flip reads,
+    // d → drop legacy writes, e → delete) is complete for browsers.
+    // Pane lifecycle (`PaneStateMachine`) follows in PR #5.
 
     /// Per-window metadata (kind, parent linkage).
     ///
@@ -632,7 +627,7 @@ impl Default for AppState {
             cli_login_stdin: Mutex::new(None),
             ipc_port: Mutex::new(0),
             ipc_token: uuid::Uuid::new_v4().to_string(),
-            browsers: Mutex::new(HashMap::new()),
+            // browsers field removed in H.2.e — see comment near struct decl.
             window_meta: Mutex::new(HashMap::new()),
             host_state: Mutex::new(crate::reducer::HostState::default()),
             window_pool: Mutex::new(VecDeque::new()),
@@ -689,242 +684,98 @@ impl AppState {
         self.host_state.lock().pending_window_creations.back().cloned()
     }
 
-    // ── Phase H.2.b — browser read helpers (with fallback) ──────────────
+    // ── Phase H.2 — browser read helpers (reducer-only, post-flip) ──────
     //
-    // These wrap reads against `HostState.browsers` (the new reducer-managed
-    // map) with fallback to the legacy `AppState.browsers` mutex. Drift
-    // (entry in one but not the other) is logged via
-    // `target = "host-reducer:drift"` so production smoke can verify the
-    // parallel-write invariant before PR #4 flips reads to reducer-only.
+    // After PR #4's flip step (H.1.c + H.2.c), `HostState.browsers` /
+    // `HostState.panes` are the sole source of truth. Legacy reads,
+    // fallback paths, and drift logging removed — production smoke
+    // verified zero drift across 50 reducer events with a balanced
+    // BrowserRegistered/Unregistered count (18/18) and PaneCreate/
+    // PaneClosed count (7/7) before this flip.
     //
-    // Snapshot-and-drop: each helper takes the relevant lock(s) briefly,
-    // clones what's needed, drops the lock. Callers never hold either
+    // Snapshot-and-drop: each helper takes the relevant lock briefly,
+    // clones what's needed, drops the lock. Callers never hold the
     // lock across CEF FFI calls.
 
-    /// Get a browser handle by label. Legacy is authoritative; reducer
-    /// fallback (codex P1 + reagent P1 PR #659 round 2).
-    ///
-    /// **Why legacy first:** during the parallel-write phase the close
-    /// paths (`on_before_close`, pane close) remove from legacy FIRST and
-    /// dispatch `UnregisterBrowser` afterward. If we returned reducer-first,
-    /// concurrent readers in that drift window would observe `legacy=None`
-    /// but `reducer=Some` — handing back a Browser handle that legacy has
-    /// already retired (its HWND is mid-teardown). That regresses behavior
-    /// vs the original `state.browsers.lock().get(label).cloned()` which
-    /// returned `None` correctly during close.
-    ///
-    /// Drift logged in both directions for observability before PR #4 flips
-    /// to reducer-only.
+    /// Get a browser handle by label.
     pub fn get_browser(&self, label: &str) -> Option<Browser> {
-        let from_reducer = self
-            .host_state
+        self.host_state
             .lock()
             .browsers
             .get(label)
-            .map(|h| h.browser.clone());
-        let from_legacy = self.browsers.lock().get(label).cloned();
-        match (&from_reducer, &from_legacy) {
-            (Some(_), None) => tracing::warn!(
-                target: "host-reducer:drift",
-                label = %label,
-                "browser in reducer but missing from legacy",
-            ),
-            (None, Some(_)) => tracing::warn!(
-                target: "host-reducer:drift",
-                label = %label,
-                "browser in legacy but missing from reducer",
-            ),
-            _ => {}
-        }
-        // Legacy authoritative until PR #4 flips reads.
-        from_legacy.or(from_reducer)
+            .map(|h| h.browser.clone())
     }
 
     /// Check whether a browser is registered under the given label.
-    ///
-    /// Same legacy-authoritative contract as `get_browser`. Logs drift in
-    /// BOTH directions for observability (was reagent P2 PR #659 round 1 —
-    /// previous version short-circuited on `in_reducer` with no legacy
-    /// check, missing reducer-has-but-legacy-doesn't drift).
     pub fn has_browser(&self, label: &str) -> bool {
-        let in_reducer = self.host_state.lock().browsers.contains_key(label);
-        let in_legacy = self.browsers.lock().contains_key(label);
-        match (in_reducer, in_legacy) {
-            (true, false) => tracing::warn!(
-                target: "host-reducer:drift",
-                label = %label,
-                "has_browser: reducer has, legacy missing",
-            ),
-            (false, true) => tracing::warn!(
-                target: "host-reducer:drift",
-                label = %label,
-                "has_browser: legacy has, reducer missing",
-            ),
-            _ => {}
-        }
-        in_legacy
+        self.host_state.lock().browsers.contains_key(label)
     }
 
     /// Are there any registered browsers?
-    ///
-    /// Legacy authoritative (matches caller intent: `on_after_created`'s
-    /// `is_empty()` check decides whether to take the "main" shortcut path).
     pub fn browsers_is_empty(&self) -> bool {
-        let reducer_empty = self.host_state.lock().browsers.is_empty();
-        let legacy_empty = self.browsers.lock().is_empty();
-        if reducer_empty != legacy_empty {
-            tracing::warn!(
-                target: "host-reducer:drift",
-                reducer_empty,
-                legacy_empty,
-                "browsers is_empty drift",
-            );
-        }
-        legacy_empty
+        self.host_state.lock().browsers.is_empty()
     }
 
-    /// Snapshot of all registered browser labels (HashMap iteration order
-    /// preserved from the legacy map — stable per-HashMap-instance, same
-    /// characteristics as the original `state.browsers.lock().keys()`
-    /// pattern these helpers replaced).
-    ///
-    /// (codex P2 PR #659 round 3): previously routed through a fresh
-    /// `HashSet` per call, which has its own randomized hash seed →
-    /// non-deterministic order even when no windows changed. That caused
-    /// UI jitter in poll-driven views (`InstancePanel`'s window list).
-    /// Now Vec is built directly from legacy keys; HashSets are local to
-    /// the diff-detection logic.
+    /// Snapshot of all registered browser labels (HashMap iteration order;
+    /// stable per-HashMap-instance, same characteristics as the original
+    /// `state.browsers.lock().keys()` pattern these helpers replaced).
     pub fn list_browser_labels(&self) -> Vec<String> {
-        use std::collections::HashSet;
-        let reducer_labels: Vec<String> = self
-            .host_state
+        self.host_state
             .lock()
             .browsers
             .keys()
             .cloned()
-            .collect();
-        let legacy_labels: Vec<String> = self.browsers.lock().keys().cloned().collect();
-        // HashSets only for set-difference; legacy_labels Vec is what we return.
-        let reducer_set: HashSet<&String> = reducer_labels.iter().collect();
-        let legacy_set: HashSet<&String> = legacy_labels.iter().collect();
-        if reducer_set != legacy_set {
-            let only_reducer: Vec<&&String> =
-                reducer_set.difference(&legacy_set).collect();
-            let only_legacy: Vec<&&String> =
-                legacy_set.difference(&reducer_set).collect();
-            tracing::warn!(
-                target: "host-reducer:drift",
-                only_reducer = ?only_reducer,
-                only_legacy = ?only_legacy,
-                "browser label set drift",
-            );
-        }
-        // Legacy authoritative until PR #4 flips reads. Vec preserves
-        // HashMap iteration order (stable per instance).
-        legacy_labels
+            .collect()
     }
 
     /// Snapshot of all registered browsers as (label, Browser) pairs.
     /// Ordering is HashMap iteration order; callers must sort if order
     /// matters.
     pub fn list_browsers(&self) -> Vec<(String, Browser)> {
-        let from_reducer: Vec<(String, Browser)> = self
-            .host_state
+        self.host_state
             .lock()
             .browsers
             .iter()
             .map(|(k, h)| (k.clone(), h.browser.clone()))
-            .collect();
-        let from_legacy: Vec<(String, Browser)> = self
-            .browsers
-            .lock()
-            .iter()
-            .map(|(k, b)| (k.clone(), b.clone()))
-            .collect();
-        if from_reducer.len() != from_legacy.len() {
-            tracing::warn!(
-                target: "host-reducer:drift",
-                reducer_count = from_reducer.len(),
-                legacy_count = from_legacy.len(),
-                "browser count drift in list_browsers",
-            );
-        }
-        // Legacy is authoritative until flip.
-        from_legacy
+            .collect()
     }
 
     /// First registered browser (for "any browser" callers like command
     /// palette routing). Returns the label + Browser pair, or None if
     /// the registry is empty.
     pub fn first_browser(&self) -> Option<(String, Browser)> {
-        // Prefer the legacy iteration order (matches existing code's
-        // `.values().next()` semantics) until flip.
-        self.browsers
+        self.host_state
             .lock()
+            .browsers
             .iter()
             .next()
-            .map(|(k, b)| (k.clone(), b.clone()))
+            .map(|(k, h)| (k.clone(), h.browser.clone()))
     }
 
-    // ── Phase H.1.b — pane lifecycle read helpers (with fallback) ───────
+    // ── Phase H.1 — pane lifecycle read helpers (reducer-only, post-flip)
 
     /// Returns the pane's label iff entry is `Live`. Used by op gates
     /// (focus/resize/navigate) — `None` indicates the pane is missing or
     /// in `Closing`, in which case the caller must short-circuit rather
     /// than touch the (possibly destroyed) HWND.
     pub fn live_pane_label(&self, block_id: &str) -> Option<String> {
-        let from_reducer = self
-            .host_state
+        self.host_state
             .lock()
             .panes
             .get(block_id)
             .filter(|e| e.lifecycle == PaneLifecycle::Live)
-            .map(|e| e.label.clone());
-        let from_legacy = self.browser_panes.test_live_label_of(block_id);
-        if from_reducer != from_legacy {
-            tracing::warn!(
-                target: "host-reducer:drift",
-                block_id = %block_id,
-                reducer = ?from_reducer,
-                legacy = ?from_legacy,
-                "live_pane_label drift",
-            );
-        }
-        from_legacy.or(from_reducer)
+            .map(|e| e.label.clone())
     }
 
     /// Snapshot of all `Live` pane labels. Used by `defocus_all` etc.
-    /// Order preserved from `PaneStateMachine.live_labels()` (legacy
-    /// HashMap iteration order — stable per instance, same as the
-    /// original code these helpers replaced). HashSets are local to
-    /// the drift-detection logic only.
     pub fn live_pane_labels(&self) -> Vec<String> {
-        use std::collections::HashSet;
-        let reducer_labels: Vec<String> = self
-            .host_state
+        self.host_state
             .lock()
             .panes
             .values()
             .filter(|e| e.lifecycle == PaneLifecycle::Live)
             .map(|e| e.label.clone())
-            .collect();
-        let legacy_labels: Vec<String> = self.browser_panes.test_live_labels();
-        let reducer_set: HashSet<&String> = reducer_labels.iter().collect();
-        let legacy_set: HashSet<&String> = legacy_labels.iter().collect();
-        if reducer_set != legacy_set {
-            let only_reducer: Vec<&&String> =
-                reducer_set.difference(&legacy_set).collect();
-            let only_legacy: Vec<&&String> =
-                legacy_set.difference(&reducer_set).collect();
-            tracing::warn!(
-                target: "host-reducer:drift",
-                only_reducer = ?only_reducer,
-                only_legacy = ?only_legacy,
-                "live_pane_labels set drift",
-            );
-        }
-        // Legacy authoritative until PR #4 flips reads.
-        legacy_labels
+            .collect()
     }
 
     /// Phase B.5e — authoritative instance-number lookup. Reads
