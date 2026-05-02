@@ -362,8 +362,19 @@ impl AgentMuxHandler {
                 // Recompute the HWND here — the prior #[cfg] block
                 // computed `hwnd` as a local that's not in scope at
                 // this site. The CEF Browser API is cheap to query
-                // a second time. Same precedence: Views' window
-                // handle first, host's window handle as fallback.
+                // a second time. Same precedence as the prior block:
+                // Views' window handle → host's window handle →
+                // `find_own_top_level_window()` as last-resort.
+                //
+                // PR #664 codex P1 round 2 — added the
+                // find_own_top_level_window fallback. Without it,
+                // if Views and host both return null at this exact
+                // timing (a documented lifecycle case), `hwnd_val`
+                // would be 0 → the explicit ReportHwndOpened with
+                // Some(label) is skipped → the launcher's mirror
+                // stays permanently unlinked (since drain-on-open
+                // was removed in the same PR), and OS destroy
+                // events never fire WindowClosed → orphan panel rows.
                 let mut browser_for_wrr = browser.clone();
                 let views_hwnd = browser_view_get_for_browser(Some(&mut browser_for_wrr))
                     .and_then(|bv| bv.window())
@@ -377,13 +388,33 @@ impl AgentMuxHandler {
                         Some(wh.0 as *mut std::ffi::c_void)
                     }
                 });
-                let hwnd_val = views_hwnd.or(host_hwnd).map(|p| p as u64).unwrap_or(0);
+                let hwnd = views_hwnd
+                    .or(host_hwnd)
+                    .unwrap_or_else(|| unsafe {
+                        crate::commands::window::find_own_top_level_window()
+                    });
+                let hwnd_val = if hwnd.is_null() { 0 } else { hwnd as u64 };
                 if hwnd_val != 0 {
                     crate::launcher_ipc::report_hwnd_opened(
                         hwnd_val,
                         "Chrome_WidgetWin_1".to_string(),
                         label.clone(),
                         Some(label.clone()),
+                    );
+                } else {
+                    // Truly pathological — no HWND from any source.
+                    // The launcher's restored drain-on-WindowOpened
+                    // (codex P1) provides best-effort linking via the
+                    // pending_hwnds entry from WM_CREATE, repaired
+                    // later by `apply_hwnd_opened` if the HWND becomes
+                    // resolvable in a future event. Log so we can
+                    // detect the regression.
+                    tracing::error!(
+                        target: "wrr",
+                        label = %label,
+                        "[wrr] on_after_created: hwnd_val=0 from all 3 sources \
+                         (Views, host, find_own_top_level_window) — relying on \
+                         launcher's pending_hwnds drain fallback"
                     );
                 }
             }
