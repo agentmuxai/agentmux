@@ -103,6 +103,7 @@
     "remark-flexible-toc": "^1.2.4",
     "remark-gfm": "^4.0.1",
     "rxjs": "^7.8.2",
+    "semver": "^7.7.3",
     "shiki": "^3.21.0",
     "solid-js": "^1.9.11",
     "sprintf-js": "^1.1.3",
