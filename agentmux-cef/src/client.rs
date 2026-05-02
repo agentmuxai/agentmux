@@ -207,6 +207,35 @@ impl AgentMuxHandler {
 
         let is_top_level_window = !label.starts_with("browser-pane-");
 
+        // Phase 2 — release the runner's in-flight slot so the next queued
+        // top-level can start. We use on_after_created as the renderer-ready
+        // signal because the CEF Chrome profile-init competition (the actual
+        // cause of the freeze) is past this point — the renderer process is
+        // alive and registered. The frontend may still be loading its JS
+        // bundle, but that doesn't compete for the resource we're guarding.
+        //
+        // Pool / pane / synthesized fallback labels: skip — only the
+        // runner-managed `window-*` labels (top-level FullInstance/Subwindow)
+        // were enqueued via EnqueueTopLevelWindow. The label-mismatch path
+        // in MarkTopLevelRendererReady would no-op anyway, but skipping
+        // here avoids the dispatch noise.
+        if is_top_level_window && !label.starts_with("window-pool-") {
+            self.state.host_dispatch(
+                crate::reducer::HostCommand::MarkTopLevelRendererReady {
+                    label: label.clone(),
+                },
+            );
+        } else if label.starts_with("window-pool-") {
+            // Pool windows ARE managed by the runner now (we route them
+            // through EnqueueTopLevelWindow in spawn_pool_window). Same
+            // signal applies.
+            self.state.host_dispatch(
+                crate::reducer::HostCommand::MarkTopLevelRendererReady {
+                    label: label.clone(),
+                },
+            );
+        }
+
         // Phase B.5 (window_meta step d, refined) — write host's
         // local `window_meta` ONCE here, synchronously from the
         // popped pending entry. This is no longer the authoritative

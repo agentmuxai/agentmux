@@ -40,6 +40,7 @@ mod saga_dispatch;
 mod sidecar;
 mod state;
 mod ui_tasks;
+mod window_creation_watchdog;
 mod wrr;
 
 use std::sync::Arc;
@@ -245,6 +246,14 @@ fn main() {
     // doesn't set `AGENTMUX_SRV_PIPE_PATH` — host runs without the
     // bridge, frontend uses the legacy waveobj:update path.
     let _srv_ipc = runtime.block_on(srv_ipc::connect_to_srv(app_state.clone()));
+
+    // Phase 2 — top-level window creation watchdog. Wakes at the in-flight
+    // creation's deadline (or every 5s when idle), evicts stalled creations
+    // so the runner queue advances. See
+    // `docs/specs/SPEC_HOST_WINDOW_CREATION_RUNNER_2026-05-02.md`.
+    runtime.block_on(async {
+        window_creation_watchdog::spawn_watchdog(app_state.clone());
+    });
 
     // Phase B.1: if launcher already spawned srv (the normal portable
     // / installed path post-PR-#570 + B.1), populate state from the

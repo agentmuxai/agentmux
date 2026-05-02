@@ -107,6 +107,87 @@ pub struct PendingWindowCreation {
     pub parent_instance_id: Option<String>,
 }
 
+// ── Phase 2 (window-creation runner) ─────────────────────────────────────
+// Types parallel to `PendingWindowCreation` but specific to TOP-LEVEL window
+// creation, which goes through the runner (serialized one-at-a-time with a
+// watchdog deadline). Browser PANES do NOT use these — pane creation is fast
+// and safe (shared parent context, no profile init) and stays on the existing
+// `pending_window_creations` queue path.
+//
+// See `docs/specs/SPEC_HOST_WINDOW_CREATION_RUNNER_2026-05-02.md` for the full
+// design + rationale (the freeze investigation 2026-05-02 traced the deadlock
+// to concurrent CEF Chrome profile-init under load; this serialization routes
+// around it without dropping per-window renderer isolation).
+
+/// A top-level window creation request, queued by `EnqueueTopLevelWindow`
+/// and processed one-at-a-time by the host reducer's runner. Carries the
+/// FULL spec needed for `post_create_window` so the reducer's effect
+/// handler can issue the CEF UI task without a separate lookup.
+#[derive(Clone, Debug)]
+pub struct TopLevelCreationRequest {
+    pub label: String,
+    pub kind: WindowKind,
+    pub parent_instance_id: Option<String>,
+    pub url: String,
+    pub pos: (i32, i32),
+    pub size: (i32, i32),
+    pub frameless: bool,
+}
+
+/// A top-level window creation that is currently being processed by CEF.
+/// Singleton invariant: the host reducer ensures at most one is in-flight
+/// at any time (the whole point of the runner).
+#[derive(Clone, Debug)]
+pub struct InFlightTopLevelCreation {
+    pub creation_id: u64,
+    pub label: String,
+    pub started_at: std::time::Instant,
+    pub phase: TopLevelCreationPhase,
+    pub deadline: std::time::Instant,
+}
+
+/// Phase progression of an in-flight top-level creation. Monotonic — phases
+/// are assigned numeric values so `AdvanceTopLevelPhase` can refuse to
+/// regress.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[repr(u8)]
+pub enum TopLevelCreationPhase {
+    /// `BeginTopLevelCreationEffect` emitted; effect handler has not yet
+    /// posted the CEF UI task. (Transient — usually <1ms.)
+    Started = 0,
+    /// CEF `on_after_created` callback fired — Browser exists, browsers
+    /// map registered the new entry. The renderer-process IPC chatter
+    /// from profile init is past this point.
+    BrowserCallbackFired = 1,
+    /// Frontend / on_after_created signaled the renderer is sufficiently
+    /// initialized to release the in-flight slot. Equivalent to
+    /// `MarkTopLevelRendererReady` in the reducer.
+    RendererReady = 2,
+}
+
+/// History entry for a completed top-level creation. Pushed to the
+/// reducer's ring buffer (cap 50) so `--diag windows` can show recent
+/// activity.
+#[derive(Clone, Debug)]
+pub struct CompletedTopLevelCreation {
+    pub creation_id: u64,
+    pub label: String,
+    pub outcome: TopLevelCreationOutcome,
+    pub started_at: std::time::Instant,
+    pub finished_at: std::time::Instant,
+    pub last_phase: TopLevelCreationPhase,
+}
+
+/// Outcome of a completed top-level creation. `TimedOut` is the watchdog
+/// path; `Aborted` is explicit abort (e.g., from a saga compensation
+/// path); `Completed` is the normal-flow happy path.
+#[derive(Clone, Debug)]
+pub enum TopLevelCreationOutcome {
+    Completed,
+    TimedOut { reason: String },
+    Aborted { reason: String },
+}
+
 /// Shared application state for the CEF host.
 ///
 /// Unlike the Tauri version, this uses `Arc<AppState>` directly instead of
@@ -389,6 +470,57 @@ impl AppState {
         out
     }
 
+    /// Phase 2 — dispatch a command and run the side-effects emitted by
+    /// the reducer.
+    ///
+    /// `host_dispatch` returns events but doesn't act on them (snapshot-
+    /// and-drop discipline keeps the reducer pure). For commands like
+    /// `EnqueueTopLevelWindow` whose emitted events include a
+    /// `BeginTopLevelCreationEffect` that requires posting a CEF UI task,
+    /// callers use this wrapper instead. The wrapper:
+    ///
+    /// 1. Calls `host_dispatch` (locks reducer mutex briefly, mutates
+    ///    state, returns events).
+    /// 2. Iterates events looking for effect-bearing variants and runs
+    ///    their side-effects with the reducer mutex DROPPED — so the
+    ///    side-effect (which may post a CEF task that eventually calls
+    ///    back into the reducer) cannot deadlock.
+    ///
+    /// Use `host_dispatch` for read-style commands and pure mutations;
+    /// use this for commands that emit `BeginTopLevelCreationEffect`.
+    pub fn host_dispatch_with_effects(
+        self: &std::sync::Arc<Self>,
+        cmd: crate::reducer::HostCommand,
+    ) -> crate::reducer::DispatchOutput {
+        let out = self.host_dispatch(cmd);
+        for ev in &out.events {
+            if let crate::reducer::HostEvent::BeginTopLevelCreationEffect {
+                creation_id,
+                request,
+                ..
+            } = ev
+            {
+                tracing::info!(
+                    creation_id = %creation_id,
+                    label = %request.label,
+                    kind = ?request.kind,
+                    "[runner] dispatching CEF create-window task"
+                );
+                crate::ui_tasks::post_create_window(
+                    self,
+                    &request.url,
+                    &request.label,
+                    request.pos.0,
+                    request.pos.1,
+                    request.size.0,
+                    request.size.1,
+                    request.frameless,
+                );
+            }
+        }
+        out
+    }
+
     /// Phase F.1 — non-mutating peek at the back of the
     /// `pending_window_creations` queue.
     ///
@@ -521,6 +653,68 @@ fn log_host_event(ev: &crate::reducer::HostEvent) {
             event = "PendingWindowQueueEmpty",
             version,
             "[host-reducer] dequeue on empty queue — caller will fall back",
+        ),
+        HostEvent::BeginTopLevelCreationEffect {
+            creation_id,
+            request,
+            version,
+        } => tracing::info!(
+            target: "host-reducer",
+            event = "BeginTopLevelCreationEffect",
+            creation_id,
+            label = %request.label,
+            version,
+            "[host-reducer] begin top-level creation",
+        ),
+        HostEvent::TopLevelCreationCompleted {
+            creation_id,
+            label,
+            latency_ms,
+            version,
+        } => tracing::info!(
+            target: "host-reducer",
+            event = "TopLevelCreationCompleted",
+            creation_id,
+            label = %label,
+            latency_ms,
+            version,
+            "[host-reducer] top-level creation completed",
+        ),
+        HostEvent::TopLevelCreationTimedOut {
+            creation_id,
+            label,
+            last_phase,
+            elapsed_ms,
+            version,
+        } => tracing::error!(
+            target: "host-reducer",
+            event = "TopLevelCreationTimedOut",
+            creation_id,
+            label = %label,
+            last_phase = ?last_phase,
+            elapsed_ms,
+            version,
+            "[host-reducer] top-level creation timed out — wedged init evicted, queue advanced",
+        ),
+        HostEvent::TopLevelCreationAborted {
+            creation_id,
+            label,
+            reason,
+            version,
+        } => tracing::warn!(
+            target: "host-reducer",
+            event = "TopLevelCreationAborted",
+            creation_id,
+            label = %label,
+            reason = %reason,
+            version,
+            "[host-reducer] top-level creation aborted",
+        ),
+        HostEvent::TopLevelQueueLengthChanged { len, version } => tracing::debug!(
+            target: "host-reducer",
+            event = "TopLevelQueueLengthChanged",
+            len,
+            version,
         ),
         HostEvent::Error { message, version } => tracing::warn!(
             target: "host-reducer",
