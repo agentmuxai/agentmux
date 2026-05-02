@@ -26,6 +26,18 @@ import { detectHost, invokeCommand } from "@/app/platform/ipc";
 
 let cefDragListenerInstalled = false;
 
+// Each CEF window's frontend gets its own `?windowLabel=…` URL query
+// (set by agentmux-cef when it creates the browser). The Rust IPC
+// handlers for start_window_drag / maximize_window default to "main"
+// when label is missing, so single-window builds (no query) still work.
+function currentWindowLabel(): string {
+    try {
+        return new URLSearchParams(window.location.search).get("windowLabel") ?? "main";
+    } catch {
+        return "main";
+    }
+}
+
 // Threshold in CSS pixels before we initiate a window drag. Below this
 // the click is treated as a normal click (e.g. for buttons that happen
 // to be inside a drag-region container). 4px matches Chrome's default
@@ -84,7 +96,7 @@ function installCefDragListener() {
         // track further motion (would race with Mutter anyway).
         dragInitiated = true;
         pressArmed = false;
-        invokeCommand("start_window_drag").catch(() => {
+        invokeCommand("start_window_drag", { label: currentWindowLabel() }).catch(() => {
             dragInitiated = false;
         });
     }, true);
@@ -101,7 +113,7 @@ function installCefDragListener() {
         e.preventDefault();
         pressArmed = false;
         dragInitiated = false;
-        invokeCommand("maximize_window").catch(() => {});
+        invokeCommand("maximize_window", { label: currentWindowLabel() }).catch(() => {});
     }, true);
 }
 

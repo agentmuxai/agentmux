@@ -391,10 +391,12 @@ export function buildCefApi(): AppApi {
             await invokeCommand("close_window", { label: label ?? null });
         },
         minimizeWindow: () => {
-            invokeCommand("minimize_window").catch(console.error);
+            const label = new URLSearchParams(window.location.search).get("windowLabel") ?? "main";
+            invokeCommand("minimize_window", { label }).catch(console.error);
         },
         maximizeWindow: () => {
-            invokeCommand("maximize_window").catch(console.error);
+            const label = new URLSearchParams(window.location.search).get("windowLabel") ?? "main";
+            invokeCommand("maximize_window", { label }).catch(console.error);
         },
         setWindowTransparency: (transparent: boolean, blur: boolean, opacity: number) => {
             invokeCommand("set_window_transparency", { transparent, blur, opacity }).catch(console.error);
