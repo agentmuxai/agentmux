@@ -701,7 +701,20 @@ impl AppState {
     // clones what's needed, drops the lock. Callers never hold either
     // lock across CEF FFI calls.
 
-    /// Get a browser handle by label. Reducer first; legacy fallback.
+    /// Get a browser handle by label. Legacy is authoritative; reducer
+    /// fallback (codex P1 + reagent P1 PR #659 round 2).
+    ///
+    /// **Why legacy first:** during the parallel-write phase the close
+    /// paths (`on_before_close`, pane close) remove from legacy FIRST and
+    /// dispatch `UnregisterBrowser` afterward. If we returned reducer-first,
+    /// concurrent readers in that drift window would observe `legacy=None`
+    /// but `reducer=Some` — handing back a Browser handle that legacy has
+    /// already retired (its HWND is mid-teardown). That regresses behavior
+    /// vs the original `state.browsers.lock().get(label).cloned()` which
+    /// returned `None` correctly during close.
+    ///
+    /// Drift logged in both directions for observability before PR #4 flips
+    /// to reducer-only.
     pub fn get_browser(&self, label: &str) -> Option<Browser> {
         let from_reducer = self
             .host_state
@@ -723,28 +736,39 @@ impl AppState {
             ),
             _ => {}
         }
-        // Prefer reducer; fall back to legacy. Both should agree post-H.2.a.
-        from_reducer.or(from_legacy)
+        // Legacy authoritative until PR #4 flips reads.
+        from_legacy.or(from_reducer)
     }
 
     /// Check whether a browser is registered under the given label.
+    ///
+    /// Same legacy-authoritative contract as `get_browser`. Logs drift in
+    /// BOTH directions for observability (was reagent P2 PR #659 round 1 —
+    /// previous version short-circuited on `in_reducer` with no legacy
+    /// check, missing reducer-has-but-legacy-doesn't drift).
     pub fn has_browser(&self, label: &str) -> bool {
         let in_reducer = self.host_state.lock().browsers.contains_key(label);
-        if in_reducer {
-            return true;
-        }
         let in_legacy = self.browsers.lock().contains_key(label);
-        if in_legacy {
-            tracing::warn!(
+        match (in_reducer, in_legacy) {
+            (true, false) => tracing::warn!(
                 target: "host-reducer:drift",
                 label = %label,
-                "browser in legacy but missing from reducer",
-            );
+                "has_browser: reducer has, legacy missing",
+            ),
+            (false, true) => tracing::warn!(
+                target: "host-reducer:drift",
+                label = %label,
+                "has_browser: legacy has, reducer missing",
+            ),
+            _ => {}
         }
         in_legacy
     }
 
     /// Are there any registered browsers?
+    ///
+    /// Legacy authoritative (matches caller intent: `on_after_created`'s
+    /// `is_empty()` check decides whether to take the "main" shortcut path).
     pub fn browsers_is_empty(&self) -> bool {
         let reducer_empty = self.host_state.lock().browsers.is_empty();
         let legacy_empty = self.browsers.lock().is_empty();
@@ -756,9 +780,7 @@ impl AppState {
                 "browsers is_empty drift",
             );
         }
-        // Conservatively report not-empty if either side has entries
-        // (preserves caller's "no windows exist yet" decisions).
-        reducer_empty && legacy_empty
+        legacy_empty
     }
 
     /// Snapshot of all registered browser labels (HashMap iteration order;
