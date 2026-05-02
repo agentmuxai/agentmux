@@ -2,9 +2,13 @@
 
 Companion to [`h7-freeze-fix-retro-2026-05-02.md`](./h7-freeze-fix-retro-2026-05-02.md). Read that first.
 
+## What we're actually solving
+
+**Not** a freeze. A **no-op create**: the user clicks "open another window," the host registers the window (InstancePanel row appears), but the window itself never becomes visible. 4 of 7 user-initiated windows in the 0.33.589 smoke session reached `main_window_focus`; 3 did not.
+
 ## Guiding principle
 
-**Stop probing with code. Start probing with logs.** PR #6 was a code probe based on an unverified hypothesis. The host log on `0.33.589` has all the data needed to root-cause what the user actually sees ("3 of 7 windows never foreground"). Diagnostic-first; code only after a specific failure mode is identified.
+**Stop probing with code. Start probing with logs.** PR #6 was a code probe based on an unverified hypothesis. The host log on `0.33.589` already has the data needed to root-cause why 3 of 7 windows never foreground. Diagnostic-first; code only after a specific failure mode is identified.
 
 ## Phase 1 — Root-cause "windows never foreground" (highest priority)
 
@@ -66,15 +70,9 @@ The same label was registered for two distinct HWNDs. This is a real concurrency
 
 Diagnostic: grep the log for the affected label window-b4d929 from `[create-window] task entered UI thread` through both `BrowserRegistered` and `ReportHwndOpened`. Compare timestamps to `pending_window_creations` enqueue/dequeue events to see which queue entry was active when each WM_CREATE fired.
 
-## Phase 3 — Reconsider the H.7 hypothesis (only if Phase 1 root cause turns out to BE pane-related)
+## Phase 3 — Reconsider the H.7 hypothesis (only if Phase 1 implicates panes)
 
-If Phase 1 reveals the failed windows were created during pane-state transitions, then the H.7 axis is the right idea but the gate location/timing was wrong. Options:
-
-- **Widen to "any pane present"** — spec §5 escape hatch
-- **Time-bound the gate** — only refuse if a pane was Created within the last N ms
-- **Move check into the runner** (the deleted PR #7 commit had this)
-
-If Phase 1 reveals the failed windows had nothing to do with panes, abandon the H.7 hypothesis entirely.
+The "freeze" framing tied this to pane state. With the corrected framing (no-op create), pane state is just one of many things that COULD interact with create. Only revisit the H.7 axis if Phase 1's root cause involves a pane lifecycle event in the failed-window timeline. Otherwise abandon it — H.7 was solving the wrong problem.
 
 ## Phase 4 — Should PR #6 be reverted?
 

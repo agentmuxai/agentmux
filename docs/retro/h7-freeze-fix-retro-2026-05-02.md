@@ -1,11 +1,19 @@
-# Retro: PR #6 H.7 freeze fix attempt — 2026-05-02
+# Retro: PR #6 H.7 "freeze fix" attempt — 2026-05-02
 
-**Status:** PR #6 merged but provably inert. PR #7 (H.6 runner wiring) drafted on top, then dropped before push. Neither fixed the freeze.
+**Status:** PR #6 merged but provably inert. PR #7 (H.6 runner wiring) drafted on top, then dropped before push. Neither addressed the actual bug.
+
+## Framing correction
+
+I called this a "freeze." It wasn't. The host was responsive throughout the smoke session: IPC kept flowing, CEF callbacks kept firing, every `EnqueueTopLevelWindow`-equivalent dispatch returned cleanly, BrowserRegistered events kept landing in the launcher mirror.
+
+What the user actually observed: **clicking "open another window" was effectively a no-op, but the InstancePanel list kept growing.** Each click registered a new top-level window in the host (so the launcher recorded a `WindowOpened` event → InstancePanel adds a row), but the window itself never became visible to the user.
+
+The original [`SPEC_WINDOW_FLEET_REDUCER_2026-05-02.md`](../specs/SPEC_WINDOW_FLEET_REDUCER_2026-05-02.md) called this pattern a "freeze" and tied it to deadlock-shaped fingerprints (HiddenSinceOpen + IPC backpressure). Those fingerprints did appear in the log, but the host was not deadlocked. The right name for what we see is **"no-op create"** — windows are created in host state but never reach the user. Calling it a freeze (mine and the spec's mistake) anchored the whole investigation on a deadlock-prevention gate that addresses a problem that wasn't happening.
 
 ## Timeline
 
 1. **2026-05-02 morning** — PR #5 (final Phase H ratchet) merged as `235c61de`. Freeze investigation resumed.
-2. **2026-05-02 mid-day** — Smoke on `0.33.586` reproduced the original 2026-05-02 freeze fingerprint (`HiddenSinceOpen` warnings + `pending=N` IPC backpressure). Diagnosis written at [`smoke-test-0.33.586-and-pr5-plan-2026-05-02.md`](./smoke-test-0.33.586-and-pr5-plan-2026-05-02.md). Hypothesis: per [`SPEC_WINDOW_FLEET_REDUCER_2026-05-02.md`](../specs/SPEC_WINDOW_FLEET_REDUCER_2026-05-02.md) §5, the trigger is "creating a top-level CEF window while a browser pane is in `Closing`."
+2. **2026-05-02 mid-day** — Smoke on `0.33.586` reproduced the symptoms from the spec's "freeze" pattern (`HiddenSinceOpen` warnings + `pending=N` IPC backpressure). Diagnosis written at [`smoke-test-0.33.586-and-pr5-plan-2026-05-02.md`](./smoke-test-0.33.586-and-pr5-plan-2026-05-02.md). I adopted the spec's framing — "freeze" — and its hypothesis: per [`SPEC_WINDOW_FLEET_REDUCER_2026-05-02.md`](../specs/SPEC_WINDOW_FLEET_REDUCER_2026-05-02.md) §5, the trigger is "creating a top-level CEF window while a browser pane is in `Closing`." (Both were wrong; see Framing correction above.)
 3. **PR #6** ([#662](https://github.com/agentmuxai/agentmux/pull/662)) — added `AppState::any_pane_closing()` and three duplicated gate calls at the top-level creation entry points (`open_window_with_kind`, `open_window_at_position`, `spawn_pool_window`) plus a pool-refill kick in `BrowserPaneManager::close()` / `drain_closed_label()`. Merged as `a1d2f747` on `0.33.588`.
 4. **Codex P1 follow-up** — caught that the unconditional pool-refill kick after pane close would overfill `pool.queue` past `POOL_TARGET_SIZE`. Fixed in `9aa80946` by adding the capacity check inside `spawn_pool_window` itself (defense-in-depth). Bumped to `0.33.589`. Merged.
 5. **PR #7 draft** — `agenta/h6-toplevel-runner-wiring` branch, single commit `53332840` that moved the H.7 check into `start_next_top_level_if_idle`, added `AppState::host_dispatch_with_effects`, and connected pane-drain arms to re-kick deferred top-level work. Reducer-only; no production callers wired. Held locally pending smoke confirmation.
