@@ -98,8 +98,13 @@ function installCefDragListener() {
 
 export function useWindowDrag(): { dragProps: Record<string, unknown> } {
     installCefDragListener();
-    // The drag-target elements need data-drag-region="true" so the
-    // mousedown listener picks them up. Tabs/buttons inside the header
-    // already have data-drag-region="false" via tabbar.tsx etc.
+    // The drag-region marker drives the JS-driven drag listener, which is
+    // only installed for CEF (see installCefDragListener). On non-CEF
+    // Linux hosts the marker has no listener attached, so emit no
+    // attribute — keeps the element strictly HTCLIENT and avoids any
+    // future hook from misinterpreting it.
+    if (detectHost() !== "cef") return { dragProps: {} };
+    // Tabs/buttons inside the header already have data-drag-region="false"
+    // via tabbar.tsx etc., so they opt out individually.
     return { dragProps: { "data-drag-region": true } };
 }

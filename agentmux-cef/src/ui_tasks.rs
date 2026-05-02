@@ -173,15 +173,32 @@ wrap_task! {
             // so we get the raw *mut _cef_window_t and invoke the function
             // pointer directly. cef-dll-sys's binding has been patched to
             // include the begin_window_drag field at the end of the struct.
+            //
+            // Runtime ABI guard: every CEF struct begins with a size field
+            // (cef_base_ref_counted_t.size) populated by libcef itself. If
+            // libcef wasn't built from the AgentMux a5af/cef branch, the
+            // size will be the upstream value (≠ size_of::<_cef_window_t>()
+            // here, since our cef-dll-sys binding has begin_window_drag
+            // appended) and reading the extension slot would be UB. Bail
+            // out cleanly when sizes diverge.
             use cef::ImplWindow;
             if let Some(window) = get_window_on_ui(&self.state, &self.label) {
                 let raw_ptr = <cef::Window as ImplWindow>::get_raw(&window);
                 unsafe {
+                    let runtime_size = (*raw_ptr).base.base.base.size;
+                    let expected_size = std::mem::size_of::<cef::sys::_cef_window_t>();
+                    if runtime_size != expected_size {
+                        tracing::warn!(
+                            "[start_window_drag] libcef.so ABI mismatch — runtime _cef_window_t.size={} expected={} (libcef.so was not built from agentmux/7680-...; skipping native drag) label={}",
+                            runtime_size, expected_size, self.label
+                        );
+                        return;
+                    }
                     if let Some(f) = (*raw_ptr).begin_window_drag {
                         let result = f(raw_ptr);
                         tracing::info!("[start_window_drag] BeginWindowDrag returned {} label={}", result, self.label);
                     } else {
-                        tracing::warn!("[start_window_drag] BeginWindowDrag fn ptr is null (libcef.so doesn't have AgentMux patch?) label={}", self.label);
+                        tracing::warn!("[start_window_drag] BeginWindowDrag fn ptr is null label={}", self.label);
                     }
                 }
             } else {
