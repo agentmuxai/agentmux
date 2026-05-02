@@ -1008,8 +1008,18 @@ fn handle_enqueue_top_level_window(
 /// Internal helper: if in_flight is None and queue has work, pop the front
 /// and start it. Emits `TopLevelCreationRequested`, `TopLevelCreationStarted`,
 /// `Effect::PostCreateWindow`, and updated queue length.
+///
+/// **Quit gating** (codex P1 PR #654 round 1): if `quit_state != Running`,
+/// don't start anything — queued background requests stay queued but will
+/// never fire (host is exiting; in-memory queue dies with the process).
+/// Without this guard, an in-flight completion during `Draining` would pop
+/// a queued background pool refill and emit `Effect::PostCreateWindow`,
+/// creating a new window mid-shutdown and preventing drain completion.
 fn start_next_top_level_if_idle(state: &mut HostState) -> DispatchOutput {
     if state.top_level_creation.in_flight.is_some() {
+        return DispatchOutput::default();
+    }
+    if state.quit_state != QuitState::Running {
         return DispatchOutput::default();
     }
     let request = match state.top_level_creation.queue.pop_front() {
@@ -1661,5 +1671,59 @@ mod tests {
         let out = update(&mut state, HostCommand::PoolWindowSpawnStart { label: "p1".into() });
         assert!(out.events.is_empty()); // suppressed
         assert!(state.pool.unpromoted.is_empty());
+    }
+
+    /// Regression test for codex P1 on PR #654 round 1.
+    ///
+    /// Setup: in-flight User creation, Background queued behind it. Begin
+    /// drain. Complete the in-flight. The queued Background request must
+    /// NOT be started — even though it was enqueued before drain, starting
+    /// it would create a new window mid-shutdown and prevent drain completion.
+    #[test]
+    fn queued_background_does_not_start_after_drain_begins() {
+        let mut state = HostState::default();
+        // Step 1: User-initiated creation goes in-flight.
+        update(
+            &mut state,
+            HostCommand::EnqueueTopLevelWindow {
+                request: top_level_request("user-window", TopLevelSource::User),
+            },
+        );
+        assert!(state.top_level_creation.in_flight.is_some());
+        // Step 2: Background pool refill queues behind it.
+        update(
+            &mut state,
+            HostCommand::EnqueueTopLevelWindow {
+                request: top_level_request("pool-refill", TopLevelSource::Background),
+            },
+        );
+        assert_eq!(state.top_level_creation.queue.len(), 1);
+        // Step 3: User triggers shutdown (last window closed). Drain begins.
+        update(&mut state, HostCommand::BeginDrain { reason: QuitReason::LastWindowClosed });
+        assert!(matches!(state.quit_state, QuitState::Draining { .. }));
+        // Step 4: The in-flight user-window's CEF callback fires. Normally
+        // this would pop the queued Background request and start it. With
+        // the quit gate it must NOT.
+        let out = update(
+            &mut state,
+            HostCommand::TopLevelCallbackFired { label: "user-window".into() },
+        );
+        assert!(state.top_level_creation.in_flight.is_none(), "in-flight cleared after callback");
+        assert_eq!(state.top_level_creation.queue.len(), 1, "queued background still queued");
+        // CRITICAL: no PostCreateWindow effect emitted.
+        let post_create_count = out
+            .events
+            .iter()
+            .filter(|e| matches!(
+                e,
+                HostEvent::Effect { effect: EffectKind::PostCreateWindow { .. }, .. }
+            ))
+            .count();
+        assert_eq!(post_create_count, 0, "no PostCreateWindow effect during drain");
+        // The completion event for the user-window should still fire.
+        assert!(
+            out.events.iter().any(|e| matches!(e, HostEvent::TopLevelCreationCompleted { .. })),
+            "user-window completion still emitted"
+        );
     }
 }
