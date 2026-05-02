@@ -196,20 +196,32 @@ fn unresolved_sagas_returns_only_in_flight_or_failed() {
 }
 
 #[test]
-fn mark_failed_compensation_is_idempotent() {
-    // PR LSD-3's recovery walker may run repeatedly across crash-
-    // restart cycles; calling mark_failed_compensation twice on the
-    // same saga must not error or duplicate any rows. The state
-    // stays in failed_compensation; only ended_at and failure_reason
-    // get rewritten with the latest call's values.
+fn mark_failed_compensation_preserves_original_failure_reason() {
+    // PR LSD-3 round 3 (codex P2): when a saga is already in `failed`
+    // state at restart with a populated failure_reason (e.g. from
+    // terminate_saga(SagaOutcome::Failed{reason})), recovery marking
+    // must PRESERVE the original reason and APPEND the restart
+    // context — overwriting would discard the precise pre-crash
+    // cause that operators need for post-mortem.
+    //
+    // Idempotence is also exercised: calling mark twice doesn't
+    // duplicate rows.
     let log = LauncherSagaLog::open_in_memory().unwrap();
     log.start_saga(7, "saga_recov", &serde_json::json!({})).unwrap();
+    // First call: failure_reason starts NULL, gets the new reason.
     log.mark_failed_compensation(7, "first attempt").unwrap();
+    let snap1 = log.snapshot_recent(10).unwrap();
+    assert_eq!(snap1[0].failure_reason.as_deref(), Some("first attempt"));
+    // Second call: failure_reason is populated; new reason gets
+    // APPENDED (not overwritten).
     log.mark_failed_compensation(7, "second attempt").unwrap();
-    let snap = log.snapshot_recent(10).unwrap();
-    assert_eq!(snap.len(), 1, "no duplicate rows after repeated marks");
-    assert_eq!(snap[0].state, "failed_compensation");
-    assert_eq!(snap[0].failure_reason.as_deref(), Some("second attempt"));
+    let snap2 = log.snapshot_recent(10).unwrap();
+    assert_eq!(snap2.len(), 1, "no duplicate rows after repeated marks");
+    assert_eq!(snap2[0].state, "failed_compensation");
+    assert_eq!(
+        snap2[0].failure_reason.as_deref(),
+        Some("first attempt | recovered: second attempt")
+    );
     // And the saga is no longer "unresolved" once marked.
     let unresolved = log.unresolved_sagas().unwrap();
     assert!(unresolved.iter().all(|s| s.saga_id != 7));
