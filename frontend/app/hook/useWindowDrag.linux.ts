@@ -67,6 +67,15 @@ function installCefDragListener() {
 
     document.addEventListener("mousemove", (e: MouseEvent) => {
         if (!pressArmed || dragInitiated) return;
+        // If the primary button is no longer pressed, the user must have
+        // released outside the webview (Wayland/X11 don't always deliver
+        // a renderer-side mouseup in that case). Disarm so we don't fire
+        // start_window_drag on a stray hover after an interrupted press.
+        // e.buttons bit 0 = primary button currently held.
+        if ((e.buttons & 1) === 0) {
+            pressArmed = false;
+            return;
+        }
         const dx = Math.abs(e.clientX - pressX);
         const dy = Math.abs(e.clientY - pressY);
         if (dx < DRAG_THRESHOLD_PX && dy < DRAG_THRESHOLD_PX) return;
