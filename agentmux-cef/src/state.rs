@@ -3,7 +3,7 @@
 //
 // Shared application state for the CEF host.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use parking_lot::Mutex;
 
 use cef::Browser;
@@ -517,47 +517,19 @@ pub struct AppState {
     /// that's already painted, has its renderer connected, and is sitting
     /// in pool-mode (`?pool=1` URL flag) waiting to be assigned a workspace.
     /// On tear-off: pop a label, reposition + show + emit `pool:promote`.
-    /// Cold-path (open_window_at_position) remains as defence-in-depth.
-    /// See SPEC_TAB_TEAR_OFF_SIZE_PRESERVATION_2026_04_26 §4.5.
-    ///
-    /// **Phase B / multi-reducer status**: this map is intentionally NOT
-    /// migrated to launcher under the B.5 ratchet — pool decisions need
-    /// synchronous host-local state (e.g., `window_pool.len() <
-    /// POOL_TARGET_SIZE` for refill triggers) that can't tolerate the
-    /// launcher round-trip lag. The launcher's `state.pool: HashSet<String>`
-    /// (B.4) mirrors the conceptual inventory for cross-process queries.
-    /// Will become host-reducer state in Phase F (see
-    /// `docs/retro/multi-reducer-proposal-2026-04-28.md`).
-    pub window_pool: Mutex<VecDeque<String>>,
-    /// Labels of pool windows that have been spawned but NOT yet
-    /// promoted. Populated synchronously in `spawn_pool_window` so
-    /// callers (list_windows, app-exit decision) can identify pool
-    /// windows BEFORE the renderer-ready handshake fires and
-    /// `window_pool` gets populated. Removed on promote, on
-    /// destroy-before-promote, and during pool teardown.
-    /// Without this, list_windows reports unpromoted pool windows
-    /// as user-visible instances during the ~100ms gap between
-    /// spawn and renderer-ready.
-    ///
-    /// **Phase B / multi-reducer status**: same as `window_pool` —
-    /// host-only synchronous lifecycle scaffolding; not migrated under B.5
-    /// ratchet. Phase F (host reducer) will retire it.
-    pub unpromoted_pool_labels: Mutex<std::collections::HashSet<String>>,
-    /// Single in-flight respawn semaphore — prevents pool refill from
-    /// stacking spawns when the user does back-to-back tear-offs faster
-    /// than CEF can create windows.
-    ///
-    /// **Phase B status**: host-only sync primitive; not migrate-able.
-    pub window_pool_respawn_in_flight: std::sync::atomic::AtomicBool,
+    // PR #5 H.4 — `window_pool`, `unpromoted_pool_labels`, and
+    // `window_pool_respawn_in_flight` deleted; the host reducer's
+    // `HostState.pool: PoolState` is the sole source of truth. Reads
+    // go through `AppState::pool_queue_size`,
+    // `unpromoted_pool_labels_snapshot`, `is_unpromoted_pool_label`;
+    // mutations through `HostCommand::PoolWindowSpawnStart`,
+    // `PoolWindowReady`, `PoolWindowDestroyedBeforePromote`,
+    // `PopAndPromoteFrontPoolWindow`, `PoolDrainAll`.
 
-    /// Phase B.9.3 — set true once `on_before_close` decides
-    /// "this is the last user-visible window closing". Tells
-    /// `spawn_pool_window` to skip refill so the existing pool
-    /// can drain. Without this, every pool close triggers a
-    /// refill that adds a new pool browser, keeping
-    /// `state.browsers` non-empty forever and preventing
-    /// `quit_message_loop` from ever reaching idle.
-    pub is_quitting: std::sync::atomic::AtomicBool,
+    // PR #5 H.5 — `is_quitting` AtomicBool deleted; the host reducer's
+    // `HostState.quit_state: QuitState` is the sole source of truth.
+    // Reads go through `AppState::is_quitting()`; transitions through
+    // `HostCommand::BeginDrain` and `ConfirmDrained`.
 
     /// Version-specific data directory (e.g. ai.agentmux.cef.v0-32-111/)
     pub version_data_dir: Mutex<Option<String>>,
@@ -577,8 +549,10 @@ pub struct AppState {
     /// `AGENTMUX_DATA_HOME` env var, if set, overrides both.
     pub user_home_dir: Mutex<Option<String>>,
 
-    /// Active cross-window drag session (at most one at a time).
-    pub active_drag: Mutex<Option<DragSession>>,
+    // PR #5 H.3 — `active_drag` field deleted; the host reducer's
+    // `HostState.active_drag` is the sole source of truth. Reads go
+    // through `AppState::get_drag_session`; mutations through
+    // `HostCommand::StartDrag` / `EndDrag`.
 
     /// Embedded browser panes (native CefBrowserView per pane).
     pub browser_panes: crate::browser_panes::BrowserPaneManager,
@@ -630,14 +604,13 @@ impl Default for AppState {
             // browsers field removed in H.2.e — see comment near struct decl.
             window_meta: Mutex::new(HashMap::new()),
             host_state: Mutex::new(crate::reducer::HostState::default()),
-            window_pool: Mutex::new(VecDeque::new()),
-            unpromoted_pool_labels: Mutex::new(std::collections::HashSet::new()),
-            window_pool_respawn_in_flight: std::sync::atomic::AtomicBool::new(false),
-            is_quitting: std::sync::atomic::AtomicBool::new(false),
+            // window_pool / unpromoted_pool_labels / window_pool_respawn_in_flight
+            // deleted (PR #5 H.4) — see HostState.pool.
+            // is_quitting deleted (PR #5 H.5) — see HostState.quit_state.
             version_data_dir: Mutex::new(None),
             version_config_dir: Mutex::new(None),
             user_home_dir: Mutex::new(None),
-            active_drag: Mutex::new(None),
+            // active_drag deleted (PR #5 H.3) — see HostState.active_drag.
             browser_panes: crate::browser_panes::BrowserPaneManager::new(),
             browser_api: crate::browser_api::BrowserApiState::new(),
             debug_port: Mutex::new(0),
@@ -776,6 +749,61 @@ impl AppState {
             .filter(|e| e.lifecycle == PaneLifecycle::Live)
             .map(|e| e.label.clone())
             .collect()
+    }
+
+    /// PR #5 H.3 — read-side helper for `commands::drag::update_cross_drag`.
+    /// Returns the active drag session iff its drag_id matches `drag_id`.
+    /// Snapshot-and-drop: clones under lock, drops the lock.
+    pub fn get_drag_session(&self, drag_id: &str) -> Option<DragSession> {
+        self.host_state
+            .lock()
+            .active_drag
+            .as_ref()
+            .filter(|s| s.drag_id == drag_id)
+            .cloned()
+    }
+
+    // ── PR #5 H.4 — pool read helpers ───────────────────────────────────
+    //
+    // Replace the legacy `state.unpromoted_pool_labels: Mutex<HashSet>` /
+    // `state.window_pool: Mutex<VecDeque>` reads. All under one
+    // `host_state` lock, snapshot-and-drop discipline.
+
+    /// Snapshot of unpromoted pool labels. Used by `list_windows`,
+    /// `compute_and_report_host_counts`, and saga-dispatch's
+    /// `drain_pool_if_last`. Caller can `.contains()` against the set
+    /// or iterate.
+    pub fn unpromoted_pool_labels_snapshot(&self) -> std::collections::HashSet<String> {
+        self.host_state
+            .lock()
+            .pool
+            .unpromoted
+            .iter()
+            .cloned()
+            .collect()
+    }
+
+    /// Single-label check against unpromoted pool set. Used by
+    /// `client.rs::on_after_created` BrowserKind classification.
+    pub fn is_unpromoted_pool_label(&self, label: &str) -> bool {
+        self.host_state.lock().pool.unpromoted.contains(label)
+    }
+
+    /// Number of pool windows currently in the renderer-ready queue
+    /// (NOT including unpromoted). Used by `init_pool` to decide
+    /// whether to bootstrap more pool windows.
+    pub fn pool_queue_size(&self) -> usize {
+        self.host_state.lock().pool.queue.len()
+    }
+
+    /// PR #5 H.5 — read-side helper for the legacy `is_quitting` check.
+    /// Returns true iff the host has begun draining (BeginDrain
+    /// dispatched) OR has fully quit. Replaces the AtomicBool.
+    pub fn is_quitting(&self) -> bool {
+        !matches!(
+            self.host_state.lock().quit_state,
+            crate::state::QuitState::Running
+        )
     }
 
     /// Phase B.5e — authoritative instance-number lookup. Reads

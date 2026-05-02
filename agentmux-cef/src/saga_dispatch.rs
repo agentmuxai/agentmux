@@ -355,7 +355,7 @@ impl SagaActionRunner for LiveActionRunner {
         // Compute the same condition `on_before_close` uses to
         // decide drain. Read-only snapshot of host state.
         // Phase H.2.b — reducer-aware label snapshot.
-        let unpromoted = self.state.unpromoted_pool_labels.lock().clone();
+        let unpromoted = self.state.unpromoted_pool_labels_snapshot();
         let labels = self.state.list_browser_labels();
         let user_count = labels
             .iter()

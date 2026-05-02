@@ -29,7 +29,6 @@
 // - App shutdown → pool windows close cleanly with the rest of
 //   the process.
 
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use crate::state::{AppState, WindowKind, WindowMeta};
@@ -59,24 +58,14 @@ pub fn spawn_pool_window(state: &Arc<AppState>) {
     // this guard, every pool close triggers a refill, keeping
     // state.browsers non-empty forever and quit_message_loop's
     // QuitWhenIdle never reaches idle.
-    if state.is_quitting.load(Ordering::Acquire) {
+    // PR #5 H.5 — early-out before dispatching to the reducer. The
+    // reducer's PoolWindowSpawnStart arm ALSO checks `quit_state !=
+    // Running` and would no-op, but the early-out keeps the warn-log
+    // shape identical to pre-PR for diagnostic continuity.
+    if state.is_quitting() {
         tracing::warn!(
             target: "wrr",
-            "[wrr] spawn_pool_window skipped — is_quitting=true (drain mode)"
-        );
-        return;
-    }
-
-    // Single-flight: skip if a respawn is already pending. The
-    // pending one will catch up to TARGET_SIZE; we don't need
-    // to stack spawns.
-    if state
-        .window_pool_respawn_in_flight
-        .swap(true, Ordering::AcqRel)
-    {
-        tracing::debug!(
-            target: "dnd:tearoff:pool",
-            "[pool] spawn skipped — respawn already in flight"
+            "[wrr] spawn_pool_window skipped — quit_state != Running (drain mode)"
         );
         return;
     }
@@ -85,20 +74,27 @@ pub fn spawn_pool_window(state: &Arc<AppState>) {
     // Use the `window-pool-` prefix so existing `is_instance_label`
     // checks (tear_off_hook.rs, app-init.ts) pass naturally — they
     // accept anything starting with `window-`. After promotion the
-    // label stays the same; `unpromoted_pool_labels` is the
+    // label stays the same; the reducer's `pool.unpromoted` is the
     // authoritative pool-vs-promoted distinction (cleared on
-    // promote — `window_pool` is populated only after the
+    // promote — `pool.queue` is populated only after the
     // renderer-ready handshake, so it's not reliable as the
     // distinguisher during the ~100ms spawn → ready gap).
     let label = format!("window-pool-{}", window_id.simple());
 
-    // Mark this label as an unpromoted pool window NOW — before any
-    // CEF work — so list_windows / app-exit can filter it out the
-    // moment on_after_created adds it to state.browsers.
-    state
-        .unpromoted_pool_labels
-        .lock()
-        .insert(label.clone());
+    // PR #5 H.4 — atomic single-flight + label-into-unpromoted via the
+    // reducer. `pool_spawn_proceeding=false` means another spawn was
+    // already in flight (or quit_state != Running) and we should skip
+    // — the in-flight spawn will catch up to TARGET_SIZE.
+    let dispatch = state.host_dispatch(
+        crate::reducer::HostCommand::PoolWindowSpawnStart { label: label.clone() },
+    );
+    if !dispatch.pool_spawn_proceeding {
+        tracing::debug!(
+            target: "dnd:tearoff:pool",
+            "[pool] spawn skipped — respawn already in flight or pool draining"
+        );
+        return;
+    }
 
     // Phase B.4 follow-up — mirror the pool inventory in the launcher
     // and check pool drift. We use the pool-only variant
@@ -118,7 +114,7 @@ pub fn spawn_pool_window(state: &Arc<AppState>) {
     // P2 PR #578 rounds 2 + 3.)
     crate::launcher_ipc::report_pool_window_added(label.clone());
     {
-        let pool_count = state.unpromoted_pool_labels.lock().len() as u32;
+        let pool_count = state.unpromoted_pool_labels_snapshot().len() as u32;
         crate::launcher_ipc::report_host_pool_count(pool_count);
     }
 
@@ -279,43 +275,33 @@ pub fn on_pool_window_destroyed(state: &Arc<AppState>, label: &str) {
     if !label.starts_with("window-pool-") {
         return;
     }
-    // Drop the label from both the queue and the intent set so
-    // list_windows / app-exit don't keep treating a dead label as
-    // pool. Independent of whether the window made it into the
-    // queue (renderer crash before ready signal) or not.
-    //
-    // `was_unpromoted` distinguishes pre-promote death (this fn
-    // owns the launcher mirror update) from post-promote close
-    // (the on_before_close window-close path owns the update).
-    // Without this gate, post-promote closes would fire
-    // `ReportHostCounts` here (browsers already shrunk, mirror
-    // hasn't seen the matching `ReportWindowClosed` yet), causing
-    // a guaranteed transient windows-drift alert on every normal
-    // promoted-window close. (codex P2 PR #578 round-1.)
-    let was_unpromoted = state.unpromoted_pool_labels.lock().remove(label);
+    // PR #5 H.4 — atomic remove-from-{unpromoted,queue} + clear
+    // respawn semaphore via reducer. The dispatch returns:
+    //   - `pool_destroyed_was_unpromoted`: distinguishes pre-promote
+    //     death (this fn owns the launcher mirror update) from
+    //     post-promote close (`on_before_close`'s window-close path
+    //     owns it). Without this gate, post-promote closes would
+    //     fire `ReportHostCounts` here (browsers already shrunk,
+    //     mirror hasn't seen the matching `ReportWindowClosed` yet),
+    //     causing a guaranteed transient windows-drift alert on
+    //     every normal promoted-window close. (codex P2 PR #578 round-1.)
+    //   - `pool_size_after`: queue length after removal — caller
+    //     decides refill against POOL_TARGET_SIZE.
+    let dispatch = state.host_dispatch(
+        crate::reducer::HostCommand::PoolWindowDestroyedBeforePromote {
+            label: label.to_string(),
+        },
+    );
 
-    if was_unpromoted {
-        // Pre-promote death: this path owns the launcher mirror
-        // update for the pool inventory + count snapshot.
+    if dispatch.pool_destroyed_was_unpromoted {
         crate::launcher_ipc::report_pool_window_removed(label.to_string());
         crate::launcher_ipc::compute_and_report_host_counts(state);
     }
-    // Post-promote: skip the reports here. on_before_close's
-    // window-close branch will fire `ReportWindowClosed` +
-    // `ReportHostCounts` once the host's mutation is complete,
-    // matching the launcher's mirror after that report applies.
-    // Single lock: drop the dead label + check whether we need to
-    // refill, all in one critical section.
-    let needs_refill = {
-        let mut pool = state.window_pool.lock();
-        pool.retain(|l| l != label);
-        pool.len() < POOL_TARGET_SIZE
-    };
-    // Whether the window made it into the pool or not, release the
-    // in-flight semaphore so a future spawn can proceed.
-    state
-        .window_pool_respawn_in_flight
-        .store(false, Ordering::Release);
+
+    let needs_refill = dispatch
+        .pool_size_after
+        .map(|n| n < POOL_TARGET_SIZE)
+        .unwrap_or(false);
     tracing::warn!(
         target: "dnd:tearoff:pool",
         label = %label,
@@ -334,20 +320,14 @@ pub fn mark_pool_window_renderer_ready(state: &Arc<AppState>, label: &str) {
     if !label.starts_with("window-pool-") {
         return;
     }
-    // Single lock acquisition for both push_back and len. Idempotent
-    // against duplicate frontend signals — if the same label is
-    // signalled ready twice (re-mount, hot reload), the second push
-    // would create a duplicate entry that promote could double-pop.
-    let pool_size = {
-        let mut pool = state.window_pool.lock();
-        if !pool.iter().any(|l| l == label) {
-            pool.push_back(label.to_string());
-        }
-        pool.len()
-    };
-    state
-        .window_pool_respawn_in_flight
-        .store(false, Ordering::Release);
+    // PR #5 H.4 — atomic move-from-unpromoted-to-queue + clear respawn
+    // semaphore via reducer. Idempotent against duplicate frontend
+    // signals (re-mount, hot reload). `pool_size_after` is the queue
+    // length after the move; caller refills if below target.
+    let dispatch = state.host_dispatch(
+        crate::reducer::HostCommand::PoolWindowReady { label: label.to_string() },
+    );
+    let pool_size = dispatch.pool_size_after.unwrap_or(0);
 
     tracing::info!(
         target: "dnd:tearoff:pool",
@@ -356,7 +336,6 @@ pub fn mark_pool_window_renderer_ready(state: &Arc<AppState>, label: &str) {
         "[pool] pool window renderer ready, enqueued"
     );
 
-    // Top up to target if we're below.
     if pool_size < POOL_TARGET_SIZE {
         spawn_pool_window(state);
     }
@@ -378,7 +357,8 @@ pub fn init_pool(state: &Arc<AppState>) {
     }
     #[cfg(target_os = "windows")]
     {
-        let current = state.window_pool.lock().len();
+        // PR #5 H.4 — read pool size via reducer-aware helper.
+        let current = state.pool_queue_size();
         if current >= POOL_TARGET_SIZE {
             return;
         }
@@ -405,11 +385,15 @@ pub fn promote_pool_window(
     screen_x: i32,
     screen_y: i32,
 ) -> Option<String> {
-    let label = state.window_pool.lock().pop_front()?;
-
-    // The label is no longer "unpromoted" — drop it from the intent
-    // set so list_windows starts treating this as a real instance.
-    state.unpromoted_pool_labels.lock().remove(&label);
+    // PR #5 H.4 — atomic pop+remove via reducer. The dispatch pops
+    // the front of the pool queue, removes the label from
+    // unpromoted, and clears `is_pool` on the corresponding
+    // BrowserHandle, all under one host_state lock. Returns None if
+    // the queue is empty (cold-path fallback).
+    let dispatch = state.host_dispatch(
+        crate::reducer::HostCommand::PopAndPromoteFrontPoolWindow,
+    );
+    let label = dispatch.promoted_pool_label?;
 
     // Phase B.4 follow-up — pool inventory shrinks unconditionally on
     // pop. The user-visible WindowOpened report is deferred until
