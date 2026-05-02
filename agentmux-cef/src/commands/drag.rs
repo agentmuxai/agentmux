@@ -622,6 +622,7 @@ pub fn tear_off_sc_move_handshake(
 /// or the deadline elapses. Returns the HWND as a raw pointer.
 /// Releases the browsers mutex between polls so on_after_created can
 /// register on the UI thread.
+#[cfg(target_os = "windows")]
 fn wait_for_browser_hwnd(
     state: &Arc<AppState>,
     label: &str,
