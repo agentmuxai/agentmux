@@ -50,11 +50,10 @@ struct AppStateCloseOps<'a>(&'a Arc<AppState>);
 
 impl<'a> PaneCloseOps for AppStateCloseOps<'a> {
     fn take_browser_hwnd(&self, label: &str) -> Option<usize> {
-        let browser = self.0.browsers.lock().remove(label)?;
-
-        // Phase H.2.a — parallel write: mirror the unregister into the
-        // host reducer. Done after the legacy remove so the reducer
-        // side sees the same state transition.
+        // Phase H.2.e — `state.browsers` field deleted; reducer is the
+        // sole source of truth. Look up the Browser via reducer-aware
+        // helper, then dispatch UnregisterBrowser to remove it.
+        let browser = self.0.get_browser(label)?;
         self.0.host_dispatch(
             crate::reducer::HostCommand::UnregisterBrowser {
                 label: label.to_string(),
