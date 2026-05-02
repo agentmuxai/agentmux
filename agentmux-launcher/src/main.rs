@@ -20,6 +20,7 @@
     windows_subsystem = "windows"
 )]
 
+mod config;
 mod data_dir;
 mod diag;
 mod event_log;
@@ -325,6 +326,26 @@ async fn run_windows(
             std::process::exit(2);
         }
     };
+
+    // LSD-4 — startup retention vacuum. Runs once per launcher boot,
+    // before the coordinator subscribes, so any rows it deletes are
+    // already terminal and can't possibly belong to an in-flight saga
+    // the coordinator is about to drive (see `vacuum_older_than` SQL —
+    // `running` and `compensating` rows are unreachable by the DELETE
+    // regardless of timing). Failure is non-fatal: a corrupted /
+    // unwritable saga log row is a diagnostic concern, not a launcher-
+    // startup blocker. Spec
+    // `docs/specs/SPEC_LAUNCHER_SAGA_DURABILITY_2026-05-01.md` §3.6.
+    let retention_days =
+        config::load_saga_retention_days(&paths.user_home_dir, |w| log(w));
+    let cutoff = chrono::Utc::now() - chrono::Duration::days(retention_days);
+    match saga_log.vacuum_older_than(cutoff) {
+        Ok(removed) => log(&format!(
+            "[saga-log] vacuumed {} sagas older than {} (retention {} days)",
+            removed, cutoff, retention_days
+        )),
+        Err(e) => log(&format!("[saga-log] WARN: vacuum failed: {}", e)),
+    }
 
     // CPD-2 — launcher → host pipe wrapper. Owns the writer half of
     // the host's IPC connection (installed by the per-connection

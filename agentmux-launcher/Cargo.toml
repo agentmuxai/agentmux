@@ -1,6 +1,6 @@
 [package]
 name = "agentmux-launcher"
-version = "0.33.573"
+version = "0.33.574"
 description = "AgentMux Launcher — tiny exe that sets DLL path then spawns the CEF host"
 authors = ["AgentMux Corp"]
 edition = "2021"
@@ -54,6 +54,11 @@ uuid = { version = "1", features = ["v4"] }
 agentmux-common = { path = "../agentmux-common" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# LSD-4: TOML parsing for `~/.agentmux/config.toml` so operators can
+# override saga-log retention via `[saga.launcher] retention_days = N`.
+# Pinned to 0.5 because that's what srv pulls in transitively (per
+# Cargo.lock); using the same version avoids a duplicate dep tree.
+toml = "0.5"
 # LSD-1: `#[derive(thiserror::Error)]` on the saga log's `LogError`
 # enum keeps the SQLite + serde_json + io error wrapping clean. Same
 # pin as srv so any cross-crate refactor stays trivial.
