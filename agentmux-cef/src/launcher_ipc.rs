@@ -787,7 +787,7 @@ pub fn report_monitor_topology_changed(rects: Vec<agentmux_common::ipc::Rect>) {
 /// "report host's authoritative reducer-state to the launcher."
 pub fn compute_and_report_host_counts(state: &std::sync::Arc<crate::state::AppState>) {
     // Phase H.2.b — reducer-aware label snapshot.
-    let unpromoted = state.unpromoted_pool_labels.lock().clone();
+    let unpromoted = state.unpromoted_pool_labels_snapshot();
     let pool = unpromoted.len() as u32;
     let windows = state
         .list_browser_labels()
