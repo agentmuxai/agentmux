@@ -133,11 +133,10 @@ pub fn spawn_pool_window(state: &Arc<AppState>) {
         base_url, separator, ipc_port, ipc_token, label
     );
 
-    // Phase B.5 (window_meta step d) — combined pre-create handoff.
-    // Pool windows graduate to tear-off destinations, which are
-    // FullInstance from the user's perspective.
-    //
-    // Phase F.1 — routed through the host reducer.
+    // Phase B.5 (window_meta step d) — combined pre-create handoff
+    // (kind + parent metadata for on_after_created). Pool windows
+    // graduate to tear-off destinations, which are FullInstance from
+    // the user's perspective.
     state.host_dispatch(
         crate::reducer::HostCommand::EnqueuePendingWindowCreation {
             entry: crate::state::PendingWindowCreation {
@@ -154,19 +153,26 @@ pub fn spawn_pool_window(state: &Arc<AppState>) {
         "[pool] spawning pool window"
     );
 
-    // Spawn at off-screen coords. The window is technically
-    // visible (frameless) but well outside any monitor bounds, so
-    // the user never sees it; CEF still paints it because Windows
-    // considers it a normal HWND.
-    crate::ui_tasks::post_create_window(
-        state,
-        &url,
-        &label,
-        POOL_OFFSCREEN_X,
-        POOL_OFFSCREEN_Y,
-        POOL_WIDTH,
-        POOL_HEIGHT,
-        true,
+    // Phase 2 — request top-level creation through the runner. Pool
+    // windows are created at off-screen coords (frameless, technically
+    // visible but well outside any monitor bounds, so the user never
+    // sees them; CEF still paints because Windows treats them as
+    // normal HWNDs). Going through the runner means pool spawns are
+    // serialized too — important because pool refill triggers right
+    // after promotion, which is exactly the concurrent-creation
+    // scenario that triggered the freeze.
+    state.host_dispatch_with_effects(
+        crate::reducer::HostCommand::EnqueueTopLevelWindow {
+            request: crate::state::TopLevelCreationRequest {
+                label: label.clone(),
+                kind: WindowKind::FullInstance,
+                parent_instance_id: None,
+                url,
+                pos: (POOL_OFFSCREEN_X, POOL_OFFSCREEN_Y),
+                size: (POOL_WIDTH, POOL_HEIGHT),
+                frameless: true,
+            },
+        },
     );
 
     // The window registers in `state.browsers` via on_after_created

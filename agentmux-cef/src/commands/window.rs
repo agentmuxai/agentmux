@@ -618,22 +618,39 @@ fn open_window_with_kind(
     let (pos_x, pos_y) = get_offset_position();
     let (win_w, win_h) = get_secondary_window_size(pos_x, pos_y);
 
-    // Phase F.1 — routed through the host reducer.
+    // Phase F.1 — pre-create handoff (kind/parent metadata) for
+    // on_after_created. This queue is consumed by client::on_after_created
+    // when CEF reports the new browser; the reducer pops the matching
+    // entry to populate window_meta + emit ReportWindowOpened.
     state.host_dispatch(
         crate::reducer::HostCommand::EnqueuePendingWindowCreation {
             entry: crate::state::PendingWindowCreation {
                 label: label.clone(),
                 kind,
-                parent_instance_id,
+                parent_instance_id: parent_instance_id.clone(),
             },
         },
     );
 
-    // Post to CEF UI thread — window_create_top_level must run there.
-    // true = frameless: secondary app windows use the same custom title bar as main.
-    crate::ui_tasks::post_create_window(
-        state, &url, &label, pos_x, pos_y, win_w, win_h,
-        true,
+    // Phase 2 — request top-level creation through the runner. The reducer
+    // serializes (one in-flight at a time) so we don't trigger the CEF v146
+    // Chrome profile-init deadlock under concurrent load. Effects executor
+    // calls `post_create_window` when the in-flight slot is free; the
+    // 30s watchdog evicts wedged inits so the queue advances.
+    state.host_dispatch_with_effects(
+        crate::reducer::HostCommand::EnqueueTopLevelWindow {
+            request: crate::state::TopLevelCreationRequest {
+                label: label.clone(),
+                kind,
+                parent_instance_id,
+                url,
+                pos: (pos_x, pos_y),
+                size: (win_w, win_h),
+                // true = frameless: secondary app windows use the same
+                // custom title bar as main.
+                frameless: true,
+            },
+        },
     );
 
     // Phase B.7.3.3 — typed launcher events drive InstancePanel
