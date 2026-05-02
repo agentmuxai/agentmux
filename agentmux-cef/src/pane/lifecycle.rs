@@ -108,9 +108,13 @@ impl PaneStateMachine {
 
     /// Remove an entry by label. Called from CEF's `on_before_close` if
     /// it fires. Idempotent — if the entry was already removed by the
-    /// explicit close path, this is a no-op. Returns true iff an entry
-    /// was actually removed.
-    pub fn drain_by_label(&self, label: &str) -> bool {
+    /// explicit close path, this is a no-op. Returns the drained
+    /// `block_id` iff an entry was actually removed; `None` otherwise.
+    ///
+    /// (Phase H.1.a — was `bool`; now returns `Option<String>` so the
+    /// caller has the block_id needed to dispatch `CompletePaneClose` to
+    /// the host reducer in parallel writes.)
+    pub fn drain_by_label(&self, label: &str) -> Option<String> {
         let mut panes = self.panes.lock();
         let victim = panes
             .iter()
@@ -118,9 +122,9 @@ impl PaneStateMachine {
             .map(|(k, _)| k.clone());
         if let Some(block_id) = victim {
             panes.remove(&block_id);
-            true
+            Some(block_id)
         } else {
-            false
+            None
         }
     }
 
@@ -274,15 +278,15 @@ mod tests {
     fn drain_by_label_removes_matching_entry() {
         let m = PaneStateMachine::new();
         m.test_insert_live("b1", "browser-pane-b1-1");
-        assert!(m.drain_by_label("browser-pane-b1-1"));
+        assert_eq!(m.drain_by_label("browser-pane-b1-1"), Some("b1".to_string()));
         assert!(!m.test_has_entry("b1"));
     }
 
     #[test]
-    fn drain_by_label_returns_false_on_miss() {
+    fn drain_by_label_returns_none_on_miss() {
         let m = PaneStateMachine::new();
         m.test_insert_live("b1", "browser-pane-b1-1");
-        assert!(!m.drain_by_label("browser-pane-other-99"));
+        assert_eq!(m.drain_by_label("browser-pane-other-99"), None);
         assert!(m.test_has_entry("b1"));
     }
 
@@ -290,8 +294,8 @@ mod tests {
     fn drain_by_label_idempotent() {
         let m = PaneStateMachine::new();
         m.test_insert_live("b1", "browser-pane-b1-1");
-        assert!(m.drain_by_label("browser-pane-b1-1"));
-        assert!(!m.drain_by_label("browser-pane-b1-1"));
+        assert_eq!(m.drain_by_label("browser-pane-b1-1"), Some("b1".to_string()));
+        assert_eq!(m.drain_by_label("browser-pane-b1-1"), None);
     }
 
     #[test]
@@ -299,7 +303,7 @@ mod tests {
         let m = PaneStateMachine::new();
         m.test_insert_live("b1", "browser-pane-b1-1");
         m.test_mark_closing("b1");
-        assert!(m.drain_by_label("browser-pane-b1-1"));
+        assert_eq!(m.drain_by_label("browser-pane-b1-1"), Some("b1".to_string()));
         assert!(!m.test_has_entry("b1"));
     }
 
