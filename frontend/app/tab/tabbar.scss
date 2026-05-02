@@ -131,6 +131,14 @@
         flex: 1 1 auto;
         min-width: 0;
         height: 100%;
+        // NOTE: intentionally HTCLIENT (not -webkit-app-region: drag).
+        // Chromium suppresses ALL events on drag elements before the renderer
+        // sees them, so contextmenu wouldn't fire. Window drag is JS-driven
+        // (see frontend/app/hook/useWindowDrag.linux.ts) — a 4px-threshold
+        // mousedown handler sends start_window_drag IPC →
+        // CefWindow::BeginWindowDrag(), which dispatches xdg_toplevel.move
+        // (Wayland) / _NET_WM_MOVERESIZE (X11). Right-click reaches the
+        // renderer normally.
     }
 
 }
