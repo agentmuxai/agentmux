@@ -45,8 +45,10 @@ pub fn set_zoom_factor(state: &Arc<AppState>, args: &serde_json::Value) -> Resul
     Ok(serde_json::Value::Null)
 }
 
-/// Close the window.
-pub fn close_window(state: &Arc<AppState>) -> Result<serde_json::Value, String> {
+/// Close the window. Args: optional `{ "label": string }`; defaults to "main".
+/// (Linux/macOS need the label to act on the right window when called from
+/// a non-main window. Windows resolves per-process via find_own_top_level_window.)
+pub fn close_window(state: &Arc<AppState>, args: &serde_json::Value) -> Result<serde_json::Value, String> {
     #[cfg(target_os = "windows")]
     unsafe {
         use windows_sys::Win32::UI::WindowsAndMessaging::*;
@@ -57,8 +59,11 @@ pub fn close_window(state: &Arc<AppState>) -> Result<serde_json::Value, String> 
         }
     }
     #[cfg(not(target_os = "windows"))]
-    crate::ui_tasks::post_close_window(state, "main");
-    let _ = state;
+    {
+        let label = args.get("label").and_then(|v| v.as_str()).unwrap_or("main");
+        crate::ui_tasks::post_close_window(state, label);
+    }
+    let _ = (state, args);
     Ok(serde_json::Value::Null)
 }
 
@@ -101,8 +106,8 @@ pub fn close_window_by_label(
     }
 }
 
-/// Minimize the window.
-pub fn minimize_window(state: &Arc<AppState>) -> Result<serde_json::Value, String> {
+/// Minimize the window. Args: optional `{ "label": string }`; defaults to "main".
+pub fn minimize_window(state: &Arc<AppState>, args: &serde_json::Value) -> Result<serde_json::Value, String> {
     #[cfg(target_os = "windows")]
     unsafe {
         use windows_sys::Win32::UI::WindowsAndMessaging::*;
@@ -113,13 +118,21 @@ pub fn minimize_window(state: &Arc<AppState>) -> Result<serde_json::Value, Strin
         }
     }
     #[cfg(not(target_os = "windows"))]
-    crate::ui_tasks::post_minimize_window(state, "main");
-    let _ = state;
+    {
+        let label = args.get("label").and_then(|v| v.as_str()).unwrap_or("main");
+        crate::ui_tasks::post_minimize_window(state, label);
+    }
+    let _ = (state, args);
     Ok(serde_json::Value::Null)
 }
 
 /// Maximize/unmaximize the window (toggle).
-pub fn maximize_window(state: &Arc<AppState>) -> Result<serde_json::Value, String> {
+///
+/// Args: `{ "label": string | null }` — optional window label. When omitted,
+/// defaults to "main" (preserves single-window-build behavior). The frontend
+/// reads its own label from the `?windowLabel=…` URL query and passes it
+/// here so non-main windows act on the right CEF window.
+pub fn maximize_window(state: &Arc<AppState>, args: &serde_json::Value) -> Result<serde_json::Value, String> {
     #[cfg(target_os = "windows")]
     unsafe {
         use windows_sys::Win32::UI::WindowsAndMessaging::*;
@@ -137,8 +150,11 @@ pub fn maximize_window(state: &Arc<AppState>) -> Result<serde_json::Value, Strin
         }
     }
     #[cfg(not(target_os = "windows"))]
-    crate::ui_tasks::post_maximize_window(state, "main");
-    let _ = state;
+    {
+        let label = args.get("label").and_then(|v| v.as_str()).unwrap_or("main");
+        crate::ui_tasks::post_maximize_window(state, label);
+    }
+    let _ = (state, args);
     Ok(serde_json::Value::Null)
 }
 
@@ -193,9 +209,13 @@ pub fn move_window_by(state: &Arc<AppState>, args: &serde_json::Value) -> Result
 }
 
 /// Initiate window drag (for frameless windows).
-/// Windows: sends WM_NCLBUTTONDOWN/HTCAPTION via Win32.
-/// Linux/macOS: delegates to CEF Views Window::drag_move() on the UI thread.
-pub fn start_window_drag(state: &Arc<AppState>) -> Result<serde_json::Value, String> {
+/// Windows: sends WM_NCLBUTTONDOWN/HTCAPTION via Win32 — find_own_top_level_window
+/// resolves the per-process HWND so multi-window works without a label.
+/// Linux/macOS: dispatches CefWindow::BeginWindowDrag on the UI thread; needs
+/// the source window's label so non-main windows drag themselves rather than
+/// the main window. Frontend reads `?windowLabel=…` from its URL and passes
+/// it here; missing → "main" for backward compatibility.
+pub fn start_window_drag(state: &Arc<AppState>, args: &serde_json::Value) -> Result<serde_json::Value, String> {
     #[cfg(target_os = "windows")]
     unsafe {
         use windows_sys::Win32::UI::WindowsAndMessaging::*;
@@ -208,8 +228,11 @@ pub fn start_window_drag(state: &Arc<AppState>) -> Result<serde_json::Value, Str
         }
     }
     #[cfg(not(target_os = "windows"))]
-    crate::ui_tasks::post_start_drag(state, "main");
-    let _ = state;
+    {
+        let label = args.get("label").and_then(|v| v.as_str()).unwrap_or("main");
+        crate::ui_tasks::post_start_drag(state, label);
+    }
+    let _ = (state, args);
     Ok(serde_json::Value::Null)
 }
 
