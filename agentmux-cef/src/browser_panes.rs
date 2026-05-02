@@ -287,27 +287,38 @@ impl BrowserPaneManager {
     pub fn close(&self, block_id: &str, state: &Arc<AppState>) {
         // Phase H.1.a — parallel write: mirror the close request into the
         // host reducer's `panes` map. EnqueuePaneClose flips entry to
-        // Closing; CompletePaneClose (after `close_with` returns) removes
-        // it. PaneStateMachine remains authoritative until step e.
+        // Closing. CompletePaneClose (which removes the entry) is dispatched
+        // ONLY when close_with actually performed the close transition —
+        // otherwise a duplicate close call would remove the reducer entry
+        // while the original call's teardown is still in progress, creating
+        // reducer/legacy drift (codex P2 PR #655).
         state.host_dispatch(
             crate::reducer::HostCommand::EnqueuePaneClose {
                 block_id: block_id.to_string(),
             },
         );
         let ops = AppStateCloseOps(state);
-        self.close_with(block_id, &ops);
-        state.host_dispatch(
-            crate::reducer::HostCommand::CompletePaneClose {
-                block_id: block_id.to_string(),
-            },
-        );
+        let did_close = self.close_with(block_id, &ops);
+        if did_close {
+            state.host_dispatch(
+                crate::reducer::HostCommand::CompletePaneClose {
+                    block_id: block_id.to_string(),
+                },
+            );
+        }
     }
 
     /// The testable body of `close()`. See `PaneCloseOps` for the seam.
-    fn close_with(&self, block_id: &str, ops: &dyn PaneCloseOps) {
+    ///
+    /// Returns `true` iff close_with actually performed the close transition
+    /// (`try_mark_closing` succeeded). Returns `false` for already-closing
+    /// or missing entries — duplicate / retry close calls. Caller uses the
+    /// return value to gate `CompletePaneClose` dispatch and avoid the
+    /// reducer-entry removal race documented above (codex P2 PR #655).
+    fn close_with(&self, block_id: &str, ops: &dyn PaneCloseOps) -> bool {
         let label = match self.lifecycle.try_mark_closing(block_id) {
             Some(l) => l,
-            None => return, // missing, or already closing — both no-op
+            None => return false, // missing, or already closing — both no-op
         };
 
         // take_browser_hwnd removes from state.browsers and drops the Browser
@@ -321,6 +332,7 @@ impl BrowserPaneManager {
         // Drop the lifecycle entry so the block_id can be reused.
         self.lifecycle.remove(block_id);
         tracing::info!(block_id, label, "browser pane lifecycle entry cleared");
+        true
     }
 
     /// Called from CEF's `on_before_close` if/when it fires for a pane
@@ -651,6 +663,42 @@ mod tests {
         assert!(ops.taken_labels().is_empty(),
             "take_browser_hwnd must not be called when entry is absent");
         assert!(ops.destroyed_hwnds().is_empty());
+    }
+
+    /// Regression test for codex P2 on PR #655.
+    ///
+    /// `close_with` returns `true` only when it actually performed the
+    /// close transition (`try_mark_closing` returned Some). Returns
+    /// `false` for missing entries and `false` for already-closing
+    /// entries — duplicate / retry close calls. The caller (`close()`)
+    /// uses this return value to gate `CompletePaneClose` dispatch and
+    /// avoid removing the reducer entry while the original close path
+    /// is still tearing down legacy state.
+    #[test]
+    fn close_with_returns_true_only_when_did_close() {
+        let m = BrowserPaneManager::new();
+        m.test_insert_live("b1", "browser-pane-b1-1");
+        let ops = MockCloseOps::new();
+        ops.register("browser-pane-b1-1", 0xABCD);
+
+        // First call: actual transition. Returns true.
+        assert_eq!(m.close_with("b1", &ops), true);
+
+        // Second call (entry now removed): returns false.
+        assert_eq!(m.close_with("b1", &ops), false);
+
+        // Truly missing entry: returns false.
+        assert_eq!(m.close_with("never-existed", &ops), false);
+    }
+
+    #[test]
+    fn close_with_returns_false_for_already_closing_entry() {
+        let m = BrowserPaneManager::new();
+        m.test_insert_live("b1", "browser-pane-b1-1");
+        m.test_mark_closing("b1");
+        let ops = MockCloseOps::new();
+        // Entry exists but is already Closing — close_with no-ops, returns false.
+        assert_eq!(m.close_with("b1", &ops), false);
     }
 
     #[test]
