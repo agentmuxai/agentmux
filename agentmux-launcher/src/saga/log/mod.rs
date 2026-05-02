@@ -216,6 +216,26 @@ impl LauncherSagaLog {
         Self::configure_and_migrate(conn)
     }
 
+    /// Open the saga log in read-only mode. Used by `--diag sagas`
+    /// so an operator's diagnostic invocation can't accidentally
+    /// schema-migrate or modify a log that a running launcher owns.
+    /// Skips `configure_and_migrate` (read-only opens shouldn't run
+    /// migrations) and skips the `foreign_keys=ON` pragma since we
+    /// don't write. (codex P2 PR #647 round 3.)
+    pub fn open_read_only(path: &Path) -> Result<Self, LogError> {
+        let conn = Connection::open_with_flags(
+            path,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY
+                | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )?;
+        // Read-only PRAGMAs only: busy_timeout for WAL coexistence with
+        // a running launcher, no journal_mode change, no migrations.
+        conn.execute_batch("PRAGMA busy_timeout=5000;")?;
+        Ok(Self {
+            conn: Mutex::new(conn),
+        })
+    }
+
     /// Open an in-memory saga log for testing. Used by `tests.rs`
     /// and by future PR LSD-2 coordinator integration tests.
     #[allow(dead_code)] // exercised under #[cfg(test)] only; see saga/log/tests.rs
@@ -483,9 +503,13 @@ impl LauncherSagaLog {
 
     /// Mark a saga as `failed_compensation` — the recovery walker's
     /// terminal write. Idempotent across repeated calls (the saga
-    /// stays in `failed_compensation`; only `ended_at` and
-    /// `failure_reason` get overwritten with the latest values).
-    /// LSD spec §3.5 — operator-review terminal state.
+    /// stays in `failed_compensation`; `ended_at` is rewritten to
+    /// the latest call's timestamp; `failure_reason` is preserved
+    /// when already populated and the new reason is APPENDED rather
+    /// than overwritten — see SQL CASE WHEN below). This preserves
+    /// the original failure cause (e.g. timeout) while adding the
+    /// recovery context. (codex P2 PR #647 round 1: post-mortem
+    /// preservation.) LSD spec §3.5 — operator-review terminal state.
     #[allow(dead_code)] // wired in PR LSD-3 (recovery walker)
     pub fn mark_failed_compensation(
         &self,

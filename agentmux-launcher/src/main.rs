@@ -63,6 +63,27 @@ async fn main() {
     }
     log("SetDllDirectoryW done");
 
+    let args: Vec<String> = std::env::args().skip(1).collect();
+
+    // LSD-3 — `agentmux.exe --diag sagas` is OFFLINE: it reads the
+    // launcher saga SQLite log directly, with no IPC and no running
+    // launcher. So it MUST run BEFORE the CEF runtime existence
+    // check below — the offline-diagnostic value is most needed
+    // exactly when the launcher won't start (e.g. corrupt runtime
+    // folder). (codex P1 + reagent P1 PR #647 round 3.)
+    if matches!(
+        (args.first().map(String::as_str), args.get(1).map(String::as_str)),
+        (Some("--diag"), Some("sagas"))
+    ) {
+        match diag::run_sagas_diag(exe_dir).await {
+            Ok(()) => std::process::exit(0),
+            Err(msg) => {
+                eprintln!("--diag sagas failed: {}", msg);
+                std::process::exit(1);
+            }
+        }
+    }
+
     let real_exe = find_cef_binary(&runtime_dir);
     log(&format!("resolved CEF binary: {}", real_exe.display()));
     if !real_exe.exists() {
@@ -77,14 +98,13 @@ async fn main() {
         std::process::exit(1);
     }
 
-    let args: Vec<String> = std::env::args().skip(1).collect();
     log(&format!("forwarding {} CLI args to host", args.len()));
 
-    // Phase B.8 — `agentmux.exe --diag wrr` Tool client. Connects
-    // to the running launcher, captures events for a short window,
-    // prints a summary, exits. Doesn't spawn srv/host; doesn't
-    // bind the pipe; doesn't drive the reducer's lifecycle. Skip
-    // straight to the Tool flow before any privileged setup.
+    // Phase B.8 — `agentmux.exe --diag wrr` and `--diag srv` Tool
+    // clients. Connect to the running launcher (or srv) over IPC,
+    // capture events for a short window, print summary, exit.
+    // (Note: --diag sagas is handled above, before the CEF runtime
+    // check, since it doesn't need IPC.)
     if matches!(args.first().map(String::as_str), Some("--diag")) {
         let topic = args.get(1).map(String::as_str).unwrap_or("");
         match topic {
@@ -106,19 +126,12 @@ async fn main() {
                     std::process::exit(1);
                 }
             },
-            // LSD-3 — operator visibility into the launcher saga log.
-            // Reads `<data-dir>/launcher-sagas.db` directly (no IPC,
-            // no running launcher required). Surfaces sagas marked
-            // `failed_compensation` by the startup recovery walker
-            // alongside the most recent 50 sagas of any state. Spec
-            // `docs/specs/SPEC_LAUNCHER_SAGA_DURABILITY_2026-05-01.md` §3.5.
-            "sagas" => match diag::run_sagas_diag(exe_dir).await {
-                Ok(()) => std::process::exit(0),
-                Err(msg) => {
-                    eprintln!("--diag sagas failed: {}", msg);
-                    std::process::exit(1);
-                }
-            },
+            // sagas is handled above, before the runtime check.
+            "sagas" => {
+                // Should never reach here — `sagas` is matched + handled
+                // above the CEF runtime check. Kept for completeness.
+                unreachable!("--diag sagas is handled before runtime check");
+            }
             "" => {
                 eprintln!("usage: agentmux.exe --diag <topic>\nknown topics: wrr, srv, sagas");
                 std::process::exit(2);

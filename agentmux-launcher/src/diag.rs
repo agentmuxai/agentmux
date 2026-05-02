@@ -743,8 +743,10 @@ async fn run_sagas_diag_impl(launcher_exe_dir: &std::path::Path) -> Result<(), S
         return Ok(());
     }
 
-    let log = crate::saga::LauncherSagaLog::open(&saga_log_path)
-        .map_err(|e| format!("open saga log {:?}: {}", saga_log_path, e))?;
+    // Read-only open: an operator's diagnostic invocation must not
+    // mutate the log a running launcher owns. (codex P2 PR #647 round 3.)
+    let log = crate::saga::LauncherSagaLog::open_read_only(&saga_log_path)
+        .map_err(|e| format!("open saga log {:?} (read-only): {}", saga_log_path, e))?;
 
     let snapshot = log
         .snapshot_recent(50)
@@ -792,7 +794,17 @@ async fn run_sagas_diag_impl(launcher_exe_dir: &std::path::Path) -> Result<(), S
         {
             u.steps.clone()
         } else if s.state == "failed_compensation" {
-            log.get_saga_steps(s.saga_id).unwrap_or_default()
+            // Surface step-query failures rather than silently
+            // returning empty — operators need visibility into "why
+            // are step rows missing for this recovered saga".
+            // (codex P2 PR #647 round 3.)
+            match log.get_saga_steps(s.saga_id) {
+                Ok(steps) => steps,
+                Err(e) => {
+                    println!("    [step query failed: {} — saga rows may exist but cannot be read]", e);
+                    Vec::new()
+                }
+            }
         } else {
             Vec::new()
         };
