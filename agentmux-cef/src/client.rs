@@ -1382,12 +1382,17 @@ wrap_focus_handler! {
 }
 
 // ---------------------------------------------------------------------------
-// DragHandler — register draggable regions with the CefWindow for window drag.
+// DragHandler — handles `-webkit-app-region: drag` regions reported by the
+// renderer (used on macOS/Windows where native draggable regions work).
 //
-// NOTE(Linux/Wayland): CEF's WindowEventFilterLinux consumes right-clicks on
-// HTCAPTION areas and shows the GNOME window menu. For local testing we binary
-// patch libcef.so (see docs/BINARY-PATCH-LINUX-DRAG.md). A production release
-// requires rebuilding CEF with the source fix.
+// NOTE(Linux): On Linux/Wayland we do NOT use -webkit-app-region: drag for
+// window-move because Chromium suppresses ALL events on drag regions before
+// they reach the renderer (verified empirically), making drag mutually
+// exclusive with right-click contextmenu on the same element. Linux drag is
+// JS-driven instead — see frontend/app/hook/useWindowDrag.linux.ts and
+// the start_window_drag IPC → CefWindow::BeginWindowDrag() (CEF source
+// patch in agentmux/7680-... branch). Retro:
+// docs/retros/2026-05-02-drag-and-rightclick-coexistence.md.
 
 wrap_drag_handler! {
     struct AgentMuxDragHandler {
