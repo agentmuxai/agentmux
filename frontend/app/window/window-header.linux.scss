@@ -6,7 +6,10 @@
 // so no width compensation is needed — 100vw is correct.
 
 .window-header {
-    --default-indent: 10px;
+    // Was 60px for a dedicated left drag strip; drag now lives on .tab-bar-fill
+    // (JS-driven via useWindowDrag.linux.ts), so the strip is redundant and the
+    // gap on the left of the + add-tab button is removed.
+    --default-indent: 0px;
 }
 
 .config-error-message {
@@ -31,10 +34,30 @@
     height: 33px;
     zoom: var(--zoomfactor);
     cursor: default;
+    // Drag is on the explicit .window-drag strip AND the .tab-bar-fill gap.
+    // Previously only .window-drag was drag because right-click on HTCAPTION
+    // was being consumed by the compositor (no contextmenu reached the
+    // renderer). With CEF Patch A (views_caption_rightclick_passthrough,
+    // commit 41802fe60 on agentmux/7680-...) right-clicks on HTCAPTION fall
+    // through to the renderer, so .tab-bar-fill can safely be draggable too.
+    //
+    // This matters on Ubuntu/GNOME because the sidebar dock occludes the
+    // leftmost ~60 logical px — the same area the .window-drag strip lives in.
+    // Without an additional drag area, the user has no clickable drag zone.
 
     .window-drag {
         height: 100%;
         width: var(--default-indent);
         flex-shrink: 0;
+        -webkit-app-region: drag;
     }
+
+    // Inter-tab gap — DO NOT mark as -webkit-app-region: drag here.
+    // Chromium architecturally suppresses ALL events on drag regions
+    // before they enter the renderer (verified 2026-05-02 via document
+    // capture-phase listener), so right-click contextmenu would not fire.
+    // Instead, JS-driven drag via mousedown threshold + start_window_drag
+    // IPC handles native window-move; the area stays HTCLIENT so
+    // contextmenu fires normally on right-click.
+    // See: useWindowDrag.linux.ts + agentmux-cef IPC start_window_drag.
 }
