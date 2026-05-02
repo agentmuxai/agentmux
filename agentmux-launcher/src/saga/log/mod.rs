@@ -494,9 +494,23 @@ impl LauncherSagaLog {
     ) -> Result<(), LogError> {
         let now = now_rfc3339();
         let conn = self.conn.lock().unwrap();
+        // Preserve original failure_reason when already populated.
+        // A saga in `failed` state pre-crash carries the precise
+        // original cause (timeout, dispatch error, etc.) that
+        // operators need for post-mortem. Recovery transitions
+        // state to `failed_compensation` but augments rather than
+        // replaces failure_reason — appends the restart context
+        // so both signals are visible in `--diag sagas`.
+        // (codex P2 PR #647 round 1.)
         conn.execute(
             "UPDATE launcher_saga
-             SET state = 'failed_compensation', ended_at = ?1, failure_reason = ?2
+             SET state = 'failed_compensation',
+                 ended_at = ?1,
+                 failure_reason = CASE
+                     WHEN failure_reason IS NULL OR failure_reason = ''
+                       THEN ?2
+                     ELSE failure_reason || ' | recovered: ' || ?2
+                 END
              WHERE saga_id = ?3",
             params![now, reason, saga_id as i64],
         )?;
