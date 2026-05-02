@@ -353,7 +353,15 @@ fn handle_mouse_move(cursor_x: i32, cursor_y: i32) {
         // emit_event calls below.
         let (candidate, prev_browser, next_browser, candidate_changed) = {
             use cef::Browser;
-            let browsers = ctx.state.browsers.lock();
+            // Phase H.2.b — reducer-aware browser snapshot. Materializes
+            // a HashMap so the existing candidate_label_under_cursor_locked
+            // helper signature stays stable. Collected once per hover tick
+            // (~16 ms cadence); allocation is negligible.
+            let browsers: std::collections::HashMap<String, Browser> = ctx
+                .state
+                .list_browsers()
+                .into_iter()
+                .collect();
             let candidate = candidate_label_under_cursor_locked(ctx, &browsers, cursor_x, cursor_y);
             let prev_label = ctx.current_target.borrow().clone();
             let candidate_changed = prev_label != candidate;
@@ -409,8 +417,16 @@ fn handle_button_up(cursor_x: i32, cursor_y: i32) {
         }
         *ctx.finalized.borrow_mut() = true;
 
+        // Phase H.2.b — reducer-aware browser snapshot for the finalize
+        // candidate lookup. Same materialize-into-HashMap pattern as
+        // on_mouse_move above.
         let candidate = {
-            let browsers = ctx.state.browsers.lock();
+            use cef::Browser;
+            let browsers: std::collections::HashMap<String, Browser> = ctx
+                .state
+                .list_browsers()
+                .into_iter()
+                .collect();
             candidate_label_under_cursor_locked(ctx, &browsers, cursor_x, cursor_y)
         };
 

@@ -423,23 +423,20 @@ async fn route_command(
                 .to_string();
             tracing::info!("[ipc] main_window_focus window_label={}", window_label);
 
-            let target_browser = {
-                let browsers = state.browsers.lock();
-                browsers
-                    .get(&window_label)
-                    .cloned()
-                    .map(|b| (window_label.clone(), b))
-                    .or_else(|| {
-                        // Fallback: pick any non-pane browser. Covers the
-                        // corner case where the requested window label
-                        // isn't registered yet (race on first DOM focus
-                        // before registerBackendWindow lands).
-                        browsers
-                            .iter()
-                            .find(|(k, _)| !k.starts_with("browser-pane-"))
-                            .map(|(k, b)| (k.clone(), b.clone()))
-                    })
-            };
+            // Phase H.2.b — reducer-aware lookup with fallback. Try the
+            // requested label first; on miss, pick any non-pane browser
+            // (covers the corner case where the requested window label
+            // isn't registered yet — race on first DOM focus before
+            // registerBackendWindow lands).
+            let target_browser = state
+                .get_browser(&window_label)
+                .map(|b| (window_label.clone(), b))
+                .or_else(|| {
+                    state
+                        .list_browsers()
+                        .into_iter()
+                        .find(|(k, _)| !k.starts_with("browser-pane-"))
+                });
 
             if let Some((label, _browser)) = target_browser {
                 // Full focus reclaim has to run on the CEF UI thread:

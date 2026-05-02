@@ -52,8 +52,8 @@ pub fn dispatch_to_renderers(state: &Arc<crate::state::AppState>, event: &Event)
     let code = CefString::from(script.as_str());
     let url = CefString::from("");
 
-    let browsers = state.browsers.lock();
-    for (label, browser) in browsers.iter() {
+    // Phase H.2.b — reducer-aware iteration with fallback.
+    for (label, browser) in state.list_browsers() {
         if label.starts_with("window-pool-") || label.starts_with("browser-pane-") {
             continue;
         }

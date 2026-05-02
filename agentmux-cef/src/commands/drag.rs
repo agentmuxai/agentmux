@@ -144,8 +144,8 @@ fn hit_test_windows(state: &Arc<AppState>, screen_x: f64, screen_y: f64) -> Opti
     use windows_sys::Win32::Foundation::RECT;
     use windows_sys::Win32::UI::WindowsAndMessaging::GetWindowRect;
 
-    let browsers = state.browsers.lock();
-    for (label, browser) in browsers.iter() {
+    // Phase H.2.b — reducer-aware iteration with fallback.
+    for (label, browser) in state.list_browsers() {
         if let Some(host) = browser.host() {
             let hwnd = host.window_handle();
             if hwnd.0.is_null() { continue; }
@@ -240,14 +240,13 @@ pub fn release_drag_capture(state: &Arc<AppState>) -> Result<serde_json::Value, 
         };
         use windows_sys::Win32::Foundation::{BOOL, LPARAM};
 
-        // Use the main browser's HWND, or find_own_top_level_window as fallback
-        let hwnd = {
-            let browsers = state.browsers.lock();
-            browsers.get("main")
-                .and_then(|b| b.host())
-                .map(|h| h.window_handle().0 as *mut std::ffi::c_void)
-                .unwrap_or_else(|| unsafe { super::window::find_own_top_level_window() })
-        };
+        // Use the main browser's HWND, or find_own_top_level_window as fallback.
+        // Phase H.2.b — reducer-aware lookup with fallback.
+        let hwnd = state
+            .get_browser("main")
+            .and_then(|b| b.host())
+            .map(|h| h.window_handle().0 as *mut std::ffi::c_void)
+            .unwrap_or_else(|| unsafe { super::window::find_own_top_level_window() });
 
         if !hwnd.is_null() {
             unsafe {
@@ -600,14 +599,12 @@ fn wait_for_browser_hwnd(
 ) -> Option<*mut std::ffi::c_void> {
     let deadline = std::time::Instant::now() + timeout;
     while std::time::Instant::now() < deadline {
-        {
-            let browsers = state.browsers.lock();
-            if let Some(browser) = browsers.get(label) {
-                if let Some(host) = browser.host() {
-                    let h = host.window_handle();
-                    if !h.0.is_null() {
-                        return Some(h.0 as *mut std::ffi::c_void);
-                    }
+        // Phase H.2.b — reducer-aware lookup with fallback.
+        if let Some(browser) = state.get_browser(label) {
+            if let Some(host) = browser.host() {
+                let h = host.window_handle();
+                if !h.0.is_null() {
+                    return Some(h.0 as *mut std::ffi::c_void);
                 }
             }
         }
