@@ -2,17 +2,21 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * AgentLaunchModal — shown when the user clicks a definition card in
- * the agent picker. Collects the instance name + runtime (host vs
- * container) and submits them to the caller, which is responsible
- * for calling launchForgeAgent with the overrides.
+ * AgentLaunchModalPanel — the form rendered inside `<TabModalLayer>`
+ * when the user clicks a definition card in the agent picker. Collects
+ * the instance name + runtime (host vs container) and submits them to
+ * the caller, which is responsible for calling launchForgeAgent with
+ * the overrides.
  *
- * See docs/specs/SPEC_AGENT_DEFINITIONS_MODAL_2026_04_23.md §6.
+ * No Portal, no Modal v2 wrapper — the layer owns positioning, backdrop,
+ * ESC, and backdrop-click semantics. This file contributes the form
+ * panel only. See docs/specs/launch-modal-rearchitecture-2026-05-01.md.
  */
 
 import { createMemo, createSignal, Show, type JSX } from "solid-js";
+
 import { Button } from "@/element/button";
-import { Modal, ModalBody, ModalFooter, ModalHeader } from "@/element/modal-v2";
+
 import { getCliCatalogEntry } from "../defaults/cli-catalog";
 import { buildInstanceSlug, slugifyInstanceName } from "../defaults/instance-slug";
 
@@ -29,13 +33,13 @@ export interface LaunchOverrides {
     containerImage?: string;
 }
 
-interface AgentLaunchModalProps {
+interface AgentLaunchModalPanelProps {
     agent: ForgeAgent;
     onCancel: () => void;
     onSubmit: (overrides: LaunchOverrides) => Promise<void> | void;
 }
 
-export const AgentLaunchModal = (props: AgentLaunchModalProps): JSX.Element => {
+export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.Element => {
     const catalog = createMemo(() => getCliCatalogEntry(props.agent.provider));
     const displayName = () => catalog()?.displayName ?? props.agent.name;
 
@@ -46,14 +50,8 @@ export const AgentLaunchModal = (props: AgentLaunchModalProps): JSX.Element => {
     const [error, setError] = createSignal<string | null>(null);
     const [showAdvanced, setShowAdvanced] = createSignal(false);
 
-    // Live preview of the instance slug — shown inside Advanced as
-    // "Its files will live in <slug>" so power users can see what
-    // their name will become. The backend stamps the real slug on
-    // submit, but this is close enough for the user to recognise it.
     const hasName = () => name().trim().length > 0;
-
     const canSubmit = () => !submitting() && slugifyInstanceName(name()).length > 0;
-
     const containerSupported = () => catalog()?.containerSupported ?? true;
 
     const resolvedImage = () => {
@@ -73,16 +71,16 @@ export const AgentLaunchModal = (props: AgentLaunchModalProps): JSX.Element => {
                 environment: runtime() === "container" ? "docker" : "local",
                 containerImage: runtime() === "container" ? resolvedImage() : undefined,
             });
+            // Success: layer closes the panel; we leave `submitting`
+            // true so the button keeps its "Launching…" label until
+            // unmount.
         } catch (e: any) {
             setError(String(e?.message ?? e));
             setSubmitting(false);
         }
-        // Success: parent closes the modal so we leave submitting true.
     };
 
-    // Modal v2 handles ESC (topmost-aware), backdrop click, focus
-    // trap, focus restoration, and scroll lock. We only need to add
-    // Enter-to-submit since the modal doesn't prescribe form semantics.
+    // Enter submits; ESC and backdrop click are handled by the layer.
     const handleKeyDown = (e: KeyboardEvent) => {
         if (e.key === "Enter" && canSubmit()) {
             e.preventDefault();
@@ -91,15 +89,11 @@ export const AgentLaunchModal = (props: AgentLaunchModalProps): JSX.Element => {
     };
 
     return (
-        <Modal
-            open={true}
-            onClose={() => { if (!submitting()) props.onCancel(); }}
-            closeOnBackdropClick={!submitting()}
-            closeOnEscape={!submitting()}
-            size="md"
-        >
-            <ModalHeader title={`Launch ${displayName()}`} />
-            <ModalBody>
+        <>
+            <header class="modal-panel-header">
+                <h2 class="modal-panel-title">Launch {displayName()}</h2>
+            </header>
+            <div class="modal-panel-body">
                 <div class="agent-launch-modal-body" onKeyDown={handleKeyDown}>
                     <Show when={catalog()}>
                         <p class="agent-launch-modal-blurb">
@@ -118,6 +112,12 @@ export const AgentLaunchModal = (props: AgentLaunchModalProps): JSX.Element => {
                             onInput={(e) => setName(e.currentTarget.value)}
                             disabled={submitting()}
                             aria-label="Agent name"
+                            // Autofocus so the user can start typing immediately.
+                            // Layer renders us inside its panel; the focus is
+                            // contained because the dimmed content beneath is
+                            // marked `inert`.
+                            // eslint-disable-next-line jsx-a11y/no-autofocus
+                            autofocus
                         />
                         <span class="agent-launch-modal-hint">
                             So you can tell it apart from other agents. 1–64 characters.
@@ -206,17 +206,17 @@ export const AgentLaunchModal = (props: AgentLaunchModalProps): JSX.Element => {
                         </div>
                     </details>
                 </div>
-            </ModalBody>
-            <ModalFooter>
+            </div>
+            <footer class="modal-panel-footer">
                 <Button onClick={props.onCancel} disabled={submitting()}>
                     Cancel
                 </Button>
                 <Button onClick={() => void handleSubmit()} disabled={!canSubmit()}>
                     {submitting() ? "Launching…" : "Launch"}
                 </Button>
-            </ModalFooter>
-        </Modal>
+            </footer>
+        </>
     );
 };
 
-AgentLaunchModal.displayName = "AgentLaunchModal";
+AgentLaunchModalPanel.displayName = "AgentLaunchModalPanel";
