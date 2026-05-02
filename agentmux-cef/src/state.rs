@@ -577,8 +577,10 @@ pub struct AppState {
     /// `AGENTMUX_DATA_HOME` env var, if set, overrides both.
     pub user_home_dir: Mutex<Option<String>>,
 
-    /// Active cross-window drag session (at most one at a time).
-    pub active_drag: Mutex<Option<DragSession>>,
+    // PR #5 H.3 — `active_drag` field deleted; the host reducer's
+    // `HostState.active_drag` is the sole source of truth. Reads go
+    // through `AppState::get_drag_session`; mutations through
+    // `HostCommand::StartDrag` / `EndDrag`.
 
     /// Embedded browser panes (native CefBrowserView per pane).
     pub browser_panes: crate::browser_panes::BrowserPaneManager,
@@ -637,7 +639,7 @@ impl Default for AppState {
             version_data_dir: Mutex::new(None),
             version_config_dir: Mutex::new(None),
             user_home_dir: Mutex::new(None),
-            active_drag: Mutex::new(None),
+            // active_drag deleted (PR #5 H.3) — see HostState.active_drag.
             browser_panes: crate::browser_panes::BrowserPaneManager::new(),
             browser_api: crate::browser_api::BrowserApiState::new(),
             debug_port: Mutex::new(0),
@@ -776,6 +778,18 @@ impl AppState {
             .filter(|e| e.lifecycle == PaneLifecycle::Live)
             .map(|e| e.label.clone())
             .collect()
+    }
+
+    /// PR #5 H.3 — read-side helper for `commands::drag::update_cross_drag`.
+    /// Returns the active drag session iff its drag_id matches `drag_id`.
+    /// Snapshot-and-drop: clones under lock, drops the lock.
+    pub fn get_drag_session(&self, drag_id: &str) -> Option<DragSession> {
+        self.host_state
+            .lock()
+            .active_drag
+            .as_ref()
+            .filter(|s| s.drag_id == drag_id)
+            .cloned()
     }
 
     /// Phase B.5e — authoritative instance-number lookup. Reads

@@ -632,6 +632,12 @@ pub enum HostEvent {
 ///   H.1.d: `drain_closed_label` needs the block_id to dispatch
 ///   `CompletePaneClose`).
 ///
+/// - `EndDrag` → `ended_drag_session: Option<DragSession>` (PR #5
+///   H.3: `complete_cross_drag` / `cancel_cross_drag` need the
+///   session payload to emit the renderer-side cross-drag-end event,
+///   AND need the .is_some() signal to distinguish actual end vs
+///   drag_id mismatch).
+///
 /// Default keeps the dispatch return type uniform across arms that
 /// don't populate these fields.
 #[derive(Default)]
@@ -642,6 +648,7 @@ pub struct DispatchOutput {
     pub pane_register_result: Option<RegisterResult>,
     pub closed_pane_label: Option<String>,
     pub drained_block_id: Option<String>,
+    pub ended_drag_session: Option<DragSession>,
 }
 
 // Manual Debug — `cef::Browser` doesn't impl Debug.
@@ -661,6 +668,7 @@ impl std::fmt::Debug for DispatchOutput {
             .field("pane_register_result", &self.pane_register_result)
             .field("closed_pane_label", &self.closed_pane_label)
             .field("drained_block_id", &self.drained_block_id)
+            .field("ended_drag_session", &self.ended_drag_session)
             .finish()
     }
 }
@@ -1042,10 +1050,14 @@ fn handle_end_drag(
     let active_id = state.active_drag.as_ref().map(|s| s.drag_id.clone());
     match active_id {
         Some(id) if id == drag_id => {
-            state.active_drag = None;
+            // PR #5 H.3 — return the prior session via output so callers
+            // (cross-drag complete / cancel) can build the renderer-side
+            // event payload without a separate read of state.active_drag.
+            let session = state.active_drag.take();
             let v = state.bump_version();
             DispatchOutput {
                 events: vec![HostEvent::DragEnded { drag_id, outcome, version: v }],
+                ended_drag_session: session,
                 ..Default::default()
             }
         }
