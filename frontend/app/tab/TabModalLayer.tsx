@@ -20,7 +20,7 @@
  * See docs/specs/launch-modal-rearchitecture-2026-05-01.md.
  */
 
-import { createSignal, Show, type Accessor, type Component, type JSX } from "solid-js";
+import { createSignal, onCleanup, onMount, Show, type Accessor, type Component, type JSX } from "solid-js";
 
 import { usePaneOverlay } from "@/app/platform/pane-overlay";
 import { AgentLaunchModalPanel } from "@/app/view/agent/components/AgentLaunchModal";
@@ -37,8 +37,21 @@ interface TabModalLayerProps {
 // rect. Without this, hardware-windowed panes composite above HTML
 // regardless of CSS z-index and render on top of the modal.
 // Mirrors the ModalPaneOverlayClip pattern in modal-v2.tsx.
+//
+// ResizeObserver supplement: inactive tabs go display:none on their
+// container, which makes the overlay's bounding rect collapse to zero.
+// usePaneOverlay only refreshes on window.resize, so we observe the
+// element for size changes and dispatch a synthetic resize to flush the
+// now-zero rect to the backend, clearing the stale clip.
 const PaneOverlayClip: Component<{ getEl: Accessor<HTMLElement | null | undefined> }> = (p) => {
     usePaneOverlay(p.getEl);
+    onMount(() => {
+        const el = p.getEl();
+        if (!el) return;
+        const ro = new ResizeObserver(() => window.dispatchEvent(new Event("resize")));
+        ro.observe(el);
+        onCleanup(() => ro.disconnect());
+    });
     return null;
 };
 
@@ -91,14 +104,20 @@ export const TabModalLayer: Component<TabModalLayerProps> = (props) => {
                                 overlay area, so e.target === e.currentTarget on the
                                 overlay would never fire. */}
                             <div class="tab-modal-backdrop" onClick={safeClose} />
-                            <div
-                                class="tab-modal-panel"
-                                role="dialog"
-                                aria-modal="true"
-                                onClick={(e) => e.stopPropagation()}
-                            >
-                                {renderRequest(req(), api, setSubmitting)}
-                            </div>
+                            {(() => {
+                                const { label, panel } = renderRequest(req(), api, setSubmitting);
+                                return (
+                                    <div
+                                        class="tab-modal-panel"
+                                        role="dialog"
+                                        aria-modal="true"
+                                        aria-label={label}
+                                        onClick={(e) => e.stopPropagation()}
+                                    >
+                                        {panel}
+                                    </div>
+                                );
+                            })()}
                         </div>
                     );
                 }}
@@ -113,25 +132,28 @@ function renderRequest(
     req: TabModalRequest,
     api: TabModalApi,
     setSubmitting: (v: boolean) => void,
-): JSX.Element {
+): { label: string; panel: JSX.Element } {
     switch (req.kind) {
         case "launch-agent":
-            return (
-                <AgentLaunchModalPanel
-                    agent={req.agent}
-                    onCancel={api.close}
-                    onSubmit={async (overrides) => {
-                        setSubmitting(true);
-                        try {
-                            await req.onSubmit(overrides);
-                            setSubmitting(false);
-                            api.close();
-                        } catch (e) {
-                            setSubmitting(false);
-                            throw e;
-                        }
-                    }}
-                />
-            );
+            return {
+                label: `Launch ${req.agent.name}`,
+                panel: (
+                    <AgentLaunchModalPanel
+                        agent={req.agent}
+                        onCancel={api.close}
+                        onSubmit={async (overrides) => {
+                            setSubmitting(true);
+                            try {
+                                await req.onSubmit(overrides);
+                                setSubmitting(false);
+                                api.close();
+                            } catch (e) {
+                                setSubmitting(false);
+                                throw e;
+                            }
+                        }}
+                    />
+                ),
+            };
     }
 }
