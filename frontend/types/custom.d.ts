@@ -651,7 +651,6 @@ declare global {
         removeNotificationById: (id: string) => void;
 
         // Bootstrap flags (set before app init)
-        __TAURI_INTERNALS__?: any;
         __AGENTMUX_IPC_PORT__?: number;
         __AGENTMUX_IPC_TOKEN__?: string;
         __WAVE_SERVER_WS_ENDPOINT__?: string;
