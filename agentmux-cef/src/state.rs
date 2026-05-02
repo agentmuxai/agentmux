@@ -701,20 +701,24 @@ impl AppState {
     // clones what's needed, drops the lock. Callers never hold either
     // lock across CEF FFI calls.
 
-    /// Get a browser handle by label. Legacy is authoritative; reducer
-    /// fallback (codex P1 + reagent P1 PR #659 round 2).
+    /// Get a browser handle by label. Legacy is authoritative;
+    /// reducer is observed only for drift detection.
     ///
-    /// **Why legacy first:** during the parallel-write phase the close
-    /// paths (`on_before_close`, pane close) remove from legacy FIRST and
-    /// dispatch `UnregisterBrowser` afterward. If we returned reducer-first,
-    /// concurrent readers in that drift window would observe `legacy=None`
-    /// but `reducer=Some` — handing back a Browser handle that legacy has
-    /// already retired (its HWND is mid-teardown). That regresses behavior
-    /// vs the original `state.browsers.lock().get(label).cloned()` which
-    /// returned `None` correctly during close.
+    /// **No fallback to reducer when legacy is None** (codex P1 PR #659
+    /// round 4). Earlier rounds returned `from_legacy.or(from_reducer)`,
+    /// but that re-introduces the stale-handle race the helper was
+    /// supposed to prevent: during `on_before_close`, the browser is
+    /// removed from `state.browsers` BEFORE `UnregisterBrowser` is
+    /// dispatched, so there's a window where `legacy=None` and
+    /// `reducer=Some`. Falling back to reducer there hands callers a
+    /// Browser whose HWND is mid-teardown — old `state.browsers.lock()
+    /// .get(label).cloned()` returned `None` correctly, letting callers
+    /// skip focus/emit/host ops during close. Drop the fallback to
+    /// restore pre-existing close safety.
     ///
-    /// Drift logged in both directions for observability before PR #4 flips
-    /// to reducer-only.
+    /// Drift logged in both directions for observability; PR #4's flip
+    /// step inverts the contract — at that point legacy will be empty
+    /// and reducer becomes authoritative.
     pub fn get_browser(&self, label: &str) -> Option<Browser> {
         let from_reducer = self
             .host_state
@@ -736,8 +740,9 @@ impl AppState {
             ),
             _ => {}
         }
-        // Legacy authoritative until PR #4 flips reads.
-        from_legacy.or(from_reducer)
+        // Legacy is the sole source of truth until PR #4's flip.
+        // No fallback to reducer — that would defeat close-time safety.
+        from_legacy
     }
 
     /// Check whether a browser is registered under the given label.
@@ -872,6 +877,14 @@ impl AppState {
     /// (focus/resize/navigate) — `None` indicates the pane is missing or
     /// in `Closing`, in which case the caller must short-circuit rather
     /// than touch the (possibly destroyed) HWND.
+    ///
+    /// **No fallback to reducer when legacy is None** (codex P1 PR #659
+    /// round 4 — same fix as `get_browser`). The whole point of the
+    /// `Live` gate is to short-circuit ops against panes mid-teardown;
+    /// a reducer fallback would defeat that during the close window
+    /// between `try_mark_closing` (legacy flips to Closing) and
+    /// `EnqueuePaneClose` (reducer dispatch). Legacy authoritative
+    /// until PR #4's flip step.
     pub fn live_pane_label(&self, block_id: &str) -> Option<String> {
         let from_reducer = self
             .host_state
@@ -890,7 +903,8 @@ impl AppState {
                 "live_pane_label drift",
             );
         }
-        from_legacy.or(from_reducer)
+        // Legacy is the sole source of truth until PR #4's flip.
+        from_legacy
     }
 
     /// Snapshot of all `Live` pane labels. Used by `defocus_all` etc.
