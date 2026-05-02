@@ -189,11 +189,6 @@ impl AgentMuxHandler {
         let pending_kind = pending.kind;
         let pending_parent = pending.parent_instance_id.clone();
 
-        tracing::info!(
-            label = %label,
-            elapsed_us = t0.elapsed().as_micros() as u64,
-            "[on-after-created] acquiring browsers lock"
-        );
         // Phase H.2.d — legacy `state.browsers.insert` removed. Reducer's
         // `RegisterBrowser` (dispatched below) is now the sole canonical
         // mutation site. Smoke test on 0.33.585 verified parallel-write
@@ -202,9 +197,9 @@ impl AgentMuxHandler {
         tracing::info!(
             label = %label,
             elapsed_us = t0.elapsed().as_micros() as u64,
-            "[on-after-created] registering browser"
+            total,
+            "[on-after-created] registering browser via reducer",
         );
-        tracing::info!("Registered browser: label={} (total: {})", label, total);
         dlog(&format!("on_after_created: registered label={} total={}", label, total));
 
         let is_top_level_window = !label.starts_with("browser-pane-");
