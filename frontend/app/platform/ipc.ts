@@ -3,23 +3,16 @@
 //
 // Platform IPC abstraction layer.
 //
-// Provides a unified interface for frontend-to-host communication that works
-// with both the Tauri host (invoke/listen) and the CEF host (HTTP fetch).
-// The frontend calls these functions without knowing which host it's running in.
-//
-// Tauri: uses @tauri-apps/api invoke()/listen().
-// CEF:   uses HTTP POST to localhost IPC server for commands (JS→Rust),
-//        and CustomEvent dispatch for events (Rust→JS).
+// Provides a unified interface for frontend-to-host communication.
+// CEF host: HTTP POST to localhost IPC server for commands (JS→Rust),
+//           CustomEvent dispatch for events (Rust→JS).
 
 /**
  * Detect the current host environment.
  */
-export type HostType = "tauri" | "cef" | "browser";
+export type HostType = "cef" | "browser";
 
 export function detectHost(): HostType {
-    if (typeof window.__TAURI_INTERNALS__ !== "undefined") {
-        return "tauri";
-    }
     if (typeof window.__AGENTMUX_IPC_PORT__ !== "undefined") {
         return "cef";
     }
@@ -29,7 +22,6 @@ export function detectHost(): HostType {
 /**
  * Invoke a host command and return the result.
  *
- * In Tauri: delegates to @tauri-apps/api/core invoke().
  * In CEF: sends HTTP POST to the local IPC server.
  * In browser: throws an error (no host available).
  */
@@ -37,11 +29,6 @@ export async function invokeCommand<T = any>(cmd: string, args?: Record<string, 
     const host = detectHost();
 
     switch (host) {
-        case "tauri": {
-            const { invoke } = await import("@tauri-apps/api/core");
-            return invoke<T>(cmd, args);
-        }
-
         case "cef": {
             const port = window.__AGENTMUX_IPC_PORT__;
             const token = window.__AGENTMUX_IPC_TOKEN__;
@@ -78,8 +65,7 @@ export async function invokeCommand<T = any>(cmd: string, args?: Record<string, 
 /**
  * Listen for events from the host.
  *
- * In Tauri: delegates to @tauri-apps/api/event listen().
- * In CEF: listens for CustomEvents dispatched by the Rust host (Phase 2).
+ * In CEF: listens for CustomEvents dispatched by the Rust host.
  * Returns an unsubscribe function.
  */
 export async function listenEvent<T = any>(
@@ -89,12 +75,6 @@ export async function listenEvent<T = any>(
     const host = detectHost();
 
     switch (host) {
-        case "tauri": {
-            const { listen } = await import("@tauri-apps/api/event");
-            const unlisten = await listen<T>(event, (e) => callback(e.payload));
-            return unlisten;
-        }
-
         case "cef": {
             // CEF host dispatches events as:
             //   window.dispatchEvent(new CustomEvent('agentmux-event', {
