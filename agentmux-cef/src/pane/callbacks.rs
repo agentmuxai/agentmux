@@ -82,7 +82,7 @@ pub fn on_after_created_pane(state: &Arc<AppState>, browser: &Browser) {
 /// with the same block_id gets a fresh Live state. Idempotent — if the
 /// explicit `close()` path already drained it, this is a no-op.
 pub fn on_before_close_pane(state: &Arc<AppState>, label: &str) {
-    state.browser_panes.drain_closed_label(label);
+    state.browser_panes.drain_closed_label(state, label);
 
     // Labels are `browser-pane-<uuid>-<seq>`; strip prefix + trailing `-<seq>`
     // to recover the block_id, then wipe any HWND context entries the
