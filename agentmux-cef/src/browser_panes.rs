@@ -50,15 +50,18 @@ struct AppStateCloseOps<'a>(&'a Arc<AppState>);
 
 impl<'a> PaneCloseOps for AppStateCloseOps<'a> {
     fn take_browser_hwnd(&self, label: &str) -> Option<usize> {
-        // Phase H.2.e — `state.browsers` field deleted; reducer is the
-        // sole source of truth. Look up the Browser via reducer-aware
-        // helper, then dispatch UnregisterBrowser to remove it.
-        let browser = self.0.get_browser(label)?;
-        self.0.host_dispatch(
+        // Atomic take-and-return via reducer (codex P2 PR #660). Earlier
+        // round 1 separated `get_browser` + `UnregisterBrowser` dispatch,
+        // which left a window for concurrent readers to resolve the same
+        // label and act on the closing handle. `UnregisterBrowser` now
+        // returns the removed `Browser` via `DispatchOutput.removed_browser`
+        // — single host_state lock, single mutation, no race.
+        let out = self.0.host_dispatch(
             crate::reducer::HostCommand::UnregisterBrowser {
                 label: label.to_string(),
             },
         );
+        let browser = out.removed_browser?;
 
         #[cfg(target_os = "windows")]
         let hwnd = browser.host().and_then(|h| {
