@@ -41,6 +41,23 @@ Drop the back-of-queue peek. Pass `label_hint=None` for every WM_CREATE.
 
 `AppState::peek_back_pending_window_creation` is preserved as-is for potential future diagnostic use.
 
+## Fix (codex P1 round 2 — drain restored as fallback for hwnd_val=0)
+
+Removing the launcher's drain entirely was too aggressive. `client.rs::on_after_created` only dispatches the explicit `ReportHwndOpened(hwnd, label, Some(label))` when `hwnd_val != 0`. If HWND discovery transiently fails from all 3 sources (Views, host, find_own_top_level_window), the explicit dispatch is skipped — and with no drain, the mirror stays permanently `hwnd: None`. Result: OS destroy events for that HWND find no mirror → no `WindowClosed` → ghost InstancePanel rows the user can't dismiss.
+
+User reported exactly this on 0.33.592 smoke ("only 2 windows visible but list says 7"). Codex caught it as P1 round 2 review.
+
+Two-part fix:
+
+1. **Strengthen host's HWND discovery in `client.rs::on_after_created`.** Add `find_own_top_level_window()` as third fallback (matches the earlier in-function HWND computation at line 296). Reduces `hwnd_val=0` to a truly pathological case + logs an ERROR if it ever happens.
+
+2. **Restore `drain-on-WindowOpened` in `handle_report_window_opened`** as best-effort fallback. The drain may wrong-pick under burst creates, but the `apply_hwnd_opened` repair logic (added earlier in this PR) detects the mismatch when the explicit on_after_created path arrives and repairs. Combined: best-effort link from drain, authoritative repair from explicit dispatch.
+
+Net behavior:
+- Burst creates: drain wrong-picks → repair restores truth (transient mis-link, no permanent damage)
+- Burst creates with hwnd_val=0: drain links the right HWND (often, by sequence) → no later repair needed
+- Single creates: drain picks the only candidate → explicit confirms benign duplicate
+
 ## Fix (launcher side — codex P1 follow-up on 0.33.590 smoke)
 
 The host-side fix alone wasn't enough. The launcher's `apply_window_opened` had a drain-on-WindowOpened fallback that used `max_by_key(arrived_at_ms)` — picked the MOST RECENT pending HWND. Under burst creates, the FIRST `WindowOpened(A)` would consume window B's pending HWND (the most recent), then `on_after_created`'s authoritative `ReportHwndOpened(actual_hwnd, A, Some(A))` would hit the double-link path and only emit drift — no repair. The mirror stayed linked to the wrong HWND. Codex caught this on 0.33.590 review.
