@@ -256,24 +256,40 @@ unsafe extern "system" fn win_event_callback(
                 "[wrr] EVENT_OBJECT_CREATE app-class hwnd={:#x} class={} title={:?}",
                 raw_hwnd, class, title
             );
-            // Phase B.9.1 — peek the back of `pending_window_creations`
-            // to supply `label_hint`. CEF's `OnAfterCreated`
-            // (which becomes `ReportWindowOpened`) fires AFTER
-            // this OS event, but the host pushed the
-            // `PendingWindowCreation` BEFORE calling
-            // `post_create_window`, so by the time we get here
-            // the back-of-queue label is the right one for the
-            // window we're seeing. Pool windows that don't push a
-            // pending entry get `None` and rely on the launcher
-            // reducer's drain-on-WindowOpened fallback.
-            // Phase F.1 — peek through the host reducer's snapshot
-            // helper. Same back-of-queue read as before; lock is
-            // held only long enough to clone the back entry.
-            let label_hint = app_state()
-                .get()
-                .and_then(|s| s.peek_back_pending_window_creation())
-                .map(|p| p.label);
-            launcher_ipc::report_hwnd_opened(raw_hwnd, class, title, label_hint);
+            // PR — drop back-of-queue label_hint optimization.
+            //
+            // The original B.9.1 design peeked the back of
+            // `pending_window_creations` to label this OS-level
+            // WM_CREATE event. That assumed at most one create in
+            // flight at any time. When users click "open new window"
+            // multiple times in succession, multiple pending entries
+            // queue up, and back-of-queue returns the LATEST label
+            // for EVERY in-flight WM_CREATE — mislabeling every HWND
+            // that arrives before its corresponding `on_after_created`.
+            //
+            // Worse: the launcher's drain-on-WindowOpened fallback at
+            // `apply_window_opened` (launcher reducer.rs:810) only
+            // drains pending HWNDs whose `label_hint.is_none()`. A
+            // wrong hint actively HIJACKS the fallback — the launcher
+            // sees `label_hint=Some(WRONG)`, doesn't match any
+            // existing mirror, stashes a wrong-labeled pending entry,
+            // and the fallback never runs because of the is_none()
+            // filter. Result: aliased mirror entries (multiple labels
+            // pointing to the same HWND in launcher state, or vice
+            // versa), `HwndWithoutBrowser` drift errors, and the
+            // user-visible bug "InstancePanel grows but no window
+            // appears; closing one window collapses multiple panel
+            // entries."
+            //
+            // Always passing None routes EVERY HWND through the
+            // launcher's drain-on-WindowOpened fallback, which matches
+            // the most-recent unlinked pending HWND when the
+            // authoritative `ReportWindowOpened` arrives from
+            // `on_after_created`. Same path pool windows already used.
+            //
+            // See `docs/retro/wrr-label-hint-race-2026-05-02.md` for
+            // full diagnosis from the 0.33.589 smoke session.
+            launcher_ipc::report_hwnd_opened(raw_hwnd, class, title, None);
 
             // Fire synthetic position + visibility events after
             // create so the reducer has a complete state for this
