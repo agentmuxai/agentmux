@@ -806,6 +806,28 @@ impl AppState {
         )
     }
 
+    /// PR #6 H.7 — cross-state invariant for the 2026-05-02 freeze.
+    ///
+    /// Returns true iff ANY pane is in `Closing`. Top-level window
+    /// creation paths (open_new_window, open_window_at_position,
+    /// spawn_pool_window) MUST refuse while this is true: empirically
+    /// (`SPEC_WINDOW_FLEET_REDUCER_2026-05-02.md`), creating a CEF
+    /// top-level mid-pane-close hits a Chromium v146 deadlock that
+    /// wedges the message loop with HiddenSinceOpen + IPC backpressure
+    /// (`pending=N` rising) and never recovers.
+    ///
+    /// The check is small enough to inline at each call site with no
+    /// async surface. If it turns out the gate needs to widen
+    /// ("any pane present" rather than "any pane Closing"), that's a
+    /// one-line edit. Spec §5 escape hatch.
+    pub fn any_pane_closing(&self) -> bool {
+        self.host_state
+            .lock()
+            .panes
+            .values()
+            .any(|e| matches!(e.lifecycle, PaneLifecycle::Closing { .. }))
+    }
+
     /// Phase B.5e — authoritative instance-number lookup. Reads
     /// the launcher-fed `shadow_instance_registry`, which is the
     /// sole source of truth post-B.5e (host's
