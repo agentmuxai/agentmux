@@ -145,8 +145,78 @@ pub fn post_focus_window(state: &Arc<AppState>, label: &str) {
 
 // ── Drag ─────────────────────────────────────────────────────────────────
 // CEF Views does not expose a programmatic drag-initiation API.
-// Window dragging on Linux/macOS uses the WindowDelegate draggable regions.
-// TODO: implement via X11 _NET_WM_MOVERESIZE for programmatic drag.
+// Begin a native window-move via the underlying CefWindow's BeginWindowDrag().
+// Posted on the CEF UI thread (BeginWindowDrag must be called there). On
+// Linux/Wayland this dispatches WmMoveResizeHandler::DispatchHostWindowDragMovement
+// → xdg_toplevel.move with the most recent input serial; on X11 it dispatches
+// an XEvent for _NET_WM_MOVERESIZE; on macOS it begins a system move loop.
+// The compositor handles the drag until the user releases the mouse button.
+// Note: views::Widget::RunMoveLoop() is the wrong API on Wayland (returns
+// immediately with a non-zero result) — see retro for details.
+//
+// Triggered by `start_window_drag` IPC from the renderer (useWindowDrag.linux.ts).
+// The renderer detects a left-button-down + threshold-crossing motion on a
+// HTCLIENT header element (NOT -webkit-app-region: drag — that suppresses
+// renderer events) and sends this IPC to initiate native drag.
+//
+// Requires CEF Patch: BeginWindowDrag added to CefWindow API (libcef/browser/views/window_impl.cc).
+#[cfg(not(target_os = "windows"))]
+wrap_task! {
+    pub struct StartWindowDragTask {
+        state: Arc<AppState>,
+        label: String,
+    }
+
+    impl Task {
+        fn execute(&self) {
+            // Call CefWindow::BeginWindowDrag via raw FFI. The cef Rust
+            // crate doesn't have a typed wrapper for our extension method
+            // (it's appended to _cef_window_t after get_runtime_style),
+            // so we get the raw *mut _cef_window_t and invoke the function
+            // pointer directly. cef-dll-sys's binding has been patched to
+            // include the begin_window_drag field at the end of the struct.
+            //
+            // Runtime ABI guard: every CEF struct begins with a size field
+            // (cef_base_ref_counted_t.size) populated by libcef itself. If
+            // libcef wasn't built from the AgentMux a5af/cef branch, the
+            // size will be the upstream value (≠ size_of::<_cef_window_t>()
+            // here, since our cef-dll-sys binding has begin_window_drag
+            // appended) and reading the extension slot would be UB. Bail
+            // out cleanly when sizes diverge.
+            use cef::ImplWindow;
+            if let Some(window) = get_window_on_ui(&self.state, &self.label) {
+                let raw_ptr = <cef::Window as ImplWindow>::get_raw(&window);
+                unsafe {
+                    let runtime_size = (*raw_ptr).base.base.base.size;
+                    let expected_size = std::mem::size_of::<cef::sys::_cef_window_t>();
+                    if runtime_size != expected_size {
+                        tracing::warn!(
+                            "[start_window_drag] libcef.so ABI mismatch — runtime _cef_window_t.size={} expected={} (libcef.so was not built from agentmux/7680-...; skipping native drag) label={}",
+                            runtime_size, expected_size, self.label
+                        );
+                        return;
+                    }
+                    if let Some(f) = (*raw_ptr).begin_window_drag {
+                        let result = f(raw_ptr);
+                        tracing::info!("[start_window_drag] BeginWindowDrag returned {} label={}", result, self.label);
+                    } else {
+                        tracing::warn!("[start_window_drag] BeginWindowDrag fn ptr is null label={}", self.label);
+                    }
+                }
+            } else {
+                tracing::warn!("[start_window_drag] no window for label={}", self.label);
+            }
+        }
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn post_start_drag(state: &Arc<AppState>, label: &str) {
+    let mut task = StartWindowDragTask::new(state.clone(), label.to_string());
+    post_task(ThreadId::UI, Some(&mut task));
+}
+
+#[cfg(target_os = "windows")]
 pub fn post_start_drag(_state: &Arc<AppState>, _label: &str) {}
 
 // ── Move window ───────────────────────────────────────────────────────────
@@ -275,7 +345,7 @@ wrap_task! {
             tracing::info!(label = %self.label, "[create-window] task entered UI thread");
 
             let settings = BrowserSettings {
-                background_color: 0xFF000000,
+                background_color: 0xFF000000, // ARGB: opaque black (matches pre-transparency-experiment baseline)
                 ..Default::default()
             };
             let cef_url = CefString::from(self.url.as_str());
