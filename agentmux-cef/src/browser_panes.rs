@@ -158,6 +158,21 @@ impl BrowserPaneManager {
         state.browsers.lock().get(&label).cloned()
     }
 
+    // ── Phase H.1.b — read passthroughs for AppState helpers ────────────
+    //
+    // Exposes `PaneStateMachine` reads to `AppState::live_pane_label` /
+    // `live_pane_labels` so they can compare reducer vs legacy with drift
+    // logging. PR #4 (H.1.e) deletes `PaneStateMachine`; these passthroughs
+    // disappear at that point.
+
+    pub fn test_live_label_of(&self, block_id: &str) -> Option<String> {
+        self.lifecycle.live_label_of(block_id)
+    }
+
+    pub fn test_live_labels(&self) -> Vec<String> {
+        self.lifecycle.live_labels()
+    }
+
     /// Return the current URL of the pane's main frame, if the pane
     /// is Live. Used by the browser DOM API resolver
     /// (`crate::browser_api::resolver`) to match CEF `/json` targets
