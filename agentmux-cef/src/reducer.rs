@@ -882,9 +882,18 @@ fn handle_pool_ready(state: &mut HostState, label: String) -> DispatchOutput {
 }
 
 fn handle_pool_destroyed_before_promote(state: &mut HostState, label: String) -> DispatchOutput {
+    // Pool windows can be destroyed in two states (codex P1 PR #654 round 2):
+    //   1. Still in `unpromoted` — never reached renderer-ready.
+    //   2. Already in `queue` — passed renderer-ready, awaiting promotion,
+    //      then closed externally before promote.
+    // Both must be cleaned up; otherwise the queue retains a dead label
+    // and a later `PromotePoolWindow` operates on stale inventory.
     let was_unpromoted = state.pool.unpromoted.remove(&label);
+    let queue_len_before = state.pool.queue.len();
+    state.pool.queue.retain(|l| l != &label);
+    let was_in_queue = state.pool.queue.len() < queue_len_before;
     state.pool.respawn_in_flight = false;
-    if !was_unpromoted {
+    if !was_unpromoted && !was_in_queue {
         return DispatchOutput::default();
     }
     let v = state.bump_version();
@@ -1671,6 +1680,47 @@ mod tests {
         let out = update(&mut state, HostCommand::PoolWindowSpawnStart { label: "p1".into() });
         assert!(out.events.is_empty()); // suppressed
         assert!(state.pool.unpromoted.is_empty());
+    }
+
+    /// Regression test for codex P1 on PR #654 round 2.
+    ///
+    /// `PoolWindowReady` moves a label from `unpromoted` to `queue`.
+    /// If the window is then destroyed externally before promotion,
+    /// the destroy handler must scrub the label from BOTH sets — not
+    /// just `unpromoted`. Otherwise dead inventory remains in `queue`
+    /// and a later `PromotePoolWindow` operates on a stale label.
+    #[test]
+    fn pool_destroy_after_ready_clears_queue() {
+        let mut state = HostState::default();
+        // Step 1: spawn + ready → label lands in queue.
+        update(&mut state, HostCommand::PoolWindowSpawnStart { label: "p1".into() });
+        update(&mut state, HostCommand::PoolWindowReady { label: "p1".into() });
+        assert_eq!(state.pool.queue.len(), 1);
+        assert!(!state.pool.unpromoted.contains("p1"));
+        // Step 2: external destroy after ready, before promote.
+        let out = update(
+            &mut state,
+            HostCommand::PoolWindowDestroyedBeforePromote { label: "p1".into() },
+        );
+        // CRITICAL: queue must be drained.
+        assert!(state.pool.queue.is_empty(), "queue must not retain destroyed label");
+        assert!(state.pool.unpromoted.is_empty());
+        // Event must fire (we did real cleanup).
+        assert!(
+            out.events.iter().any(|e| matches!(e, HostEvent::PoolWindowLeft { reason: PoolLeaveReason::DestroyedBeforePromote, .. })),
+            "PoolWindowLeft event must fire for queue-state destroy"
+        );
+    }
+
+    /// Sister test: destroy with the label in NEITHER set is still a no-op.
+    #[test]
+    fn pool_destroy_with_unknown_label_is_noop() {
+        let mut state = HostState::default();
+        let out = update(
+            &mut state,
+            HostCommand::PoolWindowDestroyedBeforePromote { label: "ghost".into() },
+        );
+        assert!(out.events.is_empty());
     }
 
     /// Regression test for codex P1 on PR #654 round 1.
