@@ -71,6 +71,58 @@ pub fn remove_contexts_for_block(block_id: &str) {
 pub static ALLOW_PANE_FOCUS_ONCE: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
 
+/// Last-redirect timestamp per root HWND, used by
+/// `should_redirect_pane_focus_to_root` to rate-limit programmatic focus
+/// storms (setInterval-driven `window.focus()`, OAuth redirector pages,
+/// DOM mutation observers re-focusing on every change). Keyed by the root
+/// HWND cast to `usize`. Entries are overwritten on each pass and never
+/// explicitly removed — the map is bounded by the count of distinct
+/// top-level AgentMux windows seen in a session, which is small.
+static PANE_REDIRECT_LAST_AT: std::sync::LazyLock<
+    std::sync::Mutex<std::collections::HashMap<usize, std::time::Instant>>,
+> = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+
+/// Returns `true` iff the pane WM_SETFOCUS subclass should redirect to
+/// `root` via `SetFocus(root)`. Two guards, both motivated by the
+/// 2026-05-02 multi-window freeze investigation
+/// (`docs/specs/SPEC_WINDOW_FLEET_REDUCER_2026-05-02.md`):
+///
+/// 1. **Cross-window refusal.** If a *different* top-level HWND currently
+///    owns OS foreground (per `GetForegroundWindow()`), refuse to redirect.
+///    Same-thread `SetFocus` on a top-level HWND triggers `WM_ACTIVATE`,
+///    so redirecting here would steal foreground from the AgentMux window
+///    the user is interacting with. With two windows whose pane content
+///    both call `window.focus()` programmatically, the redirect itself
+///    drives a foreground ping-pong and the host UI thread saturates.
+///
+/// 2. **Per-root rate limit.** Even within the user's active window, cap
+///    redirects at once per 100 ms per root. Tight focus storms from page
+///    content can otherwise pile WM_SETFOCUS / WM_ACTIVATE chains onto
+///    the UI thread faster than they drain.
+///
+/// When this returns `false`, the pane WM_SETFOCUS handler still consumes
+/// the message (returns 0) — the pane simply doesn't get focus and the
+/// previous focus owner is undisturbed.
+unsafe fn should_redirect_pane_focus_to_root(root: *mut std::ffi::c_void) -> bool {
+    use windows_sys::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
+    let current_fg = GetForegroundWindow();
+    if !current_fg.is_null() && current_fg != root {
+        return false;
+    }
+
+    let key = root as usize;
+    let now = std::time::Instant::now();
+    if let Ok(mut map) = PANE_REDIRECT_LAST_AT.lock() {
+        if let Some(last) = map.get(&key) {
+            if now.duration_since(*last) < std::time::Duration::from_millis(100) {
+                return false;
+            }
+        }
+        map.insert(key, now);
+    }
+    true
+}
+
 /// Subclass a browser pane's outer HWND (and every descendant HWND Chromium
 /// has already created) so `WM_SETFOCUS` is redirected back to the parent
 /// top-level window unless the focus change is user-initiated (see
@@ -208,8 +260,16 @@ pub unsafe fn install_pane_focus_redirect(
                 // there leaves focus stuck in the pane. `GetAncestor(GA_ROOT)`
                 // walks all the way up to the top-level window that hosts
                 // both main and pane, which is the correct place to land.
+                //
+                // Guard added 2026-05-02: refuse the redirect when another
+                // top-level HWND owns foreground or when this root has been
+                // redirected within the last 100 ms. See
+                // `should_redirect_pane_focus_to_root` for rationale.
                 let root = GetAncestor(hwnd, GA_ROOT);
-                if !root.is_null() && root != hwnd {
+                if !root.is_null()
+                    && root != hwnd
+                    && should_redirect_pane_focus_to_root(root)
+                {
                     SetFocus(root);
                 }
                 return 0;

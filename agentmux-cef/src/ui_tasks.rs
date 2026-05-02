@@ -268,6 +268,13 @@ wrap_task! {
         fn execute(&self) {
             use std::cell::RefCell;
 
+            // Phase 1 diagnostic tracing — see
+            // docs/specs/SPEC_HOST_WINDOW_CREATION_RUNNER_2026-05-02.md.
+            // Identify which exact CEF call wedges the UI thread under
+            // concurrent window creation.
+            let t0 = std::time::Instant::now();
+            tracing::info!(label = %self.label, "[create-window] task entered UI thread");
+
             let settings = BrowserSettings {
                 background_color: 0xFF000000,
                 ..Default::default()
@@ -279,9 +286,19 @@ wrap_task! {
             let client = browsers.values().next()
                 .and_then(|b| b.host().map(|h| h.client()));
             drop(browsers);
+            tracing::info!(
+                label = %self.label,
+                elapsed_us = t0.elapsed().as_micros() as u64,
+                "[create-window] got client"
+            );
 
             let mut request_context = crate::commands::create_isolated_request_context(
                 &self.state, &self.label,
+            );
+            tracing::info!(
+                label = %self.label,
+                elapsed_us = t0.elapsed().as_micros() as u64,
+                "[create-window] request_context resolved"
             );
 
             let mut client_ref = client.flatten();
@@ -296,6 +313,12 @@ wrap_task! {
                 request_context.as_mut(),
                 Some(&mut bv_delegate),
             );
+            tracing::info!(
+                label = %self.label,
+                elapsed_us = t0.elapsed().as_micros() as u64,
+                "[create-window] browser_view_create returned"
+            );
+
             let mut wd = crate::app::AgentMuxWindowDelegate::new(
                 RefCell::new(browser_view),
                 Some((self.x, self.y, self.w, self.h)),
@@ -303,6 +326,11 @@ wrap_task! {
                 RuntimeStyle::ALLOY,
             );
             window_create_top_level(Some(&mut wd));
+            tracing::info!(
+                label = %self.label,
+                elapsed_us = t0.elapsed().as_micros() as u64,
+                "[create-window] window_create_top_level returned"
+            );
         }
     }
 }
