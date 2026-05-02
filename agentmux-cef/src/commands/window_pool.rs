@@ -643,9 +643,8 @@ fn cleanup_failed_promote_orphan(state: &Arc<AppState>, label: &str) {
     }
     // Browser or host already gone — do `on_before_close`'s job
     // inline since CEF won't fire it for this label.
-    state.browsers.lock().remove(label);
-    // Phase H.2.a — parallel write: mirror the unregister into the host
-    // reducer. Idempotent on the reducer side.
+    // Phase H.2.d — legacy `state.browsers.lock().remove` removed;
+    // reducer's UnregisterBrowser is sole canonical mutation site.
     state.host_dispatch(
         crate::reducer::HostCommand::UnregisterBrowser {
             label: label.to_string(),
