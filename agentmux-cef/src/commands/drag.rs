@@ -46,7 +46,19 @@ pub fn start_cross_drag(state: &Arc<AppState>, args: &serde_json::Value) -> Resu
         started_at: now,
     };
 
-    *state.active_drag.lock() = Some(session.clone());
+    // PR #5 H.3 — sole drag-state mutation entry point. Reducer enforces
+    // singleton invariant; if a drag is already active, the dispatch
+    // emits a HostEvent::Error and leaves state unchanged. Mirroring the
+    // pre-PR semantics, we still proceed with the renderer broadcast —
+    // the legacy code unconditionally overwrote, but that masked a
+    // genuine bug. Surface the singleton violation by checking the
+    // returned event.
+    let dispatch = state.host_dispatch(
+        crate::reducer::HostCommand::StartDrag { session: session.clone() },
+    );
+    if dispatch.events.iter().any(|e| matches!(e, crate::reducer::HostEvent::Error { .. })) {
+        return Err("a drag session is already active".to_string());
+    }
     events::emit_event_all_windows(state, "cross-drag-start", &serde_json::to_value(&session).unwrap());
 
     Ok(serde_json::json!(drag_id))
@@ -58,13 +70,10 @@ pub fn update_cross_drag(state: &Arc<AppState>, args: &serde_json::Value) -> Res
     let screen_x = args.get("screenX").and_then(|v| v.as_f64()).unwrap_or(0.0);
     let screen_y = args.get("screenY").and_then(|v| v.as_f64()).unwrap_or(0.0);
 
-    let session = {
-        let guard = state.active_drag.lock();
-        match guard.as_ref() {
-            Some(s) if s.drag_id == drag_id => s.clone(),
-            _ => return Err("no active drag session or drag_id mismatch".to_string()),
-        }
-    };
+    // PR #5 H.3 — read via reducer-aware helper.
+    let session = state
+        .get_drag_session(&drag_id)
+        .ok_or_else(|| "no active drag session or drag_id mismatch".to_string())?;
 
     let target_window = hit_test_windows(state, screen_x, screen_y);
 
@@ -88,14 +97,20 @@ pub fn complete_cross_drag(state: &Arc<AppState>, args: &serde_json::Value) -> R
     let screen_x = args.get("screenX").and_then(|v| v.as_f64()).unwrap_or(0.0);
     let screen_y = args.get("screenY").and_then(|v| v.as_f64()).unwrap_or(0.0);
 
-    let session = {
-        let mut guard = state.active_drag.lock();
-        match guard.take() {
-            Some(s) if s.drag_id == drag_id => s,
-            Some(s) => { *guard = Some(s); return Err("drag_id mismatch".to_string()); }
-            None => return Err("no active drag session".to_string()),
-        }
+    // PR #5 H.3 — atomic end-and-return via reducer. EndDrag returns
+    // `ended_drag_session: Some(_)` iff the drag_id matched and the
+    // session was actually consumed. None means: no session active OR
+    // drag_id mismatch — both surface as Err here.
+    let outcome = match &target_window {
+        Some(t) => crate::reducer::DragOutcome::Dropped { target_label: t.clone() },
+        None => crate::reducer::DragOutcome::TornOff { new_label: String::new() },
     };
+    let dispatch = state.host_dispatch(
+        crate::reducer::HostCommand::EndDrag { drag_id: drag_id.clone(), outcome },
+    );
+    let session = dispatch
+        .ended_drag_session
+        .ok_or_else(|| "no active drag session or drag_id mismatch".to_string())?;
 
     let result = if target_window.is_some() { "drop" } else { "tearoff" };
     tracing::info!(drag_id = %drag_id, result = %result, "[dnd:cef] complete_cross_drag");
@@ -120,12 +135,17 @@ pub fn complete_cross_drag(state: &Arc<AppState>, args: &serde_json::Value) -> R
 pub fn cancel_cross_drag(state: &Arc<AppState>, args: &serde_json::Value) -> Result<serde_json::Value, String> {
     let drag_id = args.get("dragId").and_then(|v| v.as_str()).unwrap_or("").to_string();
 
-    {
-        let mut guard = state.active_drag.lock();
-        match guard.as_ref() {
-            Some(s) if s.drag_id == drag_id => { *guard = None; }
-            _ => return Err("no active drag session or drag_id mismatch".to_string()),
-        }
+    // PR #5 H.3 — atomic cancel via reducer. EndDrag's
+    // `ended_drag_session.is_some()` distinguishes "actually ended"
+    // from "no session / drag_id mismatch".
+    let dispatch = state.host_dispatch(
+        crate::reducer::HostCommand::EndDrag {
+            drag_id: drag_id.clone(),
+            outcome: crate::reducer::DragOutcome::Cancelled,
+        },
+    );
+    if dispatch.ended_drag_session.is_none() {
+        return Err("no active drag session or drag_id mismatch".to_string());
     }
 
     events::emit_event_all_windows(state, "cross-drag-end", &serde_json::json!({
