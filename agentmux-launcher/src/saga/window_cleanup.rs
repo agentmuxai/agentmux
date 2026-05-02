@@ -232,15 +232,25 @@ impl Saga for WindowCleanupCascade {
         }
     }
 
-    fn on_event(&mut self, event: &Event, _ctx: &SagaCtx) -> SagaAction {
+    fn on_event(&mut self, event: &Event, ctx: &SagaCtx) -> SagaAction {
+        // **CPD-4 — per-saga event correlation.** Filter
+        // `PanesReaped` / `PoolDrained` / `PoolNotLast` by `saga_id`:
+        // only events tagged with *this* saga's id advance us. The
+        // label match remains as defense-in-depth (events for the
+        // wrong window cannot end up with this saga's id, but the
+        // double-check costs nothing). Untagged events (organic host
+        // reports) and events from sibling concurrent sagas are
+        // ignored — retires the evict-and-replace workaround from
+        // PR #634 so two simultaneous `WindowClosed`s now produce
+        // two clean `SagaCompleted` brackets instead of one
+        // premature `SagaFailed { reason: "evicted" }` + one
+        // `SagaCompleted`.
         match (&self.phase, event) {
             // Step 1 → Step 2 transition. `PanesReaped` arrives from
             // the host (`report_panes_reaped` inside
-            // `on_before_close`). Match on the label so a stray
-            // event from another window's close doesn't advance us
-            // (defense-in-depth — see `closed_label` field doc).
-            (Phase::ReapingPanes, Event::PanesReaped { label, .. })
-                if label == &self.closed_label =>
+            // `on_before_close`).
+            (Phase::ReapingPanes, Event::PanesReaped { label, saga_id, .. })
+                if *saga_id == Some(ctx.saga_id) && label == &self.closed_label =>
             {
                 self.phase = Phase::DrainingPool;
                 // CPD-1 schema-only: saga_id placeholder (0); CPD-3
@@ -254,8 +264,8 @@ impl Saga for WindowCleanupCascade {
                 }
             }
             // Step 2 terminal — drain happened (last window closed).
-            (Phase::DrainingPool, Event::PoolDrained { label, .. })
-                if label == &self.closed_label =>
+            (Phase::DrainingPool, Event::PoolDrained { label, saga_id, .. })
+                if *saga_id == Some(ctx.saga_id) && label == &self.closed_label =>
             {
                 self.drained_pool = Some(true);
                 SagaAction::Done
@@ -263,16 +273,16 @@ impl Saga for WindowCleanupCascade {
             // Step 2 terminal — drain skipped (other windows remain).
             // Equally a success: the saga's job is to bracket the
             // drain *decision*, not enforce a particular outcome.
-            (Phase::DrainingPool, Event::PoolNotLast { label, .. })
-                if label == &self.closed_label =>
+            (Phase::DrainingPool, Event::PoolNotLast { label, saga_id, .. })
+                if *saga_id == Some(ctx.saga_id) && label == &self.closed_label =>
             {
                 self.drained_pool = Some(false);
                 SagaAction::Done
             }
             // Anything else: still waiting; or — for `Initial` —
-            // coordinator hasn't called `start` yet, in which case
-            // we're not supposed to be receiving events. Either way:
-            // no-op.
+            // coordinator hasn't called `start` yet; or the event's
+            // saga_id doesn't match (concurrent saga or organic
+            // report). Either way: no-op.
             _ => SagaAction::Wait,
         }
     }
@@ -309,13 +319,14 @@ mod tests {
 
     #[test]
     fn panes_reaped_advances_to_drain_pool_step() {
+        // CPD-4 — saga_id-tagged terminal event for *this* saga.
         let mut saga = WindowCleanupCascade::new("main".into());
         let _ = saga.start(&ctx(7));
         let action = saga.on_event(
             &Event::PanesReaped {
                 label: "main".into(),
                 version: 100,
-                saga_id: None,
+                saga_id: Some(7),
             },
             &ctx(7),
         );
@@ -344,7 +355,7 @@ mod tests {
             &Event::PanesReaped {
                 label: "main".into(),
                 version: 100,
-                saga_id: None,
+                saga_id: Some(7),
             },
             &ctx(7),
         );
@@ -352,7 +363,7 @@ mod tests {
             &Event::PoolDrained {
                 label: "main".into(),
                 version: 101,
-                saga_id: None,
+                saga_id: Some(7),
             },
             &ctx(7),
         );
@@ -368,7 +379,7 @@ mod tests {
             &Event::PanesReaped {
                 label: "secondary".into(),
                 version: 100,
-                saga_id: None,
+                saga_id: Some(7),
             },
             &ctx(7),
         );
@@ -376,12 +387,50 @@ mod tests {
             &Event::PoolNotLast {
                 label: "secondary".into(),
                 version: 101,
-                saga_id: None,
+                saga_id: Some(7),
             },
             &ctx(7),
         );
         assert!(matches!(action, SagaAction::Done));
         assert_eq!(saga.drained_pool(), Some(false));
+    }
+
+    /// CPD-4 — terminal events with `saga_id: None` (organic host
+    /// reports) must NOT advance the saga. Pre-CPD-4 ANY label-
+    /// matching `PanesReaped` would advance Step 1; per-saga
+    /// correlation now scopes terminal events to their originating
+    /// saga.
+    #[test]
+    fn organic_panes_reaped_does_not_advance_saga() {
+        let mut saga = WindowCleanupCascade::new("main".into());
+        let _ = saga.start(&ctx(7));
+        let action = saga.on_event(
+            &Event::PanesReaped {
+                label: "main".into(),
+                version: 100,
+                saga_id: None,
+            },
+            &ctx(7),
+        );
+        assert!(matches!(action, SagaAction::Wait));
+    }
+
+    /// CPD-4 — a terminal event tagged with a *foreign* saga_id
+    /// (sibling concurrent cleanup-cascade saga) is ignored. This is
+    /// the invariant that retires evict-and-replace.
+    #[test]
+    fn foreign_saga_id_panes_reaped_does_not_advance_saga() {
+        let mut saga = WindowCleanupCascade::new("main".into());
+        let _ = saga.start(&ctx(7));
+        let action = saga.on_event(
+            &Event::PanesReaped {
+                label: "main".into(),
+                version: 100,
+                saga_id: Some(99),
+            },
+            &ctx(7),
+        );
+        assert!(matches!(action, SagaAction::Wait));
     }
 
     #[test]
@@ -405,7 +454,7 @@ mod tests {
             &Event::PanesReaped {
                 label: "different-window".into(),
                 version: 51,
-                saga_id: None,
+                saga_id: Some(7),
             },
             &ctx(7),
         );
@@ -417,7 +466,7 @@ mod tests {
             &Event::PoolDrained {
                 label: "main".into(),
                 version: 52,
-                saga_id: None,
+                saga_id: Some(7),
             },
             &ctx(7),
         );
@@ -446,7 +495,7 @@ mod tests {
             &Event::PanesReaped {
                 label: "main".into(),
                 version: 100,
-                saga_id: None,
+                saga_id: Some(7),
             },
             &ctx(7),
         );
@@ -456,7 +505,7 @@ mod tests {
             &Event::PoolDrained {
                 label: "other".into(),
                 version: 101,
-                saga_id: None,
+                saga_id: Some(7),
             },
             &ctx(7),
         );
@@ -465,7 +514,7 @@ mod tests {
             &Event::PoolNotLast {
                 label: "other".into(),
                 version: 102,
-                saga_id: None,
+                saga_id: Some(7),
             },
             &ctx(7),
         );
@@ -500,22 +549,14 @@ mod tests {
             version: 1,
             crash_detected: false,
         });
-        // Step 1 terminal.
-        let _ = events_tx.send(Event::PanesReaped {
-            label: "main".into(),
-            version: 2,
-            saga_id: None,
-        });
-        // Step 2 terminal — pick the "drained" branch.
-        let _ = events_tx.send(Event::PoolDrained {
-            label: "main".into(),
-            version: 3,
-            saga_id: None,
-        });
 
+        // CPD-4: wait for SagaStarted to learn the coordinator-
+        // allocated saga_id, then publish step-1 + step-2 terminals
+        // tagged with that id.
+        let mut saga_id_started: Option<u64> = None;
         let mut saw_started = false;
         let mut saw_completed_after_started = false;
-        let mut saga_id_started: Option<u64> = None;
+        let mut sent_terminals = false;
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
         while std::time::Instant::now() < deadline {
             match tokio::time::timeout(std::time::Duration::from_millis(50), witness.recv()).await
@@ -524,6 +565,22 @@ mod tests {
                     if name == "window_cleanup_cascade" {
                         saw_started = true;
                         saga_id_started = Some(saga_id);
+                        if !sent_terminals {
+                            // Step 1 terminal.
+                            let _ = events_tx.send(Event::PanesReaped {
+                                label: "main".into(),
+                                version: 2,
+                                saga_id: Some(saga_id),
+                            });
+                            // Step 2 terminal — pick the "drained"
+                            // branch.
+                            let _ = events_tx.send(Event::PoolDrained {
+                                label: "main".into(),
+                                version: 3,
+                                saga_id: Some(saga_id),
+                            });
+                            sent_terminals = true;
+                        }
                     }
                 }
                 Ok(Ok(Event::SagaCompleted { saga_id, .. })) => {
@@ -547,18 +604,20 @@ mod tests {
         );
     }
 
-    /// Concurrent-window-close scenario: two `WindowClosed` events
-    /// arrive in close succession. Per the F.5 evict-and-replace
-    /// policy in `saga::mod.rs::run_coordinator`, the second close
-    /// evicts the first saga (emitting `SagaFailed` with "evicted"
-    /// reason) and starts a fresh one. Both close events still end
-    /// with terminal lifecycle activity:
-    ///   - first close → `SagaFailed` (evicted)
-    ///   - second close → `SagaStarted` + `SagaCompleted`
-    /// We assert that we observe at least one of each lifecycle
-    /// type on the bus.
+    /// **CPD-4 — concurrent same-kind sagas correlate cleanly.**
+    /// Two `WindowClosed` events arrive in close succession; both
+    /// sagas coexist in the registry. Each consumes only its own
+    /// saga_id-tagged terminal events. Both produce a clean
+    /// `SagaStarted` + `SagaCompleted` bracket — no premature
+    /// `SagaFailed { reason: "evicted" }` from the retired
+    /// evict-and-replace policy (PR #634).
+    ///
+    /// Pre-CPD-4 this test (formerly
+    /// `coordinator_evicts_on_concurrent_window_close`) asserted the
+    /// inverse: one premature `SagaFailed` + one `SagaCompleted`. The
+    /// behavioral inversion is the core of CPD-4.
     #[tokio::test]
-    async fn coordinator_evicts_on_concurrent_window_close() {
+    async fn coordinator_concurrent_window_close_runs_two_sagas_to_completion() {
         use crate::saga::{run_coordinator, SagaCoordinator};
 
         let (events_tx, _) = tokio::sync::broadcast::channel::<Event>(64);
@@ -577,70 +636,113 @@ mod tests {
             version: 1,
             crash_detected: false,
         });
-        // Second close BEFORE saga A's terminals arrive → evicts A,
-        // starts saga B.
+        // Second close BEFORE saga A's terminals arrive → with
+        // evict-and-replace removed, saga B coexists with saga A.
         let _ = events_tx.send(Event::WindowClosed {
             label: "secondary".into(),
             version: 2,
             crash_detected: false,
         });
-        // Saga B's terminals.
-        let _ = events_tx.send(Event::PanesReaped {
-            label: "secondary".into(),
-            version: 3,
-            saga_id: None,
-        });
-        let _ = events_tx.send(Event::PoolNotLast {
-            label: "secondary".into(),
-            version: 4,
-            saga_id: None,
-        });
 
-        let mut started_count = 0u32;
-        let mut completed_count = 0u32;
-        let mut failed_evict_count = 0u32;
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        // Drain the bus: capture both saga_ids from SagaStarted, then
+        // send each saga's terminal events tagged with its own id.
+        // Track a per-saga state machine: we send PanesReaped only
+        // after the saga's start is observed, then PoolDrained/
+        // PoolNotLast.
+        let mut saga_a_id: Option<u64> = None;
+        let mut saga_b_id: Option<u64> = None;
+        let mut saga_a_complete = false;
+        let mut saga_b_complete = false;
+        let mut saga_a_panes_sent = false;
+        let mut saga_b_panes_sent = false;
+        let mut version: u64 = 100;
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
         while std::time::Instant::now() < deadline {
             match tokio::time::timeout(std::time::Duration::from_millis(50), witness.recv()).await
             {
-                Ok(Ok(Event::SagaStarted { name, .. })) => {
+                Ok(Ok(Event::SagaStarted { saga_id, name, .. })) => {
                     if name == "window_cleanup_cascade" {
-                        started_count += 1;
+                        if saga_a_id.is_none() {
+                            saga_a_id = Some(saga_id);
+                            // Saga A's PanesReaped (Step 1 terminal).
+                            version += 1;
+                            let _ = events_tx.send(Event::PanesReaped {
+                                label: "main".into(),
+                                version,
+                                saga_id: Some(saga_id),
+                            });
+                            saga_a_panes_sent = true;
+                        } else if saga_b_id.is_none() {
+                            saga_b_id = Some(saga_id);
+                            version += 1;
+                            let _ = events_tx.send(Event::PanesReaped {
+                                label: "secondary".into(),
+                                version,
+                                saga_id: Some(saga_id),
+                            });
+                            saga_b_panes_sent = true;
+                        }
                     }
                 }
-                Ok(Ok(Event::SagaCompleted { .. })) => {
-                    completed_count += 1;
-                }
-                Ok(Ok(Event::SagaFailed { reason, .. })) => {
-                    if reason.contains("evicted") {
-                        failed_evict_count += 1;
+                Ok(Ok(Event::PanesReaped { saga_id: Some(sid), .. })) => {
+                    // After Step 1 echo lands, send Step 2 terminal
+                    // tagged with the same saga id.
+                    if Some(sid) == saga_a_id && saga_a_panes_sent {
+                        version += 1;
+                        let _ = events_tx.send(Event::PoolDrained {
+                            label: "main".into(),
+                            version,
+                            saga_id: Some(sid),
+                        });
+                    } else if Some(sid) == saga_b_id && saga_b_panes_sent {
+                        version += 1;
+                        let _ = events_tx.send(Event::PoolNotLast {
+                            label: "secondary".into(),
+                            version,
+                            saga_id: Some(sid),
+                        });
                     }
                 }
-                Ok(Ok(_)) => {}
-                Ok(Err(_)) => break,
-                Err(_) => {
-                    // No new events for 50ms — break early once we've
-                    // seen the expected pattern.
-                    if started_count >= 2 && completed_count >= 1 && failed_evict_count >= 1 {
+                Ok(Ok(Event::SagaCompleted { saga_id, .. })) => {
+                    if Some(saga_id) == saga_a_id {
+                        saga_a_complete = true;
+                    } else if Some(saga_id) == saga_b_id {
+                        saga_b_complete = true;
+                    }
+                    if saga_a_complete && saga_b_complete {
                         break;
                     }
                 }
+                Ok(Ok(Event::SagaFailed { reason, saga_id, .. })) => {
+                    panic!(
+                        "CPD-4 invariant violated: saga_id={} got SagaFailed reason={} — \
+                         evict-and-replace should be retired so concurrent sagas no \
+                         longer cross-talk",
+                        saga_id, reason,
+                    );
+                }
+                Ok(Ok(_)) => {}
+                Ok(Err(_)) => break,
+                Err(_) => continue,
             }
         }
+
         assert!(
-            started_count >= 2,
-            "expected ≥2 SagaStarted (one per close), got {}",
-            started_count
+            saga_a_id.is_some(),
+            "expected saga A's SagaStarted from first WindowClosed"
         );
         assert!(
-            failed_evict_count >= 1,
-            "expected ≥1 SagaFailed with 'evicted' reason from evict-and-replace policy, got {}",
-            failed_evict_count
+            saga_b_id.is_some(),
+            "expected saga B's SagaStarted from second WindowClosed (no eviction)"
+        );
+        assert_ne!(saga_a_id, saga_b_id, "concurrent sagas must have distinct ids");
+        assert!(
+            saga_a_complete,
+            "saga A (label=main) should complete cleanly with its own saga_id-tagged terminals"
         );
         assert!(
-            completed_count >= 1,
-            "expected ≥1 SagaCompleted (the surviving saga), got {}",
-            completed_count
+            saga_b_complete,
+            "saga B (label=secondary) should complete cleanly with its own saga_id-tagged terminals"
         );
     }
 }
