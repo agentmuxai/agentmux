@@ -342,6 +342,16 @@ pub fn tear_off_pool_promote(
 /// Open a new window at a specific screen position (tear-off).
 /// Creates a new CEF browser window positioned so the cursor lands in the title bar.
 pub fn open_window_at_position(state: &Arc<AppState>, args: &serde_json::Value) -> Result<serde_json::Value, String> {
+    // PR #6 H.7 — refuse top-level creation while any pane is mid-close.
+    // See `commands/window.rs::open_window_with_kind` for rationale.
+    if state.any_pane_closing() {
+        tracing::warn!(
+            target: "wfr:gate",
+            "[wfr:gate] open_window_at_position refused — pane is mid-close (H.7 invariant)"
+        );
+        return Err("a pane is currently closing; retry shortly".to_string());
+    }
+
     let screen_x = args.get("screenX").and_then(|v| v.as_f64()).unwrap_or(0.0);
     let screen_y = args.get("screenY").and_then(|v| v.as_f64()).unwrap_or(0.0);
     let workspace_id = args.get("workspaceId").and_then(|v| v.as_str()).unwrap_or("").to_string();
