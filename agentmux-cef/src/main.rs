@@ -441,6 +441,15 @@ fn main() {
     );
     if init_result != 1 {
         let exit_code = get_exit_code();
+        // Sidecar was spawned before cef_initialize(); std::process::exit()
+        // bypasses the normal shutdown block, so kill it here first.
+        {
+            let mut sidecar = app_state.sidecar_child.lock();
+            if let Some(ref mut child) = *sidecar {
+                tracing::info!("CEF early exit: killing backend sidecar before exit");
+                let _ = child.kill();
+            }
+        }
         match exit_code {
             0 | 24 | 36 | 38 => {
                 tracing::info!(
