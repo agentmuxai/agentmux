@@ -33,12 +33,12 @@ pub fn emit_event(browser: &Browser, event: &str, payload: &serde_json::Value) {
 /// Emit an event to the "main" browser stored in AppState.
 /// This is a convenience wrapper for use from command handlers and background tasks.
 pub fn emit_event_from_state(state: &crate::state::AppState, event: &str, payload: &serde_json::Value) {
-    let browsers = state.browsers.lock();
-    if let Some(browser) = browsers.get("main") {
-        emit_event(browser, event, payload);
-    } else if let Some((_label, browser)) = browsers.iter().next() {
+    // Phase H.2.b — reducer-aware lookup with fallback.
+    if let Some(browser) = state.get_browser("main") {
+        emit_event(&browser, event, payload);
+    } else if let Some((_label, browser)) = state.first_browser() {
         // Fallback: emit to any available browser
-        emit_event(browser, event, payload);
+        emit_event(&browser, event, payload);
     } else {
         tracing::warn!("Cannot emit event '{}': no browser handle in state", event);
     }
@@ -46,13 +46,14 @@ pub fn emit_event_from_state(state: &crate::state::AppState, event: &str, payloa
 
 /// Emit an event to ALL browser windows (for cross-window drag broadcasts).
 pub fn emit_event_all_windows(state: &crate::state::AppState, event: &str, payload: &serde_json::Value) {
-    let browsers = state.browsers.lock();
-    if browsers.is_empty() {
+    // Phase H.2.b — reducer-aware iteration with fallback.
+    let all = state.list_browsers();
+    if all.is_empty() {
         tracing::warn!("Cannot broadcast event '{}': no browsers", event);
         return;
     }
-    for (_label, browser) in browsers.iter() {
-        emit_event(browser, event, payload);
+    for (_label, browser) in all {
+        emit_event(&browser, event, payload);
     }
 }
 
@@ -65,10 +66,10 @@ pub fn emit_event_to_window(
     event: &str,
     payload: &serde_json::Value,
 ) -> bool {
-    let browsers = state.browsers.lock();
-    match browsers.get(label) {
+    // Phase H.2.b — reducer-aware lookup with fallback.
+    match state.get_browser(label) {
         Some(browser) => {
-            emit_event(browser, event, payload);
+            emit_event(&browser, event, payload);
             true
         }
         None => {

@@ -30,10 +30,10 @@ pub fn run_command(state: &Arc<AppState>, args: &serde_json::Value) -> Result<se
         id
     );
 
-    let browsers = state.browsers.lock();
-    let browser = browsers
-        .get(window_label)
-        .or_else(|| browsers.values().next());
+    // Phase H.2.b — reducer-aware lookup with fallback.
+    let browser = state
+        .get_browser(window_label)
+        .or_else(|| state.first_browser().map(|(_, b)| b));
 
     if let Some(browser) = browser {
         if let Some(frame) = browser.main_frame() {
@@ -67,8 +67,8 @@ pub fn open_agent(state: &Arc<AppState>, args: &serde_json::Value) -> Result<ser
         agent_id
     );
 
-    let browsers = state.browsers.lock();
-    let browser = browsers.values().next();
+    // Phase H.2.b — reducer-aware "any browser" routing.
+    let browser = state.first_browser().map(|(_, b)| b);
 
     if let Some(browser) = browser {
         if let Some(frame) = browser.main_frame() {

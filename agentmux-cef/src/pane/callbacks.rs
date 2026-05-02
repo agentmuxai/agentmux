@@ -215,9 +215,10 @@ pub fn on_loading_state_change_pane(
 /// label whose browser handle matches the given one by `is_same`, then
 /// strip the prefix and the trailing `-<seq>` to recover the uuid.
 fn resolve_pane_block_id(state: &Arc<AppState>, browser: &Browser) -> Option<String> {
-    let browsers = state.browsers.lock();
-    browsers
-        .iter()
+    // Phase H.2.b — reducer-aware iteration with fallback.
+    state
+        .list_browsers()
+        .into_iter()
         .find(|(_k, b)| {
             let mut b_clone = b.clone();
             let mut browser_clone: cef::Browser = browser.clone();
