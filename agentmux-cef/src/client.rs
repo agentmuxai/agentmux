@@ -228,7 +228,7 @@ impl AgentMuxHandler {
                 .unwrap_or_default();
             crate::state::BrowserKind::Pane { block_id }
         } else if label.starts_with("window-pool-")
-            && self.state.unpromoted_pool_labels.lock().contains(&label)
+            && self.state.is_unpromoted_pool_label(&label)
         {
             crate::state::BrowserKind::TopLevel { is_pool: true }
         } else {
@@ -638,7 +638,7 @@ impl AgentMuxHandler {
         let (user_browser_count, browsers_keys, pool_keys) = {
             // Phase H.2.b — reducer-aware label snapshot. Single helper call
             // replaces an interleaved pool_labels.lock + browsers.lock pair.
-            let pool_labels = self.state.unpromoted_pool_labels.lock().clone();
+            let pool_labels = self.state.unpromoted_pool_labels_snapshot();
             let keys = self.state.list_browser_labels();
             let count = keys
                 .iter()

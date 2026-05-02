@@ -289,6 +289,13 @@ pub enum HostCommand {
     /// as `is_pool: false`.
     PromotePoolWindow { label: String },
 
+    /// PR #5 H.4 — atomic pop+promote front of pool queue. Returns the
+    /// popped label via `DispatchOutput::promoted_pool_label`, or None
+    /// if the queue is empty. Replaces the legacy
+    /// `state.window_pool.lock().pop_front() + state.unpromoted_pool_labels.lock().remove`
+    /// pair in `promote_pool_window`.
+    PopAndPromoteFrontPoolWindow,
+
     /// Drain all pool windows on shutdown. Idempotent.
     PoolDrainAll,
 
@@ -402,6 +409,7 @@ impl std::fmt::Debug for HostCommand {
                 .debug_struct("PromotePoolWindow")
                 .field("label", label)
                 .finish(),
+            HostCommand::PopAndPromoteFrontPoolWindow => f.write_str("PopAndPromoteFrontPoolWindow"),
             HostCommand::PoolDrainAll => f.write_str("PoolDrainAll"),
             HostCommand::BeginDrain { reason } => f
                 .debug_struct("BeginDrain")
@@ -638,6 +646,24 @@ pub enum HostEvent {
 ///   AND need the .is_some() signal to distinguish actual end vs
 ///   drag_id mismatch).
 ///
+/// - `PoolWindowSpawnStart` → `pool_spawn_proceeding: bool` (PR #5
+///   H.4: spawn_pool_window's single-flight semaphore. true = slot
+///   acquired, caller proceeds with CEF spawn; false = suppressed
+///   (already in flight, or QuitState != Running)).
+///
+/// - `PoolWindowReady` / `PoolWindowDestroyedBeforePromote` /
+///   `PopAndPromoteFrontPoolWindow` → `pool_size_after: Option<usize>`
+///   (PR #5 H.4: caller checks against POOL_TARGET_SIZE to decide
+///   whether to trigger a refill).
+///
+/// - `PoolWindowDestroyedBeforePromote` → `pool_destroyed_was_unpromoted: bool`
+///   (PR #5 H.4: caller gates pool-inventory reports on this — the
+///   post-promote close path doesn't own that update).
+///
+/// - `PopAndPromoteFrontPoolWindow` → `promoted_pool_label: Option<String>`
+///   (PR #5 H.4: caller needs the popped label to drive the CEF
+///   show + emit the pool:promote frontend event).
+///
 /// Default keeps the dispatch return type uniform across arms that
 /// don't populate these fields.
 #[derive(Default)]
@@ -649,6 +675,10 @@ pub struct DispatchOutput {
     pub closed_pane_label: Option<String>,
     pub drained_block_id: Option<String>,
     pub ended_drag_session: Option<DragSession>,
+    pub pool_spawn_proceeding: bool,
+    pub pool_size_after: Option<usize>,
+    pub pool_destroyed_was_unpromoted: bool,
+    pub promoted_pool_label: Option<String>,
 }
 
 // Manual Debug — `cef::Browser` doesn't impl Debug.
@@ -669,6 +699,10 @@ impl std::fmt::Debug for DispatchOutput {
             .field("closed_pane_label", &self.closed_pane_label)
             .field("drained_block_id", &self.drained_block_id)
             .field("ended_drag_session", &self.ended_drag_session)
+            .field("pool_spawn_proceeding", &self.pool_spawn_proceeding)
+            .field("pool_size_after", &self.pool_size_after)
+            .field("pool_destroyed_was_unpromoted", &self.pool_destroyed_was_unpromoted)
+            .field("promoted_pool_label", &self.promoted_pool_label)
             .finish()
     }
 }
@@ -725,6 +759,7 @@ pub fn update(state: &mut HostState, cmd: HostCommand) -> DispatchOutput {
             handle_pool_destroyed_before_promote(state, label)
         }
         HostCommand::PromotePoolWindow { label } => handle_promote_pool_window(state, label),
+        HostCommand::PopAndPromoteFrontPoolWindow => handle_pop_and_promote_front_pool_window(state),
         HostCommand::PoolDrainAll => handle_pool_drain_all(state),
         // H.5 quit
         HostCommand::BeginDrain { reason } => handle_begin_drain(state, reason),
@@ -1068,30 +1103,51 @@ fn handle_end_drag(
 // ── H.4 — pool state ─────────────────────────────────────────────────────
 
 fn handle_pool_spawn_start(state: &mut HostState, label: String) -> DispatchOutput {
+    // PR #5 H.4 — single-flight semaphore. The legacy
+    // `window_pool_respawn_in_flight.swap(true)` returns the prior
+    // value; if true, caller skips. We replicate that here: prior
+    // in-flight OR non-Running quit state both suppress the spawn.
     if state.quit_state != QuitState::Running {
-        return DispatchOutput::default(); // pool refills suppressed during drain
+        return DispatchOutput {
+            pool_spawn_proceeding: false,
+            ..Default::default()
+        };
+    }
+    if state.pool.respawn_in_flight {
+        return DispatchOutput {
+            pool_spawn_proceeding: false,
+            ..Default::default()
+        };
     }
     state.pool.unpromoted.insert(label);
     state.pool.respawn_in_flight = true;
-    DispatchOutput::default()
+    DispatchOutput {
+        pool_spawn_proceeding: true,
+        ..Default::default()
+    }
 }
 
 fn handle_pool_ready(state: &mut HostState, label: String) -> DispatchOutput {
     if !state.pool.unpromoted.remove(&label) {
         // Not in unpromoted (race or duplicate signal); idempotent.
-        return DispatchOutput::default();
+        return DispatchOutput {
+            pool_size_after: Some(state.pool.queue.len()),
+            ..Default::default()
+        };
     }
     if !state.pool.queue.iter().any(|l| l == &label) {
         state.pool.queue.push_back(label.clone());
     }
     state.pool.respawn_in_flight = false;
+    let queue_len_after = state.pool.queue.len();
     let v = state.bump_version();
     DispatchOutput {
         events: vec![HostEvent::PoolWindowEntered {
             label,
-            queue_len_after: state.pool.queue.len(),
+            queue_len_after,
             version: v,
         }],
+        pool_size_after: Some(queue_len_after),
         ..Default::default()
     }
 }
@@ -1108,17 +1164,49 @@ fn handle_pool_destroyed_before_promote(state: &mut HostState, label: String) ->
     state.pool.queue.retain(|l| l != &label);
     let was_in_queue = state.pool.queue.len() < queue_len_before;
     state.pool.respawn_in_flight = false;
+    let queue_len_after = state.pool.queue.len();
     if !was_unpromoted && !was_in_queue {
-        return DispatchOutput::default();
+        return DispatchOutput {
+            pool_size_after: Some(queue_len_after),
+            ..Default::default()
+        };
     }
     let v = state.bump_version();
     DispatchOutput {
         events: vec![HostEvent::PoolWindowLeft {
             label,
-            queue_len_after: state.pool.queue.len(),
+            queue_len_after,
             reason: PoolLeaveReason::DestroyedBeforePromote,
             version: v,
         }],
+        pool_destroyed_was_unpromoted: was_unpromoted,
+        pool_size_after: Some(queue_len_after),
+        ..Default::default()
+    }
+}
+
+fn handle_pop_and_promote_front_pool_window(state: &mut HostState) -> DispatchOutput {
+    let label = match state.pool.queue.pop_front() {
+        Some(l) => l,
+        None => return DispatchOutput::default(),
+    };
+    state.pool.unpromoted.remove(&label);
+    if let Some(handle) = state.browsers.get_mut(&label) {
+        if let BrowserKind::TopLevel { is_pool } = &mut handle.kind {
+            *is_pool = false;
+        }
+    }
+    let queue_len_after = state.pool.queue.len();
+    let v = state.bump_version();
+    DispatchOutput {
+        events: vec![HostEvent::PoolWindowLeft {
+            label: label.clone(),
+            queue_len_after,
+            reason: PoolLeaveReason::Promoted,
+            version: v,
+        }],
+        promoted_pool_label: Some(label),
+        pool_size_after: Some(queue_len_after),
         ..Default::default()
     }
 }
