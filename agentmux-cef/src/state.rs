@@ -526,14 +526,10 @@ pub struct AppState {
     // `PoolWindowReady`, `PoolWindowDestroyedBeforePromote`,
     // `PopAndPromoteFrontPoolWindow`, `PoolDrainAll`.
 
-    /// Phase B.9.3 — set true once `on_before_close` decides
-    /// "this is the last user-visible window closing". Tells
-    /// `spawn_pool_window` to skip refill so the existing pool
-    /// can drain. Without this, every pool close triggers a
-    /// refill that adds a new pool browser, keeping
-    /// `state.browsers` non-empty forever and preventing
-    /// `quit_message_loop` from ever reaching idle.
-    pub is_quitting: std::sync::atomic::AtomicBool,
+    // PR #5 H.5 — `is_quitting` AtomicBool deleted; the host reducer's
+    // `HostState.quit_state: QuitState` is the sole source of truth.
+    // Reads go through `AppState::is_quitting()`; transitions through
+    // `HostCommand::BeginDrain` and `ConfirmDrained`.
 
     /// Version-specific data directory (e.g. ai.agentmux.cef.v0-32-111/)
     pub version_data_dir: Mutex<Option<String>>,
@@ -610,7 +606,7 @@ impl Default for AppState {
             host_state: Mutex::new(crate::reducer::HostState::default()),
             // window_pool / unpromoted_pool_labels / window_pool_respawn_in_flight
             // deleted (PR #5 H.4) — see HostState.pool.
-            is_quitting: std::sync::atomic::AtomicBool::new(false),
+            // is_quitting deleted (PR #5 H.5) — see HostState.quit_state.
             version_data_dir: Mutex::new(None),
             version_config_dir: Mutex::new(None),
             user_home_dir: Mutex::new(None),
@@ -798,6 +794,16 @@ impl AppState {
     /// whether to bootstrap more pool windows.
     pub fn pool_queue_size(&self) -> usize {
         self.host_state.lock().pool.queue.len()
+    }
+
+    /// PR #5 H.5 — read-side helper for the legacy `is_quitting` check.
+    /// Returns true iff the host has begun draining (BeginDrain
+    /// dispatched) OR has fully quit. Replaces the AtomicBool.
+    pub fn is_quitting(&self) -> bool {
+        !matches!(
+            self.host_state.lock().quit_state,
+            crate::state::QuitState::Running
+        )
     }
 
     /// Phase B.5e — authoritative instance-number lookup. Reads

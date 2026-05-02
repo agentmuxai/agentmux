@@ -716,15 +716,19 @@ impl AgentMuxHandler {
         // uses X11 WM_DELETE_WINDOW. Same async-close-cascade
         // semantics on all platforms; only the OS API differs.
         if user_browser_count == 0 && !self.is_pane {
-            // Phase B.9.3 — set the drain flag BEFORE collecting
-            // pool browsers. spawn_pool_window will see this and
-            // skip refill on every subsequent on_pool_window_destroyed
-            // → no new pool browsers added → state.browsers can
-            // actually drain.
-            self.state
-                .is_quitting
-                .store(true, std::sync::atomic::Ordering::Release);
-            tracing::warn!(target: "wrr", "[wrr] is_quitting=true (drain mode)");
+            // PR #5 H.5 — flip QuitState Running → Draining via reducer.
+            // Mirrors the pre-PR Phase B.9.3 drain flag: spawn_pool_window
+            // checks `quit_state != Running` (in the reducer's spawn arm)
+            // and skips refill on every subsequent on_pool_window_destroyed
+            // → no new pool browsers added → browsers map can actually
+            // drain. BeginDrain is idempotent — safe if a duplicate
+            // last-close fires.
+            self.state.host_dispatch(
+                crate::reducer::HostCommand::BeginDrain {
+                    reason: crate::state::QuitReason::LastWindowClosed,
+                },
+            );
+            tracing::warn!(target: "wrr", "[wrr] quit_state=Draining (drain mode)");
 
             // Phase H.2.b — reducer-aware iteration with fallback + drift logging.
             let pool_browsers: Vec<cef::Browser> = self

@@ -29,7 +29,6 @@
 // - App shutdown → pool windows close cleanly with the rest of
 //   the process.
 
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use crate::state::{AppState, WindowKind, WindowMeta};
@@ -59,10 +58,14 @@ pub fn spawn_pool_window(state: &Arc<AppState>) {
     // this guard, every pool close triggers a refill, keeping
     // state.browsers non-empty forever and quit_message_loop's
     // QuitWhenIdle never reaches idle.
-    if state.is_quitting.load(Ordering::Acquire) {
+    // PR #5 H.5 — early-out before dispatching to the reducer. The
+    // reducer's PoolWindowSpawnStart arm ALSO checks `quit_state !=
+    // Running` and would no-op, but the early-out keeps the warn-log
+    // shape identical to pre-PR for diagnostic continuity.
+    if state.is_quitting() {
         tracing::warn!(
             target: "wrr",
-            "[wrr] spawn_pool_window skipped — is_quitting=true (drain mode)"
+            "[wrr] spawn_pool_window skipped — quit_state != Running (drain mode)"
         );
         return;
     }
