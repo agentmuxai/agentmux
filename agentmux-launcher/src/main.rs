@@ -63,6 +63,27 @@ async fn main() {
     }
     log("SetDllDirectoryW done");
 
+    let args: Vec<String> = std::env::args().skip(1).collect();
+
+    // LSD-3 — `agentmux.exe --diag sagas` is OFFLINE: it reads the
+    // launcher saga SQLite log directly, with no IPC and no running
+    // launcher. So it MUST run BEFORE the CEF runtime existence
+    // check below — the offline-diagnostic value is most needed
+    // exactly when the launcher won't start (e.g. corrupt runtime
+    // folder). (codex P1 + reagent P1 PR #647 round 3.)
+    if matches!(
+        (args.first().map(String::as_str), args.get(1).map(String::as_str)),
+        (Some("--diag"), Some("sagas"))
+    ) {
+        match diag::run_sagas_diag(exe_dir).await {
+            Ok(()) => std::process::exit(0),
+            Err(msg) => {
+                eprintln!("--diag sagas failed: {}", msg);
+                std::process::exit(1);
+            }
+        }
+    }
+
     let real_exe = find_cef_binary(&runtime_dir);
     log(&format!("resolved CEF binary: {}", real_exe.display()));
     if !real_exe.exists() {
@@ -77,14 +98,13 @@ async fn main() {
         std::process::exit(1);
     }
 
-    let args: Vec<String> = std::env::args().skip(1).collect();
     log(&format!("forwarding {} CLI args to host", args.len()));
 
-    // Phase B.8 — `agentmux.exe --diag wrr` Tool client. Connects
-    // to the running launcher, captures events for a short window,
-    // prints a summary, exits. Doesn't spawn srv/host; doesn't
-    // bind the pipe; doesn't drive the reducer's lifecycle. Skip
-    // straight to the Tool flow before any privileged setup.
+    // Phase B.8 — `agentmux.exe --diag wrr` and `--diag srv` Tool
+    // clients. Connect to the running launcher (or srv) over IPC,
+    // capture events for a short window, print summary, exit.
+    // (Note: --diag sagas is handled above, before the CEF runtime
+    // check, since it doesn't need IPC.)
     if matches!(args.first().map(String::as_str), Some("--diag")) {
         let topic = args.get(1).map(String::as_str).unwrap_or("");
         match topic {
@@ -106,12 +126,18 @@ async fn main() {
                     std::process::exit(1);
                 }
             },
+            // sagas is handled above, before the runtime check.
+            "sagas" => {
+                // Should never reach here — `sagas` is matched + handled
+                // above the CEF runtime check. Kept for completeness.
+                unreachable!("--diag sagas is handled before runtime check");
+            }
             "" => {
-                eprintln!("usage: agentmux.exe --diag <topic>\nknown topics: wrr, srv");
+                eprintln!("usage: agentmux.exe --diag <topic>\nknown topics: wrr, srv, sagas");
                 std::process::exit(2);
             }
             other => {
-                eprintln!("unknown --diag topic: {} (known: wrr, srv)", other);
+                eprintln!("unknown --diag topic: {} (known: wrr, srv, sagas)", other);
                 std::process::exit(2);
             }
         }
@@ -327,15 +353,31 @@ async fn run_windows(
         }
     };
 
+    // LSD-3 — startup recovery walker. Walks the durable saga log,
+    // marks any saga still in `running` / `compensating` / `failed`
+    // (left over from a crashed prior run) as `failed_compensation`
+    // so operators see them in `--diag sagas` and the next coordinator
+    // run can't accidentally double-act on partially-applied effects.
+    // MUST run BEFORE `tokio::spawn(saga::run_coordinator(..))` below
+    // (LSD spec §5 risk #5: don't spawn while recovery is in progress).
+    // Runs BEFORE LSD-4 vacuum so just-recovered sagas land in their
+    // failed_compensation state for the operator to see — vacuum
+    // honors the 7-day retention window and won't immediately purge.
+    // Spec `docs/specs/SPEC_LAUNCHER_SAGA_DURABILITY_2026-05-01.md` §3.5.
+    if let Err(e) = saga::compensate_unresolved_launcher_sagas(&saga_log).await {
+        log(&format!(
+            "[saga-recovery] WARN: walker failed: {} — coordinator will still spawn; prior crashed sagas remain unresolved until next restart",
+            e
+        ));
+    }
+
     // LSD-4 — startup retention vacuum. Runs once per launcher boot,
     // before the coordinator subscribes, so any rows it deletes are
     // already terminal and can't possibly belong to an in-flight saga
     // the coordinator is about to drive (see `vacuum_older_than` SQL —
     // `running` and `compensating` rows are unreachable by the DELETE
-    // regardless of timing). Failure is non-fatal: a corrupted /
-    // unwritable saga log row is a diagnostic concern, not a launcher-
-    // startup blocker. Spec
-    // `docs/specs/SPEC_LAUNCHER_SAGA_DURABILITY_2026-05-01.md` §3.6.
+    // regardless of timing). Failure is non-fatal.
+    // Spec §3.6.
     let retention_days =
         config::load_saga_retention_days(&paths.user_home_dir, |w| log(w));
     let cutoff = chrono::Utc::now() - chrono::Duration::days(retention_days);

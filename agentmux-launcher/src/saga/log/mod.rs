@@ -216,6 +216,26 @@ impl LauncherSagaLog {
         Self::configure_and_migrate(conn)
     }
 
+    /// Open the saga log in read-only mode. Used by `--diag sagas`
+    /// so an operator's diagnostic invocation can't accidentally
+    /// schema-migrate or modify a log that a running launcher owns.
+    /// Skips `configure_and_migrate` (read-only opens shouldn't run
+    /// migrations) and skips the `foreign_keys=ON` pragma since we
+    /// don't write. (codex P2 PR #647 round 3.)
+    pub fn open_read_only(path: &Path) -> Result<Self, LogError> {
+        let conn = Connection::open_with_flags(
+            path,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY
+                | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )?;
+        // Read-only PRAGMAs only: busy_timeout for WAL coexistence with
+        // a running launcher, no journal_mode change, no migrations.
+        conn.execute_batch("PRAGMA busy_timeout=5000;")?;
+        Ok(Self {
+            conn: Mutex::new(conn),
+        })
+    }
+
     /// Open an in-memory saga log for testing. Used by `tests.rs`
     /// and by future PR LSD-2 coordinator integration tests.
     #[allow(dead_code)] // exercised under #[cfg(test)] only; see saga/log/tests.rs
@@ -388,7 +408,6 @@ impl LauncherSagaLog {
     /// without restart-time recovery would still benefit from the
     /// `failed_compensation` upgrade so `--diag sagas` consistently
     /// surfaces it as "needs operator attention."
-    #[allow(dead_code)] // wired in PR LSD-3 (recovery walker)
     pub fn unresolved_sagas(&self) -> Result<Vec<UnresolvedLauncherSaga>, LogError> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
@@ -448,12 +467,48 @@ impl LauncherSagaLog {
         Ok(out)
     }
 
+    /// Fetch the step rows for a single saga regardless of saga state.
+    /// `unresolved_sagas` filters out `failed_compensation` (and other
+    /// terminal states), but `--diag sagas` needs to surface step rows
+    /// for sagas the recovery walker just marked `failed_compensation`
+    /// — operators triaging a recovered crash need to see what was
+    /// pending when the launcher exited. (codex P1 PR #647 round 1.)
+    pub fn get_saga_steps(&self, saga_id: u64) -> Result<Vec<UnresolvedLauncherStep>, LogError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT step_index, name, state, target, cmd_json,
+                    output_json, started_at, ended_at, failure_reason
+             FROM launcher_saga_step
+             WHERE saga_id = ?1
+             ORDER BY step_index ASC",
+        )?;
+        let steps: Vec<UnresolvedLauncherStep> = stmt
+            .query_map(params![saga_id as i64], |row| {
+                Ok(UnresolvedLauncherStep {
+                    step_index: row.get::<_, i64>(0)? as u32,
+                    name: row.get::<_, String>(1)?,
+                    state: row.get::<_, String>(2)?,
+                    target: row.get::<_, Option<String>>(3)?,
+                    cmd_json: row.get::<_, Option<String>>(4)?,
+                    output_json: row.get::<_, Option<String>>(5)?,
+                    started_at: row.get::<_, String>(6)?,
+                    ended_at: row.get::<_, Option<String>>(7)?,
+                    failure_reason: row.get::<_, Option<String>>(8)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(steps)
+    }
+
     /// Mark a saga as `failed_compensation` — the recovery walker's
     /// terminal write. Idempotent across repeated calls (the saga
-    /// stays in `failed_compensation`; only `ended_at` and
-    /// `failure_reason` get overwritten with the latest values).
-    /// LSD spec §3.5 — operator-review terminal state.
-    #[allow(dead_code)] // wired in PR LSD-3 (recovery walker)
+    /// stays in `failed_compensation`; `ended_at` is rewritten to
+    /// the latest call's timestamp; `failure_reason` is preserved
+    /// when already populated and the new reason is APPENDED rather
+    /// than overwritten — see SQL CASE WHEN below). This preserves
+    /// the original failure cause (e.g. timeout) while adding the
+    /// recovery context. (codex P2 PR #647 round 1: post-mortem
+    /// preservation.) LSD spec §3.5 — operator-review terminal state.
     pub fn mark_failed_compensation(
         &self,
         saga_id: u64,
@@ -461,9 +516,23 @@ impl LauncherSagaLog {
     ) -> Result<(), LogError> {
         let now = now_rfc3339();
         let conn = self.conn.lock().unwrap();
+        // Preserve original failure_reason when already populated.
+        // A saga in `failed` state pre-crash carries the precise
+        // original cause (timeout, dispatch error, etc.) that
+        // operators need for post-mortem. Recovery transitions
+        // state to `failed_compensation` but augments rather than
+        // replaces failure_reason — appends the restart context
+        // so both signals are visible in `--diag sagas`.
+        // (codex P2 PR #647 round 1.)
         conn.execute(
             "UPDATE launcher_saga
-             SET state = 'failed_compensation', ended_at = ?1, failure_reason = ?2
+             SET state = 'failed_compensation',
+                 ended_at = ?1,
+                 failure_reason = CASE
+                     WHEN failure_reason IS NULL OR failure_reason = ''
+                       THEN ?2
+                     ELSE failure_reason || ' | recovered: ' || ?2
+                 END
              WHERE saga_id = ?3",
             params![now, reason, saga_id as i64],
         )?;
@@ -473,7 +542,6 @@ impl LauncherSagaLog {
     /// Return up to `limit` recent sagas for `--diag sagas`. Sorted
     /// most-recent-first by `COALESCE(ended_at, started_at)`. Mirrors
     /// srv's `snapshot_recent` shape.
-    #[allow(dead_code)] // wired in PR LSD-3 (`--diag sagas` printer)
     pub fn snapshot_recent(&self, limit: usize) -> Result<Vec<SagaSummary>, LogError> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(

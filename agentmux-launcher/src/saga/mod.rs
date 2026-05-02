@@ -81,9 +81,16 @@ mod integration_tests;
 // the coordinator to write through `LauncherSagaLog` on every state
 // transition. See `docs/specs/SPEC_LAUNCHER_SAGA_DURABILITY_2026-05-01.md`
 // §4 PR1 for the staged-rollout rationale.
-mod log;
+pub(crate) mod log;
 pub use log::LauncherSagaLog;
 use log::SagaOutcome;
+
+// LSD-3 — startup recovery walker for unresolved launcher sagas.
+// `main.rs::run_windows` calls `compensate_unresolved_launcher_sagas`
+// after opening the durable saga log and BEFORE spawning the saga
+// coordinator. See `saga/recovery.rs` for design notes.
+mod recovery;
+pub use recovery::compensate_unresolved_launcher_sagas;
 
 /// Where a `SagaAction::IssueCmd` should be dispatched.
 ///
