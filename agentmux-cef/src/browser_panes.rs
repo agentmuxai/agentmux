@@ -154,8 +154,10 @@ impl BrowserPaneManager {
     /// Look up the Browser iff the pane is Live. Returns None when closing
     /// so all ops short-circuit uniformly.
     fn live_browser(&self, state: &Arc<AppState>, block_id: &str) -> Option<Browser> {
-        let label = self.lifecycle.live_label_of(block_id)?;
-        state.browsers.lock().get(&label).cloned()
+        // Phase H.1.b + H.2.b — route reads through reducer-aware helpers
+        // with fallback + drift logging.
+        let label = state.live_pane_label(block_id)?;
+        state.get_browser(&label)
     }
 
     // ── Phase H.1.b — read passthroughs for AppState helpers ────────────
@@ -194,7 +196,8 @@ impl BrowserPaneManager {
         match self.lifecycle.try_register_live(block_id) {
             RegisterResult::AlreadyLive(label) => {
                 // Existing Live entry — re-navigate the existing browser.
-                if let Some(browser) = state.browsers.lock().get(&label).cloned() {
+                // Phase H.2.b — reducer-aware lookup with fallback.
+                if let Some(browser) = state.get_browser(&label) {
                     if let Some(frame) = browser.main_frame() {
                         frame.load_url(Some(&CefString::from(url)));
                     }
@@ -381,10 +384,12 @@ impl BrowserPaneManager {
     /// Panes in `Closing` are skipped — their HWND may be mid-destruction and
     /// `set_focus(0)` against it can hit an invalid render widget.
     pub fn defocus_all(&self, state: &Arc<AppState>) {
-        let labels = self.lifecycle.live_labels();
-        let browsers = state.browsers.lock();
+        // Phase H.1.b + H.2.b — read live labels via reducer-aware helper,
+        // then look up each browser via reducer-aware helper. Both with
+        // fallback + drift logging.
+        let labels = state.live_pane_labels();
         for label in &labels {
-            if let Some(browser) = browsers.get(label).cloned() {
+            if let Some(browser) = state.get_browser(label) {
                 if let Some(host) = browser.host() {
                     host.set_focus(0);
                 }
@@ -435,8 +440,8 @@ impl BrowserPaneManager {
         let requesting_top_level: *mut std::ffi::c_void = if window_label.is_empty() {
             std::ptr::null_mut()
         } else {
-            let browsers = state.browsers.lock();
-            match browsers.get(window_label).and_then(|b| b.host()) {
+            // Phase H.2.b — reducer-aware lookup with fallback.
+            match state.get_browser(window_label).and_then(|b| b.host()) {
                 Some(host) => {
                     let h = host.window_handle();
                     if h.0.is_null() {
@@ -449,10 +454,12 @@ impl BrowserPaneManager {
             }
         };
 
-        let labels = self.lifecycle.live_labels();
-        let browsers = state.browsers.lock();
+        // Phase H.1.b + H.2.b — labels via reducer-aware helper; per-label
+        // browser lookup via reducer-aware helper. Drops the held-across-loop
+        // legacy lock; each iteration now snapshots independently.
+        let labels = state.live_pane_labels();
         for label in &labels {
-            let browser = match browsers.get(label).cloned() {
+            let browser = match state.get_browser(label) {
                 Some(b) => b,
                 None => continue,
             };

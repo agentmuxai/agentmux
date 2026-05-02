@@ -81,8 +81,8 @@ pub fn close_window_by_label(
     unsafe {
         use cef::{ImplBrowser, ImplBrowserHost};
         use windows_sys::Win32::UI::WindowsAndMessaging::{PostMessageW, WM_CLOSE};
-        let browsers = state.browsers.lock();
-        if let Some(browser) = browsers.get(&label) {
+        // Phase H.2.b — reducer-aware lookup with fallback.
+        if let Some(browser) = state.get_browser(&label) {
             if let Some(host) = browser.host() {
                 let hwnd = host.window_handle();
                 if !hwnd.0.is_null() {
@@ -387,13 +387,12 @@ pub fn get_double_click_time() -> serde_json::Value {
 /// fall back to label/index-based naming in that case.
 pub fn list_window_instances(state: &Arc<AppState>) -> serde_json::Value {
     let pool_labels = state.unpromoted_pool_labels.lock().clone();
-    let browsers = state.browsers.lock();
-    let labels: Vec<String> = browsers
-        .keys()
-        .filter(|l| !pool_labels.contains(*l) && !l.starts_with("browser-pane-"))
-        .cloned()
+    // Phase H.2.b — reducer-aware label snapshot.
+    let labels: Vec<String> = state
+        .list_browser_labels()
+        .into_iter()
+        .filter(|l| !pool_labels.contains(l.as_str()) && !l.starts_with("browser-pane-"))
         .collect();
-    drop(browsers);
     // Read backend window IDs via `state.backend_window_id()`,
     // which queries the launcher-fed `shadow_backend_window_ids`
     // (sole source of truth post-B.5e). Resolve labels OUTSIDE
@@ -425,10 +424,11 @@ pub fn list_window_instances(state: &Arc<AppState>) -> serde_json::Value {
 /// `on_pool_window_destroyed`.
 pub fn list_windows(state: &Arc<AppState>) -> serde_json::Value {
     let pool_labels = state.unpromoted_pool_labels.lock().clone();
-    let browsers = state.browsers.lock();
-    let labels: Vec<&String> = browsers
-        .keys()
-        .filter(|l| !pool_labels.contains(*l))
+    // Phase H.2.b — reducer-aware label snapshot.
+    let labels: Vec<String> = state
+        .list_browser_labels()
+        .into_iter()
+        .filter(|l| !pool_labels.contains(l.as_str()))
         .collect();
     serde_json::json!(labels)
 }
@@ -439,8 +439,8 @@ pub fn focus_window(state: &Arc<AppState>, args: &serde_json::Value) -> Result<s
 
     #[cfg(target_os = "windows")]
     {
-        let browsers = state.browsers.lock();
-        if let Some(browser) = browsers.get(label) {
+        // Phase H.2.b — reducer-aware lookup with fallback.
+        if let Some(browser) = state.get_browser(label) {
             if let Some(host) = browser.host() {
                 let hwnd = host.window_handle();
                 if !hwnd.0.is_null() {

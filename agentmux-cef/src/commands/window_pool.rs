@@ -197,9 +197,10 @@ pub fn register_pool_window(state: &Arc<AppState>, label: &str) {
         // on_after_created fires; if it doesn't, log and bail —
         // the pool entry is harmless until promote re-checks.
         use cef::{ImplBrowser, ImplBrowserHost};
-        let raw_hwnd: Option<*mut std::ffi::c_void> = {
-            let browsers = state.browsers.lock();
-            browsers.get(label).and_then(|browser| {
+        // Phase H.2.b — reducer-aware lookup with fallback.
+        let raw_hwnd: Option<*mut std::ffi::c_void> = state
+            .get_browser(label)
+            .and_then(|browser| {
                 browser.host().and_then(|host| {
                     let h = host.window_handle();
                     if h.0.is_null() {
@@ -208,8 +209,7 @@ pub fn register_pool_window(state: &Arc<AppState>, label: &str) {
                         Some(h.0 as *mut std::ffi::c_void)
                     }
                 })
-            })
-        };
+            });
         if let Some(hwnd) = raw_hwnd {
             set_taskbar_hidden(hwnd, true);
         } else {
@@ -437,41 +437,39 @@ pub fn promote_pool_window(
     // expected failure — log per-step at ERROR so an operator can
     // tell which invariant broke.
     use cef::{ImplBrowser, ImplBrowserHost};
-    let raw_hwnd: Option<*mut std::ffi::c_void> = {
-        let browsers = state.browsers.lock();
-        match browsers.get(&label) {
+    // Phase H.2.b — reducer-aware lookup with fallback.
+    let raw_hwnd: Option<*mut std::ffi::c_void> = match state.get_browser(&label) {
+        None => {
+            tracing::error!(
+                target: "dnd:tearoff:pool",
+                label = %label,
+                "[pool] promoted label not in browsers map (state inconsistency)"
+            );
+            None
+        }
+        Some(browser) => match browser.host() {
             None => {
                 tracing::error!(
                     target: "dnd:tearoff:pool",
                     label = %label,
-                    "[pool] promoted label not in browsers map (state inconsistency)"
+                    "[pool] browser has no host (state inconsistency)"
                 );
                 None
             }
-            Some(browser) => match browser.host() {
-                None => {
+            Some(host) => {
+                let h = host.window_handle();
+                if h.0.is_null() {
                     tracing::error!(
                         target: "dnd:tearoff:pool",
                         label = %label,
-                        "[pool] browser has no host (state inconsistency)"
+                        "[pool] host window handle is null (state inconsistency)"
                     );
                     None
+                } else {
+                    Some(h.0 as *mut std::ffi::c_void)
                 }
-                Some(host) => {
-                    let h = host.window_handle();
-                    if h.0.is_null() {
-                        tracing::error!(
-                            target: "dnd:tearoff:pool",
-                            label = %label,
-                            "[pool] host window handle is null (state inconsistency)"
-                        );
-                        None
-                    } else {
-                        Some(h.0 as *mut std::ffi::c_void)
-                    }
-                }
-            },
-        }
+            }
+        },
     };
 
     // Pool-slot leak guard: if HWND lookup fails after we've already
@@ -628,10 +626,8 @@ pub fn promote_pool_window(
 #[cfg(target_os = "windows")]
 fn cleanup_failed_promote_orphan(state: &Arc<AppState>, label: &str) {
     use cef::{ImplBrowser, ImplBrowserHost};
-    let mut browser_clone = {
-        let browsers = state.browsers.lock();
-        browsers.get(label).cloned()
-    };
+    // Phase H.2.b — reducer-aware lookup with fallback.
+    let mut browser_clone = state.get_browser(label);
     if let Some(ref mut browser) = browser_clone {
         if let Some(host) = browser.host() {
             // force_close = 1: don't run beforeunload, we know

@@ -19,9 +19,8 @@ use crate::state::AppState;
 
 /// Get the CEF Views Window for a browser label on the UI thread.
 fn get_window_on_ui(state: &Arc<AppState>, label: &str) -> Option<Window> {
-    let browsers = state.browsers.lock();
-    let mut browser = browsers.get(label)?.clone();
-    drop(browsers);
+    // Phase H.2.b — reducer-aware lookup with fallback.
+    let mut browser = state.get_browser(label)?;
     let browser_view = browser_view_get_for_browser(Some(&mut browser))?;
     browser_view.window()
 }
@@ -281,11 +280,12 @@ wrap_task! {
             };
             let cef_url = CefString::from(self.url.as_str());
 
-            // Get client from an existing browser
-            let browsers = self.state.browsers.lock();
-            let client = browsers.values().next()
-                .and_then(|b| b.host().map(|h| h.client()));
-            drop(browsers);
+            // Get client from an existing browser.
+            // Phase H.2.b — reducer-aware "any browser" via first_browser().
+            let client = self
+                .state
+                .first_browser()
+                .and_then(|(_, b)| b.host().map(|h| h.client()));
             tracing::info!(
                 label = %self.label,
                 elapsed_us = t0.elapsed().as_micros() as u64,
@@ -359,15 +359,14 @@ wrap_task! {
 
     impl Task {
         fn execute(&self) {
-            let browsers = self.state.browsers.lock();
-            let browser = match browsers.get(&self.label) {
-                Some(b) => b.clone(),
+            // Phase H.2.b — reducer-aware lookup with fallback.
+            let browser = match self.state.get_browser(&self.label) {
+                Some(b) => b,
                 None => {
                     tracing::warn!("[devtools] browser '{}' not found", self.label);
                     return;
                 }
             };
-            drop(browsers);
 
             match browser.host() {
                 Some(host) => {
@@ -416,7 +415,8 @@ wrap_task! {
 
     impl Task {
         fn execute(&self) {
-            let mut browser = match self.state.browsers.lock().get(&self.label).cloned() {
+            // Phase H.2.b — reducer-aware lookup with fallback.
+            let mut browser = match self.state.get_browser(&self.label) {
                 Some(b) => b,
                 None => {
                     tracing::warn!("[main-focus-reclaim] no browser for label={}", self.label);
@@ -441,20 +441,19 @@ wrap_task! {
                 // Views top-level, so a naive EnumChildWindows would pick up
                 // their Chrome_RenderWidgetHostHWND and SetFocus on the wrong
                 // target.
-                let pane_outer_hwnds: Vec<*mut std::ffi::c_void> = {
-                    let browsers = self.state.browsers.lock();
-                    browsers
-                        .iter()
-                        .filter(|(k, _)| k.starts_with("browser-pane-"))
-                        .filter_map(|(_, b)| {
-                            let mut b = b.clone();
-                            b.host().and_then(|h| {
-                                let wh = h.window_handle();
-                                if wh.0.is_null() { None } else { Some(wh.0 as *mut std::ffi::c_void) }
-                            })
+                // Phase H.2.b — reducer-aware iteration with fallback.
+                let pane_outer_hwnds: Vec<*mut std::ffi::c_void> = self
+                    .state
+                    .list_browsers()
+                    .into_iter()
+                    .filter(|(k, _)| k.starts_with("browser-pane-"))
+                    .filter_map(|(_, mut b)| {
+                        b.host().and_then(|h| {
+                            let wh = h.window_handle();
+                            if wh.0.is_null() { None } else { Some(wh.0 as *mut std::ffi::c_void) }
                         })
-                        .collect()
-                };
+                    })
+                    .collect();
 
                 match views_top_hwnd {
                     Some(top_hwnd) => unsafe {
