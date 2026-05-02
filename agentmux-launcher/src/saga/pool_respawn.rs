@@ -188,15 +188,25 @@ impl Saga for PoolRespawn {
         }
     }
 
-    fn on_event(&mut self, event: &Event, _ctx: &SagaCtx) -> SagaAction {
+    fn on_event(&mut self, event: &Event, ctx: &SagaCtx) -> SagaAction {
         // Only pivot on `PoolWindowAdded`. Every other event the bus
         // carries is unrelated to this saga's terminal condition.
         // A coordinator that drove this saga to Done because of an
         // unrelated event would fire the `SagaCompleted` bracket
         // before refill actually finished — the renderer's buffered
         // state would flush prematurely.
+        //
+        // **CPD-4 — per-saga event correlation.** Filter
+        // `PoolWindowAdded` by `saga_id`: only the event tagged with
+        // *this* saga's id advances us. Untagged events (organic pool
+        // refills) and events from sibling concurrent sagas are
+        // ignored. Retires the evict-and-replace workaround from
+        // PR #634 — concurrent same-kind sagas now coexist without
+        // false-positive `SagaCompleted` cross-talk.
         match (&self.phase, event) {
-            (Phase::WaitingForRefill, Event::PoolWindowAdded { label, .. }) => {
+            (Phase::WaitingForRefill, Event::PoolWindowAdded { label, saga_id, .. })
+                if *saga_id == Some(ctx.saga_id) =>
+            {
                 // The refill produced a new label. Record + complete.
                 // (Spec § 7.1: Step 3 is just `Done`; no further
                 // dispatch.)
@@ -204,8 +214,9 @@ impl Saga for PoolRespawn {
                 SagaAction::Done
             }
             // Still waiting; or — for `Initial` — coordinator
-            // hasn't called `start` yet, in which case we're not
-            // supposed to be receiving events. Either way: no-op.
+            // hasn't called `start` yet; or the event's saga_id
+            // doesn't match (concurrent saga or organic refill).
+            // Either way: no-op.
             _ => SagaAction::Wait,
         }
     }
@@ -238,18 +249,61 @@ mod tests {
 
     #[test]
     fn pool_window_added_completes_the_saga() {
+        // CPD-4 — saga_id-tagged event for *this* saga advances it.
         let mut saga = PoolRespawn::new("window-pool-abc".into());
         let _ = saga.start(&ctx(7));
         let action = saga.on_event(
             &Event::PoolWindowAdded {
                 label: "window-pool-xyz".into(),
                 version: 100,
-                saga_id: None,
+                saga_id: Some(7),
             },
             &ctx(7),
         );
         assert!(matches!(action, SagaAction::Done));
         assert_eq!(saga.refilled_label(), Some("window-pool-xyz"));
+    }
+
+    /// CPD-4 — `PoolWindowAdded` with `saga_id: None` (organic refill,
+    /// no saga in flight on the host side) does NOT terminate the
+    /// saga. Pre-CPD-4, ANY `PoolWindowAdded` would complete the saga;
+    /// per-saga correlation now scopes terminal events to the
+    /// originating saga only.
+    #[test]
+    fn organic_pool_window_added_does_not_complete_saga() {
+        let mut saga = PoolRespawn::new("window-pool-abc".into());
+        let _ = saga.start(&ctx(7));
+        let action = saga.on_event(
+            &Event::PoolWindowAdded {
+                label: "window-pool-organic".into(),
+                version: 100,
+                saga_id: None,
+            },
+            &ctx(7),
+        );
+        assert!(matches!(action, SagaAction::Wait));
+        assert!(saga.refilled_label().is_none());
+    }
+
+    /// CPD-4 — `PoolWindowAdded` tagged with a *different* saga_id
+    /// (sibling concurrent saga's echo) is ignored. This is the
+    /// invariant that retires evict-and-replace: two concurrent
+    /// PoolRespawn sagas can coexist, each consuming only its own
+    /// echo.
+    #[test]
+    fn pool_window_added_with_foreign_saga_id_is_ignored() {
+        let mut saga = PoolRespawn::new("window-pool-abc".into());
+        let _ = saga.start(&ctx(7));
+        let action = saga.on_event(
+            &Event::PoolWindowAdded {
+                label: "window-pool-sibling".into(),
+                version: 100,
+                saga_id: Some(8),
+            },
+            &ctx(7),
+        );
+        assert!(matches!(action, SagaAction::Wait));
+        assert!(saga.refilled_label().is_none());
     }
 
     #[test]
@@ -289,20 +343,19 @@ mod tests {
 
     #[test]
     fn first_pool_window_added_after_start_wins() {
-        // The saga records the FIRST PoolWindowAdded after start as
-        // the refill — even if a later one would be a closer match.
-        // The coordinator's job is to scope events to this saga; the
-        // saga itself does not disambiguate against concurrent
-        // promotes (concurrent promotes spawn distinct sagas with
-        // distinct saga_ids; coordinator routes events appropriately
-        // — see super::run_coordinator for the routing logic).
+        // The saga records the FIRST PoolWindowAdded *for its own
+        // saga_id* after start as the refill. CPD-4 — the coordinator
+        // dispatches the saga's IssueCmd with `saga_id` injected, so
+        // the host's matching report carries `saga_id: Some(N)`. The
+        // saga itself filters by `ctx.saga_id`; events with foreign
+        // ids (sibling concurrent sagas) are ignored.
         let mut saga = PoolRespawn::new("window-pool-abc".into());
         let _ = saga.start(&ctx(7));
         let _ = saga.on_event(
             &Event::PoolWindowAdded {
                 label: "window-pool-first".into(),
                 version: 100,
-                saga_id: None,
+                saga_id: Some(7),
             },
             &ctx(7),
         );
@@ -342,23 +395,15 @@ mod tests {
             version: 1,
         });
 
-        // Step 2 — the saga waits for refill. Push a synthetic
-        // PoolWindowAdded representing the host's implicit refill.
-        let _ = events_tx.send(Event::PoolWindowAdded {
-            label: "window-pool-xyz".into(),
-            version: 2,
-            saga_id: None,
-        });
-
-        // Drain witness with a brief budget; we expect at minimum:
-        //   PoolWindowPromoted (input) → SagaStarted → PoolWindowAdded
-        //   (input) → SagaCompleted.
-        // The order between the input events and the coordinator's
-        // emissions can interleave (coordinator runs concurrently),
-        // but causally SagaCompleted MUST follow SagaStarted.
+        // CPD-4: wait for SagaStarted to learn the coordinator-
+        // allocated saga_id before publishing the matching
+        // PoolWindowAdded. Pre-CPD-4 we could send `saga_id: None`
+        // because every PoolWindowAdded advanced every in-flight
+        // saga; under per-saga correlation the saga only consumes
+        // its own echo.
+        let mut saga_id_started: Option<u64> = None;
         let mut saw_started = false;
         let mut saw_completed_after_started = false;
-        let mut saga_id_started: Option<u64> = None;
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
         while std::time::Instant::now() < deadline {
             match tokio::time::timeout(std::time::Duration::from_millis(50), witness.recv()).await
@@ -367,6 +412,14 @@ mod tests {
                     assert_eq!(name, "pool_respawn_on_promote");
                     saw_started = true;
                     saga_id_started = Some(saga_id);
+                    // Step 2 — the saga waits for refill. Push a
+                    // synthetic PoolWindowAdded tagged with the saga's
+                    // allocated id (CPD-4 per-saga correlation).
+                    let _ = events_tx.send(Event::PoolWindowAdded {
+                        label: "window-pool-xyz".into(),
+                        version: 2,
+                        saga_id: Some(saga_id),
+                    });
                 }
                 Ok(Ok(Event::SagaCompleted { saga_id, .. })) => {
                     if saw_started {

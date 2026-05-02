@@ -631,20 +631,20 @@ impl SagaCoordinator {
         // (codex P2 PR #644 round 2.)
         let action = {
             let mut registry = self.in_flight.lock().await;
-            // (codex P1 PR #634) Observability for the known
-            // concurrent-correlation limitation. With more than one
-            // saga of the same kind in flight, broadcast event
-            // routing mis-correlates: the first matching event
-            // completes ALL of them. Logged here so operators can
-            // spot the pattern in `--diag wrr` output. Closed when
-            // CPD-4 adds saga-id event correlation.
+            // CPD-4 — concurrent same-kind sagas now correlate by
+            // saga_id (`Saga::on_event` filters on
+            // `ctx.saga_id == event.saga_id`). The pre-CPD-4
+            // observability warning (PR #634 codex P1) is retained
+            // at info level for operators tracking concurrency
+            // density via `--diag wrr`, but the underlying
+            // correctness issue is closed.
             let same_kind_count = registry
                 .values()
                 .filter(|s| s.saga.name() == name)
                 .count();
             if same_kind_count >= 1 {
                 crate::log(&format!(
-                    "[saga] WARN: starting {} saga_id={} while {} other(s) of same kind in flight; concurrent-correlation limitation may produce premature SagaCompleted events (PR #634 / codex P1 known issue)",
+                    "[saga] starting {} saga_id={} while {} other(s) of same kind in flight (CPD-4 per-saga correlation — sagas coexist cleanly)",
                     name, saga_id, same_kind_count,
                 ));
             }
@@ -820,10 +820,11 @@ fn inject_saga_id(cmd: Command, saga_id: u64) -> Command {
 ///
 /// Future sagas extend this match.
 ///
-/// Note: this returns a *candidate* saga. The coordinator may still
-/// evict a same-kind in-flight saga via the evict-and-replace
-/// serialization gate before `spawn_saga` (codex P1 PR #634 round 3
-/// — see `run_coordinator`).
+/// CPD-4 — the coordinator no longer evicts same-kind in-flight
+/// sagas before `spawn_saga`; per-saga event correlation
+/// (`Saga::on_event` filters by `ctx.saga_id`) lets concurrent
+/// same-kind sagas coexist cleanly. The pre-CPD-4 evict-and-replace
+/// gate (PR #634 round 3) is removed in `run_coordinator`.
 fn match_trigger(event: &Event) -> Option<Box<dyn Saga>> {
     match event {
         Event::PoolWindowPromoted { label, .. } => {
@@ -919,69 +920,30 @@ pub async fn run_coordinator(
                 }
 
                 // Step 1 — start any new sagas this event triggers.
-                // (codex P1 PR #634 round 3.) Evict-and-replace: if a
-                // saga of the same kind is already in flight, EVICT
-                // it (mark Failed + remove from registry) and start
-                // the new one. Round 2's silent-drop fix had a
-                // permanent-deadlock failure mode: a stalled saga
-                // (refill never arrived) would block all future
-                // promote sagas for the rest of the process.
                 //
-                // Trade-offs of evict-and-replace:
-                // - Pros: no permanent block; each new promote gets
-                //   a fresh bracket; reducer + SQLite stay correct.
-                // - Cons: when both promotes are healthy in quick
-                //   succession, the first promote's bracket is cut
-                //   short with SagaFailed (the late refill event for
-                //   that promote completes the new saga instead).
-                //   Renderer-visible: one premature SagaFailed +
-                //   one correct SagaCompleted.
-                // Proper FIFO routing / per-event saga_id correlation
-                // ships in F.6/F.7 alongside cross-process dispatch.
+                // **CPD-4 — evict-and-replace retired.** Pre-CPD-4
+                // (codex P1 PR #634 round 3) the coordinator forced
+                // at-most-one same-kind saga in flight by emitting
+                // `SagaFailed { reason: "evicted" }` on the prior
+                // saga whenever a fresh trigger landed. That was a
+                // workaround for the broadcast-routing limitation:
+                // every `PoolWindowAdded` / `PanesReaped` /
+                // `PoolDrained` / `PoolNotLast` advanced *every*
+                // matching in-flight saga, so two concurrent sagas
+                // would cross-talk and complete each other's bracket.
+                //
+                // CPD-4 closes that limitation. Saga `on_event` now
+                // filters by `event.saga_id == ctx.saga_id`
+                // (`pool_respawn::on_event`,
+                // `window_cleanup::on_event`). Concurrent same-kind
+                // sagas coexist; each consumes only events tagged
+                // with its own coordinator-allocated id. Eviction is
+                // no longer needed — and would actively harm
+                // correctness (a healthy saga gets `SagaFailed`d the
+                // moment a sibling fires).
+                //
+                // Per spec §3.7 + execution-plan §2 batch 3.
                 if let Some(saga) = match_trigger(&event) {
-                    let new_kind = saga.name();
-                    let evict_ids: Vec<u64> = {
-                        let registry = coord.in_flight.lock().await;
-                        registry
-                            .iter()
-                            .filter(|(_, s)| s.saga.name() == new_kind)
-                            .map(|(id, _)| *id)
-                            .collect()
-                    };
-                    for evict_id in evict_ids {
-                        // claim_terminal removes from in_flight AND
-                        // ensures the timeout task / SagaActionFailed
-                        // listener can't double-emit a terminal event
-                        // for this saga_id. (reagent P1 PR #644
-                        // round 1.)
-                        if !coord.claim_terminal(evict_id).await {
-                            // Lost the race — another path (timeout,
-                            // SagaActionFailed) already terminated.
-                            continue;
-                        }
-                        crate::log(&format!(
-                            "[saga] evicting prior {} saga_id={} to make room for new trigger (codex P1 #634 round 3 evict-and-replace)",
-                            new_kind, evict_id,
-                        ));
-                        let evict_reason =
-                            "evicted: same-kind saga restarted (codex P1 #634 round 3)";
-                        // LSD-2 — record the eviction in the durable
-                        // saga row so `--diag sagas` shows it.
-                        if let Some(log) = coord.log.as_ref() {
-                            if let Err(e) = log.terminate_saga(
-                                evict_id,
-                                SagaOutcome::Failed {
-                                    reason: evict_reason.to_string(),
-                                },
-                            ) {
-                                crate::log(&format!(
-                                    "[saga] saga_id={} evict terminate_saga(Failed) log write failed: {}",
-                                    evict_id, e
-                                ));
-                            }
-                        }
-                        coord.emit_failed(evict_id, evict_reason.to_string()).await;
-                    }
                     coord.spawn_saga(saga).await;
                 }
 
@@ -1403,21 +1365,22 @@ mod tests {
         }
     }
 
-    /// Coordinator-level invariant: under random sequences of
-    /// trigger events, no two same-kind sagas are ever active
-    /// simultaneously — the evict-and-replace policy guarantees at
-    /// most one in-flight saga per kind. Drives the coordinator with
-    /// synthetic events and asserts the `in_flight` registry has at
-    /// most one entry per name (≤2 total: pool_respawn +
-    /// window_cleanup).
+    /// **CPD-4 — concurrent same-kind sagas coexist without
+    /// cross-talk.** Random sequences of trigger events drive the
+    /// coordinator; the registry is allowed to hold multiple sagas of
+    /// the same kind simultaneously (the pre-CPD-4 evict-and-replace
+    /// gate is retired). Invariant under test: NO `SagaFailed` event
+    /// fires with reason `"evicted"` — sagas only terminate via
+    /// `Done` (their tagged echo lands) or via the saga timeout
+    /// (~5-30s, far longer than this test's 50ms settling window).
     ///
-    /// Run as a single tokio test (proptest can't drive an async
-    /// closure directly). Iterates several seeded sequences inline —
-    /// enough surface area to catch concurrent-overlap regressions
-    /// without ballooning test time. Uses a hand-rolled LCG so we
-    /// don't pull in `rand` as a dev-dependency for one test.
+    /// Replaces `f7_evict_and_replace_keeps_one_saga_per_kind`. The
+    /// behavioral inversion is the core of CPD-4: pre-CPD-4 we
+    /// asserted ≤1 in-flight per kind (and accepted premature
+    /// `SagaFailed { reason: "evicted" }`); CPD-4 asserts no
+    /// premature evictions.
     #[tokio::test]
-    async fn f7_evict_and_replace_keeps_one_saga_per_kind() {
+    async fn cpd4_concurrent_sagas_no_eviction() {
         // Tiny LCG for deterministic per-seed sequences. Glibc's
         // constants — quality irrelevant; we just need reproducible
         // bit patterns across CI runs.
@@ -1433,6 +1396,7 @@ mod tests {
             let (events_tx, _) = tokio::sync::broadcast::channel::<Event>(256);
             let state = Arc::new(tokio::sync::Mutex::new(crate::state::State::default()));
             let coord = Arc::new(SagaCoordinator::new(events_tx.clone(), Arc::clone(&state)));
+            let mut witness = events_tx.subscribe();
             let coord_rx = events_tx.subscribe();
             let _handle = tokio::spawn(run_coordinator(Arc::clone(&coord), coord_rx));
             tokio::task::yield_now().await;
@@ -1463,27 +1427,30 @@ mod tests {
             // the last few events + emit terminal lifecycles.
             tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
-            // Invariant: at most one saga per name in flight.
-            let registry = coord.in_flight.lock().await;
-            let mut counts = std::collections::HashMap::<&str, u32>::new();
-            for s in registry.values() {
-                *counts.entry(s.saga.name()).or_insert(0) += 1;
+            // Invariant: NO SagaFailed with "evicted" reason.
+            // We don't assert the registry size — concurrent sagas
+            // are allowed to pile up under per-saga correlation
+            // because we never feed them their tagged terminal
+            // events in this test. They'll reach their timeout
+            // eventually, but not within 50ms.
+            let mut evictions = 0u32;
+            while let Ok(Ok(ev)) = tokio::time::timeout(
+                std::time::Duration::from_millis(5),
+                witness.recv(),
+            )
+            .await
+            {
+                if let Event::SagaFailed { reason, .. } = ev {
+                    if reason.contains("evicted") {
+                        evictions += 1;
+                    }
+                }
             }
-            for (name, count) in &counts {
-                assert!(
-                    *count <= 1,
-                    "seed {} — saga kind {:?} has {} concurrent in-flight; evict-and-replace policy violated",
-                    seed,
-                    name,
-                    count,
-                );
-            }
-            // And the 2-kind ceiling (we only register two saga kinds).
-            assert!(
-                registry.len() <= 2,
-                "seed {} — registry has {} sagas, expected ≤2 (one per kind)",
-                seed,
-                registry.len(),
+            assert_eq!(
+                evictions, 0,
+                "seed {} — CPD-4 invariant violated: observed {} SagaFailed events with reason='evicted'; \
+                 evict-and-replace should be retired so concurrent same-kind sagas coexist",
+                seed, evictions,
             );
         }
     }
@@ -1505,43 +1472,61 @@ mod tests {
         let _handle = tokio::spawn(run_coordinator(Arc::clone(&coord), coord_rx));
         tokio::task::yield_now().await;
 
-        // Drive ONE clean cleanup-cascade saga to completion.
+        // Drive ONE clean cleanup-cascade saga + ONE pool-respawn
+        // saga to completion. CPD-4: route terminals by saga_id, so
+        // we trigger each saga, capture its allocated id from
+        // SagaStarted, then send the matching tagged terminal events.
         let _ = events_tx.send(Event::WindowClosed {
             label: "main".into(),
             version: 1,
             crash_detected: false,
         });
-        let _ = events_tx.send(Event::PanesReaped {
-            label: "main".into(),
-            version: 2,
-            saga_id: None,
-        });
-        let _ = events_tx.send(Event::PoolDrained {
-            label: "main".into(),
-            version: 3,
-            saga_id: None,
-        });
-        // And ONE pool-respawn saga to completion.
         let _ = events_tx.send(Event::PoolWindowPromoted {
             label: "pool-1".into(),
-            version: 4,
-        });
-        let _ = events_tx.send(Event::PoolWindowAdded {
-            label: "pool-2".into(),
-            version: 5,
-            saga_id: None,
+            version: 2,
         });
 
         // Drain the bus with a deadline. Count one terminal event
-        // (SagaCompleted xor SagaFailed) per saga_id.
+        // (SagaCompleted xor SagaFailed) per saga_id. As each
+        // SagaStarted lands, dispatch the matching tagged terminals.
         let mut started_ids = std::collections::HashSet::<u64>::new();
+        let mut cleanup_saga_id: Option<u64> = None;
+        let mut respawn_saga_id: Option<u64> = None;
+        let mut version: u64 = 100;
         let mut terminal_for_id = std::collections::HashMap::<u64, &'static str>::new();
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
         while std::time::Instant::now() < deadline {
             match tokio::time::timeout(std::time::Duration::from_millis(50), witness.recv()).await
             {
-                Ok(Ok(Event::SagaStarted { saga_id, .. })) => {
+                Ok(Ok(Event::SagaStarted { saga_id, name, .. })) => {
                     started_ids.insert(saga_id);
+                    if name == "window_cleanup_cascade" && cleanup_saga_id.is_none() {
+                        cleanup_saga_id = Some(saga_id);
+                        version += 1;
+                        let _ = events_tx.send(Event::PanesReaped {
+                            label: "main".into(),
+                            version,
+                            saga_id: Some(saga_id),
+                        });
+                    } else if name == "pool_respawn_on_promote" && respawn_saga_id.is_none() {
+                        respawn_saga_id = Some(saga_id);
+                        version += 1;
+                        let _ = events_tx.send(Event::PoolWindowAdded {
+                            label: "pool-2".into(),
+                            version,
+                            saga_id: Some(saga_id),
+                        });
+                    }
+                }
+                Ok(Ok(Event::PanesReaped { saga_id: Some(sid), .. })) => {
+                    if Some(sid) == cleanup_saga_id {
+                        version += 1;
+                        let _ = events_tx.send(Event::PoolDrained {
+                            label: "main".into(),
+                            version,
+                            saga_id: Some(sid),
+                        });
+                    }
                 }
                 Ok(Ok(Event::SagaCompleted { saga_id, .. })) => {
                     let prev = terminal_for_id.insert(saga_id, "completed");
@@ -1641,20 +1626,33 @@ mod tests {
     #[tokio::test]
     async fn saga_completes_writes_lifecycle_to_log() {
         let (coord, log, events_tx) = spawn_coord_with_log();
+        let mut witness = events_tx.subscribe();
         let coord_rx = events_tx.subscribe();
         let _handle = tokio::spawn(run_coordinator(StdArc::clone(&coord), coord_rx));
         tokio::task::yield_now().await;
 
-        // Trigger the saga + give it the awaited terminal event.
+        // Trigger the saga.
         let _ = events_tx.send(Event::PoolWindowPromoted {
             label: "window-pool-abc".into(),
             version: 1,
         });
-        let _ = events_tx.send(Event::PoolWindowAdded {
-            label: "window-pool-xyz".into(),
-            version: 2,
-            saga_id: None,
-        });
+        // CPD-4: wait for SagaStarted to learn the saga_id, then send
+        // the awaited terminal tagged with that id. Pre-CPD-4 we
+        // could send `saga_id: None`; under per-saga correlation
+        // the saga only consumes its own echo.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        while std::time::Instant::now() < deadline {
+            if let Ok(Ok(Event::SagaStarted { saga_id, .. })) =
+                tokio::time::timeout(std::time::Duration::from_millis(50), witness.recv()).await
+            {
+                let _ = events_tx.send(Event::PoolWindowAdded {
+                    label: "window-pool-xyz".into(),
+                    version: 2,
+                    saga_id: Some(saga_id),
+                });
+                break;
+            }
+        }
 
         // Settle: coordinator runs apply_action which awaits state
         // mutex + bus send. 200ms is generous for the in-process loop.
@@ -1673,13 +1671,17 @@ mod tests {
         assert_eq!(parsed["promoted_label"], "window-pool-abc");
     }
 
-    /// LSD-2 — when a saga is evicted by the same-kind concurrent
-    /// gate (codex P1 PR #634), the durable log records its terminal
-    /// state as 'failed' with a failure_reason. The replacement saga
-    /// gets its own row.
+    /// **CPD-4 — two concurrent same-kind sagas BOTH complete
+    /// cleanly.** Repurposed from `saga_fails_writes_failed_state`
+    /// (which previously verified the evict-and-replace path).
+    /// Per-saga event correlation lets two `pool_respawn_on_promote`
+    /// sagas coexist; each consumes its own saga_id-tagged refill
+    /// echo, so the durable log records two `completed` rows — no
+    /// `failed` rows from the retired eviction policy.
     #[tokio::test]
-    async fn saga_fails_writes_failed_state() {
+    async fn saga_concurrent_same_kind_both_complete() {
         let (coord, log, events_tx) = spawn_coord_with_log();
+        let mut witness = events_tx.subscribe();
         let coord_rx = events_tx.subscribe();
         let _handle = tokio::spawn(run_coordinator(StdArc::clone(&coord), coord_rx));
         tokio::task::yield_now().await;
@@ -1689,39 +1691,59 @@ mod tests {
             label: "window-pool-a".into(),
             version: 1,
         });
-        // Second promote BEFORE A's terminal arrives — evicts A,
-        // starts saga B. Saga A's durable row must transition to
-        // 'failed' with the eviction reason.
+        // Second promote BEFORE A's terminal arrives — under CPD-4
+        // saga B coexists with A (no eviction).
         let _ = events_tx.send(Event::PoolWindowPromoted {
             label: "window-pool-b".into(),
             version: 2,
         });
-        // Saga B's terminal so it completes (don't leave it dangling
-        // — guards against the test's cleanup masking a real bug).
-        let _ = events_tx.send(Event::PoolWindowAdded {
-            label: "window-pool-c".into(),
-            version: 3,
-            saga_id: None,
-        });
+
+        // Capture both saga_ids from their `SagaStarted` brackets,
+        // then fire each saga's tagged refill so both terminate
+        // Completed. The order doesn't matter because per-saga
+        // correlation routes events by id, not by FIFO.
+        let mut ids = Vec::<u64>::new();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        let mut version: u64 = 100;
+        while std::time::Instant::now() < deadline {
+            if let Ok(Ok(ev)) =
+                tokio::time::timeout(std::time::Duration::from_millis(50), witness.recv()).await
+            {
+                if let Event::SagaStarted { saga_id, name, .. } = ev {
+                    if name == "pool_respawn_on_promote" {
+                        ids.push(saga_id);
+                        version += 1;
+                        let _ = events_tx.send(Event::PoolWindowAdded {
+                            label: format!("refill-for-{}", saga_id),
+                            version,
+                            saga_id: Some(saga_id),
+                        });
+                    }
+                }
+                if ids.len() == 2 {
+                    break;
+                }
+            }
+        }
+        assert_eq!(ids.len(), 2, "expected 2 SagaStarted events");
 
         tokio::time::sleep(std::time::Duration::from_millis(200)).await;
 
         let snapshots = log.snapshot_recent(10).expect("snapshot_recent");
-        assert_eq!(snapshots.len(), 2, "expected two saga rows (evicted + replacement)");
-        // One must be 'failed' (evicted), the other 'completed' (B).
-        let states: Vec<_> = snapshots.iter().map(|s| s.state.as_str()).collect();
-        assert!(states.contains(&"failed"), "missing 'failed' row: {:?}", states);
-        assert!(states.contains(&"completed"), "missing 'completed' row: {:?}", states);
-        let failed_row = snapshots.iter().find(|s| s.state == "failed").unwrap();
-        assert!(
-            failed_row
-                .failure_reason
-                .as_deref()
-                .map(|r| r.contains("evicted"))
-                .unwrap_or(false),
-            "evicted saga's failure_reason should mention 'evicted', got {:?}",
-            failed_row.failure_reason,
+        assert_eq!(
+            snapshots.len(),
+            2,
+            "expected two saga rows (concurrent, no eviction)"
         );
+        // BOTH must be 'completed' — eviction is retired.
+        for s in &snapshots {
+            assert_eq!(
+                s.state, "completed",
+                "CPD-4: both concurrent sagas must complete cleanly, got state={:?} reason={:?}",
+                s.state, s.failure_reason,
+            );
+            assert!(s.failure_reason.is_none());
+        }
     }
 
     /// LSD-2 — when a saga's `on_event` consumes its awaited bus
@@ -1735,6 +1757,7 @@ mod tests {
     #[tokio::test]
     async fn saga_step_finish_records_event_payload() {
         let (coord, log, events_tx) = spawn_coord_with_log();
+        let mut witness = events_tx.subscribe();
         let coord_rx = events_tx.subscribe();
         let _handle = tokio::spawn(run_coordinator(StdArc::clone(&coord), coord_rx));
         tokio::task::yield_now().await;
@@ -1744,16 +1767,27 @@ mod tests {
         // pending→succeeded but Step 1 (`DrainPoolIfLast`) stays
         // pending — the saga remains in_flight + queryable as
         // unresolved.
+        //
+        // CPD-4: tag PanesReaped with the saga's id so the saga
+        // actually advances (per-saga correlation).
         let _ = events_tx.send(Event::WindowClosed {
             label: "main".into(),
             version: 1,
             crash_detected: false,
         });
-        let _ = events_tx.send(Event::PanesReaped {
-            label: "main".into(),
-            version: 2,
-            saga_id: None,
-        });
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        while std::time::Instant::now() < deadline {
+            if let Ok(Ok(Event::SagaStarted { saga_id, .. })) =
+                tokio::time::timeout(std::time::Duration::from_millis(50), witness.recv()).await
+            {
+                let _ = events_tx.send(Event::PanesReaped {
+                    label: "main".into(),
+                    version: 2,
+                    saga_id: Some(saga_id),
+                });
+                break;
+            }
+        }
         // INTENTIONALLY no `PoolDrained` / `PoolNotLast`.
 
         tokio::time::sleep(std::time::Duration::from_millis(200)).await;
