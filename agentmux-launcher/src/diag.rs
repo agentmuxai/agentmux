@@ -695,7 +695,7 @@ fn format_event(e: &Event) -> String {
 // (`<data-dir>/launcher-sagas.db`). Unlike `--diag wrr` and
 // `--diag srv`, this command does NOT need a running launcher: the
 // SQLite log is a passive on-disk artefact. We open it read-only via
-// `LauncherSagaLog::open` and call `snapshot_recent(50)`. Useful when
+// `LauncherSagaLog::open_read_only` and call `snapshot_recent(50)`. Useful when
 // the launcher won't start (operator wants to see what sagas were
 // in flight at the last crash) or post-mortem on a portable instance.
 //

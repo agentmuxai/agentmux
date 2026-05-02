@@ -408,7 +408,6 @@ impl LauncherSagaLog {
     /// without restart-time recovery would still benefit from the
     /// `failed_compensation` upgrade so `--diag sagas` consistently
     /// surfaces it as "needs operator attention."
-    #[allow(dead_code)] // wired in PR LSD-3 (recovery walker)
     pub fn unresolved_sagas(&self) -> Result<Vec<UnresolvedLauncherSaga>, LogError> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
@@ -510,7 +509,6 @@ impl LauncherSagaLog {
     /// the original failure cause (e.g. timeout) while adding the
     /// recovery context. (codex P2 PR #647 round 1: post-mortem
     /// preservation.) LSD spec §3.5 — operator-review terminal state.
-    #[allow(dead_code)] // wired in PR LSD-3 (recovery walker)
     pub fn mark_failed_compensation(
         &self,
         saga_id: u64,
@@ -544,7 +542,6 @@ impl LauncherSagaLog {
     /// Return up to `limit` recent sagas for `--diag sagas`. Sorted
     /// most-recent-first by `COALESCE(ended_at, started_at)`. Mirrors
     /// srv's `snapshot_recent` shape.
-    #[allow(dead_code)] // wired in PR LSD-3 (`--diag sagas` printer)
     pub fn snapshot_recent(&self, limit: usize) -> Result<Vec<SagaSummary>, LogError> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
