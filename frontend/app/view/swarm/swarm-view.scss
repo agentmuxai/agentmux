@@ -1,21 +1,14 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-// Swarm widget — aggregator for per-section partials. Root `.swarm-view`
-// layout styles stay here; each section's rules live in `styles/*.scss`.
-// Split spec: see the agent-view decomposition pattern
-// (docs/specs/SPEC_AGENT_VIEW_SCSS_SPLIT_2026_04_24.md) — same mechanism
-// reused verbatim for the swarm view.
+// Swarm widget — root layout + per-section partials.
+// Split spec: see docs/specs/SPEC_AGENT_VIEW_SCSS_SPLIT_2026_04_24.md.
 
 @use "styles/header";
-@use "styles/overview";
 @use "styles/subagent-card";
 @use "styles/empty-states";
-@use "styles/history";
-@use "styles/conversation";
-@use "styles/search";
-@use "styles/activity";
-@use "styles/instances";
+@use "styles/flip";
+@use "styles/detail";
 
 .swarm-view {
     display: flex;
