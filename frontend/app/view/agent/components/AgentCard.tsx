@@ -66,6 +66,8 @@ export const AgentCard = (props: AgentCardProps): JSX.Element => {
     const catalog = createMemo(() => getCliCatalogEntry(props.agent.provider));
 
     const icon = () => props.agent.icon || catalog()?.icon || "•";
+    const iconSvg = () => catalog()?.iconSvg;
+    const pillColor = () => catalog()?.pillColor;
     const title = () => catalog()?.blurb || props.agent.description || props.agent.name;
     const caption = () => catalog()?.displayName || props.agent.name;
     const popoverText = () => catalog()?.popoverMarkdown ?? props.agent.description ?? "";
@@ -100,7 +102,16 @@ export const AgentCard = (props: AgentCardProps): JSX.Element => {
             aria-disabled={props.disabled}
             aria-label={`Launch ${caption()}`}
         >
-            <span class="agent-card-icon">{icon()}</span>
+            <Show
+                when={pillColor()}
+                fallback={<span class="agent-card-icon">{icon()}</span>}
+            >
+                <span class="agent-card-icon agent-card-icon--pill" style={{ background: pillColor() }}>
+                    <Show when={iconSvg()} fallback={<span class="agent-card-icon-glyph">{icon()}</span>}>
+                        <img src={iconSvg()!} alt="" aria-hidden="true" />
+                    </Show>
+                </span>
+            </Show>
             <span class="agent-card-info">
                 <span class="agent-card-title">{title()}</span>
                 <span class="agent-card-caption">{caption()}</span>
