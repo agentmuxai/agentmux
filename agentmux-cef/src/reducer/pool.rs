@@ -4,11 +4,10 @@
 //! Pool state (Phase H.4) reducer handlers. Extracted from reducer/mod.rs in
 //! task #182 PR-F-2 for navigability.
 
-use std::time::Instant;
 
 use crate::state::*;
 
-use super::{DispatchOutput, HostEvent, HostLifecyclePhase, HostState, PoolLeaveReason, RegisterResult, emit_error};
+use super::{DispatchOutput, HostEvent, HostState, PoolLeaveReason};
 
 // ── H.4 — pool state ─────────────────────────────────────────────────────
 
