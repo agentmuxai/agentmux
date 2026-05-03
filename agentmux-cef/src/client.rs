@@ -1383,7 +1383,7 @@ wrap_client! {
 // protection lives entirely in the Win32 `WndProc` subclass below
 // (`browser_pane::hwnd::install_browser_pane_focus_redirect`), which redirects programmatic
 // `WM_SETFOCUS` back to the top-level window. User clicks are let through
-// because `WM_LBUTTONDOWN` in the subclass arms `ALLOW_PANE_FOCUS_ONCE`.
+// because `WM_LBUTTONDOWN` in the subclass arms `ALLOW_BROWSER_PANE_FOCUS_ONCE`.
 wrap_focus_handler! {
     struct AgentMuxPaneFocusHandler;
 
@@ -1671,7 +1671,7 @@ static ORIGINAL_WNDPROCS: std::sync::LazyLock<
     std::sync::Mutex<std::collections::HashMap<usize, isize>>,
 > = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
 
-// Pane Win32 focus-redirect subclass + ALLOW_PANE_FOCUS_ONCE flag moved to
+// Pane Win32 focus-redirect subclass + ALLOW_BROWSER_PANE_FOCUS_ONCE flag moved to
 // `crate::browser_pane::hwnd` in Phase 2 of the modularization split. See
 // `docs/specs/SPEC_BROWSER_PANE_MODULARIZATION.md`.
 

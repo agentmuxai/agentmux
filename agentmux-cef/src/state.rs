@@ -663,7 +663,7 @@ impl AppState {
     // `HostState.browser_panes` are the sole source of truth. Legacy reads,
     // fallback paths, and drift logging removed — production smoke
     // verified zero drift across 50 reducer events with a balanced
-    // BrowserRegistered/Unregistered count (18/18) and PaneCreate/
+    // BrowserRegistered/Unregistered count (18/18) and BrowserPaneCreate/
     // BrowserPaneClosed count (7/7) before this flip.
     //
     // Snapshot-and-drop: each helper takes the relevant lock briefly,

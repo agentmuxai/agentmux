@@ -28,7 +28,7 @@ use cef::*;
 use crate::state::AppState;
 
 wrap_task! {
-    pub struct CreatePaneTask {
+    pub struct CreateBrowserPaneTask {
         state: Arc<AppState>,
         block_id: String,
         label: String,
