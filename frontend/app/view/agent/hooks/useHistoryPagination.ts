@@ -135,7 +135,7 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
                 const nodes = parseHistoryLines(rangeResp.lines ?? [], opts.outputFormat());
                 if (nodes.length > 0) {
                     dispatchDoc(opts.blockId, { type: "HistoryLoaded", nodes });
-                    }
+                }
 
                 // `resp.total` from the backend is the actual available
                 // line count clamped to the event ring buffer window —
