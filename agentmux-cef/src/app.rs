@@ -293,7 +293,7 @@ wrap_browser_process_handler! {
                 let mut client = self.client.borrow_mut();
                 *client = Some(AgentMuxClient::new(
                     AgentMuxHandler::new(self.state.clone(), self.ipc_port),
-                    false, // is_pane = false — main browser takes focus normally
+                    false, // is_browser_pane = false — main browser takes focus normally
                 ));
             }
 

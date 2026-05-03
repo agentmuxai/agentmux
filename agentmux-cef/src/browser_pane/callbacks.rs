@@ -7,7 +7,7 @@
 //! (see `docs/specs/SPEC_BROWSER_PANE_MODULARIZATION.md` §6). `AgentMuxHandler`
 //! still owns the CEF callback plumbing; this module holds the pane-branch
 //! bodies so pane-specific logic lives in one place instead of threaded
-//! through `if self.is_pane` branches in `client.rs`.
+//! through `if self.is_browser_pane` branches in `client.rs`.
 //!
 //! Notable: this is where `install_browser_pane_focus_redirect` actually gets wired
 //! in. Before this phase the function existed in `pane::hwnd` but had zero
@@ -98,7 +98,7 @@ pub fn on_before_close_browser_pane(state: &Arc<AppState>, label: &str) {
     }
 }
 
-/// Called from `AgentMuxHandler::on_load_end` when `is_pane` is true.
+/// Called from `AgentMuxHandler::on_load_end` when `is_browser_pane` is true.
 ///
 /// Chromium creates a fresh `Chrome_RenderWidgetHostHWND` on every
 /// navigation. The subclass installed at `on_after_created` is on the
@@ -168,7 +168,7 @@ pub fn on_load_end_browser_pane(state: &Arc<AppState>, browser: &Browser) {
 }
 
 /// Pane-specific `on_loading_state_change` body. Called from
-/// `AgentMuxHandler::on_loading_state_change` when `is_pane == true`.
+/// `AgentMuxHandler::on_loading_state_change` when `is_browser_pane == true`.
 ///
 /// CEF invokes `on_loading_state_change` whenever the navigation controller's
 /// history state changes — navigation start, navigation commit, and after
