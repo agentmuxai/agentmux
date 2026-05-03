@@ -10,7 +10,7 @@
 //! through `if self.is_browser_pane` branches in `client.rs`.
 //!
 //! Notable: this is where `install_browser_pane_focus_redirect` actually gets wired
-//! in. Before this phase the function existed in `pane::hwnd` but had zero
+//! in. Before this phase the function existed in `browser_pane::hwnd` but had zero
 //! callers (see `SPEC_BROWSER_PANE_LIFECYCLE.md` §5 race #5). Now
 //! `on_after_created_browser_pane` and `on_load_end_browser_pane` both reinstall the focus
 //! subclass — required because Chromium recreates the
