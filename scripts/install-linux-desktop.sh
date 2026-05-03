@@ -71,10 +71,31 @@ if [ -f "$svg_src" ]; then
     cp -f "$svg_src" "$ICONS_ROOT/scalable/apps/agentmux.svg"
 fi
 
-# 3. Render .desktop with Exec= substituted
+# 3. Render .desktop with Exec= substituted.
+#
+# Per the Desktop Entry Specification (§Exec): paths containing spaces or
+# any reserved character — space, tab, newline, " ` $ \ < > ~ | & ; * ? # ( ) —
+# must be enclosed in double quotes, with each ", `, $, \ inside the path
+# backslash-escaped. AppImages frequently end up under paths with spaces
+# (e.g. "~/My Apps/AgentMux.AppImage"); without quoting, launcher clicks
+# silently fail because the parser splits the path into multiple arg tokens.
+#
+# Always quote (cheap and never wrong) and escape the four special chars.
+# Use bash string substitution rather than sed for the template replacement
+# so reserved path chars don't get re-interpreted as sed metacharacters.
+escape_for_desktop_exec() {
+    local s="$1"
+    s="${s//\\/\\\\}"   # \ → \\
+    s="${s//\"/\\\"}"   # " → \"
+    s="${s//\$/\\\$}"   # $ → \$
+    s="${s//\`/\\\`}"   # ` → \`
+    printf '"%s"' "$s"
+}
+quoted_exec="$(escape_for_desktop_exec "$EXEC_PATH")"
+
 desktop="$APPS_DIR/agentmux.desktop"
-sed "s|__EXEC__|$EXEC_PATH|" "$TEMPLATE" > "$desktop.tmp"
-mv "$desktop.tmp" "$desktop"
+template_content="$(<"$TEMPLATE")"
+printf '%s\n' "${template_content//__EXEC__/$quoted_exec}" > "$desktop"
 chmod 644 "$desktop"
 
 # 4. Refresh caches (best-effort; tools may be absent on minimal systems)

@@ -64,8 +64,12 @@ require() {
 require dist/cef/agentmux-cef
 require dist/cef/libcef.so
 require dist/bin/agentmux-srv-${VERSION}-linux.x64
-# frontend index — dist/cef/frontend may be a symlink to ../frontend
-require dist/cef/frontend
+# `task build:frontend` outputs to dist/frontend (per vite.config.ts outDir).
+# `dev:serve` symlinks dist/cef/frontend → ../frontend for the host's runtime
+# lookup, but that symlink isn't created by `task bundle` — and on a clean
+# checkout running `task package:linux` it doesn't exist. Read straight from
+# the build output to keep packaging reproducible from a fresh checkout.
+require dist/frontend/index.html
 
 echo "Building AgentMux v$VERSION AppImage → $OUTPUT"
 
@@ -96,13 +100,10 @@ if [ -d dist/cef/locales ]; then
     cp -r dist/cef/locales/. "$APPDIR/usr/bin/locales/"
 fi
 
-# --- 5. Frontend (dereference symlinks; the AppImage filesystem can't follow
-#        symlinks pointing outside of itself) ---
-if [ -L dist/cef/frontend ]; then
-    cp -rL dist/cef/frontend "$APPDIR/usr/bin/frontend"
-else
-    cp -r dist/cef/frontend "$APPDIR/usr/bin/frontend"
-fi
+# --- 5. Frontend — copy from the canonical `task build:frontend` output
+#        (dist/frontend) into the AppImage at usr/bin/frontend, the path
+#        agentmux-cef looks for next to its binary. ---
+cp -r dist/frontend "$APPDIR/usr/bin/frontend"
 
 # --- 6. Schema (optional — only present if `task copy:schema` ran) ---
 if [ -d dist/schema ]; then
