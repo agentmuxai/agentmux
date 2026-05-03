@@ -95,6 +95,18 @@ for f in libcef.so libEGL.so libGLESv2.so chrome-sandbox chrome_crashpad_handler
         cp "dist/cef/$f" "$APPDIR/usr/bin/"
     fi
 done
+
+# Strip the unstripped libcef.so + GL libs to halve their size. The chromium
+# build emits libcef.so at 613MB with full .symtab/.strtab — fine for dev
+# debugging in dist/cef/ but huge for distribution. `strip` removes the local
+# (non-dynamic) symbol table but keeps .dynsym so dlopen + relocations still
+# work; saves ~210MB on libcef.so alone (~33% AppImage reduction).
+for so in libcef.so libEGL.so libGLESv2.so; do
+    if [ -f "$APPDIR/usr/bin/$so" ]; then
+        strip "$APPDIR/usr/bin/$so"
+    fi
+done
+
 # Locales
 if [ -d dist/cef/locales ]; then
     cp -r dist/cef/locales/. "$APPDIR/usr/bin/locales/"
