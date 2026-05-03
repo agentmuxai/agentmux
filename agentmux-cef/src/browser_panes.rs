@@ -160,6 +160,7 @@ impl BrowserPaneManager {
         block_id: &str,
         url: &str,
         rect: Rect,
+        window_label: &str,
     ) -> Result<(), String> {
         // Phase H.1.d (PR #5) — sole pane-registration entry point. The
         // reducer atomically generates the label and inserts the entry,
@@ -202,6 +203,7 @@ impl BrowserPaneManager {
                     label,
                     url.to_string(),
                     rect,
+                    window_label.to_string(),
                 );
                 post_task(ThreadId::UI, Some(&mut task));
                 Ok(())
@@ -236,8 +238,18 @@ impl BrowserPaneManager {
                 }
             }
         }
+        // Linux/macOS — Views path. The pane is a CefBrowserView in the main
+        // window's view hierarchy; resizing is `View::set_bounds` in DIP. Must
+        // run on the CEF UI thread (set_bounds is UI-thread-only).
         #[cfg(not(target_os = "windows"))]
-        { let _ = (block_id, rect, state); }
+        {
+            let label = match state.live_browser_pane_label(block_id) {
+                Some(l) => l,
+                None => return, // pane already closed or never created
+            };
+            let mut task = ResizeBrowserPaneViewTask::new(state.clone(), label, rect);
+            cef::post_task(cef::ThreadId::UI, Some(&mut task));
+        }
     }
 
     /// Close a pane by destroying its child HWND directly and dropping the
@@ -281,8 +293,20 @@ impl BrowserPaneManager {
             Some(l) => l,
             None => return,
         };
-        let ops = AppStateCloseOps(state);
-        Self::close_with(&label, &ops);
+        #[cfg(target_os = "windows")]
+        {
+            let ops = AppStateCloseOps(state);
+            Self::close_with(&label, &ops);
+        }
+        // Linux/macOS — Views path. Marshal the BrowserView detach onto the
+        // CEF UI thread (remove_child_view is UI-thread-only); the underlying
+        // Browser's on_before_close fires asynchronously and clears
+        // state.browsers via the existing callback (callbacks::on_before_close_browser_pane).
+        #[cfg(not(target_os = "windows"))]
+        {
+            let mut task = DetachBrowserPaneViewTask::new(state.clone(), label.clone());
+            cef::post_task(cef::ThreadId::UI, Some(&mut task));
+        }
         state.host_dispatch(
             crate::reducer::HostCommand::CompleteBrowserPaneClose {
                 block_id: block_id.to_string(),
@@ -509,13 +533,48 @@ impl BrowserPaneManager {
             "[pane-airspace] applied overlay clip to pane HWNDs",
         );
     }
+    /// Linux/macOS — equivalent of the Windows SetWindowRgn airspace
+    /// workaround, but built on Views instead of HWND clip regions.
+    ///
+    /// `add_overlay_view` puts the pane on a higher z-layer than the host UI
+    /// BrowserView, so any host-side modal/dropdown/contextmenu that overlaps
+    /// a pane rect renders UNDERNEATH the pane and becomes unclickable. We
+    /// can't punch a clip hole through an Aura View the way Win32 SetWindowRgn
+    /// does on an HWND. The pragmatic workaround: when ANY overlay rect
+    /// overlaps a pane's bounds, hide that pane (`set_visible(false)`); when
+    /// no overlay rect intersects, show it again. The DOM modal renders in
+    /// the host UI BrowserView underneath, becomes the topmost paint at that
+    /// rect, and the pane's content briefly disappears — same UX trade-off
+    /// the Windows path makes (Win32 punches a hole; we hide the whole pane).
+    /// (Codex P1 on PR #682.)
+    ///
+    /// Future improvement: only hide the overlapping fraction of the pane
+    /// (would need a per-overlay set_size + position trick or a custom Layout).
+    /// Hiding the whole pane is acceptable for now — the airspace problem only
+    /// arises when modals open over panes, which is a transient case.
+    ///
+    /// `_window_label` is currently ignored on this path because we only
+    /// support a single primary window for panes (sub-window panes are a
+    /// follow-up — see PR #682's "Risks / follow-ups" section).
+    /// (See doc comment for the cfg(target_os = "windows") variant.)
+    /// Linux/macOS body — marshalled to the CEF UI thread because
+    /// `OverlayController::set_visible` and `bounds()` are UI-thread-only.
+    /// IPC handler runs on tokio so we post a task and return immediately.
+    /// `window_label` filters which panes get visibility-managed: only those
+    /// attached to the requesting window are affected.
     #[cfg(not(target_os = "windows"))]
     pub fn set_pane_overlay_clip(
         &self,
-        _state: &Arc<AppState>,
-        _window_label: &str,
-        _overlay_rects: &[(i32, i32, i32, i32)],
+        state: &Arc<AppState>,
+        window_label: &str,
+        overlay_rects: &[(i32, i32, i32, i32)],
     ) {
+        let mut task = SetPaneOverlayClipViewsTask::new(
+            state.clone(),
+            window_label.to_string(),
+            overlay_rects.to_vec(),
+        );
+        cef::post_task(cef::ThreadId::UI, Some(&mut task));
     }
 
     /// Give keyboard focus to the pane's child HWND so keystrokes reach the
@@ -552,6 +611,117 @@ impl BrowserPaneManager {
 }
 
 // `CreateBrowserPaneTask` moved to `crate::browser_pane::creation` in Phase 3.
+
+/// Two axis-aligned rects intersect iff neither is fully to one side of the
+/// other. Coordinates: (x, y, width, height). Used by the Linux/macOS
+/// pane-airspace logic to decide whether an overlay rect from the frontend
+/// covers any part of a pane's bounds.
+#[cfg(not(target_os = "windows"))]
+fn rects_intersect(a: (i32, i32, i32, i32), b: (i32, i32, i32, i32)) -> bool {
+    let (ax, ay, aw, ah) = a;
+    let (bx, by, bw, bh) = b;
+    let a_right = ax + aw;
+    let a_bottom = ay + ah;
+    let b_right = bx + bw;
+    let b_bottom = by + bh;
+    !(a_right <= bx || b_right <= ax || a_bottom <= by || b_bottom <= ay)
+}
+
+// ── Linux/macOS UI-thread marshalling tasks ────────────────────────────────
+//
+// `View::set_bounds` and `Window::remove_child_view` must run on the CEF UI
+// thread. Both `BrowserPaneManager::resize` and `::close` are called from IPC
+// handler tasks on tokio threads, so we wrap the UI-thread bodies in
+// `wrap_task!` structs and post them via `post_task(ThreadId::UI, ...)` —
+// same pattern as `ui_tasks::CloseWindowTask` / `MaximizeWindowTask` / etc.
+
+#[cfg(not(target_os = "windows"))]
+wrap_task! {
+    pub struct ResizeBrowserPaneViewTask {
+        state: Arc<AppState>,
+        label: String,
+        rect: Rect,
+    }
+
+    impl Task {
+        fn execute(&self) {
+            crate::browser_pane::creation_views::resize_browser_pane_view(
+                &self.state, &self.label, self.rect.clone(),
+            );
+        }
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+wrap_task! {
+    pub struct DetachBrowserPaneViewTask {
+        state: Arc<AppState>,
+        label: String,
+    }
+
+    impl Task {
+        fn execute(&self) {
+            crate::browser_pane::creation_views::detach_browser_pane_view(
+                &self.state, &self.label,
+            );
+        }
+    }
+}
+
+/// Linux/macOS pane-airspace task — fired by `set_pane_overlay_clip` for the
+/// non-Windows code path. For each live OverlayController, hide it when any
+/// overlay rect intersects its current bounds; show it otherwise. See the
+/// doc comment on `set_pane_overlay_clip` (non-Windows variant) for why this
+/// is the equivalent of the Windows SetWindowRgn airspace dance.
+#[cfg(not(target_os = "windows"))]
+wrap_task! {
+    pub struct SetPaneOverlayClipViewsTask {
+        state: Arc<AppState>,
+        // Only panes attached to this window get visibility-managed; panes
+        // in other windows are unaffected by overlay rects from this window.
+        // Mirrors the window_label filtering in the Windows path.
+        window_label: String,
+        overlay_rects: Vec<(i32, i32, i32, i32)>,
+    }
+
+    impl Task {
+        fn execute(&self) {
+            // Snapshot the (pane label, parent window label, controller) tuples,
+            // filter by parent-window-label matching the requesting window,
+            // drop the mutex before any FFI call (snapshot-and-drop discipline
+            // per docs/specs/SPEC_PHASE_F_HOST_REDUCER §6).
+            let live: Vec<(String, cef::OverlayController)> = self
+                .state
+                .browser_pane_overlays
+                .lock()
+                .iter()
+                .filter(|(_, (win_label, _))| win_label == &self.window_label)
+                .map(|(k, (_, c))| (k.clone(), c.clone()))
+                .collect();
+            if live.is_empty() {
+                return;
+            }
+            for (label, controller) in live {
+                use cef::ImplOverlayController;
+                let pb = controller.bounds();
+                let pane_rect = (pb.x, pb.y, pb.width, pb.height);
+                let intersects_any = self
+                    .overlay_rects
+                    .iter()
+                    .any(|or| rects_intersect(*or, pane_rect));
+                controller.set_visible(if intersects_any { 0 } else { 1 });
+                tracing::debug!(
+                    label = %label,
+                    window_label = %self.window_label,
+                    hidden = intersects_any,
+                    pane_x = pb.x, pane_y = pb.y, pane_w = pb.width, pane_h = pb.height,
+                    overlay_count = self.overlay_rects.len(),
+                    "[pane-airspace] views: applied visibility"
+                );
+            }
+        }
+    }
+}
 
 // ── Tests ───────────────────────────────────────────────────────────────────
 //

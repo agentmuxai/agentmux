@@ -512,6 +512,42 @@ pub struct AppState {
     /// `docs/specs/SPEC_PHASE_F_HOST_REDUCER_2026-05-01.md`.
     pub host_state: Mutex<crate::reducer::HostState>,
 
+    /// Linux/macOS only — registry of live top-level `CefWindow` handles,
+    /// keyed by window label ("main" for the primary, otherwise the label
+    /// CreateWindowTask assigns to a sub-window). Populated by
+    /// `AgentMuxWindowDelegate::on_window_created` and cleared by
+    /// `on_window_destroyed`. Used by the browser-pane Views path to find
+    /// the right parent Window when attaching a pane via
+    /// `Window::add_overlay_view` — without this map, panes opened from a
+    /// non-main window were silently routed to the main window (PR #682
+    /// follow-up: "the browser opens in the wrong window" bug).
+    /// The Windows pane path uses native HWND lookup instead and never
+    /// reads this field, so it is cfg-gated to avoid carrying unused
+    /// state on Windows.
+    #[cfg(not(target_os = "windows"))]
+    pub windows: Mutex<std::collections::HashMap<String, cef::Window>>,
+
+    /// Linux/macOS only — `CefOverlayController` handles for live browser
+    /// panes, keyed by pane label (the same label used in `host_state.browsers`).
+    /// Each entry pairs the controller with the `window_label` of the
+    /// parent CefWindow it was attached to (looked up from `state.windows`
+    /// at create time), so resize / detach / overlay-clip calls can find
+    /// the right Window for `layout()` / `remove_child_view`.
+    ///
+    /// Populated by `browser_pane/creation_views.rs` after the BrowserView
+    /// has been added to its parent Window via `add_overlay_view`. We use
+    /// AddOverlayView (not AddChildView) because AddChildView cohabitates
+    /// poorly with the host UI's BrowserView under the Window's default
+    /// FillLayout — both children get full-parent-size bounds and the pane
+    /// stacks on top of the host UI at full size with per-frame redraw
+    /// flashing (verified empirically during the spike). OverlayController
+    /// has its own explicit `set_size` / `set_position` / `set_visible`
+    /// /`destroy` that aren't subject to the parent's auto-layout.
+    /// Windows panes use HWND ops instead and never touch this map.
+    #[cfg(not(target_os = "windows"))]
+    pub browser_pane_overlays:
+        Mutex<std::collections::HashMap<String, (String, cef::OverlayController)>>,
+
     /// Tear-off Phase 6 — pre-warmed pool of hidden CEF windows ready for
     /// instant promotion on tear-off. Each entry is a label of a window
     /// that's already painted, has its renderer connected, and is sitting
@@ -604,6 +640,10 @@ impl Default for AppState {
             // browsers field removed in H.2.e — see comment near struct decl.
             window_meta: Mutex::new(HashMap::new()),
             host_state: Mutex::new(crate::reducer::HostState::default()),
+            #[cfg(not(target_os = "windows"))]
+            windows: Mutex::new(HashMap::new()),
+            #[cfg(not(target_os = "windows"))]
+            browser_pane_overlays: Mutex::new(HashMap::new()),
             // window_pool / unpromoted_pool_labels / window_pool_respawn_in_flight
             // deleted (PR #5 H.4) — see HostState.pool.
             // is_quitting deleted (PR #5 H.5) — see HostState.quit_state.
