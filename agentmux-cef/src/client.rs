@@ -362,19 +362,23 @@ impl AgentMuxHandler {
                 // Recompute the HWND here — the prior #[cfg] block
                 // computed `hwnd` as a local that's not in scope at
                 // this site. The CEF Browser API is cheap to query
-                // a second time. Same precedence as the prior block:
-                // Views' window handle → host's window handle →
-                // `find_own_top_level_window()` as last-resort.
+                // a second time. Precedence: Views' window handle →
+                // host's window handle. NO fallback to
+                // `find_own_top_level_window()` — that function uses
+                // `EnumWindows` and returns the FIRST visible window
+                // belonging to this process, which in a multi-window
+                // session is some OTHER window's HWND. Sending that
+                // as authoritative `Some(label)` would corrupt the
+                // OTHER label's mirror via the `Repaired` arm in
+                // `apply_hwnd_opened`. (reagent P1 PR #664 round 3.)
                 //
-                // PR #664 codex P1 round 2 — added the
-                // find_own_top_level_window fallback. Without it,
-                // if Views and host both return null at this exact
-                // timing (a documented lifecycle case), `hwnd_val`
-                // would be 0 → the explicit ReportHwndOpened with
-                // Some(label) is skipped → the launcher's mirror
-                // stays permanently unlinked (since drain-on-open
-                // was removed in the same PR), and OS destroy
-                // events never fire WindowClosed → orphan panel rows.
+                // If both Views and host return null (transient
+                // lifecycle case), skip the explicit dispatch. The
+                // launcher's drain-on-WindowOpened fallback handles
+                // most such cases by linking the recent pending HWND
+                // from WM_CREATE; in the rare case both fail, the
+                // mirror stays unlinked — same outcome as pre-PR-664
+                // for that edge case, no worse.
                 let mut browser_for_wrr = browser.clone();
                 let views_hwnd = browser_view_get_for_browser(Some(&mut browser_for_wrr))
                     .and_then(|bv| bv.window())
@@ -388,12 +392,7 @@ impl AgentMuxHandler {
                         Some(wh.0 as *mut std::ffi::c_void)
                     }
                 });
-                let hwnd = views_hwnd
-                    .or(host_hwnd)
-                    .unwrap_or_else(|| unsafe {
-                        crate::commands::window::find_own_top_level_window()
-                    });
-                let hwnd_val = if hwnd.is_null() { 0 } else { hwnd as u64 };
+                let hwnd_val = views_hwnd.or(host_hwnd).map(|p| p as u64).unwrap_or(0);
                 if hwnd_val != 0 {
                     crate::launcher_ipc::report_hwnd_opened(
                         hwnd_val,
@@ -402,19 +401,17 @@ impl AgentMuxHandler {
                         Some(label.clone()),
                     );
                 } else {
-                    // Truly pathological — no HWND from any source.
-                    // The launcher's restored drain-on-WindowOpened
-                    // (codex P1) provides best-effort linking via the
-                    // pending_hwnds entry from WM_CREATE, repaired
-                    // later by `apply_hwnd_opened` if the HWND becomes
-                    // resolvable in a future event. Log so we can
-                    // detect the regression.
-                    tracing::error!(
+                    // Both sources null. Launcher's drain-on-WindowOpened
+                    // fallback should still link the pending HWND from
+                    // WM_CREATE; if that race lost too, the mirror
+                    // stays hwnd=None for this window — degraded but
+                    // not corrupted. Log at WARN so the regression is
+                    // visible if it happens.
+                    tracing::warn!(
                         target: "wrr",
                         label = %label,
-                        "[wrr] on_after_created: hwnd_val=0 from all 3 sources \
-                         (Views, host, find_own_top_level_window) — relying on \
-                         launcher's pending_hwnds drain fallback"
+                        "[wrr] on_after_created: hwnd_val=0 from both Views and host — \
+                         relying on launcher's pending_hwnds drain fallback"
                     );
                 }
             }
