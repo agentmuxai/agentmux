@@ -1381,7 +1381,7 @@ wrap_client! {
 // focus during the very first navigation of a newly-created pane fires
 // CEF's `on_before_close` on that pane ~10ms later. Focus-steal
 // protection lives entirely in the Win32 `WndProc` subclass below
-// (`pane::hwnd::install_browser_pane_focus_redirect`), which redirects programmatic
+// (`browser_pane::hwnd::install_browser_pane_focus_redirect`), which redirects programmatic
 // `WM_SETFOCUS` back to the top-level window. User clicks are let through
 // because `WM_LBUTTONDOWN` in the subclass arms `ALLOW_PANE_FOCUS_ONCE`.
 wrap_focus_handler! {
@@ -1401,7 +1401,7 @@ wrap_focus_handler! {
             // reliably reproducible when creating a 2nd browser pane.
             // The Win32 WndProc subclass below already redirects
             // page-load SetFocus to the top-level window (see
-            // `pane::hwnd::install_browser_pane_focus_redirect`), which
+            // `browser_pane::hwnd::install_browser_pane_focus_redirect`), which
             // handles the original focus-steal concern. Returning 0
             // here so CEF proceeds with normal focus handling at the
             // Chromium level; Win32 subclass continues to redirect
