@@ -394,6 +394,7 @@ wrap_task! {
                 Some((self.x, self.y, self.w, self.h)),
                 self.frameless,
                 RuntimeStyle::ALLOY,
+                Some((self.state.clone(), self.label.clone())),
             );
             #[cfg(target_os = "linux")]
             crate::app::install_linux_window_properties_override(&wd);

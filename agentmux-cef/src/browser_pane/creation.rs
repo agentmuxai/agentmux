@@ -34,67 +34,82 @@ wrap_task! {
         label: String,
         url: String,
         rect: Rect,
+        // Linux/macOS only: which top-level CefWindow to attach the pane
+        // overlay to (looked up in `state.windows`). Windows path doesn't
+        // read this field — `find_own_top_level_window` resolves the
+        // calling window's HWND directly.
+        window_label: String,
     }
 
     impl Task {
         fn execute(&self) {
             // Running on the CEF UI thread.
+            //
+            // Two completely separate paths by platform:
+            //   - Windows: native child window via WindowInfo::set_as_child +
+            //     browser_host_create_browser. Requires the parent HWND from
+            //     find_own_top_level_window.
+            //   - Linux / macOS: CEF Views via browser_view_create +
+            //     Window::add_overlay_view. The Windows native-child path does
+            //     not work on Wayland (cef#2804) and is officially unsupported
+            //     on macOS. We use AddOverlayView (not AddChildView) so the
+            //     pane cohabits cleanly with the host UI's full-window
+            //     BrowserView. See
+            //     `docs/specs/embedded-browser-panes-linux-macos-2026-05-03.md`.
 
-            // Get parent HWND via Win32 enumeration (CEF Views returns null).
-            #[cfg(target_os = "windows")]
-            let parent_hwnd_raw = unsafe {
-                crate::commands::window::find_own_top_level_window()
-            };
             #[cfg(not(target_os = "windows"))]
-            let parent_hwnd_raw: *mut std::ffi::c_void = std::ptr::null_mut();
-
-            if parent_hwnd_raw.is_null() {
-                tracing::error!(block_id = %self.block_id, "cannot find main window HWND — aborting browser pane creation");
+            {
+                crate::browser_pane::creation_views::create_browser_pane_view(
+                    self.state.clone(),
+                    self.block_id.clone(),
+                    self.label.clone(),
+                    self.url.clone(),
+                    self.rect.clone(),
+                    self.window_label.clone(),
+                );
                 return;
             }
 
-            // Phase B.5 (window_meta step d) — pre-create handoff.
-            // Browser panes are not top-level windows; the kind
-            // value here is irrelevant (on_after_created skips the
-            // taskbar/report-open logic for browser-pane-* labels).
-            //
-            // Phase F.1 — routed through the host reducer.
-            self.state.host_dispatch(
-                crate::reducer::HostCommand::EnqueuePendingWindowCreation {
-                    entry: crate::state::PendingWindowCreation {
-                        label: self.label.clone(),
-                        kind: crate::state::WindowKind::FullInstance,
-                        parent_instance_id: None,
-                    },
-                },
-            );
-
-            let handler = crate::client::AgentMuxHandler::new_with_browser_pane(self.state.clone(), 0, true);
-            let mut client = Some(crate::client::AgentMuxClient::new(handler, true));
-
-            let url_cef = CefString::from(self.url.as_str());
-            let settings = BrowserSettings::default();
-
             #[cfg(target_os = "windows")]
-            let window_info = {
+            {
+                // Get parent HWND via Win32 enumeration (CEF Views returns null).
+                let parent_hwnd_raw = unsafe {
+                    crate::commands::window::find_own_top_level_window()
+                };
+                if parent_hwnd_raw.is_null() {
+                    tracing::error!(block_id = %self.block_id, "cannot find main window HWND — aborting browser pane creation");
+                    return;
+                }
+
+                // Phase B.5 (window_meta step d) — pre-create handoff.
+                // Browser panes are not top-level windows; the kind value here
+                // is irrelevant (on_after_created skips the taskbar/report-open
+                // logic for browser-pane-* labels).
+                // Phase F.1 — routed through the host reducer.
+                self.state.host_dispatch(
+                    crate::reducer::HostCommand::EnqueuePendingWindowCreation {
+                        entry: crate::state::PendingWindowCreation {
+                            label: self.label.clone(),
+                            kind: crate::state::WindowKind::FullInstance,
+                            parent_instance_id: None,
+                        },
+                    },
+                );
+
+                let handler = crate::client::AgentMuxHandler::new_with_browser_pane(self.state.clone(), 0, true);
+                let mut client = Some(crate::client::AgentMuxClient::new(handler, true));
+
+                let url_cef = CefString::from(self.url.as_str());
+                let settings = BrowserSettings::default();
+
                 let parent_hwnd = sys::HWND(parent_hwnd_raw as *mut _);
                 // Use the clean set_as_child helper — it fills style/parent/bounds
                 // correctly and leaves other fields zeroed (in particular `window`
                 // which is an OUTPUT field filled by CEF).
-                let mut wi = WindowInfo::default().set_as_child(parent_hwnd, &self.rect);
+                let mut window_info = WindowInfo::default().set_as_child(parent_hwnd, &self.rect);
                 // Match the main process runtime style (ALLOY throughout the app).
-                wi.runtime_style = RuntimeStyle::ALLOY;
-                wi
-            };
+                window_info.runtime_style = RuntimeStyle::ALLOY;
 
-            #[cfg(not(target_os = "windows"))]
-            {
-                tracing::warn!(block_id = %self.block_id, "browser panes not yet implemented on this platform");
-                return;
-            }
-
-            #[cfg(target_os = "windows")]
-            {
                 let result = browser_host_create_browser(
                     Some(&window_info),
                     client.as_mut(),
