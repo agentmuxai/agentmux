@@ -52,3 +52,6 @@ ss-*.png
 ss2.png
 screenshot*.png
 nul
+
+# AppImage build artifacts (assembled in build/AgentMux.AppDir/ before being bundled by appimagetool)
+/build/AgentMux.AppDir/

@@ -395,6 +395,8 @@ wrap_task! {
                 self.frameless,
                 RuntimeStyle::ALLOY,
             );
+            #[cfg(target_os = "linux")]
+            crate::app::install_linux_window_properties_override(&wd);
             window_create_top_level(Some(&mut wd));
             tracing::info!(
                 label = %self.label,

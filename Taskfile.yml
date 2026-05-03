@@ -79,10 +79,16 @@ tasks:
             - echo "macOS packaging not yet implemented."
 
     package:linux:
-        desc: "[TODO] Package the application as a portable AppImage (Linux)."
+        desc: Package the application as a portable AppImage (Linux). Output to ~/Desktop by default.
         platforms: [linux]
+        deps:
+            - build:host
+            - build:backend
+            - build:frontend
+            - copy:schema
         cmds:
-            - echo "Linux AppImage packaging not yet implemented."
+            - task: bundle
+            - bash scripts/build-appimage-linux.sh
 
     build:frontend:
         desc: Build the frontend (production mode).
@@ -484,6 +490,16 @@ tasks:
                 mkdir -p "$DEV_DIR"
                 cp -r dist/cef/* "$DEV_DIR"/
                 echo "Copied dist/cef → $DEV_DIR (isolation)"
+
+                # Linux: register the .desktop file + hicolor icons so the
+                # window manager (GNOME/KWin/sway) shows the AgentMux logo
+                # in the taskbar/dock instead of a generic cog. Idempotent —
+                # safe to run on every dev launch. Best-effort: a missing
+                # `convert`/`gtk-update-icon-cache` doesn't fail the launch.
+                if [ "{{OS}}" = "linux" ]; then
+                  bash scripts/install-linux-desktop.sh "$(pwd)/$DEV_DIR/agentmux-cef" \
+                    || echo "⚠ install-linux-desktop.sh failed; icon may be wrong but launch continues"
+                fi
 
                 npx vite --config vite.config.ts --port 5173 &
                 VITE_PID=$!
