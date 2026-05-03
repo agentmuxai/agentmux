@@ -29,7 +29,6 @@
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::Instant;
 
 use cef::Browser;
 
@@ -43,7 +42,7 @@ use crate::state::{
 /// Capacity of `TopLevelCreationState.history` ring buffer. Configurable
 /// via `~/.agentmux/config.toml [host.reducer]` once H.5 (config) lands;
 /// hard-coded for PR #1.
-pub const TOP_LEVEL_CREATION_HISTORY_CAP: usize = 50;
+pub(crate) const TOP_LEVEL_CREATION_HISTORY_CAP: usize = 50;
 
 /// Lifecycle phase of the host reducer. Mirrors the launcher and srv
 /// reducers' phase enum.
@@ -158,9 +157,9 @@ impl HostState {
 // the same block_id doesn't collide: if the old browser's `on_before_close`
 // fires after the new pane's create has already run, `DrainBrowserPaneByLabel`
 // would otherwise find and wipe the NEW entry.
-static BROWSER_PANE_LABEL_SEQ: AtomicU64 = AtomicU64::new(1);
+pub(super) static BROWSER_PANE_LABEL_SEQ: AtomicU64 = AtomicU64::new(1);
 
-fn next_browser_pane_label(block_id: &str) -> String {
+pub(super) fn next_browser_pane_label(block_id: &str) -> String {
     let seq = BROWSER_PANE_LABEL_SEQ.fetch_add(1, Ordering::Relaxed);
     format!("browser-pane-{}-{}", block_id, seq)
 }
@@ -712,6 +711,13 @@ impl std::fmt::Debug for DispatchOutput {
 /// Returns the events emitted by the command. Side-effecting wiring
 /// (logging, future event broadcast) lives in `host_dispatch` — this
 /// function takes only `&mut HostState` and produces no I/O.
+mod browsers;
+mod drag;
+mod panes;
+mod pool;
+mod quit;
+mod top_level;
+
 pub fn update(state: &mut HostState, cmd: HostCommand) -> DispatchOutput {
     match cmd {
         HostCommand::EnqueuePendingWindowCreation { entry } => {
@@ -722,60 +728,60 @@ pub fn update(state: &mut HostState, cmd: HostCommand) -> DispatchOutput {
         }
         // H.1 panes
         HostCommand::EnqueueBrowserPaneCreate { block_id, label } => {
-            handle_enqueue_browser_pane_create(state, block_id, label)
+            panes::handle_enqueue_browser_pane_create(state, block_id, label)
         }
         HostCommand::TryRegisterBrowserPaneLive { block_id } => {
-            handle_try_register_browser_pane_live(state, block_id)
+            panes::handle_try_register_browser_pane_live(state, block_id)
         }
         HostCommand::CompleteBrowserPaneCreate { block_id } => {
-            handle_complete_browser_pane_create(state, block_id)
+            panes::handle_complete_browser_pane_create(state, block_id)
         }
         HostCommand::EnqueueBrowserPaneClose { block_id } => {
-            handle_enqueue_browser_pane_close(state, block_id)
+            panes::handle_enqueue_browser_pane_close(state, block_id)
         }
         HostCommand::CompleteBrowserPaneClose { block_id } => {
-            handle_complete_browser_pane_close(state, block_id)
+            panes::handle_complete_browser_pane_close(state, block_id)
         }
         HostCommand::DrainBrowserPaneByLabel { label } => {
-            handle_drain_browser_pane_by_label(state, label)
+            panes::handle_drain_browser_pane_by_label(state, label)
         }
         HostCommand::AbortBrowserPaneCreate { block_id, reason } => {
-            handle_abort_browser_pane_create(state, block_id, reason)
+            panes::handle_abort_browser_pane_create(state, block_id, reason)
         }
         // H.2 browsers
         HostCommand::RegisterBrowser { label, browser, kind } => {
-            handle_register_browser(state, label, browser, kind)
+            browsers::handle_register_browser(state, label, browser, kind)
         }
         HostCommand::UnregisterBrowser { label } => {
-            handle_unregister_browser(state, label)
+            browsers::handle_unregister_browser(state, label)
         }
         // H.3 drag
-        HostCommand::StartDrag { session } => handle_start_drag(state, session),
-        HostCommand::EndDrag { drag_id, outcome } => handle_end_drag(state, drag_id, outcome),
+        HostCommand::StartDrag { session } => drag::handle_start_drag(state, session),
+        HostCommand::EndDrag { drag_id, outcome } => drag::handle_end_drag(state, drag_id, outcome),
         // H.4 pool
-        HostCommand::PoolWindowSpawnStart { label } => handle_pool_spawn_start(state, label),
-        HostCommand::PoolWindowReady { label } => handle_pool_ready(state, label),
+        HostCommand::PoolWindowSpawnStart { label } => pool::handle_pool_spawn_start(state, label),
+        HostCommand::PoolWindowReady { label } => pool::handle_pool_ready(state, label),
         HostCommand::PoolWindowDestroyedBeforePromote { label } => {
-            handle_pool_destroyed_before_promote(state, label)
+            pool::handle_pool_destroyed_before_promote(state, label)
         }
-        HostCommand::PromotePoolWindow { label } => handle_promote_pool_window(state, label),
-        HostCommand::PopAndPromoteFrontPoolWindow => handle_pop_and_promote_front_pool_window(state),
-        HostCommand::PoolDrainAll => handle_pool_drain_all(state),
+        HostCommand::PromotePoolWindow { label } => pool::handle_promote_pool_window(state, label),
+        HostCommand::PopAndPromoteFrontPoolWindow => pool::handle_pop_and_promote_front_pool_window(state),
+        HostCommand::PoolDrainAll => pool::handle_pool_drain_all(state),
         // H.5 quit
-        HostCommand::BeginDrain { reason } => handle_begin_drain(state, reason),
-        HostCommand::ConfirmDrained => handle_confirm_drained(state),
+        HostCommand::BeginDrain { reason } => quit::handle_begin_drain(state, reason),
+        HostCommand::ConfirmDrained => quit::handle_confirm_drained(state),
         // H.6 top-level runner
         HostCommand::EnqueueTopLevelWindow { request } => {
-            handle_enqueue_top_level_window(state, request)
+            top_level::handle_enqueue_top_level_window(state, request)
         }
         HostCommand::TopLevelCallbackFired { label } => {
-            handle_top_level_callback_fired(state, label)
+            top_level::handle_top_level_callback_fired(state, label)
         }
         HostCommand::TopLevelRendererTerminated { label, status } => {
-            handle_top_level_renderer_terminated(state, label, status)
+            top_level::handle_top_level_renderer_terminated(state, label, status)
         }
         HostCommand::TopLevelExternallyClosed { label } => {
-            handle_top_level_externally_closed(state, label)
+            top_level::handle_top_level_externally_closed(state, label)
         }
     }
 }
@@ -846,690 +852,12 @@ fn handle_dequeue_pending_window_creation(state: &mut HostState) -> DispatchOutp
 // dispatches each Effect to its imperative handler.
 // ─────────────────────────────────────────────────────────────────────────
 
-fn emit_error(state: &mut HostState, message: String) -> DispatchOutput {
+pub(super) fn emit_error(state: &mut HostState, message: String) -> DispatchOutput {
     let v = state.bump_version();
     DispatchOutput {
         events: vec![HostEvent::Error { message, version: v }],
         ..Default::default()
     }
-}
-
-// ── H.1 — pane lifecycle ─────────────────────────────────────────────────
-
-fn handle_enqueue_browser_pane_create(
-    state: &mut HostState,
-    block_id: String,
-    label: String,
-) -> DispatchOutput {
-    if state.lifecycle == HostLifecyclePhase::ShuttingDown {
-        return emit_error(state, format!("enqueue_browser_pane_create: shutting down (block_id={})", block_id));
-    }
-    if state.browser_panes.contains_key(&block_id) {
-        return emit_error(state, format!("enqueue_browser_pane_create: block_id {} already has a pane", block_id));
-    }
-    state.browser_panes.insert(
-        block_id.clone(),
-        BrowserPaneEntry {
-            block_id: block_id.clone(),
-            label: label.clone(),
-            lifecycle: BrowserPaneLifecycle::Live,
-        },
-    );
-    let v = state.bump_version();
-    DispatchOutput {
-        events: vec![HostEvent::BrowserPaneCreateRequested { block_id, label, version: v }],
-        ..Default::default()
-    }
-}
-
-fn handle_complete_browser_pane_create(state: &mut HostState, block_id: String) -> DispatchOutput {
-    let entry = match state.browser_panes.get(&block_id) {
-        Some(e) => e.clone(),
-        None => return DispatchOutput::default(), // late callback for already-removed pane; idempotent no-op
-    };
-    // Already Live by EnqueueBrowserPaneCreate's invariant; this is a no-op
-    // confirmation event for observers.
-    let v = state.bump_version();
-    DispatchOutput {
-        events: vec![HostEvent::BrowserPaneLive { block_id, label: entry.label, version: v }],
-        ..Default::default()
-    }
-}
-
-fn handle_enqueue_browser_pane_close(state: &mut HostState, block_id: String) -> DispatchOutput {
-    let entry = match state.browser_panes.get_mut(&block_id) {
-        Some(e) => e,
-        None => return DispatchOutput::default(), // close request for already-gone pane; idempotent
-    };
-    if matches!(entry.lifecycle, BrowserPaneLifecycle::Closing { .. }) {
-        return DispatchOutput::default(); // already Closing; idempotent
-    }
-    entry.lifecycle = BrowserPaneLifecycle::Closing { since: Instant::now() };
-    let label = entry.label.clone();
-    let v = state.bump_version();
-    DispatchOutput {
-        events: vec![HostEvent::BrowserPaneClosing { block_id, version: v }],
-        closed_browser_pane_label: Some(label),
-        ..Default::default()
-    }
-}
-
-/// PR #5 — sole pane registration entry point. Replaces
-/// `pane::lifecycle::PaneStateMachine::try_register_live`.
-///
-/// - Live entry exists → `AlreadyLive(label)`
-/// - Closing entry exists → `Closing`
-/// - No entry → generate label, insert Live, `Fresh(label)` + emit
-///   `BrowserPaneCreateRequested`
-fn handle_try_register_browser_pane_live(state: &mut HostState, block_id: String) -> DispatchOutput {
-    if state.lifecycle == HostLifecyclePhase::ShuttingDown {
-        return emit_error(
-            state,
-            format!("try_register_browser_pane_live: shutting down (block_id={})", block_id),
-        );
-    }
-    if let Some(entry) = state.browser_panes.get(&block_id) {
-        let result = match entry.lifecycle {
-            BrowserPaneLifecycle::Live => RegisterResult::AlreadyLive(entry.label.clone()),
-            BrowserPaneLifecycle::Closing { .. } => RegisterResult::Closing,
-        };
-        return DispatchOutput {
-            browser_pane_register_result: Some(result),
-            ..Default::default()
-        };
-    }
-    let label = next_browser_pane_label(&block_id);
-    state.browser_panes.insert(
-        block_id.clone(),
-        BrowserPaneEntry {
-            block_id: block_id.clone(),
-            label: label.clone(),
-            lifecycle: BrowserPaneLifecycle::Live,
-        },
-    );
-    let v = state.bump_version();
-    DispatchOutput {
-        events: vec![HostEvent::BrowserPaneCreateRequested {
-            block_id,
-            label: label.clone(),
-            version: v,
-        }],
-        browser_pane_register_result: Some(RegisterResult::Fresh(label)),
-        ..Default::default()
-    }
-}
-
-/// PR #5 — sole label-keyed drain entry point. Replaces
-/// `pane::lifecycle::PaneStateMachine::drain_by_label`.
-///
-/// Removes whichever pane entry has `label`. Returns the drained block_id
-/// in `drained_browser_pane_block_id`. Idempotent — `None` if no entry has that label
-/// (e.g., explicit `close()` already cleared it; `on_before_close` arrives
-/// later).
-fn handle_drain_browser_pane_by_label(state: &mut HostState, label: String) -> DispatchOutput {
-    let victim = state
-        .browser_panes
-        .iter()
-        .find(|(_, e)| e.label == label)
-        .map(|(k, _)| k.clone());
-    let block_id = match victim {
-        Some(b) => b,
-        None => return DispatchOutput::default(),
-    };
-    state.browser_panes.remove(&block_id);
-    let v = state.bump_version();
-    DispatchOutput {
-        events: vec![HostEvent::BrowserPaneClosed {
-            block_id: block_id.clone(),
-            version: v,
-        }],
-        drained_browser_pane_block_id: Some(block_id),
-        ..Default::default()
-    }
-}
-
-fn handle_complete_browser_pane_close(state: &mut HostState, block_id: String) -> DispatchOutput {
-    if state.browser_panes.remove(&block_id).is_none() {
-        return DispatchOutput::default(); // idempotent
-    }
-    let v = state.bump_version();
-    DispatchOutput {
-        events: vec![HostEvent::BrowserPaneClosed { block_id, version: v }],
-        ..Default::default()
-    }
-}
-
-fn handle_abort_browser_pane_create(
-    state: &mut HostState,
-    block_id: String,
-    reason: String,
-) -> DispatchOutput {
-    state.browser_panes.remove(&block_id);
-    let v = state.bump_version();
-    DispatchOutput {
-        events: vec![HostEvent::BrowserPaneCreationFailed { block_id, reason, version: v }],
-        ..Default::default()
-    }
-}
-
-// ── H.2 — browser handle registry ────────────────────────────────────────
-
-fn handle_register_browser(
-    state: &mut HostState,
-    label: String,
-    browser: Browser,
-    kind: BrowserKind,
-) -> DispatchOutput {
-    if state.lifecycle == HostLifecyclePhase::ShuttingDown {
-        return emit_error(state, format!("register_browser: shutting down (label={})", label));
-    }
-    if state.browsers.contains_key(&label) {
-        return emit_error(state, format!("register_browser: label {} already registered", label));
-    }
-    state.browsers.insert(
-        label.clone(),
-        BrowserHandle {
-            label: label.clone(),
-            browser,
-            kind: kind.clone(),
-            registered_at: Instant::now(),
-        },
-    );
-    let v = state.bump_version();
-    DispatchOutput {
-        events: vec![HostEvent::BrowserRegistered { label, kind, version: v }],
-        ..Default::default()
-    }
-}
-
-fn handle_unregister_browser(state: &mut HostState, label: String) -> DispatchOutput {
-    // Atomic remove + return the Browser handle in `removed_browser`
-    // (codex P2 PR #660). The pane close path in
-    // `browser_panes::AppStateCloseOps::take_browser_hwnd` uses the
-    // returned Browser to extract its HWND. Any caller that doesn't
-    // need the handle can simply ignore `removed_browser`.
-    let removed = state.browsers.remove(&label);
-    let removed_browser = removed.map(|h| h.browser);
-    if removed_browser.is_none() {
-        return DispatchOutput::default(); // idempotent
-    }
-    let v = state.bump_version();
-    DispatchOutput {
-        events: vec![HostEvent::BrowserUnregistered { label, version: v }],
-        removed_browser,
-        ..Default::default()
-    }
-}
-
-// ── H.3 — drag state ─────────────────────────────────────────────────────
-
-fn handle_start_drag(state: &mut HostState, session: DragSession) -> DispatchOutput {
-    if state.active_drag.is_some() {
-        return emit_error(state, "start_drag: drag session already active".to_string());
-    }
-    let drag_id = session.drag_id.clone();
-    let source_window = session.source_window.clone();
-    state.active_drag = Some(session);
-    let v = state.bump_version();
-    DispatchOutput {
-        events: vec![HostEvent::DragStarted { drag_id, source_window, version: v }],
-        ..Default::default()
-    }
-}
-
-fn handle_end_drag(
-    state: &mut HostState,
-    drag_id: String,
-    outcome: DragOutcome,
-) -> DispatchOutput {
-    let active_id = state.active_drag.as_ref().map(|s| s.drag_id.clone());
-    match active_id {
-        Some(id) if id == drag_id => {
-            // PR #5 H.3 — return the prior session via output so callers
-            // (cross-drag complete / cancel) can build the renderer-side
-            // event payload without a separate read of state.active_drag.
-            let session = state.active_drag.take();
-            let v = state.bump_version();
-            DispatchOutput {
-                events: vec![HostEvent::DragEnded { drag_id, outcome, version: v }],
-                ended_drag_session: session,
-                ..Default::default()
-            }
-        }
-        _ => DispatchOutput::default(), // mismatched or no drag; idempotent no-op
-    }
-}
-
-// ── H.4 — pool state ─────────────────────────────────────────────────────
-
-fn handle_pool_spawn_start(state: &mut HostState, label: String) -> DispatchOutput {
-    // PR #5 H.4 — single-flight semaphore. The legacy
-    // `window_pool_respawn_in_flight.swap(true)` returns the prior
-    // value; if true, caller skips. We replicate that here: prior
-    // in-flight OR non-Running quit state both suppress the spawn.
-    if state.quit_state != QuitState::Running {
-        return DispatchOutput {
-            pool_spawn_proceeding: false,
-            ..Default::default()
-        };
-    }
-    if state.pool.respawn_in_flight {
-        return DispatchOutput {
-            pool_spawn_proceeding: false,
-            ..Default::default()
-        };
-    }
-    state.pool.unpromoted.insert(label);
-    state.pool.respawn_in_flight = true;
-    DispatchOutput {
-        pool_spawn_proceeding: true,
-        ..Default::default()
-    }
-}
-
-fn handle_pool_ready(state: &mut HostState, label: String) -> DispatchOutput {
-    if !state.pool.unpromoted.remove(&label) {
-        // Not in unpromoted (race or duplicate signal); idempotent.
-        return DispatchOutput {
-            pool_size_after: Some(state.pool.queue.len()),
-            ..Default::default()
-        };
-    }
-    if !state.pool.queue.iter().any(|l| l == &label) {
-        state.pool.queue.push_back(label.clone());
-    }
-    state.pool.respawn_in_flight = false;
-    let queue_len_after = state.pool.queue.len();
-    let v = state.bump_version();
-    DispatchOutput {
-        events: vec![HostEvent::PoolWindowEntered {
-            label,
-            queue_len_after,
-            version: v,
-        }],
-        pool_size_after: Some(queue_len_after),
-        ..Default::default()
-    }
-}
-
-fn handle_pool_destroyed_before_promote(state: &mut HostState, label: String) -> DispatchOutput {
-    // Pool windows can be destroyed in two states (codex P1 PR #654 round 2):
-    //   1. Still in `unpromoted` — never reached renderer-ready.
-    //   2. Already in `queue` — passed renderer-ready, awaiting promotion,
-    //      then closed externally before promote.
-    // Both must be cleaned up; otherwise the queue retains a dead label
-    // and a later `PromotePoolWindow` operates on stale inventory.
-    let was_unpromoted = state.pool.unpromoted.remove(&label);
-    let queue_len_before = state.pool.queue.len();
-    state.pool.queue.retain(|l| l != &label);
-    let was_in_queue = state.pool.queue.len() < queue_len_before;
-    state.pool.respawn_in_flight = false;
-    let queue_len_after = state.pool.queue.len();
-    if !was_unpromoted && !was_in_queue {
-        return DispatchOutput {
-            pool_size_after: Some(queue_len_after),
-            ..Default::default()
-        };
-    }
-    let v = state.bump_version();
-    DispatchOutput {
-        events: vec![HostEvent::PoolWindowLeft {
-            label,
-            queue_len_after,
-            reason: PoolLeaveReason::DestroyedBeforePromote,
-            version: v,
-        }],
-        pool_destroyed_was_unpromoted: was_unpromoted,
-        pool_size_after: Some(queue_len_after),
-        ..Default::default()
-    }
-}
-
-fn handle_pop_and_promote_front_pool_window(state: &mut HostState) -> DispatchOutput {
-    let label = match state.pool.queue.pop_front() {
-        Some(l) => l,
-        None => return DispatchOutput::default(),
-    };
-    state.pool.unpromoted.remove(&label);
-    if let Some(handle) = state.browsers.get_mut(&label) {
-        if let BrowserKind::TopLevel { is_pool } = &mut handle.kind {
-            *is_pool = false;
-        }
-    }
-    let queue_len_after = state.pool.queue.len();
-    let v = state.bump_version();
-    DispatchOutput {
-        events: vec![HostEvent::PoolWindowLeft {
-            label: label.clone(),
-            queue_len_after,
-            reason: PoolLeaveReason::Promoted,
-            version: v,
-        }],
-        promoted_pool_label: Some(label),
-        pool_size_after: Some(queue_len_after),
-        ..Default::default()
-    }
-}
-
-fn handle_promote_pool_window(state: &mut HostState, label: String) -> DispatchOutput {
-    // Idempotent no-op for truly unknown labels (reagent P2 PR #654 round 3).
-    // Symmetric with `handle_pool_destroyed_before_promote`'s pattern: only
-    // emit `PoolWindowLeft` if we actually removed the label from one of
-    // the pool sets. Without this, a stale promote command (e.g., from a
-    // race between PromotePoolWindow and PoolWindowDestroyedBeforePromote)
-    // would emit a phantom `PoolWindowLeft` event that observers might act on.
-    let queue_len_before = state.pool.queue.len();
-    state.pool.queue.retain(|l| l != &label);
-    let was_in_queue = state.pool.queue.len() < queue_len_before;
-    let was_in_unpromoted = state.pool.unpromoted.remove(&label);
-    if !was_in_queue && !was_in_unpromoted {
-        return DispatchOutput::default();
-    }
-    // Mark the corresponding browser handle as no-longer-pool.
-    if let Some(handle) = state.browsers.get_mut(&label) {
-        if let BrowserKind::TopLevel { is_pool } = &mut handle.kind {
-            *is_pool = false;
-        }
-    }
-    let v = state.bump_version();
-    DispatchOutput {
-        events: vec![HostEvent::PoolWindowLeft {
-            label,
-            queue_len_after: state.pool.queue.len(),
-            reason: PoolLeaveReason::Promoted,
-            version: v,
-        }],
-        ..Default::default()
-    }
-}
-
-fn handle_pool_drain_all(state: &mut HostState) -> DispatchOutput {
-    let drained: Vec<String> = state
-        .pool
-        .queue
-        .drain(..)
-        .chain(state.pool.unpromoted.drain())
-        .collect();
-    state.pool.respawn_in_flight = false;
-    let mut events = Vec::new();
-    for label in drained {
-        let v = state.bump_version();
-        events.push(HostEvent::PoolWindowLeft {
-            label,
-            queue_len_after: 0,
-            reason: PoolLeaveReason::DrainedOnShutdown,
-            version: v,
-        });
-    }
-    let v = state.bump_version();
-    events.push(HostEvent::PoolEmpty { version: v });
-    DispatchOutput {
-        events,
-        ..Default::default()
-    }
-}
-
-// ── H.5 — quit lifecycle ─────────────────────────────────────────────────
-
-fn handle_begin_drain(state: &mut HostState, reason: QuitReason) -> DispatchOutput {
-    if state.quit_state != QuitState::Running {
-        return DispatchOutput::default(); // already draining or quit; idempotent
-    }
-    state.quit_state = QuitState::Draining { reason: reason.clone() };
-    let v = state.bump_version();
-    DispatchOutput {
-        events: vec![HostEvent::QuitDraining { reason, version: v }],
-        ..Default::default()
-    }
-}
-
-fn handle_confirm_drained(state: &mut HostState) -> DispatchOutput {
-    if !matches!(state.quit_state, QuitState::Draining { .. }) {
-        return DispatchOutput::default(); // not draining; idempotent
-    }
-    state.quit_state = QuitState::Quit;
-    let v = state.bump_version();
-    DispatchOutput {
-        events: vec![HostEvent::QuitReady { version: v }],
-        ..Default::default()
-    }
-}
-
-// ── H.6 — top-level window creation runner ───────────────────────────────
-
-fn handle_enqueue_top_level_window(
-    state: &mut HostState,
-    request: TopLevelCreationRequest,
-) -> DispatchOutput {
-    if state.quit_state != QuitState::Running {
-        return emit_error(state, format!("enqueue_top_level_window: not Running (label={})", request.label));
-    }
-
-    // Fail-fast for User-initiated requests when in-flight is occupied.
-    // Background (pool refill) requests queue silently.
-    if state.top_level_creation.in_flight.is_some()
-        && request.source == TopLevelSource::User
-    {
-        return emit_error(state, format!("enqueue_top_level_window: busy in-flight (label={})", request.label));
-    }
-
-    state.top_level_creation.queue.push_back(request);
-    let queue_len = state.top_level_creation.queue.len();
-    let v = state.bump_version();
-    let mut out = DispatchOutput {
-        events: vec![HostEvent::TopLevelQueueLengthChanged { len: queue_len, version: v }],
-        ..Default::default()
-    };
-    // If idle, start immediately; chain the start arm's events.
-    if state.top_level_creation.in_flight.is_none() {
-        let started = start_next_top_level_if_idle(state);
-        out.events.extend(started.events);
-    }
-    out
-}
-
-/// Internal helper: if in_flight is None and queue has work, pop the front
-/// and start it. Emits `TopLevelCreationRequested`, `TopLevelCreationStarted`,
-/// `Effect::PostCreateWindow`, and updated queue length.
-///
-/// **Quit gating** (codex P1 PR #654 round 1): if `quit_state != Running`,
-/// don't start anything — queued background requests stay queued but will
-/// never fire (host is exiting; in-memory queue dies with the process).
-/// Without this guard, an in-flight completion during `Draining` would pop
-/// a queued background pool refill and emit `Effect::PostCreateWindow`,
-/// creating a new window mid-shutdown and preventing drain completion.
-fn start_next_top_level_if_idle(state: &mut HostState) -> DispatchOutput {
-    if state.top_level_creation.in_flight.is_some() {
-        return DispatchOutput::default();
-    }
-    if state.quit_state != QuitState::Running {
-        return DispatchOutput::default();
-    }
-    let request = match state.top_level_creation.queue.pop_front() {
-        Some(r) => r,
-        None => return DispatchOutput::default(),
-    };
-    state.top_level_creation.next_creation_id =
-        state.top_level_creation.next_creation_id.wrapping_add(1);
-    let creation_id = state.top_level_creation.next_creation_id;
-    let now = Instant::now();
-    state.top_level_creation.in_flight = Some(InFlightCreation {
-        creation_id,
-        label: request.label.clone(),
-        started_at: now,
-        phase: CreationPhase::Started,
-    });
-    let label = request.label.clone();
-    let source = request.source.clone();
-    let queue_len = state.top_level_creation.queue.len();
-    let v_req = state.bump_version();
-    let v_started = state.bump_version();
-    let v_eff = state.bump_version();
-    let v_qlen = state.bump_version();
-    DispatchOutput {
-        events: vec![
-            HostEvent::TopLevelCreationRequested {
-                creation_id,
-                source,
-                label: label.clone(),
-                version: v_req,
-            },
-            HostEvent::TopLevelCreationStarted {
-                creation_id,
-                label: label.clone(),
-                version: v_started,
-            },
-            HostEvent::Effect {
-                effect: EffectKind::PostCreateWindow { request, creation_id },
-                version: v_eff,
-            },
-            HostEvent::TopLevelQueueLengthChanged { len: queue_len, version: v_qlen },
-        ],
-        ..Default::default()
-    }
-}
-
-fn handle_top_level_callback_fired(state: &mut HostState, label: String) -> DispatchOutput {
-    let matches_in_flight = state
-        .top_level_creation
-        .in_flight
-        .as_ref()
-        .map(|c| c.label == label)
-        .unwrap_or(false);
-    if !matches_in_flight {
-        // Orphan callback: a CEF browser fired on_after_created with a
-        // label we don't have in flight. Could be from a previously-evicted
-        // creation (won't happen in PR #1 since we don't evict) or a stale
-        // label. Emit an effect to close the orphan, preventing collision.
-        let orphan_browser = state.browsers.get(&label).map(|h| h.browser.clone());
-        if let Some(browser) = orphan_browser {
-            let v = state.bump_version();
-            return DispatchOutput {
-                events: vec![HostEvent::Effect {
-                    effect: EffectKind::CloseOrphanBrowser { browser },
-                    version: v,
-                }],
-                ..Default::default()
-            };
-        }
-        return DispatchOutput::default();
-    }
-    let inflight = state.top_level_creation.in_flight.take().unwrap();
-    let now = Instant::now();
-    let latency_ms = now.duration_since(inflight.started_at).as_millis() as u64;
-    push_top_level_history(
-        state,
-        CompletedCreation {
-            creation_id: inflight.creation_id,
-            label: inflight.label.clone(),
-            outcome: TopLevelCreationOutcome::Completed,
-            started_at: inflight.started_at,
-            finished_at: now,
-            last_phase: CreationPhase::BrowserCallbackFired,
-        },
-    );
-    let v_done = state.bump_version();
-    let mut out = DispatchOutput {
-        events: vec![HostEvent::TopLevelCreationCompleted {
-            creation_id: inflight.creation_id,
-            label: inflight.label,
-            latency_ms,
-            version: v_done,
-        }],
-        ..Default::default()
-    };
-    let next = start_next_top_level_if_idle(state);
-    out.events.extend(next.events);
-    out
-}
-
-fn handle_top_level_renderer_terminated(
-    state: &mut HostState,
-    label: String,
-    status: String,
-) -> DispatchOutput {
-    let matches = state
-        .top_level_creation
-        .in_flight
-        .as_ref()
-        .map(|c| c.label == label)
-        .unwrap_or(false);
-    if !matches {
-        return DispatchOutput::default();
-    }
-    let inflight = state.top_level_creation.in_flight.take().unwrap();
-    let now = Instant::now();
-    let outcome = TopLevelCreationOutcome::RendererTerminated { status };
-    push_top_level_history(
-        state,
-        CompletedCreation {
-            creation_id: inflight.creation_id,
-            label: inflight.label.clone(),
-            outcome: outcome.clone(),
-            started_at: inflight.started_at,
-            finished_at: now,
-            last_phase: inflight.phase,
-        },
-    );
-    let v = state.bump_version();
-    let mut out = DispatchOutput {
-        events: vec![HostEvent::TopLevelCreationFailed {
-            creation_id: inflight.creation_id,
-            label: inflight.label,
-            outcome,
-            version: v,
-        }],
-        ..Default::default()
-    };
-    let next = start_next_top_level_if_idle(state);
-    out.events.extend(next.events);
-    out
-}
-
-fn handle_top_level_externally_closed(state: &mut HostState, label: String) -> DispatchOutput {
-    let matches = state
-        .top_level_creation
-        .in_flight
-        .as_ref()
-        .map(|c| c.label == label)
-        .unwrap_or(false);
-    if !matches {
-        return DispatchOutput::default();
-    }
-    let inflight = state.top_level_creation.in_flight.take().unwrap();
-    let now = Instant::now();
-    let outcome = TopLevelCreationOutcome::ExternallyClosed;
-    push_top_level_history(
-        state,
-        CompletedCreation {
-            creation_id: inflight.creation_id,
-            label: inflight.label.clone(),
-            outcome: outcome.clone(),
-            started_at: inflight.started_at,
-            finished_at: now,
-            last_phase: inflight.phase,
-        },
-    );
-    let v = state.bump_version();
-    let mut out = DispatchOutput {
-        events: vec![HostEvent::TopLevelCreationFailed {
-            creation_id: inflight.creation_id,
-            label: inflight.label,
-            outcome,
-            version: v,
-        }],
-        ..Default::default()
-    };
-    let next = start_next_top_level_if_idle(state);
-    out.events.extend(next.events);
-    out
-}
-
-fn push_top_level_history(state: &mut HostState, entry: CompletedCreation) {
-    if state.top_level_creation.history.len() >= TOP_LEVEL_CREATION_HISTORY_CAP {
-        state.top_level_creation.history.pop_front();
-    }
-    state.top_level_creation.history.push_back(entry);
 }
 
 
