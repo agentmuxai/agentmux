@@ -93,13 +93,15 @@ describe("agent document reducer", () => {
         });
 
         it("drops updates targeting unknown IDs", () => {
-            const r = update(initialState(), {
+            const start = initialState();
+            const r = update(start, {
                 type: "StreamFlush",
                 newNodes: [],
                 updatedNodes: [md("ghost")],
             });
-            expect(r.state).toBe(initialState() && r.state); // structurally same
-            expect(r.events).toEqual([]); // no-op since nothing changed
+            // Reducer must return the SAME state reference when nothing changed.
+            expect(r.state).toBe(start);
+            expect(r.events).toEqual([]);
         });
 
         it("is a no-op when both lists are empty", () => {
