@@ -27,6 +27,7 @@ import { type Accessor, createMemo, createSignal } from "solid-js";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import * as WOS from "@/app/store/wos";
+import { dispatch as dispatchPane } from "@/app/store/agent-pane-state-store";
 import { buildRuntimeArgs, getRuntimeConfig } from "../buildRuntimeArgs";
 import { dispatchSlashCommand } from "../commands/dispatch";
 import { buildRegistry } from "../commands/registry";
@@ -227,13 +228,12 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         // the acceptance event promotes it. This is the architecture
         // from AGENT_PANE_QUEUED_MESSAGE_FEEDBACK_SPEC.md (two lists,
         // migration on accept).
-        const setPending = opts.pendingMessagesAtom?.[1];
-        if (setPending) {
-            setPending((prev) => [
-                ...prev,
-                { id: messageId, text: message, createdAt: Date.now() },
-            ]);
-        }
+        dispatchPane(opts.blockId, {
+            type: "PendingMessageQueued",
+            id: messageId,
+            text: message,
+            at: Date.now(),
+        });
 
         // Defer the scroll-to-bottom by one animation frame so the
         // pending row has a chance to mount before the scroll math runs.
@@ -268,7 +268,10 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
             // RPC outright failed — remove the pending entry so the user
             // doesn't see a ghost row for a message the backend never
             // received. Log already surfaces the error elsewhere.
-            setPending?.((prev) => prev.filter((m) => m.id !== messageId));
+            dispatchPane(opts.blockId, {
+                type: "PendingMessageRejected",
+                id: messageId,
+            });
         });
     };
 
@@ -285,13 +288,13 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         // and it also runs a fallback timer that does the same cleanup
         // if `session_end` never arrives (killing a subprocess prevents
         // the CLI from emitting its own terminating result event).
-        opts.stoppingAtom?.[1](true);
+        dispatchPane(opts.blockId, { type: "RequestStop", at: Date.now() });
         RpcApi.ControllerInputCommand(TabRpcClient, {
             blockid: opts.blockId,
             signame: "SIGINT",
         }).catch((err) => {
             opts.log("warn", `stop failed: ${err?.message ?? String(err)}`, "warn");
-            opts.stoppingAtom?.[1](false);
+            dispatchPane(opts.blockId, { type: "StopFailed" });
         });
     };
 
