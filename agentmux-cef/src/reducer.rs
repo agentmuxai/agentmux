@@ -862,10 +862,10 @@ fn handle_enqueue_browser_pane_create(
     label: String,
 ) -> DispatchOutput {
     if state.lifecycle == HostLifecyclePhase::ShuttingDown {
-        return emit_error(state, format!("enqueue_pane_create: shutting down (block_id={})", block_id));
+        return emit_error(state, format!("enqueue_browser_pane_create: shutting down (block_id={})", block_id));
     }
     if state.browser_panes.contains_key(&block_id) {
-        return emit_error(state, format!("enqueue_pane_create: block_id {} already has a pane", block_id));
+        return emit_error(state, format!("enqueue_browser_pane_create: block_id {} already has a pane", block_id));
     }
     state.browser_panes.insert(
         block_id.clone(),
@@ -925,7 +925,7 @@ fn handle_try_register_browser_pane_live(state: &mut HostState, block_id: String
     if state.lifecycle == HostLifecyclePhase::ShuttingDown {
         return emit_error(
             state,
-            format!("try_register_pane_live: shutting down (block_id={})", block_id),
+            format!("try_register_browser_pane_live: shutting down (block_id={})", block_id),
         );
     }
     if let Some(entry) = state.browser_panes.get(&block_id) {
