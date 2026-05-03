@@ -362,8 +362,26 @@ impl AgentMuxHandler {
                 // Recompute the HWND here — the prior #[cfg] block
                 // computed `hwnd` as a local that's not in scope at
                 // this site. The CEF Browser API is cheap to query
-                // a second time. Same precedence: Views' window
-                // handle first, host's window handle as fallback.
+                // a second time. Precedence: Views' window handle →
+                // host's window handle. NO fallback to
+                // `find_own_top_level_window()` — that function uses
+                // `EnumWindows` and returns the FIRST visible window
+                // belonging to this process, which in a multi-window
+                // session is some OTHER window's HWND. Sending that
+                // as authoritative `Some(label)` would corrupt the
+                // OTHER label's mirror via the `Repaired` arm in
+                // `apply_hwnd_opened`. (reagent P1 PR #664 round 3.)
+                //
+                // If both Views and host return null (transient
+                // lifecycle case), skip the explicit dispatch. The
+                // launcher's drain-on-WindowOpened fallback links
+                // the recent pending HWND from WM_CREATE — that's
+                // the sole link path when `hwnd_val=0`. The drain
+                // is reliable when WM_CREATE arrived recently (within
+                // the launcher's 2s age limit); the only failure mode
+                // is no WM_CREATE-pending entry within that window,
+                // in which case the mirror stays hwnd=None — same
+                // outcome as pre-PR-664 for that edge case, no worse.
                 let mut browser_for_wrr = browser.clone();
                 let views_hwnd = browser_view_get_for_browser(Some(&mut browser_for_wrr))
                     .and_then(|bv| bv.window())
@@ -384,6 +402,19 @@ impl AgentMuxHandler {
                         "Chrome_WidgetWin_1".to_string(),
                         label.clone(),
                         Some(label.clone()),
+                    );
+                } else {
+                    // Both sources null. Launcher's drain-on-WindowOpened
+                    // fallback should still link the pending HWND from
+                    // WM_CREATE; if that race lost too, the mirror
+                    // stays hwnd=None for this window — degraded but
+                    // not corrupted. Log at WARN so the regression is
+                    // visible if it happens.
+                    tracing::warn!(
+                        target: "wrr",
+                        label = %label,
+                        "[wrr] on_after_created: hwnd_val=0 from both Views and host — \
+                         relying on launcher's pending_hwnds drain fallback"
                     );
                 }
             }
