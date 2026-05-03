@@ -17,6 +17,7 @@ import { ClaudeCodeStreamParser } from "./stream-parser";
 import type { DocumentNode, SessionStats, StreamingState, TurnTokens, UserMessageNode } from "./types";
 import { recordTurn } from "@/store/token-usage";
 import { dispatch as dispatchDoc } from "@/app/store/agent-document-store";
+import { dispatch as dispatchPane } from "@/app/store/agent-pane-state-store";
 
 const OutputFileName = "output";
 
@@ -72,13 +73,9 @@ export function useAgentStream({
     enabled,
     provider,
 }: UseAgentStreamOpts): void {
-    const [, setStreaming] = streamingStateAtom;
-    const [, setSessionStats] = sessionStatsAtom;
-    const [, setTurnActive] = turnActiveAtom;
-    const [, setCurrentTool] = currentToolAtom;
-    const [getTurnTokens, setTurnTokens] = turnTokensAtom;
+    // Read-side accessors only — all writes route through dispatchPane.
+    const [getTurnTokens] = turnTokensAtom;
     const getStopping = stoppingAtom?.[0];
-    const setStopping = stoppingAtom?.[1];
 
     // Mutable state that doesn't trigger re-renders
     let lineBuffer = "";
@@ -102,19 +99,20 @@ export function useAgentStream({
         pendingNew = [];
         pendingUpdates = [];
 
-        // Single dispatch — the reducer owns dedup, in-place updates, and
-        // the markdown-content merge. See agent-document-store.ts.
+        // Document mutation — the reducer owns dedup, in-place updates,
+        // and the markdown-content merge. See agent-document-store.ts.
         dispatchDoc(blockId, {
             type: "StreamFlush",
             newNodes: batchNew,
             updatedNodes: batchUpdates,
         });
-
-        setStreaming((prev) => ({
-            ...prev,
-            lastEventTime: Date.now(),
-            bufferSize: prev.bufferSize + batchNew.length,
-        }));
+        // Lifecycle counter bump — agent-pane-state owns streaming
+        // metadata (active flag + bufferSize + lastEventTime).
+        dispatchPane(blockId, {
+            type: "StreamFlushObserved",
+            addedCount: batchNew.length,
+            at: Date.now(),
+        });
     }
 
     function scheduleFlush() {
@@ -155,12 +153,6 @@ export function useAgentStream({
             // merge the headline tokens-in-Worked feature shows nothing.
             // Per PR #549 reagent/codex P1.
             const tokens = getTurnTokens();
-            const mergedStats: SessionStats | null = stats
-                ? { ...stats, input_tokens: tokens?.input, output_tokens: tokens?.output }
-                : tokens
-                    ? { input_tokens: tokens.input, output_tokens: tokens.output }
-                    : null;
-            setSessionStats(mergedStats);
             // Aggregate the completed turn's tokens into the global
             // session-local token-usage store so the status bar's
             // indicator + breakdown popover stay up to date. Guarded
@@ -169,10 +161,13 @@ export function useAgentStream({
             if (provider && tokens) {
                 recordTurn(provider, tokens);
             }
-            setCurrentTool(null);
-            setTurnTokens(null);
-            setTurnActive(false);
-            if (getStopping?.()) {
+            // The reducer's TurnEnd handler does the cross-atom cleanup
+            // in one shot: merges live tokens into stats, clears tool/
+            // tokens/turnActive, AND clears stopping (the latter cascade
+            // replaces the explicit setStopping(false) below).
+            const wasStopping = getStopping?.() === true;
+            dispatchPane(blockId, { type: "TurnEnd", stats });
+            if (wasStopping) {
                 const interruptedNode: DocumentNode = {
                     type: "markdown",
                     id: `interrupted-${Date.now()}`,
@@ -184,7 +179,6 @@ export function useAgentStream({
                     pendingNew.push(interruptedNode);
                     scheduleFlush();
                 }
-                setStopping?.(false);
             }
         };
 
@@ -193,7 +187,7 @@ export function useAgentStream({
         // — TerminateProcess skips any final output), run the same
         // finalization locally so the UI doesn't hang on "Stopping…".
         let stopFallbackTimer: number | null = null;
-        if (getStopping && setStopping) {
+        if (getStopping) {
             createEffect(() => {
                 const stopping = getStopping();
                 if (stopFallbackTimer != null) {
@@ -221,7 +215,7 @@ export function useAgentStream({
         // color shift (amber → accent blue) is the user's visible
         // "accepted" signal — the spec's core requirement.
         if (pendingMessagesAtom) {
-            const [getPending, setPending] = pendingMessagesAtom;
+            const [getPending] = pendingMessagesAtom;
             const acceptedUnsub = waveEventSubscribe({
                 eventType: "agent-message-accepted",
                 scope: WOS.makeORef("block", blockId),
@@ -237,7 +231,11 @@ export function useAgentStream({
                         // promoted or the pane was re-mounted mid-queue.
                         return;
                     }
-                    setPending((prev) => prev.filter((m) => m.id !== messageId));
+                    // Reducer removes the entry + emits pending-accepted.
+                    dispatchPane(blockId, {
+                        type: "PendingMessageAccepted",
+                        id: messageId,
+                    });
                     // A new turn is now running (either the first one,
                     // which already flipped turnActive via handleSendMessage,
                     // or one drained from the queue — in that case
@@ -245,7 +243,7 @@ export function useAgentStream({
                     // and nothing else flips it back, leaving the status
                     // line stuck on "Worked" with no running animation
                     // even though the CLI is processing the next message).
-                    setTurnActive(true);
+                    dispatchPane(blockId, { type: "TurnStart", at: Date.now() });
                     // Append as a normal user_message so it joins the
                     // conversation stream. Keeps the same id so the new
                     // node ties back to the pending entry 1:1.
@@ -274,10 +272,12 @@ export function useAgentStream({
         nodeIdSet = new Set();
         for (const n of untrack(() => doc())) nodeIdSet.add(n.id);
 
-        setStreaming((prev) => ({ ...prev, active: true, lastEventTime: Date.now() }));
-        // Mark the session active in the reducer — gates the truncate-
-        // suppression invariant.
-        dispatchDoc(blockId, { type: "SessionStart", at: Date.now() });
+        // Two reducers signaled in lockstep: pane-state owns the streaming
+        // metadata (active flag), agent-document owns the session phase
+        // gate that drives truncate suppression.
+        const subscribedAt = Date.now();
+        dispatchPane(blockId, { type: "StreamSubscribe", at: subscribedAt });
+        dispatchDoc(blockId, { type: "SessionStart", at: subscribedAt });
 
         const fileSubject = getFileSubject(blockId, OutputFileName);
 
@@ -302,10 +302,9 @@ export function useAgentStream({
                 translator.reset();
                 parser.reset();
                 nodeIdSet = new Set();
-                setSessionStats(null);
-                setCurrentTool(null);
-                setTurnTokens(null);
-                setTurnActive(false);
+                // Reducer clears sessionStats/currentTool/turnTokens/
+                // turnActive/stopping in one shot.
+                dispatchPane(blockId, { type: "TurnReset" });
                 return;
             }
 
@@ -374,12 +373,12 @@ export function useAgentStream({
                     if (inner?.type === "message_start") {
                         const inputTok = inner.message?.usage?.input_tokens as number | undefined;
                         if (inputTok != null) {
-                            setTurnTokens((prev) => ({ input: inputTok, output: prev?.output ?? 0 }));
+                            dispatchPane(blockId, { type: "TokensIn", input: inputTok });
                         }
                     } else if (inner?.type === "message_delta") {
                         const outputTok = inner.usage?.output_tokens as number | undefined;
                         if (outputTok != null) {
-                            setTurnTokens((prev) => ({ input: prev?.input ?? 0, output: outputTok }));
+                            dispatchPane(blockId, { type: "TokensOut", output: outputTok });
                         }
                     }
                 }
@@ -399,9 +398,17 @@ export function useAgentStream({
                     }
                     // Track the currently-running tool for the status line
                     if (event.type === "tool_call") {
-                        setCurrentTool(event.tool ?? null);
+                        // Preserve prior semantic: missing tool name means
+                        // "no tool" (currentTool=null), NOT "tool with empty
+                        // name". Pre-reducer code did setCurrentTool(event.tool ?? null);
+                        // route through ToolEnd in the missing-name case.
+                        if (event.tool) {
+                            dispatchPane(blockId, { type: "ToolStart", name: event.tool });
+                        } else {
+                            dispatchPane(blockId, { type: "ToolEnd" });
+                        }
                     } else if (event.type === "tool_result") {
-                        setCurrentTool(null);
+                        dispatchPane(blockId, { type: "ToolEnd" });
                     }
                     const node = parser.parseLine(JSON.stringify(event));
                     if (!node) continue;
@@ -431,11 +438,11 @@ export function useAgentStream({
         onCleanup(() => {
             if (flushRafId != null) { cancelAnimationFrame(flushRafId); flushRafId = null; }
             subscription.unsubscribe();
-            setStreaming((prev) => ({ ...prev, active: false }));
-            // Clear turn-active on teardown so a crash/exit without session_end
-            // doesn't leave the status line showing "Working…" permanently.
-            setTurnActive(false);
-            dispatchDoc(blockId, { type: "SessionEnd", at: Date.now() });
+            // StreamUnsubscribe also force-clears turnActive (so a crash
+            // or exit without session_end doesn't leave "Working…" stuck).
+            const at = Date.now();
+            dispatchPane(blockId, { type: "StreamUnsubscribe", at });
+            dispatchDoc(blockId, { type: "SessionEnd", at });
         });
     });
 }
