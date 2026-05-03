@@ -107,6 +107,22 @@ describe("launcher-event reducer", () => {
             });
         });
 
+        it("close BEFORE seed for unknown label preserves instances reference (codex P2 PR #684)", () => {
+            // Pre-seed close for a label that's NOT in knownEntries.
+            // Tombstone gets added but knownEntries (and therefore the
+            // derived instances array) is unchanged; the reducer must
+            // preserve the instances reference so the projection layer
+            // doesn't re-write atoms.
+            const start = initialState();
+            const r = update(start, {
+                type: "ApplyEvent",
+                event: evt({ event: "window_closed", label: "window-ghost" }),
+            });
+            expect(r.state.instances).toBe(start.instances);
+            expect(r.state.knownEntries).toBe(start.knownEntries);
+            expect(r.state.closedBeforeSeed?.has("window-ghost")).toBe(true);
+        });
+
         it("close BEFORE seed for an entry that was opened pre-seed: deletes + tombstones + recomputes derived", () => {
             // Open before seed
             const s1 = update(initialState(), {

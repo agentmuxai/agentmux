@@ -99,10 +99,14 @@ function project(): void {
  * surface will hook this once PR-C ships.
  */
 function onAuditEvent(event: LauncherEventReducerEvent): void {
+    // Preserve the pre-refactor logging fidelity — the full LauncherEvent
+    // payload carries label, window_id, coordinates etc. that are
+    // load-bearing for `muxlog host '[fe]'` triage of drift/saga issues
+    // (reagent P2 PR #684).
     if (event.type === "drift-detected") {
-        console.warn("[launcher-event] drift", event.eventName);
+        console.warn("[launcher-event] drift", event.raw);
     } else if (event.type === "saga-event-observed") {
-        console.info("[launcher-event]", event.eventName);
+        console.info("[launcher-event]", event.eventName, event.raw);
     }
 }
 

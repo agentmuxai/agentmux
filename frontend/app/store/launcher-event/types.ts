@@ -97,8 +97,8 @@ export type LauncherEventReducerEvent =
           changed: boolean;
       }
     | { type: "backend-window-id-unregistered"; label: string }
-    | { type: "drift-detected"; eventName: string }
-    | { type: "saga-event-observed"; eventName: string }
+    | { type: "drift-detected"; eventName: string; raw: LauncherEvent }
+    | { type: "saga-event-observed"; eventName: string; raw: LauncherEvent }
     | { type: "unknown-variant-ignored"; eventName: string }
     | { type: "filtered-out"; label: string; reason: string }
     | { type: "seeded"; addedCount: number; tombstonesSkipped: number };
