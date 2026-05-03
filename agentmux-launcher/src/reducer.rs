@@ -791,18 +791,31 @@ fn handle_report_window_opened(
     kind: WindowKind,
     parent_label: Option<String>,
 ) -> Vec<Event> {
-    // Phase B.9.1 (WRR) — drain-on-WindowOpened fallback. The
-    // host's `EVENT_OBJECT_CREATE` callback fires before its CEF
-    // `OnAfterCreated` (which becomes this Command), so the
-    // matching `ReportHwndOpened` may have already been processed
-    // and stashed in `state.pending_hwnds` (with `label_hint=None`
-    // if the host couldn't determine it from
-    // `pending_window_creations`). Find the most recent pending
-    // HWND that arrived within the last 2 seconds and link it to
-    // the new mirror. The 2s window is generous compared to the
-    // typical < 50ms create→ReportWindowOpened gap, but bounded
-    // enough that a stale pending HWND from a prior open won't
-    // mis-link.
+    // PR #664 codex P1 round 2 — drain-on-WindowOpened RESTORED as
+    // best-effort fallback. The explicit `ReportHwndOpened(Some(label))`
+    // from `client.rs::on_after_created` remains the AUTHORITATIVE
+    // link, and `apply_hwnd_opened` REPAIRS stale links it finds.
+    // But that explicit dispatch is gated on `hwnd_val != 0` host-side;
+    // if the HWND can't be resolved at on_after_created time from
+    // either of the 2 sources (Views, host), the explicit dispatch
+    // is skipped and the mirror would otherwise stay permanently
+    // unlinked, breaking WRR drift detection AND orphan-destroy
+    // reconciliation (no WindowClosed when OS destroys the HWND →
+    // permanent ghost InstancePanel rows).
+    //
+    // (PR #664 round 4 dropped a 3rd fallback `find_own_top_level_window`
+    // because it returns the FIRST visible window in the process —
+    // some other window's HWND in a multi-window session — which
+    // would corrupt other labels' mirrors via the `Repaired` arm.
+    // See client.rs::on_after_created comment for details.)
+    //
+    // The drain provides a fallback link from `pending_hwnds`. If the
+    // drain picks the WRONG HWND (the original burst-create race), the
+    // subsequent `apply_hwnd_opened` call from on_after_created will
+    // detect the mismatch and REPAIR — see the `Repaired` arm there.
+    // Net: best-effort link via drain, authoritative repair via
+    // explicit dispatch. The combination addresses both the
+    // hwnd_val=0 case and the burst-create race.
     const PENDING_AGE_LIMIT_MS: u64 = 2_000;
     let drained_hwnd: Option<u64> = state
         .pending_hwnds
@@ -822,13 +835,10 @@ fn handle_report_window_opened(
             kind,
             parent_label: parent_label.clone(),
             opened_at: ctx.now_rfc3339.clone(),
-            // Phase B.9.1 — observability axis. `hwnd` is
-            // populated from the drained pending entry above
-            // (host's WRR hook fired before this Command landed)
-            // OR remains None until the host's
-            // `ReportHwndOpened` with matching `label_hint`
-            // arrives via `apply_hwnd_opened`. Either path
-            // converges on the same linked state.
+            // Best-effort drain above; authoritative explicit
+            // ReportHwndOpened from on_after_created arrives a few
+            // ms later via `apply_hwnd_opened` and REPAIRS any wrong
+            // link the drain picked.
             hwnd: drained_hwnd,
             visible: false,
             iconic: false,
@@ -2838,6 +2848,242 @@ mod tests {
             evs.iter().any(|e| matches!(e, Event::WindowClosed { .. })),
             "WindowClosed must fire so frontend prunes its atoms, got {:?}",
             evs
+        );
+    }
+
+    #[test]
+    fn wrr_burst_creates_with_drain_then_repair() {
+        // PR #664 codex P1 round 2 — drain-on-open RESTORED as fallback
+        // for the hwnd_val=0 case. The drain may wrong-pick under burst
+        // creates, but apply_hwnd_opened REPAIRS via the Repaired arm
+        // when the explicit on_after_created path fires.
+        //
+        // Test verifies: WindowOpened drains some pending HWND, then
+        // explicit on_after_created arrives with the authoritative
+        // HWND and REPAIRS any wrong link. Doesn't assume a specific
+        // wrong-pick order (HashMap iter is non-deterministic when
+        // multiple pending entries share arrived_at_ms — test must be
+        // robust to either pick).
+        let (mut state, _c) = registered_host_state();
+        let mut c1 = ctx_with_pid(1, 1); c1.now_ms = 100;
+        let mut c2 = ctx_with_pid(1, 1); c2.now_ms = 200;
+        let mut c3 = ctx_with_pid(1, 1); c3.now_ms = 300;
+        let mut c4 = ctx_with_pid(1, 1); c4.now_ms = 400;
+        let mut c5 = ctx_with_pid(1, 1); c5.now_ms = 500;
+        let mut c6 = ctx_with_pid(1, 1); c6.now_ms = 600;
+
+        let _ = update(
+            &mut state,
+            Command::ReportMonitorTopologyChanged {
+                rects: vec![Rect { left: 0, top: 0, right: 1920, bottom: 1080 }],
+            },
+            &c1,
+        );
+        // 0xAA arrives FIRST (now_ms=200), then 0xBB (now_ms=300).
+        // Drain uses max_by_key(arrived_at_ms) — most recent. So 0xBB
+        // is drained first, deterministically.
+        let _ = update(&mut state, Command::ReportHwndOpened {
+            hwnd: 0xAA, class_name: "Chrome_WidgetWin_1".into(),
+            title: "".into(), label_hint: None,
+        }, &c2);
+        let _ = update(&mut state, Command::ReportHwndOpened {
+            hwnd: 0xBB, class_name: "Chrome_WidgetWin_1".into(),
+            title: "".into(), label_hint: None,
+        }, &c3);
+        assert!(state.pending_hwnds.contains_key(&0xAA));
+        assert!(state.pending_hwnds.contains_key(&0xBB));
+
+        // WindowOpened(w1) drains MOST RECENT (0xBB) — wrong pick.
+        let _ = update(&mut state, Command::ReportWindowOpened {
+            label: "w1".into(), kind: WindowKind::FullInstance,
+            parent_label: None,
+        }, &c4);
+        assert_eq!(state.windows["w1"].hwnd, Some(0xBB), "drain wrong-picks (most recent)");
+        assert!(!state.pending_hwnds.contains_key(&0xBB));
+
+        // WindowOpened(w2) drains the remaining (0xAA).
+        let _ = update(&mut state, Command::ReportWindowOpened {
+            label: "w2".into(), kind: WindowKind::FullInstance,
+            parent_label: None,
+        }, &c4);
+        assert_eq!(state.windows["w2"].hwnd, Some(0xAA), "drain picks remaining");
+
+        // on_after_created for w1 arrives with AUTHORITATIVE 0xAA → REPAIR.
+        let evs1 = update(&mut state, Command::ReportHwndOpened {
+            hwnd: 0xAA, class_name: "Chrome_WidgetWin_1".into(),
+            title: "".into(), label_hint: Some("w1".into()),
+        }, &c5);
+        assert_eq!(state.windows["w1"].hwnd, Some(0xAA), "repair to authoritative");
+        assert!(
+            evs1.iter().any(|e| matches!(e, Event::HwndDriftDetected {
+                kind: HwndDriftKind::HwndWithoutBrowser, ..
+            })),
+            "repair emits drift for diagnostic visibility, got {:?}", evs1
+        );
+
+        // on_after_created for w2 arrives with 0xBB. CRUCIAL: w1's
+        // repair above stole 0xAA from w2 (codex P1 round 5 steal),
+        // so w2.hwnd is currently None — clean Link, no Repair,
+        // no drift.
+        assert_eq!(state.windows["w2"].hwnd, None,
+            "w2's wrong link must have been cleared by w1's repair-steal");
+        let evs2 = update(&mut state, Command::ReportHwndOpened {
+            hwnd: 0xBB, class_name: "Chrome_WidgetWin_1".into(),
+            title: "".into(), label_hint: Some("w2".into()),
+        }, &c6);
+        assert_eq!(state.windows["w2"].hwnd, Some(0xBB), "clean link");
+        assert!(
+            !evs2.iter().any(|e| matches!(e, Event::HwndDriftDetected { .. })),
+            "no drift on clean Link (steal already happened in w1's repair), got {:?}", evs2
+        );
+
+        // Final: both windows linked to their authoritative HWNDs.
+        assert_eq!(state.windows["w1"].hwnd, Some(0xAA));
+        assert_eq!(state.windows["w2"].hwnd, Some(0xBB));
+    }
+
+    #[test]
+    fn wrr_repair_steals_hwnd_from_other_mirror() {
+        // PR #664 codex P1 round 5 — when the repair arm overwrites
+        // mirror[A].hwnd to the new HWND, any OTHER mirror that was
+        // wrongly linked to that HWND must have its link cleared.
+        // Otherwise apply_hwnd_destroyed (which uses iter().find by
+        // hwnd) only fires WindowClosed for ONE of them, leaving the
+        // other as a ghost row forever.
+        let (mut state, _c) = registered_host_state();
+        let mut c1 = ctx_with_pid(1, 1); c1.now_ms = 100;
+        let mut c2 = ctx_with_pid(1, 1); c2.now_ms = 200;
+        let mut c3 = ctx_with_pid(1, 1); c3.now_ms = 300;
+
+        let _ = update(&mut state, Command::ReportMonitorTopologyChanged {
+            rects: vec![Rect { left: 0, top: 0, right: 1920, bottom: 1080 }],
+        }, &c1);
+
+        // Stage: mirror[B] is linked to HWND 0xAA via some prior path
+        // (e.g., drain wrong-pick, partial-host-upgrade weird state).
+        let _ = update(&mut state, Command::ReportWindowOpened {
+            label: "B".into(), kind: WindowKind::FullInstance,
+            parent_label: None,
+        }, &c2);
+        state.windows.get_mut("B").unwrap().hwnd = Some(0xAA);
+
+        // mirror[A] just opened, no link yet.
+        let _ = update(&mut state, Command::ReportWindowOpened {
+            label: "A".into(), kind: WindowKind::FullInstance,
+            parent_label: None,
+        }, &c2);
+
+        // on_after_created for A arrives with the AUTHORITATIVE HWND
+        // 0xAA. Repair must:
+        //   1. set mirror[A].hwnd = 0xAA
+        //   2. CLEAR mirror[B].hwnd (the wrongly-linked one)
+        //   3. emit drift event mentioning the steal
+        let evs = update(&mut state, Command::ReportHwndOpened {
+            hwnd: 0xAA, class_name: "Chrome_WidgetWin_1".into(),
+            title: "".into(), label_hint: Some("A".into()),
+        }, &c3);
+
+        assert_eq!(state.windows["A"].hwnd, Some(0xAA), "A linked to authoritative");
+        assert_eq!(state.windows["B"].hwnd, None,
+            "B's wrong link must be CLEARED (codex P1 round 5)");
+
+        // Drift event surfaces the steal.
+        let drift_msg = evs.iter().find_map(|e| match e {
+            Event::HwndDriftDetected { detail, .. } => Some(detail.clone()),
+            _ => None,
+        });
+        assert!(
+            drift_msg.as_deref().map(|d| d.contains("stole from label=B")).unwrap_or(false),
+            "drift detail must mention which label was stolen from, got {:?}", drift_msg
+        );
+
+        // Now OS destroys 0xAA. Only mirror[A] is linked to it →
+        // exactly ONE WindowClosed, no ghost row for B.
+        let evs = update(&mut state, Command::ReportHwndDestroyed { hwnd: 0xAA }, &c3);
+        let closed_count = evs.iter().filter(|e| matches!(e, Event::WindowClosed { .. })).count();
+        assert_eq!(closed_count, 1, "exactly one WindowClosed (codex P1 round 5)");
+    }
+
+    #[test]
+    fn wrr_drain_handles_missing_explicit_link() {
+        // PR #664 codex P1 round 2 regression — when on_after_created
+        // CAN'T resolve HWND (hwnd_val=0 from all 3 sources host-side),
+        // it skips the explicit ReportHwndOpened. The drain-on-open
+        // fallback is the ONLY thing that links the mirror. Without
+        // the drain, mirror would stay hwnd=None permanently → no
+        // OrphanDestroy when OS closes the HWND → ghost panel rows.
+        let (mut state, c) = registered_host_state();
+        let _ = update(
+            &mut state,
+            Command::ReportMonitorTopologyChanged {
+                rects: vec![Rect { left: 0, top: 0, right: 1920, bottom: 1080 }],
+            },
+            &c,
+        );
+        // WM_CREATE captures HWND.
+        let _ = update(&mut state, Command::ReportHwndOpened {
+            hwnd: 0xAA, class_name: "Chrome_WidgetWin_1".into(),
+            title: "".into(), label_hint: None,
+        }, &c);
+        // WindowOpened drains it — the only link path that fires when
+        // on_after_created's explicit dispatch is skipped.
+        let _ = update(&mut state, Command::ReportWindowOpened {
+            label: "w1".into(), kind: WindowKind::FullInstance,
+            parent_label: None,
+        }, &c);
+        assert_eq!(
+            state.windows["w1"].hwnd, Some(0xAA),
+            "drain-on-open must link when explicit dispatch is the only fallback"
+        );
+
+        // OS destroys the HWND. Mirror's link enables OrphanDestroy
+        // detection → WindowClosed event → InstancePanel row removed.
+        let evs = update(&mut state, Command::ReportHwndDestroyed { hwnd: 0xAA }, &c);
+        assert!(
+            evs.iter().any(|e| matches!(
+                e, Event::HwndDriftDetected { kind: HwndDriftKind::OrphanDestroy, .. }
+            )),
+            "OrphanDestroy must fire so the panel row clears, got {:?}", evs
+        );
+        assert!(
+            evs.iter().any(|e| matches!(e, Event::WindowClosed { .. })),
+            "WindowClosed must fire to drive frontend cleanup, got {:?}", evs
+        );
+    }
+
+    #[test]
+    fn wrr_apply_hwnd_opened_repairs_stale_link() {
+        // PR #664 regression — if some prior path (e.g. partial host
+        // upgrade still using back-of-queue peek) linked a wrong HWND
+        // to a label, the explicit on_after_created path must REPAIR
+        // the link, not just emit drift and leave the wrong link in
+        // place.
+        let (mut state, c) = registered_host_state();
+        let _ = update(&mut state, Command::ReportMonitorTopologyChanged {
+            rects: vec![Rect { left: 0, top: 0, right: 1920, bottom: 1080 }],
+        }, &c);
+        let _ = update(&mut state, Command::ReportWindowOpened {
+            label: "w1".into(), kind: WindowKind::FullInstance,
+            parent_label: None,
+        }, &c);
+        // Simulate a stale wrong-HWND link (would happen pre-fix if
+        // back-of-queue peek labeled HWND_b as w1).
+        state.windows.get_mut("w1").unwrap().hwnd = Some(0xBAD);
+
+        // on_after_created arrives with the actual HWND for w1.
+        let evs = update(&mut state, Command::ReportHwndOpened {
+            hwnd: 0xAA, class_name: "Chrome_WidgetWin_1".into(),
+            title: "".into(), label_hint: Some("w1".into()),
+        }, &c);
+        assert_eq!(
+            state.windows["w1"].hwnd, Some(0xAA),
+            "stale link must be REPAIRED to the authoritative HWND"
+        );
+        assert!(
+            evs.iter().any(|e| matches!(e, Event::HwndDriftDetected {
+                kind: HwndDriftKind::HwndWithoutBrowser, ..
+            })),
+            "drift event must be emitted so the repair is visible in logs, got {:?}", evs
         );
     }
 

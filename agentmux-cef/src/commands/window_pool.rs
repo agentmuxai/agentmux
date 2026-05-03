@@ -536,6 +536,27 @@ pub fn promote_pool_window(
         agentmux_common::ipc::WindowKind::FullInstance,
         None,
     );
+
+    // PR #664 codex P2 — explicit AUTHORITATIVE HWND link for
+    // promoted pool windows. Pool windows skip the explicit
+    // report_hwnd_opened branch in `client.rs::on_after_created`
+    // (gated on `!label.starts_with("window-pool-")`) because their
+    // initial registration happens before promotion. The launcher's
+    // drain-on-WindowOpened fallback (in `handle_report_window_opened`)
+    // would only link a recent pending HWND if one happened to be in
+    // the 2s window — pre-promote pool windows are usually older than
+    // that, leaving the mirror permanently hwnd=None. This explicit
+    // link guarantees the mirror tracks the HWND so WRR
+    // visibility/foreground/orphan-destroy drift detection works for
+    // every torn-off window. The accompanying repair logic in
+    // `apply_hwnd_opened` corrects any wrong drain-pick.
+    crate::launcher_ipc::report_hwnd_opened(
+        raw_hwnd as u64,
+        "Chrome_WidgetWin_1".to_string(),
+        label.clone(),
+        Some(label.clone()),
+    );
+
     // Phase B.4 follow-up — drift check after the atomic
     // pool→windows transition.
     crate::launcher_ipc::compute_and_report_host_counts(state);
