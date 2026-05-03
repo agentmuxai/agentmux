@@ -73,11 +73,11 @@ pub struct Ctx {
     pub now_ms: u64,
 }
 
+mod pool;
+
 /// Apply one Command to State, returning the resulting Events. State
 /// is mutated in place. Total function — never panics on input
 /// (panics are reserved for internal invariant violations).
-mod pool;
-
 pub fn update(state: &mut State, cmd: Command, ctx: &Ctx) -> Vec<Event> {
     let _ = ctx.conn_id; // reserved for B.4 routing
     match cmd {
@@ -623,6 +623,11 @@ fn handle_report_panes_reaped(
     }]
 }
 
+/// Phase CPD-1 — host reported a saga-issued action failed. Pure
+/// pass-through translation into `Event::SagaActionFailed`. The
+/// saga coordinator's bus loop will (CPD-3) treat the event as a
+/// terminal signal for the matching `saga_id` and emit
+/// `Event::SagaFailed`, dropping the saga from in-flight.
 fn handle_report_saga_action_failed(
     state: &mut State,
     saga_id: u64,
