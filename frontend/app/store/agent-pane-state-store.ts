@@ -23,6 +23,7 @@ import {
     AgentPaneState,
     initialState,
 } from "./agent-pane-state/types";
+import { type CommandSource, recordDispatch } from "./command-source";
 
 /**
  * The set of projection setters the slot writes to. Each one corresponds
@@ -84,6 +85,7 @@ export function unregisterPane(blockId: string): void {
 export function dispatch(
     blockId: string,
     command: AgentPaneCommand,
+    source: CommandSource = "system",
 ): AgentPaneEvent[] {
     const slot = slots.get(blockId);
     if (!slot) {
@@ -106,6 +108,14 @@ export function dispatch(
     if (slot.state.pending !== prev.pending) slot.proj.pending(slot.state.pending);
 
     for (const ev of result.events) eventSink(blockId, ev);
+    recordDispatch({
+        slice: "agent-pane-state",
+        key: blockId,
+        command,
+        events: result.events,
+        source,
+        at: Date.now(),
+    });
     return result.events;
 }
 
