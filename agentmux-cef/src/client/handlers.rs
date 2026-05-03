@@ -12,7 +12,6 @@ use cef::*;
 use parking_lot::Mutex;
 
 use super::AgentMuxHandler;
-use super::dlog;
 
 // ---------------------------------------------------------------------------
 
