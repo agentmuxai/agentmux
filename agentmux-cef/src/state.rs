@@ -123,13 +123,13 @@ pub struct PendingWindowCreation {
 // ── Pane lifecycle (H.1) ─────────────────────────────────────────────────
 
 /// Lifecycle state of a browser pane (the `defwidget@browser` widget). Held
-/// inside `HostState.panes` keyed by `block_id`. Mirrors the existing
-/// `PaneStateMachine::PaneLifecycle` (pane/lifecycle.rs:28); the existing
+/// inside `HostState.browser_panes` keyed by `block_id`. Mirrors the existing
+/// `PaneStateMachine::BrowserPaneLifecycle` (pane/lifecycle.rs:28); the existing
 /// type stays during PR #2's a→e migration. PR #2 step e deletes the
 /// pane/lifecycle.rs version and migrates all readers to this one.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[allow(dead_code)]
-pub enum PaneLifecycle {
+pub enum BrowserPaneLifecycle {
     /// Pane is alive and accepting operations (focus, resize, navigate).
     Live,
     /// Close requested; awaiting CEF on_before_close to fully tear down.
@@ -138,14 +138,14 @@ pub enum PaneLifecycle {
     Closing { since: std::time::Instant },
 }
 
-/// Per-pane reducer-managed entry. Replaces `pane::lifecycle::PaneEntry`
+/// Per-pane reducer-managed entry. Replaces `pane::lifecycle::BrowserPaneEntry`
 /// (lifecycle.rs:42) at PR #2 step e.
 #[derive(Clone, Debug)]
 #[allow(dead_code)]
-pub struct PaneEntry {
+pub struct BrowserPaneEntry {
     pub block_id: String,
     pub label: String,
-    pub lifecycle: PaneLifecycle,
+    pub lifecycle: BrowserPaneLifecycle,
 }
 
 // ── Browser handle registry (H.2) ────────────────────────────────────────
@@ -187,7 +187,7 @@ pub enum BrowserKind {
     /// pool; cleared on promote.
     TopLevel { is_pool: bool },
     /// Browser pane child window. `block_id` correlates with the
-    /// `HostState.panes` entry.
+    /// `HostState.browser_panes` entry.
     Pane { block_id: String },
 }
 
@@ -660,11 +660,11 @@ impl AppState {
     // ── Phase H.2 — browser read helpers (reducer-only, post-flip) ──────
     //
     // After PR #4's flip step (H.1.c + H.2.c), `HostState.browsers` /
-    // `HostState.panes` are the sole source of truth. Legacy reads,
+    // `HostState.browser_panes` are the sole source of truth. Legacy reads,
     // fallback paths, and drift logging removed — production smoke
     // verified zero drift across 50 reducer events with a balanced
     // BrowserRegistered/Unregistered count (18/18) and PaneCreate/
-    // PaneClosed count (7/7) before this flip.
+    // BrowserPaneClosed count (7/7) before this flip.
     //
     // Snapshot-and-drop: each helper takes the relevant lock briefly,
     // clones what's needed, drops the lock. Callers never hold the
@@ -731,22 +731,22 @@ impl AppState {
     /// (focus/resize/navigate) — `None` indicates the pane is missing or
     /// in `Closing`, in which case the caller must short-circuit rather
     /// than touch the (possibly destroyed) HWND.
-    pub fn live_pane_label(&self, block_id: &str) -> Option<String> {
+    pub fn live_browser_pane_label(&self, block_id: &str) -> Option<String> {
         self.host_state
             .lock()
-            .panes
+            .browser_panes
             .get(block_id)
-            .filter(|e| e.lifecycle == PaneLifecycle::Live)
+            .filter(|e| e.lifecycle == BrowserPaneLifecycle::Live)
             .map(|e| e.label.clone())
     }
 
     /// Snapshot of all `Live` pane labels. Used by `defocus_all` etc.
-    pub fn live_pane_labels(&self) -> Vec<String> {
+    pub fn live_browser_pane_labels(&self) -> Vec<String> {
         self.host_state
             .lock()
-            .panes
+            .browser_panes
             .values()
-            .filter(|e| e.lifecycle == PaneLifecycle::Live)
+            .filter(|e| e.lifecycle == BrowserPaneLifecycle::Live)
             .map(|e| e.label.clone())
             .collect()
     }
@@ -820,12 +820,12 @@ impl AppState {
     /// async surface. If it turns out the gate needs to widen
     /// ("any pane present" rather than "any pane Closing"), that's a
     /// one-line edit. Spec §5 escape hatch.
-    pub fn any_pane_closing(&self) -> bool {
+    pub fn any_browser_pane_closing(&self) -> bool {
         self.host_state
             .lock()
-            .panes
+            .browser_panes
             .values()
-            .any(|e| matches!(e.lifecycle, PaneLifecycle::Closing { .. }))
+            .any(|e| matches!(e.lifecycle, BrowserPaneLifecycle::Closing { .. }))
     }
 
     /// Phase B.5e — authoritative instance-number lookup. Reads
@@ -946,29 +946,29 @@ fn log_host_event(ev: &crate::reducer::HostEvent) {
             "[host-reducer] dequeue on empty queue — caller will fall back",
         ),
         // ── H.1 panes ────────────────────────────────────────────────────
-        HostEvent::PaneCreateRequested { block_id, label, version } => tracing::info!(
+        HostEvent::BrowserPaneCreateRequested { block_id, label, version } => tracing::info!(
             target: "host-reducer",
-            event = "PaneCreateRequested",
+            event = "BrowserPaneCreateRequested",
             block_id = %block_id, label = %label, version,
         ),
-        HostEvent::PaneLive { block_id, label, version } => tracing::info!(
+        HostEvent::BrowserPaneLive { block_id, label, version } => tracing::info!(
             target: "host-reducer",
-            event = "PaneLive",
+            event = "BrowserPaneLive",
             block_id = %block_id, label = %label, version,
         ),
-        HostEvent::PaneClosing { block_id, version } => tracing::info!(
+        HostEvent::BrowserPaneClosing { block_id, version } => tracing::info!(
             target: "host-reducer",
-            event = "PaneClosing",
+            event = "BrowserPaneClosing",
             block_id = %block_id, version,
         ),
-        HostEvent::PaneClosed { block_id, version } => tracing::info!(
+        HostEvent::BrowserPaneClosed { block_id, version } => tracing::info!(
             target: "host-reducer",
-            event = "PaneClosed",
+            event = "BrowserPaneClosed",
             block_id = %block_id, version,
         ),
-        HostEvent::PaneCreationFailed { block_id, reason, version } => tracing::warn!(
+        HostEvent::BrowserPaneCreationFailed { block_id, reason, version } => tracing::warn!(
             target: "host-reducer",
-            event = "PaneCreationFailed",
+            event = "BrowserPaneCreationFailed",
             block_id = %block_id, reason = %reason, version,
         ),
         // ── H.2 browsers ─────────────────────────────────────────────────

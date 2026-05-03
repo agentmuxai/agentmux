@@ -344,7 +344,7 @@ pub fn tear_off_pool_promote(
 pub fn open_window_at_position(state: &Arc<AppState>, args: &serde_json::Value) -> Result<serde_json::Value, String> {
     // PR #6 H.7 — refuse top-level creation while any pane is mid-close.
     // See `commands/window.rs::open_window_with_kind` for rationale.
-    if state.any_pane_closing() {
+    if state.any_browser_pane_closing() {
         tracing::warn!(
             target: "wfr:gate",
             "[wfr:gate] open_window_at_position refused — pane is mid-close (H.7 invariant)"

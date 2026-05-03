@@ -80,10 +80,10 @@ pub struct AgentMuxHandler {
 
 impl AgentMuxHandler {
     pub fn new(state: Arc<AppState>, ipc_port: u16) -> Arc<Mutex<Self>> {
-        Self::new_with_pane(state, ipc_port, false)
+        Self::new_with_browser_pane(state, ipc_port, false)
     }
 
-    pub fn new_with_pane(state: Arc<AppState>, ipc_port: u16, is_pane: bool) -> Arc<Mutex<Self>> {
+    pub fn new_with_browser_pane(state: Arc<AppState>, ipc_port: u16, is_pane: bool) -> Arc<Mutex<Self>> {
         Arc::new(Mutex::new(Self {
             browser_list: Vec::new(),
             is_closing: false,
@@ -321,10 +321,10 @@ impl AgentMuxHandler {
         }
 
         // Pane-specific on_after_created work (Z-order raise + Win32 focus
-        // subclass install) lives in `crate::pane::callbacks` after Phase 4
+        // subclass install) lives in `crate::browser_pane::callbacks` after Phase 4
         // of the modularization split.
         if self.is_pane {
-            crate::pane::callbacks::on_after_created_pane(&self.state, &browser);
+            crate::browser_pane::callbacks::on_after_created_browser_pane(&self.state, &browser);
         }
 
         // Phase B.4 — report top-level windows to the launcher's
@@ -541,10 +541,10 @@ impl AgentMuxHandler {
         }
 
         // Pane-specific on_before_close work (drain lifecycle entry) lives
-        // in `crate::pane::callbacks` after Phase 4.
+        // in `crate::browser_pane::callbacks` after Phase 4.
         if let Some(ref lbl) = label {
             if lbl.starts_with("browser-pane-") {
-                crate::pane::callbacks::on_before_close_pane(&self.state, lbl);
+                crate::browser_pane::callbacks::on_before_close_browser_pane(&self.state, lbl);
             }
             // Pool-window cleanup — release the respawn semaphore +
             // drop the label from the queue if the window died before
@@ -616,7 +616,7 @@ impl AgentMuxHandler {
 
         // Phase F.6 — narrate the pane-reap step for the launcher's
         // window-cleanup-cascade saga. By the time we reach here, the
-        // pane lifecycle drain (`on_before_close_pane` for browser-
+        // pane lifecycle drain (`on_before_close_browser_pane` for browser-
         // pane labels) and the subwindow cascade above have run for
         // this label. The saga uses this signal as the Step 1
         // terminal so it can advance to Step 2 (drain-pool decision).
@@ -905,7 +905,7 @@ impl AgentMuxHandler {
             return;
         }
         if let Some(b) = browser.as_deref() {
-            crate::pane::callbacks::on_loading_state_change_pane(
+            crate::browser_pane::callbacks::on_loading_state_change_pane(
                 &self.state,
                 b,
                 can_go_back != 0,
@@ -930,11 +930,11 @@ impl AgentMuxHandler {
 
         // Pane-specific on_load_end work (focus subclass re-install after
         // Chromium rebuilds Chrome_RenderWidgetHostHWND on navigation)
-        // lives in `crate::pane::callbacks` after Phase 4. Returning early
+        // lives in `crate::browser_pane::callbacks` after Phase 4. Returning early
         // skips main-only IPC-port injection below.
         if self.is_pane {
             if let Some(b) = browser.as_deref() {
-                crate::pane::callbacks::on_load_end_pane(&self.state, b);
+                crate::browser_pane::callbacks::on_load_end_pane(&self.state, b);
             }
             return;
         }
@@ -1381,7 +1381,7 @@ wrap_client! {
 // focus during the very first navigation of a newly-created pane fires
 // CEF's `on_before_close` on that pane ~10ms later. Focus-steal
 // protection lives entirely in the Win32 `WndProc` subclass below
-// (`pane::hwnd::install_pane_focus_redirect`), which redirects programmatic
+// (`pane::hwnd::install_browser_pane_focus_redirect`), which redirects programmatic
 // `WM_SETFOCUS` back to the top-level window. User clicks are let through
 // because `WM_LBUTTONDOWN` in the subclass arms `ALLOW_PANE_FOCUS_ONCE`.
 wrap_focus_handler! {
@@ -1401,7 +1401,7 @@ wrap_focus_handler! {
             // reliably reproducible when creating a 2nd browser pane.
             // The Win32 WndProc subclass below already redirects
             // page-load SetFocus to the top-level window (see
-            // `pane::hwnd::install_pane_focus_redirect`), which
+            // `pane::hwnd::install_browser_pane_focus_redirect`), which
             // handles the original focus-steal concern. Returning 0
             // here so CEF proceeds with normal focus handling at the
             // Chromium level; Win32 subclass continues to redirect
@@ -1672,7 +1672,7 @@ static ORIGINAL_WNDPROCS: std::sync::LazyLock<
 > = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
 
 // Pane Win32 focus-redirect subclass + ALLOW_PANE_FOCUS_ONCE flag moved to
-// `crate::pane::hwnd` in Phase 2 of the modularization split. See
+// `crate::browser_pane::hwnd` in Phase 2 of the modularization split. See
 // `docs/specs/SPEC_BROWSER_PANE_MODULARIZATION.md`.
 
 /// Install a WndProc hook on a SECONDARY window that handles:

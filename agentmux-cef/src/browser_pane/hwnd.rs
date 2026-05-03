@@ -7,7 +7,7 @@
 //! Moved out of `client.rs` during Phase 2 of the pane modularization split
 //! (see `docs/specs/SPEC_BROWSER_PANE_MODULARIZATION.md` §6). `client.rs`
 //! still uses `ALLOW_PANE_FOCUS_ONCE` at a distance (nothing there imports
-//! the function directly), but `install_pane_focus_redirect` is the home
+//! the function directly), but `install_browser_pane_focus_redirect` is the home
 //! for pane-focused Win32 subclass logic and future phases can wire it up
 //! to pane `on_after_created` / `on_load_end` without touching `client.rs`.
 //!
@@ -26,7 +26,7 @@ static PANE_WNDPROCS: std::sync::LazyLock<
 > = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
 
 /// Per-pane context, keyed by the pane's outer HWND. Populated by
-/// `install_pane_focus_redirect`. The WndProc hook uses it to emit the
+/// `install_browser_pane_focus_redirect`. The WndProc hook uses it to emit the
 /// `browser-pane-clicked` event on `WM_LBUTTONDOWN` without needing to
 /// round-trip through CEF callbacks — only the outer HWND is keyed here;
 /// descendants walk up via `GetParent` to find their context.
@@ -138,7 +138,7 @@ unsafe fn should_redirect_pane_focus_to_root(root: *mut std::ffi::c_void) -> boo
 /// by `pane::callbacks::on_load_end_pane` after every navigation — Chromium
 /// recreates the `Chrome_RenderWidgetHostHWND` on every page load, so the
 /// subclass has to follow along or it ends up stranded on a destroyed HWND.
-pub unsafe fn install_pane_focus_redirect(
+pub unsafe fn install_browser_pane_focus_redirect(
     hwnd: *mut std::ffi::c_void,
     state: Arc<crate::state::AppState>,
     block_id: String,

@@ -4,7 +4,7 @@
 //! Browser-pane module.
 //!
 //! Phase H.1.d/e (PR #5) deleted the in-memory `PaneStateMachine`; pane
-//! lifecycle now lives only in the host reducer (`HostState.panes`).
+//! lifecycle now lives only in the host reducer (`HostState.browser_panes`).
 //! `RegisterResult` moved to `crate::reducer`.
 
 pub mod callbacks;
@@ -18,4 +18,4 @@ pub use creation::CreatePaneTask;
 pub use hwnd::ALLOW_PANE_FOCUS_ONCE;
 
 #[cfg(target_os = "windows")]
-pub use hwnd::install_pane_focus_redirect;
+pub use hwnd::install_browser_pane_focus_redirect;
