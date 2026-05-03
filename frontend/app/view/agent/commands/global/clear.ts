@@ -16,7 +16,7 @@ export const clearCommand: SlashCommand = {
     description: "Clear the visible document (frontend-only)",
     arg: { kind: "none" },
     handler: async (ctx): Promise<SlashResult> => {
-        dispatchDoc(ctx.blockId, { type: "UserClear" });
+        dispatchDoc(ctx.blockId, { type: "UserClear" }, "user");
         return { kind: "ok", message: "chat cleared" };
     },
 };

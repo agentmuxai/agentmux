@@ -23,6 +23,7 @@ import {
     AgentDocumentState,
     initialState,
 } from "./agent-document/types";
+import { type CommandSource, recordDispatch } from "./command-source";
 
 /** A pane's projection setter — typically the SignalPair[1] from createAgentAtoms. */
 type DocumentSetter = (nodes: DocumentNode[]) => void;
@@ -97,6 +98,7 @@ export function unregisterPane(blockId: string): void {
 export function dispatch(
     blockId: string,
     command: AgentDocumentCommand,
+    source: CommandSource = "system",
 ): AgentDocumentEvent[] {
     const slot = slots.get(blockId);
     if (!slot) {
@@ -113,6 +115,14 @@ export function dispatch(
         slot.setter(slot.state.nodes);
     }
     for (const ev of result.events) eventSink(blockId, ev);
+    recordDispatch({
+        slice: "agent-document",
+        key: blockId,
+        command,
+        events: result.events,
+        source,
+        at: Date.now(),
+    });
     return result.events;
 }
 

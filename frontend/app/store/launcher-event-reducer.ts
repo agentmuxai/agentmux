@@ -43,6 +43,7 @@ import {
     LauncherEventReducerEvent,
     LauncherEventState,
 } from "./launcher-event/types";
+import { recordDispatch } from "./command-source";
 
 // Re-export the filter so existing callers (app-init.ts) don't need to
 // chase the new module path. The filter is the source of truth for
@@ -79,6 +80,16 @@ function dispatch(command: LauncherEventCommand): LauncherEventReducerEvent[] {
     state = result.state;
     if (state.instances !== prev.instances) project();
     for (const ev of result.events) onAuditEvent(ev);
+    // Source is always "system" — this slice mirrors upstream events
+    // (launcher channel) and the snapshot seed; no user-driven path.
+    recordDispatch({
+        slice: "launcher-event",
+        key: null,
+        command,
+        events: result.events,
+        source: "system",
+        at: Date.now(),
+    });
     return result.events;
 }
 

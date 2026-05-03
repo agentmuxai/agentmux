@@ -228,12 +228,16 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         // the acceptance event promotes it. This is the architecture
         // from AGENT_PANE_QUEUED_MESSAGE_FEEDBACK_SPEC.md (two lists,
         // migration on accept).
-        dispatchPane(opts.blockId, {
-            type: "PendingMessageQueued",
-            id: messageId,
-            text: message,
-            at: Date.now(),
-        });
+        dispatchPane(
+            opts.blockId,
+            {
+                type: "PendingMessageQueued",
+                id: messageId,
+                text: message,
+                at: Date.now(),
+            },
+            "user",
+        );
 
         // Defer the scroll-to-bottom by one animation frame so the
         // pending row has a chance to mount before the scroll math runs.
@@ -288,7 +292,7 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         // and it also runs a fallback timer that does the same cleanup
         // if `session_end` never arrives (killing a subprocess prevents
         // the CLI from emitting its own terminating result event).
-        dispatchPane(opts.blockId, { type: "RequestStop", at: Date.now() });
+        dispatchPane(opts.blockId, { type: "RequestStop", at: Date.now() }, "user");
         RpcApi.ControllerInputCommand(TabRpcClient, {
             blockid: opts.blockId,
             signame: "SIGINT",
