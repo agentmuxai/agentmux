@@ -374,11 +374,14 @@ impl AgentMuxHandler {
                 //
                 // If both Views and host return null (transient
                 // lifecycle case), skip the explicit dispatch. The
-                // launcher's drain-on-WindowOpened fallback handles
-                // most such cases by linking the recent pending HWND
-                // from WM_CREATE; in the rare case both fail, the
-                // mirror stays unlinked — same outcome as pre-PR-664
-                // for that edge case, no worse.
+                // launcher's drain-on-WindowOpened fallback links
+                // the recent pending HWND from WM_CREATE — that's
+                // the sole link path when `hwnd_val=0`. The drain
+                // is reliable when WM_CREATE arrived recently (within
+                // the launcher's 2s age limit); the only failure mode
+                // is no WM_CREATE-pending entry within that window,
+                // in which case the mirror stays hwnd=None — same
+                // outcome as pre-PR-664 for that edge case, no worse.
                 let mut browser_for_wrr = browser.clone();
                 let views_hwnd = browser_view_get_for_browser(Some(&mut browser_for_wrr))
                     .and_then(|bv| bv.window())

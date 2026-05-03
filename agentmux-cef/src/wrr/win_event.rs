@@ -267,8 +267,8 @@ unsafe extern "system" fn win_event_callback(
             // for EVERY in-flight WM_CREATE — mislabeling every HWND
             // that arrives before its corresponding `on_after_created`.
             //
-            // Worse: the launcher's drain-on-WindowOpened fallback at
-            // `apply_window_opened` (launcher reducer.rs:810) only
+            // Worse: the launcher's drain-on-WindowOpened fallback in
+            // `handle_report_window_opened` (launcher reducer.rs) only
             // drains pending HWNDs whose `label_hint.is_none()`. A
             // wrong hint actively HIJACKS the fallback — the launcher
             // sees `label_hint=Some(WRONG)`, doesn't match any
