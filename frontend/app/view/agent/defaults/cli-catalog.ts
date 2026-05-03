@@ -29,10 +29,8 @@ export interface CliCatalogEntry {
     displayName: string;
     /** Unicode glyph for the card's big left-side icon (fallback when iconSvg is absent). */
     icon: string;
-    /** Path to an SVG asset (relative to public/) for the brand-color pill icon. */
+    /** Path to a self-contained SVG asset (relative to public/) — pill bg + icon in one file. */
     iconSvg?: string;
-    /** Background color for the pill when iconSvg is set. */
-    pillColor?: string;
     /** Capability-first one-liner used as the card title. */
     blurb: string;
     /** Primary context file the CLI reads at startup — shown as a badge. */
@@ -56,7 +54,6 @@ export const CLI_CATALOG: CliCatalogEntry[] = [
         displayName: "Claude Code",
         icon: "✖",
         iconSvg: "/icons/agents/claude.svg",
-        pillColor: "#D97757",
         blurb: "Anthropic's coding agent",
         primaryContextFile: "CLAUDE.md",
         mcpSupport: "stdio+http",
@@ -71,7 +68,6 @@ export const CLI_CATALOG: CliCatalogEntry[] = [
         displayName: "Codex CLI",
         icon: "✦",
         iconSvg: "/icons/agents/codex.svg",
-        pillColor: "#412991",
         blurb: "OpenAI's coding agent",
         primaryContextFile: "AGENTS.md",
         mcpSupport: "stdio+http+oauth",
@@ -86,7 +82,6 @@ export const CLI_CATALOG: CliCatalogEntry[] = [
         displayName: "Gemini CLI",
         icon: "⚡",
         iconSvg: "/icons/agents/gemini.svg",
-        pillColor: "#8E75B2",
         blurb: "Google's coding agent",
         primaryContextFile: "GEMINI.md",
         mcpSupport: "stdio+http",
@@ -101,7 +96,6 @@ export const CLI_CATALOG: CliCatalogEntry[] = [
         displayName: "Kimi Code",
         icon: "◈",
         iconSvg: "/icons/agents/kimi.svg",
-        pillColor: "#4B5FFF",
         blurb: "Moonshot's 262k-context agent",
         primaryContextFile: "AGENTS.md",
         mcpSupport: "stdio+http",
@@ -115,7 +109,7 @@ export const CLI_CATALOG: CliCatalogEntry[] = [
         provider: "pi",
         displayName: "Pi",
         icon: "π",
-        pillColor: "#4A4A4A",
+        iconSvg: "/icons/agents/pi.svg",
         blurb: "Plandex's multi-provider agent",
         primaryContextFile: "AGENTS.md or CLAUDE.md",
         mcpSupport: "stdio+http",
@@ -130,7 +124,6 @@ export const CLI_CATALOG: CliCatalogEntry[] = [
         displayName: "OpenClaw",
         icon: "◎",
         iconSvg: "/icons/agents/openclaw.svg",
-        pillColor: "#1a1a1a",
         blurb: "ACP orchestration platform",
         primaryContextFile: "AGENTS.md + SOUL.md + …",
         mcpSupport: "none",
@@ -144,7 +137,6 @@ export const CLI_CATALOG: CliCatalogEntry[] = [
         displayName: "GitHub Copilot CLI",
         icon: "⛶",
         iconSvg: "/icons/agents/copilot.svg",
-        pillColor: "#181717",
         blurb: "Microsoft's coding agent",
         primaryContextFile: "AGENTS.md",
         mcpSupport: "stdio+http",
