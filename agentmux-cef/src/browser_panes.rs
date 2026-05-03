@@ -171,7 +171,7 @@ impl BrowserPaneManager {
         );
         let result = out.browser_pane_register_result.ok_or_else(|| {
             format!(
-                "try_register_pane_live returned no result (block_id={}); host shutting down?",
+                "try_register_browser_pane_live returned no result (block_id={}); host shutting down?",
                 block_id
             )
         })?;
