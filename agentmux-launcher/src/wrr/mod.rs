@@ -110,19 +110,20 @@ pub fn apply_hwnd_opened(
             Some(mirror) => {
                 // PR #664 — REPAIR instead of just emitting drift.
                 // The explicit `on_after_created` path is the
-                // authoritative source for label↔HWND linking now
-                // (drain-on-WindowOpened removed in
-                // `handle_report_window_opened`). If we find a stale
-                // link, overwrite it. The orphaned `prior` HWND will
-                // be re-attributed when ITS OWN on_after_created
-                // fires a few ms later — same flow, no special-casing.
+                // AUTHORITATIVE source for label↔HWND linking. The
+                // launcher's drain-on-WindowOpened (in
+                // `handle_report_window_opened`) provides best-effort
+                // linking but can wrong-pick under burst creates;
+                // when the explicit path arrives later it REPAIRS
+                // any stale link by overwriting. The orphaned `prior`
+                // HWND will be re-attributed when ITS OWN
+                // on_after_created fires a few ms later — same flow,
+                // no special-casing.
                 //
                 // We still emit `HwndWithoutBrowser` drift so the
                 // existence of a stale link is visible in the log
-                // for diagnostic purposes (e.g., partial host
-                // upgrade where the host still sends back-of-queue
-                // peeks). Without the drift event, the silent repair
-                // would mask real bugs.
+                // for diagnostic purposes. Without the drift event,
+                // the silent repair would mask real bugs.
                 let prior = mirror.hwnd.unwrap_or(0);
                 mirror.hwnd = Some(hwnd);
                 drain_pending = true;

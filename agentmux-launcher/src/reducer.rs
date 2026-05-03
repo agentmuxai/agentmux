@@ -2848,73 +2848,79 @@ mod tests {
     #[test]
     fn wrr_burst_creates_with_drain_then_repair() {
         // PR #664 codex P1 round 2 — drain-on-open RESTORED as fallback
-        // for the hwnd_val=0 case (when on_after_created can't resolve
-        // HWND from any of 3 sources). The drain may wrong-pick under
-        // burst creates, but apply_hwnd_opened REPAIRS via the
-        // Repaired arm when the explicit on_after_created path fires.
+        // for the hwnd_val=0 case. The drain may wrong-pick under burst
+        // creates, but apply_hwnd_opened REPAIRS via the Repaired arm
+        // when the explicit on_after_created path fires.
         //
-        // This test verifies the burst scenario:
-        //   1. Two WM_CREATEs queue (label_hint=None each)
-        //   2. WindowOpened(A) drains the most recent (HWND_b) — WRONG
-        //   3. on_after_created for A reports HWND_a, label=A → REPAIR
-        //   4. on_after_created for B reports HWND_b, label=B → links
-        //      cleanly (HWND_b was drained but never repaired-away)
-        let (mut state, c) = registered_host_state();
+        // Test verifies: WindowOpened drains some pending HWND, then
+        // explicit on_after_created arrives with the authoritative
+        // HWND and REPAIRS any wrong link. Doesn't assume a specific
+        // wrong-pick order (HashMap iter is non-deterministic when
+        // multiple pending entries share arrived_at_ms — test must be
+        // robust to either pick).
+        let (mut state, _c) = registered_host_state();
+        let mut c1 = ctx_with_pid(1, 1); c1.now_ms = 100;
+        let mut c2 = ctx_with_pid(1, 1); c2.now_ms = 200;
+        let mut c3 = ctx_with_pid(1, 1); c3.now_ms = 300;
+        let mut c4 = ctx_with_pid(1, 1); c4.now_ms = 400;
+        let mut c5 = ctx_with_pid(1, 1); c5.now_ms = 500;
+        let mut c6 = ctx_with_pid(1, 1); c6.now_ms = 600;
+
         let _ = update(
             &mut state,
             Command::ReportMonitorTopologyChanged {
                 rects: vec![Rect { left: 0, top: 0, right: 1920, bottom: 1080 }],
             },
-            &c,
+            &c1,
         );
+        // 0xAA arrives FIRST (now_ms=200), then 0xBB (now_ms=300).
+        // Drain uses max_by_key(arrived_at_ms) — most recent. So 0xBB
+        // is drained first, deterministically.
         let _ = update(&mut state, Command::ReportHwndOpened {
             hwnd: 0xAA, class_name: "Chrome_WidgetWin_1".into(),
             title: "".into(), label_hint: None,
-        }, &c);
+        }, &c2);
         let _ = update(&mut state, Command::ReportHwndOpened {
             hwnd: 0xBB, class_name: "Chrome_WidgetWin_1".into(),
             title: "".into(), label_hint: None,
-        }, &c);
+        }, &c3);
         assert!(state.pending_hwnds.contains_key(&0xAA));
         assert!(state.pending_hwnds.contains_key(&0xBB));
 
-        // WindowOpened drains MOST RECENT pending HWND (0xBB) into w1.
-        // This is the "wrong pick" — w1's actual HWND is 0xAA, but we
-        // don't know that yet.
+        // WindowOpened(w1) drains MOST RECENT (0xBB) — wrong pick.
         let _ = update(&mut state, Command::ReportWindowOpened {
             label: "w1".into(), kind: WindowKind::FullInstance,
             parent_label: None,
-        }, &c);
-        assert_eq!(state.windows["w1"].hwnd, Some(0xBB), "drain wrong-picks");
+        }, &c4);
+        assert_eq!(state.windows["w1"].hwnd, Some(0xBB), "drain wrong-picks (most recent)");
         assert!(!state.pending_hwnds.contains_key(&0xBB));
 
+        // WindowOpened(w2) drains the remaining (0xAA).
         let _ = update(&mut state, Command::ReportWindowOpened {
             label: "w2".into(), kind: WindowKind::FullInstance,
             parent_label: None,
-        }, &c);
+        }, &c4);
         assert_eq!(state.windows["w2"].hwnd, Some(0xAA), "drain picks remaining");
 
-        // on_after_created for w1 arrives with the AUTHORITATIVE HWND
-        // (0xAA). apply_hwnd_opened detects the mismatch and REPAIRS.
+        // on_after_created for w1 arrives with AUTHORITATIVE 0xAA → REPAIR.
         let evs1 = update(&mut state, Command::ReportHwndOpened {
             hwnd: 0xAA, class_name: "Chrome_WidgetWin_1".into(),
             title: "".into(), label_hint: Some("w1".into()),
-        }, &c);
+        }, &c5);
         assert_eq!(state.windows["w1"].hwnd, Some(0xAA), "repair to authoritative");
         assert!(
             evs1.iter().any(|e| matches!(e, Event::HwndDriftDetected {
                 kind: HwndDriftKind::HwndWithoutBrowser, ..
             })),
-            "repair must emit drift for diagnostic visibility, got {:?}", evs1
+            "repair emits drift for diagnostic visibility, got {:?}", evs1
         );
 
-        // on_after_created for w2 arrives with HWND 0xBB. w2 is
-        // currently linked to 0xAA (also wrong from drain). Repair to
-        // 0xBB.
+        // on_after_created for w2 arrives with 0xBB → also REPAIR
+        // (w2 was wrongly linked to 0xAA above).
         let evs2 = update(&mut state, Command::ReportHwndOpened {
             hwnd: 0xBB, class_name: "Chrome_WidgetWin_1".into(),
             title: "".into(), label_hint: Some("w2".into()),
-        }, &c);
+        }, &c6);
         assert_eq!(state.windows["w2"].hwnd, Some(0xBB), "repair to authoritative");
         assert!(
             evs2.iter().any(|e| matches!(e, Event::HwndDriftDetected {
@@ -2923,8 +2929,7 @@ mod tests {
             "repair drift, got {:?}", evs2
         );
 
-        // Final state: both windows linked to their authoritative HWNDs.
-        // The drain's wrong-picks were transient; repair restored truth.
+        // Final: both windows linked to their authoritative HWNDs.
         assert_eq!(state.windows["w1"].hwnd, Some(0xAA));
         assert_eq!(state.windows["w2"].hwnd, Some(0xBB));
     }
