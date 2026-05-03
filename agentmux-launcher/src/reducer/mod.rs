@@ -41,9 +41,9 @@
 //     register. Running → Quitting on Quit (B.3 placeholder).
 //     Quitting → Dead on cleanup-done (B.3 placeholder). No skipping.
 
-use agentmux_common::ipc::{ClientKind, Command, DriftKind, ErrorCode, Event};
+use agentmux_common::ipc::{Command, DriftKind, Event};
 
-use crate::state::{LifecyclePhase, ProcessRecord, ProcessState, State};
+use crate::state::State;
 
 /// Context the reducer needs but can't read from State (clocks,
 /// connection identity). Passed in per-call so update remains pure.
@@ -76,6 +76,7 @@ pub struct Ctx {
 mod pool;
 mod window;
 mod saga;
+mod connection;
 
 /// Apply one Command to State, returning the resulting Events. State
 /// is mutated in place. Total function — never panics on input
@@ -87,36 +88,36 @@ pub fn update(state: &mut State, cmd: Command, ctx: &Ctx) -> Vec<Event> {
             kind,
             pid,
             version,
-        } => handle_register(state, ctx, kind, pid, version),
+        } => connection::handle_register(state, ctx, kind, pid, version),
         Command::Ping { nonce } => {
             let v = state.bump_version();
             vec![Event::Pong { nonce, version: v }]
         }
-        Command::Goodbye => handle_goodbye(state, ctx.registered_pid.unwrap_or(0)),
+        Command::Goodbye => connection::handle_goodbye(state, ctx.registered_pid.unwrap_or(0)),
         Command::ReportWindowOpened {
             label,
             kind,
             parent_label,
         } => {
-            if let Some(err) = enforce_host_only(state, ctx, "ReportWindowOpened") {
+            if let Some(err) = connection::enforce_host_only(state, ctx, "ReportWindowOpened") {
                 return vec![err];
             }
             window::handle_report_window_opened(state, ctx, label, kind, parent_label)
         }
         Command::ReportWindowClosed { label } => {
-            if let Some(err) = enforce_host_only(state, ctx, "ReportWindowClosed") {
+            if let Some(err) = connection::enforce_host_only(state, ctx, "ReportWindowClosed") {
                 return vec![err];
             }
             window::handle_report_window_closed(state, label)
         }
         Command::ReportPoolWindowAdded { label, saga_id } => {
-            if let Some(err) = enforce_host_only(state, ctx, "ReportPoolWindowAdded") {
+            if let Some(err) = connection::enforce_host_only(state, ctx, "ReportPoolWindowAdded") {
                 return vec![err];
             }
             pool::handle_report_pool_window_added(state, label, saga_id)
         }
         Command::ReportPoolWindowRemoved { label } => {
-            if let Some(err) = enforce_host_only(state, ctx, "ReportPoolWindowRemoved") {
+            if let Some(err) = connection::enforce_host_only(state, ctx, "ReportPoolWindowRemoved") {
                 return vec![err];
             }
             pool::handle_report_pool_window_removed(state, label)
@@ -128,7 +129,7 @@ pub fn update(state: &mut State, cmd: Command, ctx: &Ctx) -> Vec<Event> {
         // the typed event; saga side-effect (start the pool-respawn
         // saga) lives in the saga coordinator's bus subscription.
         Command::ReportPoolWindowPromoted { label } => {
-            if let Some(err) = enforce_host_only(state, ctx, "ReportPoolWindowPromoted") {
+            if let Some(err) = connection::enforce_host_only(state, ctx, "ReportPoolWindowPromoted") {
                 return vec![err];
             }
             pool::handle_report_pool_window_promoted(state, label)
@@ -158,7 +159,7 @@ pub fn update(state: &mut State, cmd: Command, ctx: &Ctx) -> Vec<Event> {
         // launcher's mirror; the launcher just narrates the
         // transition for subscribers.
         Command::ReportPanesReaped { label, saga_id } => {
-            if let Some(err) = enforce_host_only(state, ctx, "ReportPanesReaped") {
+            if let Some(err) = connection::enforce_host_only(state, ctx, "ReportPanesReaped") {
                 return vec![err];
             }
             saga::handle_report_panes_reaped(state, label, saga_id)
@@ -173,7 +174,7 @@ pub fn update(state: &mut State, cmd: Command, ctx: &Ctx) -> Vec<Event> {
             was_last,
             saga_id,
         } => {
-            if let Some(err) = enforce_host_only(state, ctx, "ReportPoolDrainDecision") {
+            if let Some(err) = connection::enforce_host_only(state, ctx, "ReportPoolDrainDecision") {
                 return vec![err];
             }
             pool::handle_report_pool_drain_decision(state, label, was_last, saga_id)
@@ -207,31 +208,31 @@ pub fn update(state: &mut State, cmd: Command, ctx: &Ctx) -> Vec<Event> {
         // matching `saga_id` and emit `Event::SagaFailed`. Host-only
         // gate same as other Report* arms.
         Command::ReportSagaActionFailed { saga_id, reason } => {
-            if let Some(err) = enforce_host_only(state, ctx, "ReportSagaActionFailed") {
+            if let Some(err) = connection::enforce_host_only(state, ctx, "ReportSagaActionFailed") {
                 return vec![err];
             }
             saga::handle_report_saga_action_failed(state, saga_id, reason)
         }
         Command::ReportHostCounts { windows, pool } => {
-            if let Some(err) = enforce_host_only(state, ctx, "ReportHostCounts") {
+            if let Some(err) = connection::enforce_host_only(state, ctx, "ReportHostCounts") {
                 return vec![err];
             }
             handle_report_host_counts(state, windows, pool)
         }
         Command::ReportHostPoolCount { count } => {
-            if let Some(err) = enforce_host_only(state, ctx, "ReportHostPoolCount") {
+            if let Some(err) = connection::enforce_host_only(state, ctx, "ReportHostPoolCount") {
                 return vec![err];
             }
             pool::handle_report_host_pool_count(state, count)
         }
         Command::ReportBackendWindowIdRegistered { label, window_id } => {
-            if let Some(err) = enforce_host_only(state, ctx, "ReportBackendWindowIdRegistered") {
+            if let Some(err) = connection::enforce_host_only(state, ctx, "ReportBackendWindowIdRegistered") {
                 return vec![err];
             }
             window::handle_report_backend_window_id_registered(state, label, window_id)
         }
         Command::ReportBackendWindowIdUnregistered { label } => {
-            if let Some(err) = enforce_host_only(state, ctx, "ReportBackendWindowIdUnregistered") {
+            if let Some(err) = connection::enforce_host_only(state, ctx, "ReportBackendWindowIdUnregistered") {
                 return vec![err];
             }
             window::handle_report_backend_window_id_unregistered(state, label)
@@ -241,43 +242,43 @@ pub fn update(state: &mut State, cmd: Command, ctx: &Ctx) -> Vec<Event> {
         // wndproc wrapper. Same enforce-host pattern as the other
         // observability reports.
         Command::ReportHwndOpened { hwnd, class_name, title, label_hint } => {
-            if let Some(err) = enforce_host_only(state, ctx, "ReportHwndOpened") {
+            if let Some(err) = connection::enforce_host_only(state, ctx, "ReportHwndOpened") {
                 return vec![err];
             }
             crate::wrr::apply_hwnd_opened(state, hwnd, class_name, title, label_hint, ctx.now_ms)
         }
         Command::ReportHwndDestroyed { hwnd } => {
-            if let Some(err) = enforce_host_only(state, ctx, "ReportHwndDestroyed") {
+            if let Some(err) = connection::enforce_host_only(state, ctx, "ReportHwndDestroyed") {
                 return vec![err];
             }
             crate::wrr::apply_hwnd_destroyed(state, hwnd)
         }
         Command::ReportHwndVisibilityChanged { hwnd, visible } => {
-            if let Some(err) = enforce_host_only(state, ctx, "ReportHwndVisibilityChanged") {
+            if let Some(err) = connection::enforce_host_only(state, ctx, "ReportHwndVisibilityChanged") {
                 return vec![err];
             }
             crate::wrr::apply_hwnd_visibility_changed(state, hwnd, visible)
         }
         Command::ReportHwndForegroundChanged { hwnd } => {
-            if let Some(err) = enforce_host_only(state, ctx, "ReportHwndForegroundChanged") {
+            if let Some(err) = connection::enforce_host_only(state, ctx, "ReportHwndForegroundChanged") {
                 return vec![err];
             }
             crate::wrr::apply_hwnd_foreground_changed(state, hwnd, ctx.now_ms)
         }
         Command::ReportHwndIconicChanged { hwnd, iconic } => {
-            if let Some(err) = enforce_host_only(state, ctx, "ReportHwndIconicChanged") {
+            if let Some(err) = connection::enforce_host_only(state, ctx, "ReportHwndIconicChanged") {
                 return vec![err];
             }
             crate::wrr::apply_hwnd_iconic_changed(state, hwnd, iconic)
         }
         Command::ReportHwndPositionChanged { hwnd, rect } => {
-            if let Some(err) = enforce_host_only(state, ctx, "ReportHwndPositionChanged") {
+            if let Some(err) = connection::enforce_host_only(state, ctx, "ReportHwndPositionChanged") {
                 return vec![err];
             }
             crate::wrr::apply_hwnd_position_changed(state, hwnd, rect)
         }
         Command::ReportMonitorTopologyChanged { rects } => {
-            if let Some(err) = enforce_host_only(state, ctx, "ReportMonitorTopologyChanged") {
+            if let Some(err) = connection::enforce_host_only(state, ctx, "ReportMonitorTopologyChanged") {
                 return vec![err];
             }
             crate::wrr::apply_monitor_topology_changed(state, rects)
@@ -289,7 +290,7 @@ pub fn update(state: &mut State, cmd: Command, ctx: &Ctx) -> Vec<Event> {
         // is monotonically distinct from prior events — a subscriber
         // applying snapshot + delta events knows the snapshot's
         // version is the "as-of" point.
-        Command::GetSnapshot => handle_get_snapshot(state),
+        Command::GetSnapshot => connection::handle_get_snapshot(state),
         // Phase D.3 — `GetEvents` is intercepted by the IPC server's
         // dispatch path BEFORE reaching the reducer (it's a non-
         // mutating read against the event log, which is I/O-adjacent
@@ -553,212 +554,10 @@ fn handle_report_host_counts(state: &mut State, host_windows: u32, host_pool: u3
 
 
 
-/// Phase B.4 — gate window-mirror reports to Host clients only. The
-/// host is the only source of truth about its own window lifecycle;
-/// allowing Renderer/Srv/Tool clients to mutate the mirror would let
-/// any registered process spoof open/close traffic and break the
-/// host-authoritative model. (codex P1 PR #576 round-1.)
-///
-/// Returns `Some(Error)` if the calling connection is not a Host;
-/// `None` if the call is allowed to proceed. Looks up the kind by
-/// PID rather than threading it through `Ctx` because `processes`
-/// is already the canonical source — single source of truth, no
-/// extra plumbing.
-fn enforce_host_only(state: &mut State, ctx: &Ctx, op: &'static str) -> Option<Event> {
-    let kind = ctx
-        .registered_pid
-        .and_then(|pid| state.processes.get(&pid).map(|r| r.kind));
-    if kind == Some(ClientKind::Host) {
-        return None;
-    }
-    let v = state.bump_version();
-    Some(Event::Error {
-        code: ErrorCode::NotRegistered,
-        message: format!(
-            "{} is Host-only; caller kind={:?}",
-            op, kind
-        ),
-        fatal: false,
-        version: v,
-    })
-}
 
 
-/// Phase B.9.3 — does state.processes contain a Host in the
-/// `Running` lifecycle? Used by the OrphanInstance transition
-/// check; without this guard, a stale Exited record would fire
-/// HostShouldQuit on every benign close. Tool-only sessions
-/// (`agentmux.exe --diag`) also correctly skip the saga because
-/// they never register a Host.
-pub(super) fn host_is_running(state: &State) -> bool {
-    use crate::state::ProcessState;
-    state.processes.values().any(|r| {
-        r.kind == ClientKind::Host && matches!(r.state, ProcessState::Running)
-    })
-}
 
-/// Phase D.1 — clone the reducer's canonical state into a `Snapshot`
-/// event. Read-only; doesn't mutate state except for bumping
-/// `event_version` so the snapshot's version is monotonically
-/// distinct from prior events (subscribers applying snapshot + delta
-/// events know the snapshot is "as-of" this version).
-///
-/// Sorted-vec serialization (rather than HashMap-as-JSON-object) for:
-/// 1. Deterministic ordering across snapshots (idempotent diffs in
-///    operator output, easier test assertions).
-/// 2. Wire compatibility with `Vec<(K, V)>` decoders that don't
-///    require canonical-string-keyed JSON objects.
-fn handle_get_snapshot(state: &mut State) -> Vec<Event> {
-    let v = state.bump_version();
 
-    let mut windows: Vec<agentmux_common::ipc::WindowSnapshot> = state
-        .windows
-        .values()
-        .map(|w| agentmux_common::ipc::WindowSnapshot {
-            label: w.label.clone(),
-            kind: w.kind,
-            parent_label: w.parent_label.clone(),
-            hwnd: w.hwnd,
-            visible: w.visible,
-            iconic: w.iconic,
-            last_rect: w.last_rect,
-            foregrounded_since_open: w.foregrounded_since_open,
-        })
-        .collect();
-    windows.sort_by(|a, b| a.label.cmp(&b.label));
-
-    let mut pool: Vec<String> = state.pool.iter().cloned().collect();
-    pool.sort();
-
-    let mut instance_registry: Vec<(String, u32)> =
-        state.instance_registry.iter().map(|(k, v)| (k.clone(), *v)).collect();
-    instance_registry.sort_by(|a, b| a.0.cmp(&b.0));
-
-    let mut backend_window_ids: Vec<(String, String)> = state
-        .backend_window_ids
-        .iter()
-        .map(|(k, v)| (k.clone(), v.clone()))
-        .collect();
-    backend_window_ids.sort_by(|a, b| a.0.cmp(&b.0));
-
-    vec![Event::Snapshot {
-        version: v,
-        lifecycle: state.lifecycle,
-        windows,
-        pool,
-        instance_registry,
-        backend_window_ids,
-        monitors: state.monitors.clone(),
-    }]
-}
-
-fn handle_register(
-    state: &mut State,
-    ctx: &Ctx,
-    kind: ClientKind,
-    pid: u32,
-    version: String,
-) -> Vec<Event> {
-    let mut out = Vec::with_capacity(3);
-
-    // Cross-connection invariant: only ONE live ProcessRecord per
-    // PID. We DO allow re-registration if the existing record is
-    // Exited — the OS recycles PIDs over a long-running launcher,
-    // so a new process can legitimately end up with a PID that was
-    // previously held by a process that has cleanly Goodbye'd.
-    // Without this carve-out, the process map would accumulate dead
-    // records and the launcher would reject increasingly many real
-    // registrations. (gemini MEDIUM PR #574 round-1.)
-    let existing_state = state.processes.get(&pid).map(|r| r.state);
-    if let Some(existing_state) = existing_state {
-        if !matches!(existing_state, ProcessState::Exited { .. }) {
-            let v = state.bump_version();
-            out.push(Event::Error {
-                code: ErrorCode::AlreadyRegistered,
-                message: format!(
-                    "pid {} already in process registry (state={:?})",
-                    pid, existing_state
-                ),
-                fatal: true,
-                version: v,
-            });
-            return out;
-        }
-        // Else: fall through. The insert below replaces the Exited
-        // record with the new live one — same entry, fresh state.
-    }
-
-    let record = ProcessRecord {
-        pid,
-        kind,
-        state: ProcessState::Running,
-        spawned_at: ctx.now_rfc3339.clone(),
-        version: version.clone(),
-    };
-    state.processes.insert(pid, record);
-
-    let spawned_v = state.bump_version();
-    out.push(Event::ProcessSpawned {
-        pid,
-        kind,
-        client_version: version,
-        version: spawned_v,
-    });
-
-    // Lifecycle: Starting → Running when the first Host registers.
-    // Subsequent Host re-registers (after a host crash + restart in
-    // some future world) won't double-fire because we'd already be
-    // in Running. Other client kinds (Renderer, Srv, Tool) don't
-    // drive the transition.
-    if state.lifecycle == LifecyclePhase::Starting && kind == ClientKind::Host {
-        let from = state.lifecycle;
-        state.lifecycle = LifecyclePhase::Running;
-        let v = state.bump_version();
-        out.push(Event::LifecyclePhaseChanged {
-            from,
-            to: LifecyclePhase::Running,
-            version: v,
-        });
-    }
-
-    let registered_v = state.bump_version();
-    let client_id = state.alloc_client_id();
-    out.push(Event::Registered {
-        client_id,
-        // launcher_pid + launcher_version are filled in by the
-        // server before broadcast — they don't belong in the pure
-        // reducer (env reads). We use a sentinel here; the server
-        // patches these before sending.
-        launcher_pid: 0,
-        launcher_version: String::new(),
-        version: registered_v,
-    });
-
-    out
-}
-
-fn handle_goodbye(state: &mut State, pid: u32) -> Vec<Event> {
-    if pid == 0 {
-        // No pid known for this connection (B.3 limitation). Just
-        // emit a synthetic ProcessExited with pid=0 to signal the
-        // graceful close; the server will log + close.
-        let v = state.bump_version();
-        return vec![Event::ProcessExited {
-            pid: 0,
-            code: 0,
-            version: v,
-        }];
-    }
-    if let Some(record) = state.processes.get_mut(&pid) {
-        record.state = ProcessState::Exited { code: 0 };
-    }
-    let v = state.bump_version();
-    vec![Event::ProcessExited {
-        pid,
-        code: 0,
-        version: v,
-    }]
-}
 
 
 #[cfg(test)]
