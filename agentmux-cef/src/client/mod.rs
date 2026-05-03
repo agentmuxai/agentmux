@@ -87,7 +87,7 @@ pub use handlers::AgentMuxClient;
 
 use helpers::{js_string_literal, html_escape, backend_close_window};
 #[cfg(target_os = "windows")]
-use wndproc::{install_frameless_resize_hook, set_window_icon, setup_native_frameless, skip_taskbar};
+use wndproc::{set_window_icon, skip_taskbar};
 
 impl AgentMuxHandler {
     pub fn new(state: Arc<AppState>, ipc_port: u16) -> Arc<Mutex<Self>> {
@@ -1298,7 +1298,5 @@ impl AgentMuxHandler {
 }
 
 
-// ---------------------------------------------------------------------------
-// CefClient — routes to sub-handlers
 
 
