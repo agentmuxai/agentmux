@@ -194,11 +194,11 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
             });
         }
         if (updated.length > 0) {
-            dispatchDoc(model.blockId, {
-                type: "StreamFlush",
-                newNodes: [],
-                updatedNodes: updated,
-            });
+            dispatchDoc(
+                model.blockId,
+                { type: "StreamFlush", newNodes: [], updatedNodes: updated },
+                "user",
+            );
         }
         // Send the decision to the sidecar so it can record + audit
         // it (PR-3a). Actual delivery to the agent CLI — rules
@@ -368,7 +368,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
     // Mark turn as active when the user sends a message — TurnStart
     // also clears stale sessionStats from the prior turn.
     const handleSendMessage = (message: string): Promise<void> => {
-        dispatchPane(model.blockId, { type: "TurnStart", at: Date.now() });
+        dispatchPane(model.blockId, { type: "TurnStart", at: Date.now() }, "user");
         return commands.sendMessage(message);
     };
 
