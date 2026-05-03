@@ -35,7 +35,7 @@ use cef::Browser;
 
 use crate::state::{
     BrowserHandle, BrowserKind, CompletedCreation, CreationPhase, DragSession, EffectKind,
-    InFlightCreation, PaneEntry, PaneLifecycle, PendingWindowCreation, PoolState, QuitReason,
+    InFlightCreation, BrowserPaneEntry, BrowserPaneLifecycle, PendingWindowCreation, PoolState, QuitReason,
     QuitState, TopLevelCreationOutcome, TopLevelCreationRequest, TopLevelCreationState,
     TopLevelSource,
 };
@@ -86,7 +86,7 @@ pub struct HostState {
     /// H.1 — pane lifecycle map. Replaces `BrowserPaneManager::PaneStateMachine`
     /// (pane/lifecycle.rs:60). Keyed by `block_id`.
     #[allow(dead_code)]
-    pub panes: HashMap<String, PaneEntry>,
+    pub browser_panes: HashMap<String, BrowserPaneEntry>,
 
     /// H.2 — browser handle registry. Replaces `AppState.browsers:
     /// Mutex<HashMap<String, Browser>>` (state.rs:210). Keyed by label
@@ -128,7 +128,7 @@ impl Default for HostState {
             pending_window_creations: VecDeque::new(),
             // Phase H foundations (PR #1) — empty defaults; populated as
             // PRs #2-#5 wire callers through the reducer.
-            panes: HashMap::new(),
+            browser_panes: HashMap::new(),
             browsers: HashMap::new(),
             active_drag: None,
             pool: PoolState::default(),
@@ -152,28 +152,28 @@ impl HostState {
     }
 }
 
-// ── Pane label generator (replaces pane/lifecycle.rs::PANE_LABEL_SEQ) ──────
+// ── Pane label generator (replaces pane/lifecycle.rs::BROWSER_PANE_LABEL_SEQ) ──────
 //
 // Monotonic counter appended to every pane label so a close-then-recreate of
 // the same block_id doesn't collide: if the old browser's `on_before_close`
-// fires after the new pane's create has already run, `DrainPaneByLabel`
+// fires after the new pane's create has already run, `DrainBrowserPaneByLabel`
 // would otherwise find and wipe the NEW entry.
-static PANE_LABEL_SEQ: AtomicU64 = AtomicU64::new(1);
+static BROWSER_PANE_LABEL_SEQ: AtomicU64 = AtomicU64::new(1);
 
-fn next_pane_label(block_id: &str) -> String {
-    let seq = PANE_LABEL_SEQ.fetch_add(1, Ordering::Relaxed);
+fn next_browser_pane_label(block_id: &str) -> String {
+    let seq = BROWSER_PANE_LABEL_SEQ.fetch_add(1, Ordering::Relaxed);
     format!("browser-pane-{}-{}", block_id, seq)
 }
 
-/// Outcome of `TryRegisterPaneLive`. Returned via
-/// `DispatchOutput::pane_register_result`. Same three-way semantics as the
+/// Outcome of `TryRegisterBrowserPaneLive`. Returned via
+/// `DispatchOutput::browser_pane_register_result`. Same three-way semantics as the
 /// pre-Phase-H `pane::lifecycle::PaneStateMachine::try_register_live` returned
 /// — caller decides whether to start a fresh CEF create, re-navigate the
 /// existing browser, or reject.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RegisterResult {
     /// No prior entry; reducer inserted a new `Live` pane under `label`.
-    /// Caller should post `CreatePaneTask` for this label.
+    /// Caller should post `CreateBrowserPaneTask` for this label.
     Fresh(String),
     /// Entry already existed and is `Live`; caller should re-navigate the
     /// existing browser at `label`.
@@ -206,31 +206,31 @@ pub enum HostCommand {
 
     /// Caller (pane create code) requests a new pane lifecycle entry.
     /// Reducer inserts with `Live`. Reject if `block_id` already present.
-    EnqueuePaneCreate { block_id: String, label: String },
+    EnqueueBrowserPaneCreate { block_id: String, label: String },
 
     /// PR #5 — sole pane registration entry point post-H.1.d.
     ///
     /// Replaces `pane::lifecycle::PaneStateMachine::try_register_live`.
-    /// Reducer generates the label internally (via `next_pane_label`) so
+    /// Reducer generates the label internally (via `next_browser_pane_label`) so
     /// label assignment is atomic with the entry insert. Returns the
-    /// outcome via `DispatchOutput::pane_register_result`:
-    ///   - `Fresh(label)`: new `Live` entry inserted; caller posts CreatePaneTask
+    /// outcome via `DispatchOutput::browser_pane_register_result`:
+    ///   - `Fresh(label)`: new `Live` entry inserted; caller posts CreateBrowserPaneTask
     ///   - `AlreadyLive(label)`: caller should re-navigate existing browser
     ///   - `Closing`: caller must reject (old teardown still in flight)
-    TryRegisterPaneLive { block_id: String },
+    TryRegisterBrowserPaneLive { block_id: String },
 
     /// CEF on_after_created fired for a pane browser; confirm it's Live.
     /// No-op if already Live or absent (idempotent against late callbacks).
-    CompletePaneCreate { block_id: String },
+    CompleteBrowserPaneCreate { block_id: String },
 
     /// Caller requests pane close. Reducer flips entry to `Closing` and
-    /// returns the entry's label via `DispatchOutput::closed_pane_label`
+    /// returns the entry's label via `DispatchOutput::closed_browser_pane_label`
     /// iff the transition actually fired (was `Live`). Returns `None` for
     /// missing or already-Closing entries (idempotent).
-    EnqueuePaneClose { block_id: String },
+    EnqueueBrowserPaneClose { block_id: String },
 
     /// CEF on_before_close fired for a pane; remove entry from map.
-    CompletePaneClose { block_id: String },
+    CompleteBrowserPaneClose { block_id: String },
 
     /// PR #5 — sole label-keyed drain entry point post-H.1.d.
     ///
@@ -238,13 +238,13 @@ pub enum HostCommand {
     /// by `BrowserPaneManager::drain_closed_label` when CEF's
     /// `on_before_close` fires for a pane. Removes the entry whose `label`
     /// matches; returns the drained `block_id` via
-    /// `DispatchOutput::drained_block_id` so the caller can also dispatch
+    /// `DispatchOutput::drained_browser_pane_block_id` so the caller can also dispatch
     /// any block_id-keyed cleanup. Idempotent (None if no match).
-    DrainPaneByLabel { label: String },
+    DrainBrowserPaneByLabel { label: String },
 
     /// Pane creation failed before reaching Live (e.g., CEF callback
     /// never fired, browser host returned 0). Reducer removes entry.
-    AbortPaneCreate { block_id: String, reason: String },
+    AbortBrowserPaneCreate { block_id: String, reason: String },
 
     // ── H.2 — browser handle registry ───────────────────────────────────
 
@@ -343,33 +343,33 @@ impl std::fmt::Debug for HostCommand {
             HostCommand::DequeuePendingWindowCreation => {
                 f.write_str("DequeuePendingWindowCreation")
             }
-            HostCommand::EnqueuePaneCreate { block_id, label } => f
-                .debug_struct("EnqueuePaneCreate")
+            HostCommand::EnqueueBrowserPaneCreate { block_id, label } => f
+                .debug_struct("EnqueueBrowserPaneCreate")
                 .field("block_id", block_id)
                 .field("label", label)
                 .finish(),
-            HostCommand::TryRegisterPaneLive { block_id } => f
-                .debug_struct("TryRegisterPaneLive")
+            HostCommand::TryRegisterBrowserPaneLive { block_id } => f
+                .debug_struct("TryRegisterBrowserPaneLive")
                 .field("block_id", block_id)
                 .finish(),
-            HostCommand::CompletePaneCreate { block_id } => f
-                .debug_struct("CompletePaneCreate")
+            HostCommand::CompleteBrowserPaneCreate { block_id } => f
+                .debug_struct("CompleteBrowserPaneCreate")
                 .field("block_id", block_id)
                 .finish(),
-            HostCommand::EnqueuePaneClose { block_id } => f
-                .debug_struct("EnqueuePaneClose")
+            HostCommand::EnqueueBrowserPaneClose { block_id } => f
+                .debug_struct("EnqueueBrowserPaneClose")
                 .field("block_id", block_id)
                 .finish(),
-            HostCommand::CompletePaneClose { block_id } => f
-                .debug_struct("CompletePaneClose")
+            HostCommand::CompleteBrowserPaneClose { block_id } => f
+                .debug_struct("CompleteBrowserPaneClose")
                 .field("block_id", block_id)
                 .finish(),
-            HostCommand::DrainPaneByLabel { label } => f
-                .debug_struct("DrainPaneByLabel")
+            HostCommand::DrainBrowserPaneByLabel { label } => f
+                .debug_struct("DrainBrowserPaneByLabel")
                 .field("label", label)
                 .finish(),
-            HostCommand::AbortPaneCreate { block_id, reason } => f
-                .debug_struct("AbortPaneCreate")
+            HostCommand::AbortBrowserPaneCreate { block_id, reason } => f
+                .debug_struct("AbortBrowserPaneCreate")
                 .field("block_id", block_id)
                 .field("reason", reason)
                 .finish(),
@@ -495,25 +495,25 @@ pub enum HostEvent {
 
     // ── H.1 — pane lifecycle events ─────────────────────────────────────
 
-    PaneCreateRequested {
+    BrowserPaneCreateRequested {
         block_id: String,
         label: String,
         version: u64,
     },
-    PaneLive {
+    BrowserPaneLive {
         block_id: String,
         label: String,
         version: u64,
     },
-    PaneClosing {
+    BrowserPaneClosing {
         block_id: String,
         version: u64,
     },
-    PaneClosed {
+    BrowserPaneClosed {
         block_id: String,
         version: u64,
     },
-    PaneCreationFailed {
+    BrowserPaneCreationFailed {
         block_id: String,
         reason: String,
         version: u64,
@@ -628,17 +628,17 @@ pub enum HostEvent {
 ///   creates a window where concurrent readers can also resolve the
 ///   label and act on the closing handle).
 ///
-/// - `TryRegisterPaneLive` → `pane_register_result: Option<RegisterResult>`
+/// - `TryRegisterBrowserPaneLive` → `browser_pane_register_result: Option<RegisterResult>`
 ///   (PR #5 H.1.d: `BrowserPaneManager::create` branches on
 ///   Fresh/AlreadyLive/Closing).
 ///
-/// - `EnqueuePaneClose` → `closed_pane_label: Option<String>` (PR #5
+/// - `EnqueueBrowserPaneClose` → `closed_browser_pane_label: Option<String>` (PR #5
 ///   H.1.d: the close path needs the label to call `take_browser_hwnd`
-///   without a separate `live_pane_label` query that could race).
+///   without a separate `live_browser_pane_label` query that could race).
 ///
-/// - `DrainPaneByLabel` → `drained_block_id: Option<String>` (PR #5
+/// - `DrainBrowserPaneByLabel` → `drained_browser_pane_block_id: Option<String>` (PR #5
 ///   H.1.d: `drain_closed_label` needs the block_id to dispatch
-///   `CompletePaneClose`).
+///   `CompleteBrowserPaneClose`).
 ///
 /// - `EndDrag` → `ended_drag_session: Option<DragSession>` (PR #5
 ///   H.3: `complete_cross_drag` / `cancel_cross_drag` need the
@@ -671,9 +671,9 @@ pub struct DispatchOutput {
     pub events: Vec<HostEvent>,
     pub dequeued: Option<PendingWindowCreation>,
     pub removed_browser: Option<Browser>,
-    pub pane_register_result: Option<RegisterResult>,
-    pub closed_pane_label: Option<String>,
-    pub drained_block_id: Option<String>,
+    pub browser_pane_register_result: Option<RegisterResult>,
+    pub closed_browser_pane_label: Option<String>,
+    pub drained_browser_pane_block_id: Option<String>,
     pub ended_drag_session: Option<DragSession>,
     pub pool_spawn_proceeding: bool,
     pub pool_size_after: Option<usize>,
@@ -695,9 +695,9 @@ impl std::fmt::Debug for DispatchOutput {
                     &"None"
                 },
             )
-            .field("pane_register_result", &self.pane_register_result)
-            .field("closed_pane_label", &self.closed_pane_label)
-            .field("drained_block_id", &self.drained_block_id)
+            .field("browser_pane_register_result", &self.browser_pane_register_result)
+            .field("closed_browser_pane_label", &self.closed_browser_pane_label)
+            .field("drained_browser_pane_block_id", &self.drained_browser_pane_block_id)
             .field("ended_drag_session", &self.ended_drag_session)
             .field("pool_spawn_proceeding", &self.pool_spawn_proceeding)
             .field("pool_size_after", &self.pool_size_after)
@@ -721,26 +721,26 @@ pub fn update(state: &mut HostState, cmd: HostCommand) -> DispatchOutput {
             handle_dequeue_pending_window_creation(state)
         }
         // H.1 panes
-        HostCommand::EnqueuePaneCreate { block_id, label } => {
-            handle_enqueue_pane_create(state, block_id, label)
+        HostCommand::EnqueueBrowserPaneCreate { block_id, label } => {
+            handle_enqueue_browser_pane_create(state, block_id, label)
         }
-        HostCommand::TryRegisterPaneLive { block_id } => {
-            handle_try_register_pane_live(state, block_id)
+        HostCommand::TryRegisterBrowserPaneLive { block_id } => {
+            handle_try_register_browser_pane_live(state, block_id)
         }
-        HostCommand::CompletePaneCreate { block_id } => {
-            handle_complete_pane_create(state, block_id)
+        HostCommand::CompleteBrowserPaneCreate { block_id } => {
+            handle_complete_browser_pane_create(state, block_id)
         }
-        HostCommand::EnqueuePaneClose { block_id } => {
-            handle_enqueue_pane_close(state, block_id)
+        HostCommand::EnqueueBrowserPaneClose { block_id } => {
+            handle_enqueue_browser_pane_close(state, block_id)
         }
-        HostCommand::CompletePaneClose { block_id } => {
-            handle_complete_pane_close(state, block_id)
+        HostCommand::CompleteBrowserPaneClose { block_id } => {
+            handle_complete_browser_pane_close(state, block_id)
         }
-        HostCommand::DrainPaneByLabel { label } => {
-            handle_drain_pane_by_label(state, label)
+        HostCommand::DrainBrowserPaneByLabel { label } => {
+            handle_drain_browser_pane_by_label(state, label)
         }
-        HostCommand::AbortPaneCreate { block_id, reason } => {
-            handle_abort_pane_create(state, block_id, reason)
+        HostCommand::AbortBrowserPaneCreate { block_id, reason } => {
+            handle_abort_browser_pane_create(state, block_id, reason)
         }
         // H.2 browsers
         HostCommand::RegisterBrowser { label, browser, kind } => {
@@ -856,60 +856,60 @@ fn emit_error(state: &mut HostState, message: String) -> DispatchOutput {
 
 // ── H.1 — pane lifecycle ─────────────────────────────────────────────────
 
-fn handle_enqueue_pane_create(
+fn handle_enqueue_browser_pane_create(
     state: &mut HostState,
     block_id: String,
     label: String,
 ) -> DispatchOutput {
     if state.lifecycle == HostLifecyclePhase::ShuttingDown {
-        return emit_error(state, format!("enqueue_pane_create: shutting down (block_id={})", block_id));
+        return emit_error(state, format!("enqueue_browser_pane_create: shutting down (block_id={})", block_id));
     }
-    if state.panes.contains_key(&block_id) {
-        return emit_error(state, format!("enqueue_pane_create: block_id {} already has a pane", block_id));
+    if state.browser_panes.contains_key(&block_id) {
+        return emit_error(state, format!("enqueue_browser_pane_create: block_id {} already has a pane", block_id));
     }
-    state.panes.insert(
+    state.browser_panes.insert(
         block_id.clone(),
-        PaneEntry {
+        BrowserPaneEntry {
             block_id: block_id.clone(),
             label: label.clone(),
-            lifecycle: PaneLifecycle::Live,
+            lifecycle: BrowserPaneLifecycle::Live,
         },
     );
     let v = state.bump_version();
     DispatchOutput {
-        events: vec![HostEvent::PaneCreateRequested { block_id, label, version: v }],
+        events: vec![HostEvent::BrowserPaneCreateRequested { block_id, label, version: v }],
         ..Default::default()
     }
 }
 
-fn handle_complete_pane_create(state: &mut HostState, block_id: String) -> DispatchOutput {
-    let entry = match state.panes.get(&block_id) {
+fn handle_complete_browser_pane_create(state: &mut HostState, block_id: String) -> DispatchOutput {
+    let entry = match state.browser_panes.get(&block_id) {
         Some(e) => e.clone(),
         None => return DispatchOutput::default(), // late callback for already-removed pane; idempotent no-op
     };
-    // Already Live by EnqueuePaneCreate's invariant; this is a no-op
+    // Already Live by EnqueueBrowserPaneCreate's invariant; this is a no-op
     // confirmation event for observers.
     let v = state.bump_version();
     DispatchOutput {
-        events: vec![HostEvent::PaneLive { block_id, label: entry.label, version: v }],
+        events: vec![HostEvent::BrowserPaneLive { block_id, label: entry.label, version: v }],
         ..Default::default()
     }
 }
 
-fn handle_enqueue_pane_close(state: &mut HostState, block_id: String) -> DispatchOutput {
-    let entry = match state.panes.get_mut(&block_id) {
+fn handle_enqueue_browser_pane_close(state: &mut HostState, block_id: String) -> DispatchOutput {
+    let entry = match state.browser_panes.get_mut(&block_id) {
         Some(e) => e,
         None => return DispatchOutput::default(), // close request for already-gone pane; idempotent
     };
-    if matches!(entry.lifecycle, PaneLifecycle::Closing { .. }) {
+    if matches!(entry.lifecycle, BrowserPaneLifecycle::Closing { .. }) {
         return DispatchOutput::default(); // already Closing; idempotent
     }
-    entry.lifecycle = PaneLifecycle::Closing { since: Instant::now() };
+    entry.lifecycle = BrowserPaneLifecycle::Closing { since: Instant::now() };
     let label = entry.label.clone();
     let v = state.bump_version();
     DispatchOutput {
-        events: vec![HostEvent::PaneClosing { block_id, version: v }],
-        closed_pane_label: Some(label),
+        events: vec![HostEvent::BrowserPaneClosing { block_id, version: v }],
+        closed_browser_pane_label: Some(label),
         ..Default::default()
     }
 }
@@ -920,41 +920,41 @@ fn handle_enqueue_pane_close(state: &mut HostState, block_id: String) -> Dispatc
 /// - Live entry exists → `AlreadyLive(label)`
 /// - Closing entry exists → `Closing`
 /// - No entry → generate label, insert Live, `Fresh(label)` + emit
-///   `PaneCreateRequested`
-fn handle_try_register_pane_live(state: &mut HostState, block_id: String) -> DispatchOutput {
+///   `BrowserPaneCreateRequested`
+fn handle_try_register_browser_pane_live(state: &mut HostState, block_id: String) -> DispatchOutput {
     if state.lifecycle == HostLifecyclePhase::ShuttingDown {
         return emit_error(
             state,
-            format!("try_register_pane_live: shutting down (block_id={})", block_id),
+            format!("try_register_browser_pane_live: shutting down (block_id={})", block_id),
         );
     }
-    if let Some(entry) = state.panes.get(&block_id) {
+    if let Some(entry) = state.browser_panes.get(&block_id) {
         let result = match entry.lifecycle {
-            PaneLifecycle::Live => RegisterResult::AlreadyLive(entry.label.clone()),
-            PaneLifecycle::Closing { .. } => RegisterResult::Closing,
+            BrowserPaneLifecycle::Live => RegisterResult::AlreadyLive(entry.label.clone()),
+            BrowserPaneLifecycle::Closing { .. } => RegisterResult::Closing,
         };
         return DispatchOutput {
-            pane_register_result: Some(result),
+            browser_pane_register_result: Some(result),
             ..Default::default()
         };
     }
-    let label = next_pane_label(&block_id);
-    state.panes.insert(
+    let label = next_browser_pane_label(&block_id);
+    state.browser_panes.insert(
         block_id.clone(),
-        PaneEntry {
+        BrowserPaneEntry {
             block_id: block_id.clone(),
             label: label.clone(),
-            lifecycle: PaneLifecycle::Live,
+            lifecycle: BrowserPaneLifecycle::Live,
         },
     );
     let v = state.bump_version();
     DispatchOutput {
-        events: vec![HostEvent::PaneCreateRequested {
+        events: vec![HostEvent::BrowserPaneCreateRequested {
             block_id,
             label: label.clone(),
             version: v,
         }],
-        pane_register_result: Some(RegisterResult::Fresh(label)),
+        browser_pane_register_result: Some(RegisterResult::Fresh(label)),
         ..Default::default()
     }
 }
@@ -963,12 +963,12 @@ fn handle_try_register_pane_live(state: &mut HostState, block_id: String) -> Dis
 /// `pane::lifecycle::PaneStateMachine::drain_by_label`.
 ///
 /// Removes whichever pane entry has `label`. Returns the drained block_id
-/// in `drained_block_id`. Idempotent — `None` if no entry has that label
+/// in `drained_browser_pane_block_id`. Idempotent — `None` if no entry has that label
 /// (e.g., explicit `close()` already cleared it; `on_before_close` arrives
 /// later).
-fn handle_drain_pane_by_label(state: &mut HostState, label: String) -> DispatchOutput {
+fn handle_drain_browser_pane_by_label(state: &mut HostState, label: String) -> DispatchOutput {
     let victim = state
-        .panes
+        .browser_panes
         .iter()
         .find(|(_, e)| e.label == label)
         .map(|(k, _)| k.clone());
@@ -976,38 +976,38 @@ fn handle_drain_pane_by_label(state: &mut HostState, label: String) -> DispatchO
         Some(b) => b,
         None => return DispatchOutput::default(),
     };
-    state.panes.remove(&block_id);
+    state.browser_panes.remove(&block_id);
     let v = state.bump_version();
     DispatchOutput {
-        events: vec![HostEvent::PaneClosed {
+        events: vec![HostEvent::BrowserPaneClosed {
             block_id: block_id.clone(),
             version: v,
         }],
-        drained_block_id: Some(block_id),
+        drained_browser_pane_block_id: Some(block_id),
         ..Default::default()
     }
 }
 
-fn handle_complete_pane_close(state: &mut HostState, block_id: String) -> DispatchOutput {
-    if state.panes.remove(&block_id).is_none() {
+fn handle_complete_browser_pane_close(state: &mut HostState, block_id: String) -> DispatchOutput {
+    if state.browser_panes.remove(&block_id).is_none() {
         return DispatchOutput::default(); // idempotent
     }
     let v = state.bump_version();
     DispatchOutput {
-        events: vec![HostEvent::PaneClosed { block_id, version: v }],
+        events: vec![HostEvent::BrowserPaneClosed { block_id, version: v }],
         ..Default::default()
     }
 }
 
-fn handle_abort_pane_create(
+fn handle_abort_browser_pane_create(
     state: &mut HostState,
     block_id: String,
     reason: String,
 ) -> DispatchOutput {
-    state.panes.remove(&block_id);
+    state.browser_panes.remove(&block_id);
     let v = state.bump_version();
     DispatchOutput {
-        events: vec![HostEvent::PaneCreationFailed { block_id, reason, version: v }],
+        events: vec![HostEvent::BrowserPaneCreationFailed { block_id, reason, version: v }],
         ..Default::default()
     }
 }
@@ -1624,11 +1624,11 @@ mod tests {
             HostEvent::PendingWindowEnqueued { version, .. } => *version,
             HostEvent::PendingWindowDequeued { version, .. } => *version,
             HostEvent::PendingWindowQueueEmpty { version } => *version,
-            HostEvent::PaneCreateRequested { version, .. } => *version,
-            HostEvent::PaneLive { version, .. } => *version,
-            HostEvent::PaneClosing { version, .. } => *version,
-            HostEvent::PaneClosed { version, .. } => *version,
-            HostEvent::PaneCreationFailed { version, .. } => *version,
+            HostEvent::BrowserPaneCreateRequested { version, .. } => *version,
+            HostEvent::BrowserPaneLive { version, .. } => *version,
+            HostEvent::BrowserPaneClosing { version, .. } => *version,
+            HostEvent::BrowserPaneClosed { version, .. } => *version,
+            HostEvent::BrowserPaneCreationFailed { version, .. } => *version,
             HostEvent::BrowserRegistered { version, .. } => *version,
             HostEvent::BrowserUnregistered { version, .. } => *version,
             HostEvent::DragStarted { version, .. } => *version,
@@ -1655,8 +1655,8 @@ mod tests {
 
     // ── Phase H foundations tests ───────────────────────────────────────
 
-    fn pane_request(block_id: &str, label: &str) -> HostCommand {
-        HostCommand::EnqueuePaneCreate {
+    fn browser_pane_request(block_id: &str, label: &str) -> HostCommand {
+        HostCommand::EnqueueBrowserPaneCreate {
             block_id: block_id.to_string(),
             label: label.to_string(),
         }
@@ -1678,94 +1678,94 @@ mod tests {
     // ── H.1 panes ────────────────────────────────────────────────────────
 
     #[test]
-    fn enqueue_pane_create_inserts_live() {
+    fn enqueue_browser_pane_create_inserts_live() {
         let mut state = HostState::default();
-        let out = update(&mut state, pane_request("b1", "browser-pane-b1-1"));
-        assert!(state.panes.contains_key("b1"));
-        assert!(matches!(state.panes["b1"].lifecycle, PaneLifecycle::Live));
-        assert!(matches!(out.events[0], HostEvent::PaneCreateRequested { .. }));
+        let out = update(&mut state, browser_pane_request("b1", "browser-pane-b1-1"));
+        assert!(state.browser_panes.contains_key("b1"));
+        assert!(matches!(state.browser_panes["b1"].lifecycle, BrowserPaneLifecycle::Live));
+        assert!(matches!(out.events[0], HostEvent::BrowserPaneCreateRequested { .. }));
     }
 
     #[test]
-    fn enqueue_pane_create_duplicate_rejected() {
+    fn enqueue_browser_pane_create_duplicate_rejected() {
         let mut state = HostState::default();
-        update(&mut state, pane_request("b1", "browser-pane-b1-1"));
-        let out = update(&mut state, pane_request("b1", "browser-pane-b1-2"));
+        update(&mut state, browser_pane_request("b1", "browser-pane-b1-1"));
+        let out = update(&mut state, browser_pane_request("b1", "browser-pane-b1-2"));
         assert!(matches!(out.events[0], HostEvent::Error { .. }));
-        assert_eq!(state.panes.len(), 1);
+        assert_eq!(state.browser_panes.len(), 1);
     }
 
     #[test]
     fn pane_close_lifecycle() {
         let mut state = HostState::default();
-        update(&mut state, pane_request("b1", "browser-pane-b1-1"));
-        update(&mut state, HostCommand::EnqueuePaneClose { block_id: "b1".into() });
+        update(&mut state, browser_pane_request("b1", "browser-pane-b1-1"));
+        update(&mut state, HostCommand::EnqueueBrowserPaneClose { block_id: "b1".into() });
         assert!(matches!(
-            state.panes["b1"].lifecycle,
-            PaneLifecycle::Closing { .. }
+            state.browser_panes["b1"].lifecycle,
+            BrowserPaneLifecycle::Closing { .. }
         ));
-        update(&mut state, HostCommand::CompletePaneClose { block_id: "b1".into() });
-        assert!(!state.panes.contains_key("b1"));
+        update(&mut state, HostCommand::CompleteBrowserPaneClose { block_id: "b1".into() });
+        assert!(!state.browser_panes.contains_key("b1"));
     }
 
     #[test]
     fn pane_abort_removes_entry() {
         let mut state = HostState::default();
-        update(&mut state, pane_request("b1", "browser-pane-b1-1"));
+        update(&mut state, browser_pane_request("b1", "browser-pane-b1-1"));
         let out = update(
             &mut state,
-            HostCommand::AbortPaneCreate {
+            HostCommand::AbortBrowserPaneCreate {
                 block_id: "b1".into(),
                 reason: "test".into(),
             },
         );
-        assert!(!state.panes.contains_key("b1"));
-        assert!(matches!(out.events[0], HostEvent::PaneCreationFailed { .. }));
+        assert!(!state.browser_panes.contains_key("b1"));
+        assert!(matches!(out.events[0], HostEvent::BrowserPaneCreationFailed { .. }));
     }
 
     #[test]
     fn pane_close_idempotent_for_missing() {
         let mut state = HostState::default();
-        let out = update(&mut state, HostCommand::EnqueuePaneClose { block_id: "missing".into() });
+        let out = update(&mut state, HostCommand::EnqueueBrowserPaneClose { block_id: "missing".into() });
         assert!(out.events.is_empty()); // idempotent no-op
     }
 
-    // ── H.1.d (PR #5) — TryRegisterPaneLive / EnqueuePaneClose return-values
-    //   / DrainPaneByLabel ────────────────────────────────────────────────
+    // ── H.1.d (PR #5) — TryRegisterBrowserPaneLive / EnqueueBrowserPaneClose return-values
+    //   / DrainBrowserPaneByLabel ────────────────────────────────────────────────
 
     #[test]
-    fn try_register_pane_live_fresh_returns_label_and_inserts_live() {
+    fn try_register_browser_pane_live_fresh_returns_label_and_inserts_live() {
         let mut state = HostState::default();
         let out = update(
             &mut state,
-            HostCommand::TryRegisterPaneLive { block_id: "b1".into() },
+            HostCommand::TryRegisterBrowserPaneLive { block_id: "b1".into() },
         );
-        let label = match out.pane_register_result {
+        let label = match out.browser_pane_register_result {
             Some(RegisterResult::Fresh(l)) => l,
             other => panic!("expected Fresh(_), got {:?}", other),
         };
         assert!(label.starts_with("browser-pane-b1-"));
-        assert_eq!(state.panes["b1"].label, label);
-        assert!(matches!(state.panes["b1"].lifecycle, PaneLifecycle::Live));
-        assert!(matches!(out.events[0], HostEvent::PaneCreateRequested { .. }));
+        assert_eq!(state.browser_panes["b1"].label, label);
+        assert!(matches!(state.browser_panes["b1"].lifecycle, BrowserPaneLifecycle::Live));
+        assert!(matches!(out.events[0], HostEvent::BrowserPaneCreateRequested { .. }));
     }
 
     #[test]
-    fn try_register_pane_live_already_live_returns_existing_label() {
+    fn try_register_browser_pane_live_already_live_returns_existing_label() {
         let mut state = HostState::default();
         let first = match update(
             &mut state,
-            HostCommand::TryRegisterPaneLive { block_id: "b1".into() },
-        ).pane_register_result
+            HostCommand::TryRegisterBrowserPaneLive { block_id: "b1".into() },
+        ).browser_pane_register_result
         {
             Some(RegisterResult::Fresh(l)) => l,
             _ => unreachable!(),
         };
         let out = update(
             &mut state,
-            HostCommand::TryRegisterPaneLive { block_id: "b1".into() },
+            HostCommand::TryRegisterBrowserPaneLive { block_id: "b1".into() },
         );
-        match out.pane_register_result {
+        match out.browser_pane_register_result {
             Some(RegisterResult::AlreadyLive(l)) => assert_eq!(l, first),
             other => panic!("expected AlreadyLive, got {:?}", other),
         }
@@ -1773,135 +1773,135 @@ mod tests {
     }
 
     #[test]
-    fn try_register_pane_live_closing_returns_closing() {
+    fn try_register_browser_pane_live_closing_returns_closing() {
         let mut state = HostState::default();
-        update(&mut state, HostCommand::TryRegisterPaneLive { block_id: "b1".into() });
-        update(&mut state, HostCommand::EnqueuePaneClose { block_id: "b1".into() });
+        update(&mut state, HostCommand::TryRegisterBrowserPaneLive { block_id: "b1".into() });
+        update(&mut state, HostCommand::EnqueueBrowserPaneClose { block_id: "b1".into() });
         let out = update(
             &mut state,
-            HostCommand::TryRegisterPaneLive { block_id: "b1".into() },
+            HostCommand::TryRegisterBrowserPaneLive { block_id: "b1".into() },
         );
-        assert!(matches!(out.pane_register_result, Some(RegisterResult::Closing)));
+        assert!(matches!(out.browser_pane_register_result, Some(RegisterResult::Closing)));
     }
 
     #[test]
-    fn try_register_pane_live_during_shutdown_errors() {
+    fn try_register_browser_pane_live_during_shutdown_errors() {
         let mut state = HostState::default();
         state.lifecycle = HostLifecyclePhase::ShuttingDown;
         let out = update(
             &mut state,
-            HostCommand::TryRegisterPaneLive { block_id: "b1".into() },
+            HostCommand::TryRegisterBrowserPaneLive { block_id: "b1".into() },
         );
-        assert!(out.pane_register_result.is_none());
+        assert!(out.browser_pane_register_result.is_none());
         assert!(matches!(out.events[0], HostEvent::Error { .. }));
-        assert!(!state.panes.contains_key("b1"));
+        assert!(!state.browser_panes.contains_key("b1"));
     }
 
     #[test]
-    fn enqueue_pane_close_returns_label_for_live_entry() {
+    fn enqueue_browser_pane_close_returns_label_for_live_entry() {
         let mut state = HostState::default();
         let label = match update(
             &mut state,
-            HostCommand::TryRegisterPaneLive { block_id: "b1".into() },
-        ).pane_register_result
+            HostCommand::TryRegisterBrowserPaneLive { block_id: "b1".into() },
+        ).browser_pane_register_result
         {
             Some(RegisterResult::Fresh(l)) => l,
             _ => unreachable!(),
         };
         let out = update(
             &mut state,
-            HostCommand::EnqueuePaneClose { block_id: "b1".into() },
+            HostCommand::EnqueueBrowserPaneClose { block_id: "b1".into() },
         );
-        assert_eq!(out.closed_pane_label, Some(label));
+        assert_eq!(out.closed_browser_pane_label, Some(label));
     }
 
     #[test]
-    fn enqueue_pane_close_returns_none_for_already_closing() {
+    fn enqueue_browser_pane_close_returns_none_for_already_closing() {
         let mut state = HostState::default();
-        update(&mut state, HostCommand::TryRegisterPaneLive { block_id: "b1".into() });
-        update(&mut state, HostCommand::EnqueuePaneClose { block_id: "b1".into() });
+        update(&mut state, HostCommand::TryRegisterBrowserPaneLive { block_id: "b1".into() });
+        update(&mut state, HostCommand::EnqueueBrowserPaneClose { block_id: "b1".into() });
         let out = update(
             &mut state,
-            HostCommand::EnqueuePaneClose { block_id: "b1".into() },
+            HostCommand::EnqueueBrowserPaneClose { block_id: "b1".into() },
         );
-        assert!(out.closed_pane_label.is_none());
+        assert!(out.closed_browser_pane_label.is_none());
     }
 
     #[test]
-    fn drain_pane_by_label_removes_entry_and_returns_block_id() {
+    fn drain_browser_pane_by_label_removes_entry_and_returns_block_id() {
         let mut state = HostState::default();
         let label = match update(
             &mut state,
-            HostCommand::TryRegisterPaneLive { block_id: "b1".into() },
-        ).pane_register_result
+            HostCommand::TryRegisterBrowserPaneLive { block_id: "b1".into() },
+        ).browser_pane_register_result
         {
             Some(RegisterResult::Fresh(l)) => l,
             _ => unreachable!(),
         };
-        let out = update(&mut state, HostCommand::DrainPaneByLabel { label });
-        assert_eq!(out.drained_block_id, Some("b1".to_string()));
-        assert!(!state.panes.contains_key("b1"));
-        assert!(matches!(out.events[0], HostEvent::PaneClosed { .. }));
+        let out = update(&mut state, HostCommand::DrainBrowserPaneByLabel { label });
+        assert_eq!(out.drained_browser_pane_block_id, Some("b1".to_string()));
+        assert!(!state.browser_panes.contains_key("b1"));
+        assert!(matches!(out.events[0], HostEvent::BrowserPaneClosed { .. }));
     }
 
     #[test]
-    fn drain_pane_by_label_idempotent_on_miss() {
+    fn drain_browser_pane_by_label_idempotent_on_miss() {
         let mut state = HostState::default();
         let out = update(
             &mut state,
-            HostCommand::DrainPaneByLabel { label: "no-such-label".into() },
+            HostCommand::DrainBrowserPaneByLabel { label: "no-such-label".into() },
         );
-        assert!(out.drained_block_id.is_none());
+        assert!(out.drained_browser_pane_block_id.is_none());
         assert!(out.events.is_empty());
     }
 
     #[test]
     fn pane_lifecycle_supports_h7_invariant_check() {
-        // PR #6 H.7 — `AppState::any_pane_closing()` reads
-        // `state.panes.values()` and matches `PaneLifecycle::Closing`.
+        // PR #6 H.7 — `AppState::any_browser_pane_closing()` reads
+        // `state.browser_panes.values()` and matches `BrowserPaneLifecycle::Closing`.
         // This test verifies the reducer's pane state transitions in
         // the way that helper relies on: Live entries don't trip the
         // gate; Closing entries do; drained (removed) entries don't.
         let mut state = HostState::default();
 
         // baseline: no panes → no closing
-        assert!(!state.panes.values().any(|e| matches!(e.lifecycle, PaneLifecycle::Closing { .. })));
+        assert!(!state.browser_panes.values().any(|e| matches!(e.lifecycle, BrowserPaneLifecycle::Closing { .. })));
 
-        update(&mut state, HostCommand::TryRegisterPaneLive { block_id: "b1".into() });
+        update(&mut state, HostCommand::TryRegisterBrowserPaneLive { block_id: "b1".into() });
         // Live pane present → gate is OPEN (not closing)
-        assert!(!state.panes.values().any(|e| matches!(e.lifecycle, PaneLifecycle::Closing { .. })));
+        assert!(!state.browser_panes.values().any(|e| matches!(e.lifecycle, BrowserPaneLifecycle::Closing { .. })));
 
-        update(&mut state, HostCommand::EnqueuePaneClose { block_id: "b1".into() });
+        update(&mut state, HostCommand::EnqueueBrowserPaneClose { block_id: "b1".into() });
         // Closing pane present → gate is CLOSED
-        assert!(state.panes.values().any(|e| matches!(e.lifecycle, PaneLifecycle::Closing { .. })));
+        assert!(state.browser_panes.values().any(|e| matches!(e.lifecycle, BrowserPaneLifecycle::Closing { .. })));
 
-        update(&mut state, HostCommand::CompletePaneClose { block_id: "b1".into() });
+        update(&mut state, HostCommand::CompleteBrowserPaneClose { block_id: "b1".into() });
         // Drained → gate is OPEN again
-        assert!(!state.panes.values().any(|e| matches!(e.lifecycle, PaneLifecycle::Closing { .. })));
+        assert!(!state.browser_panes.values().any(|e| matches!(e.lifecycle, BrowserPaneLifecycle::Closing { .. })));
     }
 
     #[test]
     fn drain_after_close_recreate_does_not_evict_new_entry() {
-        // The exact bug PANE_LABEL_SEQ defends against: register → close →
+        // The exact bug BROWSER_PANE_LABEL_SEQ defends against: register → close →
         // drain by OLD label → register again → drain by OLD label must
         // NOT evict the new entry.
         let mut state = HostState::default();
         let first = match update(
             &mut state,
-            HostCommand::TryRegisterPaneLive { block_id: "b1".into() },
-        ).pane_register_result
+            HostCommand::TryRegisterBrowserPaneLive { block_id: "b1".into() },
+        ).browser_pane_register_result
         {
             Some(RegisterResult::Fresh(l)) => l,
             _ => unreachable!(),
         };
-        update(&mut state, HostCommand::EnqueuePaneClose { block_id: "b1".into() });
-        update(&mut state, HostCommand::DrainPaneByLabel { label: first.clone() });
+        update(&mut state, HostCommand::EnqueueBrowserPaneClose { block_id: "b1".into() });
+        update(&mut state, HostCommand::DrainBrowserPaneByLabel { label: first.clone() });
 
         // re-register — gets a different label
         let second = match update(
             &mut state,
-            HostCommand::TryRegisterPaneLive { block_id: "b1".into() },
-        ).pane_register_result
+            HostCommand::TryRegisterBrowserPaneLive { block_id: "b1".into() },
+        ).browser_pane_register_result
         {
             Some(RegisterResult::Fresh(l)) => l,
             _ => unreachable!(),
@@ -1909,10 +1909,10 @@ mod tests {
         assert_ne!(first, second);
 
         // late on_before_close for the OLD browser tries to drain by old label
-        let stale = update(&mut state, HostCommand::DrainPaneByLabel { label: first });
-        assert!(stale.drained_block_id.is_none(), "stale drain must not evict the new entry");
-        assert!(state.panes.contains_key("b1"), "new entry must survive stale drain");
-        assert_eq!(state.panes["b1"].label, second);
+        let stale = update(&mut state, HostCommand::DrainBrowserPaneByLabel { label: first });
+        assert!(stale.drained_browser_pane_block_id.is_none(), "stale drain must not evict the new entry");
+        assert!(state.browser_panes.contains_key("b1"), "new entry must survive stale drain");
+        assert_eq!(state.browser_panes["b1"].label, second);
     }
 
     // ── H.3 drag (singleton invariant) ───────────────────────────────────

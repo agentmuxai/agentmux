@@ -8,7 +8,7 @@
 //! by label, accessed via `AppState::get_browser` etc). We only need the
 //! block_id → label mapping, which also lives in the reducer's `panes` map.
 //!
-//! Lifecycle states are tracked explicitly via the reducer's `PaneLifecycle`:
+//! Lifecycle states are tracked explicitly via the reducer's `BrowserPaneLifecycle`:
 //!   Created → Closing → Closed (removed from `panes`)
 //! Every pane-facing op (focus/resize/navigate/…) short-circuits when the
 //! entry is already in `Closing`. This drops late IPC that the frontend
@@ -17,16 +17,16 @@
 //! the crash described in `docs/specs/SPEC_BROWSER_PANE_LIFECYCLE.md` §4c.
 //!
 //! **Phase H.1.d/e (PR #5):** The legacy `pane::lifecycle::PaneStateMachine`
-//! is gone; pane state lives only in `HostState.panes`. All mutations go
-//! through `HostCommand::TryRegisterPaneLive` / `EnqueuePaneClose` /
-//! `CompletePaneClose` / `DrainPaneByLabel` and read back via the reducer's
+//! is gone; pane state lives only in `HostState.browser_panes`. All mutations go
+//! through `HostCommand::TryRegisterBrowserPaneLive` / `EnqueueBrowserPaneClose` /
+//! `CompleteBrowserPaneClose` / `DrainBrowserPaneByLabel` and read back via the reducer's
 //! atomic `DispatchOutput` fields.
 
 use std::sync::Arc;
 
 use cef::*;
 
-use crate::pane::CreatePaneTask;
+use crate::browser_pane::CreateBrowserPaneTask;
 use crate::reducer::RegisterResult;
 use crate::state::AppState;
 
@@ -38,8 +38,8 @@ use crate::state::AppState;
 /// Kept minimal (just two methods) to avoid a dependency graph that has to
 /// be updated every time `close()` grows. Other ops (`focus`, `resize`, …)
 /// can gain their own traits when they need testing, or graduate to a
-/// unified `PaneCefBridge` once the shape is stable.
-pub trait PaneCloseOps {
+/// unified `BrowserPaneCefBridge` once the shape is stable.
+pub trait BrowserPaneCloseOps {
     /// Remove the Browser for this label from the registry. Return its
     /// outer HWND as a pointer-sized value, or `None` if there is no
     /// Browser or no HWND. Dropping the Browser Arc is the implementation's
@@ -52,11 +52,11 @@ pub trait PaneCloseOps {
     fn destroy_hwnd(&self, hwnd: usize);
 }
 
-/// Production implementation of `PaneCloseOps` backed by `AppState.browsers`
+/// Production implementation of `BrowserPaneCloseOps` backed by `AppState.browsers`
 /// and Win32 `DestroyWindow`.
 struct AppStateCloseOps<'a>(&'a Arc<AppState>);
 
-impl<'a> PaneCloseOps for AppStateCloseOps<'a> {
+impl<'a> BrowserPaneCloseOps for AppStateCloseOps<'a> {
     fn take_browser_hwnd(&self, label: &str) -> Option<usize> {
         // Atomic take-and-return via reducer (codex P2 PR #660). Earlier
         // round 1 separated `get_browser` + `UnregisterBrowser` dispatch,
@@ -139,7 +139,7 @@ impl BrowserPaneManager {
     /// Look up the Browser iff the pane is Live. Returns None when closing
     /// so all ops short-circuit uniformly.
     fn live_browser(&self, state: &Arc<AppState>, block_id: &str) -> Option<Browser> {
-        let label = state.live_pane_label(block_id)?;
+        let label = state.live_browser_pane_label(block_id)?;
         state.get_browser(&label)
     }
 
@@ -165,13 +165,13 @@ impl BrowserPaneManager {
         // reducer atomically generates the label and inserts the entry,
         // returning Fresh / AlreadyLive / Closing via DispatchOutput.
         let out = state.host_dispatch(
-            crate::reducer::HostCommand::TryRegisterPaneLive {
+            crate::reducer::HostCommand::TryRegisterBrowserPaneLive {
                 block_id: block_id.to_string(),
             },
         );
-        let result = out.pane_register_result.ok_or_else(|| {
+        let result = out.browser_pane_register_result.ok_or_else(|| {
             format!(
-                "try_register_pane_live returned no result (block_id={}); host shutting down?",
+                "try_register_browser_pane_live returned no result (block_id={}); host shutting down?",
                 block_id
             )
         })?;
@@ -188,7 +188,7 @@ impl BrowserPaneManager {
             RegisterResult::Closing => {
                 // Reject rather than overwrite: the old CEF Browser is
                 // mid-teardown and its on_before_close will call
-                // DrainPaneByLabel — if we let create overwrite, drain
+                // DrainBrowserPaneByLabel — if we let create overwrite, drain
                 // would evict the NEW entry. Frontend retries on next tick.
                 Err(format!(
                     "browser pane for block_id={} is still closing; retry after on_before_close",
@@ -196,7 +196,7 @@ impl BrowserPaneManager {
                 ))
             }
             RegisterResult::Fresh(label) => {
-                let mut task = CreatePaneTask::new(
+                let mut task = CreateBrowserPaneTask::new(
                     state.clone(),
                     block_id.to_string(),
                     label,
@@ -269,29 +269,29 @@ impl BrowserPaneManager {
         // Phase H.1.d (PR #5) — sole pane-close entry point. The reducer
         // flips Live→Closing atomically and returns the entry's label iff
         // the transition fired. None means missing or already-Closing —
-        // both idempotent no-ops; we don't dispatch CompletePaneClose in
+        // both idempotent no-ops; we don't dispatch CompleteBrowserPaneClose in
         // those cases (codex P2 PR #655 race), avoiding the entry removal
         // while another in-flight close is still tearing down the HWND.
         let close_out = state.host_dispatch(
-            crate::reducer::HostCommand::EnqueuePaneClose {
+            crate::reducer::HostCommand::EnqueueBrowserPaneClose {
                 block_id: block_id.to_string(),
             },
         );
-        let label = match close_out.closed_pane_label {
+        let label = match close_out.closed_browser_pane_label {
             Some(l) => l,
             None => return,
         };
         let ops = AppStateCloseOps(state);
         Self::close_with(&label, &ops);
         state.host_dispatch(
-            crate::reducer::HostCommand::CompletePaneClose {
+            crate::reducer::HostCommand::CompleteBrowserPaneClose {
                 block_id: block_id.to_string(),
             },
         );
         tracing::info!(block_id, label, "browser pane closed");
 
         // PR #6 H.7 kick — the pane is fully closed; if any pool refill
-        // was deferred by `any_pane_closing()` while we were mid-close,
+        // was deferred by `any_browser_pane_closing()` while we were mid-close,
         // top up now. `spawn_pool_window` is internally idempotent
         // (single-flight semaphore + below-target check via reducer), so
         // calling it always-on-pane-close is safe even when no refill is
@@ -301,10 +301,10 @@ impl BrowserPaneManager {
 
     /// The testable side-effect body of `close()`. Given a pane's `label`,
     /// remove its Browser handle and destroy its HWND. The state-machine
-    /// transition (Live→Closing) and the entry removal (CompletePaneClose)
+    /// transition (Live→Closing) and the entry removal (CompleteBrowserPaneClose)
     /// happen in `close()` via reducer dispatch — `close_with` is purely
     /// the FFI side-effects that follow.
-    fn close_with(label: &str, ops: &dyn PaneCloseOps) {
+    fn close_with(label: &str, ops: &dyn BrowserPaneCloseOps) {
         if let Some(hwnd) = ops.take_browser_hwnd(label) {
             ops.destroy_hwnd(hwnd);
             tracing::info!(label, "pane HWND destroyed");
@@ -314,15 +314,15 @@ impl BrowserPaneManager {
     /// Called from CEF's `on_before_close` if/when it fires for a pane
     /// browser. The explicit `close()` path usually clears the entry first,
     /// so this is a no-op in that case — but `on_before_close` may still
-    /// fire async as Chromium's refcount hits zero, and `DrainPaneByLabel`
+    /// fire async as Chromium's refcount hits zero, and `DrainBrowserPaneByLabel`
     /// is idempotent so the callback is safe.
     pub fn drain_closed_label(&self, state: &Arc<AppState>, label: &str) {
         let out = state.host_dispatch(
-            crate::reducer::HostCommand::DrainPaneByLabel {
+            crate::reducer::HostCommand::DrainBrowserPaneByLabel {
                 label: label.to_string(),
             },
         );
-        if let Some(block_id) = out.drained_block_id {
+        if let Some(block_id) = out.drained_browser_pane_block_id {
             tracing::info!(label, block_id = %block_id, "browser pane drained via on_before_close");
             // PR #6 H.7 kick — see `close()` for rationale. The
             // on_before_close path is the async drain; pool refill that
@@ -348,7 +348,7 @@ impl BrowserPaneManager {
         // Phase H.1.b + H.2.b — read live labels via reducer-aware helper,
         // then look up each browser via reducer-aware helper. Both with
         // fallback + drift logging.
-        let labels = state.live_pane_labels();
+        let labels = state.live_browser_pane_labels();
         for label in &labels {
             if let Some(browser) = state.get_browser(label) {
                 if let Some(host) = browser.host() {
@@ -418,7 +418,7 @@ impl BrowserPaneManager {
         // Phase H.1.b + H.2.b — labels via reducer-aware helper; per-label
         // browser lookup via reducer-aware helper. Drops the held-across-loop
         // legacy lock; each iteration now snapshots independently.
-        let labels = state.live_pane_labels();
+        let labels = state.live_browser_pane_labels();
         for label in &labels {
             let browser = match state.get_browser(label) {
                 Some(b) => b,
@@ -537,7 +537,7 @@ impl BrowserPaneManager {
                         // Tell the subclass this focus request is intentional
                         // (not Chromium's on-load focus steal) so it won't be
                         // redirected back to the parent.
-                        crate::pane::ALLOW_PANE_FOCUS_ONCE.store(
+                        crate::browser_pane::ALLOW_BROWSER_PANE_FOCUS_ONCE.store(
                             true,
                             std::sync::atomic::Ordering::Relaxed,
                         );
@@ -551,17 +551,17 @@ impl BrowserPaneManager {
     }
 }
 
-// `CreatePaneTask` moved to `crate::pane::creation` in Phase 3.
+// `CreateBrowserPaneTask` moved to `crate::browser_pane::creation` in Phase 3.
 
 // ── Tests ───────────────────────────────────────────────────────────────────
 //
 // Phase H.1.d/e (PR #5): The pane state machine lives in the host reducer
-// (`HostState.panes`). Lifecycle transition tests — Live→Closing, idempotent
+// (`HostState.browser_panes`). Lifecycle transition tests — Live→Closing, idempotent
 // no-ops for missing or already-Closing entries, label sequence monotonicity,
 // drain-by-label — are now in `crate::reducer::tests`.
 //
 // What remains here: the FFI seam. `close_with` only takes a label and
-// drives `PaneCloseOps`; tests verify it forwards label → take → destroy
+// drives `BrowserPaneCloseOps`; tests verify it forwards label → take → destroy
 // in order, with a None-returning `take` short-circuiting the destroy.
 
 #[cfg(test)]
@@ -569,7 +569,7 @@ mod tests {
     use super::*;
     use std::collections::HashMap;
 
-    /// Recording mock for `PaneCloseOps`. Tests inspect `taken` and
+    /// Recording mock for `BrowserPaneCloseOps`. Tests inspect `taken` and
     /// `destroyed` to assert what close_with did.
     struct MockCloseOps {
         registered: parking_lot::Mutex<HashMap<String, usize>>,
@@ -599,7 +599,7 @@ mod tests {
         }
     }
 
-    impl PaneCloseOps for MockCloseOps {
+    impl BrowserPaneCloseOps for MockCloseOps {
         fn take_browser_hwnd(&self, label: &str) -> Option<usize> {
             self.taken.lock().push(label.to_string());
             self.registered.lock().remove(label)

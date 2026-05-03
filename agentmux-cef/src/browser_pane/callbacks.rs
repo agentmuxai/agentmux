@@ -7,12 +7,12 @@
 //! (see `docs/specs/SPEC_BROWSER_PANE_MODULARIZATION.md` §6). `AgentMuxHandler`
 //! still owns the CEF callback plumbing; this module holds the pane-branch
 //! bodies so pane-specific logic lives in one place instead of threaded
-//! through `if self.is_pane` branches in `client.rs`.
+//! through `if self.is_browser_pane` branches in `client.rs`.
 //!
-//! Notable: this is where `install_pane_focus_redirect` actually gets wired
-//! in. Before this phase the function existed in `pane::hwnd` but had zero
+//! Notable: this is where `install_browser_pane_focus_redirect` actually gets wired
+//! in. Before this phase the function existed in `browser_pane::hwnd` but had zero
 //! callers (see `SPEC_BROWSER_PANE_LIFECYCLE.md` §5 race #5). Now
-//! `on_after_created_pane` and `on_load_end_pane` both reinstall the focus
+//! `on_after_created_browser_pane` and `on_load_end_browser_pane` both reinstall the focus
 //! subclass — required because Chromium recreates the
 //! `Chrome_RenderWidgetHostHWND` child on every navigation, stranding the
 //! old subclass on a destroyed HWND.
@@ -32,7 +32,7 @@ use crate::state::AppState;
 /// 2. Install the WM_SETFOCUS redirect subclass on the pane's HWND tree so
 ///    Chromium's internal focus-steals on page load don't yank keyboard
 ///    focus away from the main window.
-pub fn on_after_created_pane(state: &Arc<AppState>, browser: &Browser) {
+pub fn on_after_created_browser_pane(state: &Arc<AppState>, browser: &Browser) {
     #[cfg(target_os = "windows")]
     {
         if let Some(host) = browser.host() {
@@ -59,7 +59,7 @@ pub fn on_after_created_pane(state: &Arc<AppState>, browser: &Browser) {
                 // focused pane).
                 let block_id = resolve_pane_block_id(state, browser).unwrap_or_default();
                 unsafe {
-                    crate::pane::hwnd::install_pane_focus_redirect(
+                    crate::browser_pane::hwnd::install_browser_pane_focus_redirect(
                         hwnd,
                         state.clone(),
                         block_id,
@@ -81,7 +81,7 @@ pub fn on_after_created_pane(state: &Arc<AppState>, browser: &Browser) {
 /// Drains the lifecycle entry from `BrowserPaneManager` so a re-create
 /// with the same block_id gets a fresh Live state. Idempotent — if the
 /// explicit `close()` path already drained it, this is a no-op.
-pub fn on_before_close_pane(state: &Arc<AppState>, label: &str) {
+pub fn on_before_close_browser_pane(state: &Arc<AppState>, label: &str) {
     state.browser_panes.drain_closed_label(state, label);
 
     // Labels are `browser-pane-<uuid>-<seq>`; strip prefix + trailing `-<seq>`
@@ -92,13 +92,13 @@ pub fn on_before_close_pane(state: &Arc<AppState>, label: &str) {
         if let Some(rest) = label.strip_prefix("browser-pane-") {
             if let Some(dash) = rest.rfind('-') {
                 let block_id = &rest[..dash];
-                crate::pane::hwnd::remove_contexts_for_block(block_id);
+                crate::browser_pane::hwnd::remove_contexts_for_block(block_id);
             }
         }
     }
 }
 
-/// Called from `AgentMuxHandler::on_load_end` when `is_pane` is true.
+/// Called from `AgentMuxHandler::on_load_end` when `is_browser_pane` is true.
 ///
 /// Chromium creates a fresh `Chrome_RenderWidgetHostHWND` on every
 /// navigation. The subclass installed at `on_after_created` is on the
@@ -110,7 +110,7 @@ pub fn on_before_close_pane(state: &Arc<AppState>, label: &str) {
 /// focused HWND; stealing focus away from the pane breaks scrolling.
 /// The FocusHandler cancel + WndProc redirect already keep focus off
 /// the pane during the *initial* navigation focus steal.
-pub fn on_load_end_pane(state: &Arc<AppState>, browser: &Browser) {
+pub fn on_load_end_browser_pane(state: &Arc<AppState>, browser: &Browser) {
     tracing::info!("[pane-load-end] pane page loaded; reinstalling focus subclass");
 
     #[cfg(target_os = "windows")]
@@ -120,7 +120,7 @@ pub fn on_load_end_pane(state: &Arc<AppState>, browser: &Browser) {
             if !wh.0.is_null() {
                 let block_id = resolve_pane_block_id(state, browser).unwrap_or_default();
                 unsafe {
-                    crate::pane::hwnd::install_pane_focus_redirect(
+                    crate::browser_pane::hwnd::install_browser_pane_focus_redirect(
                         wh.0 as *mut std::ffi::c_void,
                         state.clone(),
                         block_id,
@@ -136,7 +136,7 @@ pub fn on_load_end_pane(state: &Arc<AppState>, browser: &Browser) {
     // `on_load_end` fires before the navigation controller commits the
     // history entry, so calling `browser.can_go_back()` from this hook
     // can return the pre-navigation state. Those flags flow through the
-    // dedicated `on_loading_state_change_pane` callback below, which CEF
+    // dedicated `on_loading_state_change_browser_pane` callback below, which CEF
     // provides with correct values as direct parameters.
     if let Some(block_id) = resolve_pane_block_id(state, browser) {
         let url = {
@@ -168,14 +168,14 @@ pub fn on_load_end_pane(state: &Arc<AppState>, browser: &Browser) {
 }
 
 /// Pane-specific `on_loading_state_change` body. Called from
-/// `AgentMuxHandler::on_loading_state_change` when `is_pane == true`.
+/// `AgentMuxHandler::on_loading_state_change` when `is_browser_pane == true`.
 ///
 /// CEF invokes `on_loading_state_change` whenever the navigation controller's
 /// history state changes — navigation start, navigation commit, and after
 /// back/forward. `can_go_back` / `can_go_forward` are provided as direct
 /// parameters (not queried after the fact), so they're guaranteed to reflect
 /// the real committed state rather than the pre-commit race window.
-pub fn on_loading_state_change_pane(
+pub fn on_loading_state_change_browser_pane(
     state: &Arc<AppState>,
     browser: &Browser,
     can_go_back: bool,
