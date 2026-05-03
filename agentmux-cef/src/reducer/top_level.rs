@@ -8,7 +8,7 @@ use std::time::Instant;
 
 use crate::state::*;
 
-use super::{DispatchOutput, HostEvent, HostLifecyclePhase, HostState, RegisterResult, emit_error, TOP_LEVEL_CREATION_HISTORY_CAP};
+use super::{DispatchOutput, HostEvent, HostState, emit_error, TOP_LEVEL_CREATION_HISTORY_CAP};
 
 // ── H.6 — top-level window creation runner ───────────────────────────────
 

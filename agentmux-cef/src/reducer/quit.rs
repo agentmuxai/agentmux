@@ -4,11 +4,10 @@
 //! Quit lifecycle (Phase H.5) reducer handlers. Extracted from reducer/mod.rs in
 //! task #182 PR-F-2 for navigability.
 
-use std::time::Instant;
 
 use crate::state::*;
 
-use super::{DispatchOutput, HostEvent, HostLifecyclePhase, HostState, RegisterResult, emit_error};
+use super::{DispatchOutput, HostEvent, HostState};
 
 // ── H.5 — quit lifecycle ─────────────────────────────────────────────────
 
