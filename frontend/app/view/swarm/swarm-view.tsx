@@ -126,14 +126,12 @@ function SwarmHeader({ model }: { model: SwarmViewModel }): JSX.Element {
 
 // ── Header (back face / detail) ─────────────────────────────────────────
 
-function DetailHeader({
-    entry,
-    onBack,
-}: {
+function DetailHeader(props: {
     entry: SwarmEntry | null;
     onBack: () => void;
 }): JSX.Element {
     const title = () => {
+        const entry = props.entry;
         if (!entry) return "";
         if (entry.kind === "subagent") {
             return entry.data.slug || entry.data.agent_id.substring(0, 7);
@@ -142,7 +140,7 @@ function DetailHeader({
     };
     return (
         <div class="swarm-header swarm-header--detail">
-            <button class="swarm-back" onClick={onBack} title="Back to list">
+            <button class="swarm-back" onClick={() => props.onBack()} title="Back to list">
                 {"←"}
             </button>
             <span class="swarm-detail-title">{title()}</span>
@@ -262,7 +260,6 @@ function SwarmDetail({
     model: SwarmViewModel;
     entry: SwarmEntry;
 }): JSX.Element {
-    if (entry.kind !== "subagent") return null as unknown as JSX.Element;
     const sub = entry.data;
     const elapsed = () => {
         const ms = Date.now() - sub.last_event_at;
