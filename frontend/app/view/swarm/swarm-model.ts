@@ -68,7 +68,15 @@ export interface HistorySession {
     messages: HistoryMessage[];
 }
 
-export type SwarmTab = "overview" | "activity" | "instances" | "history" | "search";
+export type SwarmTab = "active" | "retired";
+
+/**
+ * The pane has two faces: the list (front) and entry detail (back).
+ * `selectedEntry` non-null flips the pane to the detail face.
+ * Today only subagent entries exist (agent listing is TODO — see
+ * docs/specs/swarm-redesign-active-retired-2026-05-03.md).
+ */
+export type SwarmEntry = { kind: "subagent"; data: ActiveSubagent };
 
 // ── Activity tab types ──────────────────────────────────────────────────
 // Mirrors `backend::process_tracker::TrackedProcess` + RPC responses
@@ -117,10 +125,15 @@ export class SwarmViewModel implements ViewModel {
         return null; // set by barrel
     }
 
-    // Active tab
-    private _tab = createSignal<SwarmTab>("overview");
+    // Selected tab (Active / Retired)
+    private _tab = createSignal<SwarmTab>("active");
     tabAtom: Accessor<SwarmTab> = this._tab[0];
     setTab: Setter<SwarmTab> = this._tab[1];
+
+    // Detail-face entry. Non-null = pane is flipped to detail.
+    private _selectedEntry = createSignal<SwarmEntry | null>(null);
+    selectedEntryAtom: Accessor<SwarmEntry | null> = this._selectedEntry[0];
+    setSelectedEntry: Setter<SwarmEntry | null> = this._selectedEntry[1];
 
     // Agent overview list
     private _agents = createSignal<AgentOverview[]>([]);

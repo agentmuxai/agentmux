@@ -1,0 +1,81 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// Detail face — back arrow header + entry detail grid.
+
+.swarm-header--detail {
+    gap: 12px;
+}
+
+.swarm-back {
+    background: transparent;
+    border: none;
+    color: var(--main-text-color);
+    cursor: pointer;
+    font-size: 18px;
+    padding: 4px 8px;
+    border-radius: 4px;
+    line-height: 1;
+
+    &:hover {
+        background: color-mix(in srgb, var(--main-text-color) 6%, transparent);
+    }
+}
+
+.swarm-detail-title {
+    font-size: 13px;
+    font-weight: 600;
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.swarm-detail {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+}
+
+.swarm-detail-grid {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: var(--space-2) var(--space-4);
+    margin: 0;
+
+    dt {
+        color: var(--secondary-text-color);
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+
+    dd {
+        margin: 0;
+        font-size: 12px;
+
+        &.mono {
+            font-family: var(--termfontfamily, monospace);
+        }
+    }
+}
+
+.swarm-detail-actions {
+    display: flex;
+    gap: var(--space-2);
+}
+
+.swarm-detail-action {
+    background: color-mix(in srgb, var(--accent-color) 15%, transparent);
+    color: var(--accent-color);
+    border: 1px solid color-mix(in srgb, var(--accent-color) 30%, transparent);
+    padding: var(--space-2) var(--space-3);
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+    font-family: inherit;
+
+    &:hover {
+        background: color-mix(in srgb, var(--accent-color) 25%, transparent);
+    }
+}
