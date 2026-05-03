@@ -34,7 +34,7 @@ mod launcher_ipc;
 mod srv_event_bridge;
 mod srv_ipc;
 mod memory_heartbeat;
-mod pane;
+mod browser_pane;
 mod reducer;
 mod saga_dispatch;
 mod sidecar;

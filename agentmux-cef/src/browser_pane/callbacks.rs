@@ -9,10 +9,10 @@
 //! bodies so pane-specific logic lives in one place instead of threaded
 //! through `if self.is_pane` branches in `client.rs`.
 //!
-//! Notable: this is where `install_pane_focus_redirect` actually gets wired
+//! Notable: this is where `install_browser_pane_focus_redirect` actually gets wired
 //! in. Before this phase the function existed in `pane::hwnd` but had zero
 //! callers (see `SPEC_BROWSER_PANE_LIFECYCLE.md` §5 race #5). Now
-//! `on_after_created_pane` and `on_load_end_pane` both reinstall the focus
+//! `on_after_created_browser_pane` and `on_load_end_pane` both reinstall the focus
 //! subclass — required because Chromium recreates the
 //! `Chrome_RenderWidgetHostHWND` child on every navigation, stranding the
 //! old subclass on a destroyed HWND.
@@ -32,7 +32,7 @@ use crate::state::AppState;
 /// 2. Install the WM_SETFOCUS redirect subclass on the pane's HWND tree so
 ///    Chromium's internal focus-steals on page load don't yank keyboard
 ///    focus away from the main window.
-pub fn on_after_created_pane(state: &Arc<AppState>, browser: &Browser) {
+pub fn on_after_created_browser_pane(state: &Arc<AppState>, browser: &Browser) {
     #[cfg(target_os = "windows")]
     {
         if let Some(host) = browser.host() {
@@ -59,7 +59,7 @@ pub fn on_after_created_pane(state: &Arc<AppState>, browser: &Browser) {
                 // focused pane).
                 let block_id = resolve_pane_block_id(state, browser).unwrap_or_default();
                 unsafe {
-                    crate::pane::hwnd::install_pane_focus_redirect(
+                    crate::browser_pane::hwnd::install_browser_pane_focus_redirect(
                         hwnd,
                         state.clone(),
                         block_id,
@@ -81,7 +81,7 @@ pub fn on_after_created_pane(state: &Arc<AppState>, browser: &Browser) {
 /// Drains the lifecycle entry from `BrowserPaneManager` so a re-create
 /// with the same block_id gets a fresh Live state. Idempotent — if the
 /// explicit `close()` path already drained it, this is a no-op.
-pub fn on_before_close_pane(state: &Arc<AppState>, label: &str) {
+pub fn on_before_close_browser_pane(state: &Arc<AppState>, label: &str) {
     state.browser_panes.drain_closed_label(state, label);
 
     // Labels are `browser-pane-<uuid>-<seq>`; strip prefix + trailing `-<seq>`
@@ -92,7 +92,7 @@ pub fn on_before_close_pane(state: &Arc<AppState>, label: &str) {
         if let Some(rest) = label.strip_prefix("browser-pane-") {
             if let Some(dash) = rest.rfind('-') {
                 let block_id = &rest[..dash];
-                crate::pane::hwnd::remove_contexts_for_block(block_id);
+                crate::browser_pane::hwnd::remove_contexts_for_block(block_id);
             }
         }
     }
@@ -120,7 +120,7 @@ pub fn on_load_end_pane(state: &Arc<AppState>, browser: &Browser) {
             if !wh.0.is_null() {
                 let block_id = resolve_pane_block_id(state, browser).unwrap_or_default();
                 unsafe {
-                    crate::pane::hwnd::install_pane_focus_redirect(
+                    crate::browser_pane::hwnd::install_browser_pane_focus_redirect(
                         wh.0 as *mut std::ffi::c_void,
                         state.clone(),
                         block_id,
