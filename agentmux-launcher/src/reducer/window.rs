@@ -197,7 +197,7 @@ pub(super) fn handle_report_window_closed(state: &mut State, label: String) -> V
     // saga-style HostShouldQuit so the host can reap pool and
     // quit cleanly. See B.9.3 in
     // docs/retro/next-steps-2026-04-29.md.
-    if state.windows.is_empty() && super::host_is_running(state) {
+    if state.windows.is_empty() && super::connection::host_is_running(state) {
         let v_drift = state.bump_version();
         out.push(Event::HwndDriftDetected {
             kind: HwndDriftKind::OrphanInstance,
