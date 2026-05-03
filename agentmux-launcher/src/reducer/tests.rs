@@ -1,4 +1,6 @@
 use super::*;
+use agentmux_common::ipc::{HwndDriftKind, WindowKind};
+use crate::state::WindowMirror;
 
 fn ctx(conn_id: u64) -> Ctx {
     Ctx {
@@ -1272,7 +1274,7 @@ fn arb_window_cmd() -> impl proptest::strategy::Strategy<Value = Command> {
 // Phase B.9 (WRR) — reducer arm tests
 // -----------------------------------------------------------
 
-use agentmux_common::ipc::{HwndDriftKind, Rect};
+use agentmux_common::ipc::Rect;
 
 /// Helper: drive the reducer through a host Register so
 /// subsequent host-only WRR commands are accepted. Returns the
@@ -1644,7 +1646,7 @@ fn b9_3_orphan_instance_does_not_fire_after_host_goodbye() {
     // is no longer Running, but that rejection happens
     // BEFORE reaching the predicate; we want to prove the
     // predicate itself is correct.)
-    let evs = handle_report_window_closed(&mut state, "w1".into());
+    let evs = super::window::handle_report_window_closed(&mut state, "w1".into());
     assert!(
         evs.iter().any(|e| matches!(e, Event::WindowClosed { .. })),
         "WindowClosed should still emit, got {:?}", evs
