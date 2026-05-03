@@ -398,10 +398,15 @@ export function useAgentStream({
                     }
                     // Track the currently-running tool for the status line
                     if (event.type === "tool_call") {
-                        dispatchPane(blockId, {
-                            type: "ToolStart",
-                            name: event.tool ?? "",
-                        });
+                        // Preserve prior semantic: missing tool name means
+                        // "no tool" (currentTool=null), NOT "tool with empty
+                        // name". Pre-reducer code did setCurrentTool(event.tool ?? null);
+                        // route through ToolEnd in the missing-name case.
+                        if (event.tool) {
+                            dispatchPane(blockId, { type: "ToolStart", name: event.tool });
+                        } else {
+                            dispatchPane(blockId, { type: "ToolEnd" });
+                        }
                     } else if (event.type === "tool_result") {
                         dispatchPane(blockId, { type: "ToolEnd" });
                     }

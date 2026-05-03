@@ -33,8 +33,10 @@ describe("agent-pane-state reducer", () => {
         });
 
         it("StreamFlushObserved is no-op when stream inactive", () => {
-            const r = update(mk(), { type: "StreamFlushObserved", addedCount: 3, at: 110 });
-            expect(r.state).toBe(mk() && r.state); // unchanged
+            const start = mk();
+            const r = update(start, { type: "StreamFlushObserved", addedCount: 3, at: 110 });
+            // Reducer must return SAME reference when no work was done.
+            expect(r.state).toBe(start);
             expect(r.events).toEqual([]);
         });
     });
