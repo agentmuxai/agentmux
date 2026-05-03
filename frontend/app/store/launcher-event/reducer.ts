@@ -61,13 +61,13 @@ function applyEvent(state: LauncherEventState, evt: LauncherEvent): ReducerResul
         case "hwnd_drift_detected":
             return {
                 state,
-                events: [{ type: "drift-detected", eventName: evt.event }],
+                events: [{ type: "drift-detected", eventName: evt.event, raw: evt }],
             };
         case "corrective_window_move":
         case "host_should_quit":
             return {
                 state,
-                events: [{ type: "saga-event-observed", eventName: evt.event }],
+                events: [{ type: "saga-event-observed", eventName: evt.event, raw: evt }],
             };
         default:
             return {
@@ -136,10 +136,23 @@ function handleWindowClosed(
               }
     ) as LauncherEventReducerEvent;
 
-    // No-op short-circuit: if neither knownEntries nor tombstones changed,
-    // return same state reference (per conventions §3).
+    // Three branches:
+    //  1. neither knownEntries nor tombstones changed → full no-op (return
+    //     same state reference per conventions §3)
+    //  2. tombstones changed but knownEntries unchanged → preserve instances
+    //     reference so the projection layer doesn't re-write atoms (codex
+    //     P2 PR #684 — was rebuilding `instances` array unnecessarily,
+    //     causing redundant Solid subscriber re-runs)
+    //  3. knownEntries changed → re-derive instances
     if (!wasPresent && nextClosedBeforeSeed === state.closedBeforeSeed) {
         return { state, events: [event] };
+    }
+    if (!wasPresent) {
+        // Tombstone-only change — preserve instances reference.
+        return {
+            state: { ...state, closedBeforeSeed: nextClosedBeforeSeed },
+            events: [event],
+        };
     }
     return {
         state: withDerived(state, nextKnown, nextClosedBeforeSeed),
