@@ -101,7 +101,72 @@ wrap_window_delegate! {
         fn window_runtime_style(&self) -> RuntimeStyle {
             self.runtime_style
         }
+
+        // Wayland app_id / X11 WM_CLASS are set via an FFI override below
+        // (see install_linux_window_properties_override) instead of via this
+        // trait method, because the cef 146.7.0 wrapper's
+        // `From<CefStringUtf16> for _cef_string_utf16_t` impl silently drops
+        // `Clear` variants — the kind `CefString::from("agentmux")` produces.
+        // The trait method would set the values, the writeback would zero
+        // them, and CEF would emit `xdg_toplevel.set_app_id("")`.
     }
+}
+
+/// Override the `get_linux_window_properties` function pointer on a
+/// `WindowDelegate` to write the AgentMux app_id directly to the C struct,
+/// bypassing the buggy `CefString` → `cef_string_utf16_t` conversion in the
+/// cef 146.7.0 wrapper (`Clear` variant gets dropped during writeback).
+///
+/// Without this, CEF emits `xdg_toplevel.set_app_id("")` and GNOME / KWin /
+/// sway can't match the window to `agentmux.desktop`, so the AgentMux icon
+/// never appears in the taskbar/dock/launcher.
+///
+/// Must be called once on every `WindowDelegate` we create (top-level, popup,
+/// new sub-window) before passing it to `window_create_top_level`.
+#[cfg(target_os = "linux")]
+pub fn install_linux_window_properties_override(delegate: &cef::WindowDelegate) {
+    use cef::ImplWindowDelegate;
+    // Disambiguate: WindowDelegate implements get_raw on three traits
+    // (ImplViewDelegate / ImplPanelDelegate / ImplWindowDelegate). We need
+    // the WindowDelegate one to get the right struct type for casting.
+    let raw: *mut cef::sys::_cef_window_delegate_t =
+        <cef::WindowDelegate as ImplWindowDelegate>::get_raw(delegate);
+    unsafe {
+        (*raw).get_linux_window_properties = Some(write_linux_window_properties);
+    }
+}
+
+/// Custom extern "C" shim invoked by libcef to populate
+/// `_cef_linux_window_properties_t`. Writes "agentmux" to wayland_app_id
+/// and the X11 wm_class fields via cef-dll-sys utf8→utf16 setters,
+/// then returns 1 so libcef uses the values.
+#[cfg(target_os = "linux")]
+extern "C" fn write_linux_window_properties(
+    _self_: *mut cef::sys::_cef_window_delegate_t,
+    _window: *mut cef::sys::_cef_window_t,
+    properties: *mut cef::sys::_cef_linux_window_properties_t,
+) -> std::os::raw::c_int {
+    if properties.is_null() {
+        return 0;
+    }
+    const APP_ID: &[u8] = b"agentmux";
+    unsafe {
+        let props = &mut *properties;
+        // The C struct's strings start zeroed (libcef constructs a default
+        // CefLinuxWindowProperties). cef_string_utf8_to_utf16 allocates a
+        // new utf-16 buffer and assigns it to the dest cef_string_utf16_t;
+        // ownership transfers to libcef which calls dtor when done.
+        cef::sys::cef_string_utf8_to_utf16(
+            APP_ID.as_ptr().cast(), APP_ID.len(), &mut props.wayland_app_id,
+        );
+        cef::sys::cef_string_utf8_to_utf16(
+            APP_ID.as_ptr().cast(), APP_ID.len(), &mut props.wm_class_class,
+        );
+        cef::sys::cef_string_utf8_to_utf16(
+            APP_ID.as_ptr().cast(), APP_ID.len(), &mut props.wm_class_name,
+        );
+    }
+    1
 }
 
 /// Compute a centered 70% rect for the monitor the window is currently on.
@@ -201,6 +266,8 @@ wrap_browser_view_delegate! {
                 frameless,
                 runtime_style,
             );
+            #[cfg(target_os = "linux")]
+            install_linux_window_properties_override(&window_delegate);
             window_create_top_level(Some(&mut window_delegate));
             1
         }
@@ -371,6 +438,8 @@ wrap_browser_process_handler! {
                     true, // frameless — main window uses custom title bar
                     RuntimeStyle::ALLOY,
                 );
+                #[cfg(target_os = "linux")]
+                install_linux_window_properties_override(&window_delegate);
                 window_create_top_level(Some(&mut window_delegate));
             }
         }
