@@ -59,7 +59,7 @@ function getBlockZoom(blockId: string): number | null {
     const bcm = getBlockComponentModel(blockId);
     if (!bcm?.viewModel) return null;
     const vt = bcm.viewModel.viewType;
-    if (vt !== "term" && vt !== "agent") return null;
+    if (vt !== "term" && vt !== "agent" && vt !== "swarm") return null;
 
     const blockOref = WOS.makeORef("block", blockId);
     const blockData = WOS.getObjectValue<Block>(blockOref);

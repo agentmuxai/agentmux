@@ -1,9 +1,9 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-// Swarm header toolbar + scrollable content container.
-
-// ── Header ──────────────────────────────────────────────────────────────
+// Swarm header toolbar — Active/Retired tabs on the front face,
+// back-button on the detail face. Lives inside the .swarm-flip container
+// so the header rotates with the body.
 
 .swarm-header {
     display: flex;
@@ -13,16 +13,6 @@
     border-bottom: 1px solid var(--border-color);
     background: color-mix(in srgb, var(--accent-color) 5%, transparent);
     flex-shrink: 0;
-}
-
-.swarm-header-icon {
-    font-size: 16px;
-}
-
-.swarm-header-title {
-    font-size: 13px;
-    font-weight: 600;
-    flex: 1;
 }
 
 .swarm-tabs {
@@ -52,12 +42,3 @@
         font-weight: 500;
     }
 }
-
-// ── Content ─────────────────────────────────────────────────────────────
-
-.swarm-content {
-    flex: 1;
-    overflow-y: auto;
-    padding: var(--space-3) 14px;
-}
-
