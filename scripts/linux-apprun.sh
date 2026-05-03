@@ -27,7 +27,6 @@ if [ -n "$APPIMAGE" ] && [ -x "$this_dir/install-linux-desktop.sh" ]; then
 fi
 # libcef.so + EGL/GLESv2 live in usr/bin alongside agentmux-cef per CEF's
 # colocation convention. The binary is built without RPATH, so the dynamic
-# linker needs LD_LIBRARY_PATH to find them. Also set CEF_LIBRARY_PATH for
-# CEF-internal probes.
+# linker needs LD_LIBRARY_PATH to find them.
 export LD_LIBRARY_PATH="$this_dir/usr/bin${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 exec "$this_dir/usr/bin/agentmux" "$@"
