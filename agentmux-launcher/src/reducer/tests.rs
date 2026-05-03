@@ -1,6 +1,8 @@
 use super::*;
 use agentmux_common::ipc::{HwndDriftKind, WindowKind};
 use crate::state::WindowMirror;
+use agentmux_common::ipc::{ClientKind, ErrorCode};
+use crate::state::{LifecyclePhase, ProcessRecord, ProcessState};
 
 fn ctx(conn_id: u64) -> Ctx {
     Ctx {
@@ -2193,7 +2195,7 @@ proptest! {
                     state.windows.keys().collect::<Vec<_>>(), pre_window_count
                 );
                 prop_assert!(
-                    host_is_running(&state),
+                    super::connection::host_is_running(&state),
                     "HostShouldQuit emitted but no Host in Running state"
                 );
             }
