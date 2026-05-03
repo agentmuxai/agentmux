@@ -35,8 +35,6 @@ import { createSignal, onMount, type Accessor } from "solid-js";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { dispatch as dispatchDoc } from "@/app/store/agent-document-store";
-import type { SignalPair } from "../state";
-import type { DocumentNode } from "../types";
 import { parseHistoryLines } from "../parseHistoryLines";
 
 import type { LogFn } from "../types";
@@ -44,7 +42,6 @@ export type { LogFn };
 
 export interface UseHistoryPaginationOptions {
     blockId: string;
-    documentAtom: SignalPair<DocumentNode[]>;
     /**
      * Accessor for the document's stream-event format, e.g.
      * "claude-stream-json", "codex-json", etc. Passed reactively because

@@ -39,9 +39,13 @@ export type AgentDocumentCommand =
     /** Persisted history (older messages from blockfile) — prepended. */
     | { type: "HistoryLoaded"; nodes: DocumentNode[] }
     /**
-     * Live stream RAF flush. `newNodes` are appends; `updatedNodes` are
-     * in-place mutations targeting existing IDs. Combined into a single
-     * command so each RAF causes exactly one atom write.
+     * Generic merge: `newNodes` are appends (with dedup against existing
+     * IDs — collisions route to in-place update), `updatedNodes` are
+     * targeted mutations against existing IDs. The primary caller is the
+     * stream's RAF flush, but any frontend-local mutation that needs to
+     * append or update document nodes (e.g. optimistic decision-update,
+     * login-success row) routes through the same command so slot.state
+     * stays authoritative.
      */
     | { type: "StreamFlush"; newNodes: DocumentNode[]; updatedNodes: DocumentNode[] }
     /**
