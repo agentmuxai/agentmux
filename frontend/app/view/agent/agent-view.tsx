@@ -6,6 +6,10 @@ import { createMemo, createSignal, onCleanup, onMount, Show, type JSX } from "so
 import type { AgentViewModel } from "./agent-model";
 import { getProvider } from "./providers";
 import { createAgentAtoms } from "./state";
+import {
+    registerPane as registerAgentDocPane,
+    unregisterPane as unregisterAgentDocPane,
+} from "@/app/store/agent-document-store";
 import type { SubagentLinkNode } from "./types";
 import { openSubagentPane, isSubagentPaneOpen } from "@/app/store/subagent-pane-manager";
 import { useAgentStream } from "./useAgentStream";
@@ -90,6 +94,17 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
 
     const agentAtoms = createMemo(() => createAgentAtoms(model.blockId));
 
+    // Register this pane with the document store. The store holds the
+    // authoritative reducer state per blockId; the documentAtom becomes a
+    // write-only projection. Every mutation to documentAtom must flow
+    // through `dispatch(blockId, ...)` from agent-document-store. See
+    // docs/specs/agent-pane-document-reducer-2026-05-03.md.
+    onMount(() => {
+        const [, setDocument] = agentAtoms().documentAtom;
+        registerAgentDocPane(model.blockId, setDocument);
+        onCleanup(() => unregisterAgentDocPane(model.blockId));
+    });
+
     // Activity log — collects per-session diagnostic entries from launch
     // flow, subprocess lifecycle, slash commands, errors, etc. Rendered
     // in the collapsible `<ActivityLogPanel>` above the composer.
@@ -102,9 +117,8 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
     // always after this component body has fully run (SolidJS onMount timing).
     let onReadyFn: (() => void) | null = null;
 
-    // History pagination: owns the document slice, loadingOlder state,
-    // loadOlder handler, and documentVersion (bumped on every external
-    // document mutation so useAgentStream can rebuild its dedup index).
+    // History pagination: dispatches HistoryLoaded into the agent-document-store
+    // for the trailing 200 lines on mount + each user-triggered loadOlder.
     const history = useHistoryPagination({
         blockId: model.blockId,
         documentAtom: agentAtoms().documentAtom,
@@ -267,9 +281,9 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
     };
 
     // Subscribe to subprocess output and parse into DocumentNodes.
-    // `documentVersion` is bumped whenever we mutate the document externally
-    // (history load / prepend), causing useAgentStream to rebuild its
-    // nodeIdSet and nodeIndexMap.
+    // Mutations dispatch through agent-document-store; the reducer there
+    // owns dedup against in-flight history loads and the truncate-suppress
+    // invariant that prevents the mid-session wipe bug.
     const stoppingAtom = agentAtoms().stoppingAtom;
     const pendingMessagesAtom = agentAtoms().pendingMessagesAtom;
     useAgentStream({
@@ -284,7 +298,6 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         stoppingAtom,
         pendingMessagesAtom,
         enabled: true,
-        documentVersion: history.documentVersion,
         // Provider id (lowercase catalog key) attributes completed-turn
         // tokens to the correct row in the status-bar token-usage store.
         provider: providerKey(),

@@ -16,6 +16,7 @@ import type { PendingMessage, SignalPair } from "./state";
 import { ClaudeCodeStreamParser } from "./stream-parser";
 import type { DocumentNode, SessionStats, StreamingState, TurnTokens, UserMessageNode } from "./types";
 import { recordTurn } from "@/store/token-usage";
+import { dispatch as dispatchDoc } from "@/app/store/agent-document-store";
 
 const OutputFileName = "output";
 
@@ -45,13 +46,6 @@ interface UseAgentStreamOpts {
     pendingMessagesAtom?: SignalPair<PendingMessage[]>;
     enabled: boolean;
     /**
-     * Version signal bumped by external document mutations (e.g. history
-     * load or prepend). When this changes, the hook rebuilds its internal
-     * `nodeIdSet` and `nodeIndexMap` from the current documentAtom so live
-     * updates continue to target the correct nodes.
-     */
-    documentVersion?: () => number;
-    /**
      * Provider id (from CLI_CATALOG — "claude", "codex", "gemini", …).
      * Used to attribute completed-turn tokens to the right row in the
      * status-bar token-usage store. Optional for back-compat; missing
@@ -76,10 +70,8 @@ export function useAgentStream({
     stoppingAtom,
     pendingMessagesAtom,
     enabled,
-    documentVersion,
     provider,
 }: UseAgentStreamOpts): void {
-    const [, setDocument] = documentAtom;
     const [, setStreaming] = streamingStateAtom;
     const [, setSessionStats] = sessionStatsAtom;
     const [, setTurnActive] = turnActiveAtom;
@@ -92,15 +84,14 @@ export function useAgentStream({
     let lineBuffer = "";
     let translator = createTranslator(outputFormat);
     let parser = new ClaudeCodeStreamParser();
+    // nodeIdSet remains for fast in-batch dedup (the reducer also dedups,
+    // but checking here avoids enqueuing already-seen nodes into pendingNew).
     let nodeIdSet = new Set<string>();
 
     // Batching: accumulate parsed nodes between RAF flushes
     let pendingNew: DocumentNode[] = [];
     let pendingUpdates: DocumentNode[] = [];
     let flushRafId: number | null = null;
-
-    // Index for O(1) node lookups during updates
-    let nodeIndexMap = new Map<string, number>();
 
     function flushPendingNodes() {
         flushRafId = null;
@@ -111,53 +102,12 @@ export function useAgentStream({
         pendingNew = [];
         pendingUpdates = [];
 
-        setDocument((prev) => {
-            // Only copy the array once per flush, not per WebSocket message
-            const result = prev.slice();
-            let mutated = false;
-
-            // Apply updates using index map for O(1) lookup
-            for (const updated of batchUpdates) {
-                const idx = nodeIndexMap.get(updated.id);
-                if (idx != null && idx < result.length) {
-                    const existing = result[idx];
-                    if (existing.type === "markdown" && updated.type === "markdown") {
-                        result[idx] = { ...existing, content: updated.content };
-                    } else {
-                        result[idx] = updated;
-                    }
-                    mutated = true;
-                }
-            }
-
-            // Append new nodes — but guard against the race where a
-            // documentVersion rebuild placed the node into the doc externally
-            // (e.g. history load completed between the node entering pendingNew
-            // and this RAF firing). If nodeIndexMap already has a valid entry
-            // for the node, update in-place instead of appending to prevent
-            // duplicates.
-            if (batchNew.length > 0) {
-                for (let i = 0; i < batchNew.length; i++) {
-                    const n = batchNew[i];
-                    const existingIdx = nodeIndexMap.get(n.id);
-                    if (existingIdx != null && existingIdx < result.length) {
-                        // Already in doc (placed by an external mutation while
-                        // this node was queued). Update in-place.
-                        result[existingIdx] = n;
-                    } else {
-                        nodeIndexMap.set(n.id, result.length);
-                        result.push(n);
-                    }
-                }
-                mutated = true;
-            }
-
-            // No cap on document size — `content-visibility: auto` on each
-            // node wrapper lets the browser skip layout/paint for off-screen
-            // nodes, so the DOM can grow to thousands without affecting
-            // typing smoothness. Full history is preserved.
-            // See docs/plans/agent-pane-ultra-long-sessions.md
-            return mutated ? result : prev;
+        // Single dispatch — the reducer owns dedup, in-place updates, and
+        // the markdown-content merge. See agent-document-store.ts.
+        dispatchDoc(blockId, {
+            type: "StreamFlush",
+            newNodes: batchNew,
+            updatedNodes: batchUpdates,
         });
 
         setStreaming((prev) => ({
@@ -181,7 +131,6 @@ export function useAgentStream({
         translator = createTranslator(outputFormat);
         parser = new ClaudeCodeStreamParser();
         nodeIdSet = new Set();
-        nodeIndexMap = new Map();
         pendingNew = [];
         pendingUpdates = [];
 
@@ -318,66 +267,45 @@ export function useAgentStream({
             onCleanup(() => acceptedUnsub());
         }
 
-        // Rebuild dedup set + index map from whatever is currently in the
-        // document. `doc()` is wrapped in `untrack` so the createEffect
-        // below only subscribes to documentVersion — NOT to the document
-        // signal itself. Without this, the rebuild would fire on every
-        // streaming flush (since flushPendingNodes calls setDoc), which
-        // would be O(n) per live event.
-        const rebuildIndicesFromDocument = () => {
-            const existingNodes = untrack(() => doc());
-            nodeIdSet = new Set();
-            nodeIndexMap = new Map();
-            for (let i = 0; i < existingNodes.length; i++) {
-                nodeIdSet.add(existingNodes[i].id);
-                nodeIndexMap.set(existingNodes[i].id, i);
-            }
-        };
-
-        // Initial seed — covers history nodes that were loaded before this
-        // hook mounted.
-        rebuildIndicesFromDocument();
-
-        // Reactive rebuild only when the caller bumps documentVersion after
-        // an external prepend/load. The first invocation runs immediately
-        // (SolidJS semantics) which is fine — it's idempotent.
-        if (documentVersion != null) {
-            createEffect(() => {
-                documentVersion();
-                // Re-add IDs from pending buffers AFTER rebuilding from the
-                // document so subsequent stream events for in-flight nodes are
-                // still routed as updates (not new nodes). Without this, a
-                // rebuild clears their dedup protection and the next delta
-                // creates a second entry for the same node.
-                const beforePendingNew = pendingNew.slice();
-                const beforePendingUpdates = pendingUpdates.slice();
-                rebuildIndicesFromDocument();
-                for (const n of beforePendingNew) nodeIdSet.add(n.id);
-                for (const n of beforePendingUpdates) nodeIdSet.add(n.id);
-            });
-        }
+        // Seed the local in-batch dedup set from any history that was
+        // already loaded into the document before the hook mounted. The
+        // reducer owns authoritative dedup; this set just avoids enqueuing
+        // already-known nodes into pendingNew, saving a redundant flush.
+        nodeIdSet = new Set();
+        for (const n of untrack(() => doc())) nodeIdSet.add(n.id);
 
         setStreaming((prev) => ({ ...prev, active: true, lastEventTime: Date.now() }));
+        // Mark the session active in the reducer — gates the truncate-
+        // suppression invariant.
+        dispatchDoc(blockId, { type: "SessionStart", at: Date.now() });
 
         const fileSubject = getFileSubject(blockId, OutputFileName);
 
         console.debug(`[useAgentStream] subscribed blockId=${blockId} format=${outputFormat}`);
         const subscription = fileSubject.subscribe((msg: { fileop: string; data64: string }) => {
             if (msg.fileop === "truncate") {
-                // Terminal was cleared — reset document
+                // Reducer decides whether to honor — late truncates after
+                // a socket-reconnect race are suppressed. Only reset the
+                // hook-local parser/stats/etc. when the truncate is actually
+                // honored; if suppressed, the live stream is still flowing
+                // and resetting would corrupt in-flight parse state.
+                const events = dispatchDoc(blockId, {
+                    type: "StreamTruncate",
+                    reason: "fileop",
+                });
+                const honored = events.some((e) => e.type === "truncate-applied");
+                if (!honored) return;
                 if (flushRafId != null) { cancelAnimationFrame(flushRafId); flushRafId = null; }
                 pendingNew = [];
                 pendingUpdates = [];
-                nodeIndexMap = new Map();
-                setDocument([]);
-                setSessionStats(null);
-                setCurrentTool(null);
-                setTurnTokens(null);
-                setTurnActive(false);
                 lineBuffer = "";
                 translator.reset();
                 parser.reset();
                 nodeIdSet = new Set();
+                setSessionStats(null);
+                setCurrentTool(null);
+                setTurnTokens(null);
+                setTurnActive(false);
                 return;
             }
 
@@ -507,6 +435,7 @@ export function useAgentStream({
             // Clear turn-active on teardown so a crash/exit without session_end
             // doesn't leave the status line showing "Working…" permanently.
             setTurnActive(false);
+            dispatchDoc(blockId, { type: "SessionEnd", at: Date.now() });
         });
     });
 }
