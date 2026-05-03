@@ -2921,23 +2921,87 @@ mod tests {
             "repair emits drift for diagnostic visibility, got {:?}", evs1
         );
 
-        // on_after_created for w2 arrives with 0xBB → also REPAIR
-        // (w2 was wrongly linked to 0xAA above).
+        // on_after_created for w2 arrives with 0xBB. CRUCIAL: w1's
+        // repair above stole 0xAA from w2 (codex P1 round 5 steal),
+        // so w2.hwnd is currently None — clean Link, no Repair,
+        // no drift.
+        assert_eq!(state.windows["w2"].hwnd, None,
+            "w2's wrong link must have been cleared by w1's repair-steal");
         let evs2 = update(&mut state, Command::ReportHwndOpened {
             hwnd: 0xBB, class_name: "Chrome_WidgetWin_1".into(),
             title: "".into(), label_hint: Some("w2".into()),
         }, &c6);
-        assert_eq!(state.windows["w2"].hwnd, Some(0xBB), "repair to authoritative");
+        assert_eq!(state.windows["w2"].hwnd, Some(0xBB), "clean link");
         assert!(
-            evs2.iter().any(|e| matches!(e, Event::HwndDriftDetected {
-                kind: HwndDriftKind::HwndWithoutBrowser, ..
-            })),
-            "repair drift, got {:?}", evs2
+            !evs2.iter().any(|e| matches!(e, Event::HwndDriftDetected { .. })),
+            "no drift on clean Link (steal already happened in w1's repair), got {:?}", evs2
         );
 
         // Final: both windows linked to their authoritative HWNDs.
         assert_eq!(state.windows["w1"].hwnd, Some(0xAA));
         assert_eq!(state.windows["w2"].hwnd, Some(0xBB));
+    }
+
+    #[test]
+    fn wrr_repair_steals_hwnd_from_other_mirror() {
+        // PR #664 codex P1 round 5 — when the repair arm overwrites
+        // mirror[A].hwnd to the new HWND, any OTHER mirror that was
+        // wrongly linked to that HWND must have its link cleared.
+        // Otherwise apply_hwnd_destroyed (which uses iter().find by
+        // hwnd) only fires WindowClosed for ONE of them, leaving the
+        // other as a ghost row forever.
+        let (mut state, _c) = registered_host_state();
+        let mut c1 = ctx_with_pid(1, 1); c1.now_ms = 100;
+        let mut c2 = ctx_with_pid(1, 1); c2.now_ms = 200;
+        let mut c3 = ctx_with_pid(1, 1); c3.now_ms = 300;
+
+        let _ = update(&mut state, Command::ReportMonitorTopologyChanged {
+            rects: vec![Rect { left: 0, top: 0, right: 1920, bottom: 1080 }],
+        }, &c1);
+
+        // Stage: mirror[B] is linked to HWND 0xAA via some prior path
+        // (e.g., drain wrong-pick, partial-host-upgrade weird state).
+        let _ = update(&mut state, Command::ReportWindowOpened {
+            label: "B".into(), kind: WindowKind::FullInstance,
+            parent_label: None,
+        }, &c2);
+        state.windows.get_mut("B").unwrap().hwnd = Some(0xAA);
+
+        // mirror[A] just opened, no link yet.
+        let _ = update(&mut state, Command::ReportWindowOpened {
+            label: "A".into(), kind: WindowKind::FullInstance,
+            parent_label: None,
+        }, &c2);
+
+        // on_after_created for A arrives with the AUTHORITATIVE HWND
+        // 0xAA. Repair must:
+        //   1. set mirror[A].hwnd = 0xAA
+        //   2. CLEAR mirror[B].hwnd (the wrongly-linked one)
+        //   3. emit drift event mentioning the steal
+        let evs = update(&mut state, Command::ReportHwndOpened {
+            hwnd: 0xAA, class_name: "Chrome_WidgetWin_1".into(),
+            title: "".into(), label_hint: Some("A".into()),
+        }, &c3);
+
+        assert_eq!(state.windows["A"].hwnd, Some(0xAA), "A linked to authoritative");
+        assert_eq!(state.windows["B"].hwnd, None,
+            "B's wrong link must be CLEARED (codex P1 round 5)");
+
+        // Drift event surfaces the steal.
+        let drift_msg = evs.iter().find_map(|e| match e {
+            Event::HwndDriftDetected { detail, .. } => Some(detail.clone()),
+            _ => None,
+        });
+        assert!(
+            drift_msg.as_deref().map(|d| d.contains("stole from label=B")).unwrap_or(false),
+            "drift detail must mention which label was stolen from, got {:?}", drift_msg
+        );
+
+        // Now OS destroys 0xAA. Only mirror[A] is linked to it →
+        // exactly ONE WindowClosed, no ghost row for B.
+        let evs = update(&mut state, Command::ReportHwndDestroyed { hwnd: 0xAA }, &c3);
+        let closed_count = evs.iter().filter(|e| matches!(e, Event::WindowClosed { .. })).count();
+        assert_eq!(closed_count, 1, "exactly one WindowClosed (codex P1 round 5)");
     }
 
     #[test]

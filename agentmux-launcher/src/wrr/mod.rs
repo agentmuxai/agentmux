@@ -84,6 +84,23 @@ pub fn apply_hwnd_opened(
         // `apply_hwnd_destroyed` would early-return on the
         // stale entry and skip the orphan-destroy chain.
         // (reagent #600 P1.)
+        // PR #664 codex P1 round 5 — STEAL HWND from any other mirror
+        // that currently claims it. The drain-on-WindowOpened may have
+        // wrong-linked the same HWND to a different label earlier; if
+        // we don't clear that other mirror's link, we end up with TWO
+        // mirrors pointing to the same HWND. `apply_hwnd_destroyed`
+        // uses `iter().find(...)` which returns the FIRST match — the
+        // other mirror would persist as a ghost row forever.
+        //
+        // Scan FIRST (immutable borrow), then mutate via `get_mut(label)`.
+        let stolen_from: Option<String> = state
+            .windows
+            .iter()
+            .find(|(other_label, m)| {
+                other_label.as_str() != label && m.hwnd == Some(hwnd)
+            })
+            .map(|(other_label, _)| other_label.clone());
+
         let mut drain_pending = false;
         let outcome: HwndOpenedOutcome = match state.windows.get_mut(label) {
             Some(mirror) if mirror.hwnd.is_none() => {
@@ -115,10 +132,11 @@ pub fn apply_hwnd_opened(
                 // `handle_report_window_opened`) provides best-effort
                 // linking but can wrong-pick under burst creates;
                 // when the explicit path arrives later it REPAIRS
-                // any stale link by overwriting. The orphaned `prior`
-                // HWND will be re-attributed when ITS OWN
-                // on_after_created fires a few ms later — same flow,
-                // no special-casing.
+                // any stale link by overwriting.
+                //
+                // The `prior` HWND that was wrongly linked here will
+                // be re-attributed when ITS OWN on_after_created
+                // fires (same flow, recursive REPAIR if needed).
                 //
                 // We still emit `HwndWithoutBrowser` drift so the
                 // existence of a stale link is visible in the log
@@ -131,20 +149,58 @@ pub fn apply_hwnd_opened(
             }
             None => HwndOpenedOutcome::NoMatchingLabel,
         };
+        // Apply the steal AFTER the get_mut borrow is released.
+        // (codex P1 round 5) Maintains the 1:1 HWND↔label invariant
+        // that `apply_hwnd_destroyed`'s find()-by-hwnd relies on.
+        // Steal is meaningful only when we actually claimed the HWND
+        // (Linked or Repaired); NoMatchingLabel falls through to
+        // pending stash without claiming.
+        let stole = matches!(outcome, HwndOpenedOutcome::Linked | HwndOpenedOutcome::Repaired(_))
+            && stolen_from.is_some();
+        if stole {
+            if let Some(other_label) = stolen_from.as_deref() {
+                if let Some(other) = state.windows.get_mut(other_label) {
+                    other.hwnd = None;
+                }
+            }
+        }
         if drain_pending {
             state.pending_hwnds.remove(&hwnd);
         }
         match outcome {
-            HwndOpenedOutcome::Linked => return vec![],
-            HwndOpenedOutcome::Repaired(existing) => {
+            HwndOpenedOutcome::Linked if !stole => return vec![],
+            HwndOpenedOutcome::Linked => {
+                // Linked + stole: we cleanly linked our mirror, but
+                // had to take the HWND from another label that was
+                // wrongly holding it (drain wrong-pick that wasn't
+                // yet repaired). Emit drift so the steal is visible.
                 let v = state.bump_version();
+                let other = stolen_from.as_deref().unwrap_or("?");
                 return vec![Event::HwndDriftDetected {
                     kind: HwndDriftKind::HwndWithoutBrowser,
                     label: Some(label.to_string()),
                     hwnd: Some(hwnd),
                     detail: format!(
-                        "ReportHwndOpened label_hint={} repaired stale link from hwnd={} to hwnd={}",
-                        label, existing, hwnd
+                        "ReportHwndOpened label_hint={} linked hwnd={} (stole from label={})",
+                        label, hwnd, other
+                    ),
+                    severity: severity_for(HwndDriftKind::HwndWithoutBrowser),
+                    version: v,
+                }];
+            }
+            HwndOpenedOutcome::Repaired(existing) => {
+                let v = state.bump_version();
+                let stolen_suffix = stolen_from
+                    .as_deref()
+                    .map(|s| format!(" (stole from label={})", s))
+                    .unwrap_or_default();
+                return vec![Event::HwndDriftDetected {
+                    kind: HwndDriftKind::HwndWithoutBrowser,
+                    label: Some(label.to_string()),
+                    hwnd: Some(hwnd),
+                    detail: format!(
+                        "ReportHwndOpened label_hint={} repaired stale link from hwnd={} to hwnd={}{}",
+                        label, existing, hwnd, stolen_suffix
                     ),
                     severity: severity_for(HwndDriftKind::HwndWithoutBrowser),
                     version: v,
