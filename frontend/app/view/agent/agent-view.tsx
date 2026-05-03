@@ -11,6 +11,11 @@ import {
     registerPane as registerAgentDocPane,
     unregisterPane as unregisterAgentDocPane,
 } from "@/app/store/agent-document-store";
+import {
+    dispatch as dispatchPane,
+    registerPane as registerAgentPaneStatePane,
+    unregisterPane as unregisterAgentPaneStatePane,
+} from "@/app/store/agent-pane-state-store";
 import type { SubagentLinkNode } from "./types";
 import { openSubagentPane, isSubagentPaneOpen } from "@/app/store/subagent-pane-manager";
 import { useAgentStream } from "./useAgentStream";
@@ -104,6 +109,24 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
     // docs/specs/agent-pane-document-reducer-2026-05-03.md.
     registerAgentDocPane(model.blockId, agentAtoms().documentAtom[1]);
     onCleanup(() => unregisterAgentDocPane(model.blockId));
+
+    // Slice #4 — agent-pane-state slot: bundles streaming/sessionStats/
+    // currentTool/turnTokens/turnActive/stopping/pending atoms behind a
+    // single reducer with cross-atom invariants. Same synchronous-register
+    // rule as the agent-document slot.
+    {
+        const a = agentAtoms();
+        registerAgentPaneStatePane(model.blockId, agentId, {
+            streaming: a.streamingStateAtom[1],
+            sessionStats: a.sessionStatsAtom[1],
+            currentTool: a.currentToolAtom[1],
+            turnTokens: a.turnTokensAtom[1],
+            turnActive: a.turnActiveAtom[1],
+            stopping: a.stoppingAtom[1],
+            pending: a.pendingMessagesAtom[1],
+        });
+        onCleanup(() => unregisterAgentPaneStatePane(model.blockId));
+    }
 
     // Activity log — collects per-session diagnostic entries from launch
     // flow, subprocess lifecycle, slash commands, errors, etc. Rendered
@@ -342,12 +365,10 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         pendingMessagesAtom,
     });
 
-    // Clear session stats and mark turn as active when the user sends a message.
-    const [, setSessionStats] = agentAtoms().sessionStatsAtom;
-    const [, setTurnActive] = agentAtoms().turnActiveAtom;
+    // Mark turn as active when the user sends a message — TurnStart
+    // also clears stale sessionStats from the prior turn.
     const handleSendMessage = (message: string): Promise<void> => {
-        setSessionStats(null);
-        setTurnActive(true);
+        dispatchPane(model.blockId, { type: "TurnStart", at: Date.now() });
         return commands.sendMessage(message);
     };
 
