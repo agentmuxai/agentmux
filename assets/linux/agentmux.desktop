@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=AgentMux
+Comment=AgentMux — AI-native terminal multiplexer
+Exec=__EXEC__ %F
+Icon=agentmux
+Categories=Development;TerminalEmulator;
+StartupWMClass=agentmux
+StartupNotify=true
+Terminal=false
