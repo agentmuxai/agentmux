@@ -388,13 +388,21 @@ export function buildCefApi(): AppApi {
             return await invokeCommand<string>("open_new_window");
         },
         closeWindow: async (label?: string) => {
-            await invokeCommand("close_window", { label: label ?? null });
+            // Callers like the close button or `Cmd+W` invoke this without an
+            // arg meaning "close the window I'm in." Resolve to the current
+            // page's windowLabel so the Rust handler routes to the right CEF
+            // window (its server-side default of "main" would close the wrong
+            // window from any non-main window).
+            const resolved = label ?? new URLSearchParams(window.location.search).get("windowLabel") ?? "main";
+            await invokeCommand("close_window", { label: resolved });
         },
         minimizeWindow: () => {
-            invokeCommand("minimize_window").catch(console.error);
+            const label = new URLSearchParams(window.location.search).get("windowLabel") ?? "main";
+            invokeCommand("minimize_window", { label }).catch(console.error);
         },
         maximizeWindow: () => {
-            invokeCommand("maximize_window").catch(console.error);
+            const label = new URLSearchParams(window.location.search).get("windowLabel") ?? "main";
+            invokeCommand("maximize_window", { label }).catch(console.error);
         },
         setWindowTransparency: (transparent: boolean, blur: boolean, opacity: number) => {
             invokeCommand("set_window_transparency", { transparent, blur, opacity }).catch(console.error);

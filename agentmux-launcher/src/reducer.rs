@@ -796,12 +796,18 @@ fn handle_report_window_opened(
     // from `client.rs::on_after_created` remains the AUTHORITATIVE
     // link, and `apply_hwnd_opened` REPAIRS stale links it finds.
     // But that explicit dispatch is gated on `hwnd_val != 0` host-side;
-    // if the HWND can't be resolved at on_after_created time from any
-    // of the 3 fallback sources (Views, host, find_own_top_level_window),
-    // the explicit dispatch is skipped and the mirror would otherwise
-    // stay permanently unlinked, breaking WRR drift detection AND
-    // orphan-destroy reconciliation (no WindowClosed when OS destroys
-    // the HWND → permanent ghost InstancePanel rows).
+    // if the HWND can't be resolved at on_after_created time from
+    // either of the 2 sources (Views, host), the explicit dispatch
+    // is skipped and the mirror would otherwise stay permanently
+    // unlinked, breaking WRR drift detection AND orphan-destroy
+    // reconciliation (no WindowClosed when OS destroys the HWND →
+    // permanent ghost InstancePanel rows).
+    //
+    // (PR #664 round 4 dropped a 3rd fallback `find_own_top_level_window`
+    // because it returns the FIRST visible window in the process —
+    // some other window's HWND in a multi-window session — which
+    // would corrupt other labels' mirrors via the `Repaired` arm.
+    // See client.rs::on_after_created comment for details.)
     //
     // The drain provides a fallback link from `pending_hwnds`. If the
     // drain picks the WRONG HWND (the original burst-create race), the
