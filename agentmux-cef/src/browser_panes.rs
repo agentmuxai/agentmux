@@ -26,7 +26,7 @@ use std::sync::Arc;
 
 use cef::*;
 
-use crate::browser_pane::CreatePaneTask;
+use crate::browser_pane::CreateBrowserPaneTask;
 use crate::reducer::RegisterResult;
 use crate::state::AppState;
 
@@ -38,8 +38,8 @@ use crate::state::AppState;
 /// Kept minimal (just two methods) to avoid a dependency graph that has to
 /// be updated every time `close()` grows. Other ops (`focus`, `resize`, …)
 /// can gain their own traits when they need testing, or graduate to a
-/// unified `PaneCefBridge` once the shape is stable.
-pub trait PaneCloseOps {
+/// unified `BrowserPaneCefBridge` once the shape is stable.
+pub trait BrowserPaneCloseOps {
     /// Remove the Browser for this label from the registry. Return its
     /// outer HWND as a pointer-sized value, or `None` if there is no
     /// Browser or no HWND. Dropping the Browser Arc is the implementation's
@@ -52,11 +52,11 @@ pub trait PaneCloseOps {
     fn destroy_hwnd(&self, hwnd: usize);
 }
 
-/// Production implementation of `PaneCloseOps` backed by `AppState.browsers`
+/// Production implementation of `BrowserPaneCloseOps` backed by `AppState.browsers`
 /// and Win32 `DestroyWindow`.
 struct AppStateCloseOps<'a>(&'a Arc<AppState>);
 
-impl<'a> PaneCloseOps for AppStateCloseOps<'a> {
+impl<'a> BrowserPaneCloseOps for AppStateCloseOps<'a> {
     fn take_browser_hwnd(&self, label: &str) -> Option<usize> {
         // Atomic take-and-return via reducer (codex P2 PR #660). Earlier
         // round 1 separated `get_browser` + `UnregisterBrowser` dispatch,
@@ -196,7 +196,7 @@ impl BrowserPaneManager {
                 ))
             }
             RegisterResult::Fresh(label) => {
-                let mut task = CreatePaneTask::new(
+                let mut task = CreateBrowserPaneTask::new(
                     state.clone(),
                     block_id.to_string(),
                     label,
@@ -304,7 +304,7 @@ impl BrowserPaneManager {
     /// transition (Live→Closing) and the entry removal (CompleteBrowserPaneClose)
     /// happen in `close()` via reducer dispatch — `close_with` is purely
     /// the FFI side-effects that follow.
-    fn close_with(label: &str, ops: &dyn PaneCloseOps) {
+    fn close_with(label: &str, ops: &dyn BrowserPaneCloseOps) {
         if let Some(hwnd) = ops.take_browser_hwnd(label) {
             ops.destroy_hwnd(hwnd);
             tracing::info!(label, "pane HWND destroyed");
@@ -537,7 +537,7 @@ impl BrowserPaneManager {
                         // Tell the subclass this focus request is intentional
                         // (not Chromium's on-load focus steal) so it won't be
                         // redirected back to the parent.
-                        crate::browser_pane::ALLOW_PANE_FOCUS_ONCE.store(
+                        crate::browser_pane::ALLOW_BROWSER_PANE_FOCUS_ONCE.store(
                             true,
                             std::sync::atomic::Ordering::Relaxed,
                         );
@@ -551,7 +551,7 @@ impl BrowserPaneManager {
     }
 }
 
-// `CreatePaneTask` moved to `crate::browser_pane::creation` in Phase 3.
+// `CreateBrowserPaneTask` moved to `crate::browser_pane::creation` in Phase 3.
 
 // ── Tests ───────────────────────────────────────────────────────────────────
 //
@@ -561,7 +561,7 @@ impl BrowserPaneManager {
 // drain-by-label — are now in `crate::reducer::tests`.
 //
 // What remains here: the FFI seam. `close_with` only takes a label and
-// drives `PaneCloseOps`; tests verify it forwards label → take → destroy
+// drives `BrowserPaneCloseOps`; tests verify it forwards label → take → destroy
 // in order, with a None-returning `take` short-circuiting the destroy.
 
 #[cfg(test)]
@@ -569,7 +569,7 @@ mod tests {
     use super::*;
     use std::collections::HashMap;
 
-    /// Recording mock for `PaneCloseOps`. Tests inspect `taken` and
+    /// Recording mock for `BrowserPaneCloseOps`. Tests inspect `taken` and
     /// `destroyed` to assert what close_with did.
     struct MockCloseOps {
         registered: parking_lot::Mutex<HashMap<String, usize>>,
@@ -599,7 +599,7 @@ mod tests {
         }
     }
 
-    impl PaneCloseOps for MockCloseOps {
+    impl BrowserPaneCloseOps for MockCloseOps {
         fn take_browser_hwnd(&self, label: &str) -> Option<usize> {
             self.taken.lock().push(label.to_string());
             self.registered.lock().remove(label)

@@ -12,10 +12,10 @@ pub mod creation;
 #[cfg(target_os = "windows")]
 pub mod hwnd;
 
-pub use creation::CreatePaneTask;
+pub use creation::CreateBrowserPaneTask;
 
 #[cfg(target_os = "windows")]
-pub use hwnd::ALLOW_PANE_FOCUS_ONCE;
+pub use hwnd::ALLOW_BROWSER_PANE_FOCUS_ONCE;
 
 #[cfg(target_os = "windows")]
 pub use hwnd::install_browser_pane_focus_redirect;

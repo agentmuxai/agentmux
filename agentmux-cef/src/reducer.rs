@@ -152,16 +152,16 @@ impl HostState {
     }
 }
 
-// ── Pane label generator (replaces pane/lifecycle.rs::PANE_LABEL_SEQ) ──────
+// ── Pane label generator (replaces pane/lifecycle.rs::BROWSER_PANE_LABEL_SEQ) ──────
 //
 // Monotonic counter appended to every pane label so a close-then-recreate of
 // the same block_id doesn't collide: if the old browser's `on_before_close`
 // fires after the new pane's create has already run, `DrainBrowserPaneByLabel`
 // would otherwise find and wipe the NEW entry.
-static PANE_LABEL_SEQ: AtomicU64 = AtomicU64::new(1);
+static BROWSER_PANE_LABEL_SEQ: AtomicU64 = AtomicU64::new(1);
 
 fn next_browser_pane_label(block_id: &str) -> String {
-    let seq = PANE_LABEL_SEQ.fetch_add(1, Ordering::Relaxed);
+    let seq = BROWSER_PANE_LABEL_SEQ.fetch_add(1, Ordering::Relaxed);
     format!("browser-pane-{}-{}", block_id, seq)
 }
 
@@ -173,7 +173,7 @@ fn next_browser_pane_label(block_id: &str) -> String {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RegisterResult {
     /// No prior entry; reducer inserted a new `Live` pane under `label`.
-    /// Caller should post `CreatePaneTask` for this label.
+    /// Caller should post `CreateBrowserPaneTask` for this label.
     Fresh(String),
     /// Entry already existed and is `Live`; caller should re-navigate the
     /// existing browser at `label`.
@@ -214,7 +214,7 @@ pub enum HostCommand {
     /// Reducer generates the label internally (via `next_browser_pane_label`) so
     /// label assignment is atomic with the entry insert. Returns the
     /// outcome via `DispatchOutput::browser_pane_register_result`:
-    ///   - `Fresh(label)`: new `Live` entry inserted; caller posts CreatePaneTask
+    ///   - `Fresh(label)`: new `Live` entry inserted; caller posts CreateBrowserPaneTask
     ///   - `AlreadyLive(label)`: caller should re-navigate existing browser
     ///   - `Closing`: caller must reject (old teardown still in flight)
     TryRegisterBrowserPaneLive { block_id: String },
@@ -1882,7 +1882,7 @@ mod tests {
 
     #[test]
     fn drain_after_close_recreate_does_not_evict_new_entry() {
-        // The exact bug PANE_LABEL_SEQ defends against: register → close →
+        // The exact bug BROWSER_PANE_LABEL_SEQ defends against: register → close →
         // drain by OLD label → register again → drain by OLD label must
         // NOT evict the new entry.
         let mut state = HostState::default();
