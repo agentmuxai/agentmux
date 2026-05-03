@@ -8,18 +8,18 @@
  * Step 5 of specs/SPEC_AGENT_VIEW_MODULARIZATION_2026_04_13.md.
  *
  * On mount the hook fires an async initial load: read `session:line_count`
- * for the block, fetch the trailing 200 lines, prepend them to the
- * document atom, and store the resulting offset for later page-up calls.
- * The hook NEVER blocks the UI — failures are non-fatal and just log a
- * warning. Live-stream events keep flowing through useAgentStream
- * regardless of whether history is loaded.
+ * for the block, fetch the trailing 200 lines, dispatch a HistoryLoaded
+ * command to the agent-document-store, and store the resulting offset
+ * for later page-up calls. The hook NEVER blocks the UI — failures are
+ * non-fatal and just log a warning. Live-stream events keep flowing
+ * through useAgentStream regardless of whether history is loaded.
  *
  * Subsequent page-up calls (the user scrolling near the top of the
  * document view) call `loadOlder()` which fetches the previous 200-line
- * page and prepends it. Each prepend bumps `documentVersion`, which
- * useAgentStream reads to rebuild its dedup set + index map so live
- * updates target the right node positions after the document is
- * re-shaped from outside.
+ * page and dispatches another HistoryLoaded. The reducer in
+ * agent-document-store owns dedup against in-flight stream nodes; the
+ * old `documentVersion` mechanism that bridged this hook and
+ * useAgentStream is no longer needed.
  *
  * Returns:
  *   - `historyOffset` — line index where the loaded slice begins
@@ -29,15 +29,12 @@
  *   - `loadingOlder`  — true while a page-up fetch is in flight
  *   - `loadOlder`     — async handler the document view calls when the
  *                       user scrolls near the top
- *   - `documentVersion` — bumped on every external document mutation;
- *                         useAgentStream subscribes to this
  */
 
 import { createSignal, onMount, type Accessor } from "solid-js";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import type { SignalPair } from "../state";
-import type { DocumentNode } from "../types";
+import { dispatch as dispatchDoc } from "@/app/store/agent-document-store";
 import { parseHistoryLines } from "../parseHistoryLines";
 
 import type { LogFn } from "../types";
@@ -45,7 +42,6 @@ export type { LogFn };
 
 export interface UseHistoryPaginationOptions {
     blockId: string;
-    documentAtom: SignalPair<DocumentNode[]>;
     /**
      * Accessor for the document's stream-event format, e.g.
      * "claude-stream-json", "codex-json", etc. Passed reactively because
@@ -61,7 +57,6 @@ export interface UseHistoryPagination {
     historyTotal: Accessor<number>;
     loadingOlder: Accessor<boolean>;
     loadOlder: () => Promise<void>;
-    documentVersion: Accessor<number>;
 }
 
 const PAGE_SIZE = 200;
@@ -70,16 +65,6 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
     const [historyOffset, setHistoryOffset] = createSignal(0);
     const [historyTotal, setHistoryTotal] = createSignal(0);
     const [loadingOlder, setLoadingOlder] = createSignal(false);
-
-    // Bumped on every external document mutation (initial history load +
-    // every loadOlder prepend). useAgentStream reads this and rebuilds
-    // its internal nodeIdSet + nodeIndexMap so live-stream updates
-    // continue targeting the right node indices after the document has
-    // been reshaped from outside.
-    const [documentVersion, setDocumentVersion] = createSignal(0);
-    const bumpDocumentVersion = () => setDocumentVersion((v) => v + 1);
-
-    const [doc, setDoc] = opts.documentAtom;
 
     /**
      * Load the previous page of history and prepend to the document.
@@ -106,8 +91,7 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
 
             const newNodes = parseHistoryLines(resp.lines ?? [], opts.outputFormat());
             if (newNodes.length > 0) {
-                setDoc((prev) => [...newNodes, ...prev]);
-                bumpDocumentVersion();
+                dispatchDoc(opts.blockId, { type: "HistoryLoaded", nodes: newNodes });
             }
 
             setHistoryOffset(newOffset);
@@ -147,13 +131,7 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
 
                 const nodes = parseHistoryLines(rangeResp.lines ?? [], opts.outputFormat());
                 if (nodes.length > 0) {
-                    setDoc((prev) => {
-                        if (prev.length === 0) return nodes;
-                        const seen = new Set(prev.map((n) => n.id));
-                        const historyFresh = nodes.filter((n) => !seen.has(n.id));
-                        return [...historyFresh, ...prev];
-                    });
-                    bumpDocumentVersion();
+                    dispatchDoc(opts.blockId, { type: "HistoryLoaded", nodes });
                 }
 
                 // `resp.total` from the backend is the actual available
@@ -178,6 +156,5 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
         historyTotal,
         loadingOlder,
         loadOlder,
-        documentVersion,
     };
 }

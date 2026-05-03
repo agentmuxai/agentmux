@@ -8,6 +8,7 @@
  */
 
 import type { SlashCommand, SlashResult } from "../types";
+import { dispatch as dispatchDoc } from "@/app/store/agent-document-store";
 
 export const clearCommand: SlashCommand = {
     name: "clear",
@@ -15,8 +16,7 @@ export const clearCommand: SlashCommand = {
     description: "Clear the visible document (frontend-only)",
     arg: { kind: "none" },
     handler: async (ctx): Promise<SlashResult> => {
-        const [, setDocument] = ctx.documentAtom;
-        setDocument([]);
+        dispatchDoc(ctx.blockId, { type: "UserClear" });
         return { kind: "ok", message: "chat cleared" };
     },
 };
