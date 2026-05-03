@@ -135,7 +135,7 @@ unsafe fn should_redirect_pane_focus_to_root(root: *mut std::ffi::c_void) -> boo
 /// responding.
 ///
 /// Wired in by `pane::callbacks::on_after_created_pane` at create time and
-/// by `pane::callbacks::on_load_end_pane` after every navigation — Chromium
+/// by `pane::callbacks::on_load_end_browser_pane` after every navigation — Chromium
 /// recreates the `Chrome_RenderWidgetHostHWND` on every page load, so the
 /// subclass has to follow along or it ends up stranded on a destroyed HWND.
 pub unsafe fn install_browser_pane_focus_redirect(

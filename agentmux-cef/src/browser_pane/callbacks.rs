@@ -12,7 +12,7 @@
 //! Notable: this is where `install_browser_pane_focus_redirect` actually gets wired
 //! in. Before this phase the function existed in `pane::hwnd` but had zero
 //! callers (see `SPEC_BROWSER_PANE_LIFECYCLE.md` §5 race #5). Now
-//! `on_after_created_browser_pane` and `on_load_end_pane` both reinstall the focus
+//! `on_after_created_browser_pane` and `on_load_end_browser_pane` both reinstall the focus
 //! subclass — required because Chromium recreates the
 //! `Chrome_RenderWidgetHostHWND` child on every navigation, stranding the
 //! old subclass on a destroyed HWND.
@@ -110,7 +110,7 @@ pub fn on_before_close_browser_pane(state: &Arc<AppState>, label: &str) {
 /// focused HWND; stealing focus away from the pane breaks scrolling.
 /// The FocusHandler cancel + WndProc redirect already keep focus off
 /// the pane during the *initial* navigation focus steal.
-pub fn on_load_end_pane(state: &Arc<AppState>, browser: &Browser) {
+pub fn on_load_end_browser_pane(state: &Arc<AppState>, browser: &Browser) {
     tracing::info!("[pane-load-end] pane page loaded; reinstalling focus subclass");
 
     #[cfg(target_os = "windows")]
@@ -136,7 +136,7 @@ pub fn on_load_end_pane(state: &Arc<AppState>, browser: &Browser) {
     // `on_load_end` fires before the navigation controller commits the
     // history entry, so calling `browser.can_go_back()` from this hook
     // can return the pre-navigation state. Those flags flow through the
-    // dedicated `on_loading_state_change_pane` callback below, which CEF
+    // dedicated `on_loading_state_change_browser_pane` callback below, which CEF
     // provides with correct values as direct parameters.
     if let Some(block_id) = resolve_pane_block_id(state, browser) {
         let url = {
@@ -175,7 +175,7 @@ pub fn on_load_end_pane(state: &Arc<AppState>, browser: &Browser) {
 /// back/forward. `can_go_back` / `can_go_forward` are provided as direct
 /// parameters (not queried after the fact), so they're guaranteed to reflect
 /// the real committed state rather than the pre-commit race window.
-pub fn on_loading_state_change_pane(
+pub fn on_loading_state_change_browser_pane(
     state: &Arc<AppState>,
     browser: &Browser,
     can_go_back: bool,
