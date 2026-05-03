@@ -7,6 +7,7 @@ import type { AgentViewModel } from "./agent-model";
 import { getProvider } from "./providers";
 import { createAgentAtoms } from "./state";
 import {
+    dispatch as dispatchDoc,
     registerPane as registerAgentDocPane,
     unregisterPane as unregisterAgentDocPane,
 } from "@/app/store/agent-document-store";
@@ -94,16 +95,15 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
 
     const agentAtoms = createMemo(() => createAgentAtoms(model.blockId));
 
-    // Register this pane with the document store. The store holds the
-    // authoritative reducer state per blockId; the documentAtom becomes a
-    // write-only projection. Every mutation to documentAtom must flow
-    // through `dispatch(blockId, ...)` from agent-document-store. See
+    // Register this pane with the document store SYNCHRONOUSLY during
+    // component-body execution — before any hook's onMount can dispatch
+    // (codex P1 PR #681 round 1). The store throws on dispatch to an
+    // unregistered slot to prevent silent reducer-command drops, so the
+    // slot must exist before useAgentStream / useHistoryPagination call
+    // dispatchDoc from their own onMount handlers. See
     // docs/specs/agent-pane-document-reducer-2026-05-03.md.
-    onMount(() => {
-        const [, setDocument] = agentAtoms().documentAtom;
-        registerAgentDocPane(model.blockId, setDocument);
-        onCleanup(() => unregisterAgentDocPane(model.blockId));
-    });
+    registerAgentDocPane(model.blockId, agentAtoms().documentAtom[1]);
+    onCleanup(() => unregisterAgentDocPane(model.blockId));
 
     // Activity log — collects per-session diagnostic entries from launch
     // flow, subprocess lifecycle, slash commands, errors, etc. Rendered
@@ -121,7 +121,6 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
     // for the trailing 200 lines on mount + each user-triggered loadOlder.
     const history = useHistoryPagination({
         blockId: model.blockId,
-        documentAtom: agentAtoms().documentAtom,
         outputFormat,
         log,
     });
@@ -131,7 +130,9 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
 
     // Auth + launch flow state and the onCleanup that kills the CLI
     // if the pane closes mid-login.
-    const [getDocument, setDocument] = agentAtoms().documentAtom;
+    // `getDocument` is read-only; for writes we MUST dispatch through
+    // agent-document-store so slot.state stays in sync (codex P1 PR #681).
+    const [getDocument] = agentAtoms().documentAtom;
 
     // Pending decision queue — every ToolNode whose
     // `status === "pending_approval"`, oldest first. The decision
@@ -156,17 +157,26 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         // advances to the next pending request). The backend write
         // happens in parallel; if it fails we log but don't try to
         // roll back the visual transition.
-        setDocument((prev) =>
-            prev.map((n) => {
-                if (n.type !== "tool" || n.status !== "pending_approval") return n;
-                if (n.pendingPermission?.request_id !== decision.request_id) return n;
-                return {
-                    ...n,
-                    status: decision.outcome === "allow" ? "running" : "denied",
-                    pendingPermission: undefined,
-                };
-            }),
-        );
+        // Dispatch through the reducer (StreamFlush.updatedNodes) so
+        // slot.state stays in sync. Find the matching pending tool node
+        // by request_id, then build the updated node.
+        const updated: import("./types").ToolNode[] = [];
+        for (const n of getDocument()) {
+            if (n.type !== "tool" || n.status !== "pending_approval") continue;
+            if (n.pendingPermission?.request_id !== decision.request_id) continue;
+            updated.push({
+                ...n,
+                status: decision.outcome === "allow" ? "running" : "denied",
+                pendingPermission: undefined,
+            });
+        }
+        if (updated.length > 0) {
+            dispatchDoc(model.blockId, {
+                type: "StreamFlush",
+                newNodes: [],
+                updatedNodes: updated,
+            });
+        }
         // Send the decision to the sidecar so it can record + audit
         // it (PR-3a). Actual delivery to the agent CLI — rules
         // persistence (path 1) or interactive subprocess stdin (path
@@ -188,14 +198,16 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         log,
         onLoginSuccess: (email) => {
             const display = email ? `Logged in as **${email}**` : "Login successful";
-            setDocument((prev) => [
-                ...prev,
-                {
-                    type: "markdown",
-                    id: `login_success_${Date.now()}`,
-                    content: `\u2713 ${display}`,
-                } as import("./types").MarkdownNode,
-            ]);
+            const node: import("./types").MarkdownNode = {
+                type: "markdown",
+                id: `login_success_${Date.now()}`,
+                content: `\u2713 ${display}`,
+            } as import("./types").MarkdownNode;
+            dispatchDoc(model.blockId, {
+                type: "StreamFlush",
+                newNodes: [node],
+                updatedNodes: [],
+            });
         },
         onReady: () => onReadyFn?.(),
     });

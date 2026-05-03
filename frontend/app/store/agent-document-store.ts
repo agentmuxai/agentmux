@@ -82,10 +82,17 @@ export function unregisterPane(blockId: string): void {
  * Apply a command to a pane's reducer state. Returns the audit events
  * the command produced (typically zero or one event).
  *
- * If the blockId isn't registered, the dispatch is a no-op (logged).
- * This shouldn't happen in normal operation — register-on-mount is the
- * convention — but the silent fallback prevents a crash if a hook
- * fires after unmount.
+ * If the blockId isn't registered the dispatch throws — silent drop is
+ * dangerous because it would mean a real reducer command (like
+ * `SessionStart` or an early `StreamFlush`) was lost, and the next
+ * `StreamTruncate` would then be honored against an uninitialized state
+ * cell, reintroducing the wipe class this whole module exists to
+ * prevent. Convention: panes call `registerPane` synchronously during
+ * component-body execution, before any hook can dispatch from its own
+ * `onMount`.
+ *
+ * The throw is structurally safe — Solid components don't unmount mid-
+ * dispatch (cleanup is synchronous and always runs after children).
  */
 export function dispatch(
     blockId: string,
@@ -93,10 +100,9 @@ export function dispatch(
 ): AgentDocumentEvent[] {
     const slot = slots.get(blockId);
     if (!slot) {
-        console.warn(
-            `[agent-document-store] dispatch for unregistered pane ${blockId.slice(0, 7)} (cmd=${command.type})`,
+        throw new Error(
+            `[agent-document-store] dispatch for unregistered pane ${blockId.slice(0, 7)} (cmd=${command.type}). registerPane must be called synchronously in the component body.`,
         );
-        return [];
     }
     const result = update(slot.state, command);
     const prevNodes = slot.state.nodes;
