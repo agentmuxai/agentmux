@@ -503,7 +503,14 @@ tasks:
 
                 npx vite --config vite.config.ts --port 5173 &
                 VITE_PID=$!
-                trap "kill $VITE_PID 2>/dev/null; rm -rf $DEV_DIR 2>/dev/null" EXIT
+                # Don't `rm -rf $DEV_DIR` on exit — install-linux-desktop.sh
+                # writes Exec=$DEV_DIR/agentmux-cef into the user's
+                # ~/.local/share/applications/agentmux.desktop, and that path
+                # has to stay valid between dev sessions for dock-clicks to
+                # work. Each new `dev:serve` start wipes + recreates $DEV_DIR
+                # at the top of this command, so leaving it around is safe
+                # (no stale binaries leak across versions).
+                trap "kill $VITE_PID 2>/dev/null" EXIT
                 echo "Waiting for Vite on port 5173 (pid $VITE_PID)..."
                 for i in $(seq 1 30); do
                   curl -s http://localhost:5173 > /dev/null 2>&1 && break
