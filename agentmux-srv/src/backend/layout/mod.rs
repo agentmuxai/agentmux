@@ -13,7 +13,7 @@
 //! (shipped in PR #686) — the Rust implementations must produce identical
 //! state transitions for identical inputs.
 
-use agentmux_common::{FlexDirection, LayoutNode, LayoutNodeData, ResizeOp, SplitPosition};
+use agentmux_common::{FlexDirection, LayoutNode, ResizeOp, SplitPosition};
 use uuid::Uuid;
 
 // ── Error type ─────────────────────────────────────────────────────────────
@@ -53,6 +53,38 @@ pub const DEFAULT_MAX_CHILDREN: usize = 5;
 /// Mirrors `frontend/layout/lib/types.ts::DefaultNodeSize`.
 pub const DEFAULT_NODE_SIZE: f32 = 10.0;
 
+// ── Flex-direction utilities ───────────────────────────────────────────────
+
+/// Reverse a flex direction (Row ↔ Column).
+/// Mirrors `frontend/layout/lib/layoutNode.ts::reverseFlexDirection`.
+fn reverse_flex_direction(dir: FlexDirection) -> FlexDirection {
+    match dir {
+        FlexDirection::Row => FlexDirection::Column,
+        FlexDirection::Column => FlexDirection::Row,
+    }
+}
+
+/// If `node` is a leaf (has `data`), promote it to a group by wrapping its
+/// data in an intermediate child. Mirrors TypeScript `addIntermediateNode`.
+/// After this call, `node.data` is `None` and `node.children` is non-empty.
+/// The intermediate child receives the node's ORIGINAL ID so frontend
+/// references remain stable; the group wrapper gets a new ID.
+fn ensure_group_node(node: &mut LayoutNode) {
+    if node.data.is_some() {
+        let old_id = node.id.clone();
+        let old_flex = node.flex_direction;
+        let intermediate = LayoutNode {
+            id: old_id,
+            flex_direction: reverse_flex_direction(old_flex),
+            size: DEFAULT_NODE_SIZE,
+            data: node.data.take(),
+            ..Default::default()
+        };
+        node.id = Uuid::new_v4().to_string();
+        node.children.push(intermediate);
+    }
+}
+
 // ── Tree traversal ─────────────────────────────────────────────────────────
 
 /// Find a node by id (immutable).
@@ -81,89 +113,71 @@ pub fn find_node_by_id_mut<'a>(tree: &'a mut LayoutNode, id: &str) -> Option<&'a
     None
 }
 
-/// Find the parent of a node identified by `child_id` (mutable reference to
-/// the parent). Returns `None` if `child_id == tree.id` (root has no parent).
-pub fn find_parent_by_child_id<'a>(
-    tree: &'a mut LayoutNode,
-    child_id: &str,
-) -> Option<&'a mut LayoutNode> {
-    if tree.children.iter().any(|c| c.id == child_id) {
-        return Some(tree);
-    }
-    // Can't use iter_mut here while also holding a borrow on tree; use indices.
-    let len = tree.children.len();
-    for i in 0..len {
-        // SAFETY: we borrow one child at a time without aliasing.
-        let child = &mut tree.children[i] as *mut LayoutNode;
-        // SAFETY: child outlives tree's borrow; no aliasing.
-        let result = find_parent_by_child_id(unsafe { &mut *child }, child_id);
-        if result.is_some() {
-            return result;
-        }
-    }
-    None
-}
-
 // ── Insert-location heuristic ──────────────────────────────────────────────
 
-/// Greedy depth-first search for the first node with fewer than `max_children`
-/// children. The TypeScript oracle (`findNextInsertLocation` in layoutNode.ts)
-/// uses the same greedy-DFS descent — fill each node before going deeper.
-/// (Reagent P2 PR #691: prior doc comment incorrectly said "BFS".)
+/// Candidate for insertion location, collected during tree traversal.
+struct InsertCandidate<'a> {
+    node: &'a LayoutNode,
+    index: usize,
+    depth: usize,
+}
+
+/// Find the best insertion location using the TypeScript scoring heuristic
+/// (`Math.pow(depth, index + maxChildren)`). Collects all candidates, then
+/// sorts by ascending score. Mirrors `findNextInsertLocation` in
+/// `frontend/layout/lib/layoutNode.ts`.
 fn find_next_insert_location(
     tree: &LayoutNode,
     max_children: usize,
 ) -> (&LayoutNode, usize) {
-    find_insert_location_inner(tree, max_children, 1)
+    let mut candidates = Vec::new();
+    collect_insert_candidates(tree, max_children, 1, &mut candidates);
+    candidates.sort_by(|a, b| {
+        let a_score = (a.depth as f64).powi((a.index + max_children) as i32);
+        let b_score = (b.depth as f64).powi((b.index + max_children) as i32);
+        a_score.partial_cmp(&b_score).unwrap_or(std::cmp::Ordering::Equal)
+    });
+    candidates
+        .into_iter()
+        .next()
+        .map(|c| (c.node, c.index))
         .unwrap_or((tree, tree.children.len()))
 }
 
-fn find_insert_location_inner(
-    node: &LayoutNode,
+fn collect_insert_candidates<'a>(
+    node: &'a LayoutNode,
     max_children: usize,
-    _depth: usize,
-) -> Option<(&LayoutNode, usize)> {
-    // If this node has room, insert here.
-    if node.children.len() < max_children || node.children.is_empty() {
-        return Some((node, node.children.len()));
+    depth: usize,
+    out: &mut Vec<InsertCandidate<'a>>,
+) {
+    // Leaf node (has data but no children) — TS returns index 1.
+    if node.data.is_some() && node.children.is_empty() {
+        out.push(InsertCandidate { node, index: 1, depth });
+        return;
     }
-    // Otherwise recurse into children.
-    for child in &node.children {
-        if let Some(loc) = find_insert_location_inner(child, max_children, _depth + 1) {
-            return Some(loc);
-        }
+    if node.children.len() < max_children {
+        out.push(InsertCandidate {
+            node,
+            index: node.children.len(),
+            depth,
+        });
     }
-    None
+    // TS iterates children in REVERSE order.
+    for child in node.children.iter().rev() {
+        collect_insert_candidates(child, max_children, depth + 1, out);
+    }
 }
 
 // ── Core operations ────────────────────────────────────────────────────────
 
-/// Insert `node` using a greedy DFS heuristic (up to DEFAULT_MAX_CHILDREN
-/// per node before descending — same strategy as `findNextInsertLocation`
-/// in `frontend/layout/lib/layoutNode.ts`). If the tree is empty (called
-/// with `root = None`), the caller should set `root = Some(node)` directly.
-/// This function only operates on a non-empty tree root.
-/// (Reagent P2 PR #691 round 3: prior doc said "BFS heuristic".)
+/// Insert `node` using the TypeScript scoring heuristic (up to
+/// DEFAULT_MAX_CHILDREN per node before descending). If the target location
+/// is a leaf, it is promoted to a group first via `ensure_group_node`.
+/// Mirrors `insertNode` / `addChildAt` in `frontend/layout/lib/layoutTree.ts`.
 pub fn insert_node(root: &mut LayoutNode, node: LayoutNode) {
-    // Use raw pointer to work around borrow checker limitations with the
-    // immutable findNext + mutable insert pattern.
-    let (loc_id, loc_index) = {
-        let (loc, idx) = find_next_insert_location(root, DEFAULT_MAX_CHILDREN);
-        (loc.id.clone(), idx)
-    };
+    let loc_id = find_next_insert_location(root, DEFAULT_MAX_CHILDREN).0.id.clone();
     if let Some(target) = find_node_by_id_mut(root, &loc_id) {
-        if target.data.is_some() {
-            // Leaf node — wrap its data in a child, then append.
-            let data = target.data.take().unwrap();
-            let existing_leaf = LayoutNode {
-                id: Uuid::new_v4().to_string(),
-                flex_direction: FlexDirection::Row,
-                size: DEFAULT_NODE_SIZE,
-                data: Some(data),
-                ..Default::default()
-            };
-            target.children.push(existing_leaf);
-        }
+        ensure_group_node(target);
         target.children.push(node);
     }
 }
@@ -195,35 +209,36 @@ pub fn insert_node_at_index(
         current = &mut cur.children[idx] as *mut LayoutNode;
     }
     let parent = unsafe { &mut *current };
+    ensure_group_node(parent);
     let insert_at = (last_idx + 1).min(parent.children.len());
     parent.children.insert(insert_at, node);
     Ok(())
 }
 
-/// Remove the node with the given id from the tree. Returns whether the
-/// deleted node was the currently-focused node (callers handle clearing
-/// focusedNodeId). Collapses single-child parents.
-pub fn delete_node(root: &mut LayoutNode, node_id: &str) -> Result<bool, LayoutError> {
+/// Remove the node with the given id from the tree.
+/// Returns `Ok(())` on success, or `Err(NodeNotFound)` if `node_id` is not
+/// in the tree. Callers are responsible for clearing `focused_node_id` if
+/// needed (spec §7.1). Collapses single-child parents.
+pub fn delete_node(root: &mut LayoutNode, node_id: &str) -> Result<(), LayoutError> {
     if root.id == node_id {
         // Root deletion is handled by the caller setting root = None.
-        return Ok(false);
+        return Ok(());
     }
-    let was_focused = delete_recursive(root, node_id);
-    match was_focused {
-        Some(wf) => Ok(wf),
-        None => Err(LayoutError::NodeNotFound { id: node_id.to_string() }),
+    match delete_recursive(root, node_id) {
+        true => Ok(()),
+        false => Err(LayoutError::NodeNotFound { id: node_id.to_string() }),
     }
 }
 
-/// Recursive delete. Returns `Some(was_focused)` when the node was found
-/// and removed, `None` when not found.
-fn delete_recursive(node: &mut LayoutNode, target_id: &str) -> Option<bool> {
+/// Recursive delete. Returns `true` when the node was found and removed,
+/// `false` when not found.
+fn delete_recursive(node: &mut LayoutNode, target_id: &str) -> bool {
     let idx = node.children.iter().position(|c| c.id == target_id);
     if let Some(i) = idx {
         // Found target as a direct child — remove it.
         node.children.remove(i);
         // Collapse: if only one child remains, promote it.
-        // Preserve `extra` (unknown-field catch-all from #688/#689 — reagent P1 PR #691).
+        // Preserve `extra` (unknown-field catch-all from #688/#689).
         if node.children.len() == 1 {
             let sole = node.children.remove(0);
             node.id = sole.id;
@@ -233,15 +248,15 @@ fn delete_recursive(node: &mut LayoutNode, target_id: &str) -> Option<bool> {
             node.children = sole.children;
             node.extra = sole.extra;
         }
-        return Some(false);
+        return true;
     }
     // Not a direct child — recurse.
     for child in &mut node.children {
-        if let Some(wf) = delete_recursive(child, target_id) {
-            return Some(wf);
+        if delete_recursive(child, target_id) {
+            return true;
         }
     }
-    None
+    false
 }
 
 /// Move the node identified by `node_id` to be the child at `index` under
@@ -262,8 +277,6 @@ pub fn move_node(
     }
 
     // Validate BOTH node existence AND destination BEFORE any mutation.
-    // (Reagent P1 PR #691 round 2 — prior code removed the source before
-    // checking the destination, causing silent data loss on Err paths.)
     let node_to_move = find_node_by_id(root, node_id)
         .ok_or_else(|| LayoutError::NodeNotFound { id: node_id.to_string() })?
         .clone();
@@ -272,8 +285,6 @@ pub fn move_node(
         return Err(LayoutError::NodeNotFound { id: new_parent_id.to_string() });
     }
     // Confirm destination is NOT a descendant of the node being moved.
-    // If it were, detaching the source would also remove the destination,
-    // causing an unwrap() panic at the reattach step (reagent P1 PR #691 round 3).
     if find_node_by_id(&node_to_move, new_parent_id).is_some() {
         return Err(LayoutError::NodeNotFound {
             id: format!("{} (is a descendant of the moved node {})", new_parent_id, node_id),
@@ -291,9 +302,9 @@ pub fn move_node(
         node_with_size.size = DEFAULT_NODE_SIZE;
     }
 
-    // Insert at new location (destination guaranteed to still exist since
-    // we only removed the source, not the destination).
+    // Insert at new location (destination guaranteed to still exist).
     let new_parent = find_node_by_id_mut(root, new_parent_id).unwrap();
+    ensure_group_node(new_parent);
     let insert_at = index.min(new_parent.children.len());
     new_parent.children.insert(insert_at, node_with_size);
     Ok(())
@@ -349,8 +360,7 @@ pub fn swap_nodes(
 
     // Detect ancestor/descendant relationship. If n1 is an ancestor of n2
     // (or vice versa), the first placement replaces a subtree that contains
-    // the second node's parent, making the second lookup fail (reagent P1
-    // PR #691 round 3). Return an error instead of panicking the sidecar.
+    // the second node's parent, making the second lookup fail.
     if find_node_by_id(&n1, node2_id).is_some() || find_node_by_id(&n2, node1_id).is_some() {
         return Err(LayoutError::RootCannotBeTarget);
     }
@@ -385,7 +395,7 @@ pub fn swap_nodes(
 /// if any is invalid, returns an error WITHOUT applying any ops (atomically
 /// rejected — matches the frontend's early-return semantic from PR #686).
 pub fn resize_nodes(root: &mut LayoutNode, ops: &[ResizeOp]) -> Result<(), LayoutError> {
-    // Validation pass first.
+    // Validation pass 1: sizes.
     for op in ops {
         if !(0.0..=100.0).contains(&op.size) {
             return Err(LayoutError::InvalidSize {
@@ -394,11 +404,16 @@ pub fn resize_nodes(root: &mut LayoutNode, ops: &[ResizeOp]) -> Result<(), Layou
             });
         }
     }
+    // Validation pass 2: all target nodes exist.
+    for op in ops {
+        if find_node_by_id(root, &op.node_id).is_none() {
+            return Err(LayoutError::NodeNotFound { id: op.node_id.clone() });
+        }
+    }
     // Apply pass (all valid).
     for op in ops {
-        if let Some(node) = find_node_by_id_mut(root, &op.node_id) {
-            node.size = op.size;
-        }
+        let node = find_node_by_id_mut(root, &op.node_id).unwrap();
+        node.size = op.size;
     }
     Ok(())
 }

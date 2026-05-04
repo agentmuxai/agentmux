@@ -34,10 +34,6 @@ fn group(id: &str, dir: FlexDirection, size: f32, children: Vec<LayoutNode>) -> 
     }
 }
 
-fn new_id() -> String {
-    Uuid::new_v4().to_string()
-}
-
 // ── isInstanceLabel filter (JS analogue: insert location) ──────────────────
 
 #[test]
@@ -150,7 +146,7 @@ fn delete_node_unknown_id_returns_error() {
 #[test]
 fn delete_node_root_returns_ok_without_deleting() {
     let mut root = leaf("root", "b1", 1.0);
-    // Caller should set Option<LayoutNode> = None; we just return Ok(false).
+    // Caller should set Option<LayoutNode> = None; we just return Ok(()).
     let result = delete_node(&mut root, "root");
     assert!(result.is_ok());
 }
@@ -274,6 +270,135 @@ fn replace_node_focused_flag_separate_concern() {
     let mut root = group("root", FlexDirection::Row, 10.0, vec![child]);
     let rep = leaf("rep", "b2", 5.0);
     assert!(replace_node(&mut root, "child", rep).is_ok());
+}
+
+// ── Purity ───────────────────────────────────────────────────────────────────
+
+// ── insertNode ID stability ───────────────────────────────────────────────────
+
+#[test]
+fn insert_node_preserves_leaf_id_in_intermediate() {
+    let mut root = leaf("root", "b1", 1.0);
+    let new = leaf("new", "b2", 1.0);
+    insert_node(&mut root, new);
+    // After leaf promotion, the intermediate child should keep the original root ID.
+    assert!(root.children.iter().any(|c| c.id == "root" && c.data.is_some()));
+    // The group wrapper should have a new ID.
+    assert_ne!(root.id, "root");
+    assert!(root.data.is_none());
+}
+
+// ── insertNodeAtIndex leaf promotion ─────────────────────────────────────────
+
+#[test]
+fn insert_node_at_index_promotes_leaf_parent() {
+    let mut root = leaf("root", "b1", 1.0);
+    let new = leaf("new", "b2", 1.0);
+    insert_node_at_index(&mut root, new, &[0]).unwrap();
+    // Root should have been promoted to a group with 2 children:
+    // the wrapped original leaf + the new node.
+    assert!(root.data.is_none());
+    assert_eq!(root.children.len(), 2);
+    // The original leaf data should be in a child with the original root ID.
+    assert!(root.children.iter().any(|c| c.id == "root" && c.data.is_some()));
+}
+
+// ── swapNode ancestor rejection ──────────────────────────────────────────────
+
+#[test]
+fn swap_nodes_rejects_ancestor() {
+    let inner = leaf("inner", "b1", 5.0);
+    let middle = group("middle", FlexDirection::Column, 5.0, vec![inner]);
+    let mut root = group("root", FlexDirection::Row, 10.0, vec![middle]);
+    let result = swap_nodes(&mut root, "middle", "inner");
+    assert!(matches!(result, Err(LayoutError::RootCannotBeTarget)));
+}
+
+// ── moveNode ─────────────────────────────────────────────────────────────────
+
+#[test]
+fn move_node_to_different_parent() {
+    let a = leaf("a", "b1", 5.0);
+    let b = leaf("b", "b2", 5.0);
+    let mut root = group("root", FlexDirection::Row, 10.0, vec![a, b]);
+    move_node(&mut root, "a", "root", 1).unwrap();
+    assert_eq!(root.children[1].id, "a");
+}
+
+#[test]
+fn move_node_same_parent_earlier_index() {
+    let a = leaf("a", "b1", 5.0);
+    let b = leaf("b", "b2", 5.0);
+    let c = leaf("c", "b3", 5.0);
+    let mut root = group("root", FlexDirection::Row, 10.0, vec![a, b, c]);
+    move_node(&mut root, "c", "root", 0).unwrap();
+    assert_eq!(root.children[0].id, "c");
+    assert_eq!(root.children[1].id, "a");
+    assert_eq!(root.children[2].id, "b");
+}
+
+#[test]
+fn move_node_same_parent_later_index() {
+    let a = leaf("a", "b1", 5.0);
+    let b = leaf("b", "b2", 5.0);
+    let c = leaf("c", "b3", 5.0);
+    let mut root = group("root", FlexDirection::Row, 10.0, vec![a, b, c]);
+    move_node(&mut root, "a", "root", 2).unwrap();
+    assert_eq!(root.children[0].id, "b");
+    assert_eq!(root.children[1].id, "c");
+    assert_eq!(root.children[2].id, "a");
+}
+
+#[test]
+fn move_node_rejects_root_as_source() {
+    let child = leaf("child", "b1", 5.0);
+    let mut root = group("root", FlexDirection::Row, 10.0, vec![child]);
+    let result = move_node(&mut root, "root", "root", 0);
+    assert!(matches!(result, Err(LayoutError::RootCannotBeTarget)));
+}
+
+#[test]
+fn move_node_rejects_descendant_destination() {
+    let inner = leaf("inner", "b1", 5.0);
+    let middle = group("middle", FlexDirection::Column, 5.0, vec![inner]);
+    let mut root = group("root", FlexDirection::Row, 10.0, vec![middle]);
+    let result = move_node(&mut root, "middle", "inner", 0);
+    assert!(matches!(result, Err(LayoutError::NodeNotFound { .. })));
+}
+
+#[test]
+fn move_node_preserves_size_same_parent() {
+    let a = leaf("a", "b1", 50.0);
+    let b = leaf("b", "b2", 50.0);
+    let mut root = group("root", FlexDirection::Row, 10.0, vec![a, b]);
+    move_node(&mut root, "a", "root", 1).unwrap();
+    // Moving within same parent preserves size.
+    assert_eq!(find_node_by_id(&root, "a").unwrap().size, 50.0);
+}
+
+#[test]
+fn move_node_resets_size_when_changing_parent() {
+    let a = leaf("a", "b1", 50.0);
+    let inner = leaf("inner", "b2", 50.0);
+    let middle = group("middle", FlexDirection::Column, 5.0, vec![inner]);
+    let mut root = group("root", FlexDirection::Row, 10.0, vec![a, middle]);
+    move_node(&mut root, "a", "middle", 0).unwrap();
+    // Moving to a different parent resets size to DEFAULT_NODE_SIZE.
+    assert_eq!(find_node_by_id(&root, "a").unwrap().size, DEFAULT_NODE_SIZE);
+}
+
+// ── resizeNode missing target ────────────────────────────────────────────────
+
+#[test]
+fn resize_nodes_rejects_missing_node() {
+    let n1 = leaf("n1", "b1", 50.0);
+    let mut root = group("root", FlexDirection::Row, 10.0, vec![n1]);
+    let result = resize_nodes(&mut root, &[
+        ResizeOp { node_id: "ghost".into(), size: 80.0 },
+    ]);
+    assert!(matches!(result, Err(LayoutError::NodeNotFound { .. })));
+    // n1 should NOT have been mutated.
+    assert_eq!(find_node_by_id(&root, "n1").unwrap().size, 50.0);
 }
 
 // ── Purity ───────────────────────────────────────────────────────────────────
