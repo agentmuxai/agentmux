@@ -17,12 +17,23 @@ use crate::state::AppState;
 // Window & BrowserView delegates (CEF Views framework)
 // ---------------------------------------------------------------------------
 
+// Linux/macOS only: when `Some((state, window_label))`, `on_window_created`
+// inserts the Window into `state.windows[window_label]` and
+// `on_window_destroyed` removes it. Browser-pane creation
+// (`browser_pane/creation_views.rs`) looks up the parent Window by label
+// to call `add_overlay_view` on. Without this, panes opened from a
+// non-main window were silently routed to the main window. Popup
+// delegates (DevTools etc.) pass `None` and don't register because they
+// shouldn't host user-facing panes.
+// (kept as a regular comment — wrap_window_delegate! doesn't accept
+// doc-comments on struct fields.)
 wrap_window_delegate! {
     pub struct AgentMuxWindowDelegate {
         browser_view: RefCell<Option<BrowserView>>,
         initial_bounds: Option<(i32, i32, i32, i32)>,
         frameless: bool,
         runtime_style: RuntimeStyle,
+        window_registration: Option<(Arc<AppState>, String)>,
     }
 
     impl ViewDelegate {
@@ -52,6 +63,19 @@ wrap_window_delegate! {
                 window.set_bounds(Some(&Rect { x, y, width: w, height: h }));
             }
 
+            // Linux/macOS only — register this Window in state.windows
+            // keyed by label, so the browser-pane Views path can attach
+            // pane overlays to the right window. Popup delegates pass
+            // `None` and don't register (they shouldn't host panes).
+            #[cfg(not(target_os = "windows"))]
+            if let Some((state, label)) = self.window_registration.as_ref() {
+                state.windows.lock().insert(label.clone(), window.clone());
+                tracing::info!(
+                    window_label = %label,
+                    "[browser-pane] registered Window in state.windows for pane attachment"
+                );
+            }
+
             // Chrome-style windows (DevTools popups) are shown immediately.
             // Alloy-style windows defer to on_load_end in client.rs to avoid
             // the DWM white flash on startup.
@@ -63,6 +87,18 @@ wrap_window_delegate! {
         fn on_window_destroyed(&self, _window: Option<&mut Window>) {
             let mut browser_view = self.browser_view.borrow_mut();
             *browser_view = None;
+
+            // Linux/macOS — un-register this Window from state.windows.
+            // Stale entries would cause subsequent pane creates targeting
+            // a destroyed window to silently no-op or worse.
+            #[cfg(not(target_os = "windows"))]
+            if let Some((state, label)) = self.window_registration.as_ref() {
+                state.windows.lock().remove(label);
+                tracing::info!(
+                    window_label = %label,
+                    "[browser-pane] unregistered Window on destroy"
+                );
+            }
         }
 
         fn can_close(&self, _window: Option<&mut Window>) -> i32 {
@@ -265,6 +301,7 @@ wrap_browser_view_delegate! {
                 None,
                 frameless,
                 runtime_style,
+                None, // popup (DevTools etc.) — don't register; not pane-host
             );
             #[cfg(target_os = "linux")]
             install_linux_window_properties_override(&window_delegate);
@@ -437,6 +474,7 @@ wrap_browser_process_handler! {
                     None,
                     true, // frameless — main window uses custom title bar
                     RuntimeStyle::ALLOY,
+                    Some((self.state.clone(), "main".to_string())),
                 );
                 #[cfg(target_os = "linux")]
                 install_linux_window_properties_override(&window_delegate);
