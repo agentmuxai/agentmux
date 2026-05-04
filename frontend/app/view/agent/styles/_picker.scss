@@ -130,10 +130,12 @@
         }
 
         .agent-card-icon {
-            font-size: 22px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
             flex-shrink: 0;
             width: 28px;
-            text-align: center;
+            height: 28px;
         }
 
         .agent-card-info {
