@@ -413,10 +413,26 @@ pub enum FlexDirection {
 
 /// Leaf-only payload — references the block this layout-leaf renders.
 /// Group nodes (those with `children`) carry no `data`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct LayoutNodeData {
+    /// Required field in well-formed leaf nodes. The `#[serde(default)]`
+    /// annotation is intentionally ABSENT — a missing `blockId` in JSON
+    /// is malformed and must fail deserialization (codex P1 PR #689).
+    /// `Default` on the struct only supports `..Default::default()` at
+    /// Rust construction sites, not serde deserialization fallback.
     #[serde(rename = "blockId")]
     pub block_id: String,
+    /// Catch-all for unknown fields — preserves forward-compat with
+    /// the prior `serde_json::Value` storage (codex P1 PR #688
+    /// follow-up). Without this, unknown fields are silently dropped
+    /// on deserialize→serialize cycles.
+    ///
+    /// Uses `serde_json::Map` (insertion-ordered) rather than `HashMap`
+    /// so that deserialize→serialize round-trips preserve key order
+    /// (codex P2 PR #689). HashMap iteration order is randomized per
+    /// process; reordering is observable in SQLite blob diffs.
+    #[serde(flatten, default, skip_serializing_if = "serde_json::Map::is_empty")]
+    pub extra: serde_json::Map<String, serde_json::Value>,
 }
 
 /// One node in the layout tree. Stable UUID-keyed; size is a relative
@@ -426,7 +442,12 @@ pub struct LayoutNodeData {
 /// ```json
 /// { "id": "...", "flexDirection": "row", "size": 1, "children": [...], "data": { "blockId": "..." } }
 /// ```
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+/// Note: `Default::size` is 0.0 (Rust default for f32), while the serde
+/// deserialization default is 1.0 (via `default_layout_size`). These differ
+/// intentionally — `Default` is used only for the `..Default::default()`
+/// struct-literal spread trick to populate `extra: serde_json::Map::new()` without
+/// touching every construction site. Size is always set explicitly at callsites.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct LayoutNode {
     pub id: String,
     /// Direction this node's children flow. Required in the JSON but
@@ -451,6 +472,13 @@ pub struct LayoutNode {
     /// present.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub data: Option<LayoutNodeData>,
+    /// Catch-all for unknown fields — preserves forward-compat with
+    /// the prior `serde_json::Value` storage (codex P1 PR #688
+    /// follow-up). Without this, unknown fields are silently dropped.
+    /// Uses `serde_json::Map` (insertion-ordered) for stable round-trips
+    /// (codex P2 PR #689 — HashMap iteration order is randomized).
+    #[serde(flatten, default, skip_serializing_if = "serde_json::Map::is_empty")]
+    pub extra: serde_json::Map<String, serde_json::Value>,
 }
 
 fn default_layout_size() -> f32 {
@@ -686,6 +714,7 @@ mod tests {
                 size: 1.0,
                 children: Vec::new(),
                 data: None,
+                ..Default::default()
             }),
             magnifiednodeid: "node-1".to_string(),
             ..Default::default()
@@ -804,6 +833,7 @@ mod tests {
             size: 10.0,
             children: Vec::new(),
             data: None,
+            ..Default::default()
         };
         let json = serde_json::to_string(&whole).unwrap();
         assert!(json.contains("\"size\":10"), "whole sizes should serialize as integer; got {}", json);
@@ -816,6 +846,7 @@ mod tests {
             size: 5.5,
             children: Vec::new(),
             data: None,
+            ..Default::default()
         };
         let json = serde_json::to_string(&frac).unwrap();
         assert!(json.contains("\"size\":5.5"), "fractional sizes preserve the decimal; got {}", json);
@@ -835,9 +866,61 @@ mod tests {
             size: 1.0,
             children: Vec::new(),
             data: None,
+            ..Default::default()
         };
         let json = serde_json::to_value(&group).unwrap();
         assert!(json.get("data").is_none(), "data: None must skip-serialize");
+    }
+
+    /// Regression test: unknown fields on LayoutNode and LayoutNodeData round-
+    /// trip via the `extra: HashMap` catch-all (codex P1 PR #688 + #689).
+    /// Without this, fields the frontend writes that we don't yet model would
+    /// be silently dropped on deserialize→serialize cycles — a regression vs
+    /// the prior `serde_json::Value` storage.
+    #[test]
+    fn test_layout_node_preserves_unknown_fields() {
+        let json_with_extras = serde_json::json!({
+            "id": "n",
+            "flexDirection": "row",
+            "size": 1,
+            "backendLayoutVersion": 7,
+            "data": {
+                "blockId": "b",
+                "renderHint": "compact"
+            }
+        });
+        let node: LayoutNode = serde_json::from_value(json_with_extras).unwrap();
+        assert_eq!(node.extra.get("backendLayoutVersion"), Some(&serde_json::json!(7)));
+        assert_eq!(
+            node.data.as_ref().unwrap().extra.get("renderHint"),
+            Some(&serde_json::json!("compact"))
+        );
+        // Round-trip preserves both.
+        let reserialized = serde_json::to_value(&node).unwrap();
+        assert_eq!(reserialized.get("backendLayoutVersion"), Some(&serde_json::json!(7)));
+        assert_eq!(
+            reserialized.get("data").and_then(|d| d.get("renderHint")),
+            Some(&serde_json::json!("compact"))
+        );
+        // Empty extra → no stray "extra" key on output.
+        let no_extras = LayoutNode {
+            id: "x".into(),
+            flex_direction: FlexDirection::Row,
+            size: 1.0,
+            ..Default::default()
+        };
+        let json = serde_json::to_value(&no_extras).unwrap();
+        assert!(json.get("extra").is_none());
+    }
+
+    /// Regression test (codex P1 PR #689): missing blockId in JSON must fail
+    /// deserialization rather than silently default to "". An empty block_id
+    /// would cause incorrect orphan handling in prune_block_from_layout.
+    #[test]
+    fn test_layout_node_data_missing_block_id_fails_deserialization() {
+        let missing_id = serde_json::json!({ "renderHint": "compact" });
+        let result = serde_json::from_value::<LayoutNodeData>(missing_id);
+        assert!(result.is_err(), "missing blockId must fail deserialization");
     }
 
     #[test]
