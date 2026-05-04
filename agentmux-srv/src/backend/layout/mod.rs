@@ -138,10 +138,12 @@ fn find_insert_location_inner(
 
 // ── Core operations ────────────────────────────────────────────────────────
 
-/// Insert `node` using the BFS heuristic (up to DEFAULT_MAX_CHILDREN per
-/// node before descending). If the tree is empty (called with
-/// `root = None`), the caller should set `root = Some(node)` directly.
+/// Insert `node` using a greedy DFS heuristic (up to DEFAULT_MAX_CHILDREN
+/// per node before descending — same strategy as `findNextInsertLocation`
+/// in `frontend/layout/lib/layoutNode.ts`). If the tree is empty (called
+/// with `root = None`), the caller should set `root = Some(node)` directly.
 /// This function only operates on a non-empty tree root.
+/// (Reagent P2 PR #691 round 3: prior doc said "BFS heuristic".)
 pub fn insert_node(root: &mut LayoutNode, node: LayoutNode) {
     // Use raw pointer to work around borrow checker limitations with the
     // immutable findNext + mutable insert pattern.
@@ -269,6 +271,14 @@ pub fn move_node(
     if find_node_by_id(root, new_parent_id).is_none() {
         return Err(LayoutError::NodeNotFound { id: new_parent_id.to_string() });
     }
+    // Confirm destination is NOT a descendant of the node being moved.
+    // If it were, detaching the source would also remove the destination,
+    // causing an unwrap() panic at the reattach step (reagent P1 PR #691 round 3).
+    if find_node_by_id(&node_to_move, new_parent_id).is_some() {
+        return Err(LayoutError::NodeNotFound {
+            id: format!("{} (is a descendant of the moved node {})", new_parent_id, node_id),
+        });
+    }
 
     let old_parent_id = find_parent_id(root, node_id);
     let same_parent = old_parent_id.as_deref() == Some(new_parent_id);
@@ -337,6 +347,14 @@ pub fn swap_nodes(
     let p2_id = find_parent_id(root, node2_id)
         .ok_or_else(|| LayoutError::NodeNotFound { id: format!("parent of {}", node2_id) })?;
 
+    // Detect ancestor/descendant relationship. If n1 is an ancestor of n2
+    // (or vice versa), the first placement replaces a subtree that contains
+    // the second node's parent, making the second lookup fail (reagent P1
+    // PR #691 round 3). Return an error instead of panicking the sidecar.
+    if find_node_by_id(&n1, node2_id).is_some() || find_node_by_id(&n2, node1_id).is_some() {
+        return Err(LayoutError::RootCannotBeTarget);
+    }
+
     // Find indices.
     let idx1 = {
         let p = find_node_by_id(root, &p1_id).unwrap();
@@ -353,7 +371,7 @@ pub fn swap_nodes(
     let mut n2_swapped = n1.clone();
     n2_swapped.size = n2.size; // slot 2 keeps size of what was there (n2's size)
 
-    // Place them.
+    // Place them. p2_id is guaranteed to still exist (ancestor check above).
     let p1 = find_node_by_id_mut(root, &p1_id).unwrap();
     p1.children[idx1] = n1_swapped;
 
