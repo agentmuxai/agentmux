@@ -104,16 +104,16 @@ pub fn find_parent_by_child_id<'a>(
     None
 }
 
-// ── BFS insert-location heuristic ─────────────────────────────────────────
+// ── Insert-location heuristic ──────────────────────────────────────────────
 
-/// Breadth-first search for the first node with fewer than `max_children`
-/// children. Mirrors `findNextInsertLocation` in layoutNode.ts.
+/// Greedy depth-first search for the first node with fewer than `max_children`
+/// children. The TypeScript oracle (`findNextInsertLocation` in layoutNode.ts)
+/// uses the same greedy-DFS descent — fill each node before going deeper.
+/// (Reagent P2 PR #691: prior doc comment incorrectly said "BFS".)
 fn find_next_insert_location(
     tree: &LayoutNode,
     max_children: usize,
 ) -> (&LayoutNode, usize) {
-    // BFS through the tree level by level (use depth-first with level tracking
-    // as a simpler approximation that matches the test oracle).
     find_insert_location_inner(tree, max_children, 1)
         .unwrap_or((tree, tree.children.len()))
 }
@@ -221,6 +221,7 @@ fn delete_recursive(node: &mut LayoutNode, target_id: &str) -> Option<bool> {
         // Found target as a direct child — remove it.
         node.children.remove(i);
         // Collapse: if only one child remains, promote it.
+        // Preserve `extra` (unknown-field catch-all from #688/#689 — reagent P1 PR #691).
         if node.children.len() == 1 {
             let sole = node.children.remove(0);
             node.id = sole.id;
@@ -228,6 +229,7 @@ fn delete_recursive(node: &mut LayoutNode, target_id: &str) -> Option<bool> {
             node.data = sole.data;
             node.flex_direction = sole.flex_direction;
             node.children = sole.children;
+            node.extra = sole.extra;
         }
         return Some(false);
     }
@@ -475,13 +477,15 @@ fn split_impl(
 
     // Target IS root (no parent) — wrap root in a new group.
     // We can't replace `root` itself, so we build the group children in-place.
+    // Also take `root.extra` (unknown-field catch-all from #688/#689).
+    // `..Default::default()` would silently drop it — reagent P1 PR #691.
     let root_clone = LayoutNode {
         id: root.id.clone(),
         flex_direction: root.flex_direction,
         size: root.size,
         children: std::mem::take(&mut root.children),
         data: root.data.take(),
-        ..Default::default()
+        extra: std::mem::take(&mut root.extra),
     };
     let root_size = root_clone.size;
     let new_group_id = Uuid::new_v4().to_string();
