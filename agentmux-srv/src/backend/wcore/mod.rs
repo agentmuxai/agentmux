@@ -135,6 +135,7 @@ pub fn ensure_initial_data(store: &WaveStore) -> Result<bool, StoreError> {
         id: root_id,
         flex_direction: FlexDirection::Row,
         size: 10.0,
+        data: None,
         children: vec![
             LayoutNode {
                 id: agent_node_id.clone(),
@@ -143,7 +144,9 @@ pub fn ensure_initial_data(store: &WaveStore) -> Result<bool, StoreError> {
                 children: Vec::new(),
                 data: Some(LayoutNodeData {
                     block_id: agent_block.oid.clone(),
+                    ..Default::default()
                 }),
+                ..Default::default()
             },
             LayoutNode {
                 id: right_col_id,
@@ -157,7 +160,9 @@ pub fn ensure_initial_data(store: &WaveStore) -> Result<bool, StoreError> {
                         children: Vec::new(),
                         data: Some(LayoutNodeData {
                             block_id: sysinfo_block.oid.clone(),
+                            ..Default::default()
                         }),
+                        ..Default::default()
                     },
                     LayoutNode {
                         id: swarm_node_id.clone(),
@@ -166,13 +171,16 @@ pub fn ensure_initial_data(store: &WaveStore) -> Result<bool, StoreError> {
                         children: Vec::new(),
                         data: Some(LayoutNodeData {
                             block_id: swarm_block.oid.clone(),
+                            ..Default::default()
                         }),
+                        ..Default::default()
                     },
                 ],
                 data: None,
+                ..Default::default()
             },
         ],
-        data: None,
+        ..Default::default()
     };
 
     let mut layout = store.must_get::<LayoutState>(&tab.layoutstate)?;
