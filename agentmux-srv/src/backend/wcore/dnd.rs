@@ -254,7 +254,9 @@ pub fn tear_off_block(
         children: Vec::new(),
         data: Some(LayoutNodeData {
             block_id: block_id.to_string(),
+            ..Default::default()
         }),
+        ..Default::default()
     });
     layout.leaforder = Some(vec![LeafOrderEntry {
         nodeid: node_id,
