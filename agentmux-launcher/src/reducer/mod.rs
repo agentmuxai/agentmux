@@ -513,6 +513,27 @@ pub fn update(state: &mut State, cmd: Command, ctx: &Ctx) -> Vec<Event> {
                 version: v,
             }]
         }
+        // Phase E.4.B — layout-tree commands are srv-pipe only; same
+        // soft-error treatment as GetSrvSnapshot above.
+        Command::LayoutInsertNode { .. }
+        | Command::LayoutInsertNodeAtIndex { .. }
+        | Command::LayoutDeleteNode { .. }
+        | Command::LayoutMoveNode { .. }
+        | Command::LayoutSwapNodes { .. }
+        | Command::LayoutResizeNodes { .. }
+        | Command::LayoutReplaceNode { .. }
+        | Command::LayoutSplitHorizontal { .. }
+        | Command::LayoutSplitVertical { .. }
+        | Command::LayoutClear { .. }
+        | Command::LayoutSetTree { .. } => {
+            let v = state.bump_version();
+            vec![Event::Error {
+                code: agentmux_common::ipc::ErrorCode::InvalidCommand,
+                message: "Layout command is a srv-pipe command; sent to launcher pipe by mistake".to_string(),
+                fatal: false,
+                version: v,
+            }]
+        }
     }
 }
 

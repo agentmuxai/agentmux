@@ -857,6 +857,21 @@ async fn enforce_register_first(
             "SetMagnifiedNode is a srv-pipe command; sent to launcher pipe by mistake".to_string(),
             false,
         ),
+        // Phase E.4.B — all layout-tree commands are srv-pipe only.
+        Command::LayoutInsertNode { .. }
+        | Command::LayoutInsertNodeAtIndex { .. }
+        | Command::LayoutDeleteNode { .. }
+        | Command::LayoutMoveNode { .. }
+        | Command::LayoutSwapNodes { .. }
+        | Command::LayoutResizeNodes { .. }
+        | Command::LayoutReplaceNode { .. }
+        | Command::LayoutSplitHorizontal { .. }
+        | Command::LayoutSplitVertical { .. }
+        | Command::LayoutClear { .. }
+        | Command::LayoutSetTree { .. } => (
+            "Layout command is a srv-pipe command; sent to launcher pipe by mistake".to_string(),
+            false,
+        ),
     };
     // Phase E.1b — connection-private error; sentinel version=0
     // (codex P2 #610). See parse-error path for rationale.
