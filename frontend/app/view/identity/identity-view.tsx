@@ -11,16 +11,8 @@ import type {
     SecretRef,
 } from "./identity-model";
 import { KIND_LABELS, PROVIDER_LABELS } from "./identity-model";
+import { ProviderLogo } from "@/element/ProviderLogo";
 import "./identity-view.scss";
-
-// ── Provider icons (text symbols, no extra deps) ─────────────────────────────
-
-const PROVIDER_ICON: Record<AccountProvider, string> = {
-    github: "GH",
-    aws: "AWS",
-    anthropic: "AI",
-    custom: "—",
-};
 
 const STATUS_DOT: Record<string, string> = {
     valid: "status-dot status-valid",
@@ -139,7 +131,7 @@ function AccountRow(props: { account: Account; selected: boolean; onClick: () =>
             onClick={props.onClick}
         >
             <span class={`identity-provider-badge provider-${a.provider}`}>
-                {PROVIDER_ICON[a.provider]}
+                <ProviderLogo provider={a.provider} size={16} />
             </span>
             <span class="identity-account-name">{a.name}</span>
             <div class="identity-row-meta">
@@ -162,7 +154,7 @@ function AccountDetail({ model, account }: { model: IdentityViewModel; account: 
         <div class="identity-detail">
             <div class="identity-detail-header">
                 <span class={`identity-provider-badge provider-${account.provider}`}>
-                    {PROVIDER_ICON[account.provider]}
+                    <ProviderLogo provider={account.provider} size={16} />
                 </span>
                 <div class="identity-detail-title">
                     <span class="identity-detail-name">{account.name}</span>
@@ -326,7 +318,12 @@ function AssignmentsTab({ model }: { model: IdentityViewModel }): JSX.Element {
                                                                 class={`identity-provider-badge provider-${p} matrix-badge`}
                                                                 title={acct!.name}
                                                             >
-                                                                {acct!.display_name ?? PROVIDER_ICON[p]}
+                                                                <Show
+                                                                    when={acct!.display_name}
+                                                                    fallback={<ProviderLogo provider={p} size={14} />}
+                                                                >
+                                                                    {acct!.display_name}
+                                                                </Show>
                                                             </span>
                                                             <span class={STATUS_DOT[acct!.status] ?? STATUS_DOT["unknown"]} />
                                                         </Show>
