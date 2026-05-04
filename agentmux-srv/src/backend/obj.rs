@@ -475,8 +475,10 @@ pub struct LayoutNode {
     /// Catch-all for unknown fields — preserves forward-compat with
     /// the prior `serde_json::Value` storage (codex P1 PR #688
     /// follow-up). Without this, unknown fields are silently dropped.
-    #[serde(flatten, default, skip_serializing_if = "HashMap::is_empty")]
-    pub extra: HashMap<String, serde_json::Value>,
+    /// Uses `serde_json::Map` (insertion-ordered) for stable round-trips
+    /// (codex P2 PR #689 — HashMap iteration order is randomized).
+    #[serde(flatten, default, skip_serializing_if = "serde_json::Map::is_empty")]
+    pub extra: serde_json::Map<String, serde_json::Value>,
 }
 
 fn default_layout_size() -> f32 {
