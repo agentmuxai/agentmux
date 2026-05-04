@@ -2303,12 +2303,16 @@ fn setup_torn_off_block_layout(
     let new_tab = store.must_get::<Tab>(new_tab_id)?;
     let mut layout = store.must_get::<LayoutState>(&new_tab.layoutstate)?;
     let node_id = uuid::Uuid::new_v4().to_string();
-    layout.rootnode = Some(serde_json::json!({
-        "id": node_id,
-        "data": { "blockId": block_id },
-        "flexDirection": "row",
-        "size": 1
-    }));
+    // Phase E.4.B Phase 2 — construct typed LayoutNode (was inline JSON).
+    layout.rootnode = Some(LayoutNode {
+        id: node_id.clone(),
+        flex_direction: FlexDirection::Row,
+        size: 1.0,
+        children: Vec::new(),
+        data: Some(LayoutNodeData {
+            block_id: block_id.to_string(),
+        }),
+    });
     layout.leaforder = Some(vec![LeafOrderEntry {
         nodeid: node_id,
         blockid: block_id.to_string(),

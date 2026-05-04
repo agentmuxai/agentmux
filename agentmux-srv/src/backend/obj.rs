@@ -386,13 +386,109 @@ pub struct Tab {
 
 impl_wave_obj!(Tab, OTYPE_TAB);
 
+// ====================================================================
+// Phase E.4.B Phase 2 — typed LayoutNode tree
+// ====================================================================
+//
+// `LayoutState.rootnode` was `Option<serde_json::Value>` (opaque blob)
+// pre-E.4.B. This phase replaces it with a typed Rust struct that
+// deserializes from the same JSON shape the frontend produces.
+//
+// Wire-compat goal: bytes produced by serializing a `LayoutNode` must
+// match what `Option<serde_json::Value>` would have produced for the
+// equivalent shape. See `tests::layout_node_roundtrip` (in this file).
+//
+// See `docs/specs/srv-phase-e4b-formal-spec-2026-05-03.md` §4.1.
+
+/// Direction children flow within a layout node (row = horizontal split,
+/// column = vertical split). Always present in production JSON; defaults
+/// to `Row` if absent on deserialization for forward-compat.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum FlexDirection {
+    #[default]
+    Row,
+    Column,
+}
+
+/// Leaf-only payload — references the block this layout-leaf renders.
+/// Group nodes (those with `children`) carry no `data`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LayoutNodeData {
+    #[serde(rename = "blockId")]
+    pub block_id: String,
+}
+
+/// One node in the layout tree. Stable UUID-keyed; size is a relative
+/// flex unit; children form the recursive structure (empty for leaves).
+///
+/// JSON shape (matches frontend `LayoutNode` in `frontend/layout/lib/types.ts`):
+/// ```json
+/// { "id": "...", "flexDirection": "row", "size": 1, "children": [...], "data": { "blockId": "..." } }
+/// ```
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LayoutNode {
+    pub id: String,
+    /// Direction this node's children flow. Required in the JSON but
+    /// defaulted on deserialization to be tolerant of older blobs.
+    #[serde(rename = "flexDirection", default)]
+    pub flex_direction: FlexDirection,
+    /// Flex size — relative units within the parent's children array.
+    /// Default 1.0 if missing on the wire. Custom serializer emits
+    /// whole-number sizes as integers (`10` not `10.0`) to preserve
+    /// byte-equal compatibility with the prior `serde_json::json!()`-
+    /// produced JSON, which used integer literals (reagent P2 PR #688).
+    #[serde(
+        default = "default_layout_size",
+        serialize_with = "serialize_size_smallest",
+    )]
+    pub size: f32,
+    /// Child nodes. Empty for leaves; serialized as `[]` (preserved by
+    /// default) — frontend tolerates either omitted or empty array.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub children: Vec<LayoutNode>,
+    /// Leaf-only payload. None for group nodes; serialized only when
+    /// present.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub data: Option<LayoutNodeData>,
+}
+
+fn default_layout_size() -> f32 {
+    1.0
+}
+
+/// Serialize a layout `size` as the smallest representation that
+/// round-trips faithfully:
+/// - Whole numbers (5.0) → integer JSON (`5`) — matches the prior
+///   `serde_json::json!()` writers which used integer literals
+/// - Fractional numbers (5.5) → float JSON (`5.5`)
+///
+/// JSON `number` is the same type either way, but byte-level diffs
+/// matter for downstream consumers that do string-equality on stored
+/// blobs (and for clarity in debug logs).
+fn serialize_size_smallest<S>(value: &f32, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    if value.fract() == 0.0
+        && value.is_finite()
+        && (i64::MIN as f32..=i64::MAX as f32).contains(value)
+    {
+        serializer.serialize_i64(*value as i64)
+    } else {
+        serializer.serialize_f32(*value)
+    }
+}
+
 /// Go: `LayoutState` in pkg/obj/wtype.go
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct LayoutState {
     pub oid: String,
     pub version: i64,
+    /// Phase E.4.B Phase 2 — typed; was `Option<serde_json::Value>`.
+    /// Wire format unchanged (serde-compat with the prior JSON shape).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub rootnode: Option<serde_json::Value>,
+    pub rootnode: Option<LayoutNode>,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub magnifiednodeid: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
@@ -580,10 +676,17 @@ mod tests {
 
     #[test]
     fn test_layout_state_roundtrip() {
+        // Phase E.4.B Phase 2 — uses typed LayoutNode (was a junk JSON blob).
         let ls = LayoutState {
             oid: "ls-oid".to_string(),
             version: 1,
-            rootnode: Some(serde_json::json!({"type": "split", "children": []})),
+            rootnode: Some(LayoutNode {
+                id: "node-1".into(),
+                flex_direction: FlexDirection::Row,
+                size: 1.0,
+                children: Vec::new(),
+                data: None,
+            }),
             magnifiednodeid: "node-1".to_string(),
             ..Default::default()
         };
@@ -591,6 +694,150 @@ mod tests {
         let parsed: LayoutState = wave_obj_from_json(&json).unwrap();
         assert_eq!(parsed.magnifiednodeid, "node-1");
         assert!(parsed.rootnode.is_some());
+        assert_eq!(parsed.rootnode.as_ref().unwrap().id, "node-1");
+    }
+
+    /// Phase E.4.B Phase 2 acceptance gate: deserializing the JSON shape
+    /// the frontend produces today MUST yield the typed LayoutNode, and
+    /// reserializing MUST produce equivalent JSON. The shapes here cover:
+    ///   1. Single-leaf root (dnd / tear-off shape)
+    ///   2. The first-launch three-pane shape (deep nesting + mixed
+    ///      group/leaf nodes)
+    ///   3. Edge: missing `children` array for leaves
+    #[test]
+    fn test_layout_node_serde_compat_with_frontend_shapes() {
+        // Shape 1 — single leaf (matches dnd.rs / service.rs writers).
+        let leaf_json = serde_json::json!({
+            "id": "node-uuid-1",
+            "data": { "blockId": "block-uuid-1" },
+            "flexDirection": "row",
+            "size": 1
+        });
+        let leaf: LayoutNode = serde_json::from_value(leaf_json).unwrap();
+        assert_eq!(leaf.id, "node-uuid-1");
+        assert_eq!(leaf.flex_direction, FlexDirection::Row);
+        assert_eq!(leaf.size, 1.0);
+        assert!(leaf.children.is_empty());
+        assert_eq!(leaf.data.as_ref().unwrap().block_id, "block-uuid-1");
+        // Round-trip preserves shape.
+        let reserialized = serde_json::to_value(&leaf).unwrap();
+        let reparsed: LayoutNode = serde_json::from_value(reserialized).unwrap();
+        assert_eq!(leaf, reparsed);
+
+        // Shape 2 — first-launch three-pane (matches wcore::mod.rs).
+        let three_pane_json = serde_json::json!({
+            "id": "root-id",
+            "flexDirection": "row",
+            "size": 10,
+            "children": [
+                {
+                    "id": "agent-id",
+                    "flexDirection": "column",
+                    "size": 5,
+                    "data": { "blockId": "agent-block" }
+                },
+                {
+                    "id": "right-col-id",
+                    "flexDirection": "column",
+                    "size": 5,
+                    "children": [
+                        {
+                            "id": "sysinfo-id",
+                            "flexDirection": "row",
+                            "size": 2,
+                            "data": { "blockId": "sysinfo-block" }
+                        },
+                        {
+                            "id": "swarm-id",
+                            "flexDirection": "row",
+                            "size": 8,
+                            "data": { "blockId": "swarm-block" }
+                        }
+                    ]
+                }
+            ]
+        });
+        let root: LayoutNode = serde_json::from_value(three_pane_json).unwrap();
+        assert_eq!(root.id, "root-id");
+        assert_eq!(root.children.len(), 2);
+        assert_eq!(root.children[0].id, "agent-id");
+        assert_eq!(root.children[0].flex_direction, FlexDirection::Column);
+        assert_eq!(root.children[0].data.as_ref().unwrap().block_id, "agent-block");
+        let right_col = &root.children[1];
+        assert_eq!(right_col.children.len(), 2);
+        assert_eq!(right_col.data, None); // group node, no leaf data
+        assert_eq!(right_col.children[1].data.as_ref().unwrap().block_id, "swarm-block");
+        let reserialized = serde_json::to_value(&root).unwrap();
+        let reparsed: LayoutNode = serde_json::from_value(reserialized).unwrap();
+        assert_eq!(root, reparsed);
+
+        // Shape 3 — leaf without `children` array (real on-disk blobs may
+        // or may not have `"children": []`; deserializer must tolerate either).
+        let leaf_no_children = serde_json::json!({
+            "id": "loner",
+            "flexDirection": "column",
+            "size": 5,
+            "data": { "blockId": "b" }
+        });
+        let parsed: LayoutNode = serde_json::from_value(leaf_no_children).unwrap();
+        assert!(parsed.children.is_empty());
+    }
+
+    /// Phase E.4.B Phase 2 — deserializing a node WITHOUT `flexDirection`
+    /// falls back to `Row` default. Defensive against older blobs.
+    #[test]
+    fn test_layout_node_defaults_flex_direction_to_row() {
+        let no_dir = serde_json::json!({"id": "x", "size": 1});
+        let parsed: LayoutNode = serde_json::from_value(no_dir).unwrap();
+        assert_eq!(parsed.flex_direction, FlexDirection::Row);
+    }
+
+    /// Phase E.4.B Phase 2 (reagent P2 PR #688) — whole-number sizes
+    /// serialize as integer JSON literals, not float (`10` not `10.0`).
+    /// This preserves byte-equal compatibility with the prior
+    /// `serde_json::json!()`-produced JSON which used integer literals.
+    #[test]
+    fn test_layout_node_size_serializes_as_integer_when_whole() {
+        let whole = LayoutNode {
+            id: "x".into(),
+            flex_direction: FlexDirection::Row,
+            size: 10.0,
+            children: Vec::new(),
+            data: None,
+        };
+        let json = serde_json::to_string(&whole).unwrap();
+        assert!(json.contains("\"size\":10"), "whole sizes should serialize as integer; got {}", json);
+        assert!(!json.contains("\"size\":10.0"), "whole sizes should NOT include the decimal; got {}", json);
+
+        // Fractional sizes still serialize with the decimal.
+        let frac = LayoutNode {
+            id: "y".into(),
+            flex_direction: FlexDirection::Row,
+            size: 5.5,
+            children: Vec::new(),
+            data: None,
+        };
+        let json = serde_json::to_string(&frac).unwrap();
+        assert!(json.contains("\"size\":5.5"), "fractional sizes preserve the decimal; got {}", json);
+
+        // Round-trip works either way.
+        let reparsed: LayoutNode = serde_json::from_str(&serde_json::to_string(&whole).unwrap()).unwrap();
+        assert_eq!(reparsed.size, 10.0);
+    }
+
+    /// Phase E.4.B Phase 2 — `data: None` serializes ABSENT (not `"data": null`).
+    /// Frontend tolerates either, but absent matches the pre-typed JSON shape.
+    #[test]
+    fn test_layout_node_data_skipped_when_none() {
+        let group = LayoutNode {
+            id: "g".into(),
+            flex_direction: FlexDirection::Row,
+            size: 1.0,
+            children: Vec::new(),
+            data: None,
+        };
+        let json = serde_json::to_value(&group).unwrap();
+        assert!(json.get("data").is_none(), "data: None must skip-serialize");
     }
 
     #[test]

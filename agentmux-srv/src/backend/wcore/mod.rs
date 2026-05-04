@@ -130,38 +130,50 @@ pub fn ensure_initial_data(store: &WaveStore) -> Result<bool, StoreError> {
     let right_col_id = Uuid::new_v4().to_string();
     let root_id = Uuid::new_v4().to_string();
 
-    let rootnode = serde_json::json!({
-        "id": root_id,
-        "flexDirection": "row",
-        "size": 10,
-        "children": [
-            {
-                "id": agent_node_id,
-                "flexDirection": "column",
-                "size": 5,
-                "data": { "blockId": agent_block.oid },
+    // Phase E.4.B Phase 2 — typed LayoutNode (was inline JSON).
+    let rootnode = LayoutNode {
+        id: root_id,
+        flex_direction: FlexDirection::Row,
+        size: 10.0,
+        children: vec![
+            LayoutNode {
+                id: agent_node_id.clone(),
+                flex_direction: FlexDirection::Column,
+                size: 5.0,
+                children: Vec::new(),
+                data: Some(LayoutNodeData {
+                    block_id: agent_block.oid.clone(),
+                }),
             },
-            {
-                "id": right_col_id,
-                "flexDirection": "column",
-                "size": 5,
-                "children": [
-                    {
-                        "id": sysinfo_node_id,
-                        "flexDirection": "row",
-                        "size": 2,
-                        "data": { "blockId": sysinfo_block.oid },
+            LayoutNode {
+                id: right_col_id,
+                flex_direction: FlexDirection::Column,
+                size: 5.0,
+                children: vec![
+                    LayoutNode {
+                        id: sysinfo_node_id.clone(),
+                        flex_direction: FlexDirection::Row,
+                        size: 2.0,
+                        children: Vec::new(),
+                        data: Some(LayoutNodeData {
+                            block_id: sysinfo_block.oid.clone(),
+                        }),
                     },
-                    {
-                        "id": swarm_node_id,
-                        "flexDirection": "row",
-                        "size": 8,
-                        "data": { "blockId": swarm_block.oid },
+                    LayoutNode {
+                        id: swarm_node_id.clone(),
+                        flex_direction: FlexDirection::Row,
+                        size: 8.0,
+                        children: Vec::new(),
+                        data: Some(LayoutNodeData {
+                            block_id: swarm_block.oid.clone(),
+                        }),
                     },
                 ],
+                data: None,
             },
         ],
-    });
+        data: None,
+    };
 
     let mut layout = store.must_get::<LayoutState>(&tab.layoutstate)?;
     layout.rootnode = Some(rootnode);
@@ -223,8 +235,10 @@ mod tests {
 
         let tabs = store.get_all::<Tab>().unwrap();
         assert_eq!(tabs.len(), 1);
-        // Tab should be named "Untitled1"
-        assert_eq!(tabs[0].name, "Untitled1");
+        // Tab should be named "tab1" (per SPEC_TAB_GAPS_AND_NAMING_2026_04_25 —
+        // auto-generated tabs use the `tabN` convention, not the older
+        // `Untitled1` name. The test was asserting against stale-spec naming).
+        assert_eq!(tabs[0].name, "tab1");
     }
 
     #[test]
