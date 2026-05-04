@@ -16,6 +16,7 @@
 
 import { createMemo, createSignal, For, Show, type JSX } from "solid-js";
 import { AccountForm } from "@/app/view/identity/identity-view";
+import { ProviderLogo } from "@/element/ProviderLogo";
 import {
     type AccountProvider,
     type AgentAccounts,
@@ -26,13 +27,6 @@ import {
 } from "@/app/view/identity/identity-model";
 
 const ALL_PROVIDERS: AccountProvider[] = ["github", "aws", "anthropic", "custom"];
-
-const PROVIDER_ICONS: Record<AccountProvider, string> = {
-    github: "⑆",
-    aws: "☁",
-    anthropic: "◈",
-    custom: "⊞",
-};
 
 interface AgentIdentityPanelProps {
     agent: ForgeAgent;
@@ -90,9 +84,7 @@ export const AgentIdentityPanel = (props: AgentIdentityPanelProps): JSX.Element 
 
                         return (
                             <div class="agent-identity-provider-row">
-                                <span class="agent-identity-provider-icon">
-                                    {PROVIDER_ICONS[provider]}
-                                </span>
+                                <ProviderLogo provider={provider} size={16} class="agent-identity-provider-icon" />
                                 <span class="agent-identity-provider-label">
                                     {PROVIDER_LABELS[provider]}
                                 </span>
