@@ -434,8 +434,14 @@ pub struct LayoutNode {
     #[serde(rename = "flexDirection", default)]
     pub flex_direction: FlexDirection,
     /// Flex size — relative units within the parent's children array.
-    /// Default 1.0 if missing on the wire.
-    #[serde(default = "default_layout_size")]
+    /// Default 1.0 if missing on the wire. Custom serializer emits
+    /// whole-number sizes as integers (`10` not `10.0`) to preserve
+    /// byte-equal compatibility with the prior `serde_json::json!()`-
+    /// produced JSON, which used integer literals (reagent P2 PR #688).
+    #[serde(
+        default = "default_layout_size",
+        serialize_with = "serialize_size_smallest",
+    )]
     pub size: f32,
     /// Child nodes. Empty for leaves; serialized as `[]` (preserved by
     /// default) — frontend tolerates either omitted or empty array.
@@ -449,6 +455,29 @@ pub struct LayoutNode {
 
 fn default_layout_size() -> f32 {
     1.0
+}
+
+/// Serialize a layout `size` as the smallest representation that
+/// round-trips faithfully:
+/// - Whole numbers (5.0) → integer JSON (`5`) — matches the prior
+///   `serde_json::json!()` writers which used integer literals
+/// - Fractional numbers (5.5) → float JSON (`5.5`)
+///
+/// JSON `number` is the same type either way, but byte-level diffs
+/// matter for downstream consumers that do string-equality on stored
+/// blobs (and for clarity in debug logs).
+fn serialize_size_smallest<S>(value: &f32, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    if value.fract() == 0.0
+        && value.is_finite()
+        && (i64::MIN as f32..=i64::MAX as f32).contains(value)
+    {
+        serializer.serialize_i64(*value as i64)
+    } else {
+        serializer.serialize_f32(*value)
+    }
 }
 
 /// Go: `LayoutState` in pkg/obj/wtype.go
@@ -761,6 +790,39 @@ mod tests {
         let no_dir = serde_json::json!({"id": "x", "size": 1});
         let parsed: LayoutNode = serde_json::from_value(no_dir).unwrap();
         assert_eq!(parsed.flex_direction, FlexDirection::Row);
+    }
+
+    /// Phase E.4.B Phase 2 (reagent P2 PR #688) — whole-number sizes
+    /// serialize as integer JSON literals, not float (`10` not `10.0`).
+    /// This preserves byte-equal compatibility with the prior
+    /// `serde_json::json!()`-produced JSON which used integer literals.
+    #[test]
+    fn test_layout_node_size_serializes_as_integer_when_whole() {
+        let whole = LayoutNode {
+            id: "x".into(),
+            flex_direction: FlexDirection::Row,
+            size: 10.0,
+            children: Vec::new(),
+            data: None,
+        };
+        let json = serde_json::to_string(&whole).unwrap();
+        assert!(json.contains("\"size\":10"), "whole sizes should serialize as integer; got {}", json);
+        assert!(!json.contains("\"size\":10.0"), "whole sizes should NOT include the decimal; got {}", json);
+
+        // Fractional sizes still serialize with the decimal.
+        let frac = LayoutNode {
+            id: "y".into(),
+            flex_direction: FlexDirection::Row,
+            size: 5.5,
+            children: Vec::new(),
+            data: None,
+        };
+        let json = serde_json::to_string(&frac).unwrap();
+        assert!(json.contains("\"size\":5.5"), "fractional sizes preserve the decimal; got {}", json);
+
+        // Round-trip works either way.
+        let reparsed: LayoutNode = serde_json::from_str(&serde_json::to_string(&whole).unwrap()).unwrap();
+        assert_eq!(reparsed.size, 10.0);
     }
 
     /// Phase E.4.B Phase 2 — `data: None` serializes ABSENT (not `"data": null`).
