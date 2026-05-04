@@ -292,7 +292,19 @@ fn event_version(e: &Event) -> u64 {
         | Event::FocusedNodeChanged { version, .. }
         | Event::MagnifiedNodeChanged { version, .. }
         | Event::SagaActionFailed { version, .. }
-        | Event::Error { version, .. } => *version,
+        | Event::Error { version, .. }
+        // Phase E.4.B — layout tree events.
+        | Event::LayoutNodeInserted { version, .. }
+        | Event::LayoutNodeInsertedAtIndex { version, .. }
+        | Event::LayoutNodeDeleted { version, .. }
+        | Event::LayoutNodeMoved { version, .. }
+        | Event::LayoutNodesSwapped { version, .. }
+        | Event::LayoutNodesResized { version, .. }
+        | Event::LayoutNodeReplaced { version, .. }
+        | Event::LayoutSplitHorizontalApplied { version, .. }
+        | Event::LayoutSplitVerticalApplied { version, .. }
+        | Event::LayoutCleared { version, .. }
+        | Event::LayoutTreeReplaced { version, .. } => *version,
     }
 }
 
