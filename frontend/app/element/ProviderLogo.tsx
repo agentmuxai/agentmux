@@ -92,25 +92,25 @@ export const ProviderLogo = (props: ProviderLogoProps): JSX.Element => {
         if (p === "aws") {
             // stylelint-disable color-no-hex
             return (
-                <svg width={size()} height={size()} viewBox="0 0 80 50" aria-hidden="true">
+                <svg width={size()} height={size()} viewBox="0 0 24 24" aria-hidden="true">
                     <text
-                        x="40"
-                        y="28"
+                        x="12"
+                        y="14"
                         text-anchor="middle"
-                        font-size="28"
+                        font-size="9"
                         font-weight="700"
                         font-family="Arial, sans-serif"
                         fill="#FF9900"
-                        letter-spacing="-1"
+                        letter-spacing="-0.3"
                     >
                         aws
                     </text>
-                    <path d="M20 36 Q40 48 60 36" fill="none" stroke="#FF9900" stroke-width="4" stroke-linecap="round" />
+                    <path d="M6 17 Q12 21 18 17" fill="none" stroke="#FF9900" stroke-width="1.4" stroke-linecap="round" />
                     <path
-                        d="M57 33 L62 36 L57 40"
+                        d="M17 15.5 L18.5 17 L17 18.5"
                         fill="none"
                         stroke="#FF9900"
-                        stroke-width="4"
+                        stroke-width="1.4"
                         stroke-linecap="round"
                         stroke-linejoin="round"
                     />
