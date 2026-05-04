@@ -473,6 +473,111 @@ pub enum Command {
         tab_id: String,
         node_id: String,
     },
+
+    // ── Phase E.4.B — Layout tree commands ──────────────────────────────
+    //
+    // Each command carries a `correlation_id` (UUID string) for the
+    // frontend optimistic-confirm pattern: the slice-#8 subscriber uses
+    // it to distinguish "my own command echoing back" from "a remote
+    // command I must apply locally".
+    //
+    // `focus_after` / `magnify_after` flags mirror the semantics of the
+    // frontend's `LayoutTreeActionType` (focused / magnified side effects
+    // on InsertNode, SplitH, SplitV, ReplaceNode).
+    //
+    // See docs/specs/srv-phase-e4b-formal-spec-2026-05-03.md §5.
+
+    /// Insert a new node into the tree. If `parent_id` is `None`, the
+    /// heuristic `findNextInsertLocation` is used (first available slot);
+    /// `index` positions within the parent's children (None = append).
+    LayoutInsertNode {
+        tab_id: String,
+        node: crate::LayoutNode,
+        parent_id: Option<String>,
+        index: Option<usize>,
+        focus_after: bool,
+        magnify_after: bool,
+        correlation_id: String,
+    },
+    /// Insert at an exact index path through the tree (e.g. `[0, 2]`).
+    LayoutInsertNodeAtIndex {
+        tab_id: String,
+        node: crate::LayoutNode,
+        index_arr: Vec<usize>,
+        focus_after: bool,
+        magnify_after: bool,
+        correlation_id: String,
+    },
+    /// Remove a node by id; collapse empty parents.
+    LayoutDeleteNode {
+        tab_id: String,
+        node_id: String,
+        correlation_id: String,
+    },
+    /// Reparent a node to a new parent at the given child index.
+    LayoutMoveNode {
+        tab_id: String,
+        node_id: String,
+        new_parent_id: String,
+        index: usize,
+        correlation_id: String,
+    },
+    /// Swap two sibling (or cross-parent) nodes. Sizes travel with nodes.
+    LayoutSwapNodes {
+        tab_id: String,
+        node1_id: String,
+        node2_id: String,
+        correlation_id: String,
+    },
+    /// Apply N resize operations atomically. Rejected entirely if any
+    /// `size` is out of range (reducer validates; early-return on first
+    /// invalid op, matching the frontend's existing semantic).
+    LayoutResizeNodes {
+        tab_id: String,
+        ops: Vec<crate::ResizeOp>,
+        correlation_id: String,
+    },
+    /// Replace a node with a new one, preserving the target's flex size.
+    LayoutReplaceNode {
+        tab_id: String,
+        target_id: String,
+        new_node: crate::LayoutNode,
+        focus_after: bool,
+        correlation_id: String,
+    },
+    /// Horizontal split: inserts `new_node` before/after `target_id`
+    /// in a Row parent (or wraps them in a new Row group if parent is not Row).
+    LayoutSplitHorizontal {
+        tab_id: String,
+        target_id: String,
+        new_node: crate::LayoutNode,
+        position: crate::SplitPosition,
+        focus_after: bool,
+        correlation_id: String,
+    },
+    /// Vertical split: inserts `new_node` before/after `target_id`
+    /// in a Column parent (or wraps them in a new Column group).
+    LayoutSplitVertical {
+        tab_id: String,
+        target_id: String,
+        new_node: crate::LayoutNode,
+        position: crate::SplitPosition,
+        focus_after: bool,
+        correlation_id: String,
+    },
+    /// Wipe the entire tree (sets rootnode = None, clears focus/magnify).
+    LayoutClear {
+        tab_id: String,
+        correlation_id: String,
+    },
+    /// Bulk-replace the tree. Used during Phase 7a writer migration and
+    /// for tear-off where the whole subtree changes atomically.
+    LayoutSetTree {
+        tab_id: String,
+        new_tree: Option<crate::LayoutNode>,
+        correlation_id: String,
+    },
+
     /// Phase D.3 — request an `Event::EventList` reply containing the
     /// events the launcher has emitted with version > `since`. Used
     /// by subscribers that hold a snapshot at version V and want to
@@ -680,7 +785,10 @@ pub enum WindowKind {
 /// by the launcher's reducer when commands transition state. B.4+
 /// adds the window-state events (WindowAdded, WindowStateChanged,
 /// WindowRemoved) per spec §5.2.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+/// Note: `Eq` is not derived because layout variants carry `LayoutNode`
+/// which contains `f32` (not `Eq`). `PartialEq` is sufficient for all
+/// current use-sites.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "event", rename_all = "snake_case")]
 pub enum Event {
     /// Reply to `Command::Register`. Acknowledges the client kind +
@@ -1261,6 +1369,96 @@ pub enum Event {
         node_id: String,
         version: u64,
     },
+
+    // ── Phase E.4.B — Layout tree events ───────────────────────────────
+    //
+    // Mirror of the 11 layout commands (§6 of the formal spec). Each
+    // event carries a `correlation_id` matching its command and a
+    // `version` for sequencing. The persist subscriber applies the same
+    // tree mutation as the reducer used, making applies idempotent.
+    //
+    // See docs/specs/srv-phase-e4b-formal-spec-2026-05-03.md §6.
+
+    LayoutNodeInserted {
+        tab_id: String,
+        node: crate::LayoutNode,
+        parent_id: Option<String>,
+        index: Option<usize>,
+        correlation_id: String,
+        version: u64,
+    },
+    LayoutNodeInsertedAtIndex {
+        tab_id: String,
+        node: crate::LayoutNode,
+        index_arr: Vec<usize>,
+        correlation_id: String,
+        version: u64,
+    },
+    LayoutNodeDeleted {
+        tab_id: String,
+        node_id: String,
+        /// True if the deleted node was the focused one (subscribers may
+        /// need to refocus).
+        was_focused: bool,
+        correlation_id: String,
+        version: u64,
+    },
+    LayoutNodeMoved {
+        tab_id: String,
+        node_id: String,
+        new_parent_id: String,
+        index: usize,
+        correlation_id: String,
+        version: u64,
+    },
+    LayoutNodesSwapped {
+        tab_id: String,
+        node1_id: String,
+        node2_id: String,
+        correlation_id: String,
+        version: u64,
+    },
+    LayoutNodesResized {
+        tab_id: String,
+        ops: Vec<crate::ResizeOp>,
+        correlation_id: String,
+        version: u64,
+    },
+    LayoutNodeReplaced {
+        tab_id: String,
+        target_id: String,
+        new_node: crate::LayoutNode,
+        correlation_id: String,
+        version: u64,
+    },
+    LayoutSplitHorizontalApplied {
+        tab_id: String,
+        target_id: String,
+        new_node: crate::LayoutNode,
+        position: crate::SplitPosition,
+        correlation_id: String,
+        version: u64,
+    },
+    LayoutSplitVerticalApplied {
+        tab_id: String,
+        target_id: String,
+        new_node: crate::LayoutNode,
+        position: crate::SplitPosition,
+        correlation_id: String,
+        version: u64,
+    },
+    LayoutCleared {
+        tab_id: String,
+        correlation_id: String,
+        version: u64,
+    },
+    LayoutTreeReplaced {
+        tab_id: String,
+        new_tree: Option<crate::LayoutNode>,
+        correlation_id: String,
+        version: u64,
+    },
+
     /// Phase CPD-1 (cross-process dispatch) — emitted by the launcher
     /// when the host reports that a saga-issued action failed
     /// (`Command::ReportSagaActionFailed { saga_id, reason }`). The
