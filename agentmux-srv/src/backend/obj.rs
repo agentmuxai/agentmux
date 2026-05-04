@@ -445,7 +445,7 @@ pub struct LayoutNodeData {
 /// Note: `Default::size` is 0.0 (Rust default for f32), while the serde
 /// deserialization default is 1.0 (via `default_layout_size`). These differ
 /// intentionally — `Default` is used only for the `..Default::default()`
-/// struct-literal spread trick to populate `extra: HashMap::new()` without
+/// struct-literal spread trick to populate `extra: serde_json::Map::new()` without
 /// touching every construction site. Size is always set explicitly at callsites.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct LayoutNode {
