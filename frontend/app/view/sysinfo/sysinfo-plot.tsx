@@ -116,7 +116,7 @@ function SingleLinePlot(props: SingleLinePlotProps): JSX.Element {
                     anchor: "middle",
                     dy: -30,
                     title: (d: any) =>
-                        `${dayjs.unix(d.ts / 1000).format("HH:mm:ss")} ${Number(d[yval]).toFixed(decimalPlaces)}${labelY}`,
+                        `${dayjs.unix(d.ts / 1000).format("h:mm:ss A")} ${Number(d[yval]).toFixed(decimalPlaces)}${labelY}`,
                     textPadding: 3,
                 })
             )
@@ -138,7 +138,7 @@ function SingleLinePlot(props: SingleLinePlotProps): JSX.Element {
             x: {
                 grid: true,
                 label: "time",
-                tickFormat: (d: number) => `${dayjs.unix(d / 1000).format("HH:mm:ss")}`,
+                tickFormat: (d: number) => `${dayjs.unix(d / 1000).format("h:mm:ss A")}`,
                 domain: [minX, maxX],
             },
             y: { label: labelY, domain: [minY, maxY] },
