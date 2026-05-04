@@ -1600,9 +1600,16 @@ mod tests {
     #[test]
     fn test_insert_and_get_layout_state() {
         let store = make_store();
+        // Phase E.4.B Phase 2 — uses typed LayoutNode (was a junk JSON blob).
         let mut ls = LayoutState {
             oid: "ls-1".to_string(),
-            rootnode: Some(serde_json::json!({"type": "split"})),
+            rootnode: Some(crate::backend::obj::LayoutNode {
+                id: "n1".into(),
+                flex_direction: crate::backend::obj::FlexDirection::Row,
+                size: 1.0,
+                children: Vec::new(),
+                data: None,
+            }),
             magnifiednodeid: "n1".to_string(),
             ..Default::default()
         };
@@ -1720,7 +1727,8 @@ mod tests {
 
                 let mut tab = Tab {
                     oid: "tab-tx".to_string(),
-                    name: "Untitled1".to_string(),
+                    // tabN naming convention per SPEC_TAB_GAPS_AND_NAMING_2026_04_25.
+                    name: "tab1".to_string(),
                     layoutstate: "ls-tx".to_string(),
                     meta: MetaMapType::new(),
                     ..Default::default()
@@ -1742,7 +1750,7 @@ mod tests {
         assert_eq!(ws.version, 2); // insert=v1, update=v2
 
         let tab = store.must_get::<Tab>("tab-tx").unwrap();
-        assert_eq!(tab.name, "Untitled1");
+        assert_eq!(tab.name, "tab1");
     }
 
     #[test]
