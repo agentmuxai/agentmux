@@ -259,27 +259,31 @@ pub fn move_node(
         }
     }
 
-    // Collect the node to move + its old parent id.
+    // Validate BOTH node existence AND destination BEFORE any mutation.
+    // (Reagent P1 PR #691 round 2 — prior code removed the source before
+    // checking the destination, causing silent data loss on Err paths.)
     let node_to_move = find_node_by_id(root, node_id)
         .ok_or_else(|| LayoutError::NodeNotFound { id: node_id.to_string() })?
         .clone();
-    let old_parent_id = find_parent_id(root, node_id);
+    // Confirm destination exists while tree is still intact.
+    if find_node_by_id(root, new_parent_id).is_none() {
+        return Err(LayoutError::NodeNotFound { id: new_parent_id.to_string() });
+    }
 
-    // Check same-parent case for size reset.
+    let old_parent_id = find_parent_id(root, node_id);
     let same_parent = old_parent_id.as_deref() == Some(new_parent_id);
 
-    // Remove from old location.
+    // Now it is safe to detach (both endpoints exist).
     remove_node_from_parent(root, node_id);
 
-    // Determine new size.
     let mut node_with_size = node_to_move;
     if !same_parent {
         node_with_size.size = DEFAULT_NODE_SIZE;
     }
 
-    // Insert at new location.
-    let new_parent = find_node_by_id_mut(root, new_parent_id)
-        .ok_or_else(|| LayoutError::NodeNotFound { id: new_parent_id.to_string() })?;
+    // Insert at new location (destination guaranteed to still exist since
+    // we only removed the source, not the destination).
+    let new_parent = find_node_by_id_mut(root, new_parent_id).unwrap();
     let insert_at = index.min(new_parent.children.len());
     new_parent.children.insert(insert_at, node_with_size);
     Ok(())
