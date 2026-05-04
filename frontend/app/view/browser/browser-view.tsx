@@ -56,9 +56,17 @@ export function BrowserViewComponent(props: ViewComponentProps<BrowserViewModel>
     const createPane = async (url: string) => {
         if (!placeholderRef) return;
         try {
+            // window_label tells the Rust Views path which CefWindow to attach
+            // the pane overlay to. Without it, panes opened in a non-main
+            // window were silently routed to the main window. Same
+            // ?windowLabel=… URL convention as cef-api.ts (defaults to "main"
+            // for the primary window).
+            const windowLabel =
+                new URLSearchParams(window.location.search).get("windowLabel") ?? "main";
             await invokeCommand("browser_pane_create", {
                 block_id: model.blockId,
                 url: url || "about:blank",
+                window_label: windowLabel,
                 ...paneRect(),
             });
             setPaneCreated(true);

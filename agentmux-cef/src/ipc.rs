@@ -317,7 +317,16 @@ async fn route_command(
             let w = args.get("width").and_then(|v| v.as_i64()).unwrap_or(800) as i32;
             let h = args.get("height").and_then(|v| v.as_i64()).unwrap_or(600) as i32;
             let rect = cef::Rect { x, y, width: w, height: h };
-            state.browser_panes.create(state, block_id, url, rect)?;
+            // window_label: which window the pane should be attached to
+            // (Linux/macOS Views path looks this up in state.windows). Default
+            // to "main" for backward compat with frontends that don't send it.
+            // Windows path ignores it (find_own_top_level_window resolves the
+            // calling window's HWND directly).
+            let window_label = args
+                .get("window_label")
+                .and_then(|v| v.as_str())
+                .unwrap_or("main");
+            state.browser_panes.create(state, block_id, url, rect, window_label)?;
             Ok(serde_json::json!(true))
         }
         "browser_pane_navigate" => {
