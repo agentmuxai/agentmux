@@ -1609,6 +1609,7 @@ mod tests {
                 size: 1.0,
                 children: Vec::new(),
                 data: None,
+                ..Default::default()
             }),
             magnifiednodeid: "n1".to_string(),
             ..Default::default()

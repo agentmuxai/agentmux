@@ -413,10 +413,16 @@ pub enum FlexDirection {
 
 /// Leaf-only payload — references the block this layout-leaf renders.
 /// Group nodes (those with `children`) carry no `data`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct LayoutNodeData {
-    #[serde(rename = "blockId")]
+    #[serde(rename = "blockId", default)]
     pub block_id: String,
+    /// Catch-all for unknown fields — preserves forward-compat with
+    /// the prior `serde_json::Value` storage (codex P1 PR #688
+    /// follow-up). Without this, unknown fields are silently dropped
+    /// on deserialize→serialize cycles.
+    #[serde(flatten, default, skip_serializing_if = "HashMap::is_empty")]
+    pub extra: HashMap<String, serde_json::Value>,
 }
 
 /// One node in the layout tree. Stable UUID-keyed; size is a relative
@@ -426,7 +432,12 @@ pub struct LayoutNodeData {
 /// ```json
 /// { "id": "...", "flexDirection": "row", "size": 1, "children": [...], "data": { "blockId": "..." } }
 /// ```
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+/// Note: `Default::size` is 0.0 (Rust default for f32), while the serde
+/// deserialization default is 1.0 (via `default_layout_size`). These differ
+/// intentionally — `Default` is used only for the `..Default::default()`
+/// struct-literal spread trick to populate `extra: HashMap::new()` without
+/// touching every construction site. Size is always set explicitly at callsites.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct LayoutNode {
     pub id: String,
     /// Direction this node's children flow. Required in the JSON but
@@ -451,6 +462,11 @@ pub struct LayoutNode {
     /// present.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub data: Option<LayoutNodeData>,
+    /// Catch-all for unknown fields — preserves forward-compat with
+    /// the prior `serde_json::Value` storage (codex P1 PR #688
+    /// follow-up). Without this, unknown fields are silently dropped.
+    #[serde(flatten, default, skip_serializing_if = "HashMap::is_empty")]
+    pub extra: HashMap<String, serde_json::Value>,
 }
 
 fn default_layout_size() -> f32 {
@@ -686,6 +702,7 @@ mod tests {
                 size: 1.0,
                 children: Vec::new(),
                 data: None,
+                ..Default::default()
             }),
             magnifiednodeid: "node-1".to_string(),
             ..Default::default()
@@ -804,6 +821,7 @@ mod tests {
             size: 10.0,
             children: Vec::new(),
             data: None,
+            ..Default::default()
         };
         let json = serde_json::to_string(&whole).unwrap();
         assert!(json.contains("\"size\":10"), "whole sizes should serialize as integer; got {}", json);
@@ -816,6 +834,7 @@ mod tests {
             size: 5.5,
             children: Vec::new(),
             data: None,
+            ..Default::default()
         };
         let json = serde_json::to_string(&frac).unwrap();
         assert!(json.contains("\"size\":5.5"), "fractional sizes preserve the decimal; got {}", json);
@@ -835,6 +854,7 @@ mod tests {
             size: 1.0,
             children: Vec::new(),
             data: None,
+            ..Default::default()
         };
         let json = serde_json::to_value(&group).unwrap();
         assert!(json.get("data").is_none(), "data: None must skip-serialize");

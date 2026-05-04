@@ -241,7 +241,9 @@ mod tests {
             children: Vec::new(),
             data: Some(LayoutNodeData {
                 block_id: block_id.into(),
+                ..Default::default()
             }),
+            ..Default::default()
         }
     }
 
@@ -274,6 +276,7 @@ mod tests {
                     leaf("leaf-right", right_block, 5.0),
                 ],
                 data: None,
+                ..Default::default()
             }),
             leaforder: Some(vec![
                 LeafOrderEntry { blockid: left_block.into(), nodeid: "leaf-left".into() },
