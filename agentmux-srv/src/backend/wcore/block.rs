@@ -72,12 +72,12 @@ fn prune_block_from_layout(layout: &mut LayoutState, block_id: &str) {
     // leaf (no `children` array, just `data.blockId`). `prune_node` only
     // touches the `children` array, so a rootnode-leaf orphan would
     // otherwise persist forever. See SPEC_LAYOUT_HEAL_ROOTNODE_ORPHAN.md.
+    //
+    // Phase E.4.B Phase 2 — operates on typed LayoutNode (was JSON walks).
     let root_is_orphan = layout.rootnode
         .as_ref()
-        .and_then(|r| r.get("data"))
-        .and_then(|d| d.get("blockId"))
-        .and_then(|id| id.as_str())
-        .map(|id| id == block_id)
+        .and_then(|r| r.data.as_ref())
+        .map(|d| d.block_id == block_id)
         .unwrap_or(false);
     if root_is_orphan {
         layout.rootnode = None;
@@ -86,47 +86,34 @@ fn prune_block_from_layout(layout: &mut LayoutState, block_id: &str) {
     }
 }
 
-/// Recursively remove child nodes whose `data.blockId` matches `block_id`.
+/// Recursively remove child nodes whose `data.block_id` matches `block_id`.
 /// If removing a child leaves a parent with only one child, collapse by
 /// promoting the sole child to replace the parent node.
-fn prune_node(node: &mut serde_json::Value, block_id: &str) {
-    if let Some(children) = node.get_mut("children").and_then(|c| c.as_array_mut()) {
-        // Remove children that are leaves matching block_id
-        children.retain(|child| {
-            child.get("data")
-                .and_then(|d| d.get("blockId"))
-                .and_then(|id| id.as_str())
-                .map(|id| id != block_id)
-                .unwrap_or(true) // keep non-leaf nodes
-        });
-        // Recurse into remaining children
-        for child in children.iter_mut() {
-            prune_node(child, block_id);
-        }
+///
+/// Phase E.4.B Phase 2 — operates on typed LayoutNode (was JSON walks).
+fn prune_node(node: &mut LayoutNode, block_id: &str) {
+    // Remove children whose leaf data references the doomed block.
+    node.children.retain(|child| {
+        child
+            .data
+            .as_ref()
+            .map(|d| d.block_id != block_id)
+            .unwrap_or(true) // keep group nodes (no leaf data)
+    });
+    // Recurse into remaining children
+    for child in node.children.iter_mut() {
+        prune_node(child, block_id);
     }
     // If only one child remains, promote it to replace this split node.
     // This avoids degenerate single-child splits in the layout tree.
-    let should_collapse = node.get("children")
-        .and_then(|c| c.as_array())
-        .map(|c| c.len() == 1)
-        .unwrap_or(false);
-    if should_collapse {
-        if let Some(sole_child) = node.get("children")
-            .and_then(|c| c.as_array())
-            .and_then(|c| c.first())
-            .cloned()
-        {
-            // Preserve the parent's id and size, replace everything else
-            let parent_id = node.get("id").cloned();
-            let parent_size = node.get("size").cloned();
-            *node = sole_child;
-            if let Some(id) = parent_id {
-                node["id"] = id;
-            }
-            if let Some(size) = parent_size {
-                node["size"] = size;
-            }
-        }
+    if node.children.len() == 1 {
+        let parent_id = node.id.clone();
+        let parent_size = node.size;
+        let sole_child = node.children.remove(0);
+        *node = sole_child;
+        // Preserve the parent's id and size, replace everything else.
+        node.id = parent_id;
+        node.size = parent_size;
     }
 }
 
@@ -212,20 +199,17 @@ fn heal_layout_body(
     (true, orphans)
 }
 
-/// Walk a layout-tree node, calling `sink` once per leaf `data.blockId`.
-fn collect_leaf_block_ids(node: &serde_json::Value, sink: &mut dyn FnMut(&str)) {
-    if let Some(children) = node.get("children").and_then(|c| c.as_array()) {
-        for child in children {
+/// Walk a layout-tree node, calling `sink` once per leaf `data.block_id`.
+/// Phase E.4.B Phase 2 — typed traversal (was JSON walks).
+fn collect_leaf_block_ids(node: &LayoutNode, sink: &mut dyn FnMut(&str)) {
+    if !node.children.is_empty() {
+        for child in &node.children {
             collect_leaf_block_ids(child, sink);
         }
         return;
     }
-    if let Some(id) = node
-        .get("data")
-        .and_then(|d| d.get("blockId"))
-        .and_then(|id| id.as_str())
-    {
-        sink(id);
+    if let Some(data) = &node.data {
+        sink(&data.block_id);
     }
 }
 
@@ -249,16 +233,23 @@ mod tests {
         }
     }
 
+    fn leaf(id: &str, block_id: &str, size: f32) -> LayoutNode {
+        LayoutNode {
+            id: id.into(),
+            flex_direction: FlexDirection::Row,
+            size,
+            children: Vec::new(),
+            data: Some(LayoutNodeData {
+                block_id: block_id.into(),
+            }),
+        }
+    }
+
     fn single_leaf_layout(block_id: &str, node_id: &str) -> LayoutState {
         LayoutState {
             oid: "layout-1".into(),
             version: 1,
-            rootnode: Some(json!({
-                "data": { "blockId": block_id },
-                "flexDirection": "row",
-                "id": node_id,
-                "size": 10,
-            })),
+            rootnode: Some(leaf(node_id, block_id, 10.0)),
             leaforder: Some(vec![LeafOrderEntry {
                 blockid: block_id.into(),
                 nodeid: node_id.into(),
@@ -274,25 +265,16 @@ mod tests {
         LayoutState {
             oid: "layout-1".into(),
             version: 1,
-            rootnode: Some(json!({
-                "id": "split-1",
-                "flexDirection": "row",
-                "size": 10,
-                "children": [
-                    {
-                        "id": "leaf-left",
-                        "flexDirection": "row",
-                        "size": 5,
-                        "data": { "blockId": left_block }
-                    },
-                    {
-                        "id": "leaf-right",
-                        "flexDirection": "row",
-                        "size": 5,
-                        "data": { "blockId": right_block }
-                    }
-                ]
-            })),
+            rootnode: Some(LayoutNode {
+                id: "split-1".into(),
+                flex_direction: FlexDirection::Row,
+                size: 10.0,
+                children: vec![
+                    leaf("leaf-left", left_block, 5.0),
+                    leaf("leaf-right", right_block, 5.0),
+                ],
+                data: None,
+            }),
             leaforder: Some(vec![
                 LeafOrderEntry { blockid: left_block.into(), nodeid: "leaf-left".into() },
                 LeafOrderEntry { blockid: right_block.into(), nodeid: "leaf-right".into() },
@@ -333,10 +315,9 @@ mod tests {
 
         assert!(layout.rootnode.is_some(), "rootnode should survive");
         // The split should collapse to just the "keep" leaf.
+        // Phase E.4.B Phase 2 — typed access (was JSON walks).
         let root = layout.rootnode.as_ref().unwrap();
-        let kept_block = root.get("data")
-            .and_then(|d| d.get("blockId"))
-            .and_then(|id| id.as_str());
+        let kept_block = root.data.as_ref().map(|d| d.block_id.as_str());
         assert_eq!(kept_block, Some("keep"),
             "after pruning 'drop' and collapsing, rootnode should be the 'keep' leaf");
     }

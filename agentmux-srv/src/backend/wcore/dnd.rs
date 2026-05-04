@@ -244,15 +244,20 @@ pub fn tear_off_block(
 
     // Set up the layout tree for the new tab with the block as the single root node.
     // Without this, the frontend renders an empty layout (rootnode: null).
+    // Phase E.4.B Phase 2 — typed LayoutNode (was inline JSON).
     let mut layout = store.must_get::<LayoutState>(&new_tab.layoutstate)?;
-    layout.rootnode = Some(serde_json::json!({
-        "id": Uuid::new_v4().to_string(),
-        "data": { "blockId": block_id },
-        "flexDirection": "row",
-        "size": 1
-    }));
+    let node_id = Uuid::new_v4().to_string();
+    layout.rootnode = Some(LayoutNode {
+        id: node_id.clone(),
+        flex_direction: FlexDirection::Row,
+        size: 1.0,
+        children: Vec::new(),
+        data: Some(LayoutNodeData {
+            block_id: block_id.to_string(),
+        }),
+    });
     layout.leaforder = Some(vec![LeafOrderEntry {
-        nodeid: layout.rootnode.as_ref().unwrap()["id"].as_str().unwrap().to_string(),
+        nodeid: node_id,
         blockid: block_id.to_string(),
     }]);
     store.update(&mut layout)?;
