@@ -22,6 +22,7 @@
 
 import { createMemo, Show, useContext, type Component, type JSX } from "solid-js";
 import { Popover, PopoverContext, PopoverContent } from "@/element/popover";
+import { ProviderLogo } from "@/element/ProviderLogo";
 import { getCliCatalogEntry } from "../defaults/cli-catalog";
 
 interface AgentCardProps {
@@ -65,7 +66,6 @@ const InfoPopoverTrigger: Component<{ ariaLabel: string }> = (props) => {
 export const AgentCard = (props: AgentCardProps): JSX.Element => {
     const catalog = createMemo(() => getCliCatalogEntry(props.agent.provider));
 
-    const icon = () => props.agent.icon || catalog()?.icon || "•";
     const title = () => catalog()?.blurb || props.agent.description || props.agent.name;
     const caption = () => catalog()?.displayName || props.agent.name;
     const popoverText = () => catalog()?.popoverMarkdown ?? props.agent.description ?? "";
@@ -100,7 +100,7 @@ export const AgentCard = (props: AgentCardProps): JSX.Element => {
             aria-disabled={props.disabled}
             aria-label={`Launch ${caption()}`}
         >
-            <span class="agent-card-icon">{icon()}</span>
+            <ProviderLogo provider={props.agent.provider} size={28} class="agent-card-icon" />
             <span class="agent-card-info">
                 <span class="agent-card-title">{title()}</span>
                 <span class="agent-card-caption">{caption()}</span>
