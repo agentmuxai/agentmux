@@ -11,6 +11,8 @@ pub mod callbacks;
 pub mod creation;
 #[cfg(target_os = "windows")]
 pub mod hwnd;
+#[cfg(not(target_os = "windows"))]
+pub mod creation_views;
 
 pub use creation::CreateBrowserPaneTask;
 
