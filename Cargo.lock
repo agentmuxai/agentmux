@@ -39,8 +39,10 @@ dependencies = [
 name = "agentmux-common"
 version = "0.33.639"
 dependencies = [
+ "dirs",
  "serde",
  "serde_json",
+ "tempfile",
  "tokio",
  "tracing",
 ]
