@@ -49,7 +49,7 @@ impl RuntimeMode {
     /// `exe_dir` should be `current_exe().parent()` of the binary
     /// doing the detection (typically the launcher).
     pub fn current(exe_dir: &Path) -> Self {
-        // 1. Explicit override always wins (used by tests, CI, ops).
+        // 1. Explicit AGENTMUX_RUNTIME_MODE override (tests, CI, ops).
         if let Ok(s) = std::env::var("AGENTMUX_RUNTIME_MODE") {
             if let Some(mode) = parse_mode_string(&s) {
                 return mode;
@@ -62,14 +62,22 @@ impl RuntimeMode {
             return Self::Portable;
         }
 
-        // 3. Dev: exe lives under a known build-output dir. We check
-        //    by walking parents and matching path components.
-        if exe_dir_is_dev_build(exe_dir) || std::env::var("AGENTMUX_DEV_BRANCH").is_ok() {
+        // 3. Path-based dev detection: exe lives under a known
+        //    build-output dir. We check by walking parents and
+        //    matching path components.
+        if exe_dir_is_dev_build(exe_dir) {
             let branch = detect_branch(exe_dir);
             return Self::Dev { branch };
         }
 
-        // 4. Default.
+        // 4. AGENTMUX_DEV_BRANCH env override (CI override for dev mode
+        //    when the binary isn't in a recognised build dir).
+        if std::env::var("AGENTMUX_DEV_BRANCH").is_ok() {
+            let branch = detect_branch(exe_dir);
+            return Self::Dev { branch };
+        }
+
+        // 5. Default.
         Self::Installed
     }
 
@@ -101,7 +109,12 @@ impl RuntimeMode {
             // appended separately in DataPaths so callers can re-use
             // RuntimeMode across version queries.
             Self::Installed | Self::Portable => "versions".to_string(),
-            Self::Dev { branch } => format!("dev/{}", slugify_branch(branch)),
+            // Defense in depth: branch is sanitized at parse time, but
+            // a Dev variant constructed directly (e.g. via tests) might
+            // still hold an unsafe value. Slug-on-format ensures the
+            // path produced here is always a single-segment subdir of
+            // dev/.
+            Self::Dev { branch } => format!("dev/{}", sanitize_branch_slug(branch)),
         }
     }
 }
@@ -114,10 +127,17 @@ fn parse_mode_string(s: &str) -> Option<RuntimeMode> {
     if trimmed.eq_ignore_ascii_case("portable") {
         return Some(RuntimeMode::Portable);
     }
-    if let Some(branch) = trimmed.strip_prefix("dev:") {
-        return Some(RuntimeMode::Dev {
-            branch: branch.to_string(),
-        });
+    if let Some(raw_branch) = trimmed.strip_prefix("dev:") {
+        // Slugify at parse time — the branch then flows through
+        // DataPaths::resolve into a `~/.agentmux/dev/<branch>/` path,
+        // and we must not let `/`, `..`, or shell-meta chars in the
+        // env override (`AGENTMUX_RUNTIME_MODE=dev:../versions/x`)
+        // escape the dev/ subtree. Codex P1 + Claude P1 on PR #695.
+        let slug = sanitize_branch_slug(raw_branch);
+        if slug.is_empty() {
+            return None;
+        }
+        return Some(RuntimeMode::Dev { branch: slug });
     }
     if trimmed.eq_ignore_ascii_case("dev") {
         return Some(RuntimeMode::Dev {
@@ -158,8 +178,9 @@ fn exe_dir_is_dev_build(exe_dir: &Path) -> bool {
 /// `AGENTMUX_DEV_BRANCH` env override always wins.
 fn detect_branch(exe_dir: &Path) -> String {
     if let Ok(b) = std::env::var("AGENTMUX_DEV_BRANCH") {
-        if !b.is_empty() {
-            return slugify_branch(&b);
+        let slug = sanitize_branch_slug(&b);
+        if !slug.is_empty() {
+            return slug;
         }
     }
     // Find a git repo by walking up from exe_dir.
@@ -193,8 +214,34 @@ fn run_git_branch(repo_dir: &Path) -> Option<String> {
 
 /// Convert a git branch into a filesystem-safe slug.
 /// `agenta/feature-x` → `agenta-feature-x`.
+///
+/// Use [`sanitize_branch_slug`] for any value that originates from an
+/// env var or other untrusted source — it additionally strips `..` and
+/// leading dots that could escape the dev/ subtree.
 fn slugify_branch(b: &str) -> String {
     b.replace(['/', '\\', ':', '*', '?', '"', '<', '>', '|'], "-")
+}
+
+/// Stricter sanitization for branch values that came from outside the
+/// trusted slugify path (env overrides, CI inputs). Strips parent-dir
+/// segments, leading dots, and any whitespace that survived earlier
+/// trimming. Returns an empty string if nothing usable remains, which
+/// callers should treat as "reject this input."
+fn sanitize_branch_slug(b: &str) -> String {
+    // Step 1: replace shell + filesystem-meta characters (same as
+    // slugify_branch — git-valid chars get a "-").
+    let replaced = slugify_branch(b);
+    // Step 2: drop `..` segments (now dash-separated, so "-..-"-style
+    // sequences too) and any leading/trailing dots/dashes/whitespace
+    // that would resolve up out of the dev/ subdir.
+    let cleaned: String = replaced
+        .split('-')
+        .filter(|seg| !seg.is_empty() && *seg != "." && *seg != "..")
+        .collect::<Vec<_>>()
+        .join("-");
+    cleaned
+        .trim_matches(|c: char| c == '.' || c == '-' || c.is_whitespace())
+        .to_string()
 }
 
 #[cfg(test)]
@@ -333,5 +380,35 @@ mod tests {
     fn invalid_env_string_falls_through() {
         assert!(parse_mode_string("garbage").is_none());
         assert!(parse_mode_string("").is_none());
+    }
+
+    #[test]
+    fn parse_dev_branch_rejects_traversal_attempts() {
+        // `..` resolves out of the dev/ subdir on disk — the slug must
+        // either reject it or strip it. We choose strip; if nothing
+        // usable remains, parse fails (returns None).
+        assert_eq!(parse_mode_string("dev:.."), None);
+        assert_eq!(parse_mode_string("dev:."), None);
+        assert_eq!(parse_mode_string("dev:"), None);
+        // `dev:../versions/x` slugifies to `versions-x` (the slashes
+        // are replaced and `..` segment is dropped).
+        let m = parse_mode_string("dev:../versions/x").expect("parses");
+        match m {
+            RuntimeMode::Dev { branch } => {
+                assert!(!branch.contains(".."));
+                assert!(!branch.contains('/'));
+                assert!(!branch.contains('\\'));
+            }
+            _ => panic!("expected Dev variant"),
+        }
+    }
+
+    #[test]
+    fn sanitize_branch_slug_strips_traversal() {
+        assert_eq!(sanitize_branch_slug(".."), "");
+        assert_eq!(sanitize_branch_slug("../foo"), "foo");
+        assert_eq!(sanitize_branch_slug("foo/../bar"), "foo-bar");
+        assert_eq!(sanitize_branch_slug(".hidden"), "hidden");
+        assert_eq!(sanitize_branch_slug("ok-branch"), "ok-branch");
     }
 }

@@ -61,13 +61,28 @@ pub struct DataPaths {
 impl DataPaths {
     /// Resolve all paths for the given version + mode. Honors
     /// `AGENTMUX_HOME_OVERRIDE` for tests (replaces `~/.agentmux` root).
+    ///
+    /// Returns `Err` if the input contains values that cannot be
+    /// represented as a safe single-segment subpath — e.g. `..` in the
+    /// version string, or a Dev branch that sanitizes to empty. This
+    /// is belt-and-braces safety: parse-time sanitization in
+    /// [`crate::RuntimeMode`] should already have caught these, but a
+    /// `RuntimeMode::Dev { branch }` constructed directly (e.g. by a
+    /// test or future caller) is also rejected here.
     pub fn resolve(version: &str, mode: &RuntimeMode) -> Result<Self, String> {
         let root = resolve_root()?;
+        let safe_version = sanitize_path_segment(version)
+            .ok_or_else(|| format!("invalid version string for path: {:?}", version))?;
         let instance_dir = match mode {
             RuntimeMode::Installed | RuntimeMode::Portable => {
-                root.join("versions").join(version)
+                root.join("versions").join(&safe_version)
             }
-            RuntimeMode::Dev { branch } => root.join("dev").join(branch),
+            RuntimeMode::Dev { branch } => {
+                let safe_branch = sanitize_path_segment(branch).ok_or_else(|| {
+                    format!("invalid dev branch for path: {:?}", branch)
+                })?;
+                root.join("dev").join(safe_branch)
+            }
         };
 
         let data_dir = instance_dir.join("data");
@@ -184,11 +199,38 @@ fn resolve_root() -> Result<PathBuf, String> {
     Ok(home.join(".agentmux"))
 }
 
-/// Helper: is `target` inside or equal to `parent`?
-pub fn path_contains(parent: &Path, target: &Path) -> bool {
-    let parent = parent.canonicalize().unwrap_or_else(|_| parent.to_path_buf());
-    let target = target.canonicalize().unwrap_or_else(|_| target.to_path_buf());
-    target.starts_with(&parent)
+/// Helper: is `target` inside or equal to `parent`? Returns `Err` if
+/// either path cannot be canonicalized — callers that ask "is target
+/// inside parent" before the target exists need the precondition
+/// (target on disk) before invoking.
+///
+/// (We canonicalize both sides so that symlinks, `..`, and case
+/// differences resolve before the prefix check; mixing canonicalized
+/// and raw values silently produced incorrect results in earlier
+/// drafts. Claude P2 on PR #695.)
+pub fn path_contains(parent: &Path, target: &Path) -> std::io::Result<bool> {
+    let parent = parent.canonicalize()?;
+    let target = target.canonicalize()?;
+    Ok(target.starts_with(&parent))
+}
+
+/// Sanitize a string for use as a single filesystem path segment.
+/// Rejects empty, `.`, `..`, and segments that contain path separators
+/// or other unsafe chars. Used as belt-and-braces protection in
+/// `DataPaths::resolve` to prevent traversal even when callers pass a
+/// directly-constructed `RuntimeMode::Dev` or odd version string.
+fn sanitize_path_segment(s: &str) -> Option<String> {
+    let trimmed = s.trim();
+    if trimmed.is_empty()
+        || trimmed == "."
+        || trimmed == ".."
+        || trimmed.contains('/')
+        || trimmed.contains('\\')
+        || trimmed.contains('\0')
+    {
+        return None;
+    }
+    Some(trimmed.to_string())
 }
 
 #[cfg(test)]
@@ -297,6 +339,35 @@ mod tests {
             for (k, _) in p1.to_env_vars() {
                 std::env::remove_var(k);
             }
+        });
+    }
+
+    #[test]
+    fn resolve_rejects_dev_branch_traversal() {
+        // Even if a caller manages to construct a Dev variant with an
+        // unsafe branch (bypassing parse_mode_string sanitization),
+        // resolve() must catch it.
+        with_home_override(|_root| {
+            let mode = RuntimeMode::Dev {
+                branch: "..".into(),
+            };
+            assert!(DataPaths::resolve("0.33.639", &mode).is_err());
+            let mode = RuntimeMode::Dev {
+                branch: "foo/bar".into(),
+            };
+            assert!(DataPaths::resolve("0.33.639", &mode).is_err());
+        });
+    }
+
+    #[test]
+    fn resolve_rejects_traversal_version() {
+        with_home_override(|_root| {
+            assert!(DataPaths::resolve("..", &RuntimeMode::Installed).is_err());
+            assert!(DataPaths::resolve(
+                "0.33.639/etc",
+                &RuntimeMode::Installed
+            )
+            .is_err());
         });
     }
 
