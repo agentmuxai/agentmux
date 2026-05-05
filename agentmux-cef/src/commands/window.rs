@@ -541,15 +541,20 @@ pub fn toggle_devtools(state: &Arc<AppState>, args: &serde_json::Value) -> Resul
 /// Production: IPC server serves static files from `frontend/` next to the exe.
 /// Dev: Vite dev server at `http://localhost:5173`.
 pub(crate) fn resolve_frontend_base_url(ipc_port: u16) -> String {
-    // In dev mode (AGENTMUX_RUNTIME_MODE=dev:<branch> set by the
-    // launcher), always use the Vite dev server so secondary windows
-    // get the latest code and hot reload works. Without this,
-    // secondary windows load from dist/cef-dev/frontend/ (the stale
-    // production bundle copied at build time) and miss live changes.
-    if matches!(
-        agentmux_common::RuntimeMode::from_env(),
-        Some(agentmux_common::RuntimeMode::Dev { .. })
-    ) {
+    // Detect dev mode. Two reachable scenarios:
+    //   a) Launcher-managed: AGENTMUX_RUNTIME_MODE is set, from_env()
+    //      returns Some.
+    //   b) Standalone `task dev`: env absent. Fall through to
+    //      RuntimeMode::current() against the host exe path so the
+    //      same `dist/cef-dev/` build dir → Dev classification fires
+    //      that the launcher would have used.
+    let mode = agentmux_common::RuntimeMode::from_env().or_else(|| {
+        std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|d| d.to_path_buf()))
+            .map(|d| agentmux_common::RuntimeMode::current(&d))
+    });
+    if matches!(mode, Some(agentmux_common::RuntimeMode::Dev { .. })) {
         return "http://localhost:5173".to_string();
     }
     let exe_dir = std::env::current_exe()

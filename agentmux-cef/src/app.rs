@@ -423,10 +423,16 @@ wrap_browser_process_handler! {
             // in dev mode — in release builds, localhost:5173 doesn't exist and
             // would show a raw browser error page.
             let base_url = if base_url.is_empty() {
-                let is_dev = matches!(
-                    agentmux_common::RuntimeMode::from_env(),
-                    Some(agentmux_common::RuntimeMode::Dev { .. })
-                );
+                // Use the launcher's mode if it set the env, else
+                // fall back to detecting from the host exe path
+                // (covers standalone `task dev` runs).
+                let mode = agentmux_common::RuntimeMode::from_env().or_else(|| {
+                    std::env::current_exe()
+                        .ok()
+                        .and_then(|p| p.parent().map(|d| d.to_path_buf()))
+                        .map(|d| agentmux_common::RuntimeMode::current(&d))
+                });
+                let is_dev = matches!(mode, Some(agentmux_common::RuntimeMode::Dev { .. }));
                 let exe_dir = std::env::current_exe()
                     .ok()
                     .and_then(|p| p.parent().map(|d| d.to_path_buf()));

@@ -16,7 +16,10 @@
 //! Field mapping:
 //! - launcher.data_dir       = common.data_dir
 //! - launcher.config_dir     = common.config_dir
-//! - launcher.user_home_dir  = common.shared_dir   (account-wide)
+//! - launcher.user_home_dir  = common.home_dir   (the agentmux root,
+//!                                                e.g. `~/.agentmux/`,
+//!                                                where `config.toml`
+//!                                                lives)
 //! - launcher.portable_root  = exe_dir when mode == Portable, else None
 //!
 //! The launcher continues to use these field names internally; the
