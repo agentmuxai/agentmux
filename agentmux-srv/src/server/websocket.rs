@@ -897,15 +897,28 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                 tracing::info!(
                     working_dir = %cmd.working_dir,
                     file_count = cmd.files.len(),
+                    auto_allocate = cmd.auto_allocate,
                     "WriteAgentConfig"
                 );
 
+                // Resolve to a final on-disk path. For auto-generated
+                // instance paths (`auto_allocate: true`), use the
+                // atomic `<base>-N` allocator so concurrent same-hour
+                // launches don't share a workdir. For user-specified
+                // paths, mkdir-p as before — never rewrite.
                 let expanded_working_dir = expand_home_dir_safe(&cmd.working_dir);
-                let base_path = expanded_working_dir.as_path();
-                if !base_path.exists() {
-                    std::fs::create_dir_all(base_path)
-                        .map_err(|e| format!("failed to create working dir: {e}"))?;
-                }
+                let final_working_dir = if cmd.auto_allocate {
+                    let desired = expanded_working_dir.to_string_lossy().to_string();
+                    crate::server::app_api::allocate_agent_workdir(&desired)?
+                } else {
+                    let p = expanded_working_dir.as_path();
+                    if !p.exists() {
+                        std::fs::create_dir_all(p)
+                            .map_err(|e| format!("failed to create working dir: {e}"))?;
+                    }
+                    expanded_working_dir.to_string_lossy().to_string()
+                };
+                let base_path = std::path::Path::new(&final_working_dir);
 
                 for file in &cmd.files {
                     let file_path = base_path.join(&file.path);
@@ -935,7 +948,11 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                     tracing::debug!(path = %file_path.display(), "wrote config file");
                 }
 
-                Ok(None)
+                // Return the final path so the caller can patch
+                // `cmd:cwd` if collision resolution changed it.
+                Ok(Some(serde_json::json!({
+                    "working_dir": final_working_dir,
+                })))
             })
         }),
     );

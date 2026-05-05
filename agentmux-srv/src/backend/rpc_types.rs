@@ -559,6 +559,23 @@ pub struct CommandWriteAgentConfigData {
     pub working_dir: String,
     /// Files to write (path relative to working_dir, content).
     pub files: Vec<AgentConfigFile>,
+    /// When true, treat `working_dir` as an auto-generated instance
+    /// path eligible for `<base>-N` collision resolution. When false
+    /// (user-specified `agent.working_directory` like `~/projects/X`),
+    /// write into the path as-is — no rewrite, no suffixing. The
+    /// frontend sets this based on whether it constructed the path
+    /// itself or pulled it from the agent definition.
+    #[serde(default)]
+    pub auto_allocate: bool,
+}
+
+/// Result of WriteAgentConfigCommand. Returns the final working
+/// directory used; callers should compare against the requested
+/// `working_dir` and patch `cmd:cwd` (via SetMeta) when they differ
+/// so the controller spawns the CLI in the actually-created dir.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommandWriteAgentConfigResult {
+    pub working_dir: String,
 }
 
 /// Data for ResolveCliCommand — detect or install a CLI tool.
