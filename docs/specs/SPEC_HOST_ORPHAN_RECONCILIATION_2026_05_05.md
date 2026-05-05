@@ -155,7 +155,11 @@ The existing `Event::HostShouldQuit` doc string already calls this out (`agentmu
 
 > the host's handler should re-check state.browsers before actually quitting (the user could open a new window in the same dispatch tick race window)
 
-Our handler doesn't quit directly — it just closes orphans. The Stage-2 quit in `on_before_close` re-evaluates `browser_list.is_empty()` after every close, so a new user window opened mid-reconcile keeps `browser_list` non-empty and Stage 2 stays parked. Race is benign by construction.
+Two distinct races have to be handled:
+
+**Race A — Stage-2 quit:** Our handler doesn't quit directly — it just closes orphans. The Stage-2 quit in `on_before_close` re-evaluates `browser_list.is_empty()` after every close, so a new user window opened mid-reconcile keeps `browser_list` non-empty and Stage 2 stays parked. Benign by construction.
+
+**Race B — promotion before mirror echo:** A pool window can be promoted (`promote_pool_window` removes the label from `unpromoted_pool` and queues `ReportWindowOpened` to the launcher) BEFORE the launcher's `WindowOpened` event echoes back to populate `shadow_window_meta`. If `HostShouldQuit` is being processed in that window, a shadow-only orphan check would classify the freshly-promoted live window as orphan and `WM_CLOSE` it (codex #702 round-1 P1). Mitigation: the reconciler builds `tracked` as the union of `shadow_window_meta.keys()` AND host's local `window_meta.keys()`. Local `window_meta` is the eager pre-create handoff cache that B.5c documents as the "race window catch" (`state.rs::window_meta`). A label tracked in EITHER source is treated as live and skipped.
 
 ### 5.5 What we don't change
 
