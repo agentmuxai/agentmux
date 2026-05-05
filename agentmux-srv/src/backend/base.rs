@@ -328,6 +328,16 @@ pub fn safe_join_within_base(base: &Path, relative: &str) -> Result<PathBuf, Str
                     "safe_join_within_base: '..' traversal not allowed: {relative}"
                 ));
             }
+            // A drive-letter prefix on any segment (not just the first
+            // one) is rejected — `PathBuf::push("C:foo")` on Windows
+            // discards the accumulated path and rebases on the C drive's
+            // CWD, so a nested input like `safe/C:payload.txt` would
+            // escape `base` despite the upfront whole-string guard.
+            other if has_drive_letter_prefix(other) => {
+                return Err(format!(
+                    "safe_join_within_base: drive-letter prefix in segment {other:?}: {relative}"
+                ));
+            }
             other => cleaned.push(other),
         }
     }
@@ -538,6 +548,22 @@ mod tests {
         // Rooted drive paths also rejected (already covered by is_absolute
         // on Windows; on Unix the drive-letter check catches them).
         assert!(safe_join_within_base(&base, "C:\\Windows\\System32").is_err());
+    }
+
+    #[test]
+    fn test_safe_join_within_base_rejects_drive_letter_in_inner_segment() {
+        // The whole-string drive-letter guard misses nested cases like
+        // `safe/C:payload.txt` because the prefix isn't at position 0.
+        // `PathBuf::push` on Windows would still rebase on a drive when
+        // it sees `C:payload.txt`, so the per-segment guard inside the
+        // loop must also reject these.
+        let base = PathBuf::from("/base");
+        assert!(safe_join_within_base(&base, "safe/C:payload.txt").is_err());
+        assert!(safe_join_within_base(&base, "a/b/D:malicious").is_err());
+        assert!(safe_join_within_base(&base, "subdir\\E:nested").is_err());
+        // First segment is also covered by the inner check (defense in
+        // depth — both upfront + per-segment guards reject it).
+        assert!(safe_join_within_base(&base, "C:foo/bar").is_err());
     }
 
     #[test]
