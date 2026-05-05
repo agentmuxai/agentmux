@@ -228,13 +228,31 @@ mod tests {
     use crate::TEST_ENV_LOCK;
     use tempfile::TempDir;
 
+    /// RAII guard that restores process state on drop, even if the
+    /// test panics. Without Drop-based cleanup, a panic inside `f`
+    /// would leave AGENTMUX_HOME_OVERRIDE set with a stale tempdir
+    /// path AND poison the mutex; subsequent tests recover from poison
+    /// but inherit the wrong env value.
+    struct HomeOverrideGuard {
+        _tmp: TempDir,
+        _lock: std::sync::MutexGuard<'static, ()>,
+    }
+
+    impl Drop for HomeOverrideGuard {
+        fn drop(&mut self) {
+            std::env::remove_var("AGENTMUX_HOME_OVERRIDE");
+        }
+    }
+
     fn with_home_override<F: FnOnce(&Path)>(f: F) {
-        let _g = TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let lock = TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let tmp = TempDir::new().expect("tempdir");
-        let path_str = tmp.path().display().to_string();
-        std::env::set_var("AGENTMUX_HOME_OVERRIDE", &path_str);
-        f(tmp.path());
-        std::env::remove_var("AGENTMUX_HOME_OVERRIDE");
+        let path = tmp.path().to_path_buf();
+        std::env::set_var("AGENTMUX_HOME_OVERRIDE", &path);
+        let _guard = HomeOverrideGuard { _tmp: tmp, _lock: lock };
+        f(&path);
+        // _guard drops here, removing the env var even if f panicked
+        // (the panic still propagates after Drop runs).
     }
 
     #[test]

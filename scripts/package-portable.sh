@@ -43,7 +43,7 @@ cp target/release/agentmux-launcher.exe "$PORTABLE/agentmux.exe"
 # file's contents are advisory; the detection only checks for its
 # presence next to the launcher exe. Mac .app-bundle layouts are
 # also supported (marker can sit at the bundle root).
-printf 'AgentMux portable build %s\n' "$VERSION" > "$PORTABLE/.agentmux-portable"
+printf 'AgentMux portable build %s\n' "$VERSION" > "$PORTABLE/agentmux-portable.marker"
 
 # README
 cat > "$PORTABLE/README.txt" <<READMEEOF

@@ -15,10 +15,10 @@
 //! # Detection priority
 //!
 //! 1. `AGENTMUX_RUNTIME_MODE` env override (testing, CI).
-//! 2. Marker-based portable detection: `<exe-dir>/.agentmux-portable`
+//! 2. Marker-based portable detection: `<exe-dir>/agentmux-portable.marker`
 //!    exists (also looks two levels up for macOS .app bundles). Written
 //!    by `scripts/package-portable.sh` at packaging time (see the
-//!    `printf '...' > "$PORTABLE/.agentmux-portable"` line).
+//!    `printf '...' > "$PORTABLE/agentmux-portable.marker"` line).
 //! 3. Path-based dev detection: exe is under a known dev-build dir
 //!    (`dist/cef-dev/`, `target/debug/`, `target/release/`).
 //! 4. `AGENTMUX_DEV_BRANCH` env override (CI override for dev mode).
@@ -165,21 +165,21 @@ fn parse_mode_string(s: &str) -> Option<RuntimeMode> {
 }
 
 /// True when `exe_dir` (or its parent on macOS app bundles) contains
-/// the `.agentmux-portable` marker file written by
+/// the `agentmux-portable.marker` marker file written by
 /// `scripts/package-portable.sh` at packaging time. Installed builds
 /// NEVER write this marker.
 ///
 /// Falls back to `false` (i.e., not portable) if the dir isn't readable
 /// — installed-mode default is the safer guess when unsure.
 fn is_portable_marker_present(exe_dir: &Path) -> bool {
-    if exe_dir.join(".agentmux-portable").is_file() {
+    if exe_dir.join("agentmux-portable.marker").is_file() {
         return true;
     }
     // On macOS the launcher exe is at <Bundle>.app/Contents/MacOS/<exe>;
     // a portable .app would put the marker at the bundle root, two
     // levels up.
     if let Some(bundle_root) = exe_dir.parent().and_then(|p| p.parent()) {
-        if bundle_root.join(".agentmux-portable").is_file() {
+        if bundle_root.join("agentmux-portable.marker").is_file() {
             return true;
         }
     }
@@ -296,17 +296,36 @@ mod tests {
     /// crate (defined in lib.rs) so tests in this module also
     /// serialize against `data_paths::tests` which touches the same
     /// process-global env vars.
+    ///
+    /// Uses a Drop guard so the previous env value is restored even
+    /// if `f` panics — without it, a panicking test would leave the
+    /// env var modified and any subsequent test in the same process
+    /// would see the wrong value.
     fn with_env<F: FnOnce()>(key: &str, val: Option<&str>, f: F) {
+        struct EnvGuard {
+            key: String,
+            prev: Option<String>,
+        }
+        impl Drop for EnvGuard {
+            fn drop(&mut self) {
+                match &self.prev {
+                    Some(v) => std::env::set_var(&self.key, v),
+                    None => std::env::remove_var(&self.key),
+                }
+            }
+        }
+
         let prev = std::env::var(key).ok();
+        let _guard = EnvGuard {
+            key: key.to_string(),
+            prev,
+        };
         match val {
             Some(v) => std::env::set_var(key, v),
             None => std::env::remove_var(key),
         }
         f();
-        match prev {
-            Some(v) => std::env::set_var(key, v),
-            None => std::env::remove_var(key),
-        }
+        // _guard drops here (also runs on panic).
     }
 
     #[test]
@@ -477,7 +496,7 @@ mod tests {
         assert!(!is_portable_marker_present(exe_dir));
 
         // With marker → portable.
-        std::fs::write(exe_dir.join(".agentmux-portable"), b"").unwrap();
+        std::fs::write(exe_dir.join("agentmux-portable.marker"), b"").unwrap();
         assert!(is_portable_marker_present(exe_dir));
 
         // Marker two levels up (macOS .app bundle case).
@@ -485,9 +504,9 @@ mod tests {
         std::fs::create_dir_all(&nested).unwrap();
         // Removing top-level marker would still allow detection via the
         // bundle-root walk-up.
-        std::fs::remove_file(exe_dir.join(".agentmux-portable")).unwrap();
+        std::fs::remove_file(exe_dir.join("agentmux-portable.marker")).unwrap();
         assert!(!is_portable_marker_present(&nested));
-        std::fs::write(exe_dir.join(".agentmux-portable"), b"").unwrap();
+        std::fs::write(exe_dir.join("agentmux-portable.marker"), b"").unwrap();
         assert!(is_portable_marker_present(&nested));
     }
 
@@ -501,7 +520,7 @@ mod tests {
         let tmp = tempfile::TempDir::new().expect("tempdir");
         let exe_dir = tmp.path();
         std::fs::create_dir_all(exe_dir.join("runtime")).unwrap();
-        // No .agentmux-portable marker — must be Installed (or whatever
+        // No agentmux-portable.marker marker — must be Installed (or whatever
         // the fall-through is, but specifically NOT Portable).
         std::env::remove_var("AGENTMUX_RUNTIME_MODE");
         std::env::remove_var("AGENTMUX_DEV_BRANCH");
