@@ -6,15 +6,14 @@
  * Shows the per-pane activity log (launch flow, subprocess lifecycle,
  * slash command outcomes, errors). Collapsed by default; a one-line
  * summary (most recent entry + total count) is shown in the header.
- * Clicking the header toggles expansion. Auto-opens when a new entry
- * arrives with `level: "error"` so the user can't miss genuine failures.
+ * Expansion is purely user-driven — clicking the header toggles it.
  *
  * Replaces the old `.agent-status-log` block that lived at the top of
  * the conversation scroll area and grew unbounded over the session —
  * see `agentmux-ai/AGENT_PANE_ACTIVITY_LOG_SPEC.md`.
  */
 
-import { For, Show, createEffect, createMemo, createSignal, type Accessor, type JSX } from "solid-js";
+import { For, Show, createMemo, createSignal, type Accessor, type JSX } from "solid-js";
 import type { LogLine } from "../types";
 import { NodeHoverStrip } from "./NodeHoverStrip";
 
@@ -25,34 +24,6 @@ interface ActivityLogPanelProps {
 export const ActivityLogPanel = (props: ActivityLogPanelProps): JSX.Element => {
     const [isOpen, setIsOpen] = createSignal(false);
     const [expandedIds, setExpandedIds] = createSignal<Set<string>>(new Set());
-
-    // Track the highest-index entry we've seen, so we can only react to
-    // NEW entries arriving — not to every re-render. Without this, the
-    // error auto-open effect would fire on every parent render whose
-    // entries() array ends in an error (e.g. collapsed + re-expanded).
-    //
-    // Resets to 0 when the parent list drops to empty (e.g. clear() via
-    // /clear slash command), so auto-open works again after reset
-    // instead of requiring the new entry count to exceed the stale
-    // watermark before firing.
-    let lastSeenLength = 0;
-    createEffect(() => {
-        const list = props.entries();
-        if (list.length === 0) {
-            lastSeenLength = 0;
-            return;
-        }
-        if (list.length > lastSeenLength) {
-            // Scan the newly-arrived slice for any error-level entry.
-            for (let i = lastSeenLength; i < list.length; i++) {
-                if (list[i].level === "error") {
-                    setIsOpen(true);
-                    break;
-                }
-            }
-            lastSeenLength = list.length;
-        }
-    });
 
     const mostRecent = createMemo(() => {
         const list = props.entries();
@@ -86,7 +57,6 @@ export const ActivityLogPanel = (props: ActivityLogPanelProps): JSX.Element => {
                     aria-expanded={isOpen()}
                 >
                     <span class="agent-activity-log-chevron">{isOpen() ? "⌄" : "›"}</span>
-                    <span class="agent-activity-log-label">shell</span>
                     <Show when={!isOpen() && mostRecent()}>
                         {(entry) => (
                             <span class="agent-activity-log-preview">
