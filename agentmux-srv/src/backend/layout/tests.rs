@@ -224,6 +224,17 @@ fn split_vertical_wraps_root_when_no_parent() {
 }
 
 #[test]
+fn split_vertical_wraps_root_when_no_parent_before() {
+    let mut root = leaf("only", "b1", 10.0);
+    let new = leaf("new", "b2", 10.0);
+    split_vertical(&mut root, "only", new, SplitPosition::Before).unwrap();
+    // Root wraps into a Column; new node lands at index 0.
+    assert_eq!(root.flex_direction, FlexDirection::Column);
+    assert_eq!(root.children.len(), 2);
+    assert_eq!(root.children[0].id, "new");
+}
+
+#[test]
 fn split_horizontal_missing_target_returns_error() {
     let mut root = leaf("root", "b1", 10.0);
     let new = leaf("new", "b2", 10.0);
@@ -286,6 +297,31 @@ fn insert_node_preserves_leaf_id_in_intermediate() {
     // The group wrapper should have a new ID.
     assert_ne!(root.id, "root");
     assert!(root.data.is_none());
+}
+
+#[test]
+fn insert_node_preserves_extra_fields_through_promotion() {
+    // When promoting a leaf to a group, the leaf's `extra` (forward-compat
+    // catch-all for unknown frontend fields) must travel with the data, not
+    // get defaulted on the new group wrapper.
+    let mut root = leaf("root", "b1", 1.0);
+    root.extra.insert(
+        "futureField".into(),
+        serde_json::Value::String("preserve-me".into()),
+    );
+    let new = leaf("new", "b2", 1.0);
+    insert_node(&mut root, new);
+    let intermediate = root
+        .children
+        .iter()
+        .find(|c| c.id == "root")
+        .expect("intermediate with original ID exists");
+    assert_eq!(
+        intermediate.extra.get("futureField"),
+        Some(&serde_json::Value::String("preserve-me".into())),
+    );
+    // And the group wrapper should NOT have inherited the leaf's extra.
+    assert!(root.extra.is_empty());
 }
 
 // ── insertNodeAtIndex leaf promotion ─────────────────────────────────────────

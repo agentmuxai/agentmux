@@ -87,6 +87,11 @@ fn ensure_group_node(node: &mut LayoutNode) {
             flex_direction: reverse_flex_direction(old_flex),
             size: DEFAULT_NODE_SIZE,
             data: node.data.take(),
+            // Move `extra` (forward-compat catch-all from #688/#689) to the
+            // intermediate so unknown fields the frontend wrote to the leaf
+            // travel with the data, not stay on the new group wrapper.
+            // Mirrors the same transfer in `delete_recursive` line below.
+            extra: std::mem::take(&mut node.extra),
             ..Default::default()
         };
         node.id = Uuid::new_v4().to_string();
