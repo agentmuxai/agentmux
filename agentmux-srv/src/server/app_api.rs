@@ -250,28 +250,10 @@ fn register_agent_open(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 let agent_slug = agent.name.to_lowercase()
                     .chars().map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '-' })
                     .collect::<String>();
-                let desired_work_dir = if agent.working_directory.is_empty() {
+                let work_dir = if agent.working_directory.is_empty() {
                     format!("~/.agentmux/agents/{}", agent_slug)
                 } else {
                     agent.working_directory.clone()
-                };
-                // Resolve collisions BEFORE building the block meta so
-                // `cmd:cwd` records the actual directory the agent
-                // will run in. allocate_agent_workdir returns the
-                // requested path verbatim when free, otherwise appends
-                // `-N` (1..=99) per spec §7.
-                let work_dir = {
-                    let expanded = expand_tilde_path(&desired_work_dir);
-                    let final_dir = allocate_agent_workdir(&expanded)?;
-                    if final_dir != expanded {
-                        tracing::info!(
-                            agent_id = %agent.id,
-                            from = %desired_work_dir,
-                            to = %final_dir,
-                            "agent.open: collision-resolved work_dir to free slot"
-                        );
-                    }
-                    final_dir
                 };
 
                 // Build env vars
@@ -1609,11 +1591,7 @@ fn find_agent_block(wstore: &WaveStore, tab_id: &str, agent_id: &str) -> Result<
     Ok(None)
 }
 
-/// Write agent config files (CLAUDE.md, .mcp.json, etc.) to the
-/// working directory. Caller is responsible for collision resolution
-/// (see [`allocate_agent_workdir`] — the call site in `agent.open`
-/// does this before building the block meta so `cmd:cwd` matches
-/// the actually-created directory).
+/// Write agent config files (CLAUDE.md, .mcp.json, etc.) to the working directory.
 fn write_agent_config_files(
     wstore: &WaveStore,
     agent: &crate::backend::storage::ForgeAgent,
@@ -1650,8 +1628,10 @@ fn write_agent_config_files(
     };
 
     let base_path = std::path::Path::new(&expanded_dir);
-    std::fs::create_dir_all(base_path)
-        .map_err(|e| format!("failed to create working dir: {e}"))?;
+    if !base_path.exists() {
+        std::fs::create_dir_all(base_path)
+            .map_err(|e| format!("failed to create working dir: {e}"))?;
+    }
 
     for file in &config_files {
         let file_path = base_path.join(&file.filename);
@@ -1674,53 +1654,3 @@ fn write_agent_config_files(
     Ok(())
 }
 
-/// Expand `~` / `~/...` in a path against `$HOME` (or `$USERPROFILE`
-/// on Windows). Returns the input verbatim if neither var is set.
-fn expand_tilde_path(p: &str) -> String {
-    let rest = if p == "~" {
-        Some("")
-    } else {
-        // strip_prefix only matches the literal "~/" prefix; a bare
-        // "~" returns None here. trim_start_matches would have left a
-        // stray `~` in the suffix for the bare-tilde case (producing
-        // `/home/user/~`).
-        p.strip_prefix("~/")
-    };
-    let Some(rest) = rest else {
-        return p.to_string();
-    };
-    let Ok(home) = std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE")) else {
-        return p.to_string();
-    };
-    if rest.is_empty() {
-        home
-    } else {
-        format!("{home}/{rest}")
-    }
-}
-
-/// Pick an unused working dir for an agent launch. Mirrors the
-/// `<base>` → `<base>-1` → `<base>-2` … pattern from
-/// `SPEC_AGENT_DEFINITIONS_MODAL_2026_04_23.md` §7.
-///
-/// "Used" means the path exists AND contains a `CLAUDE.md` (the
-/// agent-config marker). An empty existing directory is reused —
-/// covers the case where the user pre-created the folder. A
-/// non-existent path is preferred (no surprise reuse).
-fn allocate_agent_workdir(desired: &str) -> Result<String, String> {
-    fn looks_like_prior_run(p: &std::path::Path) -> bool {
-        p.is_dir() && p.join("CLAUDE.md").exists()
-    }
-    if !looks_like_prior_run(std::path::Path::new(desired)) {
-        return Ok(desired.to_string());
-    }
-    for n in 1..=99u32 {
-        let candidate = format!("{desired}-{n}");
-        if !looks_like_prior_run(std::path::Path::new(&candidate)) {
-            return Ok(candidate);
-        }
-    }
-    Err(format!(
-        "agent.open: too many collisions (>99) under {desired}-N — clean up old runs"
-    ))
-}

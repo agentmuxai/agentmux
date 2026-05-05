@@ -7,12 +7,16 @@
  * (for preview) and the AgentViewModel (for actual launch) agree on
  * the format without importing from each other's files.
  *
- * Format: `<slug(name)>-MMDDh`, local time. Collision resolution is
- * handled server-side: `agent.open` calls
- * `allocate_agent_workdir()` in agentmux-srv/src/server/app_api.rs
- * which appends `-N` (1, 2, …) when the desired directory already
- * contains a prior agent run (CLAUDE.md present). The block's
- * `cmd:cwd` meta records the actual collision-resolved path.
+ * Format: `<slug(name)>-MMDDh`, local time.
+ *
+ * NOTE: Collision resolution (when two launches in the same hour
+ * produce identical slugs) is currently NOT implemented end-to-end —
+ * the actual launch flow uses `WriteAgentConfigCommand` which writes
+ * config into whatever path it's given. Two same-hour launches with
+ * the same instance name will share a workdir and overwrite each
+ * other's config files. Tracked for follow-up; needs an RPC return-
+ * type change (final path) + frontend `cmd:cwd` patch + atomic
+ * `create_dir` allocation on the backend.
  */
 
 /**
