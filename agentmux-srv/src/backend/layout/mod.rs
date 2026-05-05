@@ -65,10 +65,19 @@ fn reverse_flex_direction(dir: FlexDirection) -> FlexDirection {
 }
 
 /// If `node` is a leaf (has `data`), promote it to a group by wrapping its
-/// data in an intermediate child. Mirrors TypeScript `addIntermediateNode`.
-/// After this call, `node.data` is `None` and `node.children` is non-empty.
-/// The intermediate child receives the node's ORIGINAL ID so frontend
-/// references remain stable; the group wrapper gets a new ID.
+/// data in an intermediate child. Mirrors TypeScript `addIntermediateNode`
+/// in `frontend/layout/lib/layoutTree.ts`.
+///
+/// After this call:
+/// - `node.data` is `None` and `node.children` is non-empty.
+/// - The intermediate child receives the node's ORIGINAL ID so any
+///   frontend reference (e.g. `focusedNodeId`) still points at the
+///   leaf data after promotion.
+/// - The group wrapper gets a fresh UUID, and its flex direction is
+///   the reverse of the original leaf's so the new sibling axis is
+///   perpendicular to the parent's (matches TS layout semantics).
+///
+/// No-op when `node` is already a group (no `data`).
 fn ensure_group_node(node: &mut LayoutNode) {
     if node.data.is_some() {
         let old_id = node.id.clone();
