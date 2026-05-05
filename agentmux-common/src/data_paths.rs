@@ -199,21 +199,6 @@ fn resolve_root() -> Result<PathBuf, String> {
     Ok(home.join(".agentmux"))
 }
 
-/// Helper: is `target` inside or equal to `parent`? Returns `Err` if
-/// either path cannot be canonicalized — callers that ask "is target
-/// inside parent" before the target exists need the precondition
-/// (target on disk) before invoking.
-///
-/// (We canonicalize both sides so that symlinks, `..`, and case
-/// differences resolve before the prefix check; mixing canonicalized
-/// and raw values silently produced incorrect results in earlier
-/// drafts. Claude P2 on PR #695.)
-pub fn path_contains(parent: &Path, target: &Path) -> std::io::Result<bool> {
-    let parent = parent.canonicalize()?;
-    let target = target.canonicalize()?;
-    Ok(target.starts_with(&parent))
-}
-
 /// Sanitize a string for use as a single filesystem path segment.
 /// Rejects empty, `.`, `..`, and segments that contain path separators
 /// or other unsafe chars. Used as belt-and-braces protection in

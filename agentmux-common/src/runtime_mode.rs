@@ -81,9 +81,19 @@ impl RuntimeMode {
 
         // 4. AGENTMUX_DEV_BRANCH env override (CI override for dev mode
         //    when the binary isn't in a recognised build dir).
-        if std::env::var("AGENTMUX_DEV_BRANCH").is_ok() {
-            let branch = detect_branch(exe_dir);
-            return Self::Dev { branch };
+        //
+        //    `is_ok()` would be true for an empty string too — same
+        //    anti-pattern as the legacy `AGENTMUX_DEV` flag we're
+        //    replacing. CI/shell environments sometimes export empty
+        //    placeholders (`AGENTMUX_DEV_BRANCH=`); those should not
+        //    coerce installed/portable into Dev. Only treat the var as
+        //    set when it has non-empty content. Codex P2 round-5 on PR
+        //    #695.
+        if let Ok(b) = std::env::var("AGENTMUX_DEV_BRANCH") {
+            if !b.trim().is_empty() {
+                let branch = detect_branch(exe_dir);
+                return Self::Dev { branch };
+            }
         }
 
         // 5. Default.
