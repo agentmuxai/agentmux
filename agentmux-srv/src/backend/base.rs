@@ -268,6 +268,139 @@ pub fn expand_home_dir_safe(path: &str) -> PathBuf {
     expand_home_dir(path).unwrap_or_else(|_| PathBuf::from(path))
 }
 
+/// After a lexical join, verify that no symlinked ancestor of the
+/// candidate path escapes `base_canonical`. The lexical helper alone
+/// can't catch this: if `<base>/.claude` is a symlink to `/tmp/outside`
+/// and the caller writes `<base>/.claude/commands/startup.md`, the
+/// final write follows the symlink and lands outside the working dir.
+///
+/// Walks from `final_path` upward and canonicalizes the deepest
+/// existing ancestor — that resolution dereferences any symlink in
+/// the chain. If the resolved path stays under `base_canonical`, no
+/// symlink in the existing portion escapes. Non-existent components
+/// are safe by definition (nothing to resolve, nothing to follow).
+///
+/// Returns Ok(()) if safe, Err with a human-readable message otherwise.
+///
+/// Caller invariant: the directory rooted at `base_canonical` must
+/// exist (so the upward walk is guaranteed to find it before reaching
+/// the filesystem root). `writeagentconfig` satisfies this — the
+/// working dir is created via `allocate_agent_workdir` or `mkdir_p`
+/// immediately before this is called.
+pub fn verify_no_symlink_escape(
+    final_path: &Path,
+    base_canonical: &Path,
+) -> Result<(), String> {
+    let mut p = final_path;
+    loop {
+        match p.canonicalize() {
+            Ok(canonical) => {
+                if !canonical.starts_with(base_canonical) {
+                    return Err(format!(
+                        "symlinked ancestor escapes working dir: {} → {}",
+                        p.display(),
+                        canonical.display()
+                    ));
+                }
+                return Ok(());
+            }
+            Err(_) => match p.parent() {
+                Some(parent) if !parent.as_os_str().is_empty() => p = parent,
+                _ => {
+                    // Walked past every existing ancestor without finding
+                    // one inside `base_canonical`. This violates the
+                    // caller invariant (base should exist) — fail closed.
+                    return Err(format!(
+                        "no existing ancestor found under base: {}",
+                        final_path.display()
+                    ));
+                }
+            },
+        }
+    }
+}
+
+/// True if `s` starts with `<ASCII letter>:` — a Windows drive-letter
+/// prefix. Both rooted (`C:\foo`) and drive-relative (`C:foo`) forms
+/// match. Used by `safe_join_within_base` to reject paths that would
+/// rebase off the working directory under Windows path semantics.
+fn has_drive_letter_prefix(s: &str) -> bool {
+    let mut chars = s.chars();
+    matches!(
+        (chars.next(), chars.next()),
+        (Some(c), Some(':')) if c.is_ascii_alphabetic()
+    )
+}
+
+/// Lexically join `relative` onto `base` while guaranteeing the result
+/// stays inside `base`. No filesystem access — does not require either
+/// path to exist, which matters on Windows where `Path::canonicalize`
+/// adds the `\\?\` UNC prefix and breaks naive `starts_with` checks
+/// against not-yet-created files.
+///
+/// The relative path:
+/// - must be non-empty
+/// - must NOT be absolute (rooted, drive-prefixed, or starting with `/`/`\`)
+/// - must NOT contain a `..` component
+/// - may contain `.` components (silently dropped)
+/// - is treated as forward- or back-slash separated; both are accepted
+///
+/// Returns `base.join(<cleaned>)` on success.
+pub fn safe_join_within_base(base: &Path, relative: &str) -> Result<PathBuf, String> {
+    if relative.is_empty() {
+        return Err("safe_join_within_base: empty relative path".into());
+    }
+    let rel_path = Path::new(relative);
+    if rel_path.is_absolute() {
+        return Err(format!("safe_join_within_base: absolute path not allowed: {relative}"));
+    }
+    // On Windows `Path::is_absolute` covers drive-letter and UNC roots,
+    // but a leading `/` or `\` (without drive) is technically "rooted but
+    // not absolute". Reject those too — they'd resolve onto the current
+    // drive's root, escaping `base`.
+    if matches!(relative.chars().next(), Some('/') | Some('\\')) {
+        return Err(format!("safe_join_within_base: rooted path not allowed: {relative}"));
+    }
+    // Windows drive-letter prefix (e.g. `C:foo`, `D:\bar`). `is_absolute()`
+    // requires both prefix AND root, so a drive-relative path like
+    // `C:payload.txt` slips through unless we reject it explicitly.
+    // `Path::join` would otherwise replace the base with the drive's CWD
+    // on Windows, escaping the working directory.
+    if has_drive_letter_prefix(relative) {
+        return Err(format!(
+            "safe_join_within_base: drive-letter prefix not allowed: {relative}"
+        ));
+    }
+    let mut cleaned = PathBuf::new();
+    for segment in relative.split(['/', '\\']) {
+        match segment {
+            "" | "." => continue,
+            ".." => {
+                return Err(format!(
+                    "safe_join_within_base: '..' traversal not allowed: {relative}"
+                ));
+            }
+            // A drive-letter prefix on any segment (not just the first
+            // one) is rejected — `PathBuf::push("C:foo")` on Windows
+            // discards the accumulated path and rebases on the C drive's
+            // CWD, so a nested input like `safe/C:payload.txt` would
+            // escape `base` despite the upfront whole-string guard.
+            other if has_drive_letter_prefix(other) => {
+                return Err(format!(
+                    "safe_join_within_base: drive-letter prefix in segment {other:?}: {relative}"
+                ));
+            }
+            other => cleaned.push(other),
+        }
+    }
+    if cleaned.as_os_str().is_empty() {
+        return Err(format!(
+            "safe_join_within_base: relative path resolves to empty: {relative}"
+        ));
+    }
+    Ok(base.join(cleaned))
+}
+
 /// Replace the home directory prefix with `~`.
 pub fn replace_home_dir(path: &str) -> String {
     let home = get_home_dir();
@@ -398,6 +531,149 @@ mod tests {
         // But normal dots are fine
         assert!(expand_home_dir("~/.config").is_ok());
         assert!(expand_home_dir("/tmp/.hidden").is_ok());
+    }
+
+    #[test]
+    fn test_safe_join_within_base_simple() {
+        let base = PathBuf::from("/home/user/agent");
+        let p = safe_join_within_base(&base, "CLAUDE.md").unwrap();
+        assert_eq!(p, PathBuf::from("/home/user/agent/CLAUDE.md"));
+    }
+
+    #[test]
+    fn test_safe_join_within_base_nested() {
+        let base = PathBuf::from("/home/user/agent");
+        let p = safe_join_within_base(&base, ".claude/commands/startup.md").unwrap();
+        assert_eq!(p, PathBuf::from("/home/user/agent/.claude/commands/startup.md"));
+    }
+
+    #[test]
+    fn test_safe_join_within_base_backslash_separator() {
+        // Frontends running on Windows may send `\\` separators; accept them.
+        let base = PathBuf::from("C:\\agent");
+        let p = safe_join_within_base(&base, ".claude\\commands\\startup.md").unwrap();
+        // The cleaned components are joined as native segments — final path
+        // should contain all three trailing pieces in order.
+        let s = p.to_string_lossy();
+        assert!(s.contains(".claude"));
+        assert!(s.contains("commands"));
+        assert!(s.contains("startup.md"));
+    }
+
+    #[test]
+    fn test_safe_join_within_base_dot_segments_skipped() {
+        let base = PathBuf::from("/base");
+        let p = safe_join_within_base(&base, "./a/./b").unwrap();
+        assert_eq!(p, PathBuf::from("/base/a/b"));
+    }
+
+    #[test]
+    fn test_safe_join_within_base_rejects_dotdot() {
+        let base = PathBuf::from("/base");
+        assert!(safe_join_within_base(&base, "..").is_err());
+        assert!(safe_join_within_base(&base, "../etc").is_err());
+        assert!(safe_join_within_base(&base, "a/../b").is_err());
+        assert!(safe_join_within_base(&base, "a/b/..").is_err());
+    }
+
+    #[test]
+    fn test_safe_join_within_base_rejects_absolute() {
+        let base = PathBuf::from("/base");
+        assert!(safe_join_within_base(&base, "/etc/passwd").is_err());
+        assert!(safe_join_within_base(&base, "\\Windows\\System32").is_err());
+        // Bare leading slash on a relative-looking path is also rooted.
+        assert!(safe_join_within_base(&base, "/foo").is_err());
+        #[cfg(windows)]
+        assert!(safe_join_within_base(&base, "C:\\Windows").is_err());
+    }
+
+    #[test]
+    fn test_safe_join_within_base_rejects_drive_letter_prefix() {
+        // Drive-relative (no root) — Path::is_absolute() returns false on
+        // Windows, but Path::join would still replace base with the
+        // drive's CWD. Must be rejected on every platform so the helper
+        // behaves consistently regardless of where the validation runs.
+        let base = PathBuf::from("/base");
+        assert!(safe_join_within_base(&base, "C:foo").is_err());
+        assert!(safe_join_within_base(&base, "D:payload.txt").is_err());
+        assert!(safe_join_within_base(&base, "z:relative\\file").is_err());
+        // Rooted drive paths also rejected (already covered by is_absolute
+        // on Windows; on Unix the drive-letter check catches them).
+        assert!(safe_join_within_base(&base, "C:\\Windows\\System32").is_err());
+    }
+
+    #[test]
+    fn test_safe_join_within_base_rejects_drive_letter_in_inner_segment() {
+        // The whole-string drive-letter guard misses nested cases like
+        // `safe/C:payload.txt` because the prefix isn't at position 0.
+        // `PathBuf::push` on Windows would still rebase on a drive when
+        // it sees `C:payload.txt`, so the per-segment guard inside the
+        // loop must also reject these.
+        let base = PathBuf::from("/base");
+        assert!(safe_join_within_base(&base, "safe/C:payload.txt").is_err());
+        assert!(safe_join_within_base(&base, "a/b/D:malicious").is_err());
+        assert!(safe_join_within_base(&base, "subdir\\E:nested").is_err());
+        // First segment is also covered by the inner check (defense in
+        // depth — both upfront + per-segment guards reject it).
+        assert!(safe_join_within_base(&base, "C:foo/bar").is_err());
+    }
+
+    #[test]
+    fn test_verify_no_symlink_escape_existing_inside_base() {
+        // If the existing ancestor is the base itself, canonicalize
+        // succeeds and starts_with passes. Use the OS temp dir as a
+        // base that's guaranteed to exist on every CI/dev box.
+        let base = std::env::temp_dir();
+        let canonical_base = base.canonicalize().unwrap();
+        let target = base.join("nonexistent-subdir").join("file.md");
+        assert!(verify_no_symlink_escape(&target, &canonical_base).is_ok());
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_verify_no_symlink_escape_rejects_symlinked_ancestor() {
+        // Build a temp base, create a symlink under it pointing OUTSIDE
+        // the base, and verify the helper rejects writes through it.
+        // Unix-only because std::os::unix::fs::symlink is the simplest
+        // way to set this up; the cross-platform behavior is identical.
+        use std::os::unix::fs::symlink;
+        let tmp = std::env::temp_dir();
+        let base = tmp.join("agentmux-symlink-test-base");
+        let outside = tmp.join("agentmux-symlink-test-outside");
+        let _ = std::fs::remove_dir_all(&base);
+        let _ = std::fs::remove_dir_all(&outside);
+        std::fs::create_dir_all(&base).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        let canonical_base = base.canonicalize().unwrap();
+        symlink(&outside, base.join(".claude")).unwrap();
+        let target = base.join(".claude").join("commands").join("startup.md");
+        assert!(verify_no_symlink_escape(&target, &canonical_base).is_err());
+        // Cleanup
+        let _ = std::fs::remove_dir_all(&base);
+        let _ = std::fs::remove_dir_all(&outside);
+    }
+
+    #[test]
+    fn test_has_drive_letter_prefix() {
+        assert!(has_drive_letter_prefix("C:foo"));
+        assert!(has_drive_letter_prefix("c:bar"));
+        assert!(has_drive_letter_prefix("Z:\\baz"));
+        assert!(!has_drive_letter_prefix(":foo"));
+        assert!(!has_drive_letter_prefix("foo"));
+        assert!(!has_drive_letter_prefix("12:not-a-drive"));
+        assert!(!has_drive_letter_prefix(""));
+        // Multibyte first char: the check requires ASCII letter, so
+        // non-ASCII letters do NOT match (they wouldn't be valid drive
+        // letters on Windows anyway).
+        assert!(!has_drive_letter_prefix("Ω:foo"));
+    }
+
+    #[test]
+    fn test_safe_join_within_base_rejects_empty() {
+        let base = PathBuf::from("/base");
+        assert!(safe_join_within_base(&base, "").is_err());
+        // After stripping `.` segments, an effectively-empty path also fails.
+        assert!(safe_join_within_base(&base, "./.").is_err());
     }
 
     #[test]
