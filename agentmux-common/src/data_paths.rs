@@ -204,18 +204,25 @@ fn resolve_root() -> Result<PathBuf, String> {
 }
 
 /// Sanitize a string for use as a single filesystem path segment.
-/// Rejects empty, `.`, `..`, and segments that contain path separators
-/// or other unsafe chars. Used as belt-and-braces protection in
-/// `DataPaths::resolve` to prevent traversal even when callers pass a
-/// directly-constructed `RuntimeMode::Dev` or odd version string.
+/// Rejects empty, `.`, `..`, segments containing path separators, and
+/// any character that has filesystem-special meaning on Windows (which
+/// is the most restrictive of the platforms we target). Used as belt-
+/// and-braces protection in `DataPaths::resolve` to prevent traversal
+/// even when callers pass a directly-constructed `RuntimeMode::Dev` or
+/// odd version string.
+///
+/// Why `:` is rejected: on Windows `C:temp` is a drive-relative path,
+/// not a literal filename, so `PathBuf::join("versions").join("C:temp")`
+/// would resolve OUTSIDE the intended `~/.agentmux/versions/` subtree.
 fn sanitize_path_segment(s: &str) -> Option<String> {
     let trimmed = s.trim();
-    if trimmed.is_empty()
-        || trimmed == "."
-        || trimmed == ".."
-        || trimmed.contains('/')
-        || trimmed.contains('\\')
-        || trimmed.contains('\0')
+    if trimmed.is_empty() || trimmed == "." || trimmed == ".." {
+        return None;
+    }
+    // Filesystem separators + Windows-reserved characters + NUL.
+    if trimmed
+        .chars()
+        .any(|c| matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' | '\0'))
     {
         return None;
     }
@@ -368,6 +375,19 @@ mod tests {
                 &RuntimeMode::Installed
             )
             .is_err());
+            // Drive-relative on Windows: `PathBuf::join("versions")
+            // .join("C:temp")` would resolve outside the intended
+            // ~/.agentmux/versions/ subtree because `C:temp` is a
+            // drive-relative path, not a literal filename.
+            assert!(DataPaths::resolve("C:temp", &RuntimeMode::Installed).is_err());
+            // Other Windows-reserved chars also rejected.
+            for v in ["a*b", "a?b", "a|b", "a<b", "a>b", "a\"b"] {
+                assert!(
+                    DataPaths::resolve(v, &RuntimeMode::Installed).is_err(),
+                    "should reject version with reserved char: {:?}",
+                    v
+                );
+            }
         });
     }
 
