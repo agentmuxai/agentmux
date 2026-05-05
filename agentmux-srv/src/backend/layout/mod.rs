@@ -199,7 +199,20 @@ pub fn insert_node(root: &mut LayoutNode, node: LayoutNode) {
 /// Insert `node` at the location identified by `index_arr` — an ordered
 /// sequence of child indices (e.g. `[0, 2]` = root.children[0].children
 /// at index 3). The node is inserted AFTER the position identified by the
-/// last index. Mirrors `insertNodeAtIndex` / `findInsertLocationFromIndexArr`.
+/// last index.
+///
+/// Mirrors `findInsertLocationFromIndexArr` in
+/// `frontend/layout/lib/layoutNode.ts`:
+/// - Each segment is **clamped** to `[0, children.len() - 1]`. Out-of-range
+///   indices do NOT error — they resolve to the last child slot.
+/// - Descent **stops at a leaf**. Any remaining segments after we hit a node
+///   with no children are ignored, and the leaf becomes the insert target
+///   (where `ensure_group_node` then promotes it). This matches the TS
+///   oracle's `if (indexArr.length == 0 || !node.children) return ...`.
+///
+/// This tolerance is required for "identical state transitions" with the
+/// frontend reducer under concurrent edits — the frontend may issue a
+/// stale or over-deep `indexArr` against a tree that has since shrunk.
 pub fn insert_node_at_index(
     root: &mut LayoutNode,
     node: LayoutNode,
@@ -208,23 +221,27 @@ pub fn insert_node_at_index(
     if index_arr.is_empty() {
         return Err(LayoutError::InvalidIndexPath);
     }
-    // Navigate to the parent using all-but-last indices, then insert
-    // after last-index position.
     let mut current = root as *mut LayoutNode;
-    let split_at = index_arr.len() - 1;
-    let path = &index_arr[..split_at];
-    let last_idx = index_arr[split_at];
+    let mut clamped_idx: usize = 0;
+    let last_seg = index_arr.len() - 1;
 
-    for &idx in path {
+    for (seg_pos, &idx) in index_arr.iter().enumerate() {
         let cur = unsafe { &mut *current };
-        if idx >= cur.children.len() {
-            return Err(LayoutError::InvalidIndexPath);
+        if cur.children.is_empty() {
+            // Leaf reached early — TS treats `node.children?.length ?? 1`
+            // as 1 here, so any non-negative idx clamps to 0. Stop descent.
+            clamped_idx = 0;
+            break;
         }
-        current = &mut cur.children[idx] as *mut LayoutNode;
+        clamped_idx = idx.min(cur.children.len() - 1);
+        if seg_pos < last_seg {
+            current = &mut cur.children[clamped_idx] as *mut LayoutNode;
+        }
     }
+
     let parent = unsafe { &mut *current };
     ensure_group_node(parent);
-    let insert_at = (last_idx + 1).min(parent.children.len());
+    let insert_at = (clamped_idx + 1).min(parent.children.len());
     parent.children.insert(insert_at, node);
     Ok(())
 }
