@@ -53,7 +53,11 @@ done
 #       on PR #694: without this, --yes would wipe an active installed
 #       instance's profile).
 
-RUNNING_PATHS=$(
+# Codex P1 round-2 on PR #694: `|| true` would silently swallow any
+# powershell failure (missing, restricted, broken), making the script
+# treat that as "no running instances" and happily wipe live state.
+# We require powershell discovery to succeed; fail fast if it doesn't.
+PS_OUTPUT=$(
     powershell.exe -NoProfile -Command "
         \$procs = Get-CimInstance Win32_Process -Filter \"Name LIKE 'agentmux%'\"
         \$exeParents = \$procs | Select-Object -ExpandProperty ExecutablePath |
@@ -64,10 +68,20 @@ RUNNING_PATHS=$(
                 if (\$_ -match '--wavedata\s+\"?([^\"]+?)\"?(\s|$)') { \$matches[1] }
             }
         @(\$exeParents + \$dataDirs) | Where-Object { \$_ } | Sort-Object -Unique
-    " 2>/dev/null |
-    tr -d '\r' |
-    grep -v '^$' || true
-)
+    "
+) || {
+    echo "ERROR: PowerShell process-discovery failed (exit $?)." >&2
+    echo "  Without this we cannot tell which directories are in use." >&2
+    echo "  Refusing to proceed — re-run after PowerShell is restored," >&2
+    echo "  or set AGENTMUX_WIPE_FORCE=1 to override." >&2
+    if [ "${AGENTMUX_WIPE_FORCE:-}" != "1" ]; then
+        exit 1
+    fi
+    echo "  AGENTMUX_WIPE_FORCE=1 — proceeding with empty preserve list." >&2
+}
+# An empty stdout from a successful run means no agentmux processes
+# are running — that's a valid state, not an error.
+RUNNING_PATHS=$(echo "$PS_OUTPUT" | tr -d '\r' | grep -v '^$' || true)
 
 echo "Running AgentMux folders (preserved):"
 if [ -z "$RUNNING_PATHS" ]; then
