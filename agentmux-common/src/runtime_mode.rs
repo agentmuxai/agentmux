@@ -15,7 +15,9 @@
 //! # Detection priority
 //!
 //! 1. `AGENTMUX_RUNTIME_MODE` env override (testing, CI).
-//! 2. Path-based portable detection: `<exe-dir>/runtime/` exists.
+//! 2. Marker-based portable detection: `<exe-dir>/.agentmux-portable`
+//!    exists (also looks two levels up for macOS .app bundles). Written
+//!    by `scripts/package-cef-portable.sh` at packaging time.
 //! 3. Path-based dev detection: exe is under a known dev-build dir
 //!    (`dist/cef-dev/`, `target/debug/`, `target/release/`).
 //! 4. `AGENTMUX_DEV_BRANCH` env override (CI override for dev mode).
@@ -56,9 +58,16 @@ impl RuntimeMode {
             }
         }
 
-        // 2. Portable: a `runtime/` subdir is bundled next to the
-        //    launcher binary in our portable ZIPs.
-        if exe_dir.join("runtime").is_dir() {
+        // 2. Portable: marker file written next to the launcher by the
+        //    portable-package script. See `is_portable_marker_present`.
+        //
+        //    An earlier draft used `<exe-dir>/runtime/.is_dir()` as
+        //    the test, but installed builds ALSO co-locate `runtime/`
+        //    (the launcher's main.rs:40 expects it unconditionally and
+        //    aborts if missing). So `runtime/` is universal across
+        //    portable + installed; only a marker file distinguishes
+        //    them. Claude P1 round-3 on PR #695.
+        if is_portable_marker_present(exe_dir) {
             return Self::Portable;
         }
 
@@ -147,6 +156,27 @@ fn parse_mode_string(s: &str) -> Option<RuntimeMode> {
         });
     }
     None
+}
+
+/// True when `exe_dir` (or its parent on macOS app bundles) contains
+/// the `.agentmux-portable` marker file written by the
+/// portable-package script. Installed builds NEVER write this marker.
+///
+/// Falls back to `false` (i.e., not portable) if the dir isn't readable
+/// — installed-mode default is the safer guess when unsure.
+fn is_portable_marker_present(exe_dir: &Path) -> bool {
+    if exe_dir.join(".agentmux-portable").is_file() {
+        return true;
+    }
+    // On macOS the launcher exe is at <Bundle>.app/Contents/MacOS/<exe>;
+    // a portable .app would put the marker at the bundle root, two
+    // levels up.
+    if let Some(bundle_root) = exe_dir.parent().and_then(|p| p.parent()) {
+        if bundle_root.join(".agentmux-portable").is_file() {
+            return true;
+        }
+    }
+    false
 }
 
 /// True when `exe_dir` is one of our known dev-build output dirs.
@@ -251,6 +281,7 @@ mod tests {
     use super::*;
     use crate::TEST_ENV_LOCK;
     use std::path::PathBuf;
+    // tempfile is a dev-dep used here for the marker-detection test.
 
     /// `with_env` does NOT take `TEST_ENV_LOCK` — callers must hold
     /// it. This avoids the re-entrant-locking problem when a test
@@ -400,6 +431,48 @@ mod tests {
             }
             _ => panic!("expected Dev variant"),
         }
+    }
+
+    #[test]
+    fn portable_marker_detection() {
+        let _g = TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        let exe_dir = tmp.path();
+
+        // No marker → not portable.
+        assert!(!is_portable_marker_present(exe_dir));
+
+        // With marker → portable.
+        std::fs::write(exe_dir.join(".agentmux-portable"), b"").unwrap();
+        assert!(is_portable_marker_present(exe_dir));
+
+        // Marker two levels up (macOS .app bundle case).
+        let nested = exe_dir.join("Contents/MacOS");
+        std::fs::create_dir_all(&nested).unwrap();
+        // Removing top-level marker would still allow detection via the
+        // bundle-root walk-up.
+        std::fs::remove_file(exe_dir.join(".agentmux-portable")).unwrap();
+        assert!(!is_portable_marker_present(&nested));
+        std::fs::write(exe_dir.join(".agentmux-portable"), b"").unwrap();
+        assert!(is_portable_marker_present(&nested));
+    }
+
+    #[test]
+    fn current_with_only_runtime_subdir_is_not_portable() {
+        // Regression for Claude P1 round-3 PR #695: prior implementation
+        // returned Portable whenever <exe>/runtime/ existed, but
+        // installed builds also co-locate runtime/ (per launcher
+        // main.rs:40). Without a marker, we must NOT classify as Portable.
+        let _g = TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        let exe_dir = tmp.path();
+        std::fs::create_dir_all(exe_dir.join("runtime")).unwrap();
+        // No .agentmux-portable marker — must be Installed (or whatever
+        // the fall-through is, but specifically NOT Portable).
+        std::env::remove_var("AGENTMUX_RUNTIME_MODE");
+        std::env::remove_var("AGENTMUX_DEV_BRANCH");
+        let mode = RuntimeMode::current(exe_dir);
+        assert_ne!(mode, RuntimeMode::Portable);
     }
 
     #[test]
