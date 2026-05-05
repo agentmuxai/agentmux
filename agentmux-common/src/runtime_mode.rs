@@ -74,22 +74,21 @@ impl RuntimeMode {
             return Self::Dev { branch };
         }
 
-        // 4. AGENTMUX_DEV_BRANCH override. Treat the env var as set
-        //    only when it has non-empty content AFTER detect_branch
-        //    sanitizes it — a malformed value like `..` sanitizes to
-        //    empty and should fall through to Installed rather than
-        //    silently routing into `dev/default/`.
+        // 4. AGENTMUX_DEV_BRANCH override. The env-var IS the branch
+        //    source at this step; sanitize it directly, do NOT call
+        //    detect_branch (which has its own git fallback that would
+        //    take over when the env-var sanitizes to empty — and could
+        //    then return a real branch name from an unrelated .git
+        //    ancestor of `exe_dir`, silently routing installed runs
+        //    into Dev when the user only had a typo'd env var).
+        //
+        //    If the env value is unusable (empty after trim, or
+        //    sanitizes to empty via path-traversal stripping), fall
+        //    through to Installed instead of inventing a branch.
         if let Ok(b) = std::env::var("AGENTMUX_DEV_BRANCH") {
-            if !b.trim().is_empty() {
-                let branch = detect_branch(exe_dir);
-                if !branch.is_empty() && branch != "default" {
-                    return Self::Dev { branch };
-                }
-                // The env var was set but unusable AND we're not in
-                // a known dev-build dir. detect_branch's "default"
-                // fallback is for legitimate dev-build cases (covered
-                // by step 3 above), not for accidental env-var leaks
-                // out of a bash shell. Fall through.
+            let slug = sanitize_branch_slug(&b);
+            if !slug.is_empty() {
+                return Self::Dev { branch: slug };
             }
         }
 
@@ -443,22 +442,28 @@ mod tests {
 
     #[test]
     fn dev_branch_env_with_unusable_value_falls_through() {
-        // AGENTMUX_DEV_BRANCH=`..` sanitizes to empty inside
-        // detect_branch and would previously have routed an installed
-        // process into `dev/default/` (a real bug because it'd silently
-        // change where state lives). With the fix, an unusable value
-        // falls through to Installed when no other dev signal applies.
+        // AGENTMUX_DEV_BRANCH=`..` sanitizes to empty.
+        // With the fix, an unusable value falls through to Installed
+        // when no other dev signal applies — even when exe_dir has
+        // a .git ancestor that detect_branch could have grabbed.
         let _g = TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        // Use a path nowhere near a build dir or a marker.
         let tmp = tempfile::TempDir::new().expect("tempdir");
+        // Plant a .git directory so a buggy implementation that called
+        // detect_branch as a fallback would find a real branch name and
+        // wrongly classify as Dev. Step 4 now sanitizes the env var
+        // directly without invoking the git lookup — verifying that.
+        std::fs::create_dir_all(tmp.path().join(".git")).unwrap();
+        let exe_dir = tmp.path().join("subdir");
+        std::fs::create_dir_all(&exe_dir).unwrap();
+
         std::env::remove_var("AGENTMUX_RUNTIME_MODE");
         std::env::set_var("AGENTMUX_DEV_BRANCH", "..");
-        let mode = RuntimeMode::current(tmp.path());
+        let mode = RuntimeMode::current(&exe_dir);
         std::env::remove_var("AGENTMUX_DEV_BRANCH");
-        // The "..": ancestor-traversal value sanitizes to empty;
-        // detect_branch falls back to "default" because there's no
-        // .git in the temp dir. Both signals are unsafe-to-trust, so
-        // we fall through to Installed.
+
+        // Even with the .git ancestor, an unusable env value must
+        // fall through to Installed (NOT to Dev with a git-detected
+        // branch). The env var is the source-of-truth at step 4.
         assert_eq!(mode, RuntimeMode::Installed);
     }
 
