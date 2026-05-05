@@ -67,7 +67,10 @@ pub fn use_launcher_endpoints(
         let instance_id = try_get("AGENTMUX_INSTANCE_ID")?;
         let data_dir = try_get("AGENTMUX_DATA_DIR")?;
         let config_dir = try_get("AGENTMUX_CONFIG_DIR")?;
-        let user_home_dir = try_get("AGENTMUX_USER_HOME_DIR")?;
+        // Frontend "user home" → maps to per-version agents_dir under
+        // the unified layout (replaces the pre-PR-#695
+        // AGENTMUX_USER_HOME_DIR which the launcher no longer sets).
+        let user_home_dir = try_get("AGENTMUX_AGENTS_DIR")?;
 
         // Populate AppState in the same shape `spawn_backend` would.
         // Notably we do NOT take ownership of a Child handle (launcher

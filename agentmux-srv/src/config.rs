@@ -41,20 +41,19 @@ impl Config {
         // Remove from env after read (matching Go authkey.go:50)
         std::env::remove_var("AGENTMUX_AUTH_KEY");
 
-        // CLI flag wins over env. Env preference order is the new
-        // unified `AGENTMUX_DATA_DIR` (set by the launcher via
-        // `agentmux_common::DataPaths::to_env_vars`); the legacy
-        // `AGENTMUX_DATA_HOME` name is no longer set.
+        // CLI flag wins over env. The launcher sets the canonical
+        // `AGENTMUX_DATA_DIR` and `AGENTMUX_CONFIG_DIR` via
+        // `agentmux_common::DataPaths::to_env_vars`. Pre-unification
+        // names (`AGENTMUX_DATA_HOME`, `AGENTMUX_CONFIG_HOME`) are no
+        // longer set — no fallback (symmetry; partial-rollout isn't a
+        // supported scenario per spec §3.4 "no migration").
         let data_home = args
             .wavedata
             .clone()
             .or_else(|| std::env::var("AGENTMUX_DATA_DIR").ok())
             .unwrap_or_default();
 
-        // Same migration for config_home.
-        let config_home = std::env::var("AGENTMUX_CONFIG_DIR")
-            .or_else(|_| std::env::var("AGENTMUX_CONFIG_HOME"))
-            .unwrap_or_default();
+        let config_home = std::env::var("AGENTMUX_CONFIG_DIR").unwrap_or_default();
         let app_path = std::env::var("AGENTMUX_APP_PATH").unwrap_or_default();
         // is_dev is now derived from AGENTMUX_RUNTIME_MODE (the
         // canonical env var emitted by the unified DataPaths layer).
