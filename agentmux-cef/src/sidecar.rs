@@ -67,10 +67,13 @@ pub fn use_launcher_endpoints(
         let instance_id = try_get("AGENTMUX_INSTANCE_ID")?;
         let data_dir = try_get("AGENTMUX_DATA_DIR")?;
         let config_dir = try_get("AGENTMUX_CONFIG_DIR")?;
-        // Frontend "user home" → maps to per-version agents_dir under
-        // the unified layout (replaces the pre-PR-#695
-        // AGENTMUX_USER_HOME_DIR which the launcher no longer sets).
-        let user_home_dir = try_get("AGENTMUX_AGENTS_DIR")?;
+        // Frontend "user home" → maps to the per-version
+        // `instance_dir` (`~/.agentmux/versions/<v>/`). The frontend
+        // calls `agentmuxHome()` and APPENDS `/agents/<slug>` and
+        // `/config/gh-<slug>` itself — so user_home_dir must be the
+        // root the frontend appends to, NOT the agents subdir
+        // directly (which would produce `agents/agents/<slug>`).
+        let user_home_dir = try_get("AGENTMUX_INSTANCE_DIR")?;
 
         // Populate AppState in the same shape `spawn_backend` would.
         // Notably we do NOT take ownership of a Child handle (launcher
@@ -148,10 +151,11 @@ pub async fn spawn_backend(state: &Arc<AppState>) -> Result<BackendSpawnResult, 
     // Store version-specific paths in AppState for frontend IPC commands.
     *state.version_data_dir.lock() = Some(data_dir.to_string_lossy().to_string());
     *state.version_config_dir.lock() = Some(config_dir.to_string_lossy().to_string());
-    // Frontend "user home" → maps to per-version agents_dir under the
-    // unified layout. (Account-wide stuff goes in shared_dir; agents
-    // stay version-keyed for now per spec §3.1 phase-1 scope.)
-    *state.user_home_dir.lock() = Some(paths.agents_dir.to_string_lossy().to_string());
+    // Frontend "user home" → maps to the per-version `instance_dir`
+    // (`~/.agentmux/versions/<v>/`). The frontend appends its own
+    // `/agents/<slug>` and `/config/gh-<slug>` suffixes; passing
+    // `agents_dir` directly would produce `agents/agents/<slug>`.
+    *state.user_home_dir.lock() = Some(paths.instance_dir.to_string_lossy().to_string());
 
     // 3. Resolve the backend binary path
     let backend_name = "agentmux-srv";
