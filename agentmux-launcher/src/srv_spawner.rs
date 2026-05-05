@@ -131,11 +131,14 @@ pub async fn spawn_srv(
         &instance_id,
     ])
     .env("AGENTMUX_AUTH_KEY", &auth_key)
-    .env("AGENTMUX_CONFIG_HOME", paths.config_dir.to_string_lossy().to_string())
-    .env("AGENTMUX_DATA_HOME", paths.data_dir.to_string_lossy().to_string())
-    .env("AGENTMUX_SETTINGS_DIR", paths.config_dir.to_string_lossy().to_string())
+    // Canonical AGENTMUX_* env vars (INSTANCE_DIR / DATA_DIR /
+    // CONFIG_DIR / LOG_DIR / CEF_CACHE_DIR / AGENTS_DIR / INSTANCE_
+    // RUNTIME_DIR / SHARED_DIR / RUNTIME_MODE). Replaces the old
+    // AGENTMUX_DATA_HOME / AGENTMUX_DEV / AGENTMUX_CONFIG_HOME /
+    // AGENTMUX_SETTINGS_DIR pre-unification names. srv reads them
+    // via `DataPaths::from_env()` (or the raw var names directly).
+    .envs(paths.common.to_env_vars())
     .env("AGENTMUX_APP_PATH", &app_path_str)
-    .env("AGENTMUX_DEV", if cfg!(debug_assertions) { "1" } else { "" })
     .env("AGENTMUX_SRV_PIPE_PATH", srv_pipe_path)
     .stdin(Stdio::piped())
     .stdout(Stdio::piped())

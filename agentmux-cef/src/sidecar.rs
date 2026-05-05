@@ -67,7 +67,18 @@ pub fn use_launcher_endpoints(
         let instance_id = try_get("AGENTMUX_INSTANCE_ID")?;
         let data_dir = try_get("AGENTMUX_DATA_DIR")?;
         let config_dir = try_get("AGENTMUX_CONFIG_DIR")?;
-        let user_home_dir = try_get("AGENTMUX_USER_HOME_DIR")?;
+        // Frontend "user home" → the AgentMux root (`~/.agentmux/`).
+        // The frontend's `agentmuxHome()` appends multiple suffix
+        // patterns including some that are EXPLICITLY versioned
+        // (`/instances/v<version>/cli/<provider>`), so user_home_dir
+        // must be the account-wide root, NOT a per-version subdir.
+        // We pull it via DataPaths::from_env which re-derives the
+        // root consumer-side (it isn't an env var).
+        let user_home_dir = agentmux_common::DataPaths::from_env()
+            .ok_or_else(|| "DataPaths::from_env() failed inside use_launcher_endpoints".to_string())?
+            .home_dir
+            .to_string_lossy()
+            .to_string();
 
         // Populate AppState in the same shape `spawn_backend` would.
         // Notably we do NOT take ownership of a Child handle (launcher
@@ -98,84 +109,59 @@ pub async fn spawn_backend(state: &Arc<AppState>) -> Result<BackendSpawnResult, 
 
     // 1. Resolve directories.
     //
-    // Portable mode: CEF host binary lives in <portable-root>/runtime/.
-    //   data_dir   = <portable-root>/data/
-    //   config_dir = <portable-root>/data/config/
-    //
-    // Installed mode: version-isolated dirs in platform AppData (unchanged).
-    //   data_dir   = %LOCALAPPDATA%/ai.agentmux.cef.vX/
-    //   config_dir = %APPDATA%/ai.agentmux.cef.vX/
+    // Two reachable paths:
+    //   a) The `restart_backend` RPC after launcher-managed startup —
+    //      `DataPaths::from_env()` succeeds because the host inherits
+    //      the launcher's env.
+    //   b) Standalone `task dev` (host launched directly by `task dev`,
+    //      no launcher in the loop) — env vars absent. We re-derive
+    //      via the same `agentmux_common` API the launcher would have
+    //      used, so the disk layout is identical. This is functionally
+    //      a fallback the launcher would otherwise have produced.
     let current_version = env!("CARGO_PKG_VERSION");
+    let paths = match agentmux_common::DataPaths::from_env() {
+        Some(p) => p,
+        None => {
+            // No launcher env — derive from the host's own vantage.
+            // Mode detection works at this point even though the host
+            // exe lives inside `runtime/`, because portable detection
+            // uses the `agentmux-portable.marker` (not `runtime/`).
+            let host_exe_dir = std::env::current_exe()
+                .map_err(|e| format!("current_exe() failed: {}", e))?;
+            let host_exe_dir = host_exe_dir
+                .parent()
+                .ok_or_else(|| "current_exe has no parent".to_string())?;
+            let mode = agentmux_common::RuntimeMode::current(host_exe_dir);
+            agentmux_common::DataPaths::resolve(current_version, &mode)?
+        }
+    };
     let version_instance_id = format!("v{}", current_version);
+    let data_dir = paths.data_dir.clone();
+    let config_dir = paths.config_dir.clone();
 
-    // Detect portable root: if the CEF host is inside a directory named "runtime",
-    // its parent is the portable root and data lives in <root>/data/.
-    let host_exe_dir = std::env::current_exe()
-        .ok()
-        .and_then(|p| p.parent().map(|d| d.to_path_buf()))
-        .unwrap_or_default();
-    let portable_root: Option<std::path::PathBuf> = if host_exe_dir
-        .file_name()
-        .and_then(|n| n.to_str())
-        == Some("runtime")
-    {
-        host_exe_dir.parent().map(|p| p.to_path_buf())
-    } else {
-        None
-    };
-
-    let (data_dir, config_dir) = if let Some(ref root) = portable_root {
-        let base = root.join("data");
-        (base.clone(), base.join("config"))
-    } else {
-        let is_dev = cfg!(debug_assertions);
-        let dir_name = if is_dev {
-            "ai.agentmux.cef.dev".to_string()
-        } else {
-            let version_slug = current_version.replace('.', "-");
-            format!("ai.agentmux.cef.v{}", version_slug)
-        };
-        let d = dirs::data_dir()
-            .ok_or_else(|| "Failed to get data dir".to_string())?
-            .join(&dir_name);
-        let c = dirs::config_dir()
-            .ok_or_else(|| "Failed to get config dir".to_string())?
-            .join(&dir_name);
-        (d, c)
-    };
-
-    tracing::info!(portable = portable_root.is_some(), "Using data_dir: {}", data_dir.display());
+    tracing::info!(
+        runtime_mode = ?paths.mode.to_env_string(),
+        "Using data_dir: {}",
+        data_dir.display()
+    );
     tracing::info!("Using config_dir: {}", config_dir.display());
 
-    // 2. Ensure directory tree (flat — no instances/ subdirectory)
-    std::fs::create_dir_all(data_dir.join("db"))
-        .map_err(|e| format!("Failed to create data dir: {}", e))?;
-    std::fs::create_dir_all(&config_dir)
-        .map_err(|e| format!("Failed to create config dir: {}", e))?;
+    // 2. Ensure directory tree (idempotent; launcher already did this
+    // at startup but we rerun in case the dir got nuked between launch
+    // and restart).
+    paths
+        .ensure_dirs()
+        .map_err(|e| format!("Failed to ensure data dirs: {}", e))?;
 
-    // Store version-specific paths in AppState for frontend IPC commands
+    // Store version-specific paths in AppState for frontend IPC commands.
     *state.version_data_dir.lock() = Some(data_dir.to_string_lossy().to_string());
     *state.version_config_dir.lock() = Some(config_dir.to_string_lossy().to_string());
-
-    // Resolve the user data home used by the frontend for per-agent paths
-    // (`<home>/agents/<slug>/`, `GH_CONFIG_DIR`, etc.). Portable keeps this
-    // inside the portable folder; installed uses `~/.agentmux`. An explicit
-    // `AGENTMUX_DATA_HOME` env override wins over both.
-    let user_home_dir = std::env::var("AGENTMUX_DATA_HOME")
-        .ok()
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| {
-            if portable_root.is_some() {
-                data_dir.to_string_lossy().to_string()
-            } else {
-                dirs::home_dir()
-                    .unwrap_or_default()
-                    .join(".agentmux")
-                    .to_string_lossy()
-                    .to_string()
-            }
-        });
-    *state.user_home_dir.lock() = Some(user_home_dir);
+    // Frontend "user home" → the AgentMux root (`~/.agentmux/`).
+    // The frontend appends multiple suffix patterns including some
+    // explicitly versioned (`/instances/v<version>/cli/<provider>`),
+    // so the value must be the account-wide root, not a per-version
+    // subdir.
+    *state.user_home_dir.lock() = Some(paths.home_dir.to_string_lossy().to_string());
 
     // 3. Resolve the backend binary path
     let backend_name = "agentmux-srv";
@@ -210,23 +196,12 @@ pub async fn spawn_backend(state: &Arc<AppState>) -> Result<BackendSpawnResult, 
         &version_instance_id,
     ])
     .env("AGENTMUX_AUTH_KEY", &auth_key)
-    .env(
-        "AGENTMUX_CONFIG_HOME",
-        config_dir.to_string_lossy().to_string(),
-    )
-    .env(
-        "AGENTMUX_DATA_HOME",
-        data_dir.to_string_lossy().to_string(),
-    )
-    .env(
-        "AGENTMUX_SETTINGS_DIR",
-        config_dir.to_string_lossy().to_string(),
-    )
+    // Canonical AGENTMUX_* env vars from `DataPaths::to_env_vars()`.
+    // Replaces the pre-unification AGENTMUX_DATA_HOME / CONFIG_HOME /
+    // SETTINGS_DIR / DEV set, which is no longer set by anyone in the
+    // chain (launcher → host, host → srv).
+    .envs(paths.to_env_vars())
     .env("AGENTMUX_APP_PATH", &app_path_str)
-    .env(
-        "AGENTMUX_DEV",
-        if cfg!(debug_assertions) { "1" } else { "" },
-    )
     .stdin(std::process::Stdio::piped())
     .stdout(std::process::Stdio::piped())
     .stderr(std::process::Stdio::piped());
