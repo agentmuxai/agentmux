@@ -17,7 +17,8 @@
 //! 1. `AGENTMUX_RUNTIME_MODE` env override (testing, CI).
 //! 2. Marker-based portable detection: `<exe-dir>/.agentmux-portable`
 //!    exists (also looks two levels up for macOS .app bundles). Written
-//!    by `scripts/package-cef-portable.sh` at packaging time.
+//!    by `scripts/package-portable.sh` at packaging time (see the
+//!    `printf '...' > "$PORTABLE/.agentmux-portable"` line).
 //! 3. Path-based dev detection: exe is under a known dev-build dir
 //!    (`dist/cef-dev/`, `target/debug/`, `target/release/`).
 //! 4. `AGENTMUX_DEV_BRANCH` env override (CI override for dev mode).
@@ -169,8 +170,9 @@ fn parse_mode_string(s: &str) -> Option<RuntimeMode> {
 }
 
 /// True when `exe_dir` (or its parent on macOS app bundles) contains
-/// the `.agentmux-portable` marker file written by the
-/// portable-package script. Installed builds NEVER write this marker.
+/// the `.agentmux-portable` marker file written by
+/// `scripts/package-portable.sh` at packaging time. Installed builds
+/// NEVER write this marker.
 ///
 /// Falls back to `false` (i.e., not portable) if the dir isn't readable
 /// — installed-mode default is the safer guess when unsure.

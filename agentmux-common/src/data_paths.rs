@@ -134,26 +134,28 @@ impl DataPaths {
     /// computes `DataPaths` once and exports these; downstream
     /// binaries read them via [`Self::from_env`] instead of
     /// recomputing.
-    pub fn to_env_vars(&self) -> Vec<(&'static str, String)> {
+    ///
+    /// Returns `OsString` (not `String`) so paths with non-UTF-8 bytes
+    /// — possible on Linux/macOS for users with exotic home dirs —
+    /// round-trip losslessly. `Command::env(k, v)` accepts any
+    /// `AsRef<OsStr>`, so the OsString flows through to children
+    /// unchanged. The mode value is the only `String`-typed entry
+    /// (it's a fixed ASCII vocabulary). Claude P2 round-7 PR #695.
+    pub fn to_env_vars(&self) -> Vec<(&'static str, std::ffi::OsString)> {
+        use std::ffi::OsString;
         vec![
-            (
-                "AGENTMUX_INSTANCE_DIR",
-                self.instance_dir.display().to_string(),
-            ),
-            ("AGENTMUX_DATA_DIR", self.data_dir.display().to_string()),
-            ("AGENTMUX_CONFIG_DIR", self.config_dir.display().to_string()),
-            ("AGENTMUX_LOG_DIR", self.logs_dir.display().to_string()),
-            (
-                "AGENTMUX_CEF_CACHE_DIR",
-                self.cef_cache_dir.display().to_string(),
-            ),
-            ("AGENTMUX_AGENTS_DIR", self.agents_dir.display().to_string()),
+            ("AGENTMUX_INSTANCE_DIR", self.instance_dir.clone().into_os_string()),
+            ("AGENTMUX_DATA_DIR", self.data_dir.clone().into_os_string()),
+            ("AGENTMUX_CONFIG_DIR", self.config_dir.clone().into_os_string()),
+            ("AGENTMUX_LOG_DIR", self.logs_dir.clone().into_os_string()),
+            ("AGENTMUX_CEF_CACHE_DIR", self.cef_cache_dir.clone().into_os_string()),
+            ("AGENTMUX_AGENTS_DIR", self.agents_dir.clone().into_os_string()),
             (
                 "AGENTMUX_INSTANCE_RUNTIME_DIR",
-                self.instance_runtime_dir.display().to_string(),
+                self.instance_runtime_dir.clone().into_os_string(),
             ),
-            ("AGENTMUX_SHARED_DIR", self.shared_dir.display().to_string()),
-            ("AGENTMUX_RUNTIME_MODE", self.mode.to_env_string()),
+            ("AGENTMUX_SHARED_DIR", self.shared_dir.clone().into_os_string()),
+            ("AGENTMUX_RUNTIME_MODE", OsString::from(self.mode.to_env_string())),
         ]
     }
 
@@ -161,15 +163,17 @@ impl DataPaths {
     /// `None` if any required var is missing — fail-fast vs.
     /// silently falling back to legacy paths the way the old
     /// sidecar.rs did.
+    ///
+    /// Uses `var_os` (not `var`) so non-UTF-8 path bytes survive.
     pub fn from_env() -> Option<Self> {
-        let instance_dir = std::env::var("AGENTMUX_INSTANCE_DIR").ok()?;
-        let data_dir = std::env::var("AGENTMUX_DATA_DIR").ok()?;
-        let config_dir = std::env::var("AGENTMUX_CONFIG_DIR").ok()?;
-        let logs_dir = std::env::var("AGENTMUX_LOG_DIR").ok()?;
-        let cef_cache_dir = std::env::var("AGENTMUX_CEF_CACHE_DIR").ok()?;
-        let agents_dir = std::env::var("AGENTMUX_AGENTS_DIR").ok()?;
-        let instance_runtime_dir = std::env::var("AGENTMUX_INSTANCE_RUNTIME_DIR").ok()?;
-        let shared_dir = std::env::var("AGENTMUX_SHARED_DIR").ok()?;
+        let instance_dir = std::env::var_os("AGENTMUX_INSTANCE_DIR")?;
+        let data_dir = std::env::var_os("AGENTMUX_DATA_DIR")?;
+        let config_dir = std::env::var_os("AGENTMUX_CONFIG_DIR")?;
+        let logs_dir = std::env::var_os("AGENTMUX_LOG_DIR")?;
+        let cef_cache_dir = std::env::var_os("AGENTMUX_CEF_CACHE_DIR")?;
+        let agents_dir = std::env::var_os("AGENTMUX_AGENTS_DIR")?;
+        let instance_runtime_dir = std::env::var_os("AGENTMUX_INSTANCE_RUNTIME_DIR")?;
+        let shared_dir = std::env::var_os("AGENTMUX_SHARED_DIR")?;
         let mode = RuntimeMode::from_env()?;
 
         Some(Self {
