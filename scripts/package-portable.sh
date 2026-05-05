@@ -37,6 +37,14 @@ mkdir -p "$PORTABLE/data"
 # Launcher in root
 cp target/release/agentmux-launcher.exe "$PORTABLE/agentmux.exe"
 
+# Portable marker — read by agentmux-common::RuntimeMode::current to
+# distinguish portable extracts from installed builds. Both ship a
+# `runtime/` subdir, so the dir alone is not a discriminator. The
+# file's contents are advisory; the detection only checks for its
+# presence next to the launcher exe. Mac .app-bundle layouts are
+# also supported (marker can sit at the bundle root).
+printf 'AgentMux portable build %s\n' "$VERSION" > "$PORTABLE/agentmux-portable.marker"
+
 # README
 cat > "$PORTABLE/README.txt" <<READMEEOF
 AgentMux v$VERSION - Portable Edition
