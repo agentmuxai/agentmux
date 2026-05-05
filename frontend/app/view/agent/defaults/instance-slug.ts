@@ -7,16 +7,12 @@
  * (for preview) and the AgentViewModel (for actual launch) agree on
  * the format without importing from each other's files.
  *
- * Format: `<slug(name)>-MMDDh`, local time.
- *
- * NOTE: Collision resolution (when two launches in the same hour
- * produce identical slugs) is currently NOT implemented end-to-end —
- * the actual launch flow uses `WriteAgentConfigCommand` which writes
- * config into whatever path it's given. Two same-hour launches with
- * the same instance name will share a workdir and overwrite each
- * other's config files. Tracked for follow-up; needs an RPC return-
- * type change (final path) + frontend `cmd:cwd` patch + atomic
- * `create_dir` allocation on the backend.
+ * Format: `<slug(name)>-MMDDh`, local time. Same-hour collisions are
+ * resolved server-side by `agentmux-srv/src/server/app_api.rs::
+ * allocate_agent_workdir`, called from `WriteAgentConfigCommand`
+ * when the frontend sets `auto_allocate: true`. The atomic mkdir +
+ * `<base>-N` retry there is the source of truth for collision
+ * handling — this module only owns the slug format.
  */
 
 /**
@@ -51,9 +47,10 @@ function hourToBase24Char(h: number): string {
  *   DD = 2-digit day (01-31)
  *   h  = base24 hour char (0-9 then a-n for 10-23)
  *
- * Total: 5 chars exactly. Two launches within the same hour share
- * a slug; collision resolution is a follow-up (the previous
- * millisecond-precision suffix made this a non-issue).
+ * Total: 5 chars exactly. Two launches within the same hour produce
+ * the same slug; the launch flow resolves the collision server-side
+ * by calling `WriteAgentConfigCommand` with `auto_allocate: true`,
+ * which appends `-N` (1, 2, …) until a free slot is found.
  *
  * Year is omitted because per-version isolation already separates
  * runs across releases; within a version, month+day+hour gives users
@@ -69,9 +66,9 @@ export function formatLocalStamp(d: Date): string {
  * Build the per-instance slug for a given name at the given time.
  * `<slug>-<stamp>` — stable, filesystem-safe, and 5-char date.
  *
- * Collision resolution: callers should pass the result through
- * `a future server-side allocator` or equivalent at launch time to append `-N`
- * when the directory already exists.
+ * Collision resolution happens at launch time on the server (see
+ * the module docstring). Callers don't need to pass this through any
+ * additional helper.
  */
 export function buildInstanceSlug(name: string, at: Date = new Date()): string {
     return `${slugifyInstanceName(name)}-${formatLocalStamp(at)}`;

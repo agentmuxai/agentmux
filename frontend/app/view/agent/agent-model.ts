@@ -376,16 +376,21 @@ export class AgentViewModel implements ViewModel {
             // Whether the work_dir was constructed by us (and is thus
             // eligible for `<base>-N` collision suffixing) or was
             // pulled verbatim from the agent definition's
-            // `working_directory` field (e.g. a user repo path that
-            // we must NOT rewrite even if it happens to contain
-            // CLAUDE.md). The two auto cases above are: an explicit
-            // overrides.instanceName launch, and the legacy
-            // ~/.agentmux/agents/<slug> default when no
-            // working_directory was set on the definition.
+            // `working_directory` field (which we must NEVER rewrite,
+            // even if it happens to live under ~/.agentmux/ — a user
+            // can legitimately set `agent.working_directory` to
+            // `~/.agentmux/my-project` and expect that exact dir).
+            //
+            // Auto cases:
+            //   - overrides.instanceName given (modal launch chose a
+            //     fresh per-launch slug)
+            //   - working_directory is empty (we filled in the legacy
+            //     ~/.agentmux/agents/<slug> default ourselves)
+            // Any other persisted value is user-specified and stays
+            // verbatim through allocation.
             const autoAllocate =
                 Boolean(overrides?.instanceName) ||
-                (agent.working_directory ?? "").trim() === "" ||
-                persisted.startsWith("~/.agentmux/");
+                (agent.working_directory ?? "").trim() === "";
 
             // Allocate the workdir + write config files BEFORE we set
             // cmd:cwd, so the meta records the actual collision-
