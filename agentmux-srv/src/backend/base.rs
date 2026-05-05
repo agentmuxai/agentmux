@@ -268,6 +268,58 @@ pub fn expand_home_dir_safe(path: &str) -> PathBuf {
     expand_home_dir(path).unwrap_or_else(|_| PathBuf::from(path))
 }
 
+/// After a lexical join, verify that no symlinked ancestor of the
+/// candidate path escapes `base_canonical`. The lexical helper alone
+/// can't catch this: if `<base>/.claude` is a symlink to `/tmp/outside`
+/// and the caller writes `<base>/.claude/commands/startup.md`, the
+/// final write follows the symlink and lands outside the working dir.
+///
+/// Walks from `final_path` upward and canonicalizes the deepest
+/// existing ancestor — that resolution dereferences any symlink in
+/// the chain. If the resolved path stays under `base_canonical`, no
+/// symlink in the existing portion escapes. Non-existent components
+/// are safe by definition (nothing to resolve, nothing to follow).
+///
+/// Returns Ok(()) if safe, Err with a human-readable message otherwise.
+///
+/// Caller invariant: the directory rooted at `base_canonical` must
+/// exist (so the upward walk is guaranteed to find it before reaching
+/// the filesystem root). `writeagentconfig` satisfies this — the
+/// working dir is created via `allocate_agent_workdir` or `mkdir_p`
+/// immediately before this is called.
+pub fn verify_no_symlink_escape(
+    final_path: &Path,
+    base_canonical: &Path,
+) -> Result<(), String> {
+    let mut p = final_path;
+    loop {
+        match p.canonicalize() {
+            Ok(canonical) => {
+                if !canonical.starts_with(base_canonical) {
+                    return Err(format!(
+                        "symlinked ancestor escapes working dir: {} → {}",
+                        p.display(),
+                        canonical.display()
+                    ));
+                }
+                return Ok(());
+            }
+            Err(_) => match p.parent() {
+                Some(parent) if !parent.as_os_str().is_empty() => p = parent,
+                _ => {
+                    // Walked past every existing ancestor without finding
+                    // one inside `base_canonical`. This violates the
+                    // caller invariant (base should exist) — fail closed.
+                    return Err(format!(
+                        "no existing ancestor found under base: {}",
+                        final_path.display()
+                    ));
+                }
+            },
+        }
+    }
+}
+
 /// True if `s` starts with `<ASCII letter>:` — a Windows drive-letter
 /// prefix. Both rooted (`C:\foo`) and drive-relative (`C:foo`) forms
 /// match. Used by `safe_join_within_base` to reject paths that would
@@ -564,6 +616,41 @@ mod tests {
         // First segment is also covered by the inner check (defense in
         // depth — both upfront + per-segment guards reject it).
         assert!(safe_join_within_base(&base, "C:foo/bar").is_err());
+    }
+
+    #[test]
+    fn test_verify_no_symlink_escape_existing_inside_base() {
+        // If the existing ancestor is the base itself, canonicalize
+        // succeeds and starts_with passes. Use the OS temp dir as a
+        // base that's guaranteed to exist on every CI/dev box.
+        let base = std::env::temp_dir();
+        let canonical_base = base.canonicalize().unwrap();
+        let target = base.join("nonexistent-subdir").join("file.md");
+        assert!(verify_no_symlink_escape(&target, &canonical_base).is_ok());
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_verify_no_symlink_escape_rejects_symlinked_ancestor() {
+        // Build a temp base, create a symlink under it pointing OUTSIDE
+        // the base, and verify the helper rejects writes through it.
+        // Unix-only because std::os::unix::fs::symlink is the simplest
+        // way to set this up; the cross-platform behavior is identical.
+        use std::os::unix::fs::symlink;
+        let tmp = std::env::temp_dir();
+        let base = tmp.join("agentmux-symlink-test-base");
+        let outside = tmp.join("agentmux-symlink-test-outside");
+        let _ = std::fs::remove_dir_all(&base);
+        let _ = std::fs::remove_dir_all(&outside);
+        std::fs::create_dir_all(&base).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        let canonical_base = base.canonicalize().unwrap();
+        symlink(&outside, base.join(".claude")).unwrap();
+        let target = base.join(".claude").join("commands").join("startup.md");
+        assert!(verify_no_symlink_escape(&target, &canonical_base).is_err());
+        // Cleanup
+        let _ = std::fs::remove_dir_all(&base);
+        let _ = std::fs::remove_dir_all(&outside);
     }
 
     #[test]
