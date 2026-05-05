@@ -339,6 +339,63 @@ fn insert_node_at_index_promotes_leaf_parent() {
     assert!(root.children.iter().any(|c| c.id == "root" && c.data.is_some()));
 }
 
+#[test]
+fn insert_node_at_index_clamps_out_of_range_segment() {
+    // [a, b, c], indexArr=[10] — TS oracle: clamp to lastChildIndex=2,
+    // insert at 2+1=3 → [a, b, c, new]. Rust must NOT error.
+    let a = leaf("a", "b1", 1.0);
+    let b = leaf("b", "b2", 1.0);
+    let c = leaf("c", "b3", 1.0);
+    let mut root = group("root", FlexDirection::Row, 10.0, vec![a, b, c]);
+    let new = leaf("new", "b4", 1.0);
+    insert_node_at_index(&mut root, new, &[10]).unwrap();
+    assert_eq!(root.children.len(), 4);
+    assert_eq!(root.children[3].id, "new");
+}
+
+#[test]
+fn insert_node_at_index_clamps_intermediate_segment() {
+    // root=[a, middle], middle=[m1, m2]. indexArr=[5, 0] — TS clamps
+    // first segment to lastChildIndex=1 (descends into middle), then
+    // inserts after middle.children[0] → middle = [m1, new, m2].
+    let m1 = leaf("m1", "b1", 1.0);
+    let m2 = leaf("m2", "b2", 1.0);
+    let middle = group("middle", FlexDirection::Column, 5.0, vec![m1, m2]);
+    let a = leaf("a", "b3", 5.0);
+    let mut root = group("root", FlexDirection::Row, 10.0, vec![a, middle]);
+    let new = leaf("new", "b4", 1.0);
+    insert_node_at_index(&mut root, new, &[5, 0]).unwrap();
+    let middle_after = find_node_by_id(&root, "middle").unwrap();
+    assert_eq!(middle_after.children.len(), 3);
+    assert_eq!(middle_after.children[0].id, "m1");
+    assert_eq!(middle_after.children[1].id, "new");
+    assert_eq!(middle_after.children[2].id, "m2");
+}
+
+#[test]
+fn insert_node_at_index_stops_descent_at_leaf_with_extra_segments() {
+    // root=[a], a is a leaf. indexArr=[0, 5] — TS hits the leaf at the
+    // first descent and stops; `normalizeIndex(5)` against a leaf
+    // (length-fallback=1) clamps to 0, so the result is "promote leaf,
+    // insert after position 0". Final: the descended-into node is
+    // promoted to a group; ensure_group_node moves the original ID
+    // ("a", with the data) onto the intermediate child and gives the
+    // wrapper a fresh UUID. So root.children[0] is the wrapper (no data,
+    // 2 children: the renamed intermediate carrying "a" + the new node).
+    let a = leaf("a", "b1", 5.0);
+    let mut root = group("root", FlexDirection::Row, 10.0, vec![a]);
+    let new = leaf("new", "b2", 1.0);
+    insert_node_at_index(&mut root, new, &[0, 5]).unwrap();
+    assert_eq!(root.children.len(), 1);
+    let wrapper = &root.children[0];
+    assert!(wrapper.data.is_none(), "wrapper should be a group");
+    assert_eq!(wrapper.children.len(), 2);
+    // Intermediate keeps the original leaf ID + data; "new" is the second.
+    let intermediate = wrapper.children.iter().find(|c| c.id == "a").expect("a-id child");
+    assert!(intermediate.data.is_some());
+    assert!(wrapper.children.iter().any(|c| c.id == "new"));
+}
+
 // ── swapNode ancestor rejection ──────────────────────────────────────────────
 
 #[test]
