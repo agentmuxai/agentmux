@@ -45,17 +45,14 @@ pub struct DataPaths {
 /// Detects [`RuntimeMode`] from `launcher_exe_dir`, resolves the
 /// canonical paths via [`agentmux_common::DataPaths::resolve`], and
 /// projects them onto the launcher-local field names.
-pub fn resolve_paths(
-    launcher_exe_dir: &Path,
-    version: &str,
-    _is_dev_unused: bool,
-) -> Result<DataPaths, String> {
-    // Mode is detected ONCE here from the launcher's vantage point;
-    // the result flows downstream via the AGENTMUX_RUNTIME_MODE env
-    // var that main.rs sets on the host + srv subprocesses. The legacy
-    // `is_dev` parameter is no longer consulted — `cfg!(debug_assertions)`
-    // is unreliable across binaries built with different profiles, so
-    // we ignore it and let `RuntimeMode::current` decide.
+///
+/// Mode detection is authoritative here — `cfg!(debug_assertions)` is
+/// unreliable across binaries built with different profiles, so we let
+/// `RuntimeMode::current` decide and propagate the answer downstream
+/// via the `AGENTMUX_RUNTIME_MODE` env var. The legacy `is_dev`
+/// parameter from the pre-PR-#695 signature has been removed; callers
+/// no longer need to compute it.
+pub fn resolve_paths(launcher_exe_dir: &Path, version: &str) -> Result<DataPaths, String> {
     let mode = RuntimeMode::current(launcher_exe_dir);
     let common = CommonDataPaths::resolve(version, &mode)?;
 
@@ -69,8 +66,10 @@ pub fn resolve_paths(
         data_dir: common.data_dir.clone(),
         config_dir: common.config_dir.clone(),
         // The launcher's `config.toml` (saga retention etc.) lives
-        // account-wide, not per-version. Map onto shared_dir.
-        user_home_dir: common.shared_dir.clone(),
+        // at `~/.agentmux/config.toml` — account-wide, version-
+        // independent, predates the unified layout. Map onto the
+        // resolved root, NOT shared_dir or any version-keyed subdir.
+        user_home_dir: common.home_dir.clone(),
         portable_root,
         common,
     })

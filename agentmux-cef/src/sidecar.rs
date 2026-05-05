@@ -99,22 +99,34 @@ pub fn use_launcher_endpoints(
 pub async fn spawn_backend(state: &Arc<AppState>) -> Result<BackendSpawnResult, String> {
     tracing::info!("spawn_backend() called");
 
-    // 1. Resolve directories from the launcher-injected env vars.
+    // 1. Resolve directories.
     //
-    // Pre-PR-#695, the host re-derived its own portable + dev mode and
-    // computed paths independently as a fallback for the no-launcher
-    // case (legacy `task dev`). After unification all paths flow from
-    // the launcher; this function is now only reached via the
-    // `restart_backend` RPC, where the launcher's env vars are still
-    // in scope, so `DataPaths::from_env` always succeeds. If they're
-    // somehow absent, refuse to spawn — re-deriving silently would
-    // restore the old desync risk.
-    let paths = agentmux_common::DataPaths::from_env().ok_or_else(|| {
-        "spawn_backend: launcher env vars (AGENTMUX_DATA_DIR etc.) absent — \
-         host was started without the launcher, which is no longer supported"
-            .to_string()
-    })?;
+    // Two reachable paths:
+    //   a) The `restart_backend` RPC after launcher-managed startup —
+    //      `DataPaths::from_env()` succeeds because the host inherits
+    //      the launcher's env.
+    //   b) Standalone `task dev` (host launched directly by `task dev`,
+    //      no launcher in the loop) — env vars absent. We re-derive
+    //      via the same `agentmux_common` API the launcher would have
+    //      used, so the disk layout is identical. This is functionally
+    //      a fallback the launcher would otherwise have produced.
     let current_version = env!("CARGO_PKG_VERSION");
+    let paths = match agentmux_common::DataPaths::from_env() {
+        Some(p) => p,
+        None => {
+            // No launcher env — derive from the host's own vantage.
+            // Mode detection works at this point even though the host
+            // exe lives inside `runtime/`, because portable detection
+            // uses the `agentmux-portable.marker` (not `runtime/`).
+            let host_exe_dir = std::env::current_exe()
+                .map_err(|e| format!("current_exe() failed: {}", e))?;
+            let host_exe_dir = host_exe_dir
+                .parent()
+                .ok_or_else(|| "current_exe has no parent".to_string())?;
+            let mode = agentmux_common::RuntimeMode::current(host_exe_dir);
+            agentmux_common::DataPaths::resolve(current_version, &mode)?
+        }
+    };
     let version_instance_id = format!("v{}", current_version);
     let data_dir = paths.data_dir.clone();
     let config_dir = paths.config_dir.clone();

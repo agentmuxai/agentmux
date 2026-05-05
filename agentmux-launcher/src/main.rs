@@ -173,14 +173,13 @@ async fn run_windows(
     use windows_sys::Win32::System::Threading::CREATE_SUSPENDED;
 
     let version = env!("CARGO_PKG_VERSION");
-    let is_dev = cfg!(debug_assertions);
 
     // 1. Resolve data_dir / config_dir / user_home_dir. Both srv and
     // host receive these via env so they don't recompute (and so they
     // can't drift). Host's existing data_dir computation in sidecar.rs
     // still runs as a fallback for `task dev` mode where the launcher
     // is not in the loop.
-    let paths = match data_dir::resolve_paths(launcher_exe_dir, version, is_dev) {
+    let paths = match data_dir::resolve_paths(launcher_exe_dir, version) {
         Ok(p) => p,
         Err(e) => {
             log(&format!("FATAL: path resolution failed: {}", e));

@@ -25,6 +25,12 @@ use std::path::{Path, PathBuf};
 /// where each binary made its own portable / dev-mode determination).
 #[derive(Debug, Clone)]
 pub struct DataPaths {
+    /// `~/.agentmux/` itself — the resolved root. Account-wide config
+    /// that predates the unified layout (e.g. the launcher's
+    /// `config.toml`) lives directly here. Honors
+    /// `AGENTMUX_HOME_OVERRIDE` for tests.
+    pub home_dir: PathBuf,
+
     /// Top-level dir for this version+mode. All version-keyed paths
     /// below are children. Either `~/.agentmux/versions/<v>/` (installed/
     /// portable) or `~/.agentmux/dev/<branch>/` (dev).
@@ -94,6 +100,7 @@ impl DataPaths {
         let shared_dir = root.join("shared");
 
         Ok(Self {
+            home_dir: root,
             instance_dir,
             data_dir,
             config_dir,
@@ -176,7 +183,14 @@ impl DataPaths {
         let shared_dir = std::env::var_os("AGENTMUX_SHARED_DIR")?;
         let mode = RuntimeMode::from_env()?;
 
+        // Re-resolve home_dir (the agentmux root) on the consumer
+        // side rather than transmitting it via env — it's a function
+        // of the AGENTMUX_HOME_OVERRIDE env (test only) and the OS
+        // home dir, which are stable across the launcher → host hop.
+        let home_dir = resolve_root().ok()?;
+
         Some(Self {
+            home_dir,
             instance_dir: PathBuf::from(instance_dir),
             data_dir: PathBuf::from(data_dir),
             config_dir: PathBuf::from(config_dir),
