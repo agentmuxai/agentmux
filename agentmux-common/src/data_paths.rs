@@ -140,7 +140,7 @@ impl DataPaths {
     /// round-trip losslessly. `Command::env(k, v)` accepts any
     /// `AsRef<OsStr>`, so the OsString flows through to children
     /// unchanged. The mode value is the only `String`-typed entry
-    /// (it's a fixed ASCII vocabulary). Claude P2 round-7 PR #695.
+    /// (it's a fixed ASCII vocabulary).
     pub fn to_env_vars(&self) -> Vec<(&'static str, std::ffi::OsString)> {
         use std::ffi::OsString;
         vec![

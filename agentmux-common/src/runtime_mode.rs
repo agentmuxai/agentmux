@@ -59,41 +59,37 @@ impl RuntimeMode {
             }
         }
 
-        // 2. Portable: marker file written next to the launcher by the
-        //    portable-package script. See `is_portable_marker_present`.
-        //
-        //    An earlier draft used `<exe-dir>/runtime/.is_dir()` as
-        //    the test, but installed builds ALSO co-locate `runtime/`
-        //    (the launcher's main.rs:40 expects it unconditionally and
-        //    aborts if missing). So `runtime/` is universal across
-        //    portable + installed; only a marker file distinguishes
-        //    them. Claude P1 round-3 on PR #695.
+        // 2. Portable: marker file written next to the launcher by
+        //    `scripts/package-portable.sh`. The presence of a
+        //    `runtime/` subdir is NOT a discriminator — installed
+        //    builds ship it too — so we require the explicit marker.
         if is_portable_marker_present(exe_dir) {
             return Self::Portable;
         }
 
         // 3. Path-based dev detection: exe lives under a known
-        //    build-output dir. We check by walking parents and
-        //    matching path components.
+        //    build-output dir.
         if exe_dir_is_dev_build(exe_dir) {
             let branch = detect_branch(exe_dir);
             return Self::Dev { branch };
         }
 
-        // 4. AGENTMUX_DEV_BRANCH env override (CI override for dev mode
-        //    when the binary isn't in a recognised build dir).
-        //
-        //    `is_ok()` would be true for an empty string too — same
-        //    anti-pattern as the legacy `AGENTMUX_DEV` flag we're
-        //    replacing. CI/shell environments sometimes export empty
-        //    placeholders (`AGENTMUX_DEV_BRANCH=`); those should not
-        //    coerce installed/portable into Dev. Only treat the var as
-        //    set when it has non-empty content. Codex P2 round-5 on PR
-        //    #695.
+        // 4. AGENTMUX_DEV_BRANCH override. Treat the env var as set
+        //    only when it has non-empty content AFTER detect_branch
+        //    sanitizes it — a malformed value like `..` sanitizes to
+        //    empty and should fall through to Installed rather than
+        //    silently routing into `dev/default/`.
         if let Ok(b) = std::env::var("AGENTMUX_DEV_BRANCH") {
             if !b.trim().is_empty() {
                 let branch = detect_branch(exe_dir);
-                return Self::Dev { branch };
+                if !branch.is_empty() && branch != "default" {
+                    return Self::Dev { branch };
+                }
+                // The env var was set but unusable AND we're not in
+                // a known dev-build dir. detect_branch's "default"
+                // fallback is for legitimate dev-build cases (covered
+                // by step 3 above), not for accidental env-var leaks
+                // out of a bash shell. Fall through.
             }
         }
 
@@ -154,7 +150,7 @@ fn parse_mode_string(s: &str) -> Option<RuntimeMode> {
         // DataPaths::resolve into a `~/.agentmux/dev/<branch>/` path,
         // and we must not let `/`, `..`, or shell-meta chars in the
         // env override (`AGENTMUX_RUNTIME_MODE=dev:../versions/x`)
-        // escape the dev/ subtree. Codex P1 + Claude P1 on PR #695.
+        // escape the dev/ subtree.
         let slug = sanitize_branch_slug(raw_branch);
         if slug.is_empty() {
             return None;
@@ -446,6 +442,27 @@ mod tests {
     }
 
     #[test]
+    fn dev_branch_env_with_unusable_value_falls_through() {
+        // AGENTMUX_DEV_BRANCH=`..` sanitizes to empty inside
+        // detect_branch and would previously have routed an installed
+        // process into `dev/default/` (a real bug because it'd silently
+        // change where state lives). With the fix, an unusable value
+        // falls through to Installed when no other dev signal applies.
+        let _g = TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        // Use a path nowhere near a build dir or a marker.
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        std::env::remove_var("AGENTMUX_RUNTIME_MODE");
+        std::env::set_var("AGENTMUX_DEV_BRANCH", "..");
+        let mode = RuntimeMode::current(tmp.path());
+        std::env::remove_var("AGENTMUX_DEV_BRANCH");
+        // The "..": ancestor-traversal value sanitizes to empty;
+        // detect_branch falls back to "default" because there's no
+        // .git in the temp dir. Both signals are unsafe-to-trust, so
+        // we fall through to Installed.
+        assert_eq!(mode, RuntimeMode::Installed);
+    }
+
+    #[test]
     fn portable_marker_detection() {
         let _g = TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let tmp = tempfile::TempDir::new().expect("tempdir");
@@ -471,10 +488,10 @@ mod tests {
 
     #[test]
     fn current_with_only_runtime_subdir_is_not_portable() {
-        // Regression for Claude P1 round-3 PR #695: prior implementation
-        // returned Portable whenever <exe>/runtime/ existed, but
-        // installed builds also co-locate runtime/ (per launcher
-        // main.rs:40). Without a marker, we must NOT classify as Portable.
+        // Regression: prior implementation returned Portable whenever
+        // <exe>/runtime/ existed, but installed builds also co-locate
+        // runtime/ (per the launcher unconditionally requiring it).
+        // Without a marker, we must NOT classify as Portable.
         let _g = TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let tmp = tempfile::TempDir::new().expect("tempdir");
         let exe_dir = tmp.path();
