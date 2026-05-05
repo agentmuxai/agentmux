@@ -22,6 +22,12 @@
 
 set -euo pipefail
 
+# Empty globs should expand to nothing rather than the literal pattern.
+# Without this, a glob with no matches loops once over the literal
+# pattern, which then fails downstream (e.g. `du -sm <literal>` returns
+# empty stdout, making `$((TOTAL + SIZE))` a parse error under set -e).
+shopt -s nullglob
+
 DRY_RUN=1
 for arg in "$@"; do
     case "$arg" in
@@ -37,17 +43,28 @@ for arg in "$@"; do
     esac
 done
 
-# ── Detect running portable paths ───────────────────────────────────────────
-# Use PowerShell to enumerate running agentmux processes; extract their parent
-# folder paths. We never touch anything under these.
+# ── Detect running paths to preserve ───────────────────────────────────────
+# Two sources, both unioned:
+#   (a) ExecutablePath parent dir — covers portable's <root>/data (since
+#       portable srv lives in <root>/runtime/, parent dir = <root>).
+#   (b) `--wavedata <path>` argument from any running srv command line —
+#       covers installed mode, where the exe lives in Program Files but
+#       the data dir is %LOCALAPPDATA%/ai.agentmux.cef.v<v>/ (Codex P1
+#       on PR #694: without this, --yes would wipe an active installed
+#       instance's profile).
 
 RUNNING_PATHS=$(
-    powershell.exe -NoProfile -Command \
-        "Get-CimInstance Win32_Process -Filter \"Name LIKE 'agentmux%'\" |
-         Select-Object -ExpandProperty ExecutablePath |
-         Where-Object { \$_ } |
-         ForEach-Object { Split-Path -Parent \$_ } |
-         Sort-Object -Unique" 2>/dev/null |
+    powershell.exe -NoProfile -Command "
+        \$procs = Get-CimInstance Win32_Process -Filter \"Name LIKE 'agentmux%'\"
+        \$exeParents = \$procs | Select-Object -ExpandProperty ExecutablePath |
+            Where-Object { \$_ } | ForEach-Object { Split-Path -Parent \$_ }
+        \$dataDirs = \$procs | Select-Object -ExpandProperty CommandLine |
+            Where-Object { \$_ -match '--wavedata\s+\"?([^\"]+?)\"?(\s|$)' } |
+            ForEach-Object {
+                if (\$_ -match '--wavedata\s+\"?([^\"]+?)\"?(\s|$)') { \$matches[1] }
+            }
+        @(\$exeParents + \$dataDirs) | Where-Object { \$_ } | Sort-Object -Unique
+    " 2>/dev/null |
     tr -d '\r' |
     grep -v '^$' || true
 )
@@ -92,28 +109,41 @@ is_running_path() {
 
 DELETE_LIST=()
 
+# Resolve home base in MSYS form. On Windows, $HOME is /c/Users/<name>;
+# fall back to converting $USERPROFILE if HOME isn't set.
+HOME_DIR="${HOME:-}"
+if [ -z "$HOME_DIR" ] && [ -n "${USERPROFILE:-}" ]; then
+    HOME_DIR=$(to_msys "$USERPROFILE")
+fi
+if [ -z "$HOME_DIR" ]; then
+    echo "ERROR: cannot resolve home directory ($HOME and $USERPROFILE both unset)" >&2
+    exit 1
+fi
+LOCALAPPDATA_DIR="$HOME_DIR/AppData/Local"
+ROAMING_DIR="$HOME_DIR/AppData/Roaming"
+DOTAGENTMUX_DIR="$HOME_DIR/.agentmux"
+
 # 1. Tauri-era and bundle-id-era AppData
 for d in \
-    /c/Users/area54/AppData/Local/ai.agentmux.app.* \
-    /c/Users/area54/AppData/Roaming/ai.agentmux.app.* \
-    /c/Users/area54/AppData/Local/com.a5af.agentmux* \
-    /c/Users/area54/AppData/Roaming/com.a5af.agentmux* \
-    /c/Users/area54/AppData/Local/com.agentmuxhq.agentmux* \
-    /c/Users/area54/AppData/Roaming/com.agentmuxhq.agentmux* \
+    "$LOCALAPPDATA_DIR"/ai.agentmux.app.* \
+    "$ROAMING_DIR"/ai.agentmux.app.* \
+    "$LOCALAPPDATA_DIR"/com.a5af.agentmux* \
+    "$ROAMING_DIR"/com.a5af.agentmux* \
+    "$LOCALAPPDATA_DIR"/com.agentmuxhq.agentmux* \
+    "$ROAMING_DIR"/com.agentmuxhq.agentmux* \
 ; do
     [ -e "$d" ] && DELETE_LIST+=("$d")
 done
 
-# 2. CEF-era data, excluding any version currently in a running portable's path.
-# Running portables write to <root>/data, NOT to %LOCALAPPDATA%/ai.agentmux.cef.v*,
-# so all ai.agentmux.cef.v* are safe to delete on this machine.
-# (Installed mode would use those paths, but no one is running an installed
-# AgentMux on this box per the earlier process audit.)
+# 2. CEF-era data. Running installed instances are now correctly preserved
+# via the --wavedata extraction in RUNNING_PATHS above, so this glob is
+# safe to apply broadly — anything currently in use will be filtered out
+# by is_running_path() below.
 for d in \
-    /c/Users/area54/AppData/Local/ai.agentmux.cef.v* \
-    /c/Users/area54/AppData/Roaming/ai.agentmux.cef.v* \
-    /c/Users/area54/AppData/Local/ai.agentmux.cef.dev \
-    /c/Users/area54/AppData/Roaming/ai.agentmux.cef.dev \
+    "$LOCALAPPDATA_DIR"/ai.agentmux.cef.v* \
+    "$ROAMING_DIR"/ai.agentmux.cef.v* \
+    "$LOCALAPPDATA_DIR"/ai.agentmux.cef.dev \
+    "$ROAMING_DIR"/ai.agentmux.cef.dev \
 ; do
     [ -e "$d" ] && DELETE_LIST+=("$d")
 done
@@ -122,8 +152,8 @@ done
 # Per CLAUDE.md "Multiple Instances Run in Parallel" the running portables
 # all write to <portable-root>/data, so ~/.agentmux/<v>/ is per-version
 # CLI config that's only ever appended to. Safe to wipe — torch & restart.
-if [ -d /c/Users/area54/.agentmux ]; then
-    for d in /c/Users/area54/.agentmux/*/; do
+if [ -d "$DOTAGENTMUX_DIR" ]; then
+    for d in "$DOTAGENTMUX_DIR"/*/; do
         # Strip trailing slash for grep
         DELETE_LIST+=("${d%/}")
     done
