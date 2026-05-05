@@ -25,32 +25,34 @@ use std::sync::Arc;
 
 use crate::state::AppState;
 
-/// Classify which labels in `browser_labels` are orphan
-/// `window-pool-*` entries — i.e., promoted out of the pool but no
-/// longer tracked by *any* window-metadata source (launcher mirror
-/// or host's local handoff cache).
+/// Classify which labels are *candidate* orphan `window-pool-*`
+/// entries — promoted out of the pool but not tracked by the
+/// launcher's `shadow_window_meta` mirror.
 ///
-/// `tracked_window_meta_keys` MUST be the union of `shadow_window_meta`
-/// (launcher-fed projection) AND host's local `window_meta` (the eager
-/// pre-create handoff that catches the race window where a pool window
-/// has just been promoted but the launcher's `WindowOpened` echo hasn't
-/// returned yet, see `state.rs::window_meta` doc + Phase B.5c). Without
-/// the union, a `HostShouldQuit` event in flight when the user opens a
-/// new window would classify the freshly-promoted pool window as an
-/// orphan and post `WM_CLOSE` to it (codex #702 P1).
+/// This is a NECESSARY but not SUFFICIENT condition. The orchestrator
+/// must additionally check HWND validity before dispatching close,
+/// because a freshly-promoted pool window will briefly satisfy this
+/// classification (label removed from `unpromoted_pool`, but the
+/// launcher's `WindowOpened` echo hasn't yet populated shadow). Codex
+/// #702 round 1 flagged the missing post-classify check; round 2's
+/// attempt to fix it via local `window_meta` union failed because
+/// local meta is also stale in the actual zombie case (host's
+/// `on_before_close` never runs, so the entry is never cleared) —
+/// codex round 2 P1. The HWND-validity check at the orchestrator
+/// level is the right discriminator.
 ///
 /// Pure function over snapshot inputs, so tests don't need CEF.
-pub(crate) fn classify_orphan_labels(
+pub(crate) fn classify_candidate_orphans(
     browser_labels: &[String],
     unpromoted_pool: &HashSet<String>,
-    tracked_window_meta_keys: &HashSet<String>,
+    shadow_window_meta_keys: &HashSet<String>,
 ) -> Vec<String> {
     browser_labels
         .iter()
         .filter(|label| {
             label.starts_with("window-pool-")
                 && !unpromoted_pool.contains(label.as_str())
-                && !tracked_window_meta_keys.contains(label.as_str())
+                && !shadow_window_meta_keys.contains(label.as_str())
         })
         .cloned()
         .collect()
@@ -67,49 +69,109 @@ pub(crate) fn classify_orphan_labels(
 pub fn reconcile_and_drain(state: &Arc<AppState>) {
     let browser_pairs = state.list_browsers();
     let unpromoted = state.unpromoted_pool_labels_snapshot();
-    // Union of launcher-fed mirror + host's local pre-create handoff
-    // cache. The local cache covers the race window where a pool window
-    // has just been promoted (label removed from `unpromoted_pool`,
-    // `ReportWindowOpened` queued) but the launcher's `WindowOpened`
-    // echo hasn't returned yet to update `shadow_window_meta`. Without
-    // this union, a stale `HostShouldQuit` from the previous last-close
-    // would WM_CLOSE the freshly-promoted live window (codex #702 P1).
-    let mut tracked: HashSet<String> = state
+    // Shadow alone is the source of truth for "launcher tracks this
+    // as live". Local `window_meta` is unreliable here because it's
+    // populated in `on_after_created` and only cleared in
+    // `on_before_close` — the v0.33.643 zombie case, by definition,
+    // is the one where `on_before_close` never ran, so a local-meta
+    // union would skip exactly the labels we need to reap (codex #702
+    // round 2 P1).
+    let shadow_keys: HashSet<String> = state
         .shadow_window_meta
         .lock()
         .keys()
         .cloned()
         .collect();
-    tracked.extend(state.window_meta.lock().keys().cloned());
     let labels: Vec<String> = browser_pairs.iter().map(|(l, _)| l.clone()).collect();
-    let orphan_labels = classify_orphan_labels(&labels, &unpromoted, &tracked);
+    let candidates = classify_candidate_orphans(&labels, &unpromoted, &shadow_keys);
 
-    if orphan_labels.is_empty() {
+    if candidates.is_empty() {
         tracing::info!(
             target: "wrr",
-            "[orphan-reconcile] no orphans — host is consistent; cascade should already be in flight"
+            "[orphan-reconcile] no candidates — host is consistent; cascade should already be in flight"
+        );
+        return;
+    }
+
+    // Discriminate Race B (just-promoted, launcher echo lag — HWND
+    // valid, must NOT close) from Race C (zombie, on_before_close
+    // never ran — HWND destroyed, must close) via Win32 IsWindow on
+    // the browser's underlying handle. See spec §5.4. Each iteration
+    // takes one HWND check; cheap.
+    let candidate_set: HashSet<&str> = candidates.iter().map(|s| s.as_str()).collect();
+    let mut to_close: Vec<(String, cef::Browser)> = Vec::new();
+    let mut deferred_live: Vec<String> = Vec::new();
+    for (label, browser) in browser_pairs.into_iter() {
+        if !candidate_set.contains(label.as_str()) {
+            continue;
+        }
+        if hwnd_is_dead_or_missing(&browser) {
+            to_close.push((label, browser));
+        } else {
+            deferred_live.push(label);
+        }
+    }
+
+    if !deferred_live.is_empty() {
+        tracing::info!(
+            target: "wrr",
+            "[orphan-reconcile] {} candidate(s) have live HWNDs — likely freshly-promoted, skipping: {:?}",
+            deferred_live.len(),
+            deferred_live
+        );
+    }
+
+    if to_close.is_empty() {
+        tracing::info!(
+            target: "wrr",
+            "[orphan-reconcile] no zombies after HWND-validity filter — nothing to close"
         );
         return;
     }
 
     tracing::warn!(
         target: "wrr",
-        "[orphan-reconcile] reaping {} orphan window-pool-* browser(s): {:?}",
-        orphan_labels.len(),
-        orphan_labels
+        "[orphan-reconcile] reaping {} zombie window-pool-* browser(s): {:?}",
+        to_close.len(),
+        to_close.iter().map(|(l, _)| l).collect::<Vec<_>>()
     );
 
-    // Pull just the orphan Browser handles out of the snapshot. The
-    // labels list was built from the same snapshot so each orphan
-    // label has a corresponding entry; if a parallel `WindowClosed`
-    // already removed one between the snapshot and here, the lookup
-    // misses and we just skip — the close already happened.
-    let orphan_browsers: Vec<(String, cef::Browser)> = browser_pairs
-        .into_iter()
-        .filter(|(label, _)| orphan_labels.contains(label))
-        .collect();
-    for (i, (label, browser)) in orphan_browsers.into_iter().enumerate() {
+    for (i, (label, browser)) in to_close.into_iter().enumerate() {
         post_close_or_fallback(i, &label, browser);
+    }
+}
+
+/// True when the browser's underlying HWND is missing or destroyed.
+/// Used to distinguish Race B (live HWND — freshly-promoted pool
+/// window, must NOT close) from Race C (zombie — `on_before_close`
+/// never ran, HWND was destroyed without clearing host state, must
+/// close).
+///
+/// Windows: `IsWindow` returns 0 for destroyed HWNDs, even when the
+/// stale handle value is still around. This is the discriminator.
+///
+/// Non-Windows: we only have the null-handle check. Race B/C
+/// distinction is best-effort — if the platform ever produces a
+/// stale-but-non-null HWND, we'd skip a real zombie. The v0.33.643
+/// case is Windows-specific so this is acceptable for now; revisit
+/// if the bug reproduces on macOS/Linux.
+fn hwnd_is_dead_or_missing(browser: &cef::Browser) -> bool {
+    use cef::*;
+    let mut b = browser.clone();
+    let Some(host) = b.host() else { return true };
+    let wh = host.window_handle();
+    if wh.0.is_null() {
+        return true;
+    }
+    #[cfg(target_os = "windows")]
+    unsafe {
+        use windows_sys::Win32::Foundation::HWND;
+        use windows_sys::Win32::UI::WindowsAndMessaging::IsWindow;
+        IsWindow(wh.0 as HWND) == 0
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        false
     }
 }
 
@@ -177,7 +239,7 @@ mod tests {
         let labels = vec_of(&["window-pool-aaa"]);
         let unpromoted = set_of(&[]);
         let shadow = set_of(&["window-pool-aaa"]);
-        assert_eq!(classify_orphan_labels(&labels, &unpromoted, &shadow), Vec::<String>::new());
+        assert_eq!(classify_candidate_orphans(&labels, &unpromoted, &shadow), Vec::<String>::new());
     }
 
     #[test]
@@ -188,7 +250,7 @@ mod tests {
         let unpromoted = set_of(&[]);
         let shadow = set_of(&[]);
         assert_eq!(
-            classify_orphan_labels(&labels, &unpromoted, &shadow),
+            classify_candidate_orphans(&labels, &unpromoted, &shadow),
             vec_of(&["window-pool-bbb"])
         );
     }
@@ -199,7 +261,7 @@ mod tests {
         let labels = vec_of(&["window-pool-ccc"]);
         let unpromoted = set_of(&["window-pool-ccc"]);
         let shadow = set_of(&[]);
-        assert_eq!(classify_orphan_labels(&labels, &unpromoted, &shadow), Vec::<String>::new());
+        assert_eq!(classify_candidate_orphans(&labels, &unpromoted, &shadow), Vec::<String>::new());
     }
 
     #[test]
@@ -209,7 +271,7 @@ mod tests {
         let labels = vec_of(&["browser-pane-foo"]);
         let unpromoted = set_of(&[]);
         let shadow = set_of(&[]);
-        assert_eq!(classify_orphan_labels(&labels, &unpromoted, &shadow), Vec::<String>::new());
+        assert_eq!(classify_candidate_orphans(&labels, &unpromoted, &shadow), Vec::<String>::new());
     }
 
     #[test]
@@ -219,7 +281,7 @@ mod tests {
         let labels = vec_of(&["main"]);
         let unpromoted = set_of(&[]);
         let shadow = set_of(&[]);
-        assert_eq!(classify_orphan_labels(&labels, &unpromoted, &shadow), Vec::<String>::new());
+        assert_eq!(classify_candidate_orphans(&labels, &unpromoted, &shadow), Vec::<String>::new());
     }
 
     #[test]
@@ -234,28 +296,29 @@ mod tests {
         let unpromoted = set_of(&["window-pool-ccc"]);
         let shadow = set_of(&["window-pool-aaa"]);
         assert_eq!(
-            classify_orphan_labels(&labels, &unpromoted, &shadow),
+            classify_candidate_orphans(&labels, &unpromoted, &shadow),
             vec_of(&["window-pool-bbb", "window-pool-ddd"])
         );
     }
 
     #[test]
-    fn classify_skips_label_in_local_window_meta_only() {
-        // codex #702 P1 race: user just promoted a pool window. The
-        // host has already removed it from unpromoted_pool and queued
-        // ReportWindowOpened, but the launcher's WindowOpened echo
-        // hasn't arrived yet, so shadow_window_meta is empty. The
-        // host's *local* window_meta has the entry though (eager
-        // pre-create handoff). The reconciler MUST treat that as
-        // "tracked" so we don't WM_CLOSE a live new window.
-        //
-        // The caller (`reconcile_and_drain`) builds `tracked` as the
-        // union of shadow + local; this test pretends the union is
-        // local-only (the freshly-promoted case).
-        let labels = vec_of(&["window-pool-newly-promoted"]);
+    fn classify_returns_freshly_promoted_as_candidate() {
+        // codex #702 round 1: in the WindowOpened-echo lag, a freshly-
+        // promoted pool window is in `browsers` (not in unpromoted)
+        // and the launcher's mirror hasn't caught up yet (not in
+        // shadow). The classifier returns it as a CANDIDATE; the
+        // orchestrator's HWND-validity check is what saves it from
+        // being closed (live HWND → skip). We test the negative side
+        // here — that we do NOT silently skip it at the classifier
+        // layer, because round-2's local-window-meta union (codex
+        // round 2 P1) would also skip the actual v0.33.643 zombie.
+        let labels = vec_of(&["window-pool-just-promoted"]);
         let unpromoted = set_of(&[]);
-        let tracked = set_of(&["window-pool-newly-promoted"]);
-        assert_eq!(classify_orphan_labels(&labels, &unpromoted, &tracked), Vec::<String>::new());
+        let shadow = set_of(&[]);
+        assert_eq!(
+            classify_candidate_orphans(&labels, &unpromoted, &shadow),
+            vec_of(&["window-pool-just-promoted"])
+        );
     }
 
     #[test]
@@ -271,7 +334,7 @@ mod tests {
         ]);
         let unpromoted = set_of(&[]);
         let shadow = set_of(&[]);
-        let orphans = classify_orphan_labels(&labels, &unpromoted, &shadow);
+        let orphans = classify_candidate_orphans(&labels, &unpromoted, &shadow);
         assert_eq!(orphans.len(), 2);
         assert_eq!(orphans, labels);
     }

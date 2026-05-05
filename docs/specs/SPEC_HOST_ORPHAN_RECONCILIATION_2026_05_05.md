@@ -159,7 +159,17 @@ Two distinct races have to be handled:
 
 **Race A — Stage-2 quit:** Our handler doesn't quit directly — it just closes orphans. The Stage-2 quit in `on_before_close` re-evaluates `browser_list.is_empty()` after every close, so a new user window opened mid-reconcile keeps `browser_list` non-empty and Stage 2 stays parked. Benign by construction.
 
-**Race B — promotion before mirror echo:** A pool window can be promoted (`promote_pool_window` removes the label from `unpromoted_pool` and queues `ReportWindowOpened` to the launcher) BEFORE the launcher's `WindowOpened` event echoes back to populate `shadow_window_meta`. If `HostShouldQuit` is being processed in that window, a shadow-only orphan check would classify the freshly-promoted live window as orphan and `WM_CLOSE` it (codex #702 round-1 P1). Mitigation: the reconciler builds `tracked` as the union of `shadow_window_meta.keys()` AND host's local `window_meta.keys()`. Local `window_meta` is the eager pre-create handoff cache that B.5c documents as the "race window catch" (`state.rs::window_meta`). A label tracked in EITHER source is treated as live and skipped.
+**Race B — promotion before mirror echo:** A pool window can be promoted (`promote_pool_window` removes the label from `unpromoted_pool` and queues `ReportWindowOpened` to the launcher) BEFORE the launcher's `WindowOpened` event echoes back to populate `shadow_window_meta`. A shadow-only orphan check would classify the freshly-promoted live window as orphan and `WM_CLOSE` it (codex #702 round-1 P1).
+
+**Race C — zombie HWND (the original v0.33.643 case):** A promoted pool window's HWND is destroyed without the host's `on_before_close` ever running (CEF crash, OS kill, missed callback). Host's local `window_meta` was inserted in `on_after_created` and is only cleared by `on_before_close`, so the local entry is stale. Launcher's `apply_hwnd_destroyed` removes the label from its mirror and emits `WindowClosed` — so shadow correctly drops the label, BUT host's local meta keeps it. A round-2 attempt at fixing Race B by unioning shadow + local meta would skip exactly this case (codex #702 round-2 P1).
+
+**Discrimination via HWND validity (round 3, current design):** Race B and Race C both produce labels in `browsers` that are absent from shadow and not in `unpromoted_pool`. The classifier returns both as *candidates*. The orchestrator then applies a Win32 `IsWindow(hwnd)` check on each candidate's underlying HWND:
+
+- `IsWindow == 1` (live HWND) → freshly-promoted, Race B → SKIP. The next `HostShouldQuit` (or the launcher's `WindowOpened` echo populating shadow) will resolve this naturally.
+- `IsWindow == 0` (destroyed HWND) → zombie, Race C → CLOSE.
+- `host()` returns `None` or `window_handle().0.is_null()` → also treated as dead → CLOSE.
+
+This puts the discrimination in exactly one place — the orchestrator's `hwnd_is_dead_or_missing` filter — and uses the OS as the source of truth for "is this HWND alive". No new state, no time-based wait. Non-Windows targets fall back to the null-handle check (best-effort; v0.33.643 is Windows-specific).
 
 ### 5.5 What we don't change
 
