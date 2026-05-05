@@ -767,7 +767,11 @@ class RpcApiType {
     }
 
     // command "writeagentconfig" [call]
-    WriteAgentConfigCommand(client: RpcClient, data: CommandWriteAgentConfigData, opts?: RpcOpts): Promise<void> {
+    WriteAgentConfigCommand(
+        client: RpcClient,
+        data: CommandWriteAgentConfigData,
+        opts?: RpcOpts,
+    ): Promise<{ working_dir: string }> {
         return client.rpcCall("writeagentconfig", data, opts);
     }
 

@@ -1679,6 +1679,10 @@ declare global {
     type CommandWriteAgentConfigData = {
         working_dir: string;
         files: AgentConfigFile[];
+        // When true, treat working_dir as an auto-generated instance
+        // path eligible for `<base>-N` collision resolution. When
+        // false (user-specified path), write into the path as-is.
+        auto_allocate?: boolean;
     };
 
     // wshrpc.CommandReadEditorFileData
