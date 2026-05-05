@@ -161,24 +161,34 @@ fn main() {
 
     let version = env!("CARGO_PKG_VERSION");
 
-    // Read paths + mode from the launcher-injected env vars. The
-    // launcher computes everything via `agentmux_common::DataPaths::
-    // resolve` and exports the canonical AGENTMUX_* set; here we just
-    // consume them. No fallback path-resolution — if the env is
-    // missing the host is being run standalone (legacy `task dev` flow
-    // pre-PR-695), which is no longer supported. Fail loudly below.
-    let common_paths = agentmux_common::DataPaths::from_env();
-    let is_dev = matches!(
-        agentmux_common::RuntimeMode::from_env(),
-        Some(agentmux_common::RuntimeMode::Dev { .. })
-    );
+    // Read paths + mode from the launcher-injected env vars. Two
+    // reachable configurations:
+    //   a) Launcher-managed startup → env vars present, from_env()
+    //      returns Some.
+    //   b) Standalone `task dev` → env absent. We re-derive via
+    //      `RuntimeMode::current` + `DataPaths::resolve` (symmetric
+    //      with sidecar.rs::spawn_backend's fallback so they agree on
+    //      the disk layout).
+    let host_exe_dir = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.to_path_buf()))
+        .unwrap_or_default();
+    let common_paths = agentmux_common::DataPaths::from_env().or_else(|| {
+        let mode = agentmux_common::RuntimeMode::current(&host_exe_dir);
+        agentmux_common::DataPaths::resolve(version, &mode).ok()
+    });
+    let is_dev = match &common_paths {
+        Some(p) => matches!(p.mode, agentmux_common::RuntimeMode::Dev { .. }),
+        None => false,
+    };
 
     let (data_dir, log_dir) = match &common_paths {
         Some(p) => (p.cef_cache_dir.clone(), p.logs_dir.clone()),
         None => {
-            // No launcher-set env. Last-resort: derive a minimal log
-            // path so panic messages can still be captured, and let
-            // the runtime-startup check below abort cleanly.
+            // Both env-read AND fallback resolution failed (no home
+            // dir on disk, or platform unsupported). Use a degraded
+            // path so log init at least works; the runtime-startup
+            // check below will surface the underlying error.
             (
                 std::path::PathBuf::from("."),
                 dirs::home_dir()
