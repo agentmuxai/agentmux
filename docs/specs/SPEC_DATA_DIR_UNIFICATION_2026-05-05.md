@@ -203,7 +203,9 @@ pub struct DataPaths {
     /// `~/.agentmux/shared/` — cookies, credentials, cross-version cache.
     pub shared_dir: PathBuf,
 
-    /// `~/.agentmux/instances/<uuid>/` — lock + pipes + port files.
+    /// `instance_dir/runtime/` — lock + pipes + port files for the
+    /// single running instance of this version (per §5.5: one running
+    /// instance per version; second open forwards open_new_window).
     pub instance_runtime_dir: PathBuf,
 
     pub mode: RuntimeMode,
@@ -220,7 +222,7 @@ AGENTMUX_LOG_DIR             = .../versions/0.33.639/logs/
 AGENTMUX_CEF_CACHE_DIR       = .../versions/0.33.639/cef-cache/
 AGENTMUX_AGENTS_DIR          = .../versions/0.33.639/agents/
 AGENTMUX_SHARED_DIR          = .../shared/
-AGENTMUX_INSTANCE_RUNTIME_DIR= .../instances/{uuid}/
+AGENTMUX_INSTANCE_RUNTIME_DIR= .../versions/0.33.639/runtime/
 AGENTMUX_RUNTIME_MODE        = "installed" | "portable" | "dev:agenta-feature-x"
 ```
 

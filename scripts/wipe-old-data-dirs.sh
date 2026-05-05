@@ -218,15 +218,14 @@ fi
 
 echo "Proceeding to delete…"
 FAIL_COUNT=0
-FAIL_PATHS=()
 for d in "${FILTERED[@]}"; do
-    # Claude P1 round-3 on PR #694: don't swallow rm failures — locked
-    # files / permission errors would silently leave dirs behind while
-    # we cheerfully reported "Done." Track each failure and exit non-zero
-    # at the end so callers (CI, follow-up scripts) see the truth.
+    # Don't swallow rm failures — locked files / permission errors
+    # would silently leave dirs behind while we cheerfully reported
+    # "Done." Track each failure inline (printf to stderr) and exit
+    # non-zero at the end so callers (CI, follow-up scripts) see the
+    # truth.
     if ! rm -rf -- "$d" 2>>/tmp/wipe-rm-errors.log; then
         FAIL_COUNT=$((FAIL_COUNT + 1))
-        FAIL_PATHS+=("$d")
         printf "  FAILED: %s\n" "$d" >&2
     fi
 done
